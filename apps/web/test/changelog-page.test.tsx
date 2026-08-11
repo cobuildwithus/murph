@@ -60,9 +60,10 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Training, Starter access, patterns, referrals, reminders, cards, voices, search, lighter pages, and clearer reports",
+      "Training, Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
     );
     expect(markup).toContain("Review your training in one private view");
+    expect(markup).toContain("Blood-pressure history waits for the whole sync");
     expect(markup).toContain("Response cards stay compact in Messages");
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).toContain("Completed workout rows keep their checkmark");
@@ -256,6 +257,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('data-design-study="changelog-archive"');
     expect(markup).toContain('data-design-state="latest-production-edition"');
     expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).toContain("Blood-pressure history waits for the whole sync");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("A week that closes its own loops");
     expect(markup).toContain("Follow-ups arrive where the work started");

@@ -164,6 +164,7 @@ interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImport
   canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
   fetchComplete: boolean;
+  postFetchSourceAdmission?: JunctionCurrentSourceAdmission;
   providerRecordCount: number;
   unresolvedProviderRecordIdentities: readonly string[];
   unresolvedProviderRecordCount: number;
@@ -188,6 +189,7 @@ interface JunctionImportAdmissionSource {
 }
 
 type JunctionImportSourceStatusRequirement = "connected" | "not_disconnected";
+type JunctionCurrentSourceAdmission = "admitted" | "fenced" | "pending";
 
 interface JunctionHistoricalUnresolvedProviderRecords {
   identities: readonly string[];
@@ -1996,6 +1998,27 @@ export function createJunctionDeviceSyncProvider(
               : undefined,
           },
         );
+        if (
+          extendedHistoricalBackfill
+          && timeseriesImport.postFetchSourceAdmission === "fenced"
+        ) {
+          return {};
+        }
+        if (
+          extendedHistoricalBackfill
+          && timeseriesImport.postFetchSourceAdmission === "pending"
+          && job.payload.historicalProviderRecordsSeen !== true
+          && job.payload.historicalRecordsSeen !== true
+          && timeseriesImport.providerRecordCount === 0
+        ) {
+          return withJunctionSkippedResourceMetadata(
+            context,
+            {
+              nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+            },
+            skippedOptionalResources,
+          );
+        }
         const historicalRecordsSeen = extendedHistoricalBackfill
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
@@ -2636,6 +2659,7 @@ export function createJunctionDeviceSyncProvider(
     let yieldedAt: string | null = null;
     let canonicalProviderRecordIdentities: readonly string[] = [];
     let canonicalEventCount = 0;
+    let postFetchSourceAdmission: JunctionCurrentSourceAdmission | undefined;
 
     const preciseWindows = buildPreciseTimeseriesWindows(windowStart, windowEnd);
     for (const [index, window] of preciseWindows.entries()) {
@@ -2703,9 +2727,9 @@ export function createJunctionDeviceSyncProvider(
     let unresolvedProviderRecordIdentities: readonly string[] = [];
     let unresolvedProviderRecordCount = providerRecordCount;
     let unresolvedProviderRecordsWithoutStableIdentity = providerRecordCount > 0;
-    if (executionWindowStart && executionWindowEnd && providerRecordCount > 0) {
-      const fetchedProviderRecordIdentityEvidence =
-        identifyJunctionBloodPressureProviderRecords({
+    const fetchedProviderRecordIdentityEvidence =
+      executionWindowStart && executionWindowEnd && providerRecordCount > 0
+        ? identifyJunctionBloodPressureProviderRecords({
           connections: sanitizeJunctionImportConnections(sourceProviders),
           importedAt: executionWindowEnd,
           timeseries: sanitizeJunctionImportSnapshots(
@@ -2714,7 +2738,9 @@ export function createJunctionDeviceSyncProvider(
           ),
           windowStart: executionWindowStart,
           windowEnd: executionWindowEnd,
-        });
+        })
+        : null;
+    if (fetchedProviderRecordIdentityEvidence) {
       unresolvedProviderRecordIdentities = uniqueJunctionProviderRecordIdentities(
         fetchedProviderRecordIdentityEvidence.repairStableExternalRefResourceIds,
       );
@@ -2726,44 +2752,71 @@ export function createJunctionDeviceSyncProvider(
       unresolvedProviderRecordCount =
         unresolvedProviderRecordIdentities.length
         + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
+    }
+
+    if (executionWindowStart && executionWindowEnd) {
       try {
-        const preparedImport = await prepareJunctionImportSnapshot(
-          context,
-          dedupedTimeseries,
-          sourceProviders,
-          {},
-          options.sourceStatusRequirement,
-        );
-        if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-          const receipt = await context.importSnapshot({
-            provider: "junction",
-            accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-            connectionId: context.account.id,
-            importedAt: executionWindowEnd,
-            windowStart: executionWindowStart,
-            windowEnd: executionWindowEnd,
-            connections: preparedImport.connections,
-            summaries: {},
-            timeseries: preparedImport.snapshots,
-          });
-          canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
-          const resolutionEvidence =
-            resolveJunctionBloodPressureProviderRecordResolutionEvidence({
-              canonicalEventCount,
-              canonicalEventExternalRefResourceIds:
-                readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt),
+        if (
+          sourceProviderSlug
+          && options.sourceStatusRequirement === "connected"
+        ) {
+          postFetchSourceAdmission = await resolveJunctionCurrentSourceAdmission(
+            context,
+            sourceProviderSlug,
+          );
+          if (postFetchSourceAdmission !== "admitted") {
+            return {
+              canonicalProviderRecordIdentities: [],
+              canonicalEventCount: 0,
+              fetchComplete: false,
+              postFetchSourceAdmission,
               providerRecordCount,
-              providerRecordIdentityEvidence: fetchedProviderRecordIdentityEvidence,
+              unresolvedProviderRecordIdentities,
+              unresolvedProviderRecordCount,
+              unresolvedProviderRecordsWithoutStableIdentity,
+              yieldedAt: null,
+            };
+          }
+        }
+        if (fetchedProviderRecordIdentityEvidence) {
+          const preparedImport = await prepareJunctionImportSnapshot(
+            context,
+            dedupedTimeseries,
+            sourceProviders,
+            {},
+            options.sourceStatusRequirement,
+          );
+          if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+            const receipt = await context.importSnapshot({
+              provider: "junction",
+              accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+              connectionId: context.account.id,
+              importedAt: executionWindowEnd,
+              windowStart: executionWindowStart,
+              windowEnd: executionWindowEnd,
+              connections: preparedImport.connections,
+              summaries: {},
+              timeseries: preparedImport.snapshots,
             });
-          canonicalProviderRecordIdentities =
-            resolutionEvidence.canonicalProviderRecordIdentities;
-          unresolvedProviderRecordIdentities =
-            resolutionEvidence.unresolvedProviderRecordIdentities;
-          unresolvedProviderRecordsWithoutStableIdentity =
-            resolutionEvidence.unresolvedProviderRecordsWithoutStableIdentity;
-          unresolvedProviderRecordCount =
-            unresolvedProviderRecordIdentities.length
-            + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
+            canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
+            const resolutionEvidence =
+              resolveJunctionBloodPressureProviderRecordResolutionEvidence({
+                canonicalEventCount,
+                canonicalEventExternalRefResourceIds:
+                  readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt),
+                providerRecordCount,
+                providerRecordIdentityEvidence: fetchedProviderRecordIdentityEvidence,
+              });
+            canonicalProviderRecordIdentities =
+              resolutionEvidence.canonicalProviderRecordIdentities;
+            unresolvedProviderRecordIdentities =
+              resolutionEvidence.unresolvedProviderRecordIdentities;
+            unresolvedProviderRecordsWithoutStableIdentity =
+              resolutionEvidence.unresolvedProviderRecordsWithoutStableIdentity;
+            unresolvedProviderRecordCount =
+              unresolvedProviderRecordIdentities.length
+              + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
+          }
         }
       } catch (error) {
         if (
@@ -2796,6 +2849,9 @@ export function createJunctionDeviceSyncProvider(
       canonicalProviderRecordIdentities,
       canonicalEventCount,
       fetchComplete,
+      ...(postFetchSourceAdmission === undefined
+        ? {}
+        : { postFetchSourceAdmission }),
       providerRecordCount,
       unresolvedProviderRecordIdentities,
       unresolvedProviderRecordCount,

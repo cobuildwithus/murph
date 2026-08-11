@@ -19,6 +19,22 @@ const planningMocks = vi.hoisted(() => ({
     vi.fn(async (): Promise<string | null> => 'bootstrap contract'),
   readAssistantContextSnapshotPrompt:
     vi.fn(async (): Promise<string | null> => null),
+  refreshAssistantContextSnapshotBestEffort: vi.fn(async (_input?: {
+    shouldYield?: (() => boolean) | null
+  }): Promise<{
+    pendingDirtyDomains: readonly (
+      | 'experiments'
+      | 'blood_tests'
+      | 'health_context'
+      | 'habitat'
+    )[]
+    refreshed: boolean
+    skipped: boolean
+  }> => ({
+    pendingDirtyDomains: [],
+    refreshed: false,
+    skipped: true,
+  })),
   readAssistantGroupRoomModelPrompt:
     vi.fn(async (): Promise<string | null> => null),
   resolveCodexAssistantTargetCapabilities: vi.fn(() => ({
@@ -51,6 +67,8 @@ vi.mock('../src/assistant/codex-runtime.js', () => ({
 vi.mock('../src/assistant/context-snapshot.js', () => ({
   readAssistantContextSnapshotPrompt:
     planningMocks.readAssistantContextSnapshotPrompt,
+  refreshAssistantContextSnapshotBestEffort:
+    planningMocks.refreshAssistantContextSnapshotBestEffort,
 }))
 
 vi.mock('../src/assistant/group-room-model.js', () => ({
@@ -116,12 +134,96 @@ import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js
 afterEach(() => {
   planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.readAssistantContextSnapshotPrompt.mockReset()
+  planningMocks.refreshAssistantContextSnapshotBestEffort.mockReset()
+  planningMocks.refreshAssistantContextSnapshotBestEffort.mockResolvedValue({
+    pendingDirtyDomains: [],
+    refreshed: false,
+    skipped: true,
+  })
   planningMocks.readAssistantGroupRoomModelPrompt.mockReset()
   planningMocks.readAssistantGroupRoomModelPrompt.mockResolvedValue(null)
   planningMocks.resolveCodexAssistantTargetCapabilities.mockReset()
 })
 
 describe('assistant Codex turn planning', () => {
+  it('bounds snapshot refresh inside direct provider planning and skips it for groups', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'VALUE_FREE_DEGRADED_SNAPSHOT',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    let refreshContinuationChecks = 0
+    planningMocks.refreshAssistantContextSnapshotBestEffort.mockImplementationOnce(
+      async (input?: { shouldYield?: (() => boolean) | null }) => {
+        if (!input?.shouldYield) {
+          throw new Error('Expected a foreground snapshot refresh budget.')
+        }
+        while (input.shouldYield() !== true) {
+          refreshContinuationChecks += 1
+        }
+        return {
+          pendingDirtyDomains: ['blood_tests'],
+          refreshed: false,
+          skipped: false,
+        }
+      },
+    )
+
+    const directPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(refreshContinuationChecks).toBe(64)
+    expect(planningMocks.refreshAssistantContextSnapshotBestEffort)
+      .toHaveBeenCalledTimes(1)
+    expect(planningMocks.readAssistantContextSnapshotPrompt)
+      .toHaveBeenCalledTimes(1)
+    expect(directPlan.systemPrompt).toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
+
+    planningMocks.refreshAssistantContextSnapshotBestEffort.mockClear()
+    planningMocks.readAssistantContextSnapshotPrompt.mockClear()
+    const groupSharedPlan = createSharedPlan()
+    groupSharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = false
+
+    const groupPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: groupSharedPlan,
+    })
+
+    expect(planningMocks.refreshAssistantContextSnapshotBestEffort).not.toHaveBeenCalled()
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    expect(groupPlan.systemPrompt).not.toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
+  })
+
   it('exposes grounded research guidance only when Exa is configured across conversation routes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue([
       'Murph CLI Contract:',

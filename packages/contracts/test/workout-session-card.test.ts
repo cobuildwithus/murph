@@ -15,7 +15,7 @@ const TRACKED_WORKOUT_CARD: CompactTableResponseCardV1 = {
   version: 1,
   title: "Push day",
   subtitle: "3 of 6 sets complete",
-  footer: "Tap an exercise to log or correct a set.",
+  footer: "Reply with the exercise, set, and result to log or correct it.",
   tracking: {
     kind: "workout",
     entityId: "evt_01K1ABCDEFGHJKMNPQRSTVWXYZ",
@@ -322,7 +322,7 @@ describe("workout session compact-table contract", () => {
       subtitle: `${completedSetCount} of 24 sets complete`,
       footer:
         state === "active"
-          ? "Tap an exercise to log or correct a set."
+          ? "Reply with the exercise, set, and result to log or correct it."
           : "Workout completed.",
       workout: {
         version: 1,

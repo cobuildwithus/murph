@@ -461,15 +461,17 @@ function renderCompactTableSemanticPresentation(
       const label = `set ${index + 1}`
       switch (set.status) {
         case 'completed':
-          return `${label}: ${set.actual}`
+          return set.target === null
+            ? `${label}: completed; actual ${set.actual}`
+            : `${label}: completed; actual ${set.actual}; target ${set.target}`
         case 'pending':
           return set.target === null
             ? `${label}: pending`
-            : `${label}: target ${set.target}`
+            : `${label}: pending; target ${set.target}`
         case 'skipped':
           return set.target === null
             ? `${label}: skipped`
-            : `${label}: skipped (target ${set.target})`
+            : `${label}: skipped; target ${set.target}`
       }
     })
     return `${exercise.name}: ${sets.join(' · ')}`

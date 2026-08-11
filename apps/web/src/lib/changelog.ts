@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Training, Starter access, patterns, referrals, reminders, cards, voices, search, lighter pages, and clearer reports",
+      "Training, Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
     summary:
-      "Training brings workouts together, Starter usage waits until used, patterns link actions to next-day sleep and recovery, referrals celebrate in the intended conversation, reminders keep local time, workout rows stay clear, voice memos keep the selected voice, web search reaches current information, the homepage starts lighter, and private Environment reports show their shape while loading.",
+      "Training brings workouts together; Starter usage waits; patterns connect actions with next-day sleep; blood-pressure history survives source-access changes; referrals stay in the intended conversation; reminders keep local time; workout rows and voice choices stay clear; search reaches current information; homepage starts lighter; and Environment reports show their shape while loading.",
     items: [
       {
         id: "private-training-review",
@@ -145,6 +145,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
         relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
         sourcePullRequests: [1592],
+      },
+      {
+        id: "blood-pressure-history-completion",
+        kind: "improvement",
+        priority: 4,
+        title: "Blood-pressure history waits for the whole sync",
+        summary:
+          "When Murph is recovering older blood-pressure readings, a temporary change in source access no longer lets an unfinished history import look complete.",
+        details:
+          "Murph keeps the same history window available to retry after access returns and marks it complete only after every remaining day finishes under the currently connected source.",
+        relevanceTags: ["blood-pressure", "wearables", "health-data", "reliability"],
+        sourcePullRequests: [1523, 1625],
       },
       {
         id: "reminders-keep-requested-timezone",

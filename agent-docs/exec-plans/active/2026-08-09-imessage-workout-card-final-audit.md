@@ -41,6 +41,16 @@ Success criteria:
 7. Remove temporary remediation artifacts and run focused verification.
 8. Reuse the nutrition image route for strict V3/V4 envelopes, render the native
    compact-table presentation, and preserve complete provider captions.
+9. Correct the merged static fallback in a follow-up PR: preserve labeled
+   completed-set target/actual semantics, keep continuation copy
+   channel-neutral, derive `Next` from the first pending set, and size wrapped
+   rasters from the same deterministic layout calculation.
+10. Match the corrected nutrition fallback's provider-chrome ownership: keep
+    compact-table and workout bitmaps rectangular and badge-free, remove the
+    generated icon gutter, and leave the app icon and outer mask to Messages.
+11. Keep the private line-layout owner ahead of the real raster renderer by
+    accounting for the bundled font's positive kerning adjustments and proving
+    the boundary with actual ImageResponse pixels.
 
 ## Review disposition
 
@@ -69,8 +79,65 @@ Success criteria:
   inspected. The total budget is narrowly ratcheted to 9,030,000; the 20,000-byte
   entry budget and all runner entry, static-closure, and total tolerances remain
   unchanged.
+- Accepted from final ReviewGPT round 7: completed-set captions retained only
+  the actual value, losing the completed status and distinct planned target in
+  both provider and definitive text fallbacks. The existing semantic projection
+  now labels status, actual, and target without adding a second formatter.
+- Accepted from final ReviewGPT round 7 and the preliminary specialist pass:
+  shared workout footer copy promised native-only taps, and the image renderer
+  could skip a targetless first pending set to show a later target as `Next`.
+  Workout authoring now requires channel-neutral reply guidance, and the static
+  summary derives `Next` from the first pending set in order.
+- Accepted from the preliminary specialist pass: contract-valid long table
+  values could overlap or clip because raster height depended only on row count.
+  One deterministic wrapping calculation now owns both visible line breaks and
+  image height while retaining the ordinary compact layout for short content.
+- External rollout event: PR #1502 merged before round 7 and the specialist pass
+  completed. Their accepted behavior findings therefore land in a separate
+  follow-up PR; round 8 is not started on the merged PR.
+- Accepted from PR #1576's preliminary specialist pass: completed targetless
+  extra sets had a production semantic branch without direct executable proof,
+  and the new targetless-next label used a disallowed em dash. Operator coverage
+  now proves status and actual without inventing a target, and the image label
+  uses the catalog-compliant `Next set: no target` copy.
+- Preliminary evidence disposition: the original direct rasters proved the
+  targetless and dense renderer states, but the design study still showed only
+  ordinary fixtures and there was no browser catalog capture. The catalog now
+  exposes both materially changed states. Physical macOS and no-extension
+  iPhone evidence remains an intentional release blocker, so the preliminary
+  pass cannot be called complete until that evidence exists.
+- Accepted from PR #1576 final ReviewGPT round 1: the shared semantic formatter
+  also improves durable assistant transcript/model context. That remains the
+  correct single semantic owner, but the non-obvious persisted surface and its
+  regression proof are now explicit; the canonical workout remains the sole
+  authority.
+- Accepted from the final static-presentation comparison: compact-table and
+  workout rasters still owned a generated badge, outer corner mask, clipping,
+  and reserved header gutter that the corrected nutrition raster had already
+  removed. The shared renderer now follows the same provider-owned chrome
+  contract, while inner progress and set-state rounding remain unchanged.
+- Accepted from PR #1576's preliminary specialist pass: the existing
+  character-count wrapper split ordinary words that fit within a value column,
+  including `Bodyweight`. The renderer now measures a deterministic
+  font-metric word candidate before wrapping and reserves grapheme-aware hard
+  breaks for genuinely overwide tokens. Focused coverage proves both paths,
+  and the 390px catalog study uses a smaller preview scale so the final column
+  remains visible.
+- Accepted from final ReviewGPT round 4: the first word-aware correction used
+  handwritten width buckets that underestimated the actual checked-in DM Sans
+  font and could still allocate a two-line row for text the renderer wrapped to
+  four lines. The sole private layout owner now uses cmap/hmtx advances derived
+  from that same font, with its hash pinned by focused proof and a conservative
+  fallback only for unsupported glyphs.
+- Accepted from PR #1576 final ReviewGPT round 5: raw hmtx sums still omitted
+  positive GPOS kerning applied by ImageResponse and could leave an ordinary
+  four-column note in a row shorter than its rendered lines. The pinned metric
+  owner now adds every positive pair from the bundled font while deliberately
+  treating negative kerning as spare width. A real-font route regression finds
+  the rendered dividers from PNG pixels and proves the text does not enter the
+  next row, without adding a runtime parser or dependency.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
-- Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. Neither coordinated PR is ready or merged.
+- Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. PR #1502 merged externally before that gate closed; the follow-up must stay draft until the missing evidence is captured.
 
 ## Verification
 
@@ -97,7 +164,7 @@ Success criteria:
 - The real App Server boundary passed after submitting generic compact-table, structured-workout, and nutrition authoring calls.
 - The focused resident-prompt ratchet passed at 56,896 characters before the current-main merge and 56,973 after it, under the unchanged 57,000 ratchet.
 - The current-main runner-budget conflict was resolved from a combined assembly: 9,994,210 total bytes, 8,019,079 static-closure bytes, and 1,659,616 entry bytes. The total and static baselines use those measurements; the entry baseline and every tolerance remain unchanged.
-- ReviewGPT round 4 passed the pre-merge remediation head. Round 5 on the merged head found the realistic V4 wire-capacity failure described above. Its tuple-wire remediation passed 7 contract tests, 9 operator encoder/fixture tests, 2 focused assistant boundary/tool tests, all 3 affected package typechecks, documentation drift, and the 42-test runner bundle budget policy suite. Full runner assembly passed at 9,994,191 total bytes, 8,019,060 static-closure bytes, and 1,659,616 entry bytes under the reviewed baselines and unchanged tolerances. Final backend ReviewGPT round 6 passed the exact product head `caac73f092ef68c3c3272e7ea8e38733987f8f57`, and all exact-head GitHub Actions passed. The coordinated native decoder passed SwiftFormat and all 45 Messages-extension tests; native ReviewGPT round 4 and both exact-head verification lanes passed `399d90b5eba89a826ecb8d0cef6f3c7e29169ef4`. Physical-device Messages proof remains the only open release gate, so both PRs remain draft and unmerged.
+- ReviewGPT round 4 passed the pre-merge remediation head. Round 5 on the merged head found the realistic V4 wire-capacity failure described above. Its tuple-wire remediation passed 7 contract tests, 9 operator encoder/fixture tests, 2 focused assistant boundary/tool tests, all 3 affected package typechecks, documentation drift, and the 42-test runner bundle budget policy suite. Full runner assembly passed at 9,994,191 total bytes, 8,019,060 static-closure bytes, and 1,659,616 entry bytes under the reviewed baselines and unchanged tolerances. Final backend ReviewGPT round 6 passed the exact product head `caac73f092ef68c3c3272e7ea8e38733987f8f57`, and all exact-head GitHub Actions passed. The coordinated native decoder passed SwiftFormat and all 45 Messages-extension tests; native ReviewGPT round 4 and both exact-head verification lanes passed `399d90b5eba89a826ecb8d0cef6f3c7e29169ef4`. At that checkpoint physical-device Messages proof was the only open release gate and both coordinated PRs remained draft; PR #1502 later merged externally before that gate closed.
 - The shared response-card route rendered a real 1200×580 active-workout PNG and
   a real 1200×670 generic-table PNG from their exact V4 and V3 envelopes.
   Focused Web route/render tests passed for nutrition, generic-table, workout,
@@ -113,6 +180,40 @@ Success criteria:
   tests respectively; documentation drift passed. The expanded operator sweep
   also corrected its retained boundary fixture to prove the tighter static-image
   URL and native-fragment limits together.
+- Follow-up remediation passed the touched Web, contracts, operator-config, and
+  assistant-engine typechecks; 12 Web route/render tests, 23 contract tests, the
+  complete 294-test operator-config suite, and 83 assistant card, skill, and
+  model-behavior tests; focused Web lint; documentation drift; and diff hygiene.
+  The exact
+  route rendered a 1200×580 targetless-next workout card and a 1200×1442 dense
+  eight-row, four-column boundary card with measured wrapping and no visible
+  overlap or clipping. These direct rasters do not replace the open hosted
+  catalog and physical Messages evidence.
+- Static provider-chrome parity passed the 12-test Web route/render suite, Web
+  typecheck, scoped Web ESLint, documentation drift, and diff hygiene. Fresh
+  raw workout and dense-table PNGs are rectangular and badge-free; the real
+  catalog component passed synthetic desktop 2x and mobile 3x Playwright
+  capture with legible content and no overflow. The required Claude UI
+  double-check was attempted, but Fable reported explicit usage-credit
+  exhaustion, so no substitute review was run.
+- The accepted word-wrapping remediation passed the same 12-test Web
+  route/render suite, Web typecheck, and scoped Web ESLint. Fresh direct PNG
+  proof keeps `Bodyweight ×` intact while moving only the trailing count, and
+  the updated 390px design-catalog capture preserves all four value columns.
+  Both updated catalog captures were inspected locally and through the hosted
+  lossless design-proof variant.
+- The exact-font remediation passed 15 focused Web tests, Web typecheck, and
+  scoped Web ESLint. The production-font regression proves the bundled font
+  hash and exact advances for the review phrase, every inserted line is within
+  the 160.05px four-column width, and the resulting three-line row owns 100px.
+  A fresh native-resolution 1200×1120 direct-route raster shows those three
+  lines contained between their dividers without overlap.
+- The positive-kerning remediation passed 18 focused Web tests and Web
+  typecheck. Its real ImageResponse regression decodes the bundled-font PNG,
+  finds the owning row from actual divider pixels, and proves the reported
+  gait/ankle/load phrase has a 100px row with no text pixels in the adjacent
+  row. Fresh direct-route rasters remain rectangular and badge-free at
+  1200×1120 for the dense table and 1200×580 for the active workout.
 
 ## Parent product-experience revalidation
 
@@ -123,7 +224,7 @@ real Messages transcript badge, bubble sizing, forwarding, composer insertion,
 offline reopening, static-image failure behavior, accessibility behavior, or
 App Store affordance on macOS and an iPhone without the extension. Those checks
 remain an explicit physical-device release gate rather than a claim of current
-proof. Hosted desktop/mobile catalog screenshots also remain open while the
-in-app browser has no usable tab.
+proof. Hosted desktop/mobile catalog screenshots now cover the synthetic Web
+component, but cannot substitute for that provider-owned physical-device chrome.
 
 The plan remains active until the native V4 reader is released before broad backend V4 emission.

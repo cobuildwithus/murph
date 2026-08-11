@@ -1600,11 +1600,13 @@ Their concise native caption keeps only the date and meal count instead of
 repeating visible totals or target amounts. Each assessed V2 goal keeps one
 concise directional label inside the image without relying on color alone;
 null and unavailable goals stay absent, and a short subcaption appears only
-when some totals are partial. Compact-table images retain the table grid or workout
-progress and exercise rows. Their provider chrome stays bounded to the title
-plus an optional generic subtitle or derived workout progress rather than
-repeating the raster's rows and sets. Complete semantic text remains available
-through the deterministic text renderer and value-free recovery fallback.
+when some totals are partial. Compact-table images retain the table grid or
+workout progress and exercise rows while keeping the provider's upper-left icon
+footprint clear without drawing that icon into the bitmap. Their provider
+chrome stays bounded to the title plus an optional generic subtitle or derived
+workout progress rather than repeating the raster's rows and sets. Complete
+semantic text remains available through the deterministic text renderer and
+value-free recovery fallback.
 The nutrition image derives a quantitative calorie arc only from a complete
 total and an assessed non-null goal; V1, partial, null-goal, and
 unavailable-status snapshots retain only the neutral ring track. The extension
