@@ -30,6 +30,7 @@ export interface HostedStripeBillingCatalog {
   priceIds: {
     edge: string;
     familyEdge: string;
+    familyMax: string;
     familyPulse: string;
     pulse: string;
   };
@@ -62,11 +63,6 @@ export interface HostedStripeSubscriptionTruth {
   subscriptionDefaultPaymentMethodPresent: boolean;
   trialEndsAt: Date | null;
   trialStartedAt: Date | null;
-}
-
-export interface HostedStripeResumeEventTrace {
-  observedStatuses: readonly string[];
-  updateBeforeResume: boolean;
 }
 
 export interface HostedStripeScheduleTruth {
@@ -135,7 +131,6 @@ export class HostedStripeBillingSandbox {
     return {
       additionalEnv: {
         NODE_ENV: process.env.NODE_ENV,
-        HOSTED_AUTO_PULSE_TRIAL_ENABLED: "0",
         NEXT_PUBLIC_PRIVY_APP_ID: this.privyAppId,
         HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY:
           this.portalConfigurationId,
@@ -143,11 +138,12 @@ export class HostedStripeBillingSandbox {
           this.priceIds.edge,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY:
           this.priceIds.familyEdge,
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY:
+          this.priceIds.familyMax,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY:
           this.priceIds.familyPulse,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY:
           this.priceIds.pulse,
-        HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED: "1",
         MURPH_DEV_SKIP_STRIPE_LISTEN: "0",
         // The live configuration secret is present only in the Vitest process.
         // Blank it before the full-stack harness derives any child environment.
@@ -201,6 +197,11 @@ export class HostedStripeBillingSandbox {
         label: "Family Edge seat",
         priceId: this.priceIds.familyEdge,
       }),
+      this.assertRecurringPrice({
+        expectedAmount: 4_900,
+        label: "Family Max seat",
+        priceId: this.priceIds.familyMax,
+      }),
     ]);
 
     const configuration = await this.callStripe(
@@ -215,64 +216,11 @@ export class HostedStripeBillingSandbox {
       || !configuration.is_default
       || !subscriptionUpdate.enabled
       || subscriptionUpdate.proration_behavior !== "always_invoice"
-      || subscriptionUpdate.trial_update_behavior !== "end_trial"
     ) {
       throw new HostedStripeBillingLiveError(
-        "Stripe Portal configuration must be the active default and immediately invoice paid or Trial plan updates.",
+        "Stripe Portal configuration must be the active default and immediately invoice paid plan updates.",
       );
     }
-  }
-
-  async createTrialSubscription(input: {
-    memberId: string;
-    paymentMethod: "pm_card_threeDSecure2Required" | "pm_card_visa";
-    scenario: string;
-    trialDays?: number;
-  }): Promise<HostedStripeSubscriptionFixture> {
-    const customer = await this.createCustomer({ scenario: input.scenario });
-    const paymentMethod = await this.callStripe("payment_method.attach", () =>
-      this.stripe.paymentMethods.attach(input.paymentMethod, {
-        customer: customer.id,
-      })
-    );
-    await this.callStripe("customer.update.default_payment_method", () =>
-      this.stripe.customers.update(customer.id, {
-        invoice_settings: {
-          default_payment_method: paymentMethod.id,
-        },
-      })
-    );
-
-    const subscription = await this.callStripe("subscription.create.trial", () =>
-      this.stripe.subscriptions.create({
-        customer: customer.id,
-        default_payment_method: paymentMethod.id,
-        expand: ["customer", "items.data.price", "latest_invoice"],
-        items: [{ price: this.priceIds.pulse }],
-        metadata: this.memberBillingMetadata({
-          checkoutOffer: "pulse_trial_7d",
-          memberId: input.memberId,
-          plan: "pulse",
-          scenario: input.scenario,
-        }),
-        payment_settings: {
-          save_default_payment_method: "on_subscription",
-        },
-        trial_period_days: input.trialDays ?? 14,
-        trial_settings: {
-          end_behavior: {
-            missing_payment_method: "pause",
-          },
-        },
-      })
-    );
-    this.trackSubscription(subscription);
-    return {
-      customerId: customer.id,
-      paymentMethodId: paymentMethod.id,
-      subscriptionId: subscription.id,
-      testClockId: null,
-    };
   }
 
   async createPaidSubscription(input: {
@@ -303,7 +251,6 @@ export class HostedStripeBillingSandbox {
         expand: ["customer", "items.data.price", "latest_invoice"],
         items: [{ price: priceId }],
         metadata: this.memberBillingMetadata({
-          checkoutOffer: "standard",
           memberId: input.memberId,
           plan: input.plan,
           scenario: input.scenario,
@@ -321,195 +268,6 @@ export class HostedStripeBillingSandbox {
       subscriptionId: subscription.id,
       testClockId: null,
     };
-  }
-
-  async createPausedTrialWithCustomerPaymentMethod(input: {
-    memberId: string;
-    scenario: string;
-  }): Promise<HostedStripeSubscriptionFixture> {
-    const nowSeconds = Math.floor(Date.now() / 1_000);
-    const testClock = await this.callStripe("test_clock.create", () =>
-      this.stripe.testHelpers.testClocks.create({
-        frozen_time: nowSeconds,
-        name: `murph-${buildHostedStripeRunCorrelationToken(this.runId)}-${input.scenario}`.slice(0, 80),
-      })
-    );
-    this.tracked.testClockIds.add(testClock.id);
-
-    const customer = await this.createCustomer({
-      scenario: input.scenario,
-      testClockId: testClock.id,
-    });
-    const trialEnd = nowSeconds + 2 * 24 * 60 * 60;
-    const subscription = await this.callStripe("subscription.create.pausing_trial", () =>
-      this.stripe.subscriptions.create({
-        customer: customer.id,
-        expand: ["customer", "items.data.price", "latest_invoice"],
-        items: [{ price: this.priceIds.pulse }],
-        metadata: this.memberBillingMetadata({
-          checkoutOffer: "pulse_trial_7d",
-          memberId: input.memberId,
-          plan: "pulse",
-          scenario: input.scenario,
-        }),
-        trial_end: trialEnd,
-        trial_settings: {
-          end_behavior: {
-            missing_payment_method: "pause",
-          },
-        },
-      })
-    );
-    this.trackSubscription(subscription);
-
-    await this.callStripe("test_clock.advance", () =>
-      this.stripe.testHelpers.testClocks.advance(testClock.id, {
-        frozen_time: trialEnd + 60,
-      })
-    );
-    await this.pollStripe({
-      label: "test clock ready after trial advance",
-      read: () => this.callStripe("test_clock.retrieve", () =>
-        this.stripe.testHelpers.testClocks.retrieve(testClock.id)
-      ),
-      ready: (clock) => clock.status === "ready",
-    });
-    await this.pollStripe({
-      label: "subscription paused after trial",
-      read: () => this.callStripe("subscription.retrieve.paused", () =>
-        this.stripe.subscriptions.retrieve(subscription.id, {
-          expand: ["customer", "items.data.price", "latest_invoice"],
-        })
-      ),
-      ready: (candidate) => candidate.status === "paused",
-    });
-
-    const paymentMethod = await this.callStripe("payment_method.attach", () =>
-      this.stripe.paymentMethods.attach("pm_card_visa", {
-        customer: customer.id,
-      })
-    );
-    await this.callStripe("customer.update.default_payment_method", () =>
-      this.stripe.customers.update(customer.id, {
-        invoice_settings: {
-          default_payment_method: paymentMethod.id,
-        },
-      })
-    );
-    const paused = await this.callStripe("subscription.retrieve.customer_default", () =>
-      this.stripe.subscriptions.retrieve(subscription.id, {
-        expand: ["customer", "items.data.price", "latest_invoice"],
-      })
-    );
-    if (
-      coerceStripeId(paused.default_payment_method) !== null
-      || coerceStripeId(paused.default_source) !== null
-      || readExpandedCustomerDefaultPaymentMethod(paused) !== paymentMethod.id
-    ) {
-      throw new HostedStripeBillingLiveError(
-        "Paused-trial fixture must inherit a Customer payment method while the Subscription has none.",
-      );
-    }
-
-    return {
-      customerId: customer.id,
-      paymentMethodId: paymentMethod.id,
-      subscriptionId: subscription.id,
-      testClockId: testClock.id,
-    };
-  }
-
-  async assertUnsupportedResumePaymentMethodRejected(input: {
-    paymentMethodId: string;
-    subscriptionId: string;
-  }): Promise<void> {
-    try {
-      await this.stripe.subscriptions.resume(input.subscriptionId, {
-        billing_cycle_anchor: "now",
-        default_payment_method: input.paymentMethodId,
-        expand: ["customer", "items.data.price", "latest_invoice"],
-      } as Stripe.SubscriptionResumeParams & {
-        default_payment_method: string;
-      });
-    } catch (error) {
-      const details = readStripeErrorDetails(error);
-      if (
-        details.code === "parameter_unknown"
-        && details.param === "default_payment_method"
-      ) {
-        const subscription = await this.callStripe(
-          "subscription.retrieve.after_invalid_resume",
-          () => this.stripe.subscriptions.retrieve(input.subscriptionId),
-        );
-        if (subscription.status !== "paused") {
-          throw new HostedStripeBillingLiveError(
-            "Stripe rejected the control resume payload but the subscription did not remain paused.",
-          );
-        }
-        return;
-      }
-      throw new HostedStripeBillingLiveError(
-        `Unsupported Stripe resume control failed unexpectedly (${formatStripeErrorDetails(details)}).`,
-      );
-    }
-
-    throw new HostedStripeBillingLiveError(
-      "Stripe unexpectedly accepted default_payment_method on Subscription Resume.",
-    );
-  }
-
-  async captureSubscriptionEventBaseline(
-    subscriptionId: string,
-  ): Promise<ReadonlySet<string>> {
-    const events = await this.callStripe("event.list.resume_baseline", () =>
-      this.stripe.events.list({ limit: 100 })
-    );
-    return new Set(events.data
-      .filter(isHostedStripeResumeTraceEvent)
-      .filter((event) => readEventSubscriptionId(event) === subscriptionId)
-      .map((event) => event.id));
-  }
-
-  async waitForUpdateBeforeResumeTrace(input: {
-    baselineEventIds: ReadonlySet<string>;
-    paymentMethodId: string;
-    subscriptionId: string;
-  }): Promise<HostedStripeResumeEventTrace> {
-    return this.pollStripe({
-      label: "Subscription update before resume",
-      read: async () => {
-        const events = await this.callStripe("event.list.resume_trace", () =>
-          this.stripe.events.list({ limit: 100 })
-        );
-        const ordered = events.data
-          .filter(isHostedStripeResumeTraceEvent)
-          .filter((event) => !input.baselineEventIds.has(event.id))
-          .filter((event) => readEventSubscriptionId(event) === input.subscriptionId)
-          .reverse();
-        const snapshots = ordered.flatMap((event) => {
-          const subscription = readEventSubscriptionSnapshot(event);
-          return subscription ? [{ eventType: event.type, subscription }] : [];
-        });
-        const updateIndex = snapshots.findIndex(({ eventType, subscription }) =>
-          eventType === "customer.subscription.updated"
-          && subscription.status === "paused"
-          && coerceStripeId(subscription.default_payment_method) ===
-            input.paymentMethodId
-        );
-        const resumeIndex = snapshots.findIndex(({ eventType, subscription }, index) =>
-          index > updateIndex
-          && (
-            eventType === "customer.subscription.resumed"
-            || coerceStripeId(subscription.latest_invoice) !== null
-          )
-        );
-        return {
-          observedStatuses: snapshots.map(({ subscription }) => subscription.status),
-          updateBeforeResume: updateIndex >= 0 && resumeIndex > updateIndex,
-        };
-      },
-      ready: (trace) => trace.updateBeforeResume,
-    });
   }
 
   async adoptCheckoutSession(
@@ -598,7 +356,6 @@ export class HostedStripeBillingSandbox {
   }
 
   async applyStripePortalPlanChange(input: {
-    endTrial: boolean;
     scenario: string;
     subscriptionId: string;
     targetPlan: "edge" | "pulse";
@@ -634,96 +391,10 @@ export class HostedStripeBillingSandbox {
         metadata: this.metadata(input.scenario),
         payment_behavior: "error_if_incomplete",
         proration_behavior: "always_invoice",
-        ...(input.endTrial ? { trial_end: "now" as const } : {}),
       })
     );
     this.trackSubscription(updated);
     return updated;
-  }
-
-  async payLatestInvoiceWithStripeTestApi(input: {
-    paymentMethodId?: string;
-    scenario: string;
-    subscriptionId: string;
-  }): Promise<Stripe.Invoice> {
-    const subscription = await this.callStripe(
-      "subscription.retrieve.invoice_fixture",
-      () => this.stripe.subscriptions.retrieve(input.subscriptionId, {
-        expand: ["customer", "latest_invoice"],
-      }),
-    );
-    assertRunOwnership(subscription.metadata, this.runId, "Subscription");
-    const customerId = coerceStripeId(subscription.customer);
-    const invoiceId = coerceStripeId(subscription.latest_invoice);
-    if (!customerId || !invoiceId) {
-      throw new HostedStripeBillingLiveError(
-        "Stripe invoice fixture requires an owned Customer and latest Invoice.",
-      );
-    }
-    const paymentMethodId = input.paymentMethodId
-      ? await this.requireOwnedCustomerPaymentMethod({
-          customerId,
-          paymentMethodId: input.paymentMethodId,
-        })
-      : await this.attachInvoiceFixturePaymentMethod({
-          customerId,
-          scenario: input.scenario,
-          subscription,
-        });
-    return this.callStripe("invoice.pay.fixture", () =>
-      this.stripe.invoices.pay(invoiceId, {
-        payment_method: paymentMethodId,
-      })
-    );
-  }
-
-  private async requireOwnedCustomerPaymentMethod(input: {
-    customerId: string;
-    paymentMethodId: string;
-  }): Promise<string> {
-    const paymentMethod = await this.callStripe(
-      "payment_method.retrieve.invoice_fixture",
-      () => this.stripe.paymentMethods.retrieve(input.paymentMethodId),
-    );
-    if (coerceStripeId(paymentMethod.customer) !== input.customerId) {
-      throw new HostedStripeBillingLiveError(
-        "Stripe invoice fixture PaymentMethod does not belong to the owned Customer.",
-      );
-    }
-    return paymentMethod.id;
-  }
-
-  private async attachInvoiceFixturePaymentMethod(input: {
-    customerId: string;
-    scenario: string;
-    subscription: Stripe.Subscription;
-  }): Promise<string> {
-    const paymentMethod = await this.callStripe(
-      "payment_method.attach.invoice_fixture",
-      () => this.stripe.paymentMethods.attach("pm_card_visa", {
-        customer: input.customerId,
-      }),
-    );
-    await this.callStripe("payment_method.update.invoice_fixture", () =>
-      this.stripe.paymentMethods.update(paymentMethod.id, {
-        metadata: this.metadata(input.scenario),
-      })
-    );
-    await this.callStripe("customer.update.invoice_fixture", () =>
-      this.stripe.customers.update(input.customerId, {
-        invoice_settings: { default_payment_method: paymentMethod.id },
-        metadata: this.metadata(input.scenario),
-      })
-    );
-    const updatedSubscription = await this.callStripe(
-      "subscription.update.invoice_fixture",
-      () => this.stripe.subscriptions.update(input.subscription.id, {
-        default_payment_method: paymentMethod.id,
-        metadata: this.metadata(input.scenario),
-      }),
-    );
-    this.trackSubscription(updatedSubscription);
-    return paymentMethod.id;
   }
 
   async readSubscriptionTruth(
@@ -866,26 +537,17 @@ export class HostedStripeBillingSandbox {
   }
 
   private memberBillingMetadata(input: {
-    checkoutOffer: "pulse_trial_7d" | "standard";
     memberId: string;
     plan: "edge" | "pulse";
     scenario: string;
   }): Stripe.MetadataParam {
     return {
-      ...buildHostedBillingOfferMetadata(input.checkoutOffer === "pulse_trial_7d"
-        ? {
-            billingPlanCode: "launch_monthly",
-            checkoutOffer: "pulse_trial_7d",
-            memberId: input.memberId,
-            pulseTrialStartSource: "web_onboarding",
-          }
-        : {
-            billingPlanCode: input.plan === "edge"
-              ? "launch_edge_monthly"
-              : "launch_monthly",
-            checkoutOffer: "standard",
-            memberId: input.memberId,
-          }),
+      ...buildHostedBillingOfferMetadata({
+        billingPlanCode: input.plan === "edge"
+          ? "launch_edge_monthly"
+          : "launch_monthly",
+        memberId: input.memberId,
+      }),
       ...this.metadata(input.scenario),
     };
   }
@@ -1386,26 +1048,6 @@ async function ignoreMissingStripeResource(run: () => Promise<void>): Promise<vo
       `Stripe cleanup failed (${formatStripeErrorDetails(details)}).`,
     );
   }
-}
-
-function isHostedStripeResumeTraceEvent(event: Stripe.Event): boolean {
-  return event.type === "customer.subscription.updated"
-    || event.type === "customer.subscription.resumed";
-}
-
-function readEventSubscriptionId(event: Stripe.Event): string | null {
-  return readEventSubscriptionSnapshot(event)?.id ?? null;
-}
-
-function readEventSubscriptionSnapshot(
-  event: Stripe.Event,
-): Stripe.Subscription | null {
-  const object = event.data.object;
-  return object
-    && typeof object === "object"
-    && Reflect.get(object, "object") === "subscription"
-    ? object as Stripe.Subscription
-    : null;
 }
 
 function readExpandedCustomerDefaultPaymentMethod(

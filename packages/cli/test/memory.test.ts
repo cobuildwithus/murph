@@ -162,6 +162,51 @@ test("memory set-name stores the preferred display name in canonical memory", as
   );
 });
 
+test("memory show returns onboarding demographic context from the complete canonical document", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-memory-demographic-cli-",
+  );
+  cleanupPaths.push(parentRoot);
+
+  const cli = Cli.create("vault-cli", {
+    description: "memory test cli",
+    version: "0.0.0-test",
+  });
+
+  registerMemoryCommands(cli);
+
+  const saved = await runInProcessJsonCli(cli, [
+    "memory",
+    "upsert",
+    "Age: 16",
+    "--section",
+    "Identity",
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(saved.exitCode, null);
+  assert.equal(saved.envelope.ok, true);
+
+  const shown = await runInProcessJsonCli(cli, [
+    "memory",
+    "show",
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(shown.exitCode, null);
+  assert.equal(shown.envelope.ok, true);
+  assert.deepEqual(
+    (
+      shown.envelope.data as {
+        document: {
+          records: Array<{ section: string; text: string }>;
+        };
+      }
+    ).document.records.map(({ section, text }) => ({ section, text })),
+    [{ section: "Identity", text: "Age: 16" }],
+  );
+});
+
 test("memory commands round-trip upsert, update, show, and forget through the registered CLI", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-cli-");
   cleanupPaths.push(parentRoot);

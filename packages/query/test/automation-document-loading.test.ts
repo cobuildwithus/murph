@@ -102,6 +102,9 @@ describe("automation document loading", () => {
     expect(records.map((record) => record.relativePath)).toEqual(
       [...relativePaths].reverse(),
     );
+    expect(records.every(
+      (record) => record.scheduleAnchorAt === record.createdAt,
+    )).toBe(true);
   });
 
   it("reports the earliest path failure even when a later read fails first", async () => {

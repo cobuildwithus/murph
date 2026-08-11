@@ -355,7 +355,11 @@ function canUseHostedStripeBillingLookupCandidate(input: {
   }
 
   const boundSubscriptionId = input.member.billingRef?.stripeSubscriptionId ?? null;
-  return !boundSubscriptionId || boundSubscriptionId === input.subscriptionId;
+  // A canonical signed webhook may arrive before Checkout writes the first
+  // subscription binding. Metadata can establish that missing edge, but it
+  // must never replace a different stored subscription or customer.
+  return boundSubscriptionId === null
+    || boundSubscriptionId === input.subscriptionId;
 }
 
 function listHostedStripeUniqueMemberIds(values: readonly (string | null | undefined)[]): string[] {

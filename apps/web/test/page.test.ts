@@ -216,9 +216,9 @@ test("HomePage renders the canonical landing page at the root route", async () =
     pricingStart,
     markup.indexOf("</section>", pricingStart),
   );
-  assert.match(pricingSection, /\$8\/mo/);
+  assert.match(pricingSection, /Free starter usage/);
   assert.match(pricingSection, /Open source/);
-  assert.match(pricingSection, /Cancel anytime\./);
+  assert.match(pricingSection, /Starter usage does not expire\./);
   assert.doesNotMatch(pricingSection, /free trial/i);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
@@ -266,6 +266,21 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.doesNotMatch(markup, /Perplexity Health/);
   assert.doesNotMatch(markup, /Can I choose which AI provider Murph uses\?/);
   assert.doesNotMatch(markup, /Your wearable shows data/);
+  assert.match(
+    markup,
+    /\/murph-headshots\/murph-headshot-(?:01|02|03|04)-avatar\.avif/,
+  );
+  assert.match(markup, /\/personas\/athlete-avatar\.avif/);
+  assert.match(markup, /\/personas\/sleeper-avatar\.avif/);
+  assert.match(markup, /\/personas\/founder-avatar\.avif/);
+  assert.doesNotMatch(
+    markup,
+    /\/murph-headshots\/murph-headshot-(?:01|02|03|04)\.png/,
+  );
+  assert.doesNotMatch(
+    markup,
+    /\/personas\/(?:athlete|sleeper|founder)\.jpg/,
+  );
 });
 
 test("HomePage keeps the technical runtime section in order and honors both provider flags", async () => {

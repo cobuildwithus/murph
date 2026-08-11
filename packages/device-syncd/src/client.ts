@@ -94,6 +94,7 @@ export interface DeviceSyncAccountSourceSummary {
   displayName: string | null;
   status: DeviceConnectionSourceStatus;
   resourceCount: number;
+  resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   firstSeenAt: string;

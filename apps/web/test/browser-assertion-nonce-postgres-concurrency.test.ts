@@ -85,6 +85,28 @@ async function disconnectAll(clients: PrismaClient[]): Promise<void> {
   await Promise.all(clients.map((client) => client.$disconnect()));
 }
 
+async function waitUntilBackendIsBlockedBy(input: {
+  blockedPid: number;
+  blockerPid: number;
+  observer: PrismaClient;
+}): Promise<void> {
+  const deadlineAtMs = Date.now() + 5_000;
+
+  do {
+    const rows = await input.observer.$queryRaw<Array<{ blocked: boolean }>>`
+      SELECT (
+        ${input.blockerPid}::integer
+        = ANY(pg_blocking_pids(${input.blockedPid}::integer))
+      ) AS "blocked"
+    `;
+    if (rows[0]?.blocked === true) {
+      return;
+    }
+  } while (Date.now() < deadlineAtMs);
+
+  throw new Error("Expected the nonce insert to wait on the retention transaction.");
+}
+
 describe.skipIf(!runPostgresConcurrencyProof)(
   "browser assertion nonce PostgreSQL concurrency",
   () => {
@@ -97,7 +119,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const clients = [firstClient, secondClient, observer];
       let insertions: Promise<[boolean, boolean]> | null = null;
       const input = {
-        expiresAt: "2026-08-09T12:46:00.000Z",
+        expiresAt: "9999-12-31T23:59:59.999Z",
         method: "POST",
         nonceHash,
         now: "2026-08-09T12:45:00.000Z",
@@ -137,9 +159,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const fixtureId = randomUUID();
       const lockedNonceHash = `browser_nonce_locked_${fixtureId}`;
       const freshNonceHash = `browser_nonce_fresh_${fixtureId}`;
-      const lockedAt = new Date("0001-01-01T00:00:00.000Z");
-      const cleanupAt = new Date("0001-01-02T00:00:00.000Z");
-      const freshExpiresAt = new Date("0001-01-03T00:00:00.000Z");
+      const lockedAt = new Date("2000-01-01T00:00:00.000Z");
+      const cleanupAt = new Date("2000-01-02T00:00:00.000Z");
+      const freshExpiresAt = new Date("9999-12-31T23:59:59.999Z");
       const lockClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const retentionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const insertClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -239,5 +261,118 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }
       }
     }, 20_000);
+
+    it("fails closed when same-nonce admission resumes after retention commits past expiry", async () => {
+      const fixtureId = randomUUID();
+      const nonceHash = `browser_nonce_expiry_retention_${fixtureId}`;
+      const expiredAt = new Date("2000-01-01T00:00:00.000Z");
+      const cleanupAt = new Date("2000-01-01T00:02:00.000Z");
+      const cleanupClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const admissionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const clients = [cleanupClient, admissionClient, observer];
+      const cleanupDeleted = createDeferred<number>();
+      const releaseCleanupCommit = createDeferred();
+      let cleanupTransaction: Promise<void> | null = null;
+      let admission: Promise<boolean> | null = null;
+
+      try {
+        await observer.deviceBrowserAssertionNonce.create({
+          data: {
+            createdAt: expiredAt,
+            expiresAt: expiredAt,
+            method: "POST",
+            nonceHash,
+            path: "/api/device-sync/agents/pair",
+            userId: `member_browser_expiry_retention_${fixtureId}`,
+          },
+        });
+
+        cleanupTransaction = cleanupClient.$transaction(async (tx) => {
+          const backendRows = await tx.$queryRaw<Array<{ pid: number }>>`
+            SELECT pg_backend_pid() AS "pid"
+          `;
+          const blockerPid = backendRows[0]?.pid;
+          if (blockerPid === undefined) {
+            throw new Error("Expected the retention transaction backend pid.");
+          }
+
+          await expect(deleteExpiredHostedBrowserAssertionNonces({
+            now: cleanupAt,
+            prisma: tx,
+          })).resolves.toBe(1);
+          cleanupDeleted.resolve(blockerPid);
+          await releaseCleanupCommit.promise;
+        }, transactionOptions);
+        const blockerPid = await Promise.race([
+          cleanupDeleted.promise,
+          cleanupTransaction.then(() => {
+            throw new Error("Expected the retention delete to remain uncommitted.");
+          }),
+        ]);
+
+        const admissionBackendRows = await admissionClient.$queryRaw<
+          Array<{ pid: number }>
+        >`
+          SELECT pg_backend_pid() AS "pid"
+        `;
+        const blockedPid = admissionBackendRows[0]?.pid;
+        if (blockedPid === undefined) {
+          throw new Error("Expected the nonce admission backend pid.");
+        }
+
+        admission = new PrismaHostedBrowserAssertionNonceStore(admissionClient)
+          .consumeBrowserAssertionNonce({
+            expiresAt: expiredAt.toISOString(),
+            method: "POST",
+            nonceHash,
+            now: expiredAt.toISOString(),
+            path: "/api/device-sync/agents/pair",
+            userId: `member_browser_expiry_retention_${fixtureId}`,
+          });
+        await waitUntilBackendIsBlockedBy({
+          blockedPid,
+          blockerPid,
+          observer,
+        });
+
+        releaseCleanupCommit.resolve();
+        await cleanupTransaction;
+        await expect(withDeadline(admission, 5_000)).resolves.toBe(false);
+        await expect(observer.deviceBrowserAssertionNonce.findUnique({
+          select: {
+            expiresAt: true,
+            nonceHash: true,
+          },
+          where: { nonceHash },
+        })).resolves.toEqual({
+          expiresAt: expiredAt,
+          nonceHash,
+        });
+
+        await expect(deleteExpiredHostedBrowserAssertionNonces({
+          now: cleanupAt,
+          prisma: cleanupClient,
+        })).resolves.toBe(1);
+        await expect(observer.deviceBrowserAssertionNonce.count({
+          where: { nonceHash },
+        })).resolves.toBe(0);
+      } finally {
+        releaseCleanupCommit.resolve();
+        if (cleanupTransaction) {
+          await Promise.allSettled([cleanupTransaction]);
+        }
+        if (admission) {
+          await Promise.allSettled([admission]);
+        }
+        try {
+          await observer.deviceBrowserAssertionNonce.deleteMany({
+            where: { nonceHash },
+          });
+        } finally {
+          await disconnectAll(clients);
+        }
+      }
+    }, 30_000);
   },
 );

@@ -1,6 +1,6 @@
 ---
 name: connected-apps
-description: Use when Murph needs a connected email, calendar, document, storage, note, or task account; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; or connected-app context for another action. Covers account selection, narrow discovery and reads, approved email and calendar writes, privacy, and untrusted provider content.
+description: Use when Murph needs a connected email, calendar, document, storage, note, or task account; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; connected-app context for another action; or a verified manual export fallback for an unsupported health or fitness data source. Covers account selection, narrow discovery and reads, approved email and calendar writes, privacy, untrusted provider content, and official provider export handoffs.
 ---
 
 # Connected Apps
@@ -32,6 +32,30 @@ Before asking the user to repeat a task-relevant fact these surfaces are likely
 to contain, perform the narrow read when the account and task are clear. Ask one
 narrow question when multiple accounts, providers, visit types, files, or
 locations remain materially plausible.
+
+## Unsupported health and fitness sources
+
+A request to connect, sync, or import a health or fitness service does not make
+that service a connected-app provider. First use the trusted live provider list
+in the current prompt to determine whether Murph has a real direct connection.
+If a direct route is proven, use its device or app connection owner and do not
+substitute a manual export.
+
+When no direct connection is proven and the member wants existing data from the
+service, read `references/provider-data-exports.md`. That reference owns the
+verified fallback routes for Function Health, Livongo/Teladoc Condition
+Management, Strong, and Hevy. Do not use `murph.connected_apps_search` to hunt
+for an arbitrary health integration, and do not claim support because a provider
+appears in the reference.
+
+Give the provider's verified action link—an account or export page when one is
+documented, otherwise the official instructions—plus the smallest useful steps.
+Ask for the original downloaded file and describe the result as a manual export
+or one-time import rather than a live sync. The member performs the export by
+default. Use `computer-use` only when they explicitly ask Murph to operate the
+portal and that skill permits the action. Once a file arrives, the global
+health-record ingestion invariant owns preservation and canonical extraction.
+In a group, ask the member to continue privately before sharing account data.
 
 ## Prefer connected email over webmail
 

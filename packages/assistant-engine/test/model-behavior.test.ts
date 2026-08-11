@@ -141,7 +141,7 @@ describe('assistant execution prompt contract', () => {
       'Group reply cadence applies before the first text reply in an ordinary interactive Linq/iMessage or Telegram group turn.',
     )
     expect(groupPrompt).toContain(
-      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 4`.',
+      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 8`.',
     )
     expect(groupPrompt).toContain(
       'If new human input arrives during that pause, re-evaluate safety, time sensitivity, and floor ownership as soon as the sleep finishes',
@@ -156,12 +156,12 @@ describe('assistant execution prompt contract', () => {
       'take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
     )
     expect(groupPrompt).toContain(
-      'Never sleep more than 10 seconds total.',
+      'Never sleep more than 14 seconds total.',
     )
     expect(groupPrompt).toContain(
       'Do not answer each accepted message separately, recap the burst point by point, or mention waiting, sleeping, or commands.',
     )
-    expect(directPrompt).not.toContain('run shell `sleep 4`')
+    expect(directPrompt).not.toContain('run shell `sleep 8`')
     expect(directPrompt).not.toContain('Group texting rhythm:')
     expect(groupPrompt).toContain(
       'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and the bounded shell `sleep` required by group reply cadence',
@@ -949,7 +949,7 @@ describe('assistant execution prompt contract', () => {
       '`unchanged` means no save',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'never guess voice, model, provider, or reasoning ids',
+      'Read tool schemas; never guess ids',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'use `/settings?voice=true` only for voice or sound changes',
@@ -958,7 +958,10 @@ describe('assistant execution prompt contract', () => {
       'Use `/settings` for tone, model, provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'never use a same-turn voice demo as activation proof',
+      'same-turn demos do not activate it',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Voice memos keep the running-turn voice unless this user names another',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'explicit user-requested model, core-reply provider, or reasoning changes',
@@ -1402,6 +1405,7 @@ describe('assistant execution prompt contract', () => {
 describe('assistant local PDF evidence guidance', () => {
   it('describes hosted device-connect as available without stale unavailable guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantAndroidAppAvailable: true,
       onboardingGuidance: true,
     }))
 
@@ -1419,7 +1423,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
     )
     expect(prompt).toContain(
-      'If the user asks for a wearable/source that is neither in this list nor named in the Apple Health relay section, say it is not supported yet',
+      'If the user asks for a wearable/source that is neither in this list nor named in the health data relay section, say it is not supported yet',
     )
     expect(prompt).toContain(
       'Use `murph.device` to list accounts, create a real connection link, or queue reconciliation',
@@ -1435,6 +1439,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.',
     )
     expect(prompt).toContain('Apple Health relay:')
+    expect(prompt).toContain('Android Health Connect relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
     expect(prompt).toContain(
       'WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow',
@@ -1448,14 +1453,21 @@ describe('assistant local PDF evidence guidance', () => {
     )
     expect(prompt).toContain('Xiaomi/Mi Fitness, RingConn, COROS, and Suunto')
     expect(prompt).toContain('Huawei Health: Apple Health sharing varies')
+    expect(prompt).toContain(
+      'Android Health Connect works in the Murph Android app. Canonical Google Play listing: https://play.google.com/store/apps/details?id=ai.withmurph.app.',
+    )
+    expect(prompt).toContain(
+      'Mobvoi/TicWatch: sync through Mobvoi Health or Google Fit, then connect Health Connect in Murph.',
+    )
     expect(prompt).toContain('Starting Murph: if asked how to begin')
     expect(prompt).toContain(MURPH_PRODUCT_ORIGIN)
     expect(prompt).toContain('accounts are created at')
     expect(prompt).toContain('The iPhone app supports sign-in, not account creation')
     expect(prompt).toContain('Never invent a link or pressure them')
     expect(prompt).toContain(
-      'use one brief `murph.generate_voice_memo` when available',
+      'For any Apple Health relay setup named above, use one brief `murph.generate_voice_memo` when available',
     )
+    expect(prompt).not.toContain('For any relay setup named above')
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
     expect(prompt).toContain(
       'Never call Apple Health unsupported/disabled/coming soon',
@@ -1464,7 +1476,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Apple Health works now in the Murph iPhone app.',
     )
     expect(prompt).toContain('put message URLs alone last')
-    expect(prompt).not.toContain('Health Connect')
+    expect(prompt).toContain('Health Connect')
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
     expect(prompt).toContain(
@@ -1512,7 +1524,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      `only ${MURPH_PRODUCT_ORIGIN} and https://apps.apple.com/us/app/murph-ai/id6786145859 are proof-free`,
+      `only ${MURPH_PRODUCT_ORIGIN} and both canonical app-store URLs are proof-free`,
     )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
@@ -1524,7 +1536,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).not.toContain('connection links are temporarily unavailable')
   })
 
-  it('forbids fabricated wearable connect URLs even when hosted connect is unavailable', () => {
+  it('hides Android app guidance while forbidding fabricated wearable connect URLs', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantHostedDeviceConnectAvailable: false,
       assistantHostedDeviceConnectProviders: [],
@@ -1536,14 +1548,19 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).not.toContain('Hosted wearable connection links are available')
     expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain('Apple Health relay:')
+    expect(prompt).not.toContain('Android Health Connect relay:')
     expect(prompt).toContain(
       'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.',
     )
     expect(prompt).toContain('No documented WHOOP settings deeplink; never invent one')
     expect(prompt).toContain('WHOOP limits third-party access')
+    expect(prompt).toContain('Direct sync omits steps; Apple Health may relay them')
     expect(prompt).toContain('Zepp/Amazfit: share with Apple Health in Zepp')
     expect(prompt).toContain('Xiaomi/Mi Fitness, RingConn, COROS, and Suunto')
     expect(prompt).toContain('Huawei Health: Apple Health sharing varies')
+    expect(prompt).not.toContain('Android Health Connect works in the Murph Android app.')
+    expect(prompt).not.toContain('Mobvoi/TicWatch:')
+    expect(prompt).not.toContain('https://play.google.com/store/apps/details?id=ai.withmurph.app')
     expect(prompt).toContain('no direct cloud access or guaranteed history backfill')
     expect(prompt).toContain('accounts are created at')
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
@@ -1551,7 +1568,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      `only ${MURPH_PRODUCT_ORIGIN} and https://apps.apple.com/us/app/murph-ai/id6786145859 are proof-free`,
+      `only ${MURPH_PRODUCT_ORIGIN} and the canonical iOS App Store URL are proof-free`,
     )
   })
 
@@ -1692,7 +1709,7 @@ describe('assistant consumption lookup guidance', () => {
       'Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.',
     )
     expect(prompt).toContain(
-      'Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution; body-composition weight/waist/recomposition; gut-digestion digestive symptoms; micronutrients-supplements supplement evidence, labels, dose, and safety.',
+      'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation; body-composition owns weight/waist/recomposition; gut-digestion owns digestive symptoms and elimination/reintroduction; micronutrients-supplements owns supplement evidence, labels, dose, and safety.',
     )
     expect(prompt).toContain(
       'Preserve medication state correctly: completed historical courses use `vault-cli medication history add`; current medication regimens use `regimen save --kind medication` with correct status and dates; one dose taken at a specific time uses `event medication-intake add`.',
@@ -1707,7 +1724,10 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
+      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Recovery-modality evidence and safety come from the required Health Commons lookup.',
+    )
+    expect(prompt).toContain(
+      'Live workout/card: read strength-training and tracked-table.',
     )
     expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',
@@ -1913,7 +1933,8 @@ describe('assistant system prompt cache stability', () => {
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_000)
+    // The established Apple Health/WHOOP relay contract sets this ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_469)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2193,7 +2214,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '32daf4a053a3a6fc5221b98400c6e65350983e29c0679d3988f00f4635dbfcd5',
+      '59bdee189b368b6c91df9f4cc828caf9919b7839063747c58b5d6c7281309fd1',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2333,7 +2354,22 @@ describe('assistant experiment onboarding guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).not.toContain('Supported experiment protocols:')
-    expect(prompt).toContain('Health Commons route surface:')
+    expect(prompt).toContain('Health Commons tools:')
+    expect(prompt).toContain(
+      'Before health Q&A or advice',
+    )
+    expect(prompt).toContain(
+      '`vault-cli commons knowledge search "<full health question in concise English>" --format json`',
+    )
+    expect(prompt).toContain('run one `vault-cli commons knowledge search')
+    expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
+    expect(prompt).toContain('If unavailable or empty, continue honestly.')
+    expect(prompt).toContain('Skip jokes, thanks, logs, logistics, and non-health turns.')
+    expect(prompt).toContain('only when asked to try, test, track, or set one up.')
+    expect(prompt).not.toContain('overall evidence')
+    expect(prompt).not.toContain('topicResolved')
+    expect(prompt).not.toContain('same catalogHash')
+    expect(prompt).not.toContain('use 2 only')
     expect(prompt).toContain(
       '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
     )
@@ -2563,6 +2599,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
+    expect(prompt).toContain(
+      'nutrition-strategy owns forward meal execution and named-diet evaluation',
+    )
     expect(prompt).toContain('Care logistics: appointment-scheduling.')
     expect(prompt).toContain('Transports and services: connected-apps, computer-use, phone-calls.')
     expect(prompt).toContain('Account products: murph-family.')
@@ -2703,6 +2742,7 @@ describe('assistant Murph onboarding guidance', () => {
     expect(readHostedWearableProviderList(prompt)).toBe('WHOOP (`whoop`)')
     expect(readHostedWearableProviderList(prompt)).not.toContain('Apple Health')
     expect(prompt).toContain('Apple Health relay:')
+    expect(prompt).not.toContain('Android Health Connect relay:')
     expect(prompt).toContain(
       'Hosted wearable connection links are available for WHOOP (`whoop`)',
     )
@@ -2823,7 +2863,9 @@ describe('assistant conversation scope', () => {
       'is the requested canonical public Murph iOS App Store listing',
     )
     expect(prompt).not.toContain('Apple Health relay:')
-    expect(prompt).not.toContain('WHOOP limits third-party access')
+    expect(prompt).not.toContain('Android Health Connect relay:')
+    expect(prompt).not.toContain('Mobvoi/TicWatch:')
+    expect(prompt).not.toContain('https://play.google.com/store/apps/details?id=ai.withmurph.app')
     expect(prompt).not.toContain('Starting Murph:')
     expect(prompt).not.toContain('Computer-use tools:')
     expect(prompt).not.toContain('Phone calls:')
@@ -3025,6 +3067,21 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'In group email, where filesystem reads are forbidden, do not attempt the read; apply the resident group Understand before recommending rules instead.',
     )
+    expect(prompt).toContain(
+      'Group email has no filesystem access. Do not try to read a usage skill.',
+    )
+    expect(prompt).toContain(
+      'call `murph.group action="read_usage"` exactly once',
+    )
+    expect(prompt).toContain(
+      'At least all of this room\'s included usage for the current period has been used.',
+    )
+    expect(prompt).toContain(
+      'authoritative included-usage progress figure for this room is unavailable right now',
+    )
+    expect(prompt).not.toContain(
+      'Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md`',
+    )
     expect(prompt).not.toContain(
       'Use `murph.automation` with `action: save`',
     )
@@ -3048,6 +3105,36 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain(
       'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
+    )
+    expect(prompt).toContain(
+      'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
+    )
+    expect(prompt).toContain(
+      'On patch, a replacement recurring wall-clock schedule that omits `schedule.timeZone` preserves the stored explicit timezone',
+    )
+    expect(prompt).toContain(
+      'do not ask the user to repeat it or guess it from current conversation context',
+    )
+    expect(prompt).toContain(
+      'For an active `deviceActivity` schedule, confirm the persisted event trigger directly',
+    )
+    expect(prompt).toContain(
+      'a null `nextOccurrenceAt` means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
+    )
+    expect(prompt).toContain(
+      'do not invent a time or offer timing recovery',
+    )
+    expect(prompt).toContain(
+      'For time-based schedules, confirm timing only from a result with `timingVerified: true`',
+    )
+    expect(prompt).toContain(
+      'a verified null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
+    )
+    expect(prompt).toContain(
+      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
+    )
+    expect(prompt).toContain(
+      'When a time-based result has `timingVerified: false`, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write.',
     )
     expect(prompt).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',

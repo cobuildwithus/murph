@@ -1333,6 +1333,25 @@ function createIntegratedQueryServices(): QueryServices {
         summary,
       }
     },
+    async showPersonalPatterns(input: CommandContext & {
+      date?: string
+      windowDays?: number
+    }) {
+      const windowDays = input.windowDays ?? 120
+      const query = await loadQueryRuntime()
+      const report = await query.buildPersonalPatternReportRuntime(input.vault, {
+        asOf: input.date,
+        windowDays,
+      })
+
+      return {
+        filters: {
+          date: input.date ?? null,
+          windowDays,
+        },
+        report,
+      }
+    },
     async listWearableSleep(input: CommandContext & {
       date?: string
       from?: string

@@ -1,6 +1,6 @@
 # Local Storage Lifecycle
 
-Last verified: 2026-07-19
+Last verified: 2026-08-10
 
 ## Purpose
 
@@ -77,6 +77,11 @@ Use `scripts/create-worktree`; use `--data-research <reason>` only for genuinely
 large data or research work. Registered worktrees remain visible to the normal
 open-PR, plan, cleanliness, process-CWD, and retirement gates.
 
+The creation helper writes `.metadata_never_index` at each worktree root so
+macOS Spotlight does not crawl rebuildable checkout contents. It also adds the
+root marker to the repository's common local exclude file so the marker never
+appears as worktree dirt. Keep the marker in place for the worktree's lifetime.
+
 `scripts/worktree-storage-guard` scans only conventional direct-child
 `murph-*` Git checkouts in the system `/tmp` roots by default and matches the
 current repository by normalized origin. Tests and specialized hosts can set
@@ -89,6 +94,34 @@ present legacy set, then rewrites the set downward as those checkouts retire.
 Any new unmanaged identity fails the guard even if another legacy clone
 disappeared at the same time. Registered worktrees, including locked
 `data/research:` worktrees, do not count as unmanaged.
+
+Registered-worktree authorization is checkout-scoped at commit time after the
+primary guard advances. The branch-independent hook then supplies the
+committing checkout, so a raw worktree fails its own commit without blocking an
+authorized sibling. Every registered worktree still consumes the global
+numeric and disk budget. No guard publishes legacy authorization for a raw
+checkout. A preceding primary remains globally fail-closed around clean raw
+sibling, including for authorized current-task entrypoints, until the primary
+advances. If an isolation marker from the rejected intermediate guard exists,
+advancing the primary first is a rollout prerequisite. The current primary
+retires its paired authorization under the existing guard lock: it removes a
+regular-file or symlink authorization node first and removes a regular
+non-symlink isolation marker only after authorization is absent. Task-local
+guards never mutate this state. Interruption and malformed marker nodes
+therefore remain fail-closed for both current and preceding guards. The shared
+hook and installer pass the current checkout through an environment hint while
+retaining the preceding guard's no-argument command surface, so either the
+primary or task checkout may advance first without an argument outage when no
+raw sibling exists. An authorized historical checkout can still install hooks
+and commit after the primary advances, but every preceding-primary entrypoint
+remains globally fail-closed while clean raw state exists. Current-version
+sanctioned creation composes checkout scope with the existing global resource
+checks after the primary advances. Once the bounded
+intermediate state is retired, a later primary downgrade leaves both the old
+global audit and old shared hook fail-closed.
+Running the primary checkout's `scripts/worktree-storage-guard` without a
+scoped checkout remains the explicit global audit and reports every isolated
+registered worktree.
 
 The ratchet does not delete a checkout. Preserve active/open-PR or dirty work.
 Retire a clean registered checkout with `scripts/retire-worktree` after its

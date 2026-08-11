@@ -293,15 +293,23 @@ async function handleRuntimeShellPrewarmRoute(
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
     });
     const body = requireJsonObject(payload.trim() ? JSON.parse(payload) : {});
-    if (Object.keys(body).length > 0) {
-      throw new TypeError("Hosted runtime shell prewarm request must be empty.");
+    if (Object.keys(body).some((key) => key !== "source")) {
+      throw new TypeError("Hosted runtime shell prewarm request has unknown fields.");
+    }
+    const source = body.source;
+    if (
+      source !== undefined
+      && source !== "linq-instant-start"
+      && source !== "linq-typing-started"
+    ) {
+      throw new TypeError("Hosted runtime shell prewarm source is invalid.");
     }
 
     const stub = context.env.USER_RUNNER.getByName(userId);
     if (!stub.prewarmRuntimeShellForUser) {
       throw new Error("User runner shell-prewarm RPC is unavailable.");
     }
-    await stub.prewarmRuntimeShellForUser(userId);
+    await stub.prewarmRuntimeShellForUser(userId, source);
     return json({ accepted: true }, 202);
   } catch (error) {
     emitHostedExecutionStructuredLog({

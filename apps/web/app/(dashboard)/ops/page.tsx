@@ -24,7 +24,7 @@ const OPS_TOOLS = [
     label: "Usage",
   },
   {
-    description: "Review hosted growth, trial conversion, and daily revenue snapshots.",
+    description: "Review hosted growth, starter activation, paid conversion, and daily revenue snapshots.",
     href: "/ops/growth",
     label: "Growth",
   },
@@ -37,12 +37,6 @@ const OPS_TOOLS = [
     description: "Inspect hosted runtime latency measurements.",
     href: "/ops/runtime-latency",
     label: "Runtime latency",
-  },
-  {
-    description:
-      "Preview and add seven days to one member's active or lapsed paused Pulse Trial without changing paid billing.",
-    href: "/ops/trials",
-    label: "Trials",
   },
   {
     description:

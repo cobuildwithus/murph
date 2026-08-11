@@ -13,8 +13,9 @@ nonce state.
 
 ## Success criteria
 
-- Browser assertion admission performs one direct insert and treats only the
-  nonce primary-key conflict as a replay.
+- Browser assertion admission performs one direct insert, treats only the nonce
+  primary-key conflict as a replay, and uses the database clock to fail closed
+  if a delayed insert resumes at or after expiry.
 - The hourly primary-database cleanup deletes expired browser assertion nonces
   in bounded, ordered, skip-locked batches without delaying unrelated inserts.
 - Mixed-version cleanup preserves legacy raw-expiry rows through the verifier's
@@ -60,8 +61,10 @@ nonce state.
 
 - Focused Vitest suites cover direct nonce admission, retention SQL and batch
   limits, the hourly route result, and runtime-log cleanup ordering.
-- An opt-in two-client PostgreSQL test proves one winner for duplicate nonce
-  admission and proves that a locked expired row cannot block a fresh insert.
+- An opt-in multi-client PostgreSQL test proves one winner for duplicate nonce
+  admission, proves that a locked expired row cannot block a fresh insert, and
+  proves that admission resuming after same-nonce retention fails closed while
+  restoring the tombstone.
 - Web typecheck and focused ESLint, root source hygiene, documentation
   drift/gardening, and diff whitespace checks cover the affected surfaces.
 
@@ -69,6 +72,9 @@ nonce state.
 
 - Keep replay convergence in the existing nonce primary key instead of adding an
   advisory lock or a second read.
+- Keep delayed admission fail-closed in the same insert statement with the
+  database clock instead of relying on old Web instances to drain before the
+  retention owner runs.
 - Keep mixed-version cleanup conservative instead of adding a migration or
   weakening the first-invalid verifier boundary.
 - Reuse the existing hourly retention invocation and shared batch ceilings

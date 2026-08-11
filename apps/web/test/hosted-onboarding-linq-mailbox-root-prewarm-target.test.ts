@@ -139,6 +139,11 @@ describe("hosted Linq mailbox-root prewarm target", () => {
 
     expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledWith({
       select: {
+        member: {
+          select: {
+            suspendedAt: true,
+          },
+        },
         memberId: true,
       },
       where: {
@@ -251,6 +256,11 @@ describe("hosted Linq mailbox-root prewarm target", () => {
 
     expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledWith({
       select: {
+        member: {
+          select: {
+            suspendedAt: true,
+          },
+        },
         memberId: true,
       },
       where: {

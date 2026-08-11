@@ -105,7 +105,7 @@ describe("clubs client behavior", () => {
 
     const rendered = await renderClientComponent(
       createElement(ClubPhoneDemo, {
-        murphHeadshotSrc: "/murph-headshots/murph-headshot-01.png",
+        murphHeadshotSrc: "/murph-headshots/murph-headshot-01-avatar.avif",
       }),
       {
         matchMedia: reducedMotionMatchMedia,

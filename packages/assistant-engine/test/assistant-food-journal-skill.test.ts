@@ -37,7 +37,7 @@ describe('assistant food journal skill', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md',
     )
     expect(prompt).toContain(
-      'Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution',
+      'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation',
     )
     expect(prompt).toContain(
       'When exact food or supplement identity, ingredients, allergens, dose, or movement instruction matters, follow the owning skill',
@@ -69,6 +69,53 @@ describe('assistant food journal skill', () => {
     )
     expect(skill).toContain(
       'Provide calorie and macro estimates by default when logging a meal',
+    )
+    expect(skill).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
+    )
+    expect(skill).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
+    )
+    expect(skill.indexOf('daily-nutrition-card-safety.md')).toBeLessThan(
+      skill.indexOf('daily-nutrition-card-goals.md'),
+    )
+    expect(skill).toContain('even when all five goals already appear to exist')
+    expect(skill).toContain(
+      'complete active-condition\nand active-regimen discovery is mandatory before numeric target derivation as\nwell as before a card',
+    )
+    expect(skill).toContain(
+      'the five-record context projection is not completeness\nproof',
+    )
+    expect(skill).toContain(
+      'lifetime canonical procedure-event and encounter-diagnosis discovery,\nbounded body-measurement read, separate `pregnancy-test` measurement read, and\nbounded canonical test-event list plus required detail reads are likewise\nmandatory before deriving, saving, or surfacing a proposal and again before\nactivating one',
+    )
+    expect(skill).toContain(
+      'complete `vault-cli memory show --format json` read is also mandatory',
+    )
+    expect(skill).toContain(
+      'the snapshot does not inject the canonical Identity, Preferences,\nInstructions, and Context memory document',
+    )
+    expect(skill).toContain(
+      'a failed or unreadable memory read\nfails closed, while missing or ambiguous age alone is not a universal block',
+    )
+    expect(skill).toContain(
+      'target-authority and complete active-Goal discovery contract',
+    )
+    expect(skill).toContain(
+      'before deciding that the five canonical daily goals are complete',
+    )
+    expect(skill).toContain(
+      'Use its\nproposal workflow only if a target is genuinely missing after that read.',
+    )
+    expect(skill).toContain(
+      'first setup response explains a paused canonical proposal in ordinary text',
+    )
+    expect(skill).toContain('does not attach a goal-less card')
+    expect(skill).toContain(
+      'An unambiguous acceptance may complete the\npending explicit card request in that next response after the complete safety',
+    )
+    expect(skill).toContain(
+      'recheck passes, activation and readback succeed, and a fresh same-date totals\nread completes.',
     )
     expect(skill).toContain('vault-cli food search-labels`')
     expect(skill).toContain('vault-cli food search-labels-batch`')

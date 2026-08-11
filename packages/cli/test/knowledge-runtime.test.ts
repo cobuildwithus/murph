@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -124,6 +125,9 @@ describe('upsertKnowledgePage', () => {
       slug: 'sleep-quality',
     })
     expect(shown.page.markdown).toContain('# Sleep quality')
+    expect(shown.page.pageRevisionDigest).toBe(
+      createHash('sha256').update(shown.page.markdown).digest('hex'),
+    )
     expect(shown.page.librarySlugs).toEqual(['sleep-architecture'])
     expect(shown.page.relatedSlugs).toEqual(['magnesium'])
 

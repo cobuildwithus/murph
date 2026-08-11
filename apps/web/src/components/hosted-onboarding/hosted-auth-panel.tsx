@@ -55,6 +55,7 @@ export function HostedAuthPanel({
   onPrivyWaitChange,
   onSignOut,
   onViewChange,
+  phoneInputAutoFocus = true,
   requireLaunchConsentOnCompletion,
   showPassiveLegalNotice,
   size,
@@ -66,6 +67,7 @@ export function HostedAuthPanel({
   onPrivyWaitChange?: (reason: HostedPrivyWaitReason) => void;
   onSignOut?: () => Promise<void> | void;
   onViewChange?: (view: HostedAuthPanelView) => void;
+  phoneInputAutoFocus?: boolean;
   requireLaunchConsentOnCompletion?: boolean;
   showPassiveLegalNotice?: boolean;
   size?: "default" | "compact";
@@ -369,7 +371,7 @@ export function HostedAuthPanel({
           onAuthenticated={handlePhoneAuthenticated}
           onCodeSent={() => setCodeSent(true)}
           onSignOut={onSignOut}
-          phoneInputAutoFocus
+          phoneInputAutoFocus={phoneInputAutoFocus}
           renderCaptcha={false}
           size={size}
           suppressAuthenticatedSessionIssue={telegramActive || resumableAuth !== null}

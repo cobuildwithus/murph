@@ -147,8 +147,26 @@ it has been explicitly elevated to a cross-cutting invariant.
 
 ## Foreground Reply Critical Path
 
-- A durably accepted current conversation message is the runtime's
-  highest-priority work.
+- A durably accepted current conversation message, or a ready trusted
+  completion for work that message already launched, is the runtime's
+  highest-priority work. Unfinished detached provider work remains background.
+- When an exact generated-image completion and newer conversation input are
+  both waiting at the next provider boundary, admit the completion immediately
+  before that input in the same frozen batch. Later conversation input may join
+  through the existing live foreground loop.
+- This ordering is durable rather than wake-owned. A restored background pass
+  or a replacement invocation with fresh input derives the same
+  completion-first batch from structurally trusted completion events already
+  held by the pending-input index; the assistant wake remains a droppable
+  scheduling hint.
+- Restored completion folding is origin-bounded. Admit only same-route
+  conversation events whose canonical cursor is strictly after the trusted
+  completion origin. Older same-route backlog and every other route remain
+  pending under ordinary batching rules.
+- For that exact trusted-completion match, authenticated group-route identity
+  comes from the channel, account, thread, directness, actor boundary, and
+  delivery target. A provider continuation session is not route identity;
+  ordinary non-completion batching still keeps its existing session boundary.
 - From durable acceptance through provider start and durable reply handoff,
   await only loading and decrypting the accepted current input, minimal
   current-conversation context, assistant execution, and persistence of the
@@ -196,16 +214,19 @@ it has been explicitly elevated to a cross-cutting invariant.
   shorten it. Only the exact assistant retry or follow-up wake projected
   directly by the current foreground assistant phase may run as foreground
   work inside that window without publishing a snapshot. The only other
-  exception is a server-identified, fixed-destination, transport-idempotent
-  phone-call-result or usage-referral-reward notification: after fresh
-  conversation work has priority, the runtime may select that exact durable
-  mailbox family, compose it queue-only, persist its causal outbox intent, and
-  drain it before the idle floor. Generic notifications and unrelated pending
-  outbox work remain excluded. Inherited, committed, durability-gated, and
-  shutdown-time wakes do not otherwise use this exception. If the hot pass
-  dirties state, the full quiet window starts again. An actual host termination
-  may use the separate last-chance durability path, but durably staged
-  foreground work still wins.
+  exception is a server-identified, fixed-destination exact completion: a
+  transport-idempotent phone-call-result or usage-referral-reward notification,
+  or a private Assistant Ask completion whose `aask_done_*` identity binds its
+  exact text, personal member, current direct route, and expiry. After fresh
+  conversation work has priority, the runtime may select only those durable
+  mailbox families, compose them queue-only, and persist their causal outbox
+  intents before the idle floor. Transport-idempotent delivery may drain in the
+  hot pass; non-idempotent provider work remains behind the resulting durable
+  checkpoint. Generic notifications and unrelated pending outbox work remain
+  excluded. Inherited, committed, durability-gated, and shutdown-time wakes do
+  not otherwise use this exception. If the hot pass dirties state, the full
+  quiet window starts again. An actual host termination may use the separate
+  last-chance durability path, but durably staged foreground work still wins.
   Current-turn durability barriers may run only for facts the current reply or
   effect consumes. Before provider start, that is limited to accepted-input and
   turn-ownership proof; before an irreversible send, to the minimal outbox
@@ -398,6 +419,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   concurrency-capped. Crypto owners batch envelope metadata, preserve binding
   and authenticity checks, fail closed on missing or mismatched material, and
   zeroize key and plaintext buffers on success and failure.
+- An owner that starts parallel external or crypto work drains every started
+  operation before releasing its cache or zeroization scope, opening a dependent
+  transaction, or returning control to a caller that may do either. Preserve the
+  first observed failure while awaiting siblings; fail-fast observation must not
+  leave detached work mutating scoped state after finalization.
 - A database transaction holds one pooled connection for its full duration.
   Never open one transaction per collection item concurrently; batch the items
   into one transaction or process them sequentially, and count concurrent
@@ -477,10 +503,18 @@ it has been explicitly elevated to a cross-cutting invariant.
   canceled or refunded only while holding the Family owner lock before the
   sponsored-member lock and re-proving the exact active membership, paid local
   Family binding, provider-current active Family subscription identity, and
-  direct-subscription ownership. If Family authority changes first or Stripe no
-  longer confirms that exact Family authority, the receipt remains retryable
-  and a pending Checkout attempt remains available for replay as the member's
-  direct subscription.
+  direct-subscription ownership. The first event that proves those facts owns
+  the complete exact loser cleanup: it must inspect the ordinary invoice/payment
+  shape, refund a proven payment or prove zero payment, and only then terminalize
+  local direct billing. It must not split cancellation and refund ownership
+  across event types. If Family authority changes first or Stripe no longer
+  confirms that exact Family authority, the receipt remains retryable and a
+  pending Checkout attempt remains available for replay as the member's direct
+  subscription.
+- A Family invitation may automatically purchase capacity only for a normalized
+  verified phone or email target. The existing Family capacity owner must repeat
+  that target's active-membership check under its owner lock immediately before
+  Stripe; an earlier invite transaction is not purchase authority.
 - A live monthly group sponsorship is a payer authorization, not a Stripe
   subscription and not a message bundle. It stores only payer, beneficiary,
   status, $5/$10/$20 cap, and anchored period. Current-period committed spend is
@@ -489,7 +523,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   forward. One live authorization per group is database-enforced. Refill
   admission occurs only inside the existing beneficiary serialization boundary,
   provider work is post-commit, Stripe reconciliation alone grants credit, and
-  group-visible projections reveal only sponsored versus unsponsored.
+  the sponsorship projection reveals only sponsored versus unsponsored. A
+  separate room-public usage projection may reveal only the bounded percentage
+  of current-period included usage already used. That aggregate is independent
+  of purchased, referral, carryover, and refill credit; it never reveals or
+  implies payer identity, sponsorship setup, money, credit remaining, period
+  dates, message counts, or whether effective room capacity is exhausted.
 - Purchased hosted usage credit belongs to its beneficiary, not its payer. A
   payer deletion must first resolve nonterminal payment state and must not
   delete fulfilled credit owned by a surviving beneficiary. Terminal
