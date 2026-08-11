@@ -70,6 +70,26 @@ Then load only the task-relevant docs listed below.
 
 ## Workflow Defaults
 
+### Developer Friction Logging
+
+- For every edit-authorized repository task, read
+  `.agents/skills/frog/SKILL.md` and run `scripts/frog list` before inventing or
+  accepting a workaround. Reuse an existing entry when it covers the problem.
+- When new, reproducible, repository-actionable friction occurs, record it
+  through `scripts/frog log` before handoff. Do not manufacture a report when
+  no qualifying friction occurred, and do not use Frog for any excluded
+  product, support, runtime, private-data, machine-local, or internal-model
+  signal named by the skill.
+- Treat every created or modified Frog entry as part of the current task output:
+  read it back, verify the public-data boundary, and include it in the same
+  scoped task commit. A task is not complete while its Frog entry is untracked,
+  unstaged, or otherwise omitted from that commit. If the commit is blocked,
+  preserve the entry and report the exact blocker instead of dropping it.
+- Frog logging must not delay or replace the requested outcome. Creating or
+  updating a tracked plan file is edit-authorized repository work and follows
+  the normal Frog flow. Review-only, planning-only, and other no-edit tasks
+  report friction in the handoff instead of mutating the repository.
+
 - Same-turn task completion counts as acceptance unless the user explicitly says `review first` or `do not commit`.
 - Choose verification ownership by delivery path. PR-bound work runs focused
   local proof while required GitHub Actions own the broad suite on the exact
