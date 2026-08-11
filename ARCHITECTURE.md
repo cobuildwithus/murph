@@ -1436,7 +1436,7 @@ application code.
 - Machine-facing truth lives in append-only JSONL ledgers for inbox captures, events, display-grade metric samples, explicit raw/debug samples, and audit records, with inbox capture intake canonicalized first through `ledger/inbox-captures/**`. Device observation events distinguish raw sample, compact summary, and derived-fact grain so dense telemetry admission does not depend on default query/search visibility.
 - Raw imported artifacts are immutable once copied into `raw/`, and they now live under owner-scoped directories derived from the owning canonical record or import session (`kind` + `id`, plus a partition only for batch families such as device/sample/workout imports). Dated media captures use the same owner-scoped raw path under `raw/captures/**` while staying durable as tagged note events rather than a separate medical record family. Each raw import directory keeps a `manifest.json` sidecar that records the same explicit owner metadata used to resolve the on-disk path, while normalized device/provider API snapshots continue to live under `raw/integrations/**`. Lookup-backed generated-image captures may also write a portable retry lookup in the compact index at `derived/captures/generated-image-lookups.json`; those capture events are immutable after creation except for `deleteEvent`, so the lookup can resolve the original event shard and raw media without scanning while still treating a tombstone as deleted. `raw/inbox/**` media bytes are the scoped privacy exception: image/audio/video bytes can be retention-expired after 14 days by an append-only retention ledger, while documents/PDFs and explicit promoted owner paths remain durable.
 - Raw-artifact repair helpers must stay explicit and proof-driven. `packages/core` keeps tested wearable storage repair primitives that may compact legacy payload-bearing wearable receipts, tombstone derived canonical-record artifacts, report legacy dense sample-debug ledger candidates without deleting them in v1, and tombstone dense raw provider timeseries only when an operator explicitly asks for dense raw pruning or the hosted device-sync runtime runs its bounded post-drain retention step. Each repair must prove manifest byte/sha state, preserve durable product facts, update raw manifests when raw tombstones are written, and emit metadata-only `vault_repair` audit entries; the hosted path must use the named core dense-prune primitive with recent dense raw excluded, bounded file/byte budgets, and metadata-only runtime logs. There is no separate hosted cron, generic raw delete API, or content-addressed raw store for this repair lane.
-- Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles; sparse or higher-sensitivity resources such as weight and glucose need a separate product/debug policy before any default ingestion or pruning.
+- Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Junction `note` is a sparse product input: the importer keeps dated tag names as completed intervention events and compact evidence, but drops the free-text value before raw snapshot retention. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles; sparse or higher-sensitivity resources such as weight and glucose need a separate product/debug policy before any default ingestion or pruning.
 - Audio/video transcript outputs under `derived/inbox/**` are rebuildable and never canonical health facts. They may survive an earlier raw-media byte pass, but the owning inbound message-content pass deletes them at the receipt-plus-14-day deadline. PDFs, documents, CSVs, and other inspectable attachment files follow their existing raw-inbox lifecycle unless a user or importer creates durable promoted artifacts; they are not reclassified as message-body text by this policy.
 - `bank/library/**` is the stable health reference layer for durable shared entities such as biomarkers, domains, protocol variants, and source artifacts.
 - Model-authored compiled knowledge pages under `derived/knowledge/**` are the separate non-canonical, rebuildable personal wiki layer that synthesizes local vault evidence and saved research notes without becoming a second source of truth. `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` stores the assistant-authored pages themselves.
@@ -1660,6 +1660,34 @@ values or triggering Apple data-detector downgrade. Each label retains the
 member-directed request for the complete semantic text when the accepted card
 cannot render. No persisted card state, authenticated card API, cleanup owner,
 extension network read, or second queue exists.
+
+Private Telegram exercise routine cards use the same singular outbox effect
+through a dedicated model tool so both model-facing schemas stay below the
+Codex compaction limit. Linq/iMessage does not expose that tool and keeps its
+existing catalog response-media path for visual movement guidance.
+The frozen V1 snapshot contains bounded localized labels, concrete cues, honest
+per-exercise and transition timing, and only catalog-backed public exercise
+image URLs with their alt text and provenance. Image provenance uses the
+returned catalog item ID plus the image's one-based position in the returned
+array, so it is stable and directly constructible from `exercise show`. Timing
+remains model-authored presentation. Shared agent guidance requires the stated
+total to match the visible work without adding a second runtime truth owner.
+Telegram projects any response-card kind into one Bot API rich message. Routine
+cards use collapsed exercise details with a per-exercise slideshow when catalog
+images exist. A definitive non-retryable rich-message rejection in a valid
+Telegram `ok: false` response can fall back to the deterministic card text,
+which must fit one 4,096-character Telegram message before rich provider entry.
+A valid retryable Telegram rejection proves non-acceptance and returns to the
+existing outbox retry owner. A transport failure or response without a valid
+Telegram success or rejection envelope is ambiguous, becomes terminal, and
+cannot release the effect for replay. The same envelope rule applies to existing
+Telegram text, photo, and voice sends because all four operations are
+non-idempotent and share the provider outcome resolver. Linq keeps its existing
+native nutrition and compact-table cards. New Linq/iMessage exercise turns use
+the existing response-media path;
+the deterministic routine text remains only compatibility behavior for retained
+card state. The card still cannot coexist with response media, and no new queue,
+persisted state owner, callback action, or mutable message state exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
@@ -2802,7 +2830,9 @@ provider static layout whose `image_url` carries the exact same authority-free
 envelope in the bounded queryless `/imessage/card/v1/:payload.png` path. The
 stateless Web renderer accepts only strict V1-V4 presentation envelopes, reads
 no database or remote service, logs no card values, and returns private
-no-store/no-index headers. This is a narrow presentation exception to the
+no-store/no-index headers. Linq uses that image as its static card fallback;
+Telegram daily-nutrition Rich Messages reuse the same image inside their native
+table-and-details presentation. This is a narrow presentation exception to the
 fixed-URL rule: either URL may contain the same bounded health-related values
 visible in the immutable private-direct message, but never a member identity,
 canonical record reference, credential, tracking reference, or other authority.

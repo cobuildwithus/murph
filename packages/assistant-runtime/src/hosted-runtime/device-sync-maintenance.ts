@@ -364,6 +364,9 @@ function writeHostedDeviceSyncImportCompletedRuntimeLogs(input: {
           eventToProviderSendBucket: completed.eventToProviderSendBucket,
           jobKind: toHostedRuntimeLogCode(completed.jobKind),
           provider: toHostedRuntimeLogCode(completed.provider),
+          ...(completed.sourceProvider === null
+            ? {}
+            : { sourceProvider: toHostedRuntimeLogCode(completed.sourceProvider) }),
           ...(completed.providerSendToWebhookMs === null
             ? {}
             : { providerSendToWebhookMs: completed.providerSendToWebhookMs }),
