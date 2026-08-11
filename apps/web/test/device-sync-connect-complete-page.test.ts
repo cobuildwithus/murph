@@ -405,6 +405,37 @@ test("HomePage uses connect source labels for Junction-backed targets", async ()
   assert.doesNotMatch(markup, />Get full sync</);
 });
 
+test("HomePage does not attribute setup-only Mobvoi callbacks to an active Junction source", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-03T22:05:48.000Z",
+    ok: true,
+    sources: [
+      buildConnectedSource("junction", "Junction", [
+        {
+          providerLabel: "Oura",
+          resourceCount: 1,
+          sourceProviderSlug: "oura",
+          status: "connected",
+        },
+      ]),
+    ],
+  });
+
+  const markup = renderToStaticMarkup(await HomePage({
+    searchParams: Promise.resolve({
+      connectSource: "mobvoi-health",
+      deviceSyncCompletion: "1",
+      deviceSyncProvider: "junction",
+      deviceSyncStatus: "connected",
+    }),
+  }));
+
+  assert.match(markup, /Junction is connected/);
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch/u);
+  assert.doesNotMatch(markup, /I%20just%20connected%20my%20Mobvoi/u);
+});
+
 test("HomePage preserves a completed non-WHOOP Junction source when WHOOP is also connected", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({

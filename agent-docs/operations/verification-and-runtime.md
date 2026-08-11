@@ -26,6 +26,14 @@ Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
 
+For readiness, the exact PR head is the commit that contains the PR-authored
+change; it does not need to be repeatedly merged with a moving base. Keep green
+required CI on that head and prove current-base mergeability with
+`git merge-tree --write-tree`. If strict up-to-date checks apply, satisfy them
+only at the authorized merge boundary through the merge queue when available
+or one normal base update. Let the repository gate the resulting head; do not
+restart broad CI repeatedly during preparation just because the base advances.
+
 Verification evidence belongs to the exact file state it checked. After the
 last code, test, or config edit, rerun every focused command whose inputs or
 compiled graph changed; in particular, any later TypeScript edit invalidates an

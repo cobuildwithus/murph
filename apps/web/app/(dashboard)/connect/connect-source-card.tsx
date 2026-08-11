@@ -29,16 +29,17 @@ export function SourceCard({
 }) {
   const setupGuideActionLabel = source.setupGuideActionLabel;
   const setupGuideId = source.setupGuideId;
-  const guideOnly = Boolean(setupGuideId);
+  const setupOnly = Boolean(setupGuideId)
+    || (source.connectionAvailable === false && Boolean(source.unavailableActionUrl));
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
-  const canDisconnect = !guideOnly
+  const canDisconnect = !setupOnly
     && authenticated
     && Boolean(source.disconnectConnectionId);
-  const requiresConnectionReset = !guideOnly
+  const requiresConnectionReset = !setupOnly
     && source.recoveryKind === "connection_reset";
-  const requiresReconnect = !guideOnly && source.requiresReconnect === true;
-  const historicalResetIncomplete = !guideOnly
+  const requiresReconnect = !setupOnly && source.requiresReconnect === true;
+  const historicalResetIncomplete = !setupOnly
     && source.historicalResetIncomplete === true
     && !source.connected
     && !requiresConnectionReset
@@ -69,7 +70,7 @@ export function SourceCard({
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
-      {!guideOnly ? (
+      {!setupOnly ? (
         <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
           <SourceStatusDot
             connected={source.connected}
@@ -101,7 +102,7 @@ export function SourceCard({
           </p>
         </div>
 
-        {!guideOnly && source.connected && !requiresReconnect ? (
+        {!setupOnly && source.connected && !requiresReconnect ? (
           <div className="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink">
             {errorMessage ? (
               <p role="alert" className="text-xs leading-snug text-destructive">
@@ -168,7 +169,9 @@ export function SourceCard({
                   />
                 )}
                 nativeButton={false}
-                aria-label={`${source.unavailableActionLabel} for ${source.name}`}
+                aria-label={
+                  `${source.unavailableActionLabel} for ${source.name}`
+                }
               >
                 {source.unavailableActionLabel}
               </Button>
