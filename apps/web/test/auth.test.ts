@@ -138,7 +138,7 @@ describe("requireAuthenticatedHostedUser", () => {
   });
 
   it("accepts a never-consumed assertion at the last admissible millisecond", async () => {
-    const observedExpiresAt: string[] = [];
+    const observedSignedExpiresAt: string[] = [];
     const exp = toEpochSeconds("2026-03-25T12:03:00.000Z");
     const request = createSignedRequest({
       url: "https://control.example.test/api/device-sync/agents/pair",
@@ -151,14 +151,16 @@ describe("requireAuthenticatedHostedUser", () => {
 
     await expect(
       requireAuthenticatedHostedUser(request, BASE_ENVIRONMENT, {
-        nonceStore: createNonceStore(({ expiresAt }) => observedExpiresAt.push(expiresAt)),
+        nonceStore: createNonceStore(({ signedExpiresAt }) =>
+          observedSignedExpiresAt.push(signedExpiresAt)
+        ),
         now: new Date(hostedUserAssertionFirstInvalidAtMs(exp) - 1),
       }),
     ).resolves.toMatchObject({
       id: "user-123",
     });
 
-    expect(observedExpiresAt).toEqual([new Date(hostedUserAssertionFirstInvalidAtMs(exp)).toISOString()]);
+    expect(observedSignedExpiresAt).toEqual([new Date(exp * 1000).toISOString()]);
   });
 
   it("rejects an assertion at its first invalid instant before consuming the nonce", async () => {
