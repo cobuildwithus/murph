@@ -2236,6 +2236,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               allowedRouteActions: inputItem.allowedRouteActions,
               allowedWakeKinds: inputItem.allowedWakeKinds,
               operatorHomeRoot: restored.operatorHomeRoot,
+              retainProcessedItemUntilRecorded: true,
               runtime: foregroundRuntime,
               runtimeEnv: invocationRuntimeEnv,
               shouldYieldBackgroundMaintenance: shouldYieldSystemMailboxWork,
@@ -2276,8 +2277,54 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             return { preempted: true, prepared: preparation !== null };
           }
           const recordItem = readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
-          if (!recordItem?.postCheckpointRecord) {
+          if (!recordItem) {
             return { preempted: false, prepared: preparation !== null };
+          }
+          emitPhaseLog({
+            details: {
+              workspacePresent: activeWorkspace !== null,
+              workspaceVersion: activeWorkspace?.version ?? null,
+            },
+            input,
+            requestId,
+            stage: "browser_vault.refresh",
+            status: "start",
+          });
+          let refresh: HostedBrowserVaultReplicaRefreshResult;
+          try {
+            refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
+              force: true,
+              generatedAt: new Date().toISOString(),
+              platform: foregroundRuntime.platform,
+              runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+              signal: runtimeAbortController.signal,
+              timeoutMs: null,
+              vaultRoot: restored.vaultRoot,
+              workspace: activeWorkspace,
+            });
+            emitPhaseLog({
+              details: buildHostedBrowserVaultRefreshLogDetails(refresh),
+              input,
+              requestId,
+              stage: "browser_vault.refresh",
+              status: "done",
+            });
+          } catch (error) {
+            emitPhaseLog({
+              error,
+              input,
+              requestId,
+              stage: "browser_vault.refresh",
+              status: "fail",
+            });
+            throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
+          }
+          if (hostedBrowserVaultReplicaRefreshRequiresRetry(refresh)) {
+            if (refresh.status === "deferred_runtime_wake") {
+              foregroundWakeObserved = true;
+            }
+            consumeForegroundWake();
+            return { preempted: foregroundWakeObserved, prepared: true };
           }
           const recordWakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
             enabled: true,
@@ -2297,10 +2344,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               signal: recordSignal,
               vaultRoot: restored.vaultRoot,
             });
-            const recordWake = createHostedRuntimeWakeCandidate(
-              recordResult.nextWakeAt,
-              recordResult.nextWakeReason ?? null,
-            );
+            const recordWake = selectHostedRuntimeWakeCandidate([
+              createHostedRuntimeWakeCandidate(
+                recordResult.nextWakeAt,
+                recordResult.nextWakeReason ?? null,
+              ),
+              recordItem.postCheckpointRecord
+                ? null
+                : preparationWake,
+            ]);
             rememberSystemMailboxPostRecordWake(recordWake);
             await checkpointSystemMailboxMode(
               `${inputItem.stagePrefix}.checkpoint.record`,
@@ -2332,6 +2384,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_DEVICE_SYNC_WAKE_KINDS,
         stagePrefix: "system_mailbox.device_sync",
       });
+      assertRuntimeNotAborted();
       if (devicePass.preempted) {
         return await returnSystemMailboxModeResult();
       }
@@ -2353,47 +2406,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       if (consumeForegroundWake()) {
         return await returnSystemMailboxModeResult();
       }
-      if (devicePass.prepared) {
-        emitPhaseLog({
-          details: {
-            workspacePresent: activeWorkspace !== null,
-            workspaceVersion: activeWorkspace?.version ?? null,
-          },
-          input,
-          requestId,
-          stage: "browser_vault.refresh",
-          status: "start",
-        });
-        try {
-          const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
-            force: true,
-            generatedAt: new Date().toISOString(),
-            platform: foregroundRuntime.platform,
-            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-            signal: runtimeAbortController.signal,
-            timeoutMs: null,
-            vaultRoot: restored.vaultRoot,
-            workspace: activeWorkspace,
-          });
-          emitPhaseLog({
-            details: buildHostedBrowserVaultRefreshLogDetails(refresh),
-            input,
-            requestId,
-            stage: "browser_vault.refresh",
-            status: "done",
-          });
-        } catch (error) {
-          emitPhaseLog({
-            error,
-            input,
-            requestId,
-            stage: "browser_vault.refresh",
-            status: "fail",
-          });
-          throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
-        }
-      }
-
       consumeForegroundWake();
       return await returnSystemMailboxModeResult();
     };
@@ -5155,6 +5167,17 @@ function buildHostedBrowserVaultRefreshLogDetails(
       : {}),
     browserVaultRefreshStatus: refresh.status,
   };
+}
+
+function hostedBrowserVaultReplicaRefreshRequiresRetry(
+  refresh: HostedBrowserVaultReplicaRefreshResult,
+): boolean {
+  return refresh.status === "deferred_aborted"
+    || refresh.status === "deferred_runtime_wake"
+    || refresh.status === "deferred_source_changed"
+    || refresh.status === "deferred_timeout"
+    || refresh.status === "publish_conflict"
+    || refresh.status === "refresh_failed";
 }
 
 function hasHostedRuntimePhaseOwnProperty(error: unknown, key: string): boolean {

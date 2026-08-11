@@ -2065,6 +2065,60 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("retains processed no-record work until its post-checkpoint owner finalizes it", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionRuntimeControlWake({
+      eventId: "runtime-control:retained-until-recorded",
+      kind: "runtime.manual-requested",
+      occurredAt: FIXED_NOW,
+      userId: "member_123",
+    });
+    const runtime = createRuntime({});
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedRuntimeControlItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_item_system_retained_until_recorded",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      assert.equal(prepared.item.postCheckpointRecord, null);
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([
+        expect.objectContaining({
+          itemId: "mailbox_item_system_retained_until_recorded",
+          postCheckpointRecord: null,
+          status: "recording",
+        }),
+      ]);
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: prepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        nextWakeAt: null,
+        recorded: 0,
+      });
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("selects only a pending-effects reconciliation from the shared runtime-control lane", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const manualWake = buildHostedExecutionRuntimeControlWake({

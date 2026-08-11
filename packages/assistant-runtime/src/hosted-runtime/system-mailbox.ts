@@ -248,6 +248,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
+  retainProcessedItemUntilRecorded?: boolean;
   signal?: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
@@ -351,8 +352,14 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
-    const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
-    if (postCheckpointRecord) {
+    const postCheckpointRecord =
+      metrics.postCheckpointRecord
+      ?? createRetainedHostedSystemMailboxPostCheckpointRecord({
+        item: prepared,
+        metrics,
+        retainProcessedItemUntilRecorded: input.retainProcessedItemUntilRecorded === true,
+      });
+    if (postCheckpointRecord || input.retainProcessedItemUntilRecorded === true) {
       const processedItem: HostedSystemMailboxPendingItem = {
         ...prepared,
         postCheckpointRecord,
@@ -419,6 +426,25 @@ function resolveHostedSystemMailboxPreparedItemRetryWakeReason(
   return item.routeAction === "run-device-sync-wake"
     ? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
     : null;
+}
+
+function createRetainedHostedSystemMailboxPostCheckpointRecord(input: {
+  item: HostedSystemMailboxPendingItem;
+  metrics: HostedMailboxExecutionMetrics;
+  retainProcessedItemUntilRecorded: boolean;
+}): HostedSystemMailboxPostCheckpointRecord | null {
+  if (
+    !input.retainProcessedItemUntilRecorded
+    || input.item.routeAction !== "run-device-sync-wake"
+    || !input.metrics.nextWakeAt
+  ) {
+    return null;
+  }
+  return {
+    kind: "device-sync.dirty-processed-batch",
+    nextWakeAt: input.metrics.nextWakeAt,
+    records: [],
+  };
 }
 
 function shouldPreemptHostedDeviceSyncSystemMailboxItem(
@@ -515,6 +541,10 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   recorded: number;
 }> {
   if (!input.item.postCheckpointRecord) {
+    await removeHostedSystemMailboxPendingItemIfCurrent({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+    });
     const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({
       vaultRoot: input.vaultRoot,
     });
