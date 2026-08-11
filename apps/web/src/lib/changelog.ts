@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, reminders, cards, web search, and a lighter homepage",
+      "Starter access, patterns, reliable referrals, reminders, cards, voices, web search, and a lighter homepage",
     summary:
-      "Starter usage remains until it is used, patterns compare repeated actions with next-day health, reminders keep the time you asked for, workout cards keep completed rows clear, managed web search works again, and the public homepage starts with less to download.",
+      "Starter usage waits until it is used, patterns compare actions with next-day sleep and recovery, referral celebrations stay with the intended conversation, reminders keep local time, completed workout rows stay clear, voice memos keep the selected voice, managed web search reaches current information, and the public homepage starts with less to download.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -109,6 +109,18 @@ const RAW_CHANGELOG_EDITIONS = [
         },
       },
       {
+        id: "referral-notification-route-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Referral celebrations stay in the right conversation",
+        summary:
+          "Referral reward celebrations now stay attached to their intended direct conversation, and an interrupted one can safely resume without leaving later work waiting behind it.",
+        details:
+          "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
+        relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
+        sourcePullRequests: [1592],
+      },
+      {
         id: "reminders-keep-requested-timezone",
         kind: "improvement",
         priority: 4,
@@ -123,6 +135,18 @@ const RAW_CHANGELOG_EDITIONS = [
           label: "Schedule a local-time reminder",
           prompt: "Remind me every day at 9 PM Central to wind down.",
         },
+      },
+      {
+        id: "voice-memos-use-your-voice",
+        kind: "improvement",
+        priority: 4,
+        title: "Voice memos keep your chosen voice",
+        summary:
+          "Ordinary voice memos now use the voice already selected for your Murph instead of switching voices on their own.",
+        details:
+          "A different named voice is used only when you explicitly ask to test it or request that voice for one memo. Saving a named voice and asking to hear it immediately still works as a one-time preview.",
+        relevanceTags: ["voice", "messaging", "personalization", "reliability"],
+        sourcePullRequests: [1587],
       },
       {
         id: "web-search-restored",
@@ -196,11 +220,11 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Group sleep checks use fresh shared data",
         summary:
-          "Murph now checks the current shared sleep record before answering and counts reported Deep and REM sleep as soon as those values are shared.",
+          "Murph now checks the current shared sleep record before answering, counts reported Deep and REM sleep as soon as those values are shared, and includes explicit manual corrections.",
         details:
-          "Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
+          "The latest manual correction for a sleep date wins and is labeled Manual instead of a connected source. Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
         relevanceTags: ["groups", "sleep", "health-data", "connections"],
-        sourcePullRequests: [1565],
+        sourcePullRequests: [1565, 1593],
       },
       {
         id: "public-referral-home",
