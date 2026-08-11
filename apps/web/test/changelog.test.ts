@@ -332,6 +332,13 @@ describe("changelog registry", () => {
     expect(items.get("personality-settings-and-chat")?.details).toContain(
       "changes only that room's Murph",
     );
+    expect(items.get("group-sleep-challenges-use-fresh-data")).toMatchObject({
+      sourcePullRequests: [1565, 1593],
+      summary: expect.stringContaining("explicit manual corrections"),
+      details: expect.stringContaining(
+        "latest manual correction for a sleep date wins",
+      ),
+    });
     expect(items.get("workout-card-status-rendering")).toMatchObject({
       sourcePullRequests: [1599],
       summary: expect.stringContaining("including their static previews"),
