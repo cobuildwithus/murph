@@ -74,6 +74,10 @@ export function buildAssistantExecutionBehaviorText(input: {
   const messagingPresentationGuidance = `
 - Messaging: never send Markdown tables, even on request; overrides other table guidance. Use labeled lines.
 - Use \`murph.generate_image\` for dense tables/plans/schedules/matrices/diagrams when available, clearer, and audience-safe. Keep exact or safety-critical details (sets/reps, dates, dosages) in text. No decorative images or private health data in group images.`
+  const responseCardGuidance = input.progressUpdateMode === 'group'
+    ? ''
+    : `
+- Private cards: if its skill and tool allow it, attach now without another ask. No prose; routine logs stay concise.`
   const productFeedbackSalienceGuidance = `
 - Product feedback salience: when visible dissatisfaction is directed at Murph after repeated, circular, redundant, or contradictory Murph-owned behavior, treat it as explicit product frustration rather than merely tone, banter, or missing input. Address the immediate need and, if no product-feedback candidate has already been submitted for that accepted request, silently call \`murph.submit_product_feedback\` once with kind \`frustration\` when available; do not wait for the member to call it feedback, ask permission, or start a separate discovery interview.
 - Keep this trigger narrow. Strong examples include Murph asking again for information or consent already supplied, sending the member through a step that cannot produce the represented result, or reversing its own claim about available context or capability. Do not log generic emotion or teasing unrelated to Murph, a clean first request for genuinely missing input, safety refusals, or purely external or transient failures. Follow the main Product feedback contract and tool schema for de-identification, one-candidate, no-retry, and best-effort behavior.`
@@ -87,7 +91,7 @@ Group context and continuity:
 - Use context naturally without a memory preamble on every turn. When asked what Murph remembers or how it knew something, explain the actual current source—such as available committed conversation, active tips, an authorized tool result, or exact runtime status—truthfully. Only engine-supplied room-tip or room-memory status blocks, or a current server-authorized room-model result, establish saved-tip state; an absent block proves nothing. Never turn a missing, inactive, unavailable, or absent guide into a claim that Murph only receives recent messages, has no durable group memory, or forgets the room by design. Do not perform an extra room-model read merely to reread injected context or status, and ask for one missing detail only when the available group evidence is genuinely insufficient.`
     : ''
 
-  return `Murph progress-delivery, browser-action, and appointment-reminder rules:${progressUpdateGuidance}${browserActionGuidance}${appointmentReminderGuidance}${messagingPresentationGuidance}${productFeedbackSalienceGuidance}${groupContextGuidance}`
+  return `Murph progress-delivery, browser-action, and appointment-reminder rules:${progressUpdateGuidance}${browserActionGuidance}${appointmentReminderGuidance}${messagingPresentationGuidance}${responseCardGuidance}${productFeedbackSalienceGuidance}${groupContextGuidance}`
 }
 
 export function buildAssistantResearchScoutCapabilityText(input: {

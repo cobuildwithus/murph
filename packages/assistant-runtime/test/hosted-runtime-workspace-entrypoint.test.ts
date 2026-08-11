@@ -8000,7 +8000,17 @@ describe("hosted workspace runtime entrypoint", () => {
                 },
                 async assertLinqRecentInboundEngagement(request) {
                   assert.equal(request.target, transport.target);
-                  return { providerDispatchClaimed: true };
+                  return {
+                    providerDispatchClaimed: true,
+                    resolvedRoute: {
+                      conversationThreadId: null,
+                      directRecipientPhoneNumber: null,
+                      fromPhoneNumber: null,
+                      target: transport.target,
+                      targetKind: "thread",
+                      threadIsDirect: transport.threadIsDirect,
+                    },
+                  };
                 },
                 async readRawEmailMessage() {
                   return null;
@@ -20303,7 +20313,14 @@ describe("hosted workspace runtime entrypoint", () => {
             );
             return {
               providerDispatchClaimed: true,
-              threadIsDirect: false,
+              resolvedRoute: {
+                conversationThreadId: null,
+                directRecipientPhoneNumber: null,
+                fromPhoneNumber: null,
+                target: "thread_image_edit_failure_route",
+                targetKind: "thread",
+                threadIsDirect: false,
+              },
             };
           },
           async readRawEmailMessage() {
