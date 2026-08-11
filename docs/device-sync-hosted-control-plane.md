@@ -338,7 +338,7 @@ responses use 32-row pages, and every continuing page must preserve explicit
 cursor presence. Authority is never silently truncated.
 
 Each page resolves connection sources through one set projection. The query
-keeps provider/source alias matching, applies a hard 32-row per-connection
+keeps provider/source alias matching, applies a hard 64-row per-connection
 window plus one saturation detector, and rejects a saturated connection rather
 than returning partial source authority. Eligible external-account and OAuth
 token material is opened through the existing secure-box and domain-root
@@ -360,9 +360,9 @@ this policy into the execution plane.
 Native companion status remains Privy-bearer-authenticated, consent-gated, and
 member-isolated. After those checks, Web performs one narrow member-owned
 Junction connection read selecting only `id` and `status` with a 32+1
-saturation check, one bounded set source read for those ids with the same 32+1
-per-connection check, and one existing set receipt-signal read. The path never
-selects or decrypts an external account id or OAuth token. It preserves the
+saturation check, one bounded set source read for those ids with its existing
+32+1 source-scoped per-connection check, and one set receipt-signal read. The
+path never selects or decrypts an external account id or OAuth token. It preserves the
 established active/not-disconnected predicates, source-scoped first-webhook
 behavior, disconnected-source `lastSeenAt` receipt cutoff, resource alias
 normalization, and timestamp-only response contract. Web remains the sole

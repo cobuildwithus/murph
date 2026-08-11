@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 
 import { readCompanionDeviceSyncStatus } from "@/src/lib/device-sync/companion";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
@@ -549,14 +550,17 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
   });
 
   it("uses one hard-bounded set source projection and fails closed on saturation", async () => {
-    const projectedRows = Array.from({ length: 32 }, (_, index) => ({
-      ...createSourceRecord({
-        id: `dcs_${String(index).padStart(2, "0")}`,
-        sourceInstanceKey: `src_${String(index).padStart(2, "0")}`,
-        sourceProviderSlug: index % 2 === 0 ? "whoop" : "whoop_v2",
+    const projectedRows = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT },
+      (_, index) => ({
+        ...createSourceRecord({
+          id: `dcs_${String(index).padStart(2, "0")}`,
+          sourceInstanceKey: `src_${String(index).padStart(2, "0")}`,
+          sourceProviderSlug: index % 2 === 0 ? "whoop" : "whoop_v2",
+        }),
+        projectionRowNumber: BigInt(index + 1),
       }),
-      projectionRowNumber: BigInt(index + 1),
-    }));
+    );
     const queryRaw = vi.fn(async (query: unknown) => {
       void query;
       return projectedRows;
@@ -572,7 +576,9 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       excludeDisconnected: true,
       limitPerConnection: 1_000,
       sourceProviderSlugs: ["whoop", "whoop_v2"],
-    })).resolves.toHaveLength(32);
+    })).resolves.toHaveLength(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+    );
 
     expect(queryRaw).toHaveBeenCalledOnce();
     const query = queryRaw.mock.calls[0]?.[0] as {
@@ -581,7 +587,9 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     };
     expect(query.strings?.join(" ")).toContain("ROW_NUMBER() OVER");
     expect(query.strings?.join(" ")).toContain("status <> 'disconnected'");
-    expect(query.values).toContain(33);
+    expect(query.values).toContain(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT + 1,
+    );
     expect(query.values).not.toContain(1_001);
 
     queryRaw.mockResolvedValueOnce([{

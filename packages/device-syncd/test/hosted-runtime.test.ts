@@ -1142,6 +1142,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       "/api/internal/device-sync/runtime/apply",
     );
     expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT).toBe(32);
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT).toBe(64);
     expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT).toBe(
       hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
     );

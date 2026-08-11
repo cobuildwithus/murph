@@ -4,7 +4,7 @@ import type {
   DeviceConnectionSourceStatus,
 } from "@murphai/device-syncd/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
-import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 
 import {
   generateHostedRandomPrefixedId,
@@ -314,10 +314,10 @@ export class PrismaHostedConnectionSourceStore {
       return [];
     }
     const requestedLimit = input.limitPerConnection
-      ?? HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT;
+      ?? HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT;
     const limitPerConnection = Math.min(
       requireSourceProjectionLimit(requestedLimit),
-      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
     );
     const sourceProviderSlugs = input.sourceProviderSlugs == null
       ? null

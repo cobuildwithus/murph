@@ -11,6 +11,7 @@ import type {
 } from "@murphai/device-syncd/config";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeHostedDeviceSyncConnectionMetadata,
@@ -199,7 +200,7 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     .listBoundedConnectionSourcesForConnections({
       connectionIds: records.map((record) => record.id),
       excludeDisconnected: sourceProjectionFiltered,
-      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
       sourceProviderSlugs: sourceProjectionFiltered ? boundedSourceProviderKeys : null,
     });
   const sourcesByConnectionId = new Map<string, HostedDeviceConnectionSource[]>();

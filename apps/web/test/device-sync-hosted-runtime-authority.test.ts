@@ -1,5 +1,8 @@
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
-import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
+import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+} from "@murphai/device-syncd/hosted-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -2878,7 +2881,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
       connectionIds: records.map((record) => record.id),
       excludeDisconnected: false,
-      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
       sourceProviderSlugs: null,
     });
     expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
@@ -2937,7 +2940,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
       connectionIds: ["conn_a", "conn_b", "conn_c"],
       excludeDisconnected: false,
-      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
       sourceProviderSlugs: null,
     });
     expect(harness.store.materializeStoredConnectionAccount).not.toHaveBeenCalled();
@@ -3136,7 +3139,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
       connectionIds: ["conn_123"],
       excludeDisconnected: true,
-      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
       sourceProviderSlugs: ["whoop", "whoop_v2", "whoop-v2"],
     });
     expect(harness.store.listConnectionSourcesForConnections).not.toHaveBeenCalled();

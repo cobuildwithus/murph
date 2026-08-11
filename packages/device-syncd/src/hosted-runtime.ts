@@ -46,6 +46,12 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
 /** Maximum database rows one hosted runtime snapshot page may collect. */
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT = 32;
 /**
+ * Maximum source-authority rows one connection snapshot may collect. This is
+ * separate from the connection-page bound because one aggregator connection
+ * can legitimately contain every configured source.
+ */
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT = 64;
+/**
  * Maximum connections one complete credential hydration may return. This is
  * intentionally aligned with the apply ceiling so one hydrated authority set
  * can always be returned through the existing bounded write contract.

@@ -58,10 +58,12 @@ companion bearer status
       source-projection API.
 - [x] Replay the real 1,641-receipt incident and the maximum admitted
       app-bound runtime/companion overlap against isolated PostgreSQL.
-- [ ] Run focused tests, direct replay, typecheck, lint, diff, privacy, and
-      exact-head completion gates.
-- [ ] Open the PR after the prerequisite guidance PR merges, complete
-      ReviewGPT specialist/final audits, and obtain green exact-head CI.
+- [x] Separate the 64-source runtime authority ceiling from the 32-connection
+      page ceiling and pin the configured Junction catalog below that bound.
+- [x] Run focused tests, direct replay, typecheck, lint, diff, and privacy
+      checks.
+- [ ] Complete the terminal exact-head ReviewGPT audit and obtain green
+      exact-head CI.
 
 ## Verification
 
@@ -82,7 +84,17 @@ cannot make the immutable page cursor omit it, and overlaps one 32-connection
 app-bound runtime snapshot with one 32-connection scoped companion status read.
 That maximum-shape proof performs one application-binding lookup, filters 33
 unrelated source rows in SQL, and fails closed only when the requested source
-itself reaches 33 rows on one connection.
+itself reaches 33 rows on one connection. A dedicated authority proof retains
+all 33 currently configured Junction sources in both redacted and credentialed
+runtime snapshots, uses one source-set query per request, and fails closed only
+above the independent 64-source ceiling.
+
+Round-four retrospective: the accepted finding exposed a distinct cardinality
+conflation between connection pages and source authority, not another instance
+of the previously corrected single-page consumer. The remediation adds one
+protocol-owned constant and boundary proofs while retaining the existing set
+query, fail-closed overflow detector, and ownership model. No cursor, cache,
+service, retry owner, or persisted state was added.
 
 ## Rollout
 

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
+import { listJunctionDeviceConnectRouteEntries } from "@murphai/device-syncd/connect-config";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 
 const controlPlaneMocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
@@ -21,6 +23,10 @@ import {
   type PrismaOperationTiming,
 } from "@/src/lib/prisma-operation-timing";
 import { buildHostedDeviceSyncStatusPrompt } from "../../../packages/assistant-runtime/src/hosted-runtime/device-sync-status-prompt.ts";
+import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+  type HostedDeviceSyncRuntimeSnapshotReader,
+} from "../../../packages/assistant-runtime/src/hosted-runtime/device-sync-snapshot-pagination.ts";
 
 type HostedDeviceSyncStatusSnapshotReader = NonNullable<
   Parameters<typeof buildHostedDeviceSyncStatusPrompt>[0]["deviceSyncPort"]
@@ -347,7 +353,8 @@ describe.skipIf(!runPostgresProof)(
         for (const sourceInput of snapshotSourceInputs) {
           expect(sourceInput).toMatchObject({
             connectionIds: [connectionId],
-            limitPerConnection: 32,
+            limitPerConnection:
+              HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
           });
         }
         expect(boundedSnapshotSourceRead).toHaveBeenCalledWith({
@@ -619,6 +626,164 @@ describe.skipIf(!runPostgresProof)(
         expect(prompt).toContain("WHOOP currently needs reconnect");
         expect(prompt).toContain("`TOKEN_REFRESH_STATE_UNKNOWN`");
         expect(prompt).toContain("Do not treat missing wearable data");
+      } finally {
+        await prisma.deviceConnection.deleteMany({
+          where: { userId: memberId },
+        }).catch(() => undefined);
+        await prisma.hostedMember.deleteMany({
+          where: { id: memberId },
+        }).catch(() => undefined);
+        await prisma.$disconnect();
+        controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReset();
+      }
+    }, 60_000);
+
+    it("retains all configured Junction sources below the independent runtime source ceiling", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const prisma = createPrismaClient({
+        databaseUrl: withApplicationName(
+          databaseUrl,
+          `murph_device_sync_source_authority_${suffix}`,
+        ),
+        poolMax: 4,
+      });
+      const store = new PrismaDeviceSyncControlPlaneStore({
+        codec: {
+          decrypt: (value) => value,
+          encrypt: (value) => value,
+          keyVersion: "test-v1",
+        },
+        prisma,
+      });
+      const memberId = `hbm_device_sync_source_authority_${suffix}`;
+      const connectionId = `dsc_device_sync_source_authority_${suffix}`;
+      const observedAt = new Date("2026-08-10T21:00:00.000Z");
+      const configuredSourceProviderSlugs = [...new Set(
+        listJunctionDeviceConnectRouteEntries().map(
+          ({ route }) => route.sourceProviderSlug,
+        ),
+      )].sort();
+      const sourceRead = vi.spyOn(
+        store,
+        "listBoundedConnectionSourcesForConnections",
+      );
+
+      controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+        store,
+      });
+
+      try {
+        expect(configuredSourceProviderSlugs).toHaveLength(33);
+        expect(configuredSourceProviderSlugs.length).toBeLessThanOrEqual(
+          HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+        );
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceConnection.create({
+          data: {
+            connectedAt: observedAt,
+            credentialKind: "provider_config",
+            credentialMetadataJson: { region: "us" },
+            externalAccountIdEncrypted: `junction-account-${suffix}`,
+            id: connectionId,
+            metadataJson: {},
+            provider: "junction",
+            providerAccountBlindIndex:
+              `blind_device_sync_source_authority_${suffix}`,
+            providerConfigKey: "junction",
+            scopesJson: [],
+            setupPhase: "source_confirmed",
+            status: "active",
+            userId: memberId,
+          },
+        });
+        await prisma.deviceConnectionSource.createMany({
+          data: configuredSourceProviderSlugs.map((sourceProviderSlug, index) => ({
+            connectionId,
+            firstSeenAt: observedAt,
+            id: `dcs_device_sync_source_authority_${suffix}_${String(index).padStart(2, "0")}`,
+            lastSeenAt: observedAt,
+            resourceAvailabilitySummaryJson: { activity: true },
+            sourceInstanceKey: `configured-${suffix}-${index}`,
+            sourceProviderSlug,
+            status: sourceProviderSlug === "strava" ? "disconnected" : "connected",
+          })),
+        });
+
+        const deviceSyncPort: HostedDeviceSyncRuntimeSnapshotReader = {
+          fetchSnapshot: async (snapshotRequest) => readHostedDeviceSyncRuntimeState({
+            request: runtimeSnapshotRequest({
+              cursor: snapshotRequest.cursor ?? undefined,
+              includeCredentialMaterial:
+                snapshotRequest.includeCredentialMaterial,
+              limit: snapshotRequest.limit ?? undefined,
+              memberId,
+              provider: snapshotRequest.provider ?? undefined,
+              sourceProviderSlug:
+                snapshotRequest.sourceProviderSlug ?? undefined,
+            }),
+            trustedUserId: memberId,
+          }),
+        };
+
+        const redactedSnapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+          deviceSyncPort,
+          includeCredentialMaterial: false,
+        });
+        const credentialedSnapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+          deviceSyncPort,
+          includeCredentialMaterial: true,
+        });
+
+        for (const snapshot of [redactedSnapshot, credentialedSnapshot]) {
+          expect(snapshot.connections).toHaveLength(1);
+          expect(snapshot.connections[0]?.credential).toMatchObject({
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          });
+          expect(snapshot.connections[0]?.sources).toHaveLength(33);
+          expect(snapshot.connections[0]?.sources?.map(
+            (source) => source.sourceProviderSlug,
+          )).toEqual(expect.arrayContaining(configuredSourceProviderSlugs));
+          expect(snapshot.connections[0]?.sources).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                sourceProviderSlug: "strava",
+                status: "disconnected",
+              }),
+            ]),
+          );
+        }
+        expect(sourceRead).toHaveBeenCalledTimes(2);
+        expect(sourceRead.mock.calls.every(
+          ([sourceInput]) => sourceInput.limitPerConnection
+            === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+        )).toBe(true);
+
+        const overflowCount =
+          HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT
+          - configuredSourceProviderSlugs.length
+          + 1;
+        await prisma.deviceConnectionSource.createMany({
+          data: Array.from({ length: overflowCount }, (_, index) => ({
+            connectionId,
+            firstSeenAt: observedAt,
+            id: `dcs_device_sync_source_overflow_${suffix}_${String(index).padStart(2, "0")}`,
+            lastSeenAt: observedAt,
+            resourceAvailabilitySummaryJson: {},
+            sourceInstanceKey: `overflow-${suffix}-${index}`,
+            sourceProviderSlug: `overflow_${index}`,
+            status: "connected",
+          })),
+        });
+
+        await expect(fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+          deviceSyncPort,
+          includeCredentialMaterial: false,
+        })).rejects.toMatchObject({
+          code: "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
+          retryable: false,
+        });
+        expect(sourceRead).toHaveBeenCalledTimes(3);
       } finally {
         await prisma.deviceConnection.deleteMany({
           where: { userId: memberId },
