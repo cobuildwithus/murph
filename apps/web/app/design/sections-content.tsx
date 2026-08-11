@@ -255,7 +255,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Private Environment print report">
+      <StudySection title="Private Environment print report loading and ready states">
         <EnvironmentPrintStudy />
       </StudySection>
 

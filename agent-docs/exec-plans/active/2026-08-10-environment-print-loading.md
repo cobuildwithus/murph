@@ -68,6 +68,8 @@ Updated: 2026-08-10
 - Treat the change as frontend-only and low risk, so the final cross-cutting
   ReviewGPT gate does not apply; preliminary product-experience, frontend, and
   coverage lenses still apply.
+- Accept the specialist coverage finding and assert that every loading pulse
+  remains motion-gated. No production remediation was required.
 
 ## Verification
 
@@ -77,3 +79,12 @@ Updated: 2026-08-10
 - Expected outcomes: focused checks pass, rendered text remains legible without
   overflow at both viewports, reviewers return no unresolved accepted findings,
   and all required PR checks pass on the final head.
+- Local result: the two focused Vitest files pass with 55 tests, Web typecheck
+  and scoped ESLint pass, and both delivered design-proof images match the
+  native-resolution local captures byte for byte.
+- Review result: the preliminary product and frontend lenses returned no
+  findings; the accepted low-severity coverage finding is resolved by the
+  focused reduced-motion assertion. The configured Claude UI review could not
+  run because that model reported explicit credit exhaustion.
+- Remote result: the final plan-close push owns the exact-head CI rerun; its
+  status is recorded on PR #1617 rather than in this archived snapshot.

@@ -380,6 +380,12 @@ test("Environment print report uses a report-shaped accessible loading state", (
   );
   assert.match(markup, /Preparing/);
   assert.doesNotMatch(markup, /Unlocking your private Environment report/);
+
+  const animatedCount = markup.match(/animate-pulse/g)?.length ?? 0;
+  const motionSafeAnimatedCount =
+    markup.match(/motion-safe:animate-pulse/g)?.length ?? 0;
+  assert.ok(animatedCount > 0);
+  assert.equal(motionSafeAnimatedCount, animatedCount);
 });
 
 test("Environment print design study renders the real loading and ready states", () => {
