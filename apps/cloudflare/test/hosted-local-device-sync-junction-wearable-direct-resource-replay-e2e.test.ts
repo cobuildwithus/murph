@@ -330,6 +330,10 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     ], {
       matchInputContains: experimentActivityNudgeInstructions,
     });
+    const systemImportedSeqBeforeDeviceSync = await readHostedSystemImportedSeq({
+      scenario: activeScenario,
+      userId: experimentAdherenceUserId,
+    });
 
     await postSignedJunctionWebhook({
       dirtyResource: activityPlan.cycling,
@@ -357,6 +361,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     }
     await assertHostedDeviceSyncReplayReceiptAccepted({
       scenario: activeScenario,
+      systemImportedSeqBefore: systemImportedSeqBeforeDeviceSync,
       userId: experimentAdherenceUserId,
     });
     await assertNoHostedDeviceSyncJobFailures({
@@ -449,6 +454,10 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
 
     expect(seed.dirtyResourceCount).toBe(replayPlan.dirtyResources.length);
     expect(seed.sourceCount).toBe(3);
+    const systemImportedSeqBeforeDeviceSync = await readHostedSystemImportedSeq({
+      scenario: activeScenario,
+      userId,
+    });
 
     await activeScenario.runWake(
       buildJunctionFixtureWake(seed.connectionId, seededAt),
@@ -467,6 +476,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
 
     await assertHostedDeviceSyncReplayReceiptAccepted({
       scenario: activeScenario,
+      systemImportedSeqBefore: systemImportedSeqBeforeDeviceSync,
       userId,
     });
     await assertNoHostedDeviceSyncJobFailures({
@@ -812,6 +822,10 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
     sources: garminSources,
   });
   expect(seed.sourceCount).toBe(1);
+  const systemImportedSeqBeforeDeviceSync = await readHostedSystemImportedSeq({
+    scenario: input.scenario,
+    userId: input.userId,
+  });
 
   let retriedSleepCycleDelivery = false;
   for (const [index, dirtyResource] of input.dirtyResources.entries()) {
@@ -853,6 +867,7 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
   }
   await assertHostedDeviceSyncReplayReceiptAccepted({
     scenario: input.scenario,
+    systemImportedSeqBefore: systemImportedSeqBeforeDeviceSync,
     userId: input.userId,
   });
   await assertNoHostedDeviceSyncJobFailures({
@@ -1218,6 +1233,7 @@ async function readBrowserVaultReplica(input: {
 
 async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
   scenario: HostedLocalFullStackScenario;
+  systemImportedSeqBefore: string;
   userId: string;
 }): Promise<void> {
   const receiptStatus = parseHostedRunnerStatusResponse(
@@ -1255,16 +1271,14 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
     && (entry.status === "processed" || entry.status === "recorded")
     && (entry.recordFailed ?? 0) === 0
   );
-  const durableSystemLaneSettled = systemImportedSeq !== null
-    && systemImportedSeq !== "0"
+  const durableSystemLaneAdvancedAndSettled = systemImportedSeq !== null
+    && hasDecimalSequenceAdvanced(input.systemImportedSeqBefore, systemImportedSeq)
     && systemImportedSeq === systemHandledThroughSeq
     && receiptStatus.mailboxLag.some((lane) =>
       lane.lane === "system" && lane.lag === "0"
     );
-  const receiptObserved = durableSystemLaneSettled
-    || recordedDeviceSyncLog !== undefined
-    || recorded > 0
-    || prepared > 0;
+  const receiptObserved = durableSystemLaneAdvancedAndSettled
+    || recordedDeviceSyncLog !== undefined;
 
   if (
     !receiptObserved
@@ -1284,6 +1298,7 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
         retryableFailed,
         systemHandledThroughSeq,
         systemImportedSeq,
+        systemImportedSeqBefore: input.systemImportedSeqBefore,
       })}`,
       ...(safeErrors.length > 0
         ? [`system mailbox safe errors: ${JSON.stringify(safeErrors)}`]
@@ -1291,6 +1306,26 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
       `system mailbox logs: ${JSON.stringify(systemMailboxLogs)}`,
     ]));
   }
+}
+
+async function readHostedSystemImportedSeq(input: {
+  scenario: HostedLocalFullStackScenario;
+  userId: string;
+}): Promise<string> {
+  const status = parseHostedRunnerStatusResponse(
+    await input.scenario.harness.requestJson<unknown>(
+      buildCloudflareHostedControlUserStatusPath(input.userId),
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+        },
+      },
+    ),
+  );
+  return readStringAtPath(
+    status.workspace?.redactedStatus ?? null,
+    ["hostedMailboxSystemImportedSeq"],
+  ) ?? "0";
 }
 
 async function assertNoHostedDeviceSyncJobFailures(input: {
@@ -1686,6 +1721,13 @@ function readStringAtPath(value: unknown, keys: readonly string[]): string | nul
   }
 
   return typeof current === "string" ? current : null;
+}
+
+function hasDecimalSequenceAdvanced(before: string, after: string): boolean {
+  if (!/^\d+$/u.test(before) || !/^\d+$/u.test(after)) {
+    return false;
+  }
+  return BigInt(after) > BigInt(before);
 }
 
 function collectUnsafeHostedStatusFailureKeys(value: unknown): string[] {
