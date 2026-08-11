@@ -172,15 +172,15 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Scorer-owned group challenge cards add the existing normalized score input,
 // deterministic scorer, bounded card mapper, and complete static presentation
-// to the runner graph. Combined with mainline Health Commons, workout-card,
-// recurring-timezone, usage, and group-newsletter additions, exact local
-// production assembly measured a 1,674,361B entry, 8,099,290B static closure,
-// and 10,107,083B total on 2026-08-10. No forbidden subsystem entered the boot
-// graph, so ratchet all three measurements and retain the established narrow
-// cross-platform tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_107_083 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_674_361;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_099_290;
+// to the runner graph. After merging the current mainline runtime boundaries
+// and sparse Junction blood-pressure history, exact local production assembly
+// measured a 1,599,840B entry, 7,791,221B static closure, and 9,738,964B total
+// on 2026-08-10. No forbidden subsystem entered the boot graph, so ratchet all
+// three measurements and retain the established narrow cross-platform
+// tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_738_964 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_599_840;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_791_221;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
