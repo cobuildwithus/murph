@@ -1,7 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
 
-import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
-
 export interface HostedCallbackRequestNonceStore {
   consumeHostedCallbackRequestNonce(input: {
     expiresAt: string;
@@ -31,36 +29,36 @@ export class PrismaHostedCallbackRequestNonceStore
     search: string;
     userId: string;
   }): Promise<boolean> {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.hostedWebInternalRequestNonce.deleteMany({
-        where: {
-          expiresAt: {
-            lte: new Date(input.now),
-          },
-        },
-      });
+    // Keep the volatile clock read in RETURNING so it runs only for an insert
+    // that succeeds after any unique-conflict wait; a late row is a tombstone.
+    const rows = await this.prisma.$queryRaw<Array<{ admitted: boolean }>>`
+      INSERT INTO "hosted_web_internal_request_nonce" AS request_nonce (
+        "nonce_hash",
+        "user_id",
+        "method",
+        "path",
+        "search",
+        "created_at",
+        "expires_at"
+      )
+      VALUES (
+        ${input.nonceHash},
+        ${input.userId},
+        ${input.method},
+        ${input.path},
+        ${input.search},
+        ${input.now}::timestamptz AT TIME ZONE 'UTC',
+        ${input.expiresAt}::timestamptz AT TIME ZONE 'UTC'
+      )
+      ON CONFLICT ("nonce_hash") DO NOTHING
+      RETURNING
+        request_nonce."expires_at" >= date_trunc(
+          'milliseconds',
+          clock_timestamp() AT TIME ZONE 'UTC'
+        ) AS "admitted"
+    `;
 
-      try {
-        await tx.hostedWebInternalRequestNonce.create({
-          data: {
-            createdAt: new Date(input.now),
-            expiresAt: new Date(input.expiresAt),
-            method: input.method,
-            nonceHash: input.nonceHash,
-            path: input.path,
-            search: input.search,
-            userId: input.userId,
-          },
-        });
-        return true;
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          return false;
-        }
-
-        throw error;
-      }
-    });
+    return rows[0]?.admitted === true;
   }
 }
 
