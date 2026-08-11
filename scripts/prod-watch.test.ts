@@ -2745,12 +2745,14 @@ describe("production-watch static safety contracts", () => {
     await expect(verifySchedulerExecutableChain(repoRoot, process.execPath, fakeHome))
       .rejects.toThrow("scheduler_executable_chain_unavailable");
 
-    const homeProbe = spawnSync(
-      "/bin/zsh",
-      ["-f", "-c", 'export HOME=~; test "$HOME" = "$1"', "prod-watch", os.homedir()],
-      { env: {}, encoding: "utf8" },
-    );
-    expect(homeProbe.status, homeProbe.stderr).toBe(0);
+    if (process.platform === "darwin") {
+      const homeProbe = spawnSync(
+        "/bin/zsh",
+        ["-f", "-c", 'export HOME=~; test "$HOME" = "$1"', "prod-watch", os.homedir()],
+        { env: {}, encoding: "utf8" },
+      );
+      expect(homeProbe.status, homeProbe.stderr).toBe(0);
+    }
   });
 
   it.runIf(process.platform === "darwin")(
