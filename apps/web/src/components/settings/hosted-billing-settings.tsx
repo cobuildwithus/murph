@@ -505,7 +505,7 @@ export function HostedBillingSettings(props: {
   const noPlanText = familyBillingOwner && !activeFamilyOwner
     ? "Your Family plan needs billing attention. Use Manage Family billing to repair or cancel it."
     : starterAccessActive
-      ? "Your non-expiring starter usage is active. Choose a monthly plan whenever you want recurring included usage."
+      ? null
     : retainedPlan
       ? `${retainedPlan.displayName} is not active. Choose a plan below or use Manage billing.`
     : props.billingStatus === "active"
@@ -529,7 +529,10 @@ export function HostedBillingSettings(props: {
           </div>
         </div>
       ) : null}
-      {!paidPlanResolved && !props.planChangePending && !props.groupPaymentMethodSaved ? (
+      {!paidPlanResolved
+        && !props.planChangePending
+        && !props.groupPaymentMethodSaved
+        && noPlanText ? (
         <p className="text-sm text-pretty text-muted-foreground">{noPlanText}</p>
       ) : null}
       <PlanUsageBand
@@ -622,7 +625,7 @@ function PlanUsageBand(props: {
       ? HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME
       : status.planName;
   const periodLabel = status.periodKind === "lifetime"
-    ? "Does not expire"
+    ? null
     : `Resets ${formatHostedBillingDate(new Date(status.periodEnd))}`;
   const action = status.recommendedAction;
   const eligibleUsageTopUpOffers =
@@ -654,7 +657,8 @@ function PlanUsageBand(props: {
         <div className="min-w-0">
           <p className="text-sm font-semibold text-foreground">AI usage</p>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {displayPlanName} · {periodLabel}
+            {displayPlanName}
+            {periodLabel ? ` · ${periodLabel}` : null}
           </p>
         </div>
         {eligibleUsageTopUpOffers.length > 0 || props.usageTopUpActivePurchase

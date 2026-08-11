@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 50,
+  "item": {
+    "id": "lighter-accessible-homepage",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "The homepage starts lighter",
+    "summary": "The public homepage now uses compact avatar images while continuing to prepare secure sign-in automatically in the background.",
+    "details": "Cold sign-in still opens immediately, announces its loading state, keeps keyboard focus when the form arrives, and retries a temporary loading failure. Text contrast is also clearer across the updated sections.",
+    "relevanceTags": ["homepage", "performance", "accessibility", "sign-in"],
+    "sourcePullRequests": [1573],
+    "tryIt": {
+      "href": "/",
+      "label": "Visit the homepage"
+    }
+  }
+}

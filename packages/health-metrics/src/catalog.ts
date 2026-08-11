@@ -31,6 +31,7 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
 
 const DEFINITIONS_BY_KEY = new Map(METRIC_DEFINITIONS.map((definition) => [definition.key, definition]));
 const DEFINITIONS_BY_ALIAS = new Map<string, MetricDefinition>();
+const DEFINITIONS_BY_LEGACY_COLLAPSED_ALIAS = new Map<string, MetricDefinition | null>();
 const PRIMARY_METRIC_BY_BIOMARKER = new Map<string, MetricDefinition>();
 const LAB_RESULT_DEFINITIONS_BY_KEY = new Map(
   LAB_RESULT_METRICS.map((definition) => [definition.key, definition]),
@@ -40,7 +41,9 @@ const LAB_RESULT_PRIMARY_METRIC_BY_BIOMARKER = new Map<string, MetricDefinition>
 
 for (const definition of METRIC_DEFINITIONS) {
   for (const alias of [definition.key, ...definition.aliases]) {
-    DEFINITIONS_BY_ALIAS.set(normalizeMetricKey(alias), definition);
+    const normalizedAlias = normalizeMetricKey(alias);
+    DEFINITIONS_BY_ALIAS.set(normalizedAlias, definition);
+    registerLegacyCollapsedMetricAlias(normalizedAlias, definition);
   }
   if (definition.biomarkerKey && !PRIMARY_METRIC_BY_BIOMARKER.has(definition.biomarkerKey)) {
     PRIMARY_METRIC_BY_BIOMARKER.set(definition.biomarkerKey, definition);
@@ -81,7 +84,30 @@ export function normalizeMetricKey(value: string): string {
 
 export function resolveMetricDefinition(value: string): MetricDefinition | null {
   const key = normalizeMetricKey(value);
-  return DEFINITIONS_BY_KEY.get(key) ?? DEFINITIONS_BY_ALIAS.get(key) ?? null;
+  return DEFINITIONS_BY_KEY.get(key)
+    ?? DEFINITIONS_BY_ALIAS.get(key)
+    ?? DEFINITIONS_BY_LEGACY_COLLAPSED_ALIAS.get(key)
+    ?? null;
+}
+
+function registerLegacyCollapsedMetricAlias(
+  normalizedAlias: string,
+  definition: MetricDefinition,
+): void {
+  const collapsedAlias = normalizedAlias.replace(/-/gu, "");
+  if (!collapsedAlias || collapsedAlias === normalizedAlias) {
+    return;
+  }
+
+  const existing = DEFINITIONS_BY_LEGACY_COLLAPSED_ALIAS.get(collapsedAlias);
+  DEFINITIONS_BY_LEGACY_COLLAPSED_ALIAS.set(
+    collapsedAlias,
+    existing === undefined
+      ? definition
+      : existing?.key === definition.key
+        ? definition
+        : null,
+  );
 }
 
 /** Resolves the broader identity catalog only at test-result-owned boundaries. */

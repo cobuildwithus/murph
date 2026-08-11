@@ -84,6 +84,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const reuseExplicitDatabaseUrlEnv = "MURPH_HOSTED_LOCAL_E2E_REUSE_DATABASE_URL";
+const maxHostedLocalFullStackStartupAttempts = 3;
 const preparedRunnerBundleCacheKeys = new Set<string>();
 
 interface HostedActiveMemberSeedArgs {
@@ -200,7 +201,7 @@ export interface HostedLocalFullStackScenario {
   ): Promise<HostedJunctionDeviceSyncReplaySeedResult>;
 }
 
-export async function startHostedLocalFullStackScenario(input: {
+interface HostedLocalFullStackScenarioInput {
   additionalEnv?: NodeJS.ProcessEnv;
   assistantProviderMode?: HostedLocalAssistantProviderMode;
   assistantProviderMaxResponsesApiRequestBodies?: number;
@@ -226,7 +227,30 @@ export async function startHostedLocalFullStackScenario(input: {
   streamLogs?: boolean;
   testControls?: boolean;
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
-}): Promise<HostedLocalFullStackScenario> {
+}
+
+export async function startHostedLocalFullStackScenario(
+  input: HostedLocalFullStackScenarioInput,
+): Promise<HostedLocalFullStackScenario> {
+  for (let attempt = 1; attempt <= maxHostedLocalFullStackStartupAttempts; attempt += 1) {
+    try {
+      return await startHostedLocalFullStackScenarioAttempt(input);
+    } catch (error) {
+      if (
+        attempt === maxHostedLocalFullStackStartupAttempts
+        || !isHostedLocalPortBindCollision(error)
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error("Hosted local full-stack startup exhausted its bounded attempts.");
+}
+
+async function startHostedLocalFullStackScenarioAttempt(
+  input: HostedLocalFullStackScenarioInput,
+): Promise<HostedLocalFullStackScenario> {
   const assistantProviderRequests: HostedLocalAssistantProviderStubRequest[] = [];
   const providerRequestBodyFingerprintSecret = randomUUID();
   const assistantProviderStubState: HostedLocalAssistantProviderStubState = {
@@ -605,6 +629,20 @@ export async function startHostedLocalFullStackScenario(input: {
     await localDatabase.cleanup().catch(() => {});
     throw error;
   }
+}
+
+function isHostedLocalPortBindCollision(error: unknown): boolean {
+  if (error instanceof AggregateError) {
+    return error.errors.some(isHostedLocalPortBindCollision);
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return ("code" in error && error.code === "EADDRINUSE")
+    || /\baddress already in use\b/ui.test(error.message)
+    || /\bport \d+ is already in use\b/ui.test(error.message);
 }
 
 export function buildHostedLocalFullStackWebProcessEnvOverrides(

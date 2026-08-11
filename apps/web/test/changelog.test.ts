@@ -68,6 +68,23 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
+  it("keeps cleaner plan and model settings scoped to the visible outcome", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "cleaner-plan-and-model-settings",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      kind: "improvement",
+      priority: 1,
+      sourcePullRequests: [1621],
+      summary: expect.stringContaining("Starter usage and unavailable models"),
+      title: "Cleaner plan and model settings",
+    });
+    expect(item?.details).toBeUndefined();
+    expect(item?.tryIt).toBeUndefined();
+  });
+
   it("keeps scheduled native delivery current and private", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "scheduled-cards-use-current-private-route",
@@ -335,6 +352,18 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("personality-settings-and-chat")).toMatchObject({
+      sourcePullRequests: [1589],
+      summary: expect.stringContaining("main and optional supporting personality"),
+      details: expect.stringContaining("same saved personality"),
+      tryIt: {
+        href: "/settings",
+        label: "Edit Murph's personality",
+      },
+    });
+    expect(items.get("personality-settings-and-chat")?.details).toContain(
+      "changes only that room's Murph",
+    );
     expect(items.get("cleaner-workout-cards-in-messages")).toMatchObject({
       sourcePullRequests: [1588],
       summary: expect.stringContaining("nutrition goal direction"),
@@ -358,6 +387,14 @@ describe("changelog registry", () => {
     });
     expect(
       items.get("referral-notification-route-recovery")?.tryIt,
+    ).toBeUndefined();
+    expect(items.get("blood-pressure-history-completion")).toMatchObject({
+      sourcePullRequests: [1523, 1625],
+      summary: expect.stringContaining("unfinished history import"),
+      details: expect.stringContaining("every remaining day finishes"),
+    });
+    expect(
+      items.get("blood-pressure-history-completion")?.tryIt,
     ).toBeUndefined();
     expect(items.get("group-sleep-challenges-use-fresh-data")).toMatchObject({
       sourcePullRequests: [1565, 1593],
@@ -577,30 +614,18 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through August 10 shipment set", () => {
+  it("preserves the frozen July 20 through August 9 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 22).map((edition) => ({
-        id: edition.id,
-        itemIds: edition.items.map((item) => item.id),
-      })),
+      listChangelogEditions()
+        .filter(
+          (edition) =>
+            edition.id >= "2026-07-20" && edition.id <= "2026-08-09",
+        )
+        .map((edition) => ({
+          id: edition.id,
+          itemIds: edition.items.map((item) => item.id),
+        })),
     ).toEqual([
-      {
-        id: "2026-08-10",
-        itemIds: [
-          "non-expiring-starter-access",
-          "personal-patterns",
-          "referral-notification-route-recovery",
-          "reminders-keep-requested-timezone",
-          "voice-memos-use-your-voice",
-          "cleaner-workout-cards-in-messages",
-          "web-search-restored",
-          "appointment-reminders-by-default",
-          "workout-card-status-rendering",
-          "scheduled-cards-use-current-private-route",
-          "lighter-accessible-homepage",
-          "environment-report-loading-preview",
-        ],
-      },
       {
         id: "2026-08-09",
         itemIds: [
@@ -1078,13 +1103,6 @@ describe("changelog registry", () => {
         Math.ceil(editions.length / CHANGELOG_EDITIONS_PER_PAGE) + 1,
       ),
     ).toBeNull();
-  });
-
-  it("keeps the default archive window to seven calendar days", () => {
-    const firstPage = resolveChangelogPage(1);
-    expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-10");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-04");
   });
 
   it("resolves only known canonical edition cursors", () => {

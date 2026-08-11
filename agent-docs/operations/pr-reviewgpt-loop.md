@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -86,9 +86,11 @@ Run one preliminary specialist pass when any of these lenses apply:
 - coverage: the diff changes executable behavior or changes the tests, fixtures,
   configuration, or direct-proof scaffolding that establishes its proof.
 
-The task must use a clean worktree/PR lane. Commit and push the review candidate,
-open or update the PR, and run
-`scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>`. The PR body must
+The task must use a clean worktree/PR lane. Commit and push the review candidate
+and open or update the PR. The canonical `pnpm review:gpt` command recognizes
+the PR-only preset, resolves the current branch PR, checks the clean local head
+against its pushed head, and exports the required PR ref and phase before the
+package can create an attachment. The PR body must
 declare each lens `applicable` or `not applicable`, name the product outcome and
 direct journey evidence or exact gap when applicable, name the focused local
 proof and current exact-head CI status, and list the redacted rendered-evidence
@@ -106,8 +108,6 @@ The repo config defaults response capture to 180 minutes. The workflow commands
 inherit that timeout; use `--wait-timeout` only for an intentional per-run override.
 
 ```bash
-REVIEW_GPT_PR_URL=<pr-url-or-number> \
-REVIEW_GPT_REVIEW_PHASE=preliminary \
 REVIEW_GPT_RENDERED_EVIDENCE_PATHS=$'audit-packages/<desktop>.png\naudit-packages/<mobile>.png' \
   pnpm review:gpt completion-specialists \
     --wait \
@@ -122,6 +122,11 @@ applicable. Evidence paths must be repo-relative PNG, JPEG, or WebP files under
 Redact direct identifiers and private content before packaging them. The
 packager rejects absolute paths, traversal, symlinks, missing files, unsupported
 types, and paths outside those two roots.
+
+Set `REVIEW_GPT_PR_URL` only when intentionally targeting a PR other than the
+one associated with the current branch. The guard still requires the local
+head to equal that PR's pushed head. An explicit `REVIEW_GPT_REVIEW_PHASE` must
+match the selected PR preset or the command fails before invoking ReviewGPT.
 
 The guarded ZIP contains:
 
@@ -252,16 +257,18 @@ the current user explicitly asks for it.
 
 ## One Round
 
-1. Verify the local checkout is the pushed PR head:
+1. The canonical command verifies that the local checkout is the pushed PR
+   head before invoking ReviewGPT. For a standalone preflight without starting
+   ReviewGPT, run:
 
    ```bash
    scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>
    ```
 
 2. Run ReviewGPT with the PR preset and the default randomized usable managed
-   browser lane. Set `REVIEW_GPT_REVIEW_PHASE=final` and pass the PR ref and
-   substantive round through `REVIEW_GPT_PR_URL` and
-   `REVIEW_GPT_ROUND_NUMBER`. Round 1 adds the full PR body, current patch,
+   browser lane. The command derives the final phase and current branch PR;
+   pass the substantive round through `REVIEW_GPT_ROUND_NUMBER`. Round 1 adds
+   the full PR body, current patch,
    exact round metadata, and guarded repository snapshot to `codebase.zip`:
 
    - `review-gpt-pr-context/pr-body.md`
@@ -281,8 +288,6 @@ the current user explicitly asks for it.
    reviewed head:
 
    ```bash
-   REVIEW_GPT_PR_URL=<pr-url-or-number> \
-   REVIEW_GPT_REVIEW_PHASE=final \
    REVIEW_GPT_ROUND_NUMBER=1 \
      pnpm review:gpt pr-review \
        --wait \
@@ -292,8 +297,6 @@ the current user explicitly asks for it.
    ```
 
    ```bash
-   REVIEW_GPT_PR_URL=<pr-url-or-number> \
-   REVIEW_GPT_REVIEW_PHASE=final \
    REVIEW_GPT_ROUND_NUMBER=<k> \
    REVIEW_GPT_FIRST_REVIEWED_HEAD=<round-1-full-sha> \
    REVIEW_GPT_PREVIOUS_REVIEWED_HEAD=<round-k-minus-1-full-sha> \
@@ -565,16 +568,31 @@ contract, fix a review finding, or include feature work or unrelated
 behavior/test/config/doc edits. Conflict count is orientation only and does not
 decide eligibility.
 
-When an authorized merge is blocked by strict up-to-date checks, use the merge
-queue when available or perform one normal base update at the merge boundary.
-Record any conflict paths and preservation reasons, run focused verification
-for affected surfaces, and let required PR CI gate the new head. Merge promptly
-when it clears instead of starting a repeated pre-merge refresh loop. Do not
-rerun ReviewGPT solely for that update. If any resolution
-authors behavior not already represented by the reviewed PR or current base,
-materially changes the implemented contract, includes another branch-authored
-change, or cannot be confidently classified as mechanical, use the ordinary
-next-substantive-round rule.
+At an authorized merge boundary, wait only for the routed review gates and
+required GitHub checks. Do not wait for optional or non-required status checks
+after those gates are green unless a failing check is relevant to the changed
+surface or the user explicitly requested it.
+
+When strict up-to-date checks block the merge, prefer the merge queue. If no
+queue is available, the unchanged reviewed patch has a one-update budget for
+this completion attempt: perform one normal base update, record any conflict
+paths and preservation reasons, run focused verification for affected surfaces,
+and let required PR CI gate that head. The budget remains consumed until merge
+or handoff; a later base advance, CI retry, or agent turn does not reset it. Do
+not rerun ReviewGPT solely for that update. If any resolution authors behavior
+not already represented by the reviewed PR or current base, materially changes
+the implemented contract, includes another branch-authored change, or cannot be
+confidently classified as mechanical, use the ordinary next-substantive-round
+rule instead of the base-only budget.
+
+If the base advances again after required CI is green on that one updated head,
+do not update the branch or restart CI. Fetch the current base and rerun
+`git merge-tree --write-tree`. When it is clean, use only an already-authorized
+non-refresh merge path: the merge queue or an explicit stale-head/admin bypass.
+Such a bypass may relax only strict-current status; it never bypasses required
+CI or routed review gates. If the merge-tree conflicts, or no non-refresh path
+is both available and authorized, report `moving-base race`, leave the PR and
+worktree active, and stop. Do not poll for a quiet base.
 
 ## Stop Condition
 
