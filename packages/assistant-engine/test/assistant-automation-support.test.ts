@@ -34,6 +34,7 @@ import {
   type AssistantAutoReplyPromptInput,
   type TelegramAutoReplyMetadata,
 } from '../src/assistant/automation/prompt-builder.ts'
+import { resolveAssistantPromptTimeContext } from '../src/assistant/prompt-time.ts'
 import {
   acquireAssistantAutomationRunLock,
   clearAssistantAutomationRunLock,
@@ -1327,6 +1328,97 @@ describe('assistant auto-reply prompt builder support', () => {
       ),
       userMessageContent: null,
     })
+  })
+
+  it('keeps the turn-resolved timezone when vault metadata changes during assembly', async () => {
+    const { vaultRoot } = await createTempVault('assistant-automation-timezone-stable-')
+    await initializeVault({
+      timezone: 'America/New_York',
+      vaultRoot,
+    })
+    const promptTimeContext = await resolveAssistantPromptTimeContext(vaultRoot)
+    const metadataPath = path.join(vaultRoot, 'vault.json')
+    const metadata = JSON.parse(
+      await readFile(metadataPath, 'utf8'),
+    ) as Record<string, unknown>
+    await writeFile(metadataPath, JSON.stringify({
+      ...metadata,
+      timezone: 'America/Los_Angeles',
+    }), 'utf8')
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          captureOverrides: {
+            occurredAt: '2026-07-15T17:45:30.000Z',
+            text: 'Can you check this?',
+          },
+        }),
+      ],
+      vaultRoot,
+      { promptTimeContext },
+    )
+
+    expect(result.kind === 'ready' ? result.prompt : '').toContain(
+      'Occurred at (America/New_York local; UTC in brackets): 2026-07-15 13:45:30 [UTC 2026-07-15T17:45:30.000Z]',
+    )
+    expect(result.kind === 'ready' ? result.prompt : '').not.toContain(
+      'America/Los_Angeles local',
+    )
+  })
+
+  it.each([
+    {
+      corruptMetadata: async (_vaultRoot: string) => undefined,
+      state: 'missing',
+    },
+    {
+      corruptMetadata: async (vaultRoot: string) => {
+        await mkdir(path.join(vaultRoot, 'vault.json'))
+      },
+      state: 'unreadable',
+    },
+    {
+      corruptMetadata: async (vaultRoot: string) => {
+        await writeFile(path.join(vaultRoot, 'vault.json'), '{}', 'utf8')
+      },
+      state: 'schema-invalid',
+    },
+  ])('renders UTC-only when vault metadata is $state', async ({ corruptMetadata }) => {
+    const previousTimeZone = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      const { vaultRoot } = await createTempVault('assistant-automation-timezone-fallback-')
+      await corruptMetadata(vaultRoot)
+      const result = await prepareAssistantAutoReplyInput(
+        [
+          createPromptInput({
+            captureOverrides: {
+              occurredAt: '2026-07-15T17:45:30.000Z',
+              text: 'Can you check this?',
+            },
+          }),
+        ],
+        vaultRoot,
+      )
+
+      expect(result).toEqual({
+        kind: 'ready',
+        prompt: expect.stringContaining(
+          'Occurred at (UTC only; member timezone unknown): 2026-07-15T17:45:30.000Z',
+        ),
+        userMessageContent: null,
+      })
+      expect(result.kind === 'ready' ? result.prompt : '').not.toContain(
+        'America/Los_Angeles local',
+      )
+    } finally {
+      if (previousTimeZone === undefined) {
+        delete process.env.TZ
+      } else {
+        process.env.TZ = previousTimeZone
+      }
+    }
   })
 
   it('keeps lifecycle context when no textual or rich evidence is available', async () => {

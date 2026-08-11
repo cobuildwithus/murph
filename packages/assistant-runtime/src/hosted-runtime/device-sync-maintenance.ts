@@ -313,20 +313,8 @@ function writeHostedDeviceSyncImportCompletedRuntimeLogs(input: {
   }
 
   for (const completed of input.completedImports) {
-    const eventToProviderSendMs = nonnegativeDurationMs(
-      completed.firstEventOccurredAt,
-      completed.firstProviderSentAt,
-    );
-    const providerSendToWebhookMs = nonnegativeDurationMs(
-      completed.firstProviderSentAt,
-      completed.firstWebhookReceivedAt,
-    );
     const webhookToImportMs = nonnegativeDurationMs(
       completed.firstWebhookReceivedAt,
-      completed.importCompletedAt,
-    );
-    const eventToImportMs = nonnegativeDurationMs(
-      completed.firstEventOccurredAt,
       completed.importCompletedAt,
     );
     const runtimeQueueMs = nonnegativeDurationMs(
@@ -346,31 +334,13 @@ function writeHostedDeviceSyncImportCompletedRuntimeLogs(input: {
         level: "info",
         phase: "invoke",
         redactedJson: {
-          eventCount: completed.eventCount,
-          eventType: completed.eventType
-            ? toHostedRuntimeLogCode(completed.eventType)
-            : null,
-          importCompletedAt: completed.importCompletedAt,
-          importExecutionStartedAt: completed.importExecutionStartedAt,
-          jobCreatedAt: completed.jobCreatedAt,
+          eventToProviderSendBucket: completed.eventToProviderSendBucket,
           jobKind: toHostedRuntimeLogCode(completed.jobKind),
-          oldestEventOccurredAt: completed.firstEventOccurredAt,
-          oldestProviderSentAt: completed.firstProviderSentAt,
-          oldestWebhookReceivedAt: completed.firstWebhookReceivedAt,
           provider: toHostedRuntimeLogCode(completed.provider),
-          resource: completed.resource
-            ? toHostedRuntimeLogCode(completed.resource)
-            : null,
-          resourceCategory: completed.resourceCategory
-            ? toHostedRuntimeLogCode(completed.resourceCategory)
-            : null,
-          sourceProvider: completed.sourceProviderSlug
-            ? toHostedRuntimeLogCode(completed.sourceProviderSlug)
-            : null,
-          ...(eventToProviderSendMs === null ? {} : { eventToProviderSendMs }),
-          ...(providerSendToWebhookMs === null ? {} : { providerSendToWebhookMs }),
+          ...(completed.providerSendToWebhookMs === null
+            ? {}
+            : { providerSendToWebhookMs: completed.providerSendToWebhookMs }),
           ...(webhookToImportMs === null ? {} : { webhookToImportMs }),
-          ...(eventToImportMs === null ? {} : { eventToImportMs }),
           ...(runtimeQueueMs === null ? {} : { runtimeQueueMs }),
           ...(importExecutionMs === null ? {} : { importExecutionMs }),
         },

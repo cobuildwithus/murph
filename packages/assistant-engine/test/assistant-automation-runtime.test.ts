@@ -1805,6 +1805,14 @@ describe('assistant automation scanner', () => {
         }),
       }),
     )
+    const preparedOptions = replyMocks.prepareAssistantAutoReplyInput.mock.calls[0]?.[2]
+    const sentInput = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sentInput?.promptTimeContext).toEqual({
+      canonicalTimeZoneAvailable: false,
+      currentLocalDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/u),
+      currentTimeZone: 'UTC',
+    })
+    expect(preparedOptions?.promptTimeContext).toBe(sentInput?.promptTimeContext)
   })
 
   it('advances the auto-reply channel cursor with the processed assistant input cursor', async () => {
@@ -5449,7 +5457,13 @@ describe('assistant auto-reply runtime', () => {
         projection: expect.objectContaining({ optionalInboxCaptureId: 'capture-1' }),
       })],
       '/tmp/assistant-automation-vault',
-      { onEvent: expect.any(Function) },
+      expect.objectContaining({
+        onEvent: expect.any(Function),
+        promptTimeContext: expect.objectContaining({
+          canonicalTimeZoneAvailable: false,
+          currentTimeZone: 'UTC',
+        }),
+      }),
     )
     expect(replyMocks.prepareAssistantAutoReplyInput).toHaveBeenNthCalledWith(
       2,
@@ -5457,7 +5471,12 @@ describe('assistant auto-reply runtime', () => {
         projection: expect.objectContaining({ optionalInboxCaptureId: 'capture-late' }),
       })],
       '/tmp/assistant-automation-vault',
-      { onEvent: expect.any(Function) },
+      expect.objectContaining({
+        onEvent: expect.any(Function),
+        promptTimeContext:
+          replyMocks.prepareAssistantAutoReplyInput.mock.calls[0]?.[2]
+            ?.promptTimeContext,
+      }),
     )
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -10894,6 +10913,12 @@ describe('assistant auto-reply runtime', () => {
         }),
       ],
       '/tmp/assistant-automation-vault',
+      expect.objectContaining({
+        promptTimeContext: expect.objectContaining({
+          canonicalTimeZoneAvailable: false,
+          currentTimeZone: 'UTC',
+        }),
+      }),
     )
     expect(replyMocks.sendAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -111,27 +111,30 @@ authority only after acquiring the same isolated advisory lock used by cleanup.
 ## Wearable import timing
 
 Successful hosted webhook imports write the buffered info event
-`device-sync.import_completed`. Its content-free `redacted_json` separates the
-observable stages instead of treating all missing-data time as one delay:
+`device-sync.import_completed`. Its privacy-limited `redacted_json` separates
+the operational stages instead of treating all missing-data time as one delay:
 
-- `oldestEventOccurredAt`: provider resource/event occurrence time
-- `oldestProviderSentAt`: verified signed webhook-envelope send time, when the
-  provider exposes one
-- `oldestWebhookReceivedAt`: Murph ingress receipt time
-- `jobCreatedAt`, `importExecutionStartedAt`, `importCompletedAt`: local runtime
-  queue and successful execution boundaries
-- `eventToProviderSendMs`, `providerSendToWebhookMs`, `webhookToImportMs`,
-  `eventToImportMs`, `runtimeQueueMs`, and `importExecutionMs`: nonnegative
-  derived intervals when both clocks are available and ordered
-- `eventCount`, `provider`, `sourceProvider`, `eventType`, `jobKind`,
-  `resourceCategory`, and `resource`: bounded categorical context
+- `eventToProviderSendBucket`: a coarse, non-reversible upstream delay bucket
+  computed before persistence (`under_5_minutes`, `5_to_30_minutes`,
+  `30_minutes_to_2_hours`, `2_to_24_hours`, or `over_24_hours`)
+- `providerSendToWebhookMs`: verified signed webhook-envelope send to Murph
+  receipt, when the provider exposes the signed time
+- `webhookToImportMs`: Murph receipt to successful canonical import
+- `runtimeQueueMs` and `importExecutionMs`: local queue and execution durations
+- `provider` and `jobKind`: bounded operational routing context
 
-For a coalesced dirty resource, `oldest*` timestamps describe the first event in
-the batch and `eventCount` states the batch size. Clock skew does not become a
-negative latency: the source timestamps remain present while only the affected
-derived interval is omitted. The event contains no member identifier, device
-identifier, raw wearable value, or webhook body. Like other debug/info logs it
-uses the nonblocking runtime-log buffer and seven-day retention.
+Clock skew does not become a negative latency; only the affected measurement is
+omitted. The log deliberately excludes raw stage timestamps, event or resource
+types, source-device/provider semantics, counts, health values, webhook bodies,
+and exact event-to-import intervals. The dirty-resource carrier holds only the
+coarse upstream bucket, exact signed-send-to-receipt duration, and earliest
+Murph receipt needed for the remaining duration. Compact timing and job fields
+can remain in the existing dirty row; oversized job payloads use the existing
+encrypted dirty-payload row. Coalesced hints keep the slowest upstream bucket,
+longest signed delivery, and earliest receipt, so timestamps from different
+events are never paired into a synthetic duration.
+Like other debug/info logs, the event uses the nonblocking runtime-log buffer
+and seven-day retention.
 
 Example bounded diagnostic read:
 
@@ -139,10 +142,9 @@ Example bounded diagnostic read:
 SELECT
   at,
   redacted_json->>'provider' AS provider,
-  redacted_json->>'sourceProvider' AS source_provider,
+  redacted_json->>'eventToProviderSendBucket' AS upstream_delay_bucket,
   (redacted_json->>'providerSendToWebhookMs')::bigint AS upstream_delivery_ms,
-  (redacted_json->>'webhookToImportMs')::bigint AS murph_import_ms,
-  (redacted_json->>'eventToImportMs')::bigint AS total_event_to_import_ms
+  (redacted_json->>'webhookToImportMs')::bigint AS murph_import_ms
 FROM hosted_runtime_log
 WHERE at >= now() - interval '24 hours'
   AND event_code = 'device-sync.import_completed'

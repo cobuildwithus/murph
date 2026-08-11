@@ -10,6 +10,8 @@ import {
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   isDeviceSyncCredentialIndependentImportJob,
+  isHostedDeviceSyncEventToProviderSendBucket,
+  mergeHostedDeviceSyncEventToProviderSendBuckets,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
   type DeviceSyncCredentialIndependentImportJobClassifier,
   type HostedExecutionDeviceSyncStagedDirtyAck,
@@ -1844,21 +1846,19 @@ function mergeDirtyResourceInto(
 function normalizeDirtyResource(
   resource: HostedDeviceSyncDirtyResource,
 ): HostedDeviceSyncDirtyResource {
-  const eventType = truncateDirtyKey(normalizeNullableString(resource.eventType));
-  const firstEventOccurredAt = normalizeIso(resource.firstEventOccurredAt);
-  const firstProviderSentAt = normalizeIso(resource.firstProviderSentAt);
+  const eventToProviderSendBucket = resource.eventToProviderSendBucket ?? null;
   const firstWebhookReceivedAt = normalizeIso(resource.firstWebhookReceivedAt);
+  const providerSendToWebhookMs = normalizeDurationMs(resource.providerSendToWebhookMs);
   return {
     count: Math.max(1, Math.min(1_000_000, Math.trunc(resource.count))),
     ...(resource.dirtyPayloadId
       ? { dirtyPayloadId: truncateDirtyKey(normalizeNullableString(resource.dirtyPayloadId)) ?? resource.dirtyPayloadId }
       : {}),
-    ...(eventType || firstEventOccurredAt || firstProviderSentAt || firstWebhookReceivedAt
+    ...(eventToProviderSendBucket || firstWebhookReceivedAt || providerSendToWebhookMs !== null
       ? {
-          eventType,
-          firstEventOccurredAt,
-          firstProviderSentAt,
+          eventToProviderSendBucket,
           firstWebhookReceivedAt,
+          providerSendToWebhookMs,
         }
       : {}),
     jobKind: truncateDirtyKey(normalizeNullableString(resource.jobKind) ?? "reconcile") ?? "reconcile",
@@ -1876,27 +1876,25 @@ function mergeDirtyResourceTiming(
   next: HostedDeviceSyncDirtyResource,
 ): Pick<
   HostedDeviceSyncDirtyResource,
-  "eventType" | "firstEventOccurredAt" | "firstProviderSentAt" | "firstWebhookReceivedAt"
+  "eventToProviderSendBucket" | "firstWebhookReceivedAt" | "providerSendToWebhookMs"
 > | Record<string, never> {
-  const eventType = previous.eventType ?? next.eventType ?? null;
-  const firstEventOccurredAt = minIso(
-    previous.firstEventOccurredAt,
-    next.firstEventOccurredAt,
-  );
-  const firstProviderSentAt = minIso(
-    previous.firstProviderSentAt,
-    next.firstProviderSentAt,
+  const eventToProviderSendBucket = mergeHostedDeviceSyncEventToProviderSendBuckets(
+    previous.eventToProviderSendBucket,
+    next.eventToProviderSendBucket,
   );
   const firstWebhookReceivedAt = minIso(
     previous.firstWebhookReceivedAt,
     next.firstWebhookReceivedAt,
   );
-  return eventType || firstEventOccurredAt || firstProviderSentAt || firstWebhookReceivedAt
+  const providerSendToWebhookMs = maxDurationMs(
+    previous.providerSendToWebhookMs,
+    next.providerSendToWebhookMs,
+  );
+  return eventToProviderSendBucket || firstWebhookReceivedAt || providerSendToWebhookMs !== null
     ? {
-        eventType,
-        firstEventOccurredAt,
-        firstProviderSentAt,
+        eventToProviderSendBucket,
         firstWebhookReceivedAt,
+        providerSendToWebhookMs,
       }
     : {};
 }
@@ -1972,16 +1970,15 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
     mergeDirtyResourceInto(next, {
       count: typeof record.count === "number" ? record.count : 1,
       ...(typeof record.dirtyPayloadId === "string" ? { dirtyPayloadId: record.dirtyPayloadId } : {}),
-      eventType: typeof record.eventType === "string" ? record.eventType : null,
-      firstEventOccurredAt: typeof record.firstEventOccurredAt === "string"
-        ? record.firstEventOccurredAt
-        : null,
-      firstProviderSentAt: typeof record.firstProviderSentAt === "string"
-        ? record.firstProviderSentAt
+      eventToProviderSendBucket: isHostedDeviceSyncEventToProviderSendBucket(
+        record.eventToProviderSendBucket,
+      )
+        ? record.eventToProviderSendBucket
         : null,
       firstWebhookReceivedAt: typeof record.firstWebhookReceivedAt === "string"
         ? record.firstWebhookReceivedAt
         : null,
+      providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
       jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
       payload: readDirtyResourcePayload(record.payload),
       resource: typeof record.resource === "string" ? record.resource : null,
@@ -2018,16 +2015,15 @@ async function readDirtyPayloadResourceJson(input: {
   mergeDirtyResourceInto(merged, {
     count: typeof record.count === "number" ? record.count : 1,
     dirtyPayloadId: input.row.id,
-    eventType: typeof record.eventType === "string" ? record.eventType : null,
-    firstEventOccurredAt: typeof record.firstEventOccurredAt === "string"
-      ? record.firstEventOccurredAt
-      : null,
-    firstProviderSentAt: typeof record.firstProviderSentAt === "string"
-      ? record.firstProviderSentAt
+    eventToProviderSendBucket: isHostedDeviceSyncEventToProviderSendBucket(
+      record.eventToProviderSendBucket,
+    )
+      ? record.eventToProviderSendBucket
       : null,
     firstWebhookReceivedAt: typeof record.firstWebhookReceivedAt === "string"
       ? record.firstWebhookReceivedAt
       : null,
+    providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
     jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
     payload: readDirtyResourcePayload(record.payload),
     resource: typeof record.resource === "string" ? record.resource : null,
@@ -2131,6 +2127,14 @@ function normalizeIso(value: string | null | undefined): string | null {
   }
 }
 
+function normalizeDurationMs(value: unknown): number | null {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+    ? value
+    : null;
+}
+
 function resolveDirtyWindowStart(resources: Record<string, HostedDeviceSyncDirtyResource>): Date | null {
   const value = Object.values(resources).reduce<string | null>(
     (earliest, resource) => minIso(earliest, resource.windowStart),
@@ -2188,6 +2192,21 @@ function maxIso(left: string | null, right: string | null): string | null {
     return left;
   }
   return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+function maxDurationMs(
+  left: number | null | undefined,
+  right: number | null | undefined,
+): number | null {
+  const normalizedLeft = normalizeDurationMs(left);
+  const normalizedRight = normalizeDurationMs(right);
+  if (normalizedLeft === null) {
+    return normalizedRight;
+  }
+  if (normalizedRight === null) {
+    return normalizedLeft;
+  }
+  return Math.max(normalizedLeft, normalizedRight);
 }
 
 function truncateDirtyKey(value: string | null): string | null {

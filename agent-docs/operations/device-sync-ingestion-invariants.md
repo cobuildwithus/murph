@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-07-14
+Last verified: 2026-08-10
 
 ## Purpose
 
@@ -150,16 +150,18 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
 
    Successful hosted webhook imports emit a best-effort
    `device-sync.import_completed` runtime log after the canonical job succeeds.
-   The existing dirty-resource carrier preserves the first provider event time,
-   verified signed-envelope send time when available, Murph webhook receipt
-   time, event count, and categorical resource metadata. The runtime combines
-   those fields with local job creation, execution start, and completion times
-   to expose upstream delivery, webhook-to-import, queue, execution, and total
-   oldest-event latency. Coalesced resources deliberately report the oldest
-   event in the batch. Missing or negatively ordered clocks keep their raw
-   timestamps but omit the affected duration. This telemetry remains
-   metadata-only and buffered; it cannot delay acceptance, import, or the pull
-   floor, and it is not a recovery owner.
+   At ingress, the existing dirty-resource carrier reduces provider event time
+   to a coarse event-to-send delay bucket, computes the verified signed-envelope
+   send-to-receipt duration, and preserves the earliest Murph receipt long
+   enough to derive receipt-to-import duration after import. Coalesced hints
+   keep the slowest upstream bucket, longest signed delivery, and earliest
+   receipt without pairing timestamps from different events. The runtime log contains only the
+   coarse upstream bucket, provider/job kind, provider-send-to-receipt,
+   receipt-to-import, queue, and execution durations. It deliberately omits raw
+   stage timestamps, event/resource semantics, counts, and exactly reversible
+   event-origin intervals. Missing or negatively ordered clocks omit only the
+   affected measurement. This telemetry is buffered and cannot delay
+   acceptance, import, or the pull floor; it is not a recovery owner.
 
 6. **Historical completion is source/resource coverage, not account-level
    traffic.** A useful activity record cannot complete an advertised sleep

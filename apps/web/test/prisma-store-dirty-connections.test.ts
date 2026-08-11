@@ -1299,10 +1299,9 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       resources: [
         {
           count: 1,
-          eventType: "daily.data.steps.created",
-          firstEventOccurredAt: "2026-05-26T11:58:00.000Z",
-          firstProviderSentAt: "2026-05-26T11:59:00.000Z",
+          eventToProviderSendBucket: "under_5_minutes",
           firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
+          providerSendToWebhookMs: 60_000,
           jobKind: "resource",
           payload: {
             ordinary: "y".repeat(1_000),
@@ -1345,10 +1344,9 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       userId: "member_123",
       value: resourceEncrypted,
     })).resolves.toMatchObject({
-      eventType: "daily.data.steps.created",
-      firstEventOccurredAt: "2026-05-26T11:58:00.000Z",
-      firstProviderSentAt: "2026-05-26T11:59:00.000Z",
+      eventToProviderSendBucket: "under_5_minutes",
       firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
+      providerSendToWebhookMs: 60_000,
     });
     expect(prisma.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
     expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);

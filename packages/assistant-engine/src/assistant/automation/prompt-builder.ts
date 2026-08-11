@@ -30,7 +30,9 @@ import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artif
 import { readAssistantInputMessageRef } from '../message-target-selection.js'
 import {
   formatAssistantPromptInstant,
+  formatAssistantPromptUtcInstant,
   resolveAssistantPromptTimeContext,
+  type ResolvedAssistantPromptTimeContext,
 } from '../prompt-time.js'
 import { normalizeNullableString } from '../shared.js'
 
@@ -190,7 +192,7 @@ export function buildAssistantAutoReplyPrompt(
     prompt: buildAssistantAutoReplyPromptText(
       inputs,
       sections,
-      options.timeZone ?? 'UTC',
+      normalizeIanaTimeZone(options.timeZone),
     ),
   }
 }
@@ -201,11 +203,19 @@ export async function prepareAssistantAutoReplyInput(
   options: {
     materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
     onEvent?: (event: AssistantRunEvent) => void
+    promptTimeContext?: ResolvedAssistantPromptTimeContext
     timeZone?: string
   } = {},
 ): Promise<AssistantAutoReplyPreparedInput> {
-  const promptTimeZone = normalizeIanaTimeZone(options.timeZone)
-    ?? (await resolveAssistantPromptTimeContext(vaultRoot)).currentTimeZone
+  const explicitTimeZone = normalizeIanaTimeZone(options.timeZone)
+  const resolvedPromptTimeContext = explicitTimeZone
+    ? null
+    : options.promptTimeContext
+      ?? await resolveAssistantPromptTimeContext(vaultRoot)
+  const promptTimeZone = explicitTimeZone
+    ?? (resolvedPromptTimeContext?.canonicalTimeZoneAvailable
+      ? resolvedPromptTimeContext.currentTimeZone
+      : null)
   const derivedEvidenceReadBudget = createAssistantDerivedEvidenceReadBudget()
   const preparedInputs: AssistantAutoReplyPromptInputWithBundles[] = []
   for (const entry of inputs) {
@@ -746,7 +756,7 @@ function renderInlineAttachmentFragmentTitle(
 
 function buildAssistantAutoReplyContextLines(
   inputs: readonly AssistantAutoReplyPromptInput[],
-  timeZone: string,
+  timeZone: string | null,
 ): Array<string | null> {
   const firstInput = inputs[0]
   const lastInput = inputs[inputs.length - 1]
@@ -754,15 +764,22 @@ function buildAssistantAutoReplyContextLines(
     return []
   }
 
-  const normalizedTimeZone = normalizeIanaTimeZone(timeZone) ?? 'UTC'
+  const normalizedTimeZone = normalizeIanaTimeZone(timeZone)
   const mediaGroupId = resolveGroupedTelegramMediaGroupId(inputs)
+  const occurredAt = normalizedTimeZone
+    ? `Occurred at (${normalizedTimeZone} local; UTC in brackets): ${
+        firstInput.occurredAt === lastInput.occurredAt
+          ? formatAssistantPromptInstant(firstInput.occurredAt, normalizedTimeZone)
+          : `${formatAssistantPromptInstant(firstInput.occurredAt, normalizedTimeZone)} -> ${formatAssistantPromptInstant(lastInput.occurredAt, normalizedTimeZone)}`
+      }`
+    : `Occurred at (UTC only; member timezone unknown): ${
+        firstInput.occurredAt === lastInput.occurredAt
+          ? formatAssistantPromptUtcInstant(firstInput.occurredAt)
+          : `${formatAssistantPromptUtcInstant(firstInput.occurredAt)} -> ${formatAssistantPromptUtcInstant(lastInput.occurredAt)}`
+      }`
   return [
     `Source: ${firstInput.source}`,
-    `Occurred at (${normalizedTimeZone} local; UTC in brackets): ${
-      firstInput.occurredAt === lastInput.occurredAt
-        ? formatAssistantPromptInstant(firstInput.occurredAt, normalizedTimeZone)
-        : `${formatAssistantPromptInstant(firstInput.occurredAt, normalizedTimeZone)} -> ${formatAssistantPromptInstant(lastInput.occurredAt, normalizedTimeZone)}`
-    }`,
+    occurredAt,
     `Thread: ${firstInput.conversation.threadId ?? 'unknown'}`,
     firstInput.conversation.threadIsDirect === false
       ? null
@@ -791,7 +808,7 @@ function resolveGroupedTelegramMediaGroupId(
 function buildAssistantAutoReplyPromptText(
   inputs: readonly AssistantAutoReplyPromptInput[],
   sections: readonly string[],
-  timeZone: string,
+  timeZone: string | null,
 ): string {
   const contextLines = buildAssistantAutoReplyContextLines(inputs, timeZone).filter(
     (line): line is string => line !== null,

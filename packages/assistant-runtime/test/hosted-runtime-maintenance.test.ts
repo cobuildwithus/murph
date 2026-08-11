@@ -1716,33 +1716,23 @@ describe("runHostedDeviceSyncPass", () => {
     };
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
     mocks.promoteHostedCompletedDirtyPayloadAcks.mockReturnValueOnce([{
-      eventCount: 2,
-      eventType: "daily.data.workouts.created",
-      firstEventOccurredAt: "2026-04-08T00:00:00.000Z",
-      firstProviderSentAt: "2026-04-08T00:03:00.000Z",
+      eventToProviderSendBucket: "under_5_minutes",
       firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
       importCompletedAt: "2026-04-08T00:06:00.000Z",
       importExecutionStartedAt: "2026-04-08T00:05:00.000Z",
       jobCreatedAt: "2026-04-08T00:04:30.000Z",
       jobKind: "resource",
       provider: "junction",
-      resource: "workouts",
-      resourceCategory: "summary",
-      sourceProviderSlug: "oura",
+      providerSendToWebhookMs: 60_000,
     }, {
-      eventCount: 1,
-      eventType: "activity.create",
-      firstEventOccurredAt: "2026-04-08T00:05:00.000Z",
-      firstProviderSentAt: "2026-04-08T00:04:00.000Z",
+      eventToProviderSendBucket: "5_to_30_minutes",
       firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
       importCompletedAt: "2026-04-08T00:06:00.000Z",
       importExecutionStartedAt: null,
       jobCreatedAt: "2026-04-08T00:07:00.000Z",
       jobKind: "resource",
       provider: "strava",
-      resource: "activity",
-      resourceCategory: "activity",
-      sourceProviderSlug: null,
+      providerSendToWebhookMs: null,
     }]);
 
     await runHostedDeviceSyncPass(
@@ -1769,6 +1759,7 @@ describe("runHostedDeviceSyncPass", () => {
     const entry = requests
       .flatMap((request) => request.entries)
       .find((candidate) => candidate.eventCode === "device-sync.import_completed");
+    assert.ok(entry);
     expect(entry).toEqual({
       at: "2026-04-08T00:06:00.000Z",
       component: "device-sync",
@@ -1776,39 +1767,45 @@ describe("runHostedDeviceSyncPass", () => {
       level: "info",
       phase: "invoke",
       redactedJson: {
-        eventCount: 2,
-        eventToImportMs: 360_000,
-        eventToProviderSendMs: 180_000,
-        eventType: "daily.data.workouts.created",
-        importCompletedAt: "2026-04-08T00:06:00.000Z",
+        eventToProviderSendBucket: "under_5_minutes",
         importExecutionMs: 60_000,
-        importExecutionStartedAt: "2026-04-08T00:05:00.000Z",
-        jobCreatedAt: "2026-04-08T00:04:30.000Z",
         jobKind: "resource",
-        oldestEventOccurredAt: "2026-04-08T00:00:00.000Z",
-        oldestProviderSentAt: "2026-04-08T00:03:00.000Z",
-        oldestWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
         provider: "junction",
         providerSendToWebhookMs: 60_000,
-        resource: "workouts",
-        resourceCategory: "summary",
         runtimeQueueMs: 30_000,
-        sourceProvider: "oura",
         webhookToImportMs: 120_000,
       },
     });
     const skewedEntry = requests
       .flatMap((request) => request.entries)
       .find((candidate) => candidate.redactedJson?.provider === "strava");
-    expect(skewedEntry?.redactedJson).toMatchObject({
-      eventToImportMs: 60_000,
+    assert.ok(skewedEntry);
+    expect(skewedEntry.redactedJson).toMatchObject({
+      eventToProviderSendBucket: "5_to_30_minutes",
       provider: "strava",
       webhookToImportMs: 180_000,
     });
-    expect(skewedEntry?.redactedJson).not.toHaveProperty("eventToProviderSendMs");
-    expect(skewedEntry?.redactedJson).not.toHaveProperty("providerSendToWebhookMs");
-    expect(skewedEntry?.redactedJson).not.toHaveProperty("runtimeQueueMs");
-    expect(skewedEntry?.redactedJson).not.toHaveProperty("importExecutionMs");
+    expect(skewedEntry.redactedJson).not.toHaveProperty("providerSendToWebhookMs");
+    expect(skewedEntry.redactedJson).not.toHaveProperty("runtimeQueueMs");
+    expect(skewedEntry.redactedJson).not.toHaveProperty("importExecutionMs");
+    for (const privateField of [
+      "eventCount",
+      "eventToImportMs",
+      "eventToProviderSendMs",
+      "eventType",
+      "importCompletedAt",
+      "importExecutionStartedAt",
+      "jobCreatedAt",
+      "oldestEventOccurredAt",
+      "oldestProviderSentAt",
+      "oldestWebhookReceivedAt",
+      "resource",
+      "resourceCategory",
+      "sourceProvider",
+    ]) {
+      expect(entry.redactedJson).not.toHaveProperty(privateField);
+      expect(skewedEntry.redactedJson).not.toHaveProperty(privateField);
+    }
   });
 
   it("stops a superseded connection wake after hydration without running device-sync work", async () => {

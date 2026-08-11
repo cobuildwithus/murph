@@ -14,8 +14,10 @@ timezone and the original UTC instant. Provider models must not be asked to
 convert or relabel a bare UTC clock from separately supplied timezone context.
 The thread-stable prompt also forbids relabeling `Z` or offset timestamps as
 local clock values when a tool or older context exposes an exact instant.
-If vault metadata cannot be read, prompt construction falls back best-effort to
-the runtime timezone and still names that timezone explicitly.
+If vault metadata cannot be read or does not contain a valid canonical zone,
+prompt construction renders the exact UTC instant only. The runtime timezone
+may still support internal date planning, but it is never labeled as the
+member's local timezone.
 
 ## Codex Warmth
 

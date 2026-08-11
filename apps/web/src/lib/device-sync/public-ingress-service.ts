@@ -152,10 +152,6 @@ export class HostedDeviceSyncPublicIngressService {
           }
           return;
         },
-        onLevelDirtyWebhookAlreadySatisfied: async ({ account }) => {
-          const pending = await this.context.store.hasPendingDirtyConnection(account.id);
-          return pending ? { accepted: true } : null;
-        },
         onWebhookAccepted: async ({
           account,
           claimToken,

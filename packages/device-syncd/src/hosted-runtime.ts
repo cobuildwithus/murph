@@ -41,6 +41,95 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
 
+export const HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS = [
+  "under_5_minutes",
+  "5_to_30_minutes",
+  "30_minutes_to_2_hours",
+  "2_to_24_hours",
+  "over_24_hours",
+] as const;
+
+export type HostedDeviceSyncEventToProviderSendBucket =
+  (typeof HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS)[number];
+
+export function isHostedDeviceSyncEventToProviderSendBucket(
+  value: unknown,
+): value is HostedDeviceSyncEventToProviderSendBucket {
+  return HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS.some(
+    (bucket) => bucket === value,
+  );
+}
+
+export function bucketHostedDeviceSyncEventToProviderSendDelay(input: {
+  eventOccurredAt?: string | null;
+  providerSentAt?: string | null;
+}): HostedDeviceSyncEventToProviderSendBucket | null {
+  const eventOccurredMs = input.eventOccurredAt
+    ? Date.parse(input.eventOccurredAt)
+    : Number.NaN;
+  const providerSentMs = input.providerSentAt
+    ? Date.parse(input.providerSentAt)
+    : Number.NaN;
+  if (
+    !Number.isFinite(eventOccurredMs)
+    || !Number.isFinite(providerSentMs)
+    || providerSentMs < eventOccurredMs
+  ) {
+    return null;
+  }
+
+  const delayMs = providerSentMs - eventOccurredMs;
+  if (delayMs < 5 * 60_000) {
+    return "under_5_minutes";
+  }
+  if (delayMs < 30 * 60_000) {
+    return "5_to_30_minutes";
+  }
+  if (delayMs < 2 * 60 * 60_000) {
+    return "30_minutes_to_2_hours";
+  }
+  if (delayMs < 24 * 60 * 60_000) {
+    return "2_to_24_hours";
+  }
+  return "over_24_hours";
+}
+
+export function measureHostedDeviceSyncProviderSendToWebhookMs(input: {
+  providerSentAt?: string | null;
+  webhookReceivedAt?: string | null;
+}): number | null {
+  const providerSentMs = input.providerSentAt
+    ? Date.parse(input.providerSentAt)
+    : Number.NaN;
+  const webhookReceivedMs = input.webhookReceivedAt
+    ? Date.parse(input.webhookReceivedAt)
+    : Number.NaN;
+  if (
+    !Number.isFinite(providerSentMs)
+    || !Number.isFinite(webhookReceivedMs)
+    || webhookReceivedMs < providerSentMs
+  ) {
+    return null;
+  }
+  return webhookReceivedMs - providerSentMs;
+}
+
+export function mergeHostedDeviceSyncEventToProviderSendBuckets(
+  left: HostedDeviceSyncEventToProviderSendBucket | null | undefined,
+  right: HostedDeviceSyncEventToProviderSendBucket | null | undefined,
+): HostedDeviceSyncEventToProviderSendBucket | null {
+  if (!left) {
+    return right ?? null;
+  }
+  if (!right) {
+    return left;
+  }
+  return HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS.indexOf(left)
+    >= HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS.indexOf(right)
+    ? left
+    : right;
+}
+
 const HOSTED_RUNTIME_ERROR_CODE_MAX_LENGTH = 128;
 const HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH = 2048;
 const HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH = 512;
@@ -419,10 +508,9 @@ export interface HostedExecutionDeviceSyncRuntimeApplyResponse {
 export interface HostedExecutionDeviceSyncDirtyResource {
   count: number;
   dirtyPayloadId?: string;
-  eventType?: string | null;
-  firstEventOccurredAt?: string | null;
-  firstProviderSentAt?: string | null;
+  eventToProviderSendBucket?: HostedDeviceSyncEventToProviderSendBucket | null;
   firstWebhookReceivedAt?: string | null;
+  providerSendToWebhookMs?: number | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
   resource: string | null;
@@ -1366,10 +1454,9 @@ function parseHostedExecutionDeviceSyncDirtyResource(
   label: string,
 ): HostedExecutionDeviceSyncDirtyResource {
   const record = requireObject(value, label);
-  const hasImportTiming = record.eventType !== undefined
-    || record.firstEventOccurredAt !== undefined
-    || record.firstProviderSentAt !== undefined
-    || record.firstWebhookReceivedAt !== undefined;
+  const hasImportTiming = record.eventToProviderSendBucket !== undefined
+    || record.firstWebhookReceivedAt !== undefined
+    || record.providerSendToWebhookMs !== undefined;
 
   return {
     count: requirePositiveInteger(record.count, `${label}.count`),
@@ -1380,26 +1467,23 @@ function parseHostedExecutionDeviceSyncDirtyResource(
         }),
     ...(hasImportTiming
       ? {
-          eventType: record.eventType === undefined
+          eventToProviderSendBucket: record.eventToProviderSendBucket === undefined
             ? null
-            : readNullableStringValue(record.eventType, `${label}.eventType`),
-          firstEventOccurredAt: record.firstEventOccurredAt === undefined
-            ? null
-            : readNullableIsoTimestamp(
-                record.firstEventOccurredAt,
-                `${label}.firstEventOccurredAt`,
-              ),
-          firstProviderSentAt: record.firstProviderSentAt === undefined
-            ? null
-            : readNullableIsoTimestamp(
-                record.firstProviderSentAt,
-                `${label}.firstProviderSentAt`,
+            : readNullableHostedDeviceSyncEventToProviderSendBucket(
+                record.eventToProviderSendBucket,
+                `${label}.eventToProviderSendBucket`,
               ),
           firstWebhookReceivedAt: record.firstWebhookReceivedAt === undefined
             ? null
             : readNullableIsoTimestamp(
                 record.firstWebhookReceivedAt,
                 `${label}.firstWebhookReceivedAt`,
+              ),
+          providerSendToWebhookMs: record.providerSendToWebhookMs === undefined
+            ? null
+            : readNullableHostedDeviceSyncDurationMs(
+                record.providerSendToWebhookMs,
+                `${label}.providerSendToWebhookMs`,
               ),
         }
       : {}),
@@ -1411,6 +1495,37 @@ function parseHostedExecutionDeviceSyncDirtyResource(
     windowEnd: readNullableIsoTimestamp(record.windowEnd, `${label}.windowEnd`),
     windowStart: readNullableIsoTimestamp(record.windowStart, `${label}.windowStart`),
   };
+}
+
+function readNullableHostedDeviceSyncDurationMs(
+  value: unknown,
+  label: string,
+): number | null {
+  if (value === null) {
+    return null;
+  }
+  if (
+    typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+  ) {
+    return value;
+  }
+  throw new TypeError(`${label} must be a nonnegative integer or null.`);
+}
+
+function readNullableHostedDeviceSyncEventToProviderSendBucket(
+  value: unknown,
+  label: string,
+): HostedDeviceSyncEventToProviderSendBucket | null {
+  const normalized = readNullableStringValue(value, label);
+  if (normalized === null) {
+    return null;
+  }
+  if (isHostedDeviceSyncEventToProviderSendBucket(normalized)) {
+    return normalized;
+  }
+  throw new TypeError(`${label} is invalid.`);
 }
 
 function readHostedExecutionDeviceSyncDirtyPayload(

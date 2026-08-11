@@ -357,7 +357,8 @@ export async function buildCodexTurnExecutionPlan(input: {
   const profile = resolveAssistantCodexTurnExecutionProfile({
     profile: input.profile,
   })
-  const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
+  const promptTimeContext = input.input.promptTimeContext
+    ?? await resolveAssistantPromptTimeContext(input.input.vault)
   const preferenceContext = await resolveAssistantTurnPreferenceContext(input.input.vault)
 
   return {
@@ -710,6 +711,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         )
       }
       return buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+        canonicalTimeZoneAvailable:
+          input.promptTimeContext.canonicalTimeZoneAvailable !== false,
         currentLocalDate: input.promptTimeContext.currentLocalDate,
         currentTimeZone: input.promptTimeContext.currentTimeZone,
         profile: maintenanceProfile,
@@ -771,6 +774,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantTone,
       cliAccess: input.sharedPlan.cliAccess,
       channel: resolvedChannel,
+      canonicalTimeZoneAvailable:
+        input.promptTimeContext.canonicalTimeZoneAvailable !== false,
       currentLocalDate: input.promptTimeContext.currentLocalDate,
       currentTimeZone: input.promptTimeContext.currentTimeZone,
       conversationScope,

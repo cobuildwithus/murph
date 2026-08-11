@@ -1626,7 +1626,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     }
     expect(result.prompt).toContain('Source: telegram')
     expect(result.prompt).toContain(
-      'Occurred at (UTC local; UTC in brackets): 2026-04-08 10:00:00 [UTC 2026-04-08T10:00:00.000Z] -> 2026-04-08 10:03:00 [UTC 2026-04-08T10:03:00.000Z]',
+      'Occurred at (UTC only; member timezone unknown): 2026-04-08T10:00:00.000Z -> 2026-04-08T10:03:00.000Z',
     )
     expect(result.prompt).toContain('Thread: thread-1')
     expect(result.prompt).toContain('Actor: telegram-user-42 | self=false')

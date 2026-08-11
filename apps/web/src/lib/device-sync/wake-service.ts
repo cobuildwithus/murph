@@ -29,6 +29,8 @@ import {
   requiresHistoricalResetDeviceSyncSource,
 } from "@murphai/device-syncd/public-account";
 import {
+  bucketHostedDeviceSyncEventToProviderSendDelay,
+  measureHostedDeviceSyncProviderSendToWebhookMs,
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
   type HostedExecutionDeviceSyncJobHint,
@@ -1670,7 +1672,6 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 
   const resourceCategory = normalizeNullableString(input.webhook.resourceCategory);
   const dirtyResources = buildHostedWebhookDirtyResources({
-    eventType: input.webhook.eventType,
     eventOccurredAt: input.webhook.occurredAt ?? null,
     jobs: input.webhook.jobs ?? [],
     provider: input.account.provider,
@@ -2259,19 +2260,8 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         }
       }
 
-      // Level webhooks may be coalesced only after committed dirty state exists.
-      // Durable webhook work must be persisted or retried; dirty state alone never satisfies it.
-      // Dirty state dedupes work; only the clean-to-dirty transition appends a durable runtime handoff.
-      if (
-        input.acceptanceMode === "level_dirty_hint"
-        && await input.store.hasPendingDirtyConnection(input.connectionId, tx)
-      ) {
-        await completeHostedWebhookTraceTx(input, tx);
-        return {
-          wakeMailboxItemId: null,
-        };
-      }
-
+      // Every accepted hint merges into dirty state so coalesced timing remains
+      // representative. Only the clean-to-dirty transition appends a wake.
       const dirtyUpdate = await input.store.upsertDirtyConnection({
         connectionId: input.connectionId,
         dirtyAt: input.occurredAt,
@@ -2327,19 +2317,24 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         }
         wakeMailboxItemId = mailboxAppend.item.id;
       }
-      await input.store.createSignal({
-        userId: input.userId,
-        connectionId: input.connectionId,
-        provider: input.provider,
-        kind: "webhook_hint",
-        occurredAt: input.occurredAt,
-        traceId: input.traceId,
-        eventType: input.eventType,
-        resourceCategory: input.resourceCategory ?? null,
-        sourceProviderSlug: input.dataSourceProviderSlug,
-        createdAt: input.acceptedAt,
-        tx,
-      });
+      if (
+        input.acceptanceMode !== "level_dirty_hint"
+        || dirtyUpdate.shouldRequestWake
+      ) {
+        await input.store.createSignal({
+          userId: input.userId,
+          connectionId: input.connectionId,
+          provider: input.provider,
+          kind: "webhook_hint",
+          occurredAt: input.occurredAt,
+          traceId: input.traceId,
+          eventType: input.eventType,
+          resourceCategory: input.resourceCategory ?? null,
+          sourceProviderSlug: input.dataSourceProviderSlug,
+          createdAt: input.acceptedAt,
+          tx,
+        });
+      }
 
       return {
         wakeMailboxItemId,
@@ -2489,7 +2484,6 @@ function normalizeHostedDeviceSyncJobHints(input: {
 
 function buildHostedWebhookDirtyResources(input: {
   eventOccurredAt?: string | null;
-  eventType?: string | null;
   jobs: readonly DeviceSyncJobInput[];
   provider: string;
   providerSentAt?: string | null;
@@ -2530,23 +2524,26 @@ function buildHostedWebhookDirtyResources(input: {
 
 function buildHostedWebhookDirtyResourceTiming(input: {
   eventOccurredAt?: string | null;
-  eventType?: string | null;
   providerSentAt?: string | null;
   webhookReceivedAt?: string | null;
 }): Pick<
   HostedDeviceSyncDirtyResource,
-  "eventType" | "firstEventOccurredAt" | "firstProviderSentAt" | "firstWebhookReceivedAt"
+  "eventToProviderSendBucket" | "firstWebhookReceivedAt" | "providerSendToWebhookMs"
 > | Record<string, never> {
-  const eventType = normalizeNullableString(input.eventType);
-  const firstEventOccurredAt = normalizeNullableString(input.eventOccurredAt);
-  const firstProviderSentAt = normalizeNullableString(input.providerSentAt);
+  const eventToProviderSendBucket = bucketHostedDeviceSyncEventToProviderSendDelay({
+    eventOccurredAt: input.eventOccurredAt,
+    providerSentAt: input.providerSentAt,
+  });
   const firstWebhookReceivedAt = normalizeNullableString(input.webhookReceivedAt);
-  return eventType || firstEventOccurredAt || firstProviderSentAt || firstWebhookReceivedAt
+  const providerSendToWebhookMs = measureHostedDeviceSyncProviderSendToWebhookMs({
+    providerSentAt: input.providerSentAt,
+    webhookReceivedAt: input.webhookReceivedAt,
+  });
+  return eventToProviderSendBucket || firstWebhookReceivedAt || providerSendToWebhookMs !== null
     ? {
-        eventType,
-        firstEventOccurredAt,
-        firstProviderSentAt,
+        eventToProviderSendBucket,
         firstWebhookReceivedAt,
+        providerSendToWebhookMs,
       }
     : {};
 }
