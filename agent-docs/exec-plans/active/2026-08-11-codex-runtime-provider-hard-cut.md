@@ -88,7 +88,7 @@ Updated: 2026-08-11
    after `git apply --check`, and simplify further where local evidence requires.
 4. [x] Update focused tests and current owner docs only where behavior or ownership
    materially changes.
-5. [ ] Run diff-aware or package-local coverage-bearing tests plus root typecheck and
+5. [x] Run diff-aware or package-local coverage-bearing tests plus root typecheck and
    inspect the final diff for identifiers, secrets, scope, and line shape.
 6. [ ] Commit and push the exact candidate, open a draft PR with the required intent
    contract, run preliminary and final ReviewGPT gates with CI, remediate accepted
@@ -107,8 +107,8 @@ Updated: 2026-08-11
   boundary; internal normalized config remains concrete and carries no runtime
   selector.
 - Keep the current base's appointment-reminder prompt-heading correction out of
-  this patch. The task branch predates that correction and will receive it through
-  a normal rebase before final verification.
+  this patch. A clean rebase incorporated that correction before final
+  verification without changing this task's runtime-provider patch.
 
 ## Verification
 
@@ -144,4 +144,19 @@ Updated: 2026-08-11
   local-service runtime tests. The latter requires an 8 GiB worker heap locally.
 - The first diff-aware lane passed all affected typechecks and 3,497 engine
   tests; its only failures were two prompt-heading assertions already corrected
-  on the current base and untouched by this patch. Rebase and rerun remain.
+  on the current base and untouched by this patch.
+- The candidate rebased cleanly onto current `origin/main` before the final
+  local proof.
+- The clean post-rebase diff-aware lane passed every selected typecheck, test,
+  package-boundary check, web verification step, and Cloudflare verification
+  step. Notable coverage included 3,535 assistant-engine tests, 2,171
+  assistant-runtime tests, 435 CLI tests, 9,472 web tests, 2,398 Cloudflare Node
+  tests, and 10 Cloudflare Workers tests.
+- The first post-rebase attempt exposed a pre-existing CLI artifact-preparation
+  lock that outlived a timed-out worker. After removing only the proven empty
+  owned lock, preparing the runtime artifacts through the repository command,
+  and recording the friction, the focused CLI reproduction and the complete
+  diff-aware rerun passed.
+- Final base-to-head shape before PR packaging is net deletion in executable
+  source and tests; the only additional files are the active execution plan and
+  two required developer-friction records.
