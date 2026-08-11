@@ -14,7 +14,8 @@ Updated: 2026-08-11
 - Checked-in and generated container configs set `ssh.enabled` to `false` for
   both runner classes and contain no authorized keys.
 - Deploy automation no longer accepts, validates, exports, or documents
-  container SSH key inputs or the SSH-only compatibility flag.
+  container SSH key inputs, while retaining independent PID-namespace
+  isolation.
 - Focused tests prove environment inputs cannot re-enable SSH and every
   rendered container remains disabled.
 - The private deploy workflow stops forwarding the retired inputs so public and
@@ -57,4 +58,3 @@ Updated: 2026-08-11
   `authorized_keys`, and no SSH-only compatibility flag.
 - Exact-head GitHub Actions plus preliminary ReviewGPT coverage lens and final
   ReviewGPT security/deploy gate.
-

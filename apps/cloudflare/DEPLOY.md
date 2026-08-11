@@ -1480,6 +1480,11 @@ checked-in scaffold and generated deploy config must set `ssh.enabled` to
 re-enable the capability. This explicit setting is required because Cloudflare
 enables Wrangler SSH by default.
 
+Keep `containers_pid_namespace` enabled independently of SSH. Murph's current
+compatibility date predates Cloudflare's default for isolated Container PID
+namespaces, and removing the flag would change process topology and widen
+`/proc` visibility rather than merely remove operator access.
+
 Use bounded structured runtime logs, Durable Object status, Container
 application and instance inventory, and the managed deploy smoke for production
 diagnosis. Do not add an operator shell or per-deploy SSH key escape hatch.

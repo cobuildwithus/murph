@@ -367,7 +367,10 @@ describe("hosted deploy automation helpers", () => {
         crons: ["*/5 * * * *"],
       },
     });
-    expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
+    expect(config.compatibility_flags).toEqual([
+      "nodejs_compat",
+      "containers_pid_namespace",
+    ]);
     expect(config.placement).toEqual({ mode: "smart" });
     expect(config.r2_buckets).toEqual([
       {
@@ -748,7 +751,10 @@ describe("hosted deploy automation helpers", () => {
     };
 
     expect(environment).not.toHaveProperty("containerSshKey");
-    expect(config.compatibility_flags).toEqual(["nodejs_compat"]);
+    expect(config.compatibility_flags).toEqual([
+      "nodejs_compat",
+      "containers_pid_namespace",
+    ]);
     expect(config.containers).toHaveLength(2);
     for (const container of config.containers) {
       expect(container.ssh).toEqual({ enabled: false });

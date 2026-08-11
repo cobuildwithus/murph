@@ -931,7 +931,9 @@ Last verified: 2026-08-10
 - Cloudflare runner Containers must explicitly render Wrangler SSH disabled for
   every class and must contain no authorized keys. Deploy automation must not
   accept an environment-controlled SSH key or compatibility switch that can
-  restore an operator shell. Use structured logs, Durable Object status,
+  restore an operator shell. Keep the independent Container PID-namespace
+  isolation flag enabled until the configured compatibility date provides the
+  same boundary by default. Use structured logs, Durable Object status,
   Container inventory, and managed deploy smoke as the diagnostic boundary.
 - The same protected-main Cloudflare workflow may attach the GitHub `Preview`
   Environment only for the explicit `preview` target. That environment must
