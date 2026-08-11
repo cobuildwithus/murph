@@ -77,7 +77,14 @@ The wrapper permits only file-backed `list` and `log`; it rejects direct
 publishing, enters the repository root itself, and rejects caller-supplied
 `--cwd` and `--mcp` modes. Local and Action execution use the exact Frog
 `1.1.0` dependency from Murph's reviewed manifest and committed lockfile. The
-Action-only workflow is the sole issue and reconciliation owner.
+Action-only workflow is the sole issue and reconciliation owner. It uses a
+short-lived token from a dedicated GitHub App installed only on this repository;
+the private key is available only through the main-branch-restricted
+`frog-reconciliation` environment, and the built-in `GITHUB_TOKEN` remains
+read-only. The App can write repository contents, issues, and pull requests,
+but it has no rule-bypass or repository-administration authority, and the
+workflow performs no approval or merge operation. Reconciliation remains
+reviewable and human-merged through the `frog/sync` pull request.
 
 ## Public-data boundary
 

@@ -23,16 +23,17 @@ permissions: {}
 jobs:
   friction-log:
     name: Friction Log
+    environment:
+      name: frog-reconciliation
+      deployment: false
     if: >-
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
       (github.event_name != 'issues' ||
-      github.event.issue.user.login == 'github-actions[bot]')
+      github.event.issue.user.login == vars.FROG_APP_BOT_LOGIN)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+      contents: read
     steps:
       - name: Clone repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -52,10 +53,21 @@ jobs:
       - name: Install reviewed dependency graph
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Mint Frog GitHub App token
+        id: frog-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.FROG_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
       - name: Report and reconcile frictions
         uses: wevm/frog/action@7b71c098683d49a573c279a2031a24205ea76841 # v1.1.0
         with:
           branch: frog/sync
           command: node_modules/.bin/frog
-          issue-author: github-actions[bot]
+          issue-author: ${{ vars.FROG_APP_BOT_LOGIN }}
           push: pull-request
+          token: ${{ steps.frog-app-token.outputs.token }}

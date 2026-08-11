@@ -271,23 +271,21 @@ fi
       "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
     );
     expect(workflow).toContain(
-      "github.event.issue.user.login == 'github-actions[bot]'",
+      "github.event.issue.user.login == vars.FROG_APP_BOT_LOGIN",
     );
+    expect(workflow).not.toContain("github-actions[bot]");
     expect(workflow).not.toMatch(/^\s+pull_request(?:_target)?:/mu);
+    expect(workflow).toContain(`environment:
+      name: frog-reconciliation
+      deployment: false`);
 
     const topLevelPermissions = workflow.indexOf("permissions: {}");
     const jobs = workflow.indexOf("jobs:");
     expect(topLevelPermissions).toBeGreaterThanOrEqual(0);
     expect(jobs).toBeGreaterThan(topLevelPermissions);
-    expect(
-      (workflow.match(/^\s+[a-z-]+: write$/gmu) ?? []).map((line) =>
-        line.trim()
-      ),
-    ).toEqual([
-      "contents: write",
-      "issues: write",
-      "pull-requests: write",
-    ]);
+    const jobPermissions = /^    permissions:\n(?<permissions>(?:      .+\n)+)/mu
+      .exec(workflow)?.groups?.permissions;
+    expect(jobPermissions).toBe("      contents: read\n");
     expect(workflow).not.toContain("id-token: write");
     expect(workflow).toContain("timeout-minutes: 10");
     expect(workflow).toContain("persist-credentials: false");
@@ -302,16 +300,37 @@ fi
       "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
       "fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
       "48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+      "bcd2ba49218906704ab6c1aa796996da409d3eb1",
       "7b71c098683d49a573c279a2031a24205ea76841",
     ]);
     for (const input of [
-      "branch: frog/sync",
-      "command: node_modules/.bin/frog",
-      "issue-author: github-actions[bot]",
-      "push: pull-request",
+      "client-id: ${{ vars.FROG_APP_CLIENT_ID }}",
+      "private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}",
+      "permission-contents: write",
+      "permission-issues: write",
+      "permission-pull-requests: write",
     ]) {
       expect(workflow).toContain(input);
     }
+    for (const input of [
+      "branch: frog/sync",
+      "command: node_modules/.bin/frog",
+      "issue-author: ${{ vars.FROG_APP_BOT_LOGIN }}",
+      "push: pull-request",
+      "token: ${{ steps.frog-app-token.outputs.token }}",
+    ]) {
+      expect(workflow).toContain(input);
+    }
+    expect(workflow).not.toMatch(/^\s+token:\s*\$\{\{\s*github\.token\s*\}\}/mu);
+    expect(workflow).not.toContain("secrets.GITHUB_TOKEN");
     expect(workflow).not.toMatch(/^\s+version:/mu);
+
+    const readme = readRepoFile(".agents", "friction-log", "README.md");
+    expect(readme).toContain("FROG_APP_CLIENT_ID");
+    expect(readme).toContain("FROG_APP_BOT_LOGIN");
+    expect(readme).toContain("FROG_APP_PRIVATE_KEY");
+    expect(readme).toContain("installed only on this repository");
+    expect(readme).toContain("environment is limited");
+    expect(readme).toMatch(/Missing credentials\s+fail the workflow closed/u);
   });
 });
