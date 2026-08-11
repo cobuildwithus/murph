@@ -34,6 +34,10 @@ const hostedMemberBillingStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/hosted-member-billing-store.ts",
   import.meta.url,
 ).href;
+const hostedStarterUsageGrantModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/starter-usage-grant.ts",
+  import.meta.url,
+).href;
 const hostedLinqLineStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/linq-line-store.ts",
   import.meta.url,
@@ -442,12 +446,23 @@ interface HostedMemberSeedModules {
   upsertHostedMemberIdentity: HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"];
   incrementHostedLinqInboundDailyState:
     HostedLinqDailyStateModule["incrementHostedLinqInboundDailyState"];
+  ensureHostedStarterUsageGrantTx:
+    HostedStarterUsageGrantModule["ensureHostedStarterUsageGrantTx"];
   projectHostedLinqLineForDeliveryReceiptTx:
     HostedLinqLineStoreModule["projectHostedLinqLineForDeliveryReceiptTx"];
   upsertHostedLinqLineForPhoneTx:
     HostedLinqLineStoreModule["upsertHostedLinqLineForPhoneTx"];
   writeHostedMemberStripeBillingRefTx:
     HostedMemberBillingStoreModule["writeHostedMemberStripeBillingRefTx"];
+}
+
+interface HostedStarterUsageGrantModule {
+  ensureHostedStarterUsageGrantTx(input: {
+    effectiveAt: Date;
+    memberId: string;
+    source: "web_onboarding";
+    tx: unknown;
+  }): Promise<unknown>;
 }
 
 interface HostedJunctionDeviceSyncReplaySeedModules {
@@ -490,7 +505,7 @@ export async function seedHostedActiveMember(
           tx,
           userId: input.memberId,
         });
-        await seedHostedMemberBillingRefTx({
+        await seedHostedMemberUsageCapacityTx({
           billingPlanCode: input.billingPlanCode,
           memberId: input.memberId,
           modules,
@@ -536,7 +551,7 @@ export async function seedHostedActiveLinqMember(
           tx,
           userId: input.memberId,
         });
-        await seedHostedMemberBillingRefTx({
+        await seedHostedMemberUsageCapacityTx({
           billingPlanCode: input.billingPlanCode,
           memberId: input.memberId,
           modules,
@@ -1266,6 +1281,7 @@ async function loadHostedMemberSeedModules(
     hostedMemberRoutingStoreModule,
     hostedMemberStoreModule,
     hostedMemberBillingStoreModule,
+    hostedStarterUsageGrantModule,
     hostedLinqDailyStateModule,
     hostedLinqLineStoreModule,
   ] = await Promise.all([
@@ -1276,6 +1292,7 @@ async function loadHostedMemberSeedModules(
     import(hostedMemberRoutingStoreModuleSpecifier),
     import(hostedMemberStoreModuleSpecifier),
     import(hostedMemberBillingStoreModuleSpecifier),
+    import(hostedStarterUsageGrantModuleSpecifier),
     import(hostedLinqDailyStateModuleSpecifier),
     import(hostedLinqLineStoreModuleSpecifier),
   ]);
@@ -1295,6 +1312,8 @@ async function loadHostedMemberSeedModules(
   const typedHostedMemberStoreModule = hostedMemberStoreModule as HostedMemberStoreModule;
   const typedHostedMemberBillingStoreModule =
     hostedMemberBillingStoreModule as HostedMemberBillingStoreModule;
+  const typedHostedStarterUsageGrantModule =
+    hostedStarterUsageGrantModule as HostedStarterUsageGrantModule;
   const typedHostedLinqDailyStateModule =
     hostedLinqDailyStateModule as HostedLinqDailyStateModule;
   const typedHostedLinqLineStoreModule =
@@ -1320,6 +1339,8 @@ async function loadHostedMemberSeedModules(
     upsertHostedMemberIdentity: typedHostedMemberIdentityStoreModule.upsertHostedMemberIdentity,
     incrementHostedLinqInboundDailyState:
       typedHostedLinqDailyStateModule.incrementHostedLinqInboundDailyState,
+    ensureHostedStarterUsageGrantTx:
+      typedHostedStarterUsageGrantModule.ensureHostedStarterUsageGrantTx,
     projectHostedLinqLineForDeliveryReceiptTx:
       typedHostedLinqLineStoreModule.projectHostedLinqLineForDeliveryReceiptTx,
     upsertHostedLinqLineForPhoneTx:
@@ -1380,7 +1401,7 @@ function readHostedJunctionReplayProviderAccountBlindIndexKey(
   return decodeHostedDeviceRoutingIndexKey(value);
 }
 
-async function seedHostedMemberBillingRefTx(input: {
+async function seedHostedMemberUsageCapacityTx(input: {
   billingPlanCode?: HostedMemberTestSeedBillingPlanCode;
   memberId: string;
   modules: HostedMemberSeedModules;
@@ -1389,6 +1410,12 @@ async function seedHostedMemberBillingRefTx(input: {
   tx: unknown;
 }): Promise<void> {
   if (!input.billingPlanCode) {
+    await input.modules.ensureHostedStarterUsageGrantTx({
+      effectiveAt: new Date(),
+      memberId: input.memberId,
+      source: "web_onboarding",
+      tx: input.tx,
+    });
     return;
   }
 

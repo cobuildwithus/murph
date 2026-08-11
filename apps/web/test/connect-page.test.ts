@@ -420,10 +420,12 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch/u);
+  assert.doesNotMatch(markup, /Get Murph for Android/u);
+  assert.doesNotMatch(markup, /play\.google\.com/u);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
-  assert.match(markup, />Download app<\/a>/u);
   for (const relayName of [
     "Zepp / Amazfit",
     "Xiaomi / Mi Fitness",
@@ -1231,7 +1233,7 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   const visibleSourceIds = new Set(
     listVisibleConnectSources().map((source) => source.id),
   );
-  const configuredSourceIds = new Set(
+  const configuredSourceIds = new Set<string>(
     (
       await import("@murphai/device-syncd/config")
     ).DEVICE_CONNECT_SOURCES.filter((source) =>
@@ -1241,6 +1243,12 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   assert.deepEqual(
     [...visibleSourceIds].sort(),
     [...configuredSourceIds].sort(),
+  );
+  assert.equal(visibleSourceIds.has("mobvoi-health"), false);
+  assert.equal(
+    listVisibleConnectSources({ MURPH_ANDROID_APP_ENABLED: "1" })
+      .some((source) => source.id === "mobvoi-health"),
+    true,
   );
 
   const logo = {
@@ -1502,6 +1510,46 @@ test("ConnectPage marks iOS Apple Health Junction SDK source connected from host
     sourceHeadingIndex(markup, "Apple Health") <
       sourceHeadingIndex(markup, "Garmin"),
   );
+});
+
+test("ConnectPage keeps Mobvoi statusless when Health Connect is active", async () => {
+  vi.stubEnv("MURPH_ANDROID_APP_ENABLED", "1");
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_health_connect",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Health Connect",
+            resourceCount: 4,
+            sourceProviderSlug: "health_connect",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import(
+    "../app/(dashboard)/connect/connect-page-content"
+  );
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(
+    markup,
+    /aria-label="Get Murph for Android for Mobvoi \/ TicWatch"/u,
+  );
+  assert.match(
+    markup,
+    /Sync through Mobvoi Health or Google Fit, then connect Health Connect in Murph\./u,
+  );
+  assert.match(markup, /src="\/brand-logos\/connect\/mobvoi-health\.png"/u);
+  assert.match(markup, /rounded-full/u);
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch (?:connected|not connected)/u);
 });
 
 test("ConnectPage shows source-scoped disconnects for multi-source Junction accounts", async () => {

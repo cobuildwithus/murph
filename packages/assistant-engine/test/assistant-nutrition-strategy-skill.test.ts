@@ -30,14 +30,51 @@ async function readSkills(): Promise<{
   nutrition: string
   foodJournal: string
   gut: string
+  bodyComposition: string
+  cardGoals: string
+  cardSafety: string
 }> {
   const root = resolveAssistantSkillsRoot()
-  const [nutrition, foodJournal, gut] = await Promise.all([
-    readFile(path.join(root, 'nutrition-strategy', 'SKILL.md'), 'utf8'),
-    readFile(path.join(root, 'food-journal', 'SKILL.md'), 'utf8'),
-    readFile(path.join(root, 'gut-digestion', 'SKILL.md'), 'utf8'),
-  ])
-  return { nutrition, foodJournal, gut }
+  const [
+    nutrition,
+    foodJournal,
+    gut,
+    bodyComposition,
+    cardGoals,
+    cardSafety,
+  ] =
+    await Promise.all([
+      readFile(path.join(root, 'nutrition-strategy', 'SKILL.md'), 'utf8'),
+      readFile(path.join(root, 'food-journal', 'SKILL.md'), 'utf8'),
+      readFile(path.join(root, 'gut-digestion', 'SKILL.md'), 'utf8'),
+      readFile(path.join(root, 'body-composition', 'SKILL.md'), 'utf8'),
+      readFile(
+        path.join(
+          root,
+          'nutrition-strategy',
+          'references',
+          'daily-nutrition-card-goals.md',
+        ),
+        'utf8',
+      ),
+      readFile(
+        path.join(
+          root,
+          'nutrition-strategy',
+          'references',
+          'daily-nutrition-card-safety.md',
+        ),
+        'utf8',
+      ),
+    ])
+  return {
+    nutrition,
+    foodJournal,
+    gut,
+    bodyComposition,
+    cardGoals,
+    cardSafety,
+  }
 }
 
 describe('assistant nutrition strategy skill', () => {
@@ -142,10 +179,416 @@ describe('assistant nutrition strategy skill', () => {
 
     expect(nutrition).toContain('It is not the owner for body-composition strategy, digestive symptom strategy, or clinician-managed therapeutic diets.')
     expect(nutrition).toContain('The lowest useful tracking burden wins')
-    expect(nutrition).toContain('Do not give unsolicited calorie, macro, or weight-loss estimates.')
+    expect(nutrition).toContain(
+      'Outside the one first-run managed closeout proposal below, do not give',
+    )
     expect(nutrition).toContain('Treat appetite cues as information')
     expect(nutrition).not.toContain('### Body composition')
     expect(nutrition).not.toContain('### GI comfort and performance')
+  })
+
+  it('grounds first-card goals in one researched, explanation-first owner', async () => {
+    const { bodyComposition, cardGoals, cardSafety, nutrition } =
+      await readSkills()
+    const compactGoals = cardGoals.replace(/\s+/gu, ' ').trim()
+    const compactSafety = cardSafety.replace(/\s+/gu, ' ').trim()
+
+    expect(nutrition).toContain('### Daily nutrition-card goals')
+    expect(nutrition).toContain('references/daily-nutrition-card-safety.md')
+    expect(nutrition).toContain('references/daily-nutrition-card-goals.md')
+    expect(nutrition.indexOf('references/daily-nutrition-card-safety.md'))
+      .toBeLessThan(
+        nutrition.indexOf('references/daily-nutrition-card-goals.md'),
+      )
+    expect(nutrition).toContain('the single canonical Goal proposal')
+    expect(nutrition).toContain('explanation-before-card')
+    expect(bodyComposition).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
+    )
+
+    for (const source of [
+      'https://www.ncbi.nlm.nih.gov/books/NBK591034/',
+      'https://www.ncbi.nlm.nih.gov/books/NBK208874/',
+      'https://link.springer.com/article/10.1186/s12970-017-0177-8',
+      'https://www.ncbi.nlm.nih.gov/books/NBK208887/',
+      'https://www.ncbi.nlm.nih.gov/books/NBK591042/',
+      'https://www.ncbi.nlm.nih.gov/books/NBK278991/',
+      'https://pubmed.ncbi.nlm.nih.gov/35233712/',
+      'https://pubmed.ncbi.nlm.nih.gov/31247944/',
+      'https://pubmed.ncbi.nlm.nih.gov/34623696/',
+    ]) {
+      expect(cardGoals).toContain(source)
+    }
+
+    expect(compactGoals).toContain('2023 National Academies EER equation')
+    expect(cardGoals).toContain('5-10% above maintenance')
+    expect(cardGoals).toContain('10-20% below maintenance')
+    expect(cardGoals).toContain('1.6 g/kg/day')
+    expect(compactGoals).toContain('1.4 g/kg/day')
+    expect(compactGoals).toContain('0.8 g/kg/day')
+    expect(cardGoals).toContain('10-35% protein AMDR')
+    expect(cardGoals).toContain('carbohydrate within 45-65%')
+    expect(compactGoals).toContain('Fat must remain within 20-35%')
+    expect(cardGoals).toContain('14 g per 1,000 kcal')
+    expect(cardGoals).toContain('Round the final target to the nearest 100 kcal')
+    expect(compactGoals).toContain(
+      'Round each derived missing macro to the nearest 5 g',
+    )
+    expect(compactGoals).toContain(
+      'If the adjusted or rounded target is below 1,200 kcal/day, stop',
+    )
+    expect(compactGoals).toContain(
+      'Hold those applicable, compatible explicit targets fixed.',
+    )
+    expect(compactGoals).toContain(
+      'With exactly one macro missing, assign that macro the remaining energy.',
+    )
+    expect(compactGoals).toContain(
+      'clamp it to the feasible value nearest that preference',
+    )
+    expect(compactGoals).toContain(
+      'choose the feasible fat share closest to 30%, or closest to 25% when running or another endurance demand is material',
+    )
+    expect(compactGoals).toContain(
+      '`4*protein + 4*carbohydrate + 9*fat` must be within 50 kcal of the calorie target.',
+    )
+    expect(compactGoals).toContain(
+      'If the residual is negative, the feasible interval is empty, rounding breaks an AMDR or the 50 kcal tolerance, or known inputs cannot prove one result, do not write or update the Goal.',
+    )
+    expect(compactGoals).toContain(
+      'explicit 2,000 kcal, 150 g protein, and 250 g carbohydrate',
+    )
+    expect(compactGoals).toContain(
+      'With the same calories and protein but explicit 300 g carbohydrate',
+    )
+
+    expect(compactGoals).toContain(
+      'Reuse at most one Goal with slug `murph-daily-nutrition-starting-targets`.',
+    )
+    expect(compactGoals).toContain(
+      'Use the target-authority and canonical-discovery rules below after every explicit interactive request to set nutrition targets or receive a numeric daily nutrition card, even when the visible context appears to contain a complete bundle.',
+    )
+    expect(compactGoals).toContain(
+      'run `vault-cli goal list --status active --limit 200 --format json`.',
+    )
+    expect(compactGoals).toContain(
+      'If it returns 200 records, the bounded read may be incomplete: fail closed with ordinary text, no Goal or measurement mutation, and no card.',
+    )
+    expect(compactGoals).toContain(
+      'run `vault-cli goal show <goal-id> --format json` for every returned active Goal whose list item reports a nonzero `data.metricTargetsCount`.',
+    )
+    expect(compactGoals).toContain(
+      'Do not select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix.',
+    )
+    expect(compactGoals).toContain(
+      'Keep this active-target authority read separate from the all-status lookup used below to reuse or honor Murph\'s managed paused or abandoned proposal',
+    )
+    expect(compactGoals).toContain(
+      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, separate 300-day `pregnancy-test` measurement read, and 300-day canonical test-event list plus required detail reads.',
+    )
+    expect(compactGoals).toContain(
+      'The context snapshot is not completeness proof for any of these owners.',
+    )
+    expect(compactGoals).toContain(
+      'If any required canonical read is saturated or unavailable, or the gate suppresses numeric goals, stop here with no Goal or measurement mutation',
+    )
+    expect(compactGoals).toContain(
+      'Separately run `vault-cli goal list --limit 200 --format json`',
+    )
+    expect(compactGoals).toContain(
+      'It authorizes only the one paused canonical proposal below so the provisional values do not live in transient assistant state; it does not accept, activate, or use those targets.',
+    )
+    expect(nutrition).toContain(
+      'The narrow paused daily-card proposal below has two initiation paths:',
+    )
+    expect(nutrition).toContain(
+      'an explicit numeric-card request, or the first eligible managed automatic meal',
+    )
+    expect(compactGoals).toContain(
+      'The owning automatic-meal-capture skill may also use this workflow for one first eligible managed closeout',
+    )
+    expect(compactGoals).toContain(
+      'a complete all-status Goal read proves that no Goal with slug `murph-daily-nutrition-starting-targets` exists in any status.',
+    )
+    expect(compactGoals).toContain(
+      'That scheduled exception may use only already-known responsible inputs, creates and explains one paused proposal in ordinary text, asks no question, attaches no card, and never activates the proposal.',
+    )
+    expect(compactGoals).toContain(
+      'Once the managed Goal exists in any status, later scheduled closeouts may use an accepted active bundle but never create, change, or automatically repeat a numeric proposal.',
+    )
+    expect(compactGoals).toContain('status `paused`')
+    expect(compactGoals).toContain(
+      'Before that first write, establish one proposal-effective local date.',
+    )
+    expect(compactGoals).toContain(
+      "Use the member's explicitly requested effective date when present; otherwise use the selected card `localDate` for a dated card request, including a historical date; otherwise use the engine-supplied current vault-local date for an undated target or card request.",
+    )
+    expect(compactGoals).toContain(
+      'Include `window: { startAt: <proposal-effective-localDate> }` in the initial `goal import-json` payload.',
+    )
+    expect(compactGoals).toContain(
+      "Do not rely on the Goal owner's write-day default or substitute a wall-clock date.",
+    )
+    expect(compactGoals).toContain('vault-cli goal import-json --input -')
+    expect(compactGoals).toContain('kind: "metric"')
+    expect(compactGoals).toContain(
+      "Supplying `metricTargets` replaces that Goal's stored array",
+    )
+    expect(compactGoals).toContain(
+      'every edit or overlap removal must therefore send the complete intended post-update array for the managed Goal.',
+    )
+    expect(compactGoals).toContain(
+      'Preserve every unchanged target and stable target id, and omit only a metric deliberately removed because an explicit owner now exists.',
+    )
+    expect(compactGoals).toContain(
+      'Read the Goal back and verify the complete retained set and window',
+    )
+    expect(compactGoals).toContain(
+      'Preserve the existing Goal window on every later value, overlap-removal, status, or card-request turn; omit `window` from those patches and never silently rebase it to another requested card date.',
+    )
+    expect(compactGoals).toContain(
+      "Change the window only when the member explicitly changes the proposal's effective date, then explain that revision and verify the complete record.",
+    )
+    expect(compactGoals).toContain(
+      'Any write that adds or changes a derived managed value must include `status: "paused"` atomically, even when the same Goal was active',
+    )
+    expect(compactGoals).toContain(
+      'Removing an overlapping metric without adding or changing a derived value may leave the managed Goal active',
+    )
+    expect(compactGoals).toContain(
+      'A turn that creates or changes the paused proposal must be ordinary text, never a card.',
+    )
+    expect(compactGoals).toContain(
+      'Briefly name all five effective values, which facts and labeled assumptions materially drove them, and why calories, protein, carbohydrate, fat, and fiber landed there.',
+    )
+    expect(compactGoals).toContain(
+      'State the proposal-effective date, especially when it is historical or future.',
+    )
+    expect(compactGoals).toContain(
+      'Call the values provisional and invite correction or acceptance.',
+    )
+    expect(compactGoals).toContain(
+      'vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active',
+    )
+    expect(compactGoals).toContain('Only after that gate passes, re-read target authority')
+    expect(compactGoals.indexOf('Only after that gate passes, re-read target authority')).toBeLessThan(
+      compactGoals.indexOf(
+        'vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active',
+      ),
+    )
+    expect(compactGoals.indexOf('first re-run the complete current-context gate')).toBeLessThan(
+      compactGoals.indexOf(
+        'vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active',
+      ),
+    )
+    expect(compactGoals).toContain(
+      'its next unambiguous acceptance may be the first later eligible response',
+    )
+    expect(compactGoals).toContain(
+      'after the complete pre-activation safety gate in step 5 passes, activate and read back the Goal, reuse those identical current-turn safety reads, re-read same-date canonical meal totals, and attach exactly one card in that acceptance response',
+    )
+    expect(compactGoals).toContain(
+      'When the member accepts the proposal, first re-run the complete current-context gate in `daily-nutrition-card-safety.md`, including its bounded canonical memory, active-condition, active-regimen, procedure-event, encounter-diagnosis, body-measurement, `pregnancy-test` measurement, and canonical test-event reads.',
+    )
+    expect(compactGoals).toContain(
+      'leave the proposal paused and unchanged, surface no target values, use ordinary non-numeric text, and attach no card.',
+    )
+    expect(compactGoals).toContain(
+      'A target-setting-only request, correction, decline, ambiguous acceptance, or compound request remains ordinary text with no card.',
+    )
+    expect(compactGoals).toContain(
+      'A member- or clinician-chosen active target always wins for its metric.',
+    )
+    expect(compactGoals).toContain(
+      'Comparator compatibility is part of target authority.',
+    )
+    expect(compactGoals).toContain(
+      'This point-target card and its managed derivation accept a selected-value target only when its comparator is `between` and its numeric `value` and `highValue` are identical.',
+    )
+    expect(compactGoals).toContain(
+      'A one-sided `<`, `<=`, `>`, or `>=` threshold, a non-identical `between` range, or any other target shape remains authoritative canonical state but is incompatible with this workflow.',
+    )
+    expect(compactGoals).toContain(
+      'do not expose, compare, or copy it into the card; use it for the 1,200 kcal boundary, residual-energy, or fiber calculations; or create, replace, or remove managed targets around it.',
+    )
+    expect(compactGoals).toContain(
+      'Use ordinary text or one narrow interactive question without mutation; a scheduled closeout asks nothing and sends no card.',
+    )
+    expect(compactGoals).toContain(
+      'Unit compatibility is part of target authority.',
+    )
+    expect(compactGoals).toContain(
+      'This fixed-unit workflow accepts only `dietary-calories` in `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`.',
+    )
+    expect(compactGoals).toContain(
+      'its raw value must not be compared with the 1,200 kcal boundary, copied into a card, or used by the residual-energy or fiber calculations.',
+    )
+    expect(compactGoals).toContain(
+      'perform no managed Goal mutation, use ordinary text or one narrow interactive question, and let a scheduled closeout use ordinary text without a question or card.',
+    )
+    expect(compactGoals).toContain(
+      "Run this only after the calorie target and every explicit protein, carbohydrate, and fat target are proven applicable to the proposal's card date and exact points with comparator `between` and identical endpoints, then prove the calorie target is in `kcal` and each macro target is in `g`.",
+    )
+    expect(compactGoals).toContain('Effective dates are also part of target authority.')
+    expect(compactGoals).toContain(
+      'Resolve them against the exact card `localDate`: the selected capture date for a scheduled closeout, which may be a historical catch-up date rather than the occurrence date, or the explicitly requested date.',
+    )
+    expect(compactGoals).toContain(
+      'Never use wall-clock today as a substitute.',
+    )
+    expect(compactGoals).toContain(
+      '`window.startAt <= localDate` and its optional `window.targetAt` is absent or `localDate <= window.targetAt`.',
+    )
+    expect(compactGoals).toContain(
+      'An out-of-window target remains canonical authority for its own period, but it is not a current owner or conflict',
+    )
+    expect(compactGoals).toContain(
+      'If one complete applicable bundle does not remain, use ordinary text or one narrow interactive question with no mutation; a scheduled closeout asks nothing and sends no card.',
+    )
+    expect(compactGoals).toContain(
+      "send the managed Goal's complete retained array without that overlapping metric; never edit the explicit Goal.",
+    )
+    expect(compactGoals).toContain(
+      'If the member declines, update the same Goal to `abandoned`.',
+    )
+    expect(compactGoals).toContain(
+      'On an interactive card request, explain an existing paused proposal again',
+    )
+    expect(compactGoals).toContain(
+      'an abandoned or completed record is an opt-out and must not be recreated automatically.',
+    )
+    expect(compactSafety).toContain(
+      'before activating a paused nutrition proposal, and before every `daily_nutrition` attachment, including when five accepted active goals already exist and during a scheduled closeout.',
+    )
+    expect(compactSafety).toContain(
+      'run `vault-cli memory show --format json` and inspect the complete Identity, Preferences, Instructions, and Context memory document',
+    )
+    expect(compactSafety).toContain(
+      'A clearly current saved age under 18, or a clearly current saved intuitive-eating or number-sensitive preference, suppresses numeric setup, proposal presentation, every Goal write or activation, and every card.',
+    )
+    expect(compactSafety).toContain(
+      'Missing, stale, ambiguous, or conflicting age is unavailable evidence, not a universal block.',
+    )
+    expect(compactSafety).toContain(
+      'If the memory read fails or is unreadable, fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card.',
+    )
+    expect(compactSafety).toContain(
+      'Before deriving, saving, or surfacing numeric nutrition goals and before every goal-aware card, run both `vault-cli condition list --status active --limit 200 --format json` and `vault-cli regimen list --status active --limit 200 --format json`.',
+    )
+    expect(compactSafety).toContain(
+      'If either list fails or returns exactly 200 records, canonical safety discovery may be incomplete: fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card.',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli condition show <condition-id> --format json` for every returned active condition and `vault-cli regimen show <regimen-id> --format json` for every returned active regimen.',
+    )
+    expect(compactSafety).toContain(
+      'If any required detail read fails or is unreadable, use the same fail-closed behavior.',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli event list --kind procedure --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      'when either field is missing or visibly truncated, run `vault-cli event show <event-id> --format json` for that item before deciding.',
+    )
+    expect(compactSafety).toContain(
+      'An explicit `completed` status together with an explicit bariatric procedure',
+    )
+    expect(compactSafety).toContain(
+      '`ordered`, `planned`, or `cancelled` status, an unknown or ambiguous status, and an unrelated procedure are not proof of post-bariatric care and do not suppress by themselves.',
+    )
+    expect(compactSafety).toContain(
+      'If the list fails, is unreadable, or returns exactly 200 records, discovery may be incomplete: fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card.',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli event list --kind encounter --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      'for every item whose list data reports a nonzero `diagnosesCount`, run `vault-cli event show <event-id> --format json` and inspect every complete diagnosis entry',
+    )
+    expect(compactSafety).toContain(
+      'A safety-relevant diagnosis with explicit `active` status and `documented` or `suspected` certainty is current suppressing evidence.',
+    )
+    expect(compactSafety).toContain(
+      '`inactive`, `resolved`, `history`, or `rule_out` status, `ruled_out` certainty, and an unrelated diagnosis do not prove a current exclusion by themselves.',
+    )
+    expect(compactSafety).toContain(
+      'If a safety-relevant diagnosis has missing or `unknown` status or certainty and its current meaning cannot be resolved safely, fail closed.',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      'Otherwise run `vault-cli event show <event-id> --format json` for every returned test',
+    )
+    expect(compactSafety).toContain(
+      'Treat a test event as explicit positive pregnancy evidence only when all of these are true: its result status is not `pending`;',
+    )
+    expect(compactSafety).toContain(
+      'Any explicit positive in the window suppresses numeric setup, proposal presentation, every Goal write or activation, and every card.',
+    )
+    expect(compactSafety).toContain(
+      'Canonical `resultStatus` classifies the result rather than the source report\'s lifecycle, so `unknown` does not prove that a test is unfinished and may qualify only when the same strict test identity and explicit textual result rules pass.',
+    )
+    expect(compactSafety).toContain(
+      '`pending` is unfinished and never qualifies, even if preliminary text says positive.',
+    )
+    expect(compactSafety).toContain(
+      'Do not infer pregnancy from a numeric hCG value, reference range, `abnormal` or `unknown` status/flag alone, test title, or non-result note alone.',
+    )
+    expect(compactSafety).toContain(
+      'It takes precedence over negative evidence in the same window, including a later negative from either pregnancy-evidence owner',
+    )
+    expect(compactSafety).toContain(
+      'Missing, negative, stale, indeterminate, malformed, or qualifier/value-conflicting rows are unavailable evidence, not proof that the member is not pregnant and not a universal block.',
+    )
+    expect(compactSafety).toContain(
+      'If this read fails, is unreadable, or returns exactly 200 records, fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card',
+    )
+    expect(compactSafety).toContain(
+      'either a direct `bmi` row whose unit is canonically equivalent to `kg/m^2` (including `kg/m2` and `kg_m2`), or height and weight rows that share the same `eventId`',
+    )
+    expect(compactSafety).toContain(
+      'Do not combine height and weight from different events or dates',
+    )
+    expect(compactSafety).toContain(
+      'A usable adult BMI below 18.5 suppresses numeric goals, every Goal write or activation, and the card.',
+    )
+    expect(compactSafety).toContain(
+      'If the read fails, or a 200-record result is saturated without resolving whether usable BMI evidence is present, fail closed for numeric setup, proposal presentation, Goal mutation, activation, and card presentation.',
+    )
+    expect(compactSafety).toContain(
+      'Leave an existing paused proposal unchanged and use ordinary non-numeric text.',
+    )
+    expect(compactSafety).toContain(
+      'A one-sided threshold, non-identical range, or calorie target in any other unit makes the point-target card bundle incompatible.',
+    )
+    expect(compactSafety).toContain(
+      'Never compare a threshold bound or incompatible raw number with 1,200, copy it as calories, convert it ad hoc, or use it for macro derivation.',
+    )
+    expect(compactSafety).toContain(
+      'a calorie threshold whose satisfying range includes intake below 1,200 cannot authorize numeric self-directed card feedback.',
+    )
+    expect(compactSafety).toContain(
+      'first require that the containing Goal window and target-level dates include the exact card `localDate`; an out-of-window target must neither trigger nor satisfy this gate.',
+    )
+    expect(compactSafety).toContain(
+      'A scheduled occurrence never gains authority to ask safety-profile questions, solicit target inputs, activate a proposal, or attach a card from provisional targets.',
+    )
+    expect(compactSafety).toContain(
+      'The owning automatic-meal-capture skill has one narrower exception:',
+    )
+    expect(compactGoals).toContain(
+      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, separate 300-day `pregnancy-test` measurement read, and 300-day canonical test-event list plus required detail reads.',
+    )
+    expect(compactGoals).toContain(
+      'including its bounded canonical memory, active-condition, active-regimen, procedure-event, encounter-diagnosis, body-measurement, `pregnancy-test` measurement, and canonical test-event reads.',
+    )
   })
 
   it('keeps performance numbers bounded and qualified', async () => {
@@ -163,9 +606,38 @@ describe('assistant nutrition strategy skill', () => {
   })
 
   it('protects under-fueled, eating-disorder-sensitive, and acute contexts', async () => {
-    const { nutrition } = await readSkills()
+    const { cardSafety, nutrition } = await readSkills()
 
     expect(nutrition).toContain('can occur at any body size')
+    expect(cardSafety).toContain(
+      'Do not derive, save, or surface numeric goals',
+    )
+    const compactSafety = cardSafety.replace(/\s+/gu, ' ').trim()
+
+    expect(compactSafety).toContain('under-fueling or RED-S concern')
+    expect(compactSafety).toContain(
+      'known underweight (including adult BMI below 18.5 when current height and weight are available), frailty, or malnutrition risk',
+    )
+    expect(compactSafety).toContain(
+      'Never ask a scheduled occurrence for these measurements and never mutate measurement records during this check.',
+    )
+    expect(compactSafety).toContain(
+      "Treat a calorie target below 1,200 kcal/day as outside this product's self-directed numeric-card boundary.",
+    )
+    expect(compactSafety).toContain(
+      'This applies both to an active canonical target at card time and to an adjusted or rounded derived result before any Goal write.',
+    )
+    expect(compactSafety).toContain(
+      'its selected-value comparator must be `between` with identical numeric `value` and `highValue`.',
+    )
+    expect(compactSafety).toContain(
+      'Do not raise a compatible low point target to the boundary and continue',
+    )
+    expect(cardSafety).toContain('anyone under 18')
+    expect(compactSafety).toContain('pregnancy or breastfeeding')
+    expect(compactSafety).toContain('glucose-lowering medication')
+    expect(compactSafety).toContain('kidney disease')
+    expect(compactSafety).toContain('another clinician-managed nutrition context')
     expect(nutrition).toContain('Do not calculate energy availability or diagnose RED-S')
     expect(nutrition).toContain('little or nothing for about five days')
     expect(nutrition).toContain('refeeding can require medical monitoring')

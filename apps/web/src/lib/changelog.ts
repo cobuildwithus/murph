@@ -65,10 +65,26 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns and reminders that keep their local time",
+    title: "Starter access, patterns, reminders, cards, voices, and web search",
     summary:
-      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
     items: [
+      {
+        id: "non-expiring-starter-access",
+        kind: "feature",
+        priority: 5,
+        title: "Start with usage that does not expire",
+        summary:
+          "Eligible new members receive a Starter usage balance that remains available until it is used, with remaining usage and paid plan choices visible in Settings.",
+        details:
+          "Eligible legacy trial value carries into Starter. When the balance is exhausted, Murph pauses AI work without deleting account state and Settings offers eligible paid plans; usage top-ups remain available only to active paid-plan owners.",
+        relevanceTags: ["starter", "usage", "billing", "settings"],
+        sourcePullRequests: [1464],
+        tryIt: {
+          href: "/settings#subscription",
+          label: "View Starter usage",
+        },
+      },
       {
         id: "personal-patterns",
         kind: "feature",
@@ -106,6 +122,59 @@ const RAW_CHANGELOG_EDITIONS = [
           label: "Schedule a local-time reminder",
           prompt: "Remind me every day at 9 PM Central to wind down.",
         },
+      },
+      {
+        id: "voice-memos-use-your-voice",
+        kind: "improvement",
+        priority: 4,
+        title: "Voice memos keep your chosen voice",
+        summary:
+          "Ordinary voice memos now use the voice already selected for your Murph instead of switching voices on their own.",
+        details:
+          "A different named voice is used only when you explicitly ask to test it or request that voice for one memo. Saving a named voice and asking to hear it immediately still works as a one-time preview.",
+        relevanceTags: ["voice", "messaging", "personalization", "reliability"],
+        sourcePullRequests: [1587],
+      },
+      {
+        id: "web-search-restored",
+        kind: "improvement",
+        priority: 5,
+        title: "Managed OpenAI web search works again",
+        summary:
+          "When Murph uses managed OpenAI, its built-in web search can reach current information again instead of stopping with a forbidden-request error.",
+        details:
+          "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
+        relevanceTags: ["assistant", "search", "research", "reliability"],
+        sourcePullRequests: [1583],
+      },
+      {
+        id: "appointment-reminders-by-default",
+        kind: "improvement",
+        priority: 4,
+        title: "Confirmed appointments come with a reminder",
+        summary:
+          "When a future care appointment is confirmed in a private conversation, Murph now creates one useful reminder by default unless you opt out.",
+        details:
+          "Morning appointments use the prior evening, later appointments use the same morning, and Murph keeps the same reminder up to date when an appointment is rescheduled or canceled.",
+        relevanceTags: ["appointments", "reminders", "automations", "care"],
+        sourcePullRequests: [1586],
+        tryIt: {
+          label: "Tell Murph about an appointment",
+          prompt:
+            "I have a confirmed dentist appointment next Thursday at 2 PM.",
+        },
+      },
+      {
+        id: "workout-card-status-rendering",
+        kind: "improvement",
+        priority: 3,
+        title: "Completed workout rows keep their checkmark",
+        summary:
+          "Completed exercises now keep a clear checkmark in Messages workout cards, including their static previews.",
+        details:
+          "The status mark is part of the card image itself, so it stays visible anywhere the static preview is shown.",
+        relevanceTags: ["workouts", "imessage", "cards", "reliability"],
+        sourcePullRequests: [1599],
       },
     ],
   },

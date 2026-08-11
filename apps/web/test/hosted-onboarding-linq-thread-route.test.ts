@@ -2597,7 +2597,7 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
   });
 
-  it("rejects an active-status owner whose trial has expired before creating a thread container", async () => {
+  it("keeps an active owner eligible when a retained trial timestamp has passed", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
@@ -2623,23 +2623,32 @@ describe("Linq explicit external-thread routing", () => {
       threadContainer: null,
     });
     assertThreadContainerRouteTransactionClient(prisma);
+    const accountLookupKey = requireTestPhoneLookupKey("+15550000000");
+    const preparedCreation = await prepareThreadContainerCreationForTest({
+      accountLookupKey,
+      channel: "linq",
+      containerMemberId: "member_thread_container_expired_trial",
+      prisma,
+      threadId: "chat_expired_trial_123",
+    });
 
     await expect(
       ensureHostedThreadContainerRouteTx({
-        accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        accountLookupKey,
         channel: "linq",
         occurredAt: new Date("2026-06-24T12:00:00.000Z"),
         ownerMemberId: "member_owner_123",
+        preparedCreation,
         prisma,
         threadId: "chat_expired_trial_123",
       }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED",
+    ).resolves.toMatchObject({
+      created: true,
     });
 
-    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+    expect(hostedMemberStore.createHostedMember).toHaveBeenCalledOnce();
+    expect(prisma.hostedThreadContainer.create).toHaveBeenCalledOnce();
+    expect(prisma.hostedThreadRoute.create).toHaveBeenCalledOnce();
   });
 
   it("rejects thread containers as owners of nested thread containers", async () => {
@@ -3790,7 +3799,7 @@ describe("Linq explicit external-thread routing", () => {
     });
   });
 
-  it("rejects routed traffic when an active-status owner trial is expired at processing time", async () => {
+  it("routes traffic when only a retained trial timestamp has expired", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
       routeOwnerTrialEndsAt: new Date("2001-01-08T00:00:00.000Z"),
@@ -3804,11 +3813,11 @@ describe("Linq explicit external-thread routing", () => {
     });
 
     expect(plan.response).toMatchObject({
-      ignored: true,
+      ignored: false,
       ok: true,
-      reason: "thread-container-inactive",
+      reason: "wake-appended-thread-route",
     });
-    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
   });
 
   it("routes a bound Linq group thread even when the delivering line differs", async () => {
@@ -7984,7 +7993,7 @@ describe("Linq group chat auto-provision", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("does not provision a delayed group message sent during a trial that has expired by processing time", async () => {
+  it("does not let a retained trial timestamp expire a delayed group message", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     mockSenderLookup(senderCore);
     mockSuccessfulGroupProvision({ prisma, senderCore });
@@ -8010,17 +8019,14 @@ describe("Linq group chat auto-provision", () => {
       prisma: prisma as never,
     });
 
-    // The expired trial revokes access, so the delayed message can only earn a
-    // setup link — never a container, route, or wake.
     expect(plan.response).toMatchObject({
       ok: true,
-      reason: "sent-group-setup",
+      reason: "wake-appended-thread-route",
     });
     expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
-      .toEqual(["group_setup"]);
-    expect(memberRoutingStore.readHostedMemberRoutingState).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
-    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      .not.toContain("group_setup");
+    expect(prisma.hostedThreadContainer.create).toHaveBeenCalledOnce();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
   });
 
   it("ignores group messages from suspended members without answering", async () => {

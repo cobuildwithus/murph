@@ -26,6 +26,14 @@ Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
 
+For readiness, the exact PR head is the commit that contains the PR-authored
+change; it does not need to be repeatedly merged with a moving base. Keep green
+required CI on that head and prove current-base mergeability with
+`git merge-tree --write-tree`. If strict up-to-date checks apply, satisfy them
+only at the authorized merge boundary through the merge queue when available
+or one normal base update. Let the repository gate the resulting head; do not
+restart broad CI repeatedly during preparation just because the base advances.
+
 Verification evidence belongs to the exact file state it checked. After the
 last code, test, or config edit, rerun every focused command whose inputs or
 compiled graph changed; in particular, any later TypeScript edit invalidates an
@@ -78,7 +86,8 @@ pnpm --dir packages/hosted-local-harness exec vitest run \
   test/stripe-billing-live-config.test.ts \
   test/dev-hosted-local/stack.test.ts
 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
-  apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts \
+  apps/web/test/hosted-onboarding-billing-checkout-route.test.ts \
+  apps/web/test/hosted-starter-usage-migration.test.ts \
   apps/web/test/hosted-billing-live-support.test.ts
 pnpm hosted-billing:ci-guard
 ```
@@ -94,54 +103,73 @@ pnpm hosted-local e2e stripe-billing-browser-matrix
 pnpm hosted-billing:live:cleanup
 ```
 
-Never run PR-controlled code with writable Stripe authority and never use
-`pull_request_target` to work around GitHub's secret boundary. The live lane
-runs only on pushes to `main` (`github.event_name == 'push'`), so no pull
-request event of any origin can start the secret-bearing job; absent or
-malformed sandbox configuration fails closed on those `main` runs. All pull
-requests run only the credential-free hermetic lane. The always-present
-`Required hosted Stripe billing boundary` job checks the event-applicable
-result so branch protection has one stable required context. The live job exposes the
-existing pinned `@openai/codex` workspace binary for
-hosted-local model-catalog preparation without adding another CLI dependency.
-Keep the key on preflight/matrix/cleanup steps only; within the scenario it
-reaches the web Stripe client and harness-owned
-`stripe listen` child, not the browser, Cloudflare, Temporal, setup, or runner
-children. Do not pass it as a CLI argument or write it to a repository file.
+Never run PR-controlled fork code with writable Stripe authority and never use
+`pull_request_target` to work around GitHub's secret boundary. The Actions
+classifier admits only same-repository heads (excluding dependency-bot heads)
+whose pull-request author and triggering actor are both non-Dependabot. Every
+eligible trusted head enters the live lane; absent or malformed sandbox
+configuration fails closed. Fork and dependency-bot pull requests run only the
+credential-free hermetic lane. The always-present
+`Required hosted Stripe billing boundary` job checks the applicable result so
+branch protection has one stable required context. The live job exposes the
+existing pinned `@openai/codex` workspace binary for hosted-local model-catalog
+preparation without adding another CLI dependency. Keep the key on
+preflight/matrix/cleanup steps only; within the scenario it reaches the web
+Stripe client and harness-owned `stripe listen` child, not the browser,
+Cloudflare, Temporal, setup, or runner children. Do not pass it as a CLI
+argument or write it to a repository file.
 
-Use stable pre-provisioned test prices and an active default Portal configuration
-with plan updates enabled that ends Trial upgrades and immediately invoices the
-resulting paid plan. The browser journey, rather than a cached configuration
-projection, proves that Stripe exposes the dedicated Pulse and Edge products.
-Test Clocks are reserved for the paused-Trial case.
-Synchronize on bounded Stripe object/event
-state and Murph's PostgreSQL projection; do not replace those assertions with a
-fixed sleep. Diagnostics may state only opaque run correlation, object
-type/status, and browser step/surface/status. Do not capture or upload
-screenshots, traces, raw webhook payloads, URLs, identities, or full Playwright
-reports. Cleanup must verify exact run ownership, remain idempotent, avoid shared
-catalog objects, and run even after a scenario failure. Use the standalone
-cleanup command with the same run id after an interrupted process.
+Use stable pre-provisioned test prices and an active default Portal
+configuration with plan updates enabled and immediate invoicing. The browser
+journey, rather than a cached configuration projection, proves that Stripe
+exposes the dedicated Pulse and Edge products. The matrix covers Starter
+activation followed by ordinary paid Pulse Checkout, paid Pulse to Edge through
+the Portal boundary, Edge to Pulse at renewal, Family Checkout plus invite
+activation, and paid individual-to-Family conversion in place. Synchronize on
+bounded Stripe object/event state and Murph's PostgreSQL projection; do not
+replace those assertions with a fixed sleep. Diagnostics may state only opaque
+run correlation, object type/status, and browser step/surface/status. Do not
+capture or upload screenshots, traces, raw webhook payloads, URLs, identities,
+or full Playwright reports. Cleanup must verify exact run ownership, remain
+idempotent, avoid shared catalog objects, and run even after a scenario
+failure. Use the standalone cleanup command with the same run id after an
+interrupted process.
 
-The paused-Trial regression deliberately makes a real unsupported Resume control
-call before the UI journey, then requires the corrected production sequence:
-Subscription Update carries the inherited Customer payment method while paused,
-Subscription Resume carries only supported resume fields, the browser observes
-the resulting open, positive-balance hosted invoice even before Stripe records
-an attempted charge, that exact test invoice is paid, and webhook
-reconciliation opens Murph paid entitlement. The Family Checkout scenario starts from an
-authenticated lapsed individual without an active subscription, while a separate
-browser case proves that an already-paid individual converts to Family through an
-in-place update of the same subscription. Edge to Pulse is verified as a renewal
-schedule, never an immediate downgrade. Stripe's
-official Subscription Update and Resume references are the authority for that
-request-shape boundary; the trial, Test Clock, Portal deep-link, webhook, and
-test-mode references linked from `packages/hosted-local-harness/README.md` own
-the remaining external-provider assumptions. Stripe's immutable paid
-invoices/events and terminal records remain as bounded audit history in the
-dedicated sandbox; cleanup removes only mutable resources whose exact run
-ownership was proved. Repository files contain only the protected Environment
-contract names; the sandbox values remain external to the checkout.
+Stripe Checkout completion uses the official CLI fixture. Paid plan changes use
+the supported Subscription Update and Schedule APIs, and provider events traverse
+the harness-owned webhook listener before Murph's projection is asserted. The
+Family Checkout case starts from an authenticated lapsed individual without an
+active subscription, while a separate browser case proves that an already-paid
+individual converts to Family through an in-place update of the same
+subscription. Edge to Pulse is verified as a renewal schedule, never an
+immediate downgrade. Stripe's immutable paid invoices, events, and terminal
+records remain as bounded audit history in the dedicated sandbox; cleanup
+removes only mutable resources whose exact run ownership was proved. Repository
+files contain only the protected Environment contract names; sandbox values
+remain external to the checkout.
+
+## Live Junction WHOOP Canary Verification
+
+The public live wearable canary is a protected-main external-provider proof,
+not a pull-request check. Its focused hermetic owner proof is:
+
+```bash
+pnpm --dir packages/hosted-local-harness exec vitest run \
+  --config vitest.config.ts --no-coverage \
+  test/junction-wearable-canary-workflow.test.ts
+```
+
+The workflow must expose and smoke-check the exact workspace Codex CLI installed
+by the frozen root dependency graph before hosted-local model-catalog
+preparation. That workspace pin currently matches the independently owned
+`Dockerfile.cloudflare-hosted-runner-base` pin; both owners remain visible in
+the guarded review context, but no executable cross-owner equality guard links
+them. Keep that setup step free of Environment secrets; only the final
+browser-canary step may receive Junction sandbox authority and the dedicated
+WHOOP login. A real sign-in proof remains available only after the exact
+workflow reaches protected `main`, where non-canceling concurrency serializes
+the dedicated provider account. Do not weaken the protected-branch gate or
+expose live credentials to a pull request to obtain earlier proof.
 
 ## Verification Execution Location
 

@@ -231,7 +231,7 @@ export function MemberEmailClient() {
                   onChange={(event) => updateDraft(() => {
                     setSubject(event.target.value);
                   })}
-                  placeholder="Your Murph trial is ready again"
+                  placeholder="Your Murph access is ready again"
                   required
                   value={subject}
                 />
@@ -263,7 +263,7 @@ export function MemberEmailClient() {
                   onChange={(event) => updateDraft(() => {
                     setText(event.target.value);
                   })}
-                  placeholder={"Hey,\n\nI added more trial time to your Murph account..."}
+                  placeholder={"Hey,\n\nI added more usage to your Murph account..."}
                   required
                   value={text}
                 />

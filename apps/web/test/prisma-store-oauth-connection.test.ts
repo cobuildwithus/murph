@@ -60,7 +60,10 @@ vi.mock("@/src/lib/device-sync/prisma-store/dirty-connections", async () => {
 });
 
 import { buildHostedProviderAccountBlindIndex } from "@/src/lib/device-sync/routing-index";
-import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import {
+  PrismaDeviceSyncControlPlaneStore,
+  type HostedConnectionRecord,
+} from "@/src/lib/device-sync/prisma-store";
 
 type MutableOAuthSession = {
   state: string;
@@ -1705,39 +1708,90 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(serialized).not.toContain("refresh_token=secret");
   });
 
-  it("persists webhook receipt timestamps in durable Prisma state", async () => {
-    const connection = createConnection({
-      id: "dsc_123",
-      provider: "oura",
-      userId: "user-123",
-    });
-    const updateConnection = vi.fn(async () => undefined);
-
+  it("persists webhook receipt timestamps with one set-based write", async () => {
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
         deviceConnection: {
-          findUnique: async ({ where }: { where: { id?: string } | { provider_providerAccountBlindIndex?: { provider: string; providerAccountBlindIndex: string } } }) => {
-            if ("id" in where && where.id === connection.id) {
-              return cloneConnection(connection);
-            }
-
-            return null;
-          },
-          update: updateConnection,
+          updateMany,
         },
       } as never,
     });
 
     await store.markWebhookReceived("dsc_123", "2026-03-25T06:00:00.000Z");
+    await expect(
+      store.markWebhookReceived("dsc_missing", "2026-03-25T06:01:00.000Z"),
+    ).resolves.toBeUndefined();
 
-    expect(updateConnection).toHaveBeenCalledWith({
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
       where: {
         id: "dsc_123",
+        OR: [
+          { lastWebhookAt: null },
+          { lastWebhookAt: { lt: new Date("2026-03-25T06:00:00.000Z") } },
+        ],
       },
       data: {
         lastWebhookAt: new Date("2026-03-25T06:00:00.000Z"),
       },
     });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: "dsc_missing",
+        OR: [
+          { lastWebhookAt: null },
+          { lastWebhookAt: { lt: new Date("2026-03-25T06:01:00.000Z") } },
+        ],
+      },
+      data: {
+        lastWebhookAt: new Date("2026-03-25T06:01:00.000Z"),
+      },
+    });
+  });
+
+  it("materializes a preloaded connection row without another connection query", async () => {
+    const findFirst = vi.fn();
+    const findUnique = vi.fn();
+    const connection = {
+      ...createConnection({
+        accessTokenEncrypted: "enc:access-token",
+        accessTokenExpiresAt: new Date("2026-03-25T06:30:00.000Z"),
+        externalAccountIdEncrypted: "enc:acct_456",
+        keyVersion: "v1",
+        refreshTokenEncrypted: "enc:refresh-token",
+        status: "active",
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        deviceConnection: {
+          findFirst,
+          findUnique,
+        },
+      } as never,
+    });
+
+    const stored = await store.materializeStoredConnectionAccount(connection);
+    const durable = await store.materializeDurableConnectionRecord(connection);
+
+    expect(stored).toMatchObject({
+      externalAccountId: "acct_456",
+      id: "dsc_123",
+      tokenVersion: 2,
+    });
+    expect(durable).toMatchObject({
+      externalAccountId: "acct_456",
+      id: "dsc_123",
+    });
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(findUnique).not.toHaveBeenCalled();
   });
 
   it("preserves the stored external account binding across token clears, tokenless reads, and retokenization", async () => {

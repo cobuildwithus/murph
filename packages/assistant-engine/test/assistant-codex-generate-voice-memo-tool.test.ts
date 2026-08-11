@@ -106,7 +106,6 @@ describe('executeGenerateVoiceMemoTool', () => {
       executeGenerateVoiceMemoTool({
         args: {
           text: 'Send a short reminder.',
-          voiceId: null,
         },
         runtime: null,
       }),
@@ -122,7 +121,6 @@ describe('executeGenerateVoiceMemoTool', () => {
       executeGenerateVoiceMemoTool({
         args: {
           text: 'Send a short reminder.',
-          voiceId: null,
         },
         runtime: createTelegramRuntime({ apiKeyAvailable: false }),
       }),
@@ -135,7 +133,6 @@ describe('executeGenerateVoiceMemoTool', () => {
       executeGenerateVoiceMemoTool({
         args: {
           text: 'Send a short reminder.',
-          voiceId: null,
         },
         runtime: createTelegramRuntime({ modelId: null }),
       }),
@@ -149,7 +146,6 @@ describe('executeGenerateVoiceMemoTool', () => {
       executeGenerateVoiceMemoTool({
         args: {
           text: 'Send a short reminder.',
-          voiceId: null,
         },
         runtime: createTelegramRuntime({ voiceId: null }),
       }),
@@ -160,7 +156,7 @@ describe('executeGenerateVoiceMemoTool', () => {
     })
   })
 
-  it('uses the preferred runtime voice unless the tool supplies an explicit voice', async () => {
+  it('uses the configured running-turn voice for a normal memo', async () => {
     const runtime = createTelegramRuntime({
       defaultVoiceId: 'voice_env_default',
       voiceId: 'voice_preferred',
@@ -169,14 +165,6 @@ describe('executeGenerateVoiceMemoTool', () => {
     const preferredResult = await executeGenerateVoiceMemoTool({
       args: {
         text: 'Send a short reminder.',
-        voiceId: null,
-      },
-      runtime,
-    })
-    const explicitResult = await executeGenerateVoiceMemoTool({
-      args: {
-        text: 'Send a short reminder.',
-        voiceId: 'voice_explicit',
       },
       runtime,
     })
@@ -193,21 +181,9 @@ describe('executeGenerateVoiceMemoTool', () => {
       ],
       rpcSuccess: true,
     })
-    expect(explicitResult).toMatchObject({
-      responseMedia: [
-        {
-          transport: {
-            generation: {
-              voiceId: 'voice_explicit',
-            },
-          },
-        },
-      ],
-      rpcSuccess: true,
-    })
   })
 
-  it('resolves catalog voice options and falls back to the configured default', async () => {
+  it('resolves explicitly user-requested roster voices and their configured fallback', async () => {
     const runtime = createTelegramRuntime({
       defaultVoiceId: 'voice_env_default',
       voiceId: 'voice_preferred',
@@ -216,16 +192,14 @@ describe('executeGenerateVoiceMemoTool', () => {
     const catalogResult = await executeGenerateVoiceMemoTool({
       args: {
         text: 'Send a short reminder.',
-        voiceId: null,
-        voiceOptionId: 'upbeat',
+        userRequestedVoiceOptionId: 'upbeat',
       },
       runtime,
     })
     const fallbackResult = await executeGenerateVoiceMemoTool({
       args: {
         text: 'Send a short reminder.',
-        voiceId: null,
-        voiceOptionId: 'classic',
+        userRequestedVoiceOptionId: 'classic',
       },
       runtime,
     })
@@ -260,7 +234,6 @@ describe('executeGenerateVoiceMemoTool', () => {
     const result = await executeGenerateVoiceMemoTool({
       args: {
         text: 'Send a short reminder.',
-        voiceId: 'voice_explicit',
       },
       runtime: createTelegramRuntime(),
     })
@@ -276,7 +249,7 @@ describe('executeGenerateVoiceMemoTool', () => {
               modelId: 'eleven_multilingual_v2',
               outputFormat: 'mp3_44100_128',
               text: 'Send a short reminder.',
-              voiceId: 'voice_explicit',
+              voiceId: 'voice_default',
             },
             kind: 'telegram_generation',
           },
@@ -300,7 +273,6 @@ describe('executeGenerateVoiceMemoTool', () => {
     const result = await executeGenerateVoiceMemoTool({
       args: {
         text: 'Send a short reminder.',
-        voiceId: null,
       },
       runtime,
     })
@@ -374,7 +346,6 @@ describe('executeGenerateVoiceMemoTool', () => {
       executeGenerateVoiceMemoTool({
         args: {
           text: 'Send a short reminder.',
-          voiceId: null,
         },
         runtime: missingTokenRuntime,
       }),
@@ -387,7 +358,6 @@ describe('executeGenerateVoiceMemoTool', () => {
       executeGenerateVoiceMemoTool({
         args: {
           text: 'Send a short reminder.',
-          voiceId: null,
         },
         runtime: generationFailureRuntime,
       }),
@@ -400,7 +370,6 @@ describe('executeGenerateVoiceMemoTool', () => {
       executeGenerateVoiceMemoTool({
         args: {
           text: 'Send a short reminder.',
-          voiceId: null,
         },
         runtime: invalidAudioRuntime,
       }),
@@ -412,7 +381,6 @@ describe('executeGenerateVoiceMemoTool', () => {
       executeGenerateVoiceMemoTool({
         args: {
           text: 'Send a short reminder.',
-          voiceId: null,
         },
         runtime: uploadFailureRuntime,
       }),
@@ -436,7 +404,6 @@ describe('executeGenerateVoiceMemoTool', () => {
     const result = await executeGenerateVoiceMemoTool({
       args: {
         text: 'Send a short reminder.',
-        voiceId: null,
       },
       runtime,
     })
@@ -461,7 +428,6 @@ describe('executeGenerateVoiceMemoTool', () => {
       executeGenerateVoiceMemoTool({
         args: {
           text: 'Send a short reminder.',
-          voiceId: null,
         },
         runtime,
       }),
@@ -478,7 +444,6 @@ describe('executeGenerateVoiceMemoTool', () => {
       executeGenerateVoiceMemoTool({
         args: {
           text: 'Send a short reminder.',
-          voiceId: null,
         },
         currentResponseMedia: [
           {
