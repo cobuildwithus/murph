@@ -104,7 +104,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
-import { createHostedStripeCustomerLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedStripeCustomerLookupKey,
+  createHostedStripeSubscriptionLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { buildHostedMemberBillingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 
 afterEach(() => {
@@ -541,6 +544,56 @@ describe("createHostedBillingCheckout", () => {
       );
     },
   );
+
+  it("fails closed on a persisted legacy subscription instead of starting a second checkout", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite({
+      member: {
+        billingRef: {
+          currentBillingPhase: "trial",
+          currentCheckoutOffer: "pulse_trial",
+          stripeSubscriptionLookupKey: "subscription_lookup_legacy_trial",
+        },
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        identity: { phoneLookupKey: "hbidx:phone:v1:test" },
+        routing: null,
+        suspendedAt: null,
+      },
+    }));
+    const stripeCustomerId = "cus_legacy_trial";
+    const stripeSubscriptionId = "sub_legacy_trial";
+    const prisma = makePrisma({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentCheckoutOffer: "pulse_trial",
+        memberId: "member_123",
+        ...await buildHostedMemberBillingPrivateColumns({
+          memberId: "member_123",
+          stripeCustomerId,
+          stripeSubscriptionId,
+        }),
+        stripeCustomerLookupKey:
+          createHostedStripeCustomerLookupKey(stripeCustomerId),
+        stripeSubscriptionLookupKey:
+          createHostedStripeSubscriptionLookupKey(stripeSubscriptionId),
+      },
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS",
+      httpStatus: 409,
+    });
+
+    expect(mocks.requireHostedStripeCheckoutConfig).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
 
   it("rechecks Core eligibility after taking the billing lock", async () => {
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
