@@ -5,8 +5,12 @@ import type {
 } from "@murphai/contracts";
 
 import {
-  IMessageCardBadge,
+  IMessageCardHeader,
   IMESSAGE_CARD_COLOR,
+  IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP,
+  IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
+  IMESSAGE_CARD_HEADER_TEXT_GAP,
+  IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
 } from "./card-image-chrome";
 import {
   measureDmSans400Text,
@@ -21,8 +25,6 @@ export const IMESSAGE_CHALLENGE_STANDINGS_CARD_IMAGE_WIDTH = 1_200;
 
 const ACCENT_COLOR = "#AA571F";
 const CARD_CONTENT_WIDTH = 1_110;
-const TITLE_FONT_SIZE = 64;
-const SUBTITLE_FONT_SIZE = 56;
 const FOOTER_FONT_SIZE = 49;
 const SUBHEADLINE_FONT_SIZE = 56;
 const CAPTION_FONT_SIZE = 45;
@@ -106,46 +108,13 @@ export function ChallengeStandingsCardImage({
         fontFamily: "DM Sans",
       }}
     >
-      <IMessageCardBadge logoSrc={logoSrc} />
-
-      <div
-        data-card-header="below-badge"
-        style={{
-          display: "flex",
-          height: layout.headerHeight,
-          flexDirection: "column",
-          marginTop: 113,
-          gap: 15,
-        }}
-      >
-        <div
-          data-card-text-lines={layout.title.lineCount}
-          style={{
-            display: "flex",
-            fontSize: TITLE_FONT_SIZE,
-            fontWeight: 600,
-            lineHeight: 1.05,
-            letterSpacing: "-0.025em",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {layout.title.text}
-        </div>
-        {layout.subtitle === null ? null : (
-          <div
-            data-card-text-lines={layout.subtitle.lineCount}
-            style={{
-              display: "flex",
-              color: IMESSAGE_CARD_COLOR.secondary,
-              fontSize: SUBTITLE_FONT_SIZE,
-              lineHeight: 1.2,
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {layout.subtitle.text}
-          </div>
-        )}
-      </div>
+      <IMessageCardHeader
+        height={layout.headerHeight}
+        layout="below-badge"
+        logoSrc={logoSrc}
+        subtitle={layout.subtitle}
+        title={layout.title}
+      />
 
       {card.format === "collective"
         ? (
@@ -517,19 +486,25 @@ function getChallengeStandingsLayout(
   const title = wrapCardText(
     card.title,
     CARD_CONTENT_WIDTH,
-    TITLE_FONT_SIZE,
+    IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
     600,
   );
   const subtitle = card.subtitle === null
     ? null
-    : wrapCardText(card.subtitle, CARD_CONTENT_WIDTH, SUBTITLE_FONT_SIZE);
+    : wrapCardText(
+      card.subtitle,
+      CARD_CONTENT_WIDTH,
+      IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
+    );
   const footer = card.footer === null
     ? null
     : wrapCardText(card.footer, CARD_CONTENT_WIDTH, FOOTER_FONT_SIZE);
-  const titleHeight = title.lineCount * TITLE_FONT_SIZE * 1.05;
+  const titleHeight = title.lineCount
+    * IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE * 1.05;
   const subtitleHeight = subtitle === null
     ? 0
-    : 15 + subtitle.lineCount * SUBTITLE_FONT_SIZE * 1.2;
+    : IMESSAGE_CARD_HEADER_TEXT_GAP
+      + subtitle.lineCount * IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE * 1.2;
   const headerHeight = Math.ceil(titleHeight + subtitleHeight);
   const footerHeight = footer === null
     ? 0
@@ -545,7 +520,8 @@ function getChallengeStandingsLayout(
       footer,
       headerHeight,
       height: Math.ceil(
-        38 + 113 + headerHeight + 53 + collectiveBodyHeight + footerHeight + 42,
+        38 + IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP + headerHeight + 53
+        + collectiveBodyHeight + footerHeight + 42,
       ),
       rows: [],
       subtitle,
@@ -564,7 +540,8 @@ function getChallengeStandingsLayout(
     footer,
     headerHeight,
     height: Math.ceil(
-      38 + 113 + headerHeight + 53 + rowsHeight + incompleteNoteHeight
+      38 + IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP + headerHeight + 53
+        + rowsHeight + incompleteNoteHeight
         + footerHeight + 42,
     ),
     rows,

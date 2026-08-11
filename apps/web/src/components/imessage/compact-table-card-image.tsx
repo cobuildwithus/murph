@@ -4,8 +4,13 @@ import type {
 } from "@murphai/contracts";
 
 import {
-  IMessageCardBadge,
+  IMessageCardHeader,
   IMESSAGE_CARD_COLOR,
+  IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP,
+  IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET,
+  IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
+  IMESSAGE_CARD_HEADER_TEXT_GAP,
+  IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
 } from "./card-image-chrome";
 import {
   measureDmSans400Text,
@@ -21,16 +26,15 @@ export const IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH = 1_200;
 const CARD_HORIZONTAL_PADDING = 45;
 const CARD_CONTENT_WIDTH =
   IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH - CARD_HORIZONTAL_PADDING * 2;
-const BADGE_SAFE_TITLE_INSET = 126;
-const WORKOUT_HEADER_TEXT_WIDTH = CARD_CONTENT_WIDTH - BADGE_SAFE_TITLE_INSET;
-const TITLE_FONT_SIZE = 64;
-const SUBTITLE_FONT_SIZE = 56;
+const WORKOUT_HEADER_TEXT_WIDTH =
+  CARD_CONTENT_WIDTH - IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET;
 const FOOTER_FONT_SIZE = 49;
 const CAPTION_2_FONT_SIZE = 41;
 const CAPTION_FONT_SIZE = 45;
 const SUBHEADLINE_FONT_SIZE = 56;
 const GENERIC_ROW_LABEL_WIDTH = CARD_CONTENT_WIDTH * 0.38;
 const GENERIC_VALUES_WIDTH = CARD_CONTENT_WIDTH * 0.62;
+const INTRINSIC_TRACK_SAFETY_PADDING = 4;
 
 type WrappedCardText = {
   lineCount: number;
@@ -105,48 +109,13 @@ export function CompactTableCardImage({
         fontFamily: "DM Sans",
       }}
     >
-      <IMessageCardBadge logoSrc={logoSrc} />
-
-      <div
-        data-card-header={"workout" in card ? "beside-badge" : "below-badge"}
-        style={{
-          display: "flex",
-          height: layout.headerHeight,
-          flexDirection: "column",
-          justifyContent: "workout" in card ? "center" : "flex-start",
-          marginTop: "workout" in card ? 0 : 113,
-          marginLeft: "workout" in card ? BADGE_SAFE_TITLE_INSET : 0,
-          gap: "workout" in card ? 0 : 11,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            fontSize: TITLE_FONT_SIZE,
-            fontWeight: 600,
-            lineHeight: 1.05,
-            letterSpacing: "-0.025em",
-            whiteSpace: "pre-wrap",
-          }}
-          data-card-text-lines={layout.title.lineCount}
-        >
-          {layout.title.text}
-        </div>
-        {"workout" in card || card.subtitle === null ? null : (
-          <div
-            style={{
-              display: "flex",
-              color: IMESSAGE_CARD_COLOR.secondary,
-              fontSize: SUBTITLE_FONT_SIZE,
-              lineHeight: 1.2,
-              whiteSpace: "pre-wrap",
-            }}
-            data-card-text-lines={layout.subtitle?.lineCount}
-          >
-            {layout.subtitle?.text}
-          </div>
-        )}
-      </div>
+      <IMessageCardHeader
+        height={layout.headerHeight}
+        layout={"workout" in card ? "beside-badge" : "below-badge"}
+        logoSrc={logoSrc}
+        subtitle={"workout" in card ? null : layout.subtitle}
+        title={layout.title}
+      />
 
       {"workout" in card
         ? <WorkoutSnapshot card={card} rows={layout.workoutRows ?? []} />
@@ -451,6 +420,7 @@ function GenericTableSnapshot({
           style={{
             display: "flex",
             width: header?.rowHeaderWidth ?? GENERIC_ROW_LABEL_WIDTH,
+            flexShrink: 0,
             lineHeight: 1.2,
             whiteSpace: "pre-wrap",
           }}
@@ -464,6 +434,7 @@ function GenericTableSnapshot({
               display: "flex",
               width: header?.columnWidths[index] ?? GENERIC_VALUES_WIDTH
                 / card.columns.length,
+              flexShrink: 0,
               justifyContent: "flex-end",
               lineHeight: 1.2,
               textAlign: "right",
@@ -490,6 +461,7 @@ function GenericTableSnapshot({
             style={{
               display: "flex",
               width: header?.rowHeaderWidth ?? GENERIC_ROW_LABEL_WIDTH,
+              flexShrink: 0,
               fontSize: SUBHEADLINE_FONT_SIZE,
               fontWeight: 600,
               lineHeight: 1.15,
@@ -506,6 +478,7 @@ function GenericTableSnapshot({
                 display: "flex",
                 width: header?.columnWidths[index] ?? GENERIC_VALUES_WIDTH
                   / card.columns.length,
+                flexShrink: 0,
                 justifyContent: "flex-end",
                 fontSize: valueFontSize,
                 fontVariantNumeric: "tabular-nums",
@@ -623,20 +596,25 @@ function getCompactTableCardImageLayout(
   const title = wrapCardText(
     card.title,
     isWorkout ? WORKOUT_HEADER_TEXT_WIDTH : CARD_CONTENT_WIDTH,
-    TITLE_FONT_SIZE,
+    IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
     600,
   );
   const subtitle = "workout" in card || card.subtitle === null
     ? null
-    : wrapCardText(card.subtitle, CARD_CONTENT_WIDTH, SUBTITLE_FONT_SIZE);
+    : wrapCardText(
+      card.subtitle,
+      CARD_CONTENT_WIDTH,
+      IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
+    );
   const footer = card.footer === null
     ? null
     : wrapCardText(card.footer, CARD_CONTENT_WIDTH, FOOTER_FONT_SIZE);
   const measuredHeaderHeight = Math.ceil(
-    title.lineCount * TITLE_FONT_SIZE * 1.1
+    title.lineCount * IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE * 1.1
     + (subtitle === null
       ? 0
-      : 11 + subtitle.lineCount * SUBTITLE_FONT_SIZE * 1.2),
+      : IMESSAGE_CARD_HEADER_TEXT_GAP
+        + subtitle.lineCount * IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE * 1.2),
   );
   const headerHeight = isWorkout
     ? Math.max(101, measuredHeaderHeight)
@@ -743,7 +721,8 @@ function getCompactTableCardImageLayout(
     : tableRows.reduce((total, row) => total + row.height, 0)
       + Math.max(0, tableRows.length - 1) * 2;
   const measuredHeight =
-    38 + 113 + headerHeight + 45 + tableHeight
+    38 + IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP + headerHeight + 45
+    + tableHeight
     + footerHeight + 42;
   return {
     footer,
@@ -805,30 +784,34 @@ function getWorkoutExerciseLayout(
 function getCompactTableGridWidths(
   card: Exclude<CompactTablePresentationCardV1, { workout: unknown }>,
 ): { columnWidths: number[]; rowHeaderWidth: number; totalWidth: number } {
-  const rowHeaderWidth = Math.max(
-    measureDmSans600Text(
-      card.rowHeader.toUpperCase(),
-      CAPTION_2_FONT_SIZE,
-      0.07,
-    ),
-    ...card.rows.map((row) =>
-      measureDmSans600Text(row.label, SUBHEADLINE_FONT_SIZE)
-    ),
-  );
-  const columnWidths = card.columns.map((column, index) =>
+  const rowHeaderWidth = Math.ceil(
     Math.max(
       measureDmSans600Text(
-        column.toUpperCase(),
+        card.rowHeader.toUpperCase(),
         CAPTION_2_FONT_SIZE,
         0.07,
       ),
       ...card.rows.map((row) =>
-        measureDmSans400Text(
-          row.values[index] ?? "",
-          SUBHEADLINE_FONT_SIZE,
-        )
+        measureDmSans600Text(row.label, SUBHEADLINE_FONT_SIZE)
       ),
-    )
+    ),
+  ) + INTRINSIC_TRACK_SAFETY_PADDING;
+  const columnWidths = card.columns.map((column, index) =>
+    Math.ceil(
+      Math.max(
+        measureDmSans600Text(
+          column.toUpperCase(),
+          CAPTION_2_FONT_SIZE,
+          0.07,
+        ),
+        ...card.rows.map((row) =>
+          measureDmSans400Text(
+            row.values[index] ?? "",
+            SUBHEADLINE_FONT_SIZE,
+          )
+        ),
+      ),
+    ) + INTRINSIC_TRACK_SAFETY_PADDING
   );
   const horizontalSpacing = card.columns.length * 38;
   return {

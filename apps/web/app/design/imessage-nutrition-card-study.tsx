@@ -41,10 +41,10 @@ export function ImessageNutritionCardStudy() {
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The static fallback mirrors the shipping Messages balloon&apos;s default
           state and embeds the canonical Murph mark in its native badge
-          footprint. Concise goal-direction labels preserve the native
-          interactive meaning when only the bitmap is available. Messages
-          supplies the outer mask and concise date label; only partial totals
-          add a short subcaption.
+          footprint. Goal direction stays in the existing safe text recovery
+          instead of repeating status words in the bitmap. Messages supplies
+          the outer mask and concise date label; only partial totals add a short
+          subcaption.
         </p>
       </div>
       <div className="hidden sm:block">

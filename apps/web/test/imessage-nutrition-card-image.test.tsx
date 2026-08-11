@@ -348,12 +348,14 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.match(serialized, /data-calorie-progress="0\.8364"/u);
   assert.match(serialized, /data-goal-status="under_target"/u);
   assert.match(serialized, /data-calorie-goal-status="under_target"/u);
-  assert.match(serialized, /top:105px/u);
+  assert.match(serialized, /top:171px/u);
   assert.match(serialized, /data-murph-card-badge="svg"/u);
   assert.match(serialized, /data-murph-card-logo="true"/u);
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /data-goal-status="unavailable"/u);
   assert.match(serialized, /color:#666163/u);
+  assert.match(serialized, /min-height:135px/u);
+  assert.doesNotMatch(serialized, />UNDER</u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
   assert.doesNotMatch(
     serialized,
@@ -361,7 +363,7 @@ test("nutrition card image mirrors the native default-state composition", async 
   );
 });
 
-test("nutrition card image preserves every assessed goal direction without target amounts", async () => {
+test("nutrition card image keeps goal direction semantic without visible status copy", async () => {
   const { NutritionCardImage } = await import(
     "@/src/components/imessage/nutrition-card-image"
   );
@@ -383,15 +385,19 @@ test("nutrition card image preserves every assessed goal direction without targe
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /color:#337338/u);
   for (const label of [
-    "FAR UNDER",
-    "UNDER",
-    "ON TARGET",
-    "OVER",
-    "FAR OVER",
+    "far under target",
+    "under target",
+    "on target",
+    "over target",
+    "far over target",
   ]) {
-    assert.match(serialized, new RegExp(`>${label}<`, "u"));
+    assert.match(serialized, new RegExp(`aria-label="[^"]*${label}`, "u"));
   }
-  assert.equal(serialized.match(/data-goal-status-label=/gu)?.length, 5);
+  assert.doesNotMatch(
+    serialized,
+    />FAR UNDER<|>UNDER<|>ON TARGET<|>OVER<|>FAR OVER</u,
+  );
+  assert.doesNotMatch(serialized, /data-goal-status-label=/u);
   assert.doesNotMatch(serialized, /3,000|130g|210g|50g|10g/u);
 });
 
@@ -481,7 +487,7 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 846);
+  assert.equal(init.height, 908);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /imessage-native-compact-table-card/u);
   assert.match(serialized, /Weekly plan/u);
@@ -490,7 +496,10 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.match(serialized, />16</u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
   assert.match(serialized, /data-murph-card-badge="svg"/u);
+  assert.match(serialized, /data-imessage-card-header="true"/u);
   assert.match(serialized, /data-card-header="below-badge"/u);
+  assert.match(serialized, /margin-top:171px/u);
+  assert.match(serialized, /<h1/u);
   assert.match(serialized, /data-compact-table-layout="grid"/u);
 });
 
@@ -529,7 +538,10 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.doesNotMatch(serialized, /✓/u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
   assert.match(serialized, /data-murph-card-badge="svg"/u);
+  assert.match(serialized, /data-imessage-card-header="true"/u);
   assert.match(serialized, /data-card-header="beside-badge"/u);
+  assert.match(serialized, /margin-left:205px/u);
+  assert.match(serialized, /<h1/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
 });
@@ -684,9 +696,10 @@ test("fitting four-column tables retain one shared header and compact height", a
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   const serialized = renderToStaticMarkup(imageTree);
-  assert.equal(init.height, 1_129);
+  assert.equal(init.height, 1_187);
   assert.match(serialized, /data-compact-table-layout="grid"/u);
   assert.equal(serialized.match(/>A<\/div>/gu)?.length, 1);
+  assert.ok((serialized.match(/flex-shrink:0/gu)?.length ?? 0) >= 5);
   assert.doesNotMatch(serialized, /data-compact-table-layout="stacked"/u);
 });
 
@@ -742,7 +755,7 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 1_065);
+  assert.equal(init.height, 1_123);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /imessage-native-challenge-standings-card/u);
   assert.match(serialized, /Summer movement challenge/u);
@@ -757,7 +770,10 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   assert.ok(rootTag);
   assert.doesNotMatch(rootTag[0], /border-radius|overflow:hidden/u);
   assert.match(serialized, /data-murph-card-badge="svg"/u);
+  assert.match(serialized, /data-imessage-card-header="true"/u);
   assert.match(serialized, /data-card-header="below-badge"/u);
+  assert.match(serialized, /margin-top:171px/u);
+  assert.match(serialized, /<h1/u);
   assert.doesNotMatch(
     serialized,
     /VERIFIED STANDINGS|TEAM STANDINGS|GROUP GOAL|LEADERBOARD|verified minimum|waiting for data/u,
@@ -805,7 +821,7 @@ test("standings image keeps collective progress collective", async () => {
     ...COLLECTIVE_STANDINGS_CARD,
     title: "T".repeat(60),
     subtitle: "S".repeat(120),
-  })).toEqual({ width: 1_200, height: 1_128 });
+  })).toEqual({ width: 1_200, height: 1_186 });
 });
 
 test("standings image sizes semibold titles and maximum score context", async () => {

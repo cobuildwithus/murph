@@ -149,7 +149,7 @@ function getMaximumStackedCard(
   };
 }
 
-test("real-font nutrition labels preserve direction without color", async () => {
+test("real-font nutrition omits duplicate status rows and stays contained", async () => {
   const image = await renderCard({
     schemaVersion: 2,
     card: DIRECTIONAL_NUTRITION_CARD,
@@ -163,16 +163,16 @@ test("real-font nutrition labels preserve direction without color", async () => 
   assert.equal(
     hasGrayscaleDarkPixel(
       image,
-      { left: 45, right: 390, top: 250, bottom: 292 },
+      { left: 45, right: 800, top: 318, bottom: 334 },
     ),
-    true,
+    false,
   );
   assert.equal(
     hasGrayscaleDarkPixel(
       image,
-      { left: 45, right: 1_155, top: 424, bottom: 466 },
+      { left: 45, right: 1_155, top: 455, bottom: 470 },
     ),
-    true,
+    false,
   );
 });
 
@@ -220,7 +220,7 @@ test("real-font route keeps a fitting four-column eight-row table compact", asyn
     schemaVersion: 3,
     card: NARROW_FOUR_COLUMN_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 1_129]);
+  assert.deepEqual([image.width, image.height], [1_200, 1_187]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);
@@ -243,7 +243,7 @@ test("real-font route keeps positive-kerning text above the stacked-row divider"
   assert.equal(response.status, 200);
   const png = Buffer.from(await response.arrayBuffer());
   const image = decodePng(png);
-  assert.deepEqual([image.width, image.height], [1_200, 1_795]);
+  assert.deepEqual([image.width, image.height], [1_200, 1_853]);
 
   const dividerBands = findHorizontalDividerBands(image);
   assert.ok(dividerBands.length >= 1);
@@ -265,7 +265,7 @@ test("real-font collective status and coverage retain bottom padding", async () 
     schemaVersion: 5,
     card: PARTIAL_COLLECTIVE_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 710]);
+  assert.deepEqual([image.width, image.height], [1_200, 768]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);

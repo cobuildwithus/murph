@@ -7,6 +7,7 @@ import {
 } from "@murphai/contracts";
 
 import {
+  IMESSAGE_CARD_BADGE_CONTENT_TOP,
   IMessageCardBadge,
   IMESSAGE_CARD_COLOR,
 } from "./card-image-chrome";
@@ -98,15 +99,20 @@ export function NutritionCardImage({
       <IMessageCardBadge logoSrc={logoSrc} />
 
       <div
+        aria-label={formatMetricAccessibilityLabel(
+          "Calories",
+          calories === null ? "unavailable" : `${formatNumber(calories)} cal`,
+          calorieGoal,
+        )}
         data-calorie-goal-status={calorieGoal?.status ?? "no-goal"}
+        role="group"
         style={{
           position: "absolute",
-          top: 105,
+          top: IMESSAGE_CARD_BADGE_CONTENT_TOP,
           left: 45,
           display: "flex",
           flexDirection: "column",
           alignItems: "flex-start",
-          gap: 8,
           maxWidth: 800,
           whiteSpace: "nowrap",
         }}
@@ -142,7 +148,6 @@ export function NutritionCardImage({
             cal
           </div>
         </div>
-        <GoalStatusLabel fontSize={27} goal={calorieGoal} />
       </div>
 
       <CalorieRing
@@ -253,14 +258,22 @@ function Metric({
 
   return (
     <div
+      aria-label={formatMetricAccessibilityLabel(
+        label,
+        metric.total === null
+          ? "unavailable"
+          : `${formatWholeNumber(metric.total)}g`,
+        goal,
+      )}
       data-goal-status={goal?.status ?? "no-goal"}
+      role="group"
       style={{
         display: "flex",
         flexDirection: "column",
         flexBasis: 0,
         flexGrow: 1,
         minWidth: 0,
-        minHeight: 165,
+        minHeight: 135,
         alignItems: "flex-start",
         gap: 7,
       }}
@@ -291,46 +304,28 @@ function Metric({
       >
         {metric.total === null ? "—" : `${formatWholeNumber(metric.total)}g`}
       </div>
-      <GoalStatusLabel fontSize={23} goal={goal} />
     </div>
   );
 }
 
-function GoalStatusLabel({
-  fontSize,
-  goal,
-}: {
-  fontSize: number;
-  goal: NutritionCardGoalSnapshot | null | undefined;
-}) {
+function formatMetricAccessibilityLabel(
+  label: string,
+  value: string,
+  goal: NutritionCardGoalSnapshot | null | undefined,
+): string {
+  const status = getGoalStatusDescription(goal);
+  return status === null
+    ? `${label}: ${value}`
+    : `${label}: ${value}, ${status}`;
+}
+
+function getGoalStatusDescription(
+  goal: NutritionCardGoalSnapshot | null | undefined,
+): string | null {
   if (goal === null || goal === undefined || goal.status === "unavailable") {
     return null;
   }
-
-  return (
-    <div
-      data-goal-status-label={goal.status}
-      style={{
-        display: "flex",
-        color: getStatusColor(goal),
-        fontSize,
-        fontWeight: 600,
-        lineHeight: 1,
-        letterSpacing: "0.04em",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {formatGoalStatusLabel(goal.status)}
-    </div>
-  );
-}
-
-function formatGoalStatusLabel(
-  status: NutritionCardGoalSnapshot["status"],
-): string {
-  const label = nutritionCardGoalStatusLabels[status];
-  return (status === "on_target" ? label : label.replace(" target", ""))
-    .toUpperCase();
+  return nutritionCardGoalStatusLabels[goal.status];
 }
 
 function getCalorieProgress(
