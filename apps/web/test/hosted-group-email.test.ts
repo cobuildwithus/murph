@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+  HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+} from "@murphai/hosted-execution/runtime-control";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
@@ -48,6 +52,173 @@ describe("hosted group email authorization", () => {
         })),
     );
   });
+
+  it("bounds preliminary and canonical member/share reads with stable ordering", async () => {
+    const prisma = createPrismaMock();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(prepareHostedGroupEmail({
+      runtimeMemberId: "group_runtime_member",
+    })).resolves.toEqual(expect.objectContaining({ status: "ok" }));
+
+    const memberQueries = prisma.hostedGroup.findFirst.mock.calls
+      .map(([args]) => args)
+      .filter((args) => args?.select?.members);
+    expect(memberQueries).toHaveLength(2);
+
+    const preliminaryMembers = memberQueries[0]?.select?.members;
+    expect(preliminaryMembers).toEqual(expect.objectContaining({
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { memberId: true },
+      take: HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1,
+    }));
+
+    const canonicalMembers = memberQueries[1]?.select?.members;
+    expect(canonicalMembers).toEqual(expect.objectContaining({
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1,
+    }));
+    expect(
+      canonicalMembers?.select?.member?.select?.vaultSharesGranted,
+    ).toEqual(expect.objectContaining({
+      orderBy: [{ projectionScopeKey: "asc" }, { id: "asc" }],
+      take:
+        HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX + 2,
+    }));
+  });
+
+  it("admits exactly the hosted group email participant maximum", async () => {
+    const memberIds = buildGroupEmailMemberIds(
+      HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+    );
+    const prisma = createPrismaMock({ groupEmailMemberIds: memberIds });
+    prisma.hostedVaultShare.findMany.mockResolvedValue(
+      memberIds.map(buildGroupEmailGrant),
+    );
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const result = await prepareHostedGroupEmail({
+      runtimeMemberId: "group_runtime_member",
+    });
+
+    if (result.status !== "ok") {
+      throw new Error("Expected the exact participant maximum to remain valid.");
+    }
+    expect(result.participants).toHaveLength(
+      HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+    );
+    expect(result.missingEmailParticipants).toEqual([]);
+  });
+
+  it("admits exactly the authorized-share maximum plus the email grant", async () => {
+    const memberId = "member_share_boundary";
+    const shares = buildGroupEmailShareSnapshot(
+      memberId,
+      HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+    );
+    const prisma = createPrismaMock({ groupEmailMemberIds: [memberId] });
+    prisma.hostedVaultShare.findMany.mockResolvedValue(shares);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const prepared = await prepareHostedGroupEmail({
+      runtimeMemberId: "group_runtime_member",
+    });
+    if (prepared.status !== "ok") {
+      throw new Error("Expected the exact authorized-share maximum to remain valid.");
+    }
+    expect(prepared.participants).toHaveLength(1);
+    expect(prepared.participants[0]?.authorizedShares).toHaveLength(
+      HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+    );
+
+    const recipientPrisma = createPrismaMock({ groupEmailMemberIds: [memberId] });
+    recipientPrisma.hostedVaultShare.findMany.mockResolvedValue(shares);
+    mocks.getPrisma.mockReturnValue(recipientPrisma);
+    await expect(readHostedGroupEmailRecipients({
+      expectedGroupEmailAuthorizationProof: prepared.authorizationProof,
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    })).resolves.toEqual({
+      recipients: [{
+        address: `${memberId}@example.com`,
+        memberId,
+      }],
+      status: "ok",
+    });
+  });
+
+  it("fails before access and email expansion when preliminary membership is one over", async () => {
+    const prisma = createPrismaMock({
+      groupEmailMemberIds: buildGroupEmailMemberIds(
+        HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1,
+      ),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(prepareHostedGroupEmail({
+      runtimeMemberId: "group_runtime_member",
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "authorization_snapshot_too_large",
+    });
+    expect(prisma.hostedMember.findMany).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberVerifiedEmailSnapshots).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("fails canonical one-over membership before proof or recipient construction", async () => {
+    const prisma = createPrismaMock({
+      groupEmailCanonicalMemberIds: buildGroupEmailMemberIds(
+        HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1,
+      ),
+      groupEmailPreliminaryMemberIds: buildGroupEmailMemberIds(
+        HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+      ),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(readHostedGroupEmailRecipients({
+      expectedGroupEmailAuthorizationProof: "stale-proof",
+      groupId: "hgrp_123",
+      runtimeMemberId: "group_runtime_member",
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "authorization_snapshot_too_large",
+    });
+    expect(prisma.hostedMember.findMany).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberVerifiedEmailSnapshots).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["prepare", "recipients"] as const)(
+    "fails a one-over authorized-share snapshot during %s without truncated success",
+    async (operation) => {
+      const memberId = "member_share_overflow";
+      const prisma = createPrismaMock({ groupEmailMemberIds: [memberId] });
+      prisma.hostedVaultShare.findMany.mockResolvedValue(
+        buildGroupEmailShareSnapshot(
+          memberId,
+          HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX + 1,
+        ),
+      );
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      const result = operation === "prepare"
+        ? await prepareHostedGroupEmail({
+            runtimeMemberId: "group_runtime_member",
+          })
+        : await readHostedGroupEmailRecipients({
+            expectedGroupEmailAuthorizationProof: "stale-proof",
+            groupId: "hgrp_123",
+            runtimeMemberId: "group_runtime_member",
+          });
+
+      expect(result).toEqual({
+        status: "unavailable",
+        unavailableReason: "authorization_snapshot_too_large",
+      });
+    },
+  );
 
   it("excludes inactive granted members from group email preparation and email recipients", async () => {
     const prisma = createPrismaMock();
@@ -460,6 +631,81 @@ describe("hosted group email authorization", () => {
 
 });
 
+interface MockHostedVaultShare {
+  grantorMemberId: string;
+  id: string;
+  projectionKind: string;
+  projectionScopeKey: string;
+}
+
+interface MockHostedVaultShareRelationArgs {
+  orderBy?: unknown;
+  take?: number;
+}
+
+interface MockHostedGroupMemberRelationArgs {
+  orderBy?: unknown;
+  select?: {
+    member?: {
+      select?: {
+        vaultSharesGranted?: MockHostedVaultShareRelationArgs;
+      };
+    };
+    memberId?: boolean;
+  };
+  take?: number;
+}
+
+interface MockHostedGroupFindFirstArgs {
+  select?: {
+    members?: MockHostedGroupMemberRelationArgs;
+    runtimeMember?: unknown;
+    runtimeMemberId?: boolean;
+  };
+}
+
+interface MockHostedMemberFindManyArgs {
+  where?: {
+    id?: {
+      in?: readonly string[];
+    };
+  };
+}
+
+function buildGroupEmailMemberIds(count: number): string[] {
+  return Array.from(
+    { length: count },
+    (_, index) => `member_${String(index).padStart(3, "0")}`,
+  );
+}
+
+function buildGroupEmailGrant(memberId: string): MockHostedVaultShare {
+  return {
+    grantorMemberId: memberId,
+    id: `share_email_${memberId}`,
+    projectionKind: "group-email.v0",
+    projectionScopeKey: "group-email.v0",
+  };
+}
+
+function buildGroupEmailShareSnapshot(
+  memberId: string,
+  authorizedShareCount: number,
+): MockHostedVaultShare[] {
+  return [
+    buildGroupEmailGrant(memberId),
+    ...Array.from({ length: authorizedShareCount }, (_, index) => {
+      const suffix = String(index).padStart(3, "0");
+      return {
+        grantorMemberId: memberId,
+        id: `share_authorized_${suffix}`,
+        projectionKind: "steps-days.v0",
+        projectionScopeKey: `authorized-share-${suffix}`,
+      };
+    }),
+  ];
+}
+
 function verifiedEmailFact(address: string, input?: {
   lookupKey?: string;
   verifiedAt?: Date;
@@ -513,21 +759,33 @@ function createPrismaMock(input?: {
   groupRuntimeMemberId?: string | null;
   groupEmailLookupKeyByMember?: Readonly<Record<string, string | null>>;
   groupEmailActiveOwnerMemberIds?: readonly string[];
+  groupEmailCanonicalMemberIds?: readonly string[];
+  groupEmailMemberIds?: readonly string[];
   groupEmailMissingEmailMemberIds?: readonly string[];
   groupEmailParticipantBackedMemberIds?: readonly string[];
   groupEmailParticipantUnavailableMemberIds?: readonly string[];
+  groupEmailPreliminaryMemberIds?: readonly string[];
   groupEmailSuspendedMemberIds?: readonly string[];
   groupEmailWithdrawnMemberIds?: readonly string[];
   groupEmailWithdrawnOwnerMemberIds?: readonly string[];
 }) {
+  const defaultMemberIds = [
+    "member_active_with_email",
+    "member_suspended",
+    "member_active_missing_email",
+  ];
+  const preliminaryMemberIds = input?.groupEmailPreliminaryMemberIds
+    ?? input?.groupEmailMemberIds
+    ?? defaultMemberIds;
+  const canonicalMemberIds = input?.groupEmailCanonicalMemberIds
+    ?? input?.groupEmailMemberIds
+    ?? defaultMemberIds;
   const prisma = {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
       callback(prisma)
     ),
     hostedGroup: {
-      findFirst: vi.fn(async (args?: {
-        select?: { runtimeMember?: unknown; runtimeMemberId?: boolean };
-      }) => {
+      findFirst: vi.fn(async (args?: MockHostedGroupFindFirstArgs) => {
         if (args?.select?.runtimeMemberId) {
           return {
             displayName: "Sunday group",
@@ -560,15 +818,14 @@ function createPrismaMock(input?: {
           const withdrawnOwnerMemberIds = new Set(
             input?.groupEmailWithdrawnOwnerMemberIds ?? [],
           );
-          const memberIds = [
-            "member_active_with_email",
-            "member_suspended",
-            "member_active_missing_email",
-          ];
+          const memberTake = args.select.members?.take
+            ?? canonicalMemberIds.length;
+          const shareTake =
+            args.select.members?.select?.member?.select?.vaultSharesGranted?.take;
           return {
             displayName: "Sunday group",
             id: "hgrp_123",
-            members: memberIds.map((memberId) => ({
+            members: canonicalMemberIds.slice(0, memberTake).map((memberId) => ({
               member: {
                 ...groupEmailMemberAccessState({
                   activeOwner: activeOwnerMemberIds.has(memberId),
@@ -588,9 +845,13 @@ function createPrismaMock(input?: {
                       verifiedEmailVerifiedAt:
                         verifiedEmailFact(`${memberId}@example.com`).verifiedAt,
                     },
-                vaultSharesGranted: grants.filter((grant) =>
-                  grant.grantorMemberId === memberId
-                ),
+                vaultSharesGranted: grants
+                  .filter((grant) => grant.grantorMemberId === memberId)
+                  .sort((left, right) =>
+                    left.projectionScopeKey.localeCompare(right.projectionScopeKey)
+                    || left.id.localeCompare(right.id)
+                  )
+                  .slice(0, shareTake),
               },
             })),
             runtimeMember: groupEmailMemberAccessState({
@@ -603,16 +864,14 @@ function createPrismaMock(input?: {
         return {
           displayName: "Sunday group",
           id: "hgrp_123",
-          members: [
-            { memberId: "member_active_with_email" },
-            { memberId: "member_suspended" },
-            { memberId: "member_active_missing_email" },
-          ],
+          members: preliminaryMemberIds
+            .slice(0, args?.select?.members?.take)
+            .map((memberId) => ({ memberId })),
         };
       }),
     },
     hostedMember: {
-      findMany: vi.fn(async () => {
+      findMany: vi.fn(async (args?: MockHostedMemberFindManyArgs) => {
         const suspendedMemberIds = new Set(
           input?.groupEmailSuspendedMemberIds ?? ["member_suspended"],
         );
@@ -631,23 +890,21 @@ function createPrismaMock(input?: {
         const withdrawnOwnerMemberIds = new Set(
           input?.groupEmailWithdrawnOwnerMemberIds ?? [],
         );
-        return [
-          "member_active_with_email",
-          "member_suspended",
-          "member_active_missing_email",
-        ].map((memberId) => groupEmailMemberAccessState({
-          activeOwner: activeOwnerMemberIds.has(memberId),
-          memberId,
-          participantBacked: participantBackedMemberIds.has(memberId),
-          participantEligible: !participantUnavailableMemberIds.has(memberId),
-          suspended: suspendedMemberIds.has(memberId),
-          withdrawn: withdrawnMemberIds.has(memberId),
-          withdrawnOwner: withdrawnOwnerMemberIds.has(memberId),
-        }));
+        return (args?.where?.id?.in ?? preliminaryMemberIds).map((memberId) =>
+          groupEmailMemberAccessState({
+            activeOwner: activeOwnerMemberIds.has(memberId),
+            memberId,
+            participantBacked: participantBackedMemberIds.has(memberId),
+            participantEligible: !participantUnavailableMemberIds.has(memberId),
+            suspended: suspendedMemberIds.has(memberId),
+            withdrawn: withdrawnMemberIds.has(memberId),
+            withdrawnOwner: withdrawnOwnerMemberIds.has(memberId),
+          })
+        );
       }),
     },
     hostedVaultShare: {
-      findMany: vi.fn(async () => [
+      findMany: vi.fn(async (): Promise<MockHostedVaultShare[]> => [
         {
           grantorMemberId: "member_active_with_email",
           id: "share_email_ready",
