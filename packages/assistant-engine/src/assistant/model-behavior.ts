@@ -77,7 +77,7 @@ export function buildAssistantExecutionBehaviorText(input: {
   const responseCardGuidance = input.progressUpdateMode === 'group'
     ? ''
     : `
-- Private cards: if its skill and tool allow it, attach now without another ask. No prose; routine logs stay concise.`
+- Private cards: verified meal/live-workout updates use the allowed card alone; meal intent never sets targets.`
   const productFeedbackSalienceGuidance = `
 - Product feedback salience: when visible dissatisfaction is directed at Murph after repeated, circular, redundant, or contradictory Murph-owned behavior, treat it as explicit product frustration rather than merely tone, banter, or missing input. Address the immediate need and, if no product-feedback candidate has already been submitted for that accepted request, silently call \`murph.submit_product_feedback\` once with kind \`frustration\` when available; do not wait for the member to call it feedback, ask permission, or start a separate discovery interview.
 - Keep this trigger narrow. Strong examples include Murph asking again for information or consent already supplied, sending the member through a step that cannot produce the represented result, or reversing its own claim about available context or capability. Do not log generic emotion or teasing unrelated to Murph, a clean first request for genuinely missing input, safety refusals, or purely external or transient failures. Follow the main Product feedback contract and tool schema for de-identification, one-candidate, no-retry, and best-effort behavior.`

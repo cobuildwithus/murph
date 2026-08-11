@@ -5,10 +5,10 @@
     "id": "response-cards-without-another-ask",
     "kind": "improvement",
     "priority": 2,
-    "title": "Workout cards without another ask",
-    "summary": "Starting or resuming a verified live workout now returns its available card in the same private response instead of waiting for a second request.",
-    "details": "Murph also defaults to other already-authorized complete response cards, while ordinary meal and set updates stay concise and unsupported or unverifiable cases fall back to text.",
+    "title": "Cards after every meal and workout update",
+    "summary": "Eligible private meal logs and verified live-workout mutations now return their refreshed card in the same response, including ordinary meals and incremental set updates.",
+    "details": "Murph uses the card as the complete reply when the owning safety, authority, evidence, route, and bounded-card checks pass; otherwise it falls back to truthful concise text.",
     "relevanceTags": ["cards", "workouts", "nutrition", "imessage"],
-    "sourcePullRequests": [1680]
+    "sourcePullRequests": [1680, 1691]
   }
 }
