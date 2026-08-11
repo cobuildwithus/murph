@@ -666,6 +666,16 @@ Web-owned exact-text, member, expiry, and direct-route assertion at every
 provider attempt; non-idempotent transport work remains checkpoint-gated. Fresh
 conversation input continues to preempt this pass.
 
+An authenticated current-sender private exact completion keeps the member's
+existing logical direct session and ordinary target, appends the exact reviewed
+assistant text to that session, and clears its stale native provider-resume
+pointer in the same session save. This forces the next attended turn to start a
+fresh provider thread with bounded committed history that includes the private
+completion, without creating another logical session. The runtime recognizes
+this exception only from the complete queue-only, exact-text, one-mailbox-item,
+direct Linq-or-Telegram private-completion envelope; an expiry marker alone and
+all generic detached notifications remain isolated.
+
 A legacy usage-referral notification can be authority-less even after Web has
 repaired its producer, because the local system mailbox may already have
 persisted the old wake and advanced the import watermark. The bounded Web scan
@@ -1592,8 +1602,10 @@ adds no image-specific sender, durable image job, mailbox kind, scheduler,
 reservation, allowance implementation, or usage lifecycle. Runner loss may
 drop unfinished provider work.
 
-Detached `assistant.notification.requested` work remains output-only and cannot
-mutate resident conversation history or native provider resume state. A completed phone
+Generic model-backed `assistant.notification.requested` work remains
+output-only and cannot mutate resident conversation history or native provider
+resume state. The authenticated deterministic current-sender private exact
+completion above is the sole conversation-bound exception. A completed phone
 call is delivered as an ordinary `assistant.notification.requested` system-mailbox
 event: Murph composes the result in its own voice and proactively messages the
 member's resolved messaging route, and may skip a non-meaningful call

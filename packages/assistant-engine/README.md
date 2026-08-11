@@ -63,6 +63,15 @@ formatter uses a fresh ephemeral thread on the resident App Server. Its
 thread-local deny configuration does not change the ordinary process launch
 identity or persist a resumable notification thread.
 
+An authenticated current-sender private Assistant Ask completion is the narrow
+deterministic exception. It starts no formatter or provider turn, keeps the
+member's existing logical direct session and ordinary target, appends the exact
+reviewed assistant text to that session, and clears only the stale native
+provider-resume optimization in the same session save. The next attended turn
+therefore starts a fresh provider thread with bounded committed history that
+includes the private completion. Expiry alone and every generic detached
+notification remain isolated and cannot claim this continuity behavior.
+
 The `creative-response` and `creative-response-text` notification prompt
 profiles are isolated system continuations for verified, explicitly requested
 social moments. Both prompts are built only from the engine-supplied task and

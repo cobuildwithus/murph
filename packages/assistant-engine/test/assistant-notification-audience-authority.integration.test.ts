@@ -1,14 +1,28 @@
 import { rm } from 'node:fs/promises'
 
+import {
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
+} from '@murphai/hosted-execution/assistant-identifiers'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { executeCodexTurnWithRecovery } from '../src/assistant/codex-turn-runner.ts'
+import {
+  readCodexThreadCompatibilityFingerprint,
+  readCodexThreadRouteFingerprint,
+} from '../src/assistant/codex-thread-route.ts'
+import { resolveAssistantExecutionPlan } from '../src/assistant/execution-plan.ts'
 import type { persistAssistantTurnAndSession } from '../src/assistant/turn-finalizer.ts'
 import { sendAssistantNotificationLocal } from '../src/assistant/notification-turn.ts'
 import { resolveAssistantSessionForMessage } from '../src/assistant/session-resolution.ts'
-import { resolveAssistantSession } from '../src/assistant/store.ts'
+import {
+  appendAssistantTranscriptEntries,
+  listAssistantSessions,
+  listAssistantTranscriptEntries,
+  resolveAssistantSession,
+  saveAssistantSession,
+} from '../src/assistant/store.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const boundaries = vi.hoisted(() => ({
@@ -303,7 +317,7 @@ describe('notification audience authority integration', () => {
     expect(boundaries.deliverMessage).not.toHaveBeenCalled()
   })
 
-  it('keeps exact text without first-contact policy on a detached session', async () => {
+  it('keeps unrelated exact text with only reviewed expiry on a detached session', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'linq-exact-detached-session-',
     )
@@ -335,6 +349,7 @@ describe('notification audience authority integration', () => {
         kind: 'require_send_exact_text',
         text: 'You joined the group.',
       },
+      reviewedAssistantAskCompletionExpiresAt: '2099-01-01T00:00:00.000Z',
       vault: vaultRoot,
     })
 
@@ -355,6 +370,170 @@ describe('notification audience authority integration', () => {
     expect(attended.created).toBe(true)
     expect(attended.session.sessionId).not.toBe(notification.session.sessionId)
     expect(attended.session.providerOptions.sandbox).toBe('danger-full-access')
+  })
+
+  it('keeps a reviewed private exact completion on the ordinary direct session and invalidates native resume', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'linq-private-completion-continuity-',
+    )
+    cleanupPaths.push(parentRoot)
+    const completionText = 'Here is the reviewed private answer.'
+    const completionEventId = 'aask_done_private_completion_continuity'
+    const deliveryKey =
+      createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionEventId,
+      )
+    const reviewedExpiresAt = '2099-01-01T00:00:00.000Z'
+    const locator = {
+      actorId: 'h1_aaaaaaaaaaaaaaaaaaaaaaaa',
+      channel: 'linq',
+      identityId: 'h1_bbbbbbbbbbbbbbbbbbbbbbbb',
+      threadId: 'h1_cccccccccccccccccccccccc',
+      threadIsDirect: true,
+    } as const
+    const executionContext = {
+      hosted: {
+        defaultTarget: modelTarget,
+        memberId: 'member-private-completion-continuity',
+        userEnvKeys: [],
+      },
+    } as const
+    const ordinary = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: modelTarget,
+      defaults: null,
+      message: {
+        ...locator,
+        executionContext,
+        prompt: 'Start the ordinary direct conversation.',
+        vault: vaultRoot,
+      },
+    })
+    const ordinaryRoute = resolveAssistantExecutionPlan({
+      defaults: null,
+      sessionTarget: ordinary.session.target,
+    }).codexRoute
+    const nativeResume: NonNullable<AssistantSession['codexResume']> = {
+      assistantContractFingerprint: 'a'.repeat(64),
+      routeFingerprint: readCodexThreadRouteFingerprint(ordinaryRoute),
+      threadCompatibilityFingerprint:
+        readCodexThreadCompatibilityFingerprint(ordinaryRoute),
+      threadId: 'thread-private-completion-continuity',
+    }
+    const ordinaryWithResume = await saveAssistantSession(vaultRoot, {
+      ...ordinary.session,
+      codexResume: nativeResume,
+      resumeState: nativeResume,
+    })
+    const ordinaryContinuityFingerprint =
+      ordinaryWithResume.providerOptions.continuityFingerprint
+    expect(ordinary.created).toBe(true)
+    expect(ordinaryContinuityFingerprint).toEqual(expect.any(String))
+    expect(ordinaryWithResume.codexResume).toEqual(nativeResume)
+    expect(ordinaryWithResume.resumeState).toEqual(nativeResume)
+
+    boundaries.appendTranscript.mockImplementation(
+      async (
+        sessionId: string,
+        entries: Parameters<typeof appendAssistantTranscriptEntries>[2],
+      ) => await appendAssistantTranscriptEntries(vaultRoot, sessionId, entries),
+    )
+    boundaries.saveSession.mockImplementation(
+      async (session: AssistantSession) =>
+        await saveAssistantSession(vaultRoot, session),
+    )
+    boundaries.deliverMessage.mockResolvedValueOnce({
+      delivery: null,
+      deliveryError: null,
+      intent: {
+        intentId: 'intent-private-completion-continuity',
+      },
+      kind: 'queued',
+      session: null,
+    })
+
+    const completion = await sendAssistantNotificationLocal({
+      ...locator,
+      answeredMailboxItemIds: [completionEventId],
+      bindingDeliveryTarget: locator.threadId,
+      deliveryDedupeToken: deliveryKey,
+      deliveryDispatchMode: 'queue-only',
+      deliveryIdempotencyKey: deliveryKey,
+      deliveryKind: 'thread',
+      deliveryTarget: locator.threadId,
+      executionContext,
+      instructions: 'Deliver the reviewed private Assistant Ask answer exactly.',
+      responsePolicy: {
+        kind: 'require_send_exact_text',
+        text: completionText,
+      },
+      reviewedAssistantAskCompletionExpiresAt: reviewedExpiresAt,
+      vault: vaultRoot,
+    })
+
+    expect(boundaries.executeProvider).not.toHaveBeenCalled()
+    expect(boundaries.deliverMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds: [completionEventId],
+        dedupeToken: deliveryKey,
+        dispatchMode: 'queue-only',
+        message: completionText,
+        reviewedAssistantAskCompletionExpiresAt: reviewedExpiresAt,
+      }),
+    )
+    expect(completion.deliveryOutcome?.kind).toBe('queued')
+    expect(completion.session.sessionId).toBe(ordinaryWithResume.sessionId)
+    expect(completion.session.providerOptions.continuityFingerprint).toBe(
+      ordinaryContinuityFingerprint,
+    )
+    expect(completion.session.providerOptions.sandbox).toBe('danger-full-access')
+    expect(completion.session.codexResume).toBeNull()
+    expect(completion.session.resumeState).toBeNull()
+    expect(boundaries.saveSession).toHaveBeenCalledTimes(1)
+    expect(boundaries.saveSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codexResume: null,
+        resumeState: null,
+        sessionId: ordinaryWithResume.sessionId,
+      }),
+    )
+    await expect(
+      listAssistantTranscriptEntries(vaultRoot, ordinaryWithResume.sessionId),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        kind: 'assistant',
+        text: completionText,
+      }),
+    ])
+    await expect(listAssistantSessions(vaultRoot)).resolves.toEqual([
+      expect.objectContaining({
+        codexResume: null,
+        providerOptions: expect.objectContaining({
+          continuityFingerprint: ordinaryContinuityFingerprint,
+        }),
+        resumeState: null,
+        sessionId: ordinaryWithResume.sessionId,
+      }),
+    ])
+
+    const nextOrdinary = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: modelTarget,
+      defaults: null,
+      message: {
+        ...locator,
+        executionContext,
+        prompt: 'Continue the ordinary direct conversation.',
+        vault: vaultRoot,
+      },
+    })
+
+    expect(nextOrdinary.created).toBe(false)
+    expect(nextOrdinary.session.sessionId).toBe(ordinaryWithResume.sessionId)
+    expect(nextOrdinary.session.providerOptions.continuityFingerprint).toBe(
+      ordinaryContinuityFingerprint,
+    )
+    expect(nextOrdinary.session.codexResume).toBeNull()
+    expect(nextOrdinary.session.resumeState).toBeNull()
+    await expect(listAssistantSessions(vaultRoot)).resolves.toHaveLength(1)
   })
 
   it('keeps an exact Telegram welcome on the attended conversation session', async () => {
