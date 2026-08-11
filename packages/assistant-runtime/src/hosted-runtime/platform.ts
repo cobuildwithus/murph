@@ -37,8 +37,6 @@ import type {
   HostedRuntimeAssistantAskControlResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
-  HostedRuntimeNewsletterToolRequest,
-  HostedRuntimeNewsletterToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
@@ -545,12 +543,6 @@ export interface HostedRuntimeGroupToolPort {
     | { status: "unavailable"; unavailableReason: string };
 }
 
-export interface HostedRuntimeNewsletterToolPort {
-  request(
-    request: HostedRuntimeNewsletterToolRequest,
-  ): Promise<HostedRuntimeNewsletterToolResponse>;
-}
-
 export interface HostedRuntimeCodexAuthPort {
   update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
 }
@@ -717,7 +709,6 @@ export interface HostedRuntimePlatform {
   labsToolPort?: HostedRuntimeLabsToolPort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
-  newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
   physicalNotes?: HostedRuntimePhysicalNotePort | null;
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;

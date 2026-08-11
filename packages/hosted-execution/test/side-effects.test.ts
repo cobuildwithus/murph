@@ -197,6 +197,24 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
   });
 
+  it("rejects the retired group-email proof wire field", () => {
+    const authorizationProof = "a".repeat(64);
+    const canonicalPayload = createHostedAssistantDeliveryPayload();
+    const legacyEffect = {
+      deliveryPhase: "foreground_current_turn",
+      effectId: "intent-legacy-group-email-proof",
+      fingerprint: "dedupe-legacy-group-email-proof",
+      kind: "assistant.delivery",
+      payload: {
+        ...canonicalPayload,
+        newsletterAuthorizationProof: authorizationProof,
+      },
+    };
+
+    expect(() => parseHostedAssistantDeliverySideEffect(legacyEffect))
+      .toThrow(/retired runner wire contract/u);
+  });
+
 
   it("propagates strict response cards and preserves legacy card omission", () => {
     const payload = createHostedAssistantDeliveryPayload({

@@ -134,8 +134,8 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
     intentPath: string
     terminalAtMs: number
   }> = []
-  const protectedNewsletterOccurrencePrefixes =
-    await readProtectedNewsletterOccurrencePrefixes(input.paths)
+  const protectedGroupEmailOccurrencePrefixes =
+    await readProtectedGroupEmailOccurrencePrefixes(input.paths)
 
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) {
@@ -149,7 +149,7 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
       || !isTerminalAssistantOutboxIntent(intent)
       || isPruneProtectedAssistantOutboxIntent(
         intent,
-        protectedNewsletterOccurrencePrefixes,
+        protectedGroupEmailOccurrencePrefixes,
       )
     ) {
       continue
@@ -174,8 +174,17 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
   })
 
   let pruned = 0
-  for (const [index, entry] of terminalIntents.entries()) {
-    const pruneByCount = index >= ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT
+  let countPrunableIntentCount = 0
+  for (const entry of terminalIntents) {
+    const preserveUntilAgeCutoff = isGeneratedImageDeliveryEvidenceIntent(
+      entry.intent,
+    )
+    const pruneByCount =
+      !preserveUntilAgeCutoff
+      && countPrunableIntentCount >= ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT
+    if (!preserveUntilAgeCutoff) {
+      countPrunableIntentCount += 1
+    }
     const pruneByAge =
       Number.isFinite(entry.terminalAtMs) && entry.terminalAtMs < cutoffMs
     if (!pruneByCount && !pruneByAge) {
@@ -313,14 +322,28 @@ function isTerminalAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean
   )
 }
 
+function isGeneratedImageDeliveryEvidenceIntent(
+  intent: AssistantOutboxIntent,
+): boolean {
+  if (intent.media.length !== 1) {
+    return false
+  }
+  const media = intent.media[0]
+  return (
+    media?.kind === 'vault_image'
+    && media.source === 'gpt-image-2'
+    && media.ref.startsWith('raw/captures/')
+  )
+}
+
 function isPruneProtectedAssistantOutboxIntent(
   intent: AssistantOutboxIntent,
-  protectedNewsletterOccurrencePrefixes: readonly string[],
+  protectedGroupEmailOccurrencePrefixes: readonly string[],
 ): boolean {
   const deliveryIdempotencyKey = intent.deliveryIdempotencyKey
   if (
     !deliveryIdempotencyKey
-    || !protectedNewsletterOccurrencePrefixes.some((prefix) =>
+    || !protectedGroupEmailOccurrencePrefixes.some((prefix) =>
       deliveryIdempotencyKey.startsWith(prefix)
     )
   ) {
@@ -330,7 +353,7 @@ function isPruneProtectedAssistantOutboxIntent(
   return target?.targetKind === 'group'
 }
 
-async function readProtectedNewsletterOccurrencePrefixes(
+async function readProtectedGroupEmailOccurrencePrefixes(
   paths: AssistantStatePaths,
 ): Promise<string[]> {
   const store = await readAssistantCronCanonicalRuntimeStore(paths, {
@@ -339,6 +362,9 @@ async function readProtectedNewsletterOccurrencePrefixes(
   return store.jobs.flatMap((record) =>
     record.state.pendingOccurrenceAt
       ? [
+          `group-email-effect:${record.jobId}:${record.state.pendingOccurrenceAt}:`,
+          // Read-only migration support for effects accepted before the
+          // generic group-email idempotency key shipped.
           `group-newsletter:${record.jobId}:${record.state.pendingOccurrenceAt}:`,
         ]
       : []

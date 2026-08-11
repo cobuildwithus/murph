@@ -21,7 +21,7 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 const HOSTED_ASSISTANT_MODEL_PRICING_ERROR =
   "HOSTED_ASSISTANT_MODEL must be one of gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna for hosted AI usage allowance pricing.";
 const HOSTED_STATE_ISOLATION_ROLLOUT_ERROR =
-  "production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is the audience-key and selector-scope runner bundle.";
+  "production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=immediate; rollback floor is the audience-key, selector-scope, and runner-schema-v16 media-effect bundle.";
 
 function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefined> = {}): EnvSource {
   return {

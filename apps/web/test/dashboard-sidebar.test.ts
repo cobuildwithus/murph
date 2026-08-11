@@ -241,6 +241,15 @@ test("Sidebar keeps the read-only Labs catalog out of navigation", () => {
   assert.doesNotMatch(markup, />Labs<\/a>/);
 });
 
+test("Sidebar keeps the private Training page out of navigation", () => {
+  mocks.usePathname.mockReturnValue("/training");
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.doesNotMatch(markup, /href="\/training"/);
+  assert.doesNotMatch(markup, />Training<\/a>/);
+});
+
 test("Sidebar keeps the Biomarkers tab active across biomarker section routes", () => {
   mocks.usePathname.mockReturnValue("/biomarkers/heart-rate-variability");
 

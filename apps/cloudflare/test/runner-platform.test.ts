@@ -7905,7 +7905,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const mealPhotoKey = "a".repeat(40);
     const mealPhotoResult = await effectsPort.readMealPhoto?.(mealPhotoKey);
     await effectsPort.deleteMealPhoto?.(mealPhotoKey);
+    const groupEmailAuthorizationProof = "a".repeat(64);
     const sendResult = await effectsPort.sendEmail({
+      groupEmailAuthorizationProof,
       message: "hello",
       subject: "subject",
       target: "assistant@example.com",
@@ -7938,6 +7940,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
     expect(mealPhotoDeleteRequest.method).toBe("DELETE");
     expect(sendRequest.url).toBe("http://results.worker/send");
+    await expect(sendRequest.json()).resolves.toEqual({
+      groupEmailAuthorizationProof,
+      message: "hello",
+      subject: "subject",
+      target: "assistant@example.com",
+      targetKind: "explicit",
+    });
   });
 
   it("preserves hosted email pre-provider failure proof across the effects port", async () => {

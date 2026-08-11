@@ -67,6 +67,11 @@ export {
 } from "./events/generated-image-capture-retention.ts";
 export {
   CAPTURE_LOOKUP_INDEX_PATH,
+  readStoredCaptureLookupIndex,
+} from "./events/capture-lookup.ts";
+export type {
+  StoredCaptureLookup,
+  StoredCaptureLookupIndex,
 } from "./events/capture-lookup.ts";
 export type {
   DeleteEventInput,

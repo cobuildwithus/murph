@@ -14,9 +14,11 @@ import type {
 
 // Reference authority is structural. Vault refs must live in a vault family
 // whose only writers are the inbound-attachment pipeline (raw/inbox/**) or the
-// canonical capture surface (raw/captures/**). Both hold media a human sent
-// into this vault's conversation, so "pipeline-written media family" is the
-// consent fact that authorizes reuse in image generation. Confidentiality
+// canonical capture surface (raw/captures/**). raw/inbox holds user-sent media;
+// raw/captures holds canonical trusted captures and may include Murph-generated
+// images. Membership in either owner-written family proves reference provenance,
+// not action consent; the consuming tool still owns intent and effect authority.
+// Confidentiality
 // across relationships is owned by vault separation (each 1:1 and each group
 // is its own runtime and vault), not by this check; this check blocks DIRECT
 // reference of document scans (raw/documents/**), bank/, derived/, and other

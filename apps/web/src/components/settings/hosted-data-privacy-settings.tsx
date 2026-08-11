@@ -562,7 +562,7 @@ export function formatVaultExportSuccess(result: {
   return result.freshness !== "fresh"
     || result.refreshPending
     || result.deviceSyncImportPending
-    ? "Your latest retained data downloaded. Changes Murph had not processed before you withdrew consent may be absent. Keep the file somewhere private and secure."
+    ? "Your latest retained data downloaded. Recent changes Murph had not finished processing may be absent. Keep the file somewhere private and secure."
     : "Your data export downloaded. Keep the file somewhere private and secure.";
 }
 

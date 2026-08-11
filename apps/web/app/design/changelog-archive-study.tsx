@@ -7,6 +7,7 @@ import {
   ChangelogEditionSection,
   type ResolvedChangelogTryIt,
 } from "../changelog/changelog-edition-section";
+import { GroupFundingSupporters } from "@/src/components/hosted-groups/group-funding-supporters";
 import { PhoneMock } from "../changelog/phone-mock";
 import {
   CalendarMock,
@@ -19,19 +20,19 @@ import {
 const DESIGN_CHANGELOG_EDITION: ChangelogEdition = {
   id: "2030-01-17",
   publishedOn: "2030-01-17",
-  title: "A week that closes its own loops",
+  title: "A week of follow-through",
   summary:
-    "Synthetic release copy shows the production archive rhythm without reading live product data.",
+    "Synthetic release copy exercises generated group photos and the production archive rhythm without reading live product data.",
   items: [
     {
-      id: "design-follow-up",
+      id: "design-generated-group-photo",
       kind: "feature",
       priority: 5,
-      title: "Follow-ups arrive where the work started",
+      title: "Generated images can become group photos",
       summary:
-        "A finished task returns one useful result to the same conversation, with the next decision easy to spot.",
+        "After an image appears in the conversation, one explicit request can reuse that exact image as the group photo.",
       details:
-        "This fixture exercises a full feature card with supporting detail at desktop and phone widths.",
+        "The generated-photo state exercises the production feature card and its supporting detail at desktop and phone widths.",
       relevanceTags: ["design"],
       sourcePullRequests: [],
     },
@@ -107,12 +108,6 @@ const DESIGN_VISUALS = {
       subtitle="Verified line after setup"
     />
   ),
-  "design-follow-up": (
-    <CalendarMock
-      entries={[{ day: "Tue", time: "2:00 AM", what: "Review the result" }]}
-      label="Scheduled follow-up"
-    />
-  ),
   "design-recovery": (
     <ChecklistMock
       items={[
@@ -149,6 +144,7 @@ const DESIGN_VISUALS = {
 } as const;
 
 const LATEST_PRODUCTION_ITEM_IDS = new Set([
+  "group-funding-supporters",
   "appointment-reminders-by-default",
   "blood-pressure-history-completion",
   "web-search-restored",
@@ -183,6 +179,21 @@ const LATEST_PRODUCTION_TRY_IT_BY_ITEM_ID: ReadonlyMap<
 ]);
 
 const LATEST_PRODUCTION_VISUALS = {
+  "group-funding-supporters": (
+    <div className="w-full max-w-[320px] rounded-2xl border border-[#c4a882]/35 bg-[#fdfaf5] px-5 pb-6">
+      <GroupFundingSupporters
+        supporters={{
+          monthlySponsor: {
+            id: "hucp_design_changelog_monthly",
+            name: "The Group Historian",
+          },
+          oneTimeContributions: [
+            { id: "hucp_design_changelog_one_time", name: "Anonymous" },
+          ],
+        }}
+      />
+    </div>
+  ),
   "appointment-reminders-by-default": (
     <CalendarMock
       entries={[

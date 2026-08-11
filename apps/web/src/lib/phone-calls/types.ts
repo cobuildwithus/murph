@@ -39,6 +39,10 @@ export type HostedPhoneCallProviderUsageResolution =
   | { state: "pending" }
   | {
       state: "ready";
+      terminalTransfer?: {
+        endedAt: Date;
+        providerCallId: string;
+      };
       usage: HostedPhoneCallProviderUsage;
     };
 

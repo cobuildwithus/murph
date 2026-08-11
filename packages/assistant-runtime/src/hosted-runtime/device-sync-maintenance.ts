@@ -27,6 +27,7 @@ import {
   reconcileHostedDeviceSyncControlPlaneState,
   promoteHostedCompletedDirtyPayloadAcks,
   syncHostedDeviceSyncControlPlaneState,
+  type HostedDeviceSyncCompletedImportTiming,
   type HostedDeviceSyncRuntimeSyncState,
 } from "../hosted-device-sync-runtime.ts";
 import type {
@@ -221,9 +222,13 @@ export async function runHostedDeviceSyncPass(
       service,
       shouldYield,
     });
-    promoteHostedCompletedDirtyPayloadAcks({
+    const completedImports = promoteHostedCompletedDirtyPayloadAcks({
       service,
       state: syncState,
+    }) ?? [];
+    writeHostedDeviceSyncImportCompletedRuntimeLogs({
+      completedImports,
+      platform: options.runtimeLogPlatform ?? null,
     });
     await writeHostedDeviceSyncJobFailureRuntimeLogs({
       platform: options.runtimeLogPlatform ?? null,
@@ -323,6 +328,67 @@ export async function runHostedDeviceSyncPass(
   } finally {
     closeHostedRuntimeDeviceSyncService(service);
   }
+}
+
+function writeHostedDeviceSyncImportCompletedRuntimeLogs(input: {
+  completedImports: readonly HostedDeviceSyncCompletedImportTiming[];
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+}): void {
+  if (!input.platform?.logPort) {
+    return;
+  }
+
+  for (const completed of input.completedImports) {
+    const webhookToImportMs = nonnegativeDurationMs(
+      completed.firstWebhookReceivedAt,
+      completed.importCompletedAt,
+    );
+    const runtimeQueueMs = nonnegativeDurationMs(
+      completed.jobCreatedAt,
+      completed.importExecutionStartedAt,
+    );
+    const importExecutionMs = nonnegativeDurationMs(
+      completed.importExecutionStartedAt,
+      completed.importCompletedAt,
+    );
+
+    void writeHostedRuntimeLogBestEffort({
+      entry: {
+        at: completed.importCompletedAt,
+        component: "device-sync",
+        eventCode: "device-sync.import_completed",
+        level: "info",
+        phase: "invoke",
+        redactedJson: {
+          eventToProviderSendBucket: completed.eventToProviderSendBucket,
+          jobKind: toHostedRuntimeLogCode(completed.jobKind),
+          provider: toHostedRuntimeLogCode(completed.provider),
+          ...(completed.providerSendToWebhookMs === null
+            ? {}
+            : { providerSendToWebhookMs: completed.providerSendToWebhookMs }),
+          ...(webhookToImportMs === null ? {} : { webhookToImportMs }),
+          ...(runtimeQueueMs === null ? {} : { runtimeQueueMs }),
+          ...(importExecutionMs === null ? {} : { importExecutionMs }),
+        },
+      },
+      platform: input.platform,
+    });
+  }
+}
+
+function nonnegativeDurationMs(
+  startAt: string | null,
+  endAt: string | null,
+): number | null {
+  if (!startAt || !endAt) {
+    return null;
+  }
+  const startMs = Date.parse(startAt);
+  const endMs = Date.parse(endAt);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return null;
+  }
+  return endMs - startMs;
 }
 
 export function resolveHostedDeviceSyncNextWakeAt(input: {

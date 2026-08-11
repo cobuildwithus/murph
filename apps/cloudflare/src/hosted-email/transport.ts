@@ -98,10 +98,13 @@ export async function sendHostedEmailMessage(input: {
 
     const preflight = assertSupportedHostedEmailSendRequest(input.request);
     if (
-      input.request.idempotencyKey?.startsWith("group-newsletter:")
-      && !input.request.newsletterAuthorizationProof
+      (
+        input.request.idempotencyKey?.startsWith("group-email-effect:")
+        || input.request.idempotencyKey?.startsWith("group-newsletter:")
+      )
+      && !input.request.groupEmailAuthorizationProof
     ) {
-      throw new Error("Hosted newsletter delivery requires an authorization proof.");
+      throw new Error("Hosted group email delivery requires an authorization proof.");
     }
     const groupId = resolveHostedEmailSendGroupId({
       existingThreadTarget: preflight.existingThreadTarget,
@@ -119,8 +122,8 @@ export async function sendHostedEmailMessage(input: {
     });
     const groupRecipientResolution = groupId
       ? await resolveHostedEmailGroupRecipients({
-          expectedNewsletterAuthorizationProof:
-            input.request.newsletterAuthorizationProof ?? null,
+          expectedGroupEmailAuthorizationProof:
+            input.request.groupEmailAuthorizationProof ?? null,
           fetchImpl: input.fetchImpl,
           groupId,
           userId: input.userId,
@@ -367,7 +370,7 @@ async function sendPreparedHostedEmailMimeMessages(input: {
 }
 
 async function resolveHostedEmailGroupRecipients(input: {
-  expectedNewsletterAuthorizationProof?: string | null;
+  expectedGroupEmailAuthorizationProof?: string | null;
   fetchImpl?: typeof fetch;
   groupId: string;
   userId: string;
@@ -383,10 +386,10 @@ async function resolveHostedEmailGroupRecipients(input: {
     ...(input.webControlAllowHttpHosts ? { allowHttpHosts: input.webControlAllowHttpHosts } : {}),
     baseUrl: input.webControlBaseUrl,
     body: JSON.stringify({
-      ...(input.expectedNewsletterAuthorizationProof
+      ...(input.expectedGroupEmailAuthorizationProof
         ? {
-            expectedNewsletterAuthorizationProof:
-              input.expectedNewsletterAuthorizationProof,
+            expectedGroupEmailAuthorizationProof:
+              input.expectedGroupEmailAuthorizationProof,
           }
         : {}),
       groupId: input.groupId,
@@ -452,8 +455,8 @@ async function prepareHostedEmailSend(input: {
     ?? null;
   const isGroupDelivery = Boolean(input.groupId);
 
-  // Direct/thread email stays owner-only by default. Group newsletters are the
-  // explicit shared-thread exception, with recipients resolved by web at send time.
+  // Direct/thread email stays owner-only by default. Authorized group email is
+  // the explicit shared-thread exception, with recipients resolved by Web at send time.
   const groupRecipients = normalizeHostedEmailAddressList(input.groupRecipients ?? []);
   const primaryRecipient = resolveHostedEmailPrimaryRecipient({
     existingThreadTarget,
@@ -620,13 +623,14 @@ function buildRawMimeMessage(input: {
 }
 
 function resolveHostedEmailMimeDate(idempotencyKey: string | null): string {
-  const newsletterOccurrenceAt = parseHostedNewsletterOccurrenceAt(idempotencyKey);
-  return (newsletterOccurrenceAt ?? new Date()).toUTCString();
+  const groupEmailOccurrenceAt = parseHostedGroupEmailOccurrenceAt(idempotencyKey);
+  return (groupEmailOccurrenceAt ?? new Date()).toUTCString();
 }
 
-function parseHostedNewsletterOccurrenceAt(idempotencyKey: string | null): Date | null {
+function parseHostedGroupEmailOccurrenceAt(idempotencyKey: string | null): Date | null {
   const trimmed = idempotencyKey?.trim() ?? "";
-  const match = /^group-newsletter:[^:]+:(.+):[^:]+$/u.exec(trimmed);
+  const match = /^(?:group-email-effect|group-newsletter):[^:]+:(.+):[^:]+$/u
+    .exec(trimmed);
   const occurrenceAt = match?.[1] ?? "";
   if (!occurrenceAt) {
     return null;

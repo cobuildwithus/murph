@@ -1,12 +1,24 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  deleteExpiredHostedBrowserAssertionNonces: vi.fn(),
+  isHostedRuntimeLogDatabaseConfigured: vi.fn(),
   requireVercelCronRequest: vi.fn(),
   runHostedRetentionCleanup: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
   requireVercelCronRequest: mocks.requireVercelCronRequest,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-log/database", () => ({
+  isHostedRuntimeLogDatabaseConfigured:
+    mocks.isHostedRuntimeLogDatabaseConfigured,
+}));
+
+vi.mock("@/src/lib/hosted-retention/browser-assertion-nonces", () => ({
+  deleteExpiredHostedBrowserAssertionNonces:
+    mocks.deleteExpiredHostedBrowserAssertionNonces,
 }));
 
 vi.mock("@/src/lib/hosted-retention/cleanup", () => ({
@@ -25,6 +37,8 @@ describe("hosted retention cron route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
+    mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(false);
+    mocks.deleteExpiredHostedBrowserAssertionNonces.mockResolvedValue(8);
     mocks.runHostedRetentionCleanup.mockResolvedValue({
       accountDeletionCleanup: {
         completed: 1,
@@ -32,6 +46,7 @@ describe("hosted retention cron route", () => {
         pending: 2,
         selected: 3,
       },
+      expiredCallbackRequestNoncesDeleted: 8,
       expiredComputerRunsCleanedUp: 4,
       expiredConversationPolicyNonRepliesRecorded: 1,
       expiredMailboxContentRetired: 7,
@@ -52,6 +67,7 @@ describe("hosted retention cron route", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireVercelCronRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.runHostedRetentionCleanup).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteExpiredHostedBrowserAssertionNonces).toHaveBeenCalledTimes(1);
     await expect(response.json()).resolves.toEqual({
       cleanup: {
         accountDeletionCleanup: {
@@ -60,6 +76,8 @@ describe("hosted retention cron route", () => {
           pending: 2,
           selected: 3,
         },
+        expiredBrowserAssertionNoncesDeleted: 8,
+        expiredCallbackRequestNoncesDeleted: 8,
         expiredComputerRunsCleanedUp: 4,
         expiredConversationPolicyNonRepliesRecorded: 1,
         expiredMailboxContentRetired: 7,

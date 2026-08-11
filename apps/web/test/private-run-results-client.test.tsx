@@ -155,6 +155,7 @@ function browserVaultContext(
     ref: null,
     refresh: mocks.refresh,
     refreshPending: false,
+    runtimeRefreshPending: false,
     status: "empty",
     workspaceVersion: null,
     ...overrides,

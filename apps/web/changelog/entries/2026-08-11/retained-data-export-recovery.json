@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 200,
+  "item": {
+    "id": "retained-data-export-recovery",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Download retained data while updates process",
+    "summary": "Settings export now downloads the newest retained dashboard data Murph has instead of blocking while newer Oura or other health changes are still processing.",
+    "details": "The export explains that recent changes may be absent and requests a background refresh only while health-data consent remains granted. A missing retained copy stays retryable without consuming the failed attempt's one-time challenge.",
+    "relevanceTags": ["settings", "export", "privacy", "wearables", "reliability"],
+    "sourcePullRequests": [1655]
+  }
+}

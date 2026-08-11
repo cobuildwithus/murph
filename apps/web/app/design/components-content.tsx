@@ -156,6 +156,7 @@ import {
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
+  GroupFundingSupportersStudy,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import {
@@ -2144,6 +2145,17 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Group funding supporters">
+          <p className="text-sm text-muted-foreground">
+            The funding page recognizes the current monthly sponsor and recent
+            one-time supporters without exposing contribution amounts or the
+            sponsor&apos;s private monthly maximum.
+          </p>
+          <GroupFundingSupportersStudy />
+        </Section>
+
+        <Separator />
+
         <Section title="Signup referral link actions">
           <p className="text-sm text-muted-foreground">
             The real copy action keeps loading, clipboard, and recovery states
@@ -2533,7 +2545,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Health data consent actions">
+        <Section title="Health data consent settings row">
           <HealthDataConsentControlStudy />
         </Section>
 

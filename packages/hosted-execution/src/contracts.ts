@@ -67,7 +67,6 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
-  "group-newsletter.email-needed",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -90,7 +89,6 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "clinical-records.sync-requested",
   "device-sync.wake",
   "environment-voice.captured",
-  "group-newsletter.email-needed",
   "meal-photo.captured",
   "vault-share.delivery",
   "vault-share.revoke",
@@ -497,20 +495,6 @@ export type HostedExecutionDirectRoute =
 export type HostedExecutionDirectRouteChannel =
   HostedExecutionDirectRoute["channel"];
 
-/** @deprecated Use HostedExecutionDirectRouteChannel. */
-export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
-  HostedExecutionDirectRouteChannel;
-/** @deprecated Use HostedExecutionDirectRoute. */
-export type HostedExecutionGroupNewsletterEmailNeededDirectRoute =
-  HostedExecutionDirectRoute;
-
-export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
-  directRoute?: HostedExecutionDirectRoute | null;
-  groupDisplayName: string | null;
-  groupId: string;
-  kind: "group-newsletter.email-needed";
-}
-
 export interface HostedExecutionPlainRuntimeControlRequestedEvent
   extends HostedExecutionBaseEvent {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
@@ -543,7 +527,6 @@ export type HostedExecutionEvent =
   | HostedExecutionAssistantAskCompletedEvent
   | HostedExecutionClinicalRecordsSyncRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
-  | HostedExecutionGroupNewsletterEmailNeededEvent
   | HostedExecutionRuntimeControlRequestedEvent;
 
 export interface HostedExecutionBaseWake {
@@ -822,13 +805,6 @@ export interface HostedExecutionEnvironmentVoiceCapturedWake
   kind: "environment-voice.captured";
 }
 
-export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
-  directRoute?: HostedExecutionDirectRoute | null;
-  groupDisplayName: string | null;
-  groupId: string;
-  kind: "group-newsletter.email-needed";
-}
-
 export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface HostedExecutionMealPhotoCapturedPayload {
@@ -882,7 +858,6 @@ export type HostedExecutionWake =
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionEnvironmentVoiceCapturedWake
-  | HostedExecutionGroupNewsletterEmailNeededWake
   | HostedExecutionMealPhotoCapturedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake
