@@ -451,13 +451,6 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
       refreshOptions?.requestRuntimeRefreshUntil?.(unchangedClient),
       false,
     );
-    assert.equal(
-      refreshOptions?.requestRuntimeRefreshUntil?.(changedClient),
-      true,
-    );
-    const cardioUpdate = selectBrowserVaultTraining(changedClient);
-    assert.equal(cardioUpdate.recentSessions[0]?.distanceKm, 4.828032);
-
     await act(async () => {
       rendered.window.dispatchEvent(new rendered.window.Event("focus"));
       await Promise.resolve();
@@ -468,13 +461,35 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
       /Start workout|Continue workout/,
     );
 
-    currentClient = changedClient;
+    await act(async () => {
+      assert.equal(
+        refreshOptions?.requestRuntimeRefreshUntil?.(changedClient),
+        true,
+      );
+      currentClient = changedClient;
+    });
+    const cardioUpdate = selectBrowserVaultTraining(changedClient);
+    assert.equal(cardioUpdate.recentSessions[0]?.distanceKm, 4.828032);
     await rendered.rerender(
       createElement(TrainingPageClient, {
         authenticated: true,
         continueContactOptions,
         startContactOptions,
       }),
+    );
+    assert.match(rendered.container.textContent ?? "", /Continue workout/);
+
+    currentClient = unchangedClient;
+    await rendered.rerender(
+      createElement(TrainingPageClient, {
+        authenticated: true,
+        continueContactOptions,
+        startContactOptions,
+      }),
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Checking for your saved update|Update not visible yet/,
     );
     assert.match(rendered.container.textContent ?? "", /Continue workout/);
   } finally {
@@ -546,12 +561,27 @@ test("Training shows bounded recovery when the runtime owner expires a stalled r
     const checkAgain = [...rendered.container.querySelectorAll("button")]
       .find((button) => button.textContent?.includes("Check again"));
     assert.ok(checkAgain);
+    const cancelUpdate = [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("didn't send an update"));
+    assert.ok(cancelUpdate);
     await act(async () => {
       checkAgain.dispatchEvent(
         new rendered.window.Event("click", { bubbles: true }),
       );
     });
     assert.equal(refresh.mock.calls.length, 2);
+
+    await act(async () => {
+      cancelUpdate.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    assert.equal(refresh.mock.calls.length, 2);
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Checking for your saved update|Update not visible yet/,
+    );
+    assert.match(rendered.container.textContent ?? "", /Continue workout/);
   } finally {
     await rendered.cleanup();
   }
@@ -723,12 +753,14 @@ test("Training keeps retained data visible while a Messages update is checked an
   assert.doesNotMatch(checkingMarkup, /Start workout|Continue workout/);
 
   const onCheckUpdate = vi.fn();
+  const onCancelUpdate = vi.fn();
   const recoveryMarkup = renderToStaticMarkup(
     createElement(TrainingPageView, {
       authenticated: true,
       continueContactOptions,
       error: null,
       handoffRefreshState: "not_visible",
+      onCancelUpdate,
       onCheckUpdate,
       onRefresh: () => {},
       refreshPending: false,
@@ -739,6 +771,7 @@ test("Training keeps retained data visible while a Messages update is checked an
   );
 
   assert.match(recoveryMarkup, /Update not visible yet/);
+  assert.match(recoveryMarkup, /I didn&#x27;t send an update/);
   assert.match(recoveryMarkup, /Check again/);
   assert.match(recoveryMarkup, /Recent workouts/);
   assert.doesNotMatch(recoveryMarkup, /Start workout|Continue workout/);
@@ -749,6 +782,7 @@ test("Training keeps retained data visible while a Messages update is checked an
       continueContactOptions,
       error: null,
       handoffRefreshState: "not_visible",
+      onCancelUpdate,
       onCheckUpdate,
       onRefresh: () => {},
       refreshPending: false,
@@ -759,6 +793,7 @@ test("Training keeps retained data visible while a Messages update is checked an
   );
 
   assert.match(emptyRecoveryMarkup, /Update not visible yet/);
+  assert.match(emptyRecoveryMarkup, /I didn&#x27;t send an update/);
   assert.match(emptyRecoveryMarkup, /Check again/);
   assert.doesNotMatch(emptyRecoveryMarkup, /Start workout|Continue workout/);
 });

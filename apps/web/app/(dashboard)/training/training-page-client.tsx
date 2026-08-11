@@ -120,8 +120,15 @@ export default function TrainingPageClient({
       setHandoffRefreshBaseline(baseline);
       void refresh({
         background: true,
-        requestRuntimeRefreshUntil: (client) =>
-          isTrainingHandoffComplete(baseline, client),
+        requestRuntimeRefreshUntil: (client) => {
+          const complete = isTrainingHandoffComplete(baseline, client);
+          if (complete) {
+            setHandoffRefreshBaseline((current) =>
+              current === baseline ? undefined : current
+            );
+          }
+          return complete;
+        },
       });
     },
     [refresh],
@@ -167,6 +174,7 @@ export default function TrainingPageClient({
       continueContactOptions={continueContactOptions}
       error={error}
       handoffRefreshState={handoffRefreshState}
+      onCancelUpdate={() => setHandoffRefreshBaseline(undefined)}
       onCheckUpdate={() => {
         if (handoffRefreshBaseline) {
           requestHandoffRefresh(handoffRefreshBaseline);
@@ -187,6 +195,7 @@ export function TrainingPageView({
   continueContactOptions,
   error,
   handoffRefreshState = "idle",
+  onCancelUpdate,
   onCheckUpdate,
   onContactAction,
   onRefresh,
@@ -199,6 +208,7 @@ export function TrainingPageView({
   continueContactOptions: readonly MurphContactOption[];
   error: string | null;
   handoffRefreshState?: TrainingHandoffRefreshState;
+  onCancelUpdate?: () => void;
   onCheckUpdate?: () => void;
   onContactAction?: () => void;
   onRefresh: () => void;
@@ -286,16 +296,30 @@ export function TrainingPageView({
                   ? "Your current training stays visible while Murph checks for the update from Messages."
                   : "The saved update has not reached this view yet. Your current training is still available."}
               </span>
-              {handoffRefreshState === "not_visible" && onCheckUpdate ? (
-                <Button
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={onCheckUpdate}
-                >
-                  <RefreshCw aria-hidden="true" />
-                  Check again
-                </Button>
+              {handoffRefreshState === "not_visible" ? (
+                <div className="flex flex-wrap gap-2">
+                  {onCancelUpdate ? (
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                      onClick={onCancelUpdate}
+                    >
+                      I didn&apos;t send an update
+                    </Button>
+                  ) : null}
+                  {onCheckUpdate ? (
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                      onClick={onCheckUpdate}
+                    >
+                      <RefreshCw aria-hidden="true" />
+                      Check again
+                    </Button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           </AlertDescription>
