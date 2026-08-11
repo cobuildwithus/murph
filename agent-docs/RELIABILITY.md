@@ -1048,9 +1048,11 @@ Last verified: 2026-08-10
   carries only the just-created causal outbox intent into the existing
   write-ahead provider drain, and leaves generic notifications or unrelated
   pending outbox work checkpoint-gated. Fresh conversation input retains
-  priority. Referral recovery also re-signals bounded oldest unconsumed
-  celebration pointers, so a post-commit signal failure remains recoverable
-  from the existing mailbox without another queue or state machine. Web must
+  priority. Referral recovery also re-signals bounded oldest celebration
+  pointers only when they are the exact current head after their canonical
+  lane-consumption cursor, so a post-commit signal failure remains recoverable
+  without repeatedly interrupting an already-running backlog drain or adding
+  another queue or state machine. Web must
   not rewrite an encrypted payload after the runtime may have imported it and
   advanced its watermark. For the exact authority-less direct-Linq
   usage-referral shape, the local system-mailbox owner reasserts the frozen

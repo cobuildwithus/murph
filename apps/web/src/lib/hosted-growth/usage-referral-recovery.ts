@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { isHostedMailboxLane } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -22,6 +22,15 @@ import {
 } from "./usage-referral";
 
 export const HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE = 50;
+const HOSTED_USAGE_REFERRAL_NOTIFICATION_DEDUPE_PREFIX =
+  "assistant.notification.requested:usage-referral-reward:";
+
+interface PendingHostedUsageReferralNotification {
+  id: string;
+  lane: string;
+  laneSeq: bigint;
+  userId: string;
+}
 
 export interface HostedUsageReferralRecoveryResult {
   failed: number;
@@ -43,7 +52,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
 } = {}): Promise<HostedUsageReferralRecoveryResult> {
   const prisma = input.prisma ?? getPrisma();
   const signupRewards = await recoverHostedSignupReferralRewardsSafely(prisma);
-  const [referrals, unconsumedCelebrations] = await Promise.all([
+  const [referrals, pendingCelebrations] = await Promise.all([
     prisma.hostedUsageReferral.findMany({
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       select: {
@@ -64,24 +73,24 @@ export async function recoverPendingHostedUsageReferrals(input: {
         ],
       },
     }),
-    prisma.hostedMailboxItem.findMany({
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: {
-        id: true,
-        lane: true,
-        laneSeq: true,
-        userId: true,
-      },
-      take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
-      where: {
-        consumedAt: null,
-        dedupeKey: {
-          startsWith:
-            "assistant.notification.requested:usage-referral-reward:",
-        },
-        kind: "assistant.notification.requested",
-      },
-    }),
+    prisma.$queryRaw<PendingHostedUsageReferralNotification[]>(Prisma.sql`
+      SELECT
+        item.id,
+        item.lane,
+        item.lane_seq AS "laneSeq",
+        item.user_id AS "userId"
+      FROM hosted_mailbox_item AS item
+      INNER JOIN hosted_mailbox_lane_counter AS counter
+        ON counter.user_id = item.user_id
+        AND counter.lane = item.lane
+      WHERE item.consumed_at IS NULL
+        AND item.dedupe_key LIKE
+          ${`${HOSTED_USAGE_REFERRAL_NOTIFICATION_DEDUPE_PREFIX}%`}
+        AND item.kind = 'assistant.notification.requested'
+        AND item.lane_seq = counter.consumed_seq + 1
+      ORDER BY item.created_at ASC, item.id ASC
+      LIMIT ${HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE}
+    `),
   ]);
 
   let failed = signupRewards.failed;
@@ -128,7 +137,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
   }
 
   let resignaled = 0;
-  for (const celebration of unconsumedCelebrations) {
+  for (const celebration of pendingCelebrations) {
     try {
       resignaled += 1;
       await signalHostedMailboxAppendRuntime({
@@ -146,7 +155,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
         prisma,
       });
     } catch {
-      // The next bounded recovery pass re-signals this same unconsumed item.
+      // The next bounded recovery pass re-signals this same pending item.
     }
   }
 
@@ -158,7 +167,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
     scanned:
       signupRewards.scanned
       + referrals.length
-      + unconsumedCelebrations.length,
+      + pendingCelebrations.length,
   };
 }
 
