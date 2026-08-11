@@ -26,3 +26,10 @@ export type {
   OverviewWeeklySampleSummary,
   OverviewWeeklyStat,
 } from "./overview-weekly-stats.ts";
+export type {
+  PersonalPatternCell,
+  PersonalPatternFactor,
+  PersonalPatternOutcome,
+  PersonalPatternReport,
+  PersonalPatternStage,
+} from "./personal-patterns.ts";

@@ -33,6 +33,7 @@ export type BrowserVaultStatus = "loading" | "ready" | "empty" | "error";
 
 const BROWSER_VAULT_STALE_POLL_INTERVAL_MS = 1_500;
 const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 20_000;
+const BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS = 15_000;
 const EMPTY_BROWSER_VAULT_SESSION_METADATA: BrowserVaultSessionMetadata = {
   deviceSyncImportPending: false,
   freshness: "stale",
@@ -354,13 +355,16 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const poll = () => {
-      if (cancelled || Date.now() - startedAt > BROWSER_VAULT_STALE_POLL_WINDOW_MS) {
+      if (cancelled) {
         return;
       }
 
       void pollStaleReplica().finally(() => {
-        if (!cancelled && Date.now() - startedAt <= BROWSER_VAULT_STALE_POLL_WINDOW_MS) {
-          timeoutId = setTimeout(poll, BROWSER_VAULT_STALE_POLL_INTERVAL_MS);
+        if (!cancelled) {
+          const interval = Date.now() - startedAt <= BROWSER_VAULT_STALE_POLL_WINDOW_MS
+            ? BROWSER_VAULT_STALE_POLL_INTERVAL_MS
+            : BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS;
+          timeoutId = setTimeout(poll, interval);
         }
       });
     };

@@ -58,6 +58,25 @@ export interface WearableSleepPatternBuildContext {
   >;
 }
 
+export function isWearableSleepPatternEligibleNight(
+  night: { sleepType: WearableSleepSessionType },
+): boolean {
+  return night.sleepType !== "nap";
+}
+
+export function resolveWearableSleepAnalysisDate(
+  night: Pick<WearableSleepNight, "date" | "sleepEndAt" | "timeZone">,
+  fallbackTimeZone: string | null,
+): string {
+  const canonicalTimeZone = typeof night.timeZone === "string" && isValidIanaTimeZone(night.timeZone)
+    ? night.timeZone
+    : null;
+  const timeZone = canonicalTimeZone ?? fallbackTimeZone;
+  const endAt = typeof night.sleepEndAt === "string" ? night.sleepEndAt : null;
+  if (!timeZone || !endAt || !Number.isFinite(Date.parse(endAt))) return night.date;
+  return formatTimeZoneDateTimeParts(endAt, timeZone).dayKey;
+}
+
 /**
  * Sleep rows are stored under a provider date, while pattern membership is
  * anchored to the sleep end localized in the night's canonical/reporting zone.
@@ -113,7 +132,7 @@ export function buildWearableSleepPatternSummary(
   const preparedInWindow = prepared.filter((night) =>
     night.analysisDate >= window.from && night.analysisDate <= window.to
   );
-  const nonNapPreparedInWindow = preparedInWindow.filter((night) => night.sleepType !== "nap");
+  const nonNapPreparedInWindow = preparedInWindow.filter(isWearableSleepPatternEligibleNight);
   const collapsed = collapseDuplicateAndOverlappingNights(nonNapPreparedInWindow);
   const sameDateCollapsed = selectOneNightPerAnalysisDate(collapsed.nights);
   const nights = sameDateCollapsed.nights;
@@ -124,7 +143,7 @@ export function buildWearableSleepPatternSummary(
       asOf.getTime(),
     ))
     .filter((night) => night.analysisDate >= window.from && night.analysisDate <= window.to)
-    .filter((night) => night.sleepType !== "nap");
+    .filter(isWearableSleepPatternEligibleNight);
   const suppressionCollapsed = collapseDuplicateAndOverlappingNights(suppressionPreparedInWindow);
   const suppressionSameDateCollapsed = selectOneNightPerAnalysisDate(suppressionCollapsed.nights);
   const omittedEvidenceCount = preparedInWindow.reduce(
@@ -301,7 +320,7 @@ function prepareSleepNight(
   const recordedAtMs = recordedAt ? Date.parse(recordedAt) : Number.NaN;
 
   return {
-    analysisDate: endParts?.dayKey ?? night.date,
+    analysisDate: resolveWearableSleepAnalysisDate(night, explicitReportingTimeZone),
     awakeMinutes: directMetricValue(night.awakeMinutes),
     bedtimeMinutes: startParts ? startParts.hour * 60 + startParts.minute : null,
     endAt,

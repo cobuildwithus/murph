@@ -7,6 +7,11 @@ import {
   isStrictIsoDate,
   safeParseContract,
 } from "@murphai/contracts";
+import {
+  normalizeWearableMetricValue,
+  resolveMetricDefinition,
+  resolveWearableCanonicalMetricKey,
+} from "@murphai/health-metrics";
 
 import type {
   BloodTestReferenceRange,
@@ -110,18 +115,53 @@ type StoredHistoryEventEntry = {
   relativePath: string;
   record: HistoryEventRecord;
 };
+type StoredAvailabilitySpineRecord = Pick<
+  EventRecord,
+  "id" | "occurredAt" | "recordedAt" | "lifecycle"
+>;
+type StoredAvailabilityEventEntry = {
+  relativePath: string;
+  record: StoredAvailabilitySpineRecord;
+  value: unknown;
+};
 
-export interface ReadLatestBloodTestHistorySummaryInput {
+export interface ReadCanonicalEventAvailabilityInput {
   vaultRoot: string;
   shouldContinue?: () => boolean;
   signal?: AbortSignal | null;
 }
 
-export interface LatestBloodTestHistorySummary {
+export interface CanonicalEventAvailabilitySummary {
   interrupted: boolean;
-  latestOccurredAt: string | null;
-  present: boolean;
+  latestBloodPressureMeasurementDayKey: string | null;
+  latestBloodPressureMeasurementOccurredAt: string | null;
+  latestBloodTestOccurredAt: string | null;
+  latestBodyMeasurementDayKey: string | null;
+  latestBodyMeasurementOccurredAt: string | null;
 }
+
+const CANONICAL_BODY_MEASUREMENT_METRIC_KEYS = new Set([
+  "bmi",
+  "bodyFatPercentage",
+  "leanBodyMassKg",
+  "waistCircumference",
+  "weightKg",
+]);
+const CANONICAL_SYSTOLIC_BLOOD_PRESSURE_METRIC_KEY =
+  "systolic-blood-pressure";
+const CANONICAL_DIASTOLIC_BLOOD_PRESSURE_METRIC_KEY =
+  "diastolic-blood-pressure";
+const CANONICAL_BODY_MEASUREMENT_TYPES = new Set([
+  "body_fat_pct",
+  "waist",
+  "weight",
+]);
+const STORED_DAY_GRAIN_OBSERVATION_ALIASES = new Set([
+  "day",
+  "daily-summary",
+  "daily-timeseries-aggregate",
+  "summary",
+]);
 
 type EncounterHistoryFields = Pick<
   EncounterHistoryEventRecord,
@@ -1298,9 +1338,9 @@ export async function listHistoryEvents({
   return normalizedLimit ? records.slice(0, normalizedLimit) : records;
 }
 
-export async function readLatestBloodTestHistorySummaryInterruptible(
-  input: ReadLatestBloodTestHistorySummaryInput,
-): Promise<LatestBloodTestHistorySummary> {
+export async function readCanonicalEventAvailabilityInterruptible(
+  input: ReadCanonicalEventAvailabilityInput,
+): Promise<CanonicalEventAvailabilitySummary> {
   const shouldContinue = () =>
     !input.signal?.aborted && input.shouldContinue?.() !== false;
   const walked = await walkVaultFilesInterruptible(
@@ -1312,10 +1352,10 @@ export async function readLatestBloodTestHistorySummaryInterruptible(
     },
   );
   if (walked.interrupted) {
-    return interruptedBloodTestHistorySummary();
+    return interruptedCanonicalEventAvailability();
   }
 
-  const latestByEventId = new Map<string, StoredHistoryEventEntry>();
+  const latestByEventId = new Map<string, StoredAvailabilityEventEntry>();
   for (const relativePath of walked.relativePaths) {
     const read = await visitJsonlRecordsInterruptible({
       relativePath,
@@ -1323,50 +1363,358 @@ export async function readLatestBloodTestHistorySummaryInterruptible(
       signal: input.signal,
       vaultRoot: input.vaultRoot,
       visit: (shardRecord) => {
-        const record = parseStoredHistoryEvent(shardRecord);
-        if (!record) {
+        let spineRecord: StoredAvailabilitySpineRecord | null;
+        try {
+          spineRecord = parseStoredAvailabilitySpineRecord(shardRecord);
+        } catch (error) {
+          if (storedEventMayContributeToCanonicalAvailability(shardRecord)) {
+            throw error;
+          }
+          return;
+        }
+        if (!spineRecord) {
+          if (storedEventMayContributeToCanonicalAvailability(shardRecord)) {
+            throw new VaultError(
+              "EVENT_CONTRACT_INVALID",
+              "Stored availability event record has an invalid event spine.",
+            );
+          }
           return;
         }
 
-        const candidate = { relativePath, record };
-        const current = latestByEventId.get(record.id);
+        const candidate = {
+          relativePath,
+          record: spineRecord,
+          value: shardRecord,
+        };
+        const current = latestByEventId.get(spineRecord.id);
         if (!current || compareEventSpineEntries(current, candidate) < 0) {
-          latestByEventId.set(record.id, candidate);
+          latestByEventId.set(spineRecord.id, candidate);
         }
       },
     });
     if (read.interrupted) {
-      return interruptedBloodTestHistorySummary();
+      return interruptedCanonicalEventAvailability();
     }
   }
 
-  let latestOccurredAt: string | null = null;
-  for (const { record } of latestByEventId.values()) {
+  let latestBloodPressureMeasurementDayKey: string | null = null;
+  let latestBloodPressureMeasurementOccurredAt: string | null = null;
+  let latestBloodTestOccurredAt: string | null = null;
+  let latestBodyMeasurementDayKey: string | null = null;
+  let latestBodyMeasurementOccurredAt: string | null = null;
+  for (const candidate of latestByEventId.values()) {
     if (!shouldContinue()) {
-      return interruptedBloodTestHistorySummary();
+      return interruptedCanonicalEventAvailability();
+    }
+    if (isDeletedEventSpineRecord(candidate.record)) {
+      continue;
+    }
+
+    const storedHistoryRecord = parseStoredHistoryEvent(candidate.value);
+    let record: EventRecord;
+    let providerBodyObservation = false;
+    if (storedHistoryRecord) {
+      record = storedHistoryRecord;
+    } else {
+      const normalizedStoredRecord = normalizeStoredAvailabilityEvent(
+        candidate.value,
+      );
+      const parsed = safeParseContract(eventRecordSchema, normalizedStoredRecord);
+      if (parsed.success) {
+        record = parsed.data;
+        providerBodyObservation = record.kind === "observation"
+          && record.externalRef !== undefined;
+      } else {
+        const legacyBodyObservation =
+          parseStoredProviderBodyAvailabilityEvent(normalizedStoredRecord);
+        if (!legacyBodyObservation) {
+          if (storedEventMayContributeToCanonicalAvailability(
+            normalizedStoredRecord,
+          )) {
+            throw new VaultError(
+              "EVENT_CONTRACT_INVALID",
+              "Stored availability event record is invalid.",
+              { errors: parsed.errors },
+            );
+          }
+          continue;
+        }
+        record = legacyBodyObservation;
+        providerBodyObservation = true;
+      }
+    }
+
+    if (
+      record.kind === "test"
+      && isBloodTestHistoryRecord(record)
+      && (
+        latestBloodTestOccurredAt === null
+        || record.occurredAt > latestBloodTestOccurredAt
+      )
+    ) {
+      latestBloodTestOccurredAt = record.occurredAt;
     }
     if (
-      !isDeletedEventSpineRecord(record)
-      && record.kind === "test"
-      && isBloodTestHistoryRecord(record)
-      && (latestOccurredAt === null || record.occurredAt > latestOccurredAt)
+      canonicalEventContainsBodyMeasurement(record, providerBodyObservation)
+      && isLaterCanonicalAvailabilityEvent(
+        record.occurredAt,
+        record.dayKey,
+        latestBodyMeasurementOccurredAt,
+        latestBodyMeasurementDayKey,
+      )
     ) {
-      latestOccurredAt = record.occurredAt;
+      latestBodyMeasurementOccurredAt = record.occurredAt;
+      latestBodyMeasurementDayKey = record.dayKey;
+    }
+    if (
+      canonicalEventContainsPairedBloodPressure(record)
+      && isLaterCanonicalAvailabilityEvent(
+        record.occurredAt,
+        record.dayKey,
+        latestBloodPressureMeasurementOccurredAt,
+        latestBloodPressureMeasurementDayKey,
+      )
+    ) {
+      latestBloodPressureMeasurementOccurredAt = record.occurredAt;
+      latestBloodPressureMeasurementDayKey = record.dayKey;
     }
   }
 
   return {
     interrupted: false,
-    latestOccurredAt,
-    present: latestOccurredAt !== null,
+    latestBloodPressureMeasurementDayKey,
+    latestBloodPressureMeasurementOccurredAt,
+    latestBloodTestOccurredAt,
+    latestBodyMeasurementDayKey,
+    latestBodyMeasurementOccurredAt,
   };
 }
 
-function interruptedBloodTestHistorySummary(): LatestBloodTestHistorySummary {
+function canonicalEventContainsBodyMeasurement(
+  record: EventRecord,
+  providerBodyObservation = false,
+): boolean {
+  if (record.kind === "observation") {
+    return isReadableCanonicalBodyMeasurement(
+      record.metric,
+      record.value,
+      record.unit,
+    )
+      && (providerBodyObservation || record.externalRef !== undefined)
+      && (
+        record.observationGrain === undefined
+        || record.observationGrain === "summary"
+      );
+  }
+  if (record.kind === "measurement") {
+    return record.measurements.some((measurement) =>
+      isCanonicalGenericBodyMeasurementMetric(measurement.metric)
+    );
+  }
+  if (record.kind === "body_measurement") {
+    return record.measurements.some((measurement) =>
+      CANONICAL_BODY_MEASUREMENT_TYPES.has(measurement.type)
+    );
+  }
+  return false;
+}
+
+function isReadableCanonicalBodyMeasurement(
+  metric: string,
+  value: number,
+  unit: string | null | undefined,
+): boolean {
+  const normalizedMetric = normalizeWearableMetricValue(metric, value, unit);
+  return normalizedMetric !== null
+    && CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(normalizedMetric.key);
+}
+
+function isLaterCanonicalAvailabilityEvent(
+  occurredAt: string,
+  dayKey: string,
+  latestOccurredAt: string | null,
+  latestDayKey: string | null,
+): boolean {
+  return latestOccurredAt === null
+    || occurredAt > latestOccurredAt
+    || (
+      occurredAt === latestOccurredAt
+      && (latestDayKey === null || dayKey > latestDayKey)
+    );
+}
+
+function parseStoredAvailabilitySpineRecord(
+  value: unknown,
+): StoredAvailabilitySpineRecord | null {
+  if (
+    !isPlainRecord(value)
+    || typeof value.id !== "string"
+    || typeof value.occurredAt !== "string"
+    || typeof value.recordedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    occurredAt: value.occurredAt,
+    recordedAt: value.recordedAt,
+    lifecycle: parseStoredEventSpineLifecycle(
+      value.lifecycle,
+      "EVENT_CONTRACT_INVALID",
+      "Stored availability event record has an invalid lifecycle.",
+    ),
+  };
+}
+
+function isCanonicalProviderBodyObservationMetric(metric: string): boolean {
+  const canonicalMetricKey = resolveWearableCanonicalMetricKey(metric);
+  return canonicalMetricKey !== null
+    && CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(canonicalMetricKey);
+}
+
+function resolveCanonicalGenericMeasurementMetricKey(
+  metric: string,
+): string | null {
+  return resolveMetricDefinition(metric)?.key
+    ?? resolveWearableCanonicalMetricKey(metric);
+}
+
+function isCanonicalGenericBodyMeasurementMetric(metric: string): boolean {
+  return isCanonicalGenericBodyMeasurementMetricKey(
+    resolveCanonicalGenericMeasurementMetricKey(metric),
+  );
+}
+
+function isCanonicalGenericBodyMeasurementMetricKey(
+  canonicalMetricKey: string | null,
+): boolean {
+  return canonicalMetricKey !== null
+    && (
+      resolveMetricDefinition(canonicalMetricKey)?.category === "body"
+      || CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(canonicalMetricKey)
+    );
+}
+
+function normalizeStoredAvailabilityEvent(value: unknown): unknown {
+  if (
+    !isPlainRecord(value)
+    || value.kind !== "observation"
+    || typeof value.observationGrain !== "string"
+    || typeof value.metric !== "string"
+    || !isCanonicalProviderBodyObservationMetric(value.metric)
+    || !isPlainRecord(value.externalRef)
+    || typeof value.externalRef.system !== "string"
+  ) {
+    return value;
+  }
+
+  const observationGrain = value.observationGrain
+    .trim()
+    .toLowerCase()
+    .replace(/_/gu, "-");
+  if (!STORED_DAY_GRAIN_OBSERVATION_ALIASES.has(observationGrain)) {
+    return value;
+  }
+
+  // The query read model has always treated these persisted provider-day
+  // spellings as summary grain. Normalize only relevant provider body rows at
+  // this stored-read boundary; current writes remain constrained by the
+  // current event contract.
+  return {
+    ...value,
+    observationGrain: "summary",
+  };
+}
+
+function parseStoredProviderBodyAvailabilityEvent(
+  value: unknown,
+): EventRecord | null {
+  if (
+    !isPlainRecord(value)
+    || value.kind !== "observation"
+    || typeof value.metric !== "string"
+    || !isCanonicalProviderBodyObservationMetric(value.metric)
+    || !isPlainRecord(value.externalRef)
+    || typeof value.externalRef.system !== "string"
+    || value.externalRef.system.trim().length === 0
+    || !isNullableStoredProvenanceText(value.externalRef.resourceType)
+    || !isNullableStoredProvenanceText(value.externalRef.resourceId)
+  ) {
+    return null;
+  }
+
+  const { externalRef: _legacyExternalRef, ...withoutExternalRef } = value;
+  const parsed = safeParseContract(eventRecordSchema, withoutExternalRef);
+  return parsed.success && parsed.data.kind === "observation"
+    ? parsed.data
+    : null;
+}
+
+function isNullableStoredProvenanceText(value: unknown): boolean {
+  return value === undefined
+    || value === null
+    || (typeof value === "string" && value.trim().length > 0);
+}
+
+function storedEventMayContributeToCanonicalAvailability(
+  value: unknown,
+): boolean {
+  if (!isPlainRecord(value)) {
+    return false;
+  }
+
+  if (value.kind === "body_measurement") {
+    return true;
+  }
+  if (value.kind === "observation") {
+    return typeof value.metric === "string"
+      && isCanonicalProviderBodyObservationMetric(value.metric);
+  }
+  if (value.kind === "test") {
+    return value.testCategory === BLOOD_TEST_CATEGORY
+      || (
+        typeof value.specimenType === "string"
+        && KNOWN_BLOOD_TEST_SPECIMEN_TYPES.has(value.specimenType)
+      );
+  }
+  if (value.kind !== "measurement" || !Array.isArray(value.measurements)) {
+    return false;
+  }
+
+  return value.measurements.some((measurement) => {
+    if (!isPlainRecord(measurement) || typeof measurement.metric !== "string") {
+      return false;
+    }
+    const canonicalMetricKey = resolveCanonicalGenericMeasurementMetricKey(
+      measurement.metric,
+    );
+    return isCanonicalGenericBodyMeasurementMetricKey(canonicalMetricKey)
+      || canonicalMetricKey === CANONICAL_SYSTOLIC_BLOOD_PRESSURE_METRIC_KEY
+      || canonicalMetricKey === CANONICAL_DIASTOLIC_BLOOD_PRESSURE_METRIC_KEY;
+  });
+}
+
+function canonicalEventContainsPairedBloodPressure(record: EventRecord): boolean {
+  if (record.kind !== "measurement") {
+    return false;
+  }
+  const metrics = new Set(record.measurements.map((measurement) =>
+    resolveCanonicalGenericMeasurementMetricKey(measurement.metric)
+  ));
+  return metrics.has(CANONICAL_SYSTOLIC_BLOOD_PRESSURE_METRIC_KEY)
+    && metrics.has(CANONICAL_DIASTOLIC_BLOOD_PRESSURE_METRIC_KEY);
+}
+
+function interruptedCanonicalEventAvailability(): CanonicalEventAvailabilitySummary {
   return {
     interrupted: true,
-    latestOccurredAt: null,
-    present: false,
+    latestBloodPressureMeasurementDayKey: null,
+    latestBloodPressureMeasurementOccurredAt: null,
+    latestBloodTestOccurredAt: null,
+    latestBodyMeasurementDayKey: null,
+    latestBodyMeasurementOccurredAt: null,
   };
 }
 

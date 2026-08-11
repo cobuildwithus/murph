@@ -29,6 +29,7 @@ export const HOSTED_GROUP_JOIN_POLICY_SCHEMA =
   "murph.hosted-group.join-policy.v1" as const;
 
 export interface HostedGroupJoinPolicy {
+  offerGeneration: string | null;
   schema: typeof HOSTED_GROUP_JOIN_POLICY_SCHEMA;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   /** Compatibility view for fixed-kind callers. Prefer requestedVaultShareProjectionScopes. */
@@ -200,11 +201,12 @@ export function readHostedGroupJoinPolicy(value: unknown): HostedGroupJoinPolicy
       record.requestedVaultShareProjectionScopes
         ?? record.requestedVaultShareProjectionKinds,
     ),
+    normalizeHostedGroupJoinOfferGeneration(record.offerGeneration),
   );
 }
 
 export function emptyHostedGroupJoinPolicy(): HostedGroupJoinPolicy {
-  return hostedGroupJoinPolicyFromScopes([]);
+  return hostedGroupJoinPolicyFromScopes([], null);
 }
 
 /**
@@ -263,12 +265,11 @@ export function normalizeHostedVaultShareProjectionScopes(
 }
 
 /**
- * Current group access offers expose one Deep sleep permission and one REM
- * sleep permission. Their source-aware v1 scopes are the complete contracts.
- * Durable join policies keep legacy v0 scopes exact so the previous Web remains
- * able to show and revoke their independently authoritative grants on rollback.
+ * Comprehensive defaults expose one Deep sleep permission and one REM sleep
+ * permission. Their source-aware v1 scopes are the complete contracts. An
+ * explicitly supplied list stays exact, including legacy aggregate v0 scopes.
  */
-export function normalizeHostedGroupAccessOfferProjectionScopes(
+function normalizeHostedGroupAccessOfferDefaultProjectionScopes(
   value: unknown,
 ): HostedVaultShareProjectionScope[] {
   const offered = normalizeHostedVaultShareProjectionScopes(value).map((scope) => {
@@ -281,6 +282,16 @@ export function normalizeHostedGroupAccessOfferProjectionScopes(
     return scope;
   });
   return normalizeHostedVaultShareProjectionScopes(offered);
+}
+
+export function resolveHostedGroupAccessOfferProjectionScopes(
+  value: unknown,
+): HostedVaultShareProjectionScope[] {
+  return value === undefined || value === null
+    ? normalizeHostedGroupAccessOfferDefaultProjectionScopes(
+        HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+      )
+    : normalizeHostedVaultShareProjectionScopes(value);
 }
 
 export function legacyHostedGroupSleepProjectionScope(
@@ -327,10 +338,11 @@ export function includeSourceAwareHostedGroupSleepProjectionScopes(
 
 export function mergeHostedGroupJoinPolicy(input: {
   existing: unknown;
+  offerGeneration?: string | null;
   requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
 }): HostedGroupJoinPolicy {
   const existing = readHostedGroupJoinPolicy(input.existing);
-  const offered = normalizeHostedGroupAccessOfferProjectionScopes(
+  const offered = normalizeHostedVaultShareProjectionScopes(
     input.requestedVaultShareProjectionScopes,
   );
   return hostedGroupJoinPolicyFromScopes(
@@ -338,6 +350,9 @@ export function mergeHostedGroupJoinPolicy(input: {
       ...existing.requestedVaultShareProjectionScopes,
       ...offered,
     ]),
+    input.offerGeneration === undefined
+      ? existing.offerGeneration
+      : normalizeHostedGroupJoinOfferGeneration(input.offerGeneration),
   );
 }
 
@@ -377,14 +392,26 @@ function collapseLegacySleepProjectionScopes(
 
 function hostedGroupJoinPolicyFromScopes(
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[],
+  offerGeneration: string | null,
 ): HostedGroupJoinPolicy {
   return {
+    offerGeneration,
     schema: HOSTED_GROUP_JOIN_POLICY_SCHEMA,
     requestedVaultShareProjectionKinds: [
       ...new Set(requestedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
     ],
     requestedVaultShareProjectionScopes,
   };
+}
+
+function normalizeHostedGroupJoinOfferGeneration(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return /^hgrpjog_[A-Za-z0-9_-]{16}$/u.test(normalized)
+    ? normalized
+    : null;
 }
 
 function hostedVaultShareProjectionScopeDisplay(

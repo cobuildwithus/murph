@@ -17,18 +17,20 @@ Two rollout gates control their respective mutations:
 
 Public referral marketing derives from those same gates at server render. The
 homepage section and footer link appear only when at least one earning path is
-enabled, and `/refer` lists only the enabled paths. When both gates are off,
-`/refer` shows one temporary-unavailability state without reward quantities or
-a share action. Gate-derived availability is program-level, not a promise that
-an individual member has enough rolling capacity for the next reward. Public
-signup-link copy therefore states that a completed signup can earn credit only
-after the later settlement eligibility and rolling-limit checks pass.
+enabled. `/refer` lists the enabled earning paths and, while group rewards are
+enabled, also keeps the stable personal link visible as a share-only option.
+When the signup reward gate is off, that share-only card carries no reward
+quantity or promise. When both gates are off, `/refer` shows one
+temporary-unavailability state without reward quantities or a share action.
+Gate-derived availability is program-level, not a promise that an individual
+member has enough rolling capacity for the next reward. Public signup-link
+copy therefore states that a completed signup can earn more usage only after
+the later eligibility and rolling-limit checks pass.
 On the compact homepage referral section, each enabled path leads with a
-plain typical-use day label (10 days for the $2 rewards and 14 days for the
-$3.50 reward) without repeating the underlying dollar-denominated credit. These
-day labels are presentation estimates, not accounting units; the homepage says
-that actual capacity varies, while `/refer` retains the full qualification and
-credit detail.
+typical-use estimate (about 10 or 14 more days of Murph usage). These day labels
+are presentation estimates, not accounting units; the homepage says that actual
+capacity varies, while `/refer` retains the full qualification detail without
+exposing internal ledger units.
 
 The stable referral link remains available to an eligible signed-in member when
 either reward gate is disabled, but a disabled signup reward is not marketed or
@@ -41,6 +43,12 @@ only when recovery atomically creates its receipt and grant under the same
 referrer lock.
 
 ## Product behavior
+
+Member-facing copy calls the earned group choices **referral options**, never
+missions. Internal action names, response fields, and persisted lifecycle
+terminology may retain `mission` while they remain compatibility surfaces, but
+the website, Settings, assistant explanations, and completion copy use plain
+referral language.
 
 Murph may offer conversational missions when trusted usage context says a
 personal or group Murph is running low. When the current sender explicitly asks
@@ -62,20 +70,27 @@ an amount the tool did not return.
 
 | Path | Qualification | Public reward label |
 | --- | --- | --- |
-| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member, and the referral passes settlement eligibility and rolling-cap checks. | $2.00 of cost-weighted usage credit |
-| `new_person_activation_v1` mission | The referrer starts a fresh Murph iMessage group with a genuinely new person. That person activates after the mission was armed and speaks in the bound target group. | $2.00 of cost-weighted usage credit |
-| `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | $3.50 of cost-weighted usage credit |
+| Stable signup referral link | A genuinely new member completes ordinary Murph activation through an invite attributed to the sharing member, and the referral passes settlement eligibility and rolling-cap checks. | About 10 more days of Murph usage |
+| `new_person_activation_v1` mission | The referrer starts a fresh Murph iMessage group with a genuinely new person. That person activates after the mission was armed and speaks in the bound target group. | About 10 more days of Murph usage |
+| `active_group_v1` mission | A fresh group reaches 15 qualifying human messages, including at least 8 messages from at least 2 non-referrer speakers, across at least 10 minutes. | About 14 more days of Murph usage |
 
-Each dollar label states the exact cost-weighted usage value of its fixed offer.
-The ledger stores that value in USD micros. Actual message capacity varies by
-model, tools, media, task complexity, and response length, so Murph does not
-translate the credit into a message estimate.
+The day labels estimate typical Murph usage rather than calendar access. The
+ledger continues to store the exact usage value in USD micros. The
+current display generation anchors the signup/new-person fixed grant at 10 days
+and the active-group fixed grant at 14 days. Grants between those anchors
+interpolate; grants outside them scale from the nearest anchor. Persisted policy
+versions select the display generation, and equal granted capacity within that
+generation always yields the same rounded day estimate regardless of referral
+path, so current offer changes cannot rewrite a historical receipt's label.
+Actual capacity varies by model, tools, media, task complexity, and response
+length. A reward never extends a trial end date or subscription period.
 
-Available policies use the current fixed offer. Arming freezes that amount on
-the referral receipt; every active-mission snapshot, grant, completion notice,
-and Settings projection thereafter uses the persisted receipt amount.
+Available policies use the current fixed offer. Arming freezes that amount and
+policy version on the referral receipt; every active-mission snapshot, grant,
+completion notice, and Settings projection thereafter derives the day estimate
+from those persisted facts.
 
-Trial rewards add usage capacity but never extend the trial end date.
+Referral rewards add usage capacity but never mint another Starter grant.
 
 ## Stable signup referral links
 
@@ -114,8 +129,8 @@ same-origin claim form retains the canonical `Origin` required by its mutation
 guard.
 
 The available landing has one action: `Join Murph`, above a single closing line
-stating that Murph credits whoever shared the link and that the referrer cannot
-see the recipient's conversations or health information.
+stating that the link tells Murph who made the introduction and that the
+referrer cannot see the recipient's conversations or health information.
 
 Known unavailable links render a human-readable recovery state instead of a
 generic 404. A temporarily exhausted claim allowance or unexpected read/claim
@@ -302,8 +317,14 @@ created, after invite expiry and a simulated ordinary-resume channel relabel.
 
 ## Recovery and completion notices
 
-The existing Vercel-authenticated referral recovery cron remains the only
-scheduler. Each bounded pass:
+The existing Vercel-authenticated minute referral recovery cron remains the
+only scheduler. For attributed stable-link activations, this scan is the normal
+settlement owner rather than a fallback after an immediate activation handoff.
+Conversational referrals may also reconcile immediately after qualification;
+the same scan remains their idempotent retry owner. It stays on its standalone
+route instead of sharing the billing-critical minute Stripe sweep: one pass may
+scan or re-signal up to 150 durable candidates, so each owner's timeout and
+failure semantics remain independent. Each bounded pass:
 
 1. scans up to 50 recent attributed `member.activated` events when signup-link
    rewards are enabled;
@@ -311,8 +332,37 @@ scheduler. Each bounded pass:
 3. reconciles up to 50 ordinary qualified missions, ordinary rewarded referrals
    awaiting their source celebration, or signup-link rewards awaiting their
    personal completion notice;
-4. re-signals up to 50 oldest unconsumed referral-notification mailbox items in
-   their actual `system` or `conversation` lane.
+4. selects up to 50 lanes containing a live pending referral notification and
+   re-signals only each lane's first live item above its canonical consumed
+   cursor. Live-row filtering skips retention-old or expired prefixes. That head
+   may be an earlier non-referral item; ordinary lane order remains authoritative.
+
+Referral notification producers carry the destination owner's validated
+external-route authority. A direct Linq source conversation remains an explicit
+delivery target so it cannot fall back to a different home conversation, and
+the hosted runtime treats that target as binding evidence only when the wake
+member, hosted member, channel, directness, and authority target all agree
+exactly.
+
+For the one legacy direct-Linq notice shape imported without that proof, Web
+never decrypts or rewrites the mailbox payload: the runtime may already have
+persisted the wake and advanced its import watermark. The local system-mailbox
+boundary admits only an exact usage-referral event whose mailbox dedupe key,
+event id, delivery dedupe token, delivery idempotency key, queue-only mode,
+required-send policy, direct Linq explicit route, hosted member, and absent
+authority all agree. Before model work it submits the frozen explicit target to
+the existing signed external-route authority owner. A current exact member,
+channel, directness, and target match adds that authority only to the in-memory
+wake, which then traverses the unchanged audience guard and provider-entry
+recheck. The target is never replaced by a current-home fallback.
+
+A definitive non-retryable `HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED` result
+records a typed terminal no-send outcome for that same local pending item, so its ordered lane
+can advance without provider work. Missing authority transport, timeout, or any
+other unavailable or retryable owner result retains the ordinary retry of that
+same item. The bounded Web recovery pass only re-signals the existing mailbox
+pointer; it does not append a replacement, rewind a cursor, alter ciphertext,
+or own a second reconciliation lifecycle.
 
 The first reward enablement intentionally applies the same oldest-first scan to
 at most the preceding 30 days of attributed activations. That bounded window
@@ -338,10 +388,10 @@ After a qualifying signup-link reward commits, Settings history is the durable
 visible receipt. When the member has a current authorized Linq or Telegram
 route, Murph also sends one concise personal confirmation. It states that
 someone completed setup through the referral link and that the receipt's
-persisted dollar-denominated cost-weighted usage credit is already applied. It
-does not identify or guess who joined, mention internal qualification logic, or
-ask the member to do another step. A missing route delays only this notice; it
-never delays, reverses, or duplicates the reward.
+estimated days of Murph usage are already applied. It does not identify or guess
+who joined, mention internal accounting or qualification logic, or ask the
+member to do another step. A missing route delays only this notice; it never
+delays, reverses, or duplicates the reward.
 
 Once a notification mailbox item is durable, failed signaling leaves that same
 item eligible for the next bounded pass regardless of its lane. A notification
@@ -363,14 +413,14 @@ Referral access and history remain read-only projections:
   supported Murph conversation exists;
 - the empty referral explanation says qualifying rewards are added
   automatically;
-- current mission rows show title, status, deadline, dollar-denominated
-  cost-weighted usage reward, and reward owner;
+- current mission rows show title, status, deadline, estimated days of Murph
+  usage, and reward owner;
 - reward columns stack below descriptions on narrow screens instead of forcing
   horizontal compression;
 - qualification requirements and selection date stay in one native details
   disclosure;
-- completed mission and signup-link rewards appear in History with the exact
-  persisted receipt amount;
+- completed mission and signup-link rewards appear in History with the day
+  estimate derived from the persisted receipt amount and policy version;
 - signup-link rows use their persisted policy version to display `Invite someone
   to Murph` rather than masquerading as the fresh-group mission;
 - purchase-grant history follows referral history as a flat ledger;

@@ -10,8 +10,9 @@ import type {
   AssistantBeforeProviderAcceptedInputsHook,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
-import type {
-  AssistantProviderStartCriticalPathContext,
+import {
+  stampAssistantProviderStartCriticalPath,
+  type AssistantProviderStartCriticalPathContext,
 } from '../provider-start-critical-path.js'
 import {
   type AssistantInputCandidate,
@@ -89,6 +90,7 @@ export async function scanAssistantAutomationOnce(input: {
   const scanState = cloneAutomationScanState(input.state)
   let persistedState = cloneAutomationScanState(scanState)
   let providerStartCriticalPath = input.providerStartCriticalPath ?? null
+  let automationLaneSubdivisionEligible = true
   const onProviderRequestStarted: AssistantAutoReplyProviderRequestStartHook = (
     event,
   ) => {
@@ -126,6 +128,10 @@ export async function scanAssistantAutomationOnce(input: {
     signal: input.signal,
     vault: input.vault,
   })
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    'automationCandidateScanDoneAtMonotonicMs',
+  )
   if (candidates.length === 0) {
     return {
       currentTurnDeliveryIntentIds,
@@ -183,50 +189,80 @@ export async function scanAssistantAutomationOnce(input: {
     }
 
     replies.considered += context.inputCount
+    const groupProviderStartCriticalPath =
+      providerStartCriticalPath && !automationLaneSubdivisionEligible
+        ? {
+            ...providerStartCriticalPath,
+            automationLaneSubdivisionEligible: false as const,
+          }
+        : providerStartCriticalPath
     const processGroup = async (
       executionContext: AssistantExecutionContext | null | undefined,
       turnEnvironment: AssistantTurnEnvironment | null,
-    ) => await processAssistantAutoReplyGroup({
-      allowSelfAuthored: input.allowSelfAuthored ?? false,
-      ...(input.beforeProviderAcceptedInputs
-        ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
-        : {}),
-      ...(providerStartCriticalPath
-        ? { providerStartCriticalPath }
-        : {}),
-      context,
-      deliveryDispatchMode: input.deliveryDispatchMode,
-      enabledChannels: replyChannels,
-      executionContext,
-      inboxServices: input.inboxServices,
-      onEvent: input.onEvent,
-      onProviderEvent: input.onProviderEvent ?? null,
-      onProviderRequestStarted:
-        providerStartCriticalPath || input.onProviderRequestStarted
-          ? onProviderRequestStarted
-          : null,
-      onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted ?? null,
-      onTraceEvent: input.onTraceEvent,
-      providerHeartbeatMs: input.providerHeartbeatMs,
-      providerLongRunningCommandStallTimeoutMs:
-        input.providerLongRunningCommandStallTimeoutMs,
-      providerStallTimeoutMs: input.providerStallTimeoutMs,
-      historyReader,
-      requestId: input.requestId ?? null,
-      signal: input.signal,
-      sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-      turnEnvironment,
-      inputSource: input.inputSource,
-      vault: input.vault,
-    })
+      scopedProviderStartCriticalPath?:
+        AssistantProviderStartCriticalPathContext | null,
+    ) => {
+      const providerStartAtGroupAndOperationScopeDone =
+        scopedProviderStartCriticalPath === undefined
+          ? stampAssistantProviderStartCriticalPath(
+              groupProviderStartCriticalPath,
+              'automationGroupAndOperationScopeDoneAtMonotonicMs',
+            )
+          : scopedProviderStartCriticalPath
+      return await processAssistantAutoReplyGroup({
+        allowSelfAuthored: input.allowSelfAuthored ?? false,
+        ...(input.beforeProviderAcceptedInputs
+          ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+          : {}),
+        ...(providerStartAtGroupAndOperationScopeDone
+          ? {
+              providerStartCriticalPath:
+                providerStartAtGroupAndOperationScopeDone,
+            }
+          : {}),
+        context,
+        deliveryDispatchMode: input.deliveryDispatchMode,
+        enabledChannels: replyChannels,
+        executionContext,
+        inboxServices: input.inboxServices,
+        onEvent: input.onEvent,
+        onProviderEvent: input.onProviderEvent ?? null,
+        onProviderRequestStarted:
+          providerStartCriticalPath || input.onProviderRequestStarted
+            ? onProviderRequestStarted
+            : null,
+        onTerminalNonReplyCommitted: input.onTerminalNonReplyCommitted ?? null,
+        onTraceEvent: input.onTraceEvent,
+        providerHeartbeatMs: input.providerHeartbeatMs,
+        providerLongRunningCommandStallTimeoutMs:
+          input.providerLongRunningCommandStallTimeoutMs,
+        providerStallTimeoutMs: input.providerStallTimeoutMs,
+        historyReader,
+        requestId: input.requestId ?? null,
+        signal: input.signal,
+        sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+        turnEnvironment,
+        inputSource: input.inputSource,
+        vault: input.vault,
+      })
+    }
     const replyResult = input.operationScope && input.executionContext
       ? await input.operationScope.runAutoReplyGroup({
           executionContext: input.executionContext,
           inputIds: context.inputIds,
           operation: processGroup,
+          providerStartCriticalPath: groupProviderStartCriticalPath,
           turnEnvironment: input.turnEnvironment ?? null,
         })
-      : await processGroup(input.executionContext, input.turnEnvironment ?? null)
+      : await processGroup(
+          input.executionContext,
+          input.turnEnvironment ?? null,
+          stampAssistantProviderStartCriticalPath(
+            groupProviderStartCriticalPath,
+            'automationGroupAndOperationScopeDoneAtMonotonicMs',
+          ),
+        )
+    automationLaneSubdivisionEligible = false
     const stopReplyScan = applyAssistantAutoReplyProcessResult({
       context,
       result: replyResult,
@@ -361,13 +397,14 @@ async function listAssistantReplyCandidates(input: {
     }),
   )
 
-  return candidates
-    .flat()
-    .sort((left, right) =>
-      compareAssistantInputCursors(
-        left.inputCandidate.event.cursor,
-        right.inputCandidate.event.cursor,
-      ))
+  const flattenedCandidates = candidates.flat()
+  return (input.inputSource.preserveInputCandidateOrder === true
+    ? flattenedCandidates
+    : flattenedCandidates.sort((left, right) =>
+        compareAssistantInputCursors(
+          left.inputCandidate.event.cursor,
+          right.inputCandidate.event.cursor,
+        )))
     .slice(0, input.limit)
 }
 

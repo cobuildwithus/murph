@@ -29,6 +29,7 @@ import {
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
   HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
+  HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES,
   HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY,
   HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -52,12 +53,14 @@ import {
   readMealNutritionTotals,
   readMemoryDocument,
   resolveAdherenceObservationActivityKind,
+  selectAuthoritativeMetricPoint,
   selectMetricSeries,
   summarizeWearableSleepRuntime,
   summarizeWearableSourceHealthRuntime,
   type CanonicalEntity,
   type MealNutritionDayTotal,
   type MealNutritionTotalsResult,
+  type MetricPoint,
   type MetricSeriesPoint,
 } from "@murphai/query";
 
@@ -512,18 +515,45 @@ export async function readProjectableDailyMetricDays(
     limit: null,
     metricKey: spec.metricKey,
   });
+  const acceptsManualSleepStage = spec.metricKey === "deep-sleep-minutes"
+    || spec.metricKey === "rem-sleep-minutes";
+  const dayGrainPoints = acceptsManualSleepStage
+    ? points.map((point) =>
+        isManualSleepStageCorrection(point)
+          && point.grain === "event"
+          ? { ...point, grain: "day" as const }
+          : point
+      )
+    : points;
+  const projectionPoints = acceptsManualSleepStage
+    ? selectAuthoritativeManualSleepStageCorrections(dayGrainPoints)
+    : dayGrainPoints;
+  const manualCorrectionDates = acceptsManualSleepStage
+    ? new Set(projectionPoints
+        .filter((point) =>
+          point.grain === "day" && isManualSleepStageCorrection(point)
+        )
+        .map((point) => point.effectiveDate))
+    : new Set<string>();
+  const selectionPoints = manualCorrectionDates.size > 0
+    ? projectionPoints.filter((point) =>
+        !manualCorrectionDates.has(point.effectiveDate)
+        || isManualSleepStageCorrection(point)
+      )
+    : projectionPoints;
   const series = selectMetricSeries({
     duplicatePolicy: "selection-policy",
     from: cutoffDate,
     grain: "day",
     metricKey: spec.metricKey,
-    points,
+    points: selectionPoints,
     statistic: "value",
   });
   let rows: readonly DailyMetricProjectionPoint[] = series.rows;
   if (spec.sourceMode === "all-public-sleep-sources") {
     const sourcesByDate = await readProjectableSleepMetricSourcesByDate({
       cutoffDate,
+      points: projectionPoints,
       spec,
       vaultRoot,
     });
@@ -550,12 +580,44 @@ export async function readProjectableDailyMetricDays(
       ?? vaultTimeZone;
     if (!timeZone) return [];
     const currentDate = formatTimeZoneDateTimeParts(nowMs, timeZone).dayKey;
-    return row.date > currentDate ? [] : [{ ...row, provisional: row.date === currentDate }];
+    return row.date > currentDate ? [] : [row];
   }), spec, nowMs);
+}
+
+function isManualSleepStageCorrection(point: MetricPoint): boolean {
+  return point.source.family === "event"
+    && point.source.kind === "observation"
+    && point.provenance.provider === null
+    && point.provenance.sourceLabel === "Manual";
+}
+
+function selectAuthoritativeManualSleepStageCorrections(
+  points: readonly MetricPoint[],
+): MetricPoint[] {
+  const manualPointsByDate = new Map<string, MetricPoint[]>();
+  for (const point of points) {
+    if (point.grain !== "day" || !isManualSleepStageCorrection(point)) {
+      continue;
+    }
+    const datePoints = manualPointsByDate.get(point.effectiveDate) ?? [];
+    datePoints.push(point);
+    manualPointsByDate.set(point.effectiveDate, datePoints);
+  }
+  const authoritativeManualPointIds = new Set(
+    [...manualPointsByDate.values()].flatMap((datePoints) => {
+      const selected = selectAuthoritativeMetricPoint(datePoints);
+      return selected ? [selected.id] : [];
+    }),
+  );
+  return points.filter((point) =>
+    !isManualSleepStageCorrection(point)
+    || authoritativeManualPointIds.has(point.id)
+  );
 }
 
 async function readProjectableSleepMetricSourcesByDate(input: {
   cutoffDate: string;
+  points: readonly MetricPoint[];
   spec: HostedVaultShareDailyMetricProjectionSpec;
   vaultRoot: string;
 }): Promise<Map<string, HostedVaultShareSleepMetricSource[]> | null> {
@@ -636,6 +698,64 @@ async function readProjectableSleepMetricSourcesByDate(input: {
       });
       sourcesByDate.set(summary.date, sources);
     }
+  }
+
+  const manualPoints = input.points.filter(isManualSleepStageCorrection);
+  const manualSeries = selectMetricSeries({
+    duplicatePolicy: "selection-policy",
+    from: input.cutoffDate,
+    grain: "day",
+    metricKey: input.spec.metricKey,
+    points: manualPoints,
+    statistic: "value",
+  });
+  const manualPointsById = new Map(manualPoints.map((point) => [point.id, point]));
+
+  for (const row of manualSeries.rows) {
+    const value = row.value;
+    if (
+      typeof value !== "number"
+      || !Number.isFinite(value)
+      || value < input.spec.minValue
+      || value > input.spec.maxValue
+    ) {
+      sourcesByDate.delete(row.date);
+      continue;
+    }
+    const unit = sanitizeProjectionUnit(row.unit);
+    if (
+      input.spec.expectedUnit !== undefined
+      && unit !== input.spec.expectedUnit
+    ) {
+      sourcesByDate.delete(row.date);
+      continue;
+    }
+    const pointIds = row.pointIds ?? [];
+    const selectedPoint = pointIds.length === 1
+      ? manualPointsById.get(pointIds[0] ?? "")
+      : undefined;
+    if (!selectedPoint) {
+      sourcesByDate.delete(row.date);
+      continue;
+    }
+    const recordedAt = selectedPoint.recordedAt;
+    if (recordedAt !== null && !isStrictIsoDateTime(recordedAt)) {
+      sourcesByDate.delete(row.date);
+      continue;
+    }
+
+    const sources = sourcesByDate.get(row.date) ?? [];
+    if (sources.some((candidate) => candidate.source === "manual")) {
+      return null;
+    }
+    sources.push({
+      label: "Manual",
+      recordedAt,
+      source: "manual",
+      unit,
+      value,
+    });
+    sourcesByDate.set(row.date, sources);
   }
 
   for (const sources of sourcesByDate.values()) {
@@ -960,9 +1080,11 @@ function selectProjectableSleepMetricSources(
   selectedValue: number,
 ): HostedVaultShareSleepMetricSource[] | null {
   const sourceRows = point.sources ?? [];
+  const wearableSourceCount = sourceRows.filter((source) => source.source !== "manual").length;
   if (
     sourceRows.length === 0
     || sourceRows.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES
+    || wearableSourceCount > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES
   ) {
     return null;
   }

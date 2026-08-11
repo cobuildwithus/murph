@@ -48,10 +48,11 @@ jobs:
       - name: Generate hosted web test client
         run: pnpm --dir apps/web prisma:generate
 
-      - name: Test billing resume contract and live support
+      - name: Test Starter checkout, migration, and live support
         run: >-
           pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
-          apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts
+          apps/web/test/hosted-onboarding-billing-checkout-route.test.ts
+          apps/web/test/hosted-starter-usage-migration.test.ts
           apps/web/test/hosted-billing-live-support.test.ts
 
       - name: Test workflow guard mutations
@@ -121,6 +122,7 @@ jobs:
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_PULSE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_EDGE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_MAX }}
           HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PORTAL_CONFIGURATION_EDGE }}
         run: pnpm hosted-billing:live:preflight
 
@@ -135,6 +137,7 @@ jobs:
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_PULSE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_EDGE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_MAX }}
           HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PORTAL_CONFIGURATION_EDGE }}
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_hosted_stripe_billing
           MURPH_DEV_TEMPORAL: disabled
@@ -153,6 +156,7 @@ jobs:
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_PULSE }}
           HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_EDGE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_MAX }}
           HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PORTAL_CONFIGURATION_EDGE }}
         run: pnpm hosted-billing:live:cleanup
 

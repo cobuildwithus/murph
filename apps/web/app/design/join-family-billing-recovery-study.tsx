@@ -1,5 +1,6 @@
 import {
   JoinInviteCheckoutPanel,
+  JoinInviteFamilyBillingManagementPanel,
   JoinInviteFamilyBillingSyncPanel,
   JoinInviteFamilyCheckoutContinuationPanel,
 } from "@/src/components/hosted-onboarding/join-invite-stage-server";
@@ -30,6 +31,21 @@ export function JoinFamilyBillingRecoveryStudy() {
           familyBillingRecovery="available"
           inviteCode="design-family-recovery"
         />
+      </div>
+
+      <div
+        className="max-w-xl space-y-4"
+        data-design-state="family-billing-management"
+      >
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Payment issue
+          </p>
+          <h3 className="mt-2 font-serif text-2xl font-semibold tracking-tight text-foreground">
+            Family billing management
+          </h3>
+        </div>
+        <JoinInviteFamilyBillingManagementPanel />
       </div>
 
       <div className="max-w-xl space-y-4">

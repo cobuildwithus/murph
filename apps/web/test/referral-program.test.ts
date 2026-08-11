@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatHostedPublicReferralRewardAmount,
-  formatHostedPublicReferralRewardDays,
   formatHostedPublicReferralRewardValue,
   getAvailableHostedPublicReferralRewards,
   HOSTED_PUBLIC_REFERRAL_REWARDS,
@@ -18,6 +16,11 @@ import {
   HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_SPEAKERS,
   HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
 } from "@/src/lib/hosted-growth/usage-referral";
+
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
 
 function readReward(id: (typeof HOSTED_PUBLIC_REFERRAL_REWARDS)[number]["id"]) {
   const reward = HOSTED_PUBLIC_REFERRAL_REWARDS.find(
@@ -78,44 +81,40 @@ describe("public referral program projection", () => {
 
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
+      policyCode: newPersonGroup.policyCode,
+      policyVersion: newPersonGroup.policyVersion,
       rewardUsdMicros: newPersonGroup.rewardUsdMicros,
-    })).toBe("$2.00 of cost-weighted usage credit for your Murph");
+    })).toBe("about 10 more days of Murph usage for your Murph");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
+      policyCode: activeGroup.policyCode,
+      policyVersion: activeGroup.policyVersion,
       rewardUsdMicros: activeGroup.rewardUsdMicros,
-    })).toBe("$3.50 of cost-weighted usage credit for your Murph");
+    })).toBe("about 14 more days of Murph usage for your Murph");
     expect(signup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
-    expect(signup.description).toContain(
-      "eligibility and rolling-limit checks pass",
-    );
+    expect(signup.description).toContain("the referral meets the rules");
     expect(signup.description).not.toMatch(
       /when setup completes|checks at completion/u,
     );
     expect(signup.description).not.toContain(
       "the reward is added automatically",
     );
+    expect(signup.description).not.toMatch(/\$|usage credit/iu);
+    expect(signup.description).not.toMatch(RETIRED_USAGE_TERM_PATTERN);
     expect(newPersonGroup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
     expect(activeGroup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
     );
-    expect(formatHostedPublicReferralRewardValue(
-      HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
-    )).toBe(
-      "$2.00 of cost-weighted usage credit",
+    expect(formatHostedPublicReferralRewardValue(signup)).toBe(
+      "About 10 more days of Murph usage",
     );
-    expect(formatHostedPublicReferralRewardAmount(
-      HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
-    )).toBe("$3.50");
-    expect(formatHostedPublicReferralRewardDays(
-      signup.estimatedUsageDays,
-    )).toBe("10 days of Murph");
-    expect(formatHostedPublicReferralRewardDays(
-      activeGroup.estimatedUsageDays,
-    )).toBe("14 days of Murph");
+    expect(formatHostedPublicReferralRewardValue(activeGroup)).toBe(
+      "About 14 more days of Murph usage",
+    );
   });
 
   it("keeps the active-group public requirements exact", () => {
@@ -124,10 +123,10 @@ describe("public referral program projection", () => {
       HOSTED_USAGE_REFERRAL_GROUP_MINIMUM_ACTIVITY_SPAN_MS / 60_000;
 
     expect(activeGroup.description).toContain(
-      `${HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_MESSAGES} human messages`,
+      `${HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_MESSAGES} messages`,
     );
     expect(activeGroup.description).toContain(
-      `${HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_MESSAGES} from at least ${HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_SPEAKERS} other people`,
+      `${HOSTED_USAGE_REFERRAL_GROUP_REQUIRED_NON_REFERRER_MESSAGES} from two or more people besides you`,
     );
     expect(activeGroup.description).toContain(
       `at least ${minimumMinutes} minutes`,

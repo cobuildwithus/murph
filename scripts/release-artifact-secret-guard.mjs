@@ -8,6 +8,9 @@ const execFileAsync = promisify(execFile);
 const tarListMaxBufferBytes = 64 * 1024 * 1024;
 const maxScannableFileBytes = 128 * 1024 * 1024;
 const scanConcurrency = 8;
+const allowedPublicDataStorePaths = new Set([
+  'package/node_modules/@murphai/health-commons/generated/knowledge.sqlite',
+]);
 
 const providerPatterns = [
   {
@@ -222,8 +225,13 @@ function validateArchiveEntryPath(entryPath) {
 }
 
 function sensitiveFilenameRule(relativePath) {
-  const normalized = normalizedArchivePath(relativePath).toLowerCase();
+  const exactPath = normalizedArchivePath(relativePath);
+  const normalized = exactPath.toLowerCase();
   const basename = path.posix.basename(normalized);
+
+  if (allowedPublicDataStorePaths.has(exactPath)) {
+    return null;
+  }
 
   if (basename === '.env' || basename.startsWith('.env.')) {
     return 'sensitive-filename:dotenv';

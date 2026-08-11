@@ -24,10 +24,13 @@ describe('assistant hosted low-usage message-balance policy', () => {
       'even when someone asks directly, supplies a percent-per-message observation',
     )
     expect(normalizedSkill).toContain(
-      'Do not divide or extrapolate from remaining percentage, dollars, cost-weighted credit, forecasts, model choice, or prior turns.',
+      'Do not divide or extrapolate from remaining percentage, dollars, credit formulas, forecasts, model choice, or prior turns.',
     )
     expect(normalizedSkill).toContain(
-      'Answer with only the authoritative fields allowed below: remaining percentage, reset or trial-end date, or days forecast.',
+      'Answer with only the authoritative fields allowed below: remaining percentage, an applicable monthly reset date, days forecast, or the exact hosted-group included-usage progress wording below.',
+    )
+    expect(normalizedSkill).toContain(
+      'Starter usage has no expiry date.',
     )
     expect(normalizedSkill).toContain(
       'never reuse it to estimate the current balance',
@@ -37,6 +40,15 @@ describe('assistant hosted low-usage message-balance policy', () => {
     )
     expect(normalizedSkill).toContain(
       'An explicit request for a message count still does not authorize estimating one',
+    )
+    expect(normalizedSkill).toContain(
+      'This is cumulative consumption of the room\'s included allowance, not its effective remaining capacity.',
+    )
+    expect(normalizedSkill).toContain(
+      'Never subtract it from 100 or combine it with funding state, purchased usage, referral rewards, refills, or any other signal to infer effective remaining usage, messages, dollars, days, time until a pause, a reset date, or whether the room can continue.',
+    )
+    expect(normalizedSkill).toContain(
+      'Additional usage can still remain when the value is 100.',
     )
     expect(normalizedSkill).not.toContain(
       'Use messages, tokens, credits, or usage only when someone explicitly asks',

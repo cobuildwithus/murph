@@ -73,6 +73,7 @@ import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
+import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.ts'
 import { listAssistantCronJobs } from '../src/assistant-cron.ts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -124,6 +125,7 @@ const TEST_LINQ_DELIVERY_SOURCE: NonNullable<
 
 const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
   kind: 'daily_nutrition',
+  version: 2,
   localDate: '2026-07-28',
   mealCount: 3,
   totals: {
@@ -131,6 +133,62 @@ const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
     proteinGrams: { total: 94.5, mealCount: 3 },
     carbsGrams: { total: 193.125, mealCount: 3 },
     fatGrams: { total: 34.75, mealCount: 3 },
+    fiberGrams: { total: 26.5, mealCount: 3 },
+  },
+  goals: {
+    calories: { target: 2_100, status: 'under_target' },
+    proteinGrams: { target: 100, status: 'on_target' },
+    carbsGrams: { target: 220, status: 'on_target' },
+    fatGrams: { target: 40, status: 'on_target' },
+    fiberGrams: { target: 30, status: 'under_target' },
+  },
+}
+
+const CHALLENGE_STANDINGS_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'challenge_standings',
+  version: 1,
+  format: 'individual',
+  title: 'Weird Health Week',
+  subtitle: 'Day 4 of 7',
+  objective: { kind: 'ranking' },
+  entries: [{
+    label: 'Maya',
+    points: 120,
+    coverage: 'complete',
+    detail: null,
+  }],
+  footer: null,
+}
+
+const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Push day',
+  subtitle: null,
+  footer: null,
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: [{
+      name: 'Bench press',
+      sets: [
+        {
+          status: 'completed',
+          target: '185 lb × 8',
+          actual: '185 lb × 8',
+        },
+        {
+          status: 'pending',
+          target: '185 lb × 6–8',
+          actual: null,
+        },
+      ],
+    }],
   },
 }
 
@@ -1096,6 +1154,15 @@ describe('assistant outbox runtime', () => {
   it('persists and dispatches response cards through the existing outbox owner', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-card-')
     const rendered = renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD)
+    for (const target of [
+      '2,100 calories (under target)',
+      '100g protein (on target)',
+      '220g carbs (on target)',
+      '40g fat (on target)',
+      '30g fiber (under target)',
+    ]) {
+      expect(rendered).toContain(target)
+    }
     const intent = await createAssistantOutboxIntent({
       actorId: '+15550001',
       card: NUTRITION_RESPONSE_CARD,
@@ -1181,6 +1248,128 @@ describe('assistant outbox runtime', () => {
     })).rejects.toMatchObject({
       code: 'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
     })
+  })
+
+  it('persists and dispatches challenge standings cards for Linq groups only', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-challenge-card-',
+    )
+    const rendered = renderAssistantResponseCardText(
+      CHALLENGE_STANDINGS_RESPONSE_CARD,
+    )
+    const intent = await createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-group-challenge-card-token',
+      message: 'model-authored text must not become the durable card message',
+      sessionId: 'session-group-challenge-card',
+      threadId: 'thread-group-challenge-card',
+      threadIsDirect: false,
+      turnId: 'turn-group-challenge-card',
+      vault: vaultRoot,
+    })
+
+    expect(intent.card).toEqual(CHALLENGE_STANDINGS_RESPONSE_CARD)
+    expect(intent.message).toBe(rendered)
+    expect(intent.threadIsDirect).toBe(false)
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'linq-group-challenge-card-delivered',
+        target: 'thread-group-challenge-card',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+        message: rendered,
+        threadIsDirect: false,
+      }),
+      expect.any(Object),
+    )
+
+    await expect(createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'linq',
+      message: rendered,
+      sessionId: 'session-direct-challenge-card',
+      threadId: 'thread-direct-challenge-card',
+      threadIsDirect: true,
+      turnId: 'turn-direct-challenge-card',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
+    })
+
+    await expect(createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'telegram',
+      message: rendered,
+      sessionId: 'session-telegram-group-challenge-card',
+      threadId: 'thread-telegram-group-challenge-card',
+      threadIsDirect: false,
+      turnId: 'turn-telegram-group-challenge-card',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
+    })
+  })
+
+  it('round-trips workout cards through local outbox save, list, and read owners', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-workout-card-',
+    )
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      card: WORKOUT_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-workout-card-token',
+      message: 'ignored model prose',
+      sessionId: 'session-workout-card',
+      threadId: 'thread-workout-card',
+      threadIsDirect: true,
+      turnId: 'turn-workout-card',
+      vault: vaultRoot,
+    })
+
+    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
+      ...intent,
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRYABLE',
+        message: 'retry later',
+      },
+      nextAttemptAt: '2026-08-09T20:00:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-08-09T19:46:00.000Z',
+    })
+
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, retryable.intentId),
+    ).resolves.toMatchObject({
+      card: WORKOUT_RESPONSE_CARD,
+      status: 'retryable',
+    })
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([
+      expect.objectContaining({
+        card: WORKOUT_RESPONSE_CARD,
+        intentId: retryable.intentId,
+        status: 'retryable',
+      }),
+    ])
   })
 
   it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
@@ -3911,10 +4100,11 @@ describe('assistant outbox runtime', () => {
         now: new Date('2026-04-09T13:32:00.000Z'),
         vaultRoot,
       })
-      await expect(showAutomation({
+      const convertedAutomation = await showAutomation({
         automationId: automation.record.automationId,
         vaultRoot,
-      })).resolves.toMatchObject({
+      })
+      expect(convertedAutomation).toMatchObject({
         continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         schedule: expect.objectContaining({ kind: 'dailyLocal' }),
@@ -3923,20 +4113,36 @@ describe('assistant outbox runtime', () => {
         tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
         title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       })
+      if (convertedAutomation?.schedule.kind !== 'dailyLocal') {
+        throw new Error('Expected the predecessor to use the current daily schedule.')
+      }
       const convertedRuntimeStore =
         await readAssistantCronCanonicalRuntimeStore(paths)
       expect(convertedRuntimeStore.jobs).toContainEqual(expect.objectContaining({
         jobId: automation.record.automationId,
         state: expect.objectContaining({
+          activatedAt: schedule.kind === 'at'
+            ? '2026-04-09T13:32:00.000Z'
+            : automation.record.createdAt,
           pendingOccurrenceAt: occurrenceAt,
         }),
       }))
+      const expectedNextRunAt = schedule.kind === 'every'
+        ? computeAssistantCronNextRunAt(
+            {
+              kind: 'dailyLocal',
+              localTime: convertedAutomation.schedule.localTime,
+              timeZone: 'UTC',
+            },
+            new Date('2026-04-09T13:32:00.000Z'),
+          )
+        : '2026-04-09T13:31:30.000Z'
       await expect(listAssistantCronJobs(vaultRoot)).resolves.toContainEqual(
         expect.objectContaining({
           jobId: automation.record.automationId,
           prompt: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
           state: expect.objectContaining({
-            nextRunAt: '2026-04-09T13:31:30.000Z',
+            nextRunAt: expectedNextRunAt,
           }),
         }),
       )

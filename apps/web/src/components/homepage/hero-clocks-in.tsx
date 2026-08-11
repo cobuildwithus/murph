@@ -3,7 +3,6 @@
 import Link from "next/link";
 import {
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -937,12 +936,12 @@ export function HeroClocksIn({
   // first scroll jumps instantly so a seeded thread doesn't animate on load;
   // later appends scroll smoothly.
   const hasAutoScrolledRef = useRef(false);
-  useLayoutEffect(() => {
+  useEffect(() => {
     const node = scrollerRef.current;
     if (!node) return;
     if (isAtBottomRef.current) {
       node.scrollTo({
-        top: node.scrollHeight,
+        top: Number.MAX_SAFE_INTEGER,
         behavior: hasAutoScrolledRef.current ? "smooth" : "auto",
       });
       hasAutoScrolledRef.current = true;
@@ -1546,7 +1545,7 @@ export function HeroClocksIn({
                   "hero-floater-btn pointer-events-auto cursor-pointer select-none whitespace-nowrap bg-transparent font-mono text-[10px] tracking-[0.18em] transition-colors duration-200 ease-out hover:text-[#5a6e32] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5a6e32] focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8] disabled:cursor-default",
                   f.member
                     ? "inline-flex min-h-8 items-center gap-1.5 rounded-full border border-[#c4a882]/40 bg-[#f5f0e8]/90 py-1 pl-1 pr-2.5 text-[#736a58] backdrop-blur-sm"
-                    : "inline-flex min-h-8 items-center rounded-md px-2 py-1 uppercase text-[#c1baae]",
+                    : "inline-flex min-h-8 items-center rounded-md px-2 py-1 uppercase text-[#756c5a]",
                 )}
               >
                 {f.member ? (
@@ -1783,7 +1782,7 @@ function ContactCard({
         className="mt-3 flex items-center gap-2"
       >
         <div className="h-px flex-1 bg-[#c4a882]/40" />
-        <span className="font-mono text-[9px] font-medium uppercase tracking-[0.18em] text-[#736a58]/70">
+        <span className="font-mono text-[9px] font-medium uppercase tracking-[0.18em] text-[#736a58]">
           or
         </span>
         <div className="h-px flex-1 bg-[#c4a882]/40" />
@@ -1854,7 +1853,7 @@ function BloodworkCard({ result }: { result: BloodworkResult }) {
           {result.eyebrow}
         </span>
         {result.sideLabel ? (
-          <span className="font-mono text-[8px] tracking-[0.08em] text-[#736a58]/70">
+          <span className="font-mono text-[8px] tracking-[0.08em] text-[#736a58]">
             {result.sideLabel}
           </span>
         ) : null}
@@ -2276,7 +2275,7 @@ function Composer({
             autoComplete="off"
             disabled={busy}
             className={cn(
-              "min-w-0 flex-1 bg-transparent text-[0.8125rem] tracking-tight text-[#2d3436] caret-[#5a6e32] outline-none placeholder:text-[#736a58]/45 disabled:cursor-wait",
+              "min-w-0 flex-1 bg-transparent text-[0.8125rem] tracking-tight text-[#2d3436] caret-[#5a6e32] outline-none placeholder:text-[#736a58] disabled:cursor-wait",
               hasText ? "pr-7" : "pr-4",
             )}
           />

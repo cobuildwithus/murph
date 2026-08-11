@@ -2,8 +2,11 @@ import "server-only";
 
 import { createHash, randomBytes } from "node:crypto";
 
+import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import type { Prisma } from "@prisma/client";
 
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
+import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
 import {
   requireActiveHostedAppSessionFromRequest,
@@ -164,12 +167,8 @@ export async function finishClinicalRecordAuthorization(input: {
   }
 
   const provider = requireProviderEntry(session.providerDirectoryEntryId);
-  if (createHash("sha256").update(provider.fhirBaseUrl).digest("hex") !== session.fhirBaseHash) {
-    throw clinicalRecordsError({
-      code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED",
-      httpStatus: 409,
-      message: "The provider configuration changed. Start the connection again.",
-    });
+  if (hashClinicalFhirBaseUrl(provider.fhirBaseUrl) !== session.fhirBaseHash) {
+    throw providerConfigurationChangedError();
   }
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
   const verifier = await openClinicalOauthVerifier({
@@ -195,8 +194,9 @@ export async function finishClinicalRecordAuthorization(input: {
       message: "The provider did not grant enough Clinical Records permissions.",
     });
   }
-  return persistClinicalConnection({
+  const persisted = await runWithHostedDomainRootUnwrapCache(() => persistClinicalConnection({
     connectIntentClaimHash: session.connectIntentClaimHash,
+    fhirBaseHash: session.fhirBaseHash,
     memberId: auth.member.id,
     now: new Date(),
     provider,
@@ -205,7 +205,12 @@ export async function finishClinicalRecordAuthorization(input: {
     resourceTypes,
     tokenEndpoint: session.tokenEndpoint,
     token,
-  });
+  }));
+  await signalClinicalRetrievalWake(persisted.wake);
+  return {
+    connectionId: persisted.connectionId,
+    retrievalRunId: persisted.retrievalRunId,
+  };
 }
 
 async function consumeClinicalOauthSession(input: {
@@ -257,6 +262,7 @@ async function consumeClinicalOauthSession(input: {
 async function persistClinicalConnection(input: {
   clientId: string;
   connectIntentClaimHash: string;
+  fhirBaseHash: string;
   memberId: string;
   now: Date;
   provider: ClinicalProviderDirectoryEntry;
@@ -264,98 +270,109 @@ async function persistClinicalConnection(input: {
   resourceTypes: readonly string[];
   tokenEndpoint: string;
   token: Awaited<ReturnType<typeof exchangeSmartAuthorizationCode>>;
-}): Promise<{ connectionId: string; retrievalRunId: string }> {
+}): Promise<{
+  connectionId: string;
+  retrievalRunId: string;
+  wake: Awaited<ReturnType<typeof appendClinicalRetrievalWakeTx>>;
+}> {
+  const prisma = getPrisma();
+  await assertClinicalRecordConnectionAvailable({
+    memberId: input.memberId,
+    providerDirectoryEntryId: input.provider.id,
+  });
+
+  const connectionId = generateOpaqueId(CLINICAL_CONNECTION_ID_PREFIX);
+  const retrievalRunId = generateOpaqueId(CLINICAL_RETRIEVAL_RUN_ID_PREFIX);
+  const tokenVersion = 1;
+  const retrievalGeneration = 1;
+  const fhirBaseUrlEncrypted = await sealClinicalConnectionFhirBaseUrl({
+    connectionId,
+    memberId: input.memberId,
+    value: input.provider.fhirBaseUrl,
+  });
+  const patientIdEncrypted = await sealClinicalConnectionSecret({
+    connectionId,
+    field: "patientId",
+    memberId: input.memberId,
+    tokenVersion,
+    value: input.token.patientId,
+  });
+  const accessTokenEncrypted = await sealClinicalConnectionSecret({
+    connectionId,
+    field: "accessToken",
+    memberId: input.memberId,
+    tokenVersion,
+    value: input.token.accessToken,
+  });
+  if (!patientIdEncrypted || !accessTokenEncrypted) {
+    throw new TypeError("Clinical Records connection encryption returned an empty required value.");
+  }
+  const connectionData = {
+    accessTokenEncrypted,
+    accessTokenExpiresAt: input.token.expiresInSeconds
+      ? new Date(input.now.getTime() + input.token.expiresInSeconds * 1_000)
+      : null,
+    connectedAt: input.now,
+    clientId: input.clientId,
+    disconnectedAt: null,
+    displayName: input.provider.brandName,
+    fhirBaseHash: input.fhirBaseHash,
+    fhirBaseUrlEncrypted,
+    grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
+    id: connectionId,
+    lastErrorCode: null,
+    memberId: input.memberId,
+    patientIdEncrypted,
+    providerDirectoryEntryId: input.provider.id,
+    refreshTokenEncrypted: null,
+    requestedScopesJson: toClinicalJsonArray(input.requestedScopes),
+    retrievalGeneration,
+    sourceSystem: input.provider.sourceSystem,
+    status: "active",
+    tokenEndpoint: input.tokenEndpoint,
+    tokenVersion,
+  } satisfies Prisma.ClinicalRecordConnectionUncheckedCreateInput;
+  const retrievalRunData = {
+    connectionId,
+    createdAt: input.now,
+    generation: retrievalGeneration,
+    id: retrievalRunId,
+    memberId: input.memberId,
+    grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
+    retrievalPlanJson: buildEpicBetaRetrievalPlan({
+      frozenAt: input.now,
+      pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+      resourceTypes: input.resourceTypes,
+    }),
+    retrievalProtocol: "query-slices-v2",
+    resourceTypesJson: toClinicalJsonArray(input.resourceTypes),
+    status: "queued",
+  } satisfies Prisma.ClinicalRecordRetrievalRunUncheckedCreateInput;
+
+  // The wake payload is sealed with commit-time laneSeq AAD, so it must stay
+  // inside the transaction. Warm the exact mailbox-payload root beforehand;
+  // the scoped cache makes the later seal local work while locks are held.
+  const mailboxRoot = await unwrapHostedDomainRootForWeb({
+    domain: getHostedCryptoDomainForLane("mailbox-payload"),
+    prisma,
+    retainFailureInScopedCache: true,
+    userId: input.memberId,
+  });
+  mailboxRoot.rootKey.fill(0);
+
   let persisted: {
     connectionId: string;
     retrievalRunId: string;
     wake: Awaited<ReturnType<typeof appendClinicalRetrievalWakeTx>>;
   };
   try {
-    persisted = await getPrisma().$transaction(async (tx) => {
-      const existing = await tx.clinicalRecordConnection.findUnique({
-        select: { id: true },
-        where: {
-          memberId_providerDirectoryEntryId: {
-            memberId: input.memberId,
-            providerDirectoryEntryId: input.provider.id,
-          },
-        },
-      });
-      if (existing) throw connectionAlreadyExistsError();
-      const connectionId = generateOpaqueId(CLINICAL_CONNECTION_ID_PREFIX);
-      const tokenVersion = 1;
-      const retrievalGeneration = 1;
-      const fhirBaseUrlEncrypted = await sealClinicalConnectionFhirBaseUrl({
-        connectionId,
-        memberId: input.memberId,
-        prisma: tx,
-        value: input.provider.fhirBaseUrl,
-      });
-      const patientIdEncrypted = await sealClinicalConnectionSecret({
-        connectionId,
-        field: "patientId",
-        memberId: input.memberId,
-        prisma: tx,
-        tokenVersion,
-        value: input.token.patientId,
-      });
-      const accessTokenEncrypted = await sealClinicalConnectionSecret({
-        connectionId,
-        field: "accessToken",
-        memberId: input.memberId,
-        prisma: tx,
-        tokenVersion,
-        value: input.token.accessToken,
-      });
-      if (!patientIdEncrypted || !accessTokenEncrypted) {
-        throw new TypeError("Clinical Records connection encryption returned an empty required value.");
-      }
-      const connectionData = {
-        accessTokenEncrypted,
-        accessTokenExpiresAt: input.token.expiresInSeconds
-          ? new Date(input.now.getTime() + input.token.expiresInSeconds * 1_000)
-          : null,
-        connectedAt: input.now,
-        clientId: input.clientId,
-        disconnectedAt: null,
-        displayName: input.provider.brandName,
-        fhirBaseHash: createHash("sha256").update(input.provider.fhirBaseUrl).digest("hex"),
-        fhirBaseUrlEncrypted,
-        grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
-        id: connectionId,
-        lastErrorCode: null,
-        memberId: input.memberId,
-        patientIdEncrypted,
-        providerDirectoryEntryId: input.provider.id,
-        refreshTokenEncrypted: null,
-        requestedScopesJson: toClinicalJsonArray(input.requestedScopes),
-        retrievalGeneration,
-        sourceSystem: input.provider.sourceSystem,
-        status: "active",
-        tokenEndpoint: input.tokenEndpoint,
-        tokenVersion,
-      } satisfies Prisma.ClinicalRecordConnectionUncheckedCreateInput;
+    persisted = await prisma.$transaction(async (tx) => {
+      await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: tx });
       await tx.clinicalRecordConnection.create({
         data: connectionData,
       });
-      const retrievalRunId = generateOpaqueId(CLINICAL_RETRIEVAL_RUN_ID_PREFIX);
       await tx.clinicalRecordRetrievalRun.create({
-        data: {
-          connectionId,
-          createdAt: input.now,
-          generation: retrievalGeneration,
-          id: retrievalRunId,
-          memberId: input.memberId,
-          grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
-          retrievalPlanJson: buildEpicBetaRetrievalPlan({
-            frozenAt: input.now,
-            pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
-            resourceTypes: input.resourceTypes,
-          }),
-          retrievalProtocol: "query-slices-v2",
-          resourceTypesJson: toClinicalJsonArray(input.resourceTypes),
-          status: "queued",
-        },
+        data: retrievalRunData,
       });
       await completeClinicalRecordConnectIntent({
         claimHash: input.connectIntentClaimHash,
@@ -375,11 +392,7 @@ async function persistClinicalConnection(input: {
     if (isUniqueConstraintError(error)) throw connectionAlreadyExistsError();
     throw error;
   }
-  await signalClinicalRetrievalWake(persisted.wake);
-  return {
-    connectionId: persisted.connectionId,
-    retrievalRunId: persisted.retrievalRunId,
-  };
+  return persisted;
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -464,6 +477,18 @@ function connectionAlreadyExistsError() {
     httpStatus: 409,
     message: "This Clinical Records provider is already connected.",
   });
+}
+
+function providerConfigurationChangedError() {
+  return clinicalRecordsError({
+    code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED",
+    httpStatus: 409,
+    message: "The provider configuration changed. Start the connection again.",
+  });
+}
+
+function hashClinicalFhirBaseUrl(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function generateOpaqueId(prefix: string): string {

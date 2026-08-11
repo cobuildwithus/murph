@@ -35,7 +35,14 @@ type ProviderControl =
   | { kind: "post_accept_transport_loss"; responses: number }
   | { kind: "post_accept_timeout"; responses: number }
   | { kind: "pre_accept_definitive"; responses: number }
-  | { kind: "pre_accept_unrelated_conflict"; responses: number };
+  | { kind: "pre_accept_unrelated_conflict"; responses: number }
+  | { kind: "post_accept_stalled_body"; responses: number }
+  | { kind: "conflict_stalled_body"; responses: number }
+  | { kind: "attachment_create_stalled_body"; responses: number }
+  | { kind: "attachment_create_failure_stalled_body"; responses: number }
+  | { kind: "upload_stalled_body"; responses: number }
+  | { kind: "post_accept_retryable_stalled_body"; responses: number }
+  | { kind: "definitive_stalled_body"; responses: number };
 
 interface AcceptedMessage {
   body: string;
@@ -48,6 +55,12 @@ interface ProviderDouble {
   arm(control: ProviderControl): void;
   baseUrl: string;
   close(): Promise<void>;
+  /**
+   * Sockets carrying a response this double deliberately never finished. A
+   * completed response's socket stays open under keep-alive and that is not a
+   * leak; a stalled one can only end because the client ended it.
+   */
+  liveStalledResponseCount(): number;
   observedSendBodies: string[];
 }
 
@@ -69,7 +82,11 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
     return control;
   };
 
+  const stalledSockets = new Set<import("node:net").Socket>();
   const server = createServer(async (request, response) => {
+    const stall = () => {
+      stalledSockets.add(request.socket);
+    };
     const chunks: Buffer[] = [];
     for await (const chunk of request) {
       chunks.push(chunk as Buffer);
@@ -79,6 +96,20 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
 
     if (request.method === "POST" && url === "/attachments") {
       const attachmentId = `attachment_${++nextAttachmentSequence}`;
+      if (armed?.kind === "attachment_create_stalled_body") {
+        consumeArmed();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.write("{");
+        stall();
+        return;
+      }
+      if (armed?.kind === "attachment_create_failure_stalled_body") {
+        consumeArmed();
+        response.writeHead(500, { "content-type": "application/json" });
+        response.write("{");
+        stall();
+        return;
+      }
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({
         attachment_id: attachmentId,
@@ -89,6 +120,13 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
     }
 
     if (request.method === "PUT" && url.startsWith("/uploads/")) {
+      if (armed?.kind === "upload_stalled_body") {
+        consumeArmed();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.write("{");
+        stall();
+        return;
+      }
       response.writeHead(200);
       response.end();
       return;
@@ -100,6 +138,19 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
       if (control?.kind === "pre_accept_definitive") {
         response.writeHead(400, { "content-type": "application/json" });
         response.end(JSON.stringify({ error: "Synthetic definitive Linq send failure." }));
+        return;
+      }
+      if (control?.kind === "definitive_stalled_body") {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.write("{");
+        stall();
+        return;
+      }
+      if (control?.kind === "conflict_stalled_body") {
+        // Headers say 409, then the body never arrives.
+        response.writeHead(409, { "content-type": "application/json" });
+        response.write("{");
+        stall();
         return;
       }
       if (control?.kind === "pre_accept_unrelated_conflict") {
@@ -136,6 +187,22 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
         request.socket.destroy();
         return;
       }
+      if (control?.kind === "post_accept_retryable_stalled_body") {
+        // Accepted, then retryable headers whose body never finishes. Nothing
+        // in this branch ever reads that body, so only an explicit end closes
+        // it before reconciliation opens the next connection.
+        response.writeHead(503, { "content-type": "application/json" });
+        response.write("{");
+        stall();
+        return;
+      }
+      if (control?.kind === "post_accept_stalled_body") {
+        // Accepted, headers returned inside the budget, body never finishes.
+        response.writeHead(200, { "content-type": "application/json" });
+        response.write("{");
+        stall();
+        return;
+      }
       if (control?.kind === "post_accept_timeout") {
         // Never answered: the caller's own request timeout must fire.
         return;
@@ -168,6 +235,8 @@ async function startLinqProviderDouble(): Promise<ProviderDouble> {
       armed = control;
     },
     baseUrl,
+    liveStalledResponseCount: () =>
+      [...stalledSockets].filter((socket) => !socket.destroyed).length,
     async close() {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => {
@@ -303,6 +372,238 @@ describe("sendHostedLinqAttachmentMessage acknowledgement contract", () => {
     expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(false);
     expect(provider.observedSendBodies).toHaveLength(1);
     expect(provider.acceptedMessageIds).toEqual([]);
+  });
+
+  it("reconciles an accepted send whose response body stalls", async () => {
+    provider.arm({ kind: "post_accept_stalled_body", responses: 1 });
+
+    const { error, result } = await send();
+
+    // Headers said accepted but the answer never finished arriving, so nothing
+    // was established. The same-key resubmission replays the original message
+    // rather than accepting a second one, which is what makes it safe.
+    expect(error).toBeNull();
+    expect(result).toEqual({ chatId: "chat_direct_1", messageId: "linq_msg_1" });
+    expect(provider.observedSendBodies).toHaveLength(2);
+    expect(provider.observedSendBodies[0]).toBe(provider.observedSendBodies[1]);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+  });
+
+  it("reports unconfirmed when the reconciled body also never arrives", async () => {
+    provider.arm({ kind: "post_accept_stalled_body", responses: 2 });
+
+    const { error } = await send();
+
+    // Reconciliation was the one attempt available and it could not be read
+    // either, so the request ends explicitly unresolved rather than claiming
+    // a delivery it never established — and still exactly one card exists.
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(true);
+    expect(isHostedLinqIdempotencyKeyReuseFailure(error)).toBe(false);
+    expect(provider.observedSendBodies).toHaveLength(2);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+  });
+
+  it("keeps an unkeyed accepted send sent when its body stalls", async () => {
+    provider.arm({ kind: "post_accept_stalled_body", responses: 1 });
+
+    const { error, result } = await send(null);
+
+    // Without a key a resubmission would accept a second message, so there is
+    // no safe way to learn more. The 200 already proved acceptance; only the
+    // message identity is lost, and no caller of this send uses it.
+    expect(error).toBeNull();
+    expect(result).toEqual({ chatId: null, messageId: null });
+    expect(provider.observedSendBodies).toHaveLength(1);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+  });
+
+  it("treats a conflict whose body never arrives as unresolved, not as failed", async () => {
+    provider.arm({ kind: "conflict_stalled_body", responses: 1 });
+
+    const { error, result } = await send();
+
+    // An answer we could not finish reading is not an answer. The reconcile
+    // resubmits the identical body under the same key, which the provider
+    // accepts once, so the member gets exactly one card and a truthful result.
+    expect(error).toBeNull();
+    expect(result).toEqual({ chatId: "chat_direct_1", messageId: "linq_msg_1" });
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+    expect(provider.observedSendBodies).toHaveLength(2);
+  });
+
+  // The operation must have released every stalled response before it settles;
+  // the production code joins its cancellation rather than firing it off. What
+  // this can observe is the far side of that: the provider sees its socket end
+  // promptly, with no further client action. Closure travels over the socket,
+  // so it cannot land in the same tick the caller settles — but it does land,
+  // which is exactly what an unowned body never does. The previous
+  // implementation leaves these open indefinitely and fails here.
+  const PROVIDER_CLOSE_GRACE_MS = 1_000;
+  const expectNoLiveProviderConnections = async () => {
+    await vi.waitFor(() => {
+      expect(provider.liveStalledResponseCount()).toBe(0);
+    }, { interval: 10, timeout: PROVIDER_CLOSE_GRACE_MS });
+  };
+
+  it("ends the provider connection when a stalled body hits its deadline", async () => {
+    provider.arm({ kind: "post_accept_stalled_body", responses: 2 });
+    const startedAt = Date.now();
+
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        sendDeadlineAt: startedAt + 3_000,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(true);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
+    await expectNoLiveProviderConnections();
+  });
+
+  it.each([
+    {
+      arm: { kind: "attachment_create_failure_stalled_body", responses: 1 } as const,
+      label: "an attachment-create failure whose body stalls",
+    },
+    {
+      arm: { kind: "upload_stalled_body", responses: 1 } as const,
+      label: "an upload response whose body stalls",
+    },
+    {
+      arm: { kind: "definitive_stalled_body", responses: 1 } as const,
+      label: "a definitive send rejection whose body stalls",
+    },
+    {
+      arm: { kind: "post_accept_retryable_stalled_body", responses: 2 } as const,
+      label: "retryable send responses whose bodies stall",
+    },
+  ])("leaves no live provider connection after $label", async ({ arm }) => {
+    // These branches only ever need the status, so nothing reads their bodies
+    // and fetchLinqApi's own timer is already cleared. Without an explicit end
+    // each one holds its connection open behind a settled operation.
+    provider.arm(arm);
+    const startedAt = Date.now();
+
+    await sendHostedLinqAttachmentMessage({
+      bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+      chatId: "chat_direct_1",
+      contentType: "text/vcard",
+      fileName: "murph.vcf",
+      idempotencyKey: REQUEST_KEY,
+      prepareDeadlineAt: startedAt + 4_000,
+      sendDeadlineAt: startedAt + 12_000,
+    }).catch(() => undefined);
+
+    await expectNoLiveProviderConnections();
+  });
+
+  it("refuses the send when the pre-send deadline already passed", async () => {
+    // The abort callback is a scheduling mechanism; a busy event loop can run
+    // it late. The comparison has to be synchronous or the POST goes out.
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        prepareDeadlineAt: Date.now() - 1,
+        sendDeadlineAt: Date.now() + 12_000,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(isHostedLinqAttachmentSendPrepareFailure(error)).toBe(true);
+    expect(provider.observedSendBodies).toEqual([]);
+    expect(provider.acceptedMessageIds).toEqual([]);
+    await expectNoLiveProviderConnections();
+  });
+
+  it("never dispatches a send whose deadline has already elapsed", async () => {
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        sendDeadlineAt: Date.now() - 1,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    // A zero-millisecond abort still lets fetch dispatch first, so the budget
+    // has to be checked before the request rather than around it.
+    expect(provider.observedSendBodies).toEqual([]);
+    expect(provider.acceptedMessageIds).toEqual([]);
+  });
+
+  it("bounds a stalled attachment-create body and never reaches the send", async () => {
+    provider.arm({ kind: "attachment_create_stalled_body", responses: 1 });
+    const startedAt = Date.now();
+
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        prepareDeadlineAt: startedAt + 1_000,
+        sendDeadlineAt: startedAt + 15_000,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    // Headers arrived, so fetchLinqApi's own timer was already done; only the
+    // prepare deadline can stop this. It is provably before the message POST.
+    expect(isHostedLinqAttachmentSendPrepareFailure(error)).toBe(true);
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(false);
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(provider.observedSendBodies).toEqual([]);
+    expect(provider.acceptedMessageIds).toEqual([]);
+    await expectNoLiveProviderConnections();
+  });
+
+  it("keeps both send attempts inside one caller deadline", async () => {
+    provider.arm({ kind: "post_accept_stalled_body", responses: 2 });
+    const startedAt = Date.now();
+
+    let error: unknown = null;
+    try {
+      await sendHostedLinqAttachmentMessage({
+        bytes: new Uint8Array(Buffer.from("BEGIN:VCARD\r\nEND:VCARD\r\n", "utf8")),
+        chatId: "chat_direct_1",
+        contentType: "text/vcard",
+        fileName: "murph.vcf",
+        idempotencyKey: REQUEST_KEY,
+        sendDeadlineAt: startedAt + 14_000,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    // The send and its one reconciliation share the caller's window, so the
+    // owner returns its own terminal result rather than outliving the turn.
+    expect(isHostedLinqUnconfirmedAcknowledgementFailure(error)).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(16_000);
+    expect(provider.observedSendBodies).toHaveLength(2);
+    expect(provider.acceptedMessageIds).toEqual(["linq_msg_1"]);
   });
 
   it("treats a prepare-deadline expiry as provably unsent", async () => {

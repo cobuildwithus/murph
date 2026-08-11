@@ -20,8 +20,7 @@ import {
 import { runWithHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { decodeHostedMailboxStoredPayload } from "@/src/lib/hosted-mailbox/store";
 import {
-  HOSTED_PLAN_CODES,
-  HOSTED_PULSE_TRIAL_DAYS,
+  HOSTED_FAMILY_PLAN_CODES,
   getHostedBillingPlanDefinition,
   getHostedFamilyBillingOfferDefinition,
   isHostedPulseTrialBillingState,
@@ -40,13 +39,17 @@ import {
   type HostedLinqParticipantContactKind,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
-  parseHostedPulseTrialStartSource,
-  type HostedPulseTrialStartSource,
-} from "@/src/lib/hosted-onboarding/pulse-trial-start-source";
+  parseHostedStarterUsageSourceReferenceLookupKey,
+  type HostedStarterUsageSource,
+} from "@/src/lib/hosted-onboarding/starter-usage";
 import {
   buildHostedGrowthMessageSeries,
   type HostedGrowthMessagePoint,
 } from "@/src/lib/hosted-ops/growth-message-series";
+import {
+  buildHostedGrowthReferralLinkUsage,
+  type HostedGrowthReferralLinkUsage,
+} from "@/src/lib/hosted-ops/growth-referral-link-usage";
 import {
   MONTHLY_REVENUE_MONTHS,
   buildHostedGrowthMonthlyRevenueSeries,
@@ -60,6 +63,11 @@ export { buildHostedGrowthMessageSeries } from "@/src/lib/hosted-ops/growth-mess
 export type { HostedGrowthMessagePoint } from "@/src/lib/hosted-ops/growth-message-series";
 export { buildHostedGrowthMonthlyRevenueSeries } from "@/src/lib/hosted-ops/growth-monthly-revenue-series";
 export type { HostedGrowthMonthlyRevenuePoint } from "@/src/lib/hosted-ops/growth-monthly-revenue-series";
+export { buildHostedGrowthReferralLinkUsage } from "@/src/lib/hosted-ops/growth-referral-link-usage";
+export type {
+  HostedGrowthReferralLinkDailyPoint,
+  HostedGrowthReferralLinkUsage,
+} from "@/src/lib/hosted-ops/growth-referral-link-usage";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAILY_SERIES_DAYS = 30;
@@ -67,6 +75,7 @@ const WEEKLY_ROWS = 8;
 const SNAPSHOT_COMPARE_TARGET_DAYS = 7;
 const SNAPSHOT_COMPARE_MIN_DAYS = 6;
 const SNAPSHOT_COMPARE_MAX_DAYS = 8;
+export const HOSTED_GROWTH_CONVERSION_MATURITY_DAYS = 14;
 const TRIAL_ENDING_SOON_DAYS = 3;
 
 const CHURN_STATUS_KEYS = [
@@ -160,11 +169,12 @@ export interface HostedGrowthTrialStartRow {
 }
 
 export type HostedGrowthTrialStartSource =
-  | HostedPulseTrialStartSource
+  | HostedStarterUsageSource
   | "unknown";
 
 export interface HostedGrowthTrialStartSourceCounts {
   companion_onboarding: number;
+  legacy_trial_migration: number;
   linq_instant_start: number;
   unknown: number;
   web_onboarding: number;
@@ -181,7 +191,7 @@ interface HostedGrowthTrialStartAttributionRow {
   memberCreatedAt: Date;
   phoneHint: string | null;
   pulseTrialRedeemedAt: Date;
-  pulseTrialStartSource: HostedPulseTrialStartSource | null;
+  pulseTrialStartSource: HostedStarterUsageSource | null;
 }
 
 export interface HostedGrowthSnapshotRow {
@@ -296,6 +306,7 @@ export interface HostedGrowthDashboard {
     wowPercent: number | null;
   };
   payingCustomersWowPercent: number | null;
+  referralLinkUsage: HostedGrowthReferralLinkUsage;
   snapshotSeries: HostedGrowthSnapshotPoint[];
   trialCohorts: HostedGrowthTrialCohortRow[];
   trialStarts: {
@@ -401,7 +412,7 @@ export function calculateHostedGrowthCurrentMetrics(
 
     payingFamilyGroups += 1;
     payingFamilySeats += sumHostedFamilyPlanCapacities(capacities);
-    familyMrrUsdCents += HOSTED_PLAN_CODES.reduce(
+    familyMrrUsdCents += HOSTED_FAMILY_PLAN_CODES.reduce(
       (sum, planCode) => sum + capacities[planCode] *
         getHostedFamilyBillingOfferDefinition(planCode).recurringAmountUsdCents,
       0,
@@ -545,6 +556,7 @@ export function buildHostedGrowthTrialStartAttribution(input: {
 }): HostedGrowthDashboard["trialStartAttribution"] {
   const counts: HostedGrowthTrialStartSourceCounts = {
     companion_onboarding: 0,
+    legacy_trial_migration: 0,
     linq_instant_start: 0,
     unknown: 0,
     web_onboarding: 0,
@@ -708,7 +720,7 @@ export function findComparableSnapshot(
 }
 
 export function getTrialMaturityCutoff(now: Date): Date {
-  return addUtcDays(now, -HOSTED_PULSE_TRIAL_DAYS);
+  return addUtcDays(now, -HOSTED_GROWTH_CONVERSION_MATURITY_DAYS);
 }
 
 interface HostedGrowthGroupMailboxRow {
@@ -1218,6 +1230,7 @@ export async function readHostedGrowthDashboard(
     activeUsersGroupRows,
     activeUsersTodayDirectRows,
     monthlyRevenuePurchases,
+    referralLinkClaimRows,
   ] = await Promise.all([
     readCurrentHostedGrowthMetrics(now, prisma),
     prisma.hostedMember.findMany({
@@ -1232,10 +1245,9 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
-    prisma.hostedMemberBillingRef.findMany({
+    prisma.hostedUsageCreditEntry.findMany({
       select: {
-        currentBillingPhase: true,
-        member: {
+        beneficiary: {
           select: {
             accountGroupMemberships: {
               select: {
@@ -1243,6 +1255,11 @@ export async function readHostedGrowthDashboard(
               },
               take: 1,
               where: activePaidFamilyMembershipWhere(),
+            },
+            billingRef: {
+              select: {
+                currentBillingPhase: true,
+              },
             },
             createdAt: true,
             identity: {
@@ -1253,14 +1270,15 @@ export async function readHostedGrowthDashboard(
             suspendedAt: true,
           },
         },
-        pulseTrialRedeemedAt: true,
-        pulseTrialStartSource: true,
+        effectiveAt: true,
+        sourceReferenceLookupKey: true,
       },
       where: {
-        pulseTrialRedeemedAt: {
+        effectiveAt: {
           gte: recentStart,
           lte: now,
         },
+        kind: "starter_grant",
       },
     }),
     // One snapshot read serves both the 30-day chart series and the
@@ -1294,35 +1312,39 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
-    prisma.hostedMemberBillingRef.count({
+    prisma.hostedUsageCreditEntry.count({
       where: {
-        pulseTrialRedeemedAt: {
+        effectiveAt: {
           lt: getTrialMaturityCutoff(now),
         },
+        kind: "starter_grant",
       },
     }),
-    prisma.hostedMemberBillingRef.count({
+    prisma.hostedUsageCreditEntry.count({
       where: {
-        member: {
-          OR: [
-            {
-              billingRef: {
-                is: {
-                  currentBillingPhase: "paid",
+        beneficiary: {
+          is: {
+            OR: [
+              {
+                billingRef: {
+                  is: {
+                    currentBillingPhase: "paid",
+                  },
                 },
               },
-            },
-            {
-              accountGroupMemberships: {
-                some: activePaidFamilyMembershipWhere(),
+              {
+                accountGroupMemberships: {
+                  some: activePaidFamilyMembershipWhere(),
+                },
               },
-            },
-          ],
-          suspendedAt: null,
+            ],
+            suspendedAt: null,
+          },
         },
-        pulseTrialRedeemedAt: {
+        effectiveAt: {
           lt: getTrialMaturityCutoff(now),
         },
+        kind: "starter_grant",
       },
     }),
     prisma.hostedGrowthAggregate.findUniqueOrThrow({
@@ -1415,6 +1437,45 @@ export async function readHostedGrowthDashboard(
         stripeLiveMode: true,
       },
     }),
+    prisma.hostedInvite.findMany({
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
+      select: {
+        createdAt: true,
+        member: {
+          select: {
+            hostedMailboxItems: {
+              orderBy: [
+                { occurredAt: "asc" },
+                { id: "asc" },
+              ],
+              select: {
+                occurredAt: true,
+              },
+              where: {
+                kind: "member.activated",
+                occurredAt: {
+                  gte: dailyStart,
+                  lte: now,
+                },
+              },
+            },
+          },
+        },
+        referrerMemberId: true,
+      },
+      where: {
+        createdAt: {
+          gte: dailyStart,
+          lte: now,
+        },
+        referrerMemberId: {
+          not: null,
+        },
+      },
+    }),
   ]);
   const activeUsers = await calculateHostedGrowthActiveUsers({
     currentDirectRows: activeUsersTrailing7DayDirectRows,
@@ -1430,28 +1491,24 @@ export async function readHostedGrowthDashboard(
     trailing7DayStart: activeUsersCurrentStart,
   });
   const trialStartRows = rawTrialStartRows.map((row): HostedGrowthTrialStartRow => ({
-    currentBillingPhase: row.currentBillingPhase,
+    currentBillingPhase: row.beneficiary.billingRef?.currentBillingPhase ?? null,
     member: {
-      suspendedAt: row.member.suspendedAt,
+      suspendedAt: row.beneficiary.suspendedAt,
     },
-    paidViaFamily: row.member.accountGroupMemberships.length > 0,
-    pulseTrialRedeemedAt: row.pulseTrialRedeemedAt,
+    paidViaFamily: row.beneficiary.accountGroupMemberships.length > 0,
+    pulseTrialRedeemedAt: row.effectiveAt,
   }));
   const trialStartAttribution = buildHostedGrowthTrialStartAttribution({
     endExclusive: addUtcDays(todayStart, 1),
-    rows: rawTrialStartRows.flatMap((row) => {
-      if (row.pulseTrialRedeemedAt === null) {
-        return [];
-      }
-      return [{
-        memberCreatedAt: row.member.createdAt,
-        phoneHint: row.member.identity?.maskedPhoneNumberHint ?? null,
-        pulseTrialRedeemedAt: row.pulseTrialRedeemedAt,
-        pulseTrialStartSource: parseHostedPulseTrialStartSource(
-          row.pulseTrialStartSource,
+    rows: rawTrialStartRows.map((row) => ({
+      memberCreatedAt: row.beneficiary.createdAt,
+      phoneHint: row.beneficiary.identity?.maskedPhoneNumberHint ?? null,
+      pulseTrialRedeemedAt: row.effectiveAt,
+      pulseTrialStartSource:
+        parseHostedStarterUsageSourceReferenceLookupKey(
+          row.sourceReferenceLookupKey,
         ),
-      }];
-    }),
+    })),
     startInclusive: dailyStart,
   });
 
@@ -1557,6 +1614,11 @@ export async function readHostedGrowthDashboard(
           current.payingCustomers,
           comparableSnapshot.payingCustomers,
         ),
+    referralLinkUsage: buildHostedGrowthReferralLinkUsage({
+      claimRows: referralLinkClaimRows,
+      dayCount: DAILY_SERIES_DAYS,
+      windowEnd: now,
+    }),
     snapshotSeries: snapshots
       .filter((row) => row.snapshotDate.getTime() >= dailyStart.getTime())
       .map(serializeSnapshotPoint),

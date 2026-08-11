@@ -59,6 +59,7 @@ export function HostedFamilySettings(props: {
           name: plan.displayName,
           planCode: plan.code,
           priceLabel: `$${Math.round(plan.recurringAmountUsdCents / 100)}/mo`,
+          recurringAmountUsdCents: plan.recurringAmountUsdCents,
         }))}
         usageTopUpActiveMemberId={props.usageTopUpActiveMemberId}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}

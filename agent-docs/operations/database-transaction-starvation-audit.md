@@ -3,8 +3,16 @@
 Last verified: 2026-08-09
 Target catalog base: `7816f428d428a51f3bf3791b4fceef4168d8becf` (`origin/main`)
 Target implementation branch: `agent/mailbox-db-critical-section`
-Status: current-base structural catalog; live capacity and blocking measurements are still required
+Status: point-in-time structural catalog for the exact target base; current
+implementation planning must refresh affected paths against the latest `main`
 Owner: Web/runtime database reliability
+
+> **Freshness boundary:** Source counts, callsites, classifications, and
+> “current-base” wording below describe only the exact target catalog base.
+> They are not claims about later revisions of `main`. Re-audit every affected
+> owner before using this catalog to plan or approve implementation. The
+> critical-section policy and privacy-safe observability constraints remain the
+> durable guidance.
 
 ## Purpose
 

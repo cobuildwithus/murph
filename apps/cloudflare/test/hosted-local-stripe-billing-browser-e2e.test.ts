@@ -5,7 +5,6 @@ import {
   HostedBillingBrowserDriver,
   HostedStripeBillingSandbox,
   issueHostedWebInviteForTest,
-  readHostedBillingProjectionForTest,
   readHostedFamilyProjectionForTest,
   seedHostedBillingMemberForTest,
   seedHostedLaunchConsentForTest,
@@ -104,20 +103,8 @@ describe("hosted-local Stripe billing browser matrix", () => {
     }
   }, 300_000);
 
-  it("starts a new-member Pulse Trial through Checkout", async () => {
-    await proveNewMemberPulseTrialCheckout();
-  }, 300_000);
-
-  it("converts a Pulse Trial to paid Pulse after invoice reconciliation", async () => {
-    await proveTrialStartsPaidPulseAfterInvoiceReconciliation();
-  }, 300_000);
-
-  it("updates the payment method before resuming a paused Pulse Trial", async () => {
-    await provePausedTrialUpdateBeforeResumeIncidentRegression();
-  }, 300_000);
-
-  it("upgrades a Pulse Trial to Edge through the Portal boundary", async () => {
-    await proveTrialUpgradesToEdgeThroughPortal();
+  it("activates Starter and begins paid Pulse through Checkout", async () => {
+    await proveStarterUsageStartsPaidPulseThroughCheckout();
   }, 300_000);
 
   it("upgrades paid Pulse to Edge through the Portal boundary", async () => {
@@ -138,175 +125,52 @@ describe("hosted-local Stripe billing browser matrix", () => {
   }, 300_000);
 });
 
-async function proveNewMemberPulseTrialCheckout(): Promise<void> {
-  const member = await createMember("trial_checkout");
+async function proveStarterUsageStartsPaidPulseThroughCheckout(): Promise<void> {
+  const member = await createMember("starter_to_paid_pulse");
   const invite = await issueHostedWebInviteForTest({
     environment: requireScenario().runtimeEnv,
     memberId: member.memberId,
   });
   const actor = await createActor(member.session);
   try {
-    const checkout = await requireDriver().beginPulseTrialCheckout(
+    await requireDriver().activateStarterUsage(actor, invite.inviteCode);
+    await requireDriver().assertSettingsText(
       actor,
-      invite.inviteCode,
+      /non-expiring starter usage is active/iu,
     );
+
+    const checkout = await requireDriver().beginDirectPlanCheckout(actor, "Pulse");
     await requireDriver().assertStripeCheckoutReady(actor);
     assertHostedStripeListenerAlive();
     const completed = await requireSandbox().completeCheckoutSessionWithOfficialFixture({
-      expectedAmount: 0,
+      expectedAmount: 800,
       ownership: {
         memberId: member.memberId,
-        scenario: "trial-checkout",
+        scenario: "starter-to-paid-pulse",
       },
       sessionId: checkout.sessionId,
     });
     const subscriptionId = requireStripeObjectId(completed.subscription, "Subscription");
     const stripeTruth = await requireSandbox().waitForSubscriptionTruth({
-      label: "new-member Pulse Trial subscription",
-      ready: (truth) =>
-        truth.status === "trialing"
-        && truth.priceIds.includes(requireSandbox().priceIds.pulse),
-      subscriptionId,
-    });
-    expect(stripeTruth.trialStartedAt).not.toBeNull();
-    expect(stripeTruth.trialEndsAt).not.toBeNull();
-
-    const projection = await waitForHostedBillingProjectionForTest({
-      environment: requireScenario().runtimeEnv,
-      label: "new-member Pulse Trial webhook projection",
-      memberId: member.memberId,
-      ready: (candidate) =>
-        candidate.billingStatus === "active"
-        && candidate.currentBillingPhase === "trial"
-        && candidate.currentBillingPlanCode === "launch_monthly"
-        && candidate.currentCheckoutOffer === "pulse_trial_7d"
-        && candidate.stripeSubscriptionId === subscriptionId,
-    });
-    expect(projection.currentTrialEndsAt).not.toBeNull();
-    await requireDriver().assertSettingsPlanState(actor, {
-      planName: "Pulse",
-      stateLabel: "Free trial",
-    });
-  } finally {
-    await closeActor(actor);
-  }
-}
-
-async function proveTrialStartsPaidPulseAfterInvoiceReconciliation(): Promise<void> {
-  const member = await createMember("trial_to_paid");
-  const fixture = await requireSandbox().createTrialSubscription({
-    memberId: member.memberId,
-    paymentMethod: "pm_card_threeDSecure2Required",
-    scenario: "trial-to-paid-pulse",
-  });
-  await bindDirectFixture(member.memberId, fixture, "trial", "launch_monthly");
-  const actor = await createActor(member.session);
-  try {
-    assertHostedStripeListenerAlive();
-    const result = await requireDriver().startPaidPulse(actor);
-    const beforeInvoice = await readHostedBillingProjectionForTest({
-      environment: requireScenario().runtimeEnv,
-      memberId: member.memberId,
-    });
-    expect(beforeInvoice.currentBillingPhase).not.toBe("paid");
-    expect(result.paymentUrlPresent).toBe(true);
-    await requireDriver().assertStripeHostedInvoiceReady(actor);
-    assertHostedStripeListenerAlive();
-    await requireSandbox().payLatestInvoiceWithStripeTestApi({
-      scenario: "trial-to-paid-pulse",
-      subscriptionId: fixture.subscriptionId,
-    });
-
-    await requireSandbox().waitForSubscriptionTruth({
-      label: "trial converted to paid Pulse",
+      label: "Starter member paid Pulse subscription",
       ready: (truth) =>
         truth.status === "active"
         && truth.latestInvoicePaid
         && truth.priceIds.includes(requireSandbox().priceIds.pulse),
-      subscriptionId: fixture.subscriptionId,
+      subscriptionId,
     });
-    await waitForPaidMemberProjection(member.memberId, "launch_monthly");
+    expect(stripeTruth.trialStartedAt).toBeNull();
+    expect(stripeTruth.trialEndsAt).toBeNull();
+
+    const projection = await waitForPaidMemberProjection(
+      member.memberId,
+      "launch_monthly",
+    );
+    expect(projection.currentCheckoutOffer).toBe("standard");
+    expect(projection.currentTrialStartedAt).toBeNull();
+    expect(projection.currentTrialEndsAt).toBeNull();
     await requireDriver().assertSettingsPlanState(actor, {
       planName: "Pulse",
-      stateLabel: "Current plan",
-    });
-  } finally {
-    await closeActor(actor);
-  }
-}
-
-async function provePausedTrialUpdateBeforeResumeIncidentRegression(): Promise<void> {
-  const member = await createMember("paused_trial_resume");
-  const fixture = await requireSandbox().createPausedTrialWithCustomerPaymentMethod({
-    memberId: member.memberId,
-    scenario: "paused-trial-resume",
-  });
-  await bindDirectFixture(member.memberId, fixture, "trial", "launch_monthly", "paused");
-  await requireSandbox().assertUnsupportedResumePaymentMethodRejected({
-    paymentMethodId: fixture.paymentMethodId,
-    subscriptionId: fixture.subscriptionId,
-  });
-  const baselineEventIds = await requireSandbox().captureSubscriptionEventBaseline(
-    fixture.subscriptionId,
-  );
-  const actor = await createActor(member.session);
-  try {
-    assertHostedStripeListenerAlive();
-    const result = await requireDriver().startPaidPulse(actor);
-    expect(result.paymentUrlPresent).toBe(true);
-    await requireDriver().assertStripeHostedInvoiceReady(actor);
-    const trace = await requireSandbox().waitForUpdateBeforeResumeTrace({
-      baselineEventIds,
-      paymentMethodId: fixture.paymentMethodId,
-      subscriptionId: fixture.subscriptionId,
-    });
-    expect(trace.updateBeforeResume).toBe(true);
-    assertHostedStripeListenerAlive();
-    await requireSandbox().payLatestInvoiceWithStripeTestApi({
-      paymentMethodId: fixture.paymentMethodId,
-      scenario: "paused-trial-resume",
-      subscriptionId: fixture.subscriptionId,
-    });
-    const truth = await requireSandbox().waitForSubscriptionTruth({
-      label: "paused Pulse Trial resumed and invoiced",
-      ready: (candidate) =>
-        candidate.status === "active"
-        && candidate.subscriptionDefaultPaymentMethodPresent
-        && candidate.latestInvoicePaid,
-      subscriptionId: fixture.subscriptionId,
-    });
-    expect(truth.customerDefaultPaymentMethodPresent).toBe(true);
-    await waitForPaidMemberProjection(member.memberId, "launch_monthly");
-    await requireDriver().assertSettingsPlanState(actor, {
-      planName: "Pulse",
-      stateLabel: "Current plan",
-    });
-  } finally {
-    await closeActor(actor);
-  }
-}
-
-async function proveTrialUpgradesToEdgeThroughPortal(): Promise<void> {
-  const member = await createMember("trial_to_edge");
-  const fixture = await requireSandbox().createTrialSubscription({
-    memberId: member.memberId,
-    paymentMethod: "pm_card_visa",
-    scenario: "trial-to-edge",
-  });
-  await bindDirectFixture(member.memberId, fixture, "trial", "launch_monthly");
-  const actor = await createActor(member.session);
-  try {
-    await requireDriver().openEdgeFromTrialPortal(actor);
-    assertHostedStripeListenerAlive();
-    await requireSandbox().applyStripePortalPlanChange({
-      endTrial: true,
-      scenario: "trial-to-edge",
-      subscriptionId: fixture.subscriptionId,
-      targetPlan: "edge",
-    });
-    await waitForPaidEdgeTruthAndProjection(member.memberId, fixture.subscriptionId);
-    await requireDriver().assertSettingsPlanState(actor, {
-      planName: "Edge",
       stateLabel: "Current plan",
     });
   } finally {
@@ -327,7 +191,6 @@ async function provePaidPulseUpgradesToEdgeThroughPortal(): Promise<void> {
     await requireDriver().openPaidPulseEdgeConfirmation(actor);
     assertHostedStripeListenerAlive();
     await requireSandbox().applyStripePortalPlanChange({
-      endTrial: false,
       scenario: "paid-pulse-to-edge",
       subscriptionId: fixture.subscriptionId,
       targetPlan: "edge",
@@ -598,7 +461,7 @@ async function createMember(
 async function bindDirectFixture(
   memberId: string,
   fixture: HostedStripeSubscriptionFixture,
-  phase: "paid" | "trial",
+  phase: "paid",
   planCode: "launch_edge_monthly" | "launch_monthly",
   billingStatus: "active" | "paused" = "active",
 ): Promise<void> {
@@ -618,19 +481,19 @@ async function bindDirectFixture(
 
 function buildBillingRefSeed(input: {
   fixture: HostedStripeSubscriptionFixture;
-  phase: "paid" | "trial";
+  phase: "paid";
   planCode: "launch_edge_monthly" | "launch_monthly";
   truth: HostedStripeSubscriptionTruth;
 }): HostedBillingRefSeedForTest {
   return {
     currentBillingPhase: input.phase,
     currentBillingPlanCode: input.planCode,
-    currentCheckoutOffer: input.phase === "trial" ? "pulse_trial_7d" as const : "standard" as const,
+    currentCheckoutOffer: "standard" as const,
     currentPeriodEnd: input.truth.currentPeriodEnd,
     currentPeriodStart: input.truth.currentPeriodStart,
     currentTrialEndsAt: input.truth.trialEndsAt,
     currentTrialStartedAt: input.truth.trialStartedAt,
-    pulseTrialRedeemedAt: input.phase === "trial" ? input.truth.trialStartedAt : null,
+    pulseTrialRedeemedAt: null,
     stripeCustomerId: input.fixture.customerId,
     stripeSubscriptionId: input.fixture.subscriptionId,
   };

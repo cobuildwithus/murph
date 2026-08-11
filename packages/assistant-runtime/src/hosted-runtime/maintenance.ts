@@ -35,6 +35,8 @@ import type {
   HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS,
+  inspectHostedRuntimeAutomationLaneTimingSubdivision,
   readHostedIngressLatencySource,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -163,7 +165,7 @@ export async function runHostedAssistantAutomationLane(input: {
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
 }): Promise<HostedAssistantAutomationLaneMetrics> {
-  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+  let providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
     input.providerStartCriticalPath,
     "automationLaneStartedAtMonotonicMs",
   );
@@ -185,6 +187,10 @@ export async function runHostedAssistantAutomationLane(input: {
     readiness: assistantAutomation,
     readinessElapsedMs,
   } = await resolveReadiness();
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    "automationReadinessDoneAtMonotonicMs",
+  );
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
 
   if (!assistantAutomation.configured) {
@@ -333,11 +339,12 @@ export async function runHostedAssistantAutomation(
   let activeProviderMilestoneTraceContext: HostedAssistantMilestoneTraceContext | null = null;
   const recordedProviderMilestones = new Set<string>();
   const freshAssistantInputIdCount = new Set(freshAssistantInputIds).size;
+  let providerStartCriticalPath = options?.providerStartCriticalPath ?? null;
   const selectedInputIds = await selectHostedAssistantInputIds(
     freshAssistantInputIdCount > 0
-      ? {
-          freshAssistantInputIds,
-          mode: "foreground",
+        ? {
+            freshAssistantInputIds,
+            mode: "foreground",
           vaultRoot,
         }
       : {
@@ -346,10 +353,16 @@ export async function runHostedAssistantAutomation(
           vaultRoot,
         },
   );
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    "automationInputSelectionDoneAtMonotonicMs",
+  );
   const baseInputSource = createHostedAssistantInputSource({
     initialPendingInputIds: selectedInputIds.pendingInputIds,
     pendingInputRefreshMode:
       selectedInputIds.mode === "foreground" ? "none" : "compact",
+    preserveSelectedInputOrder:
+      selectedInputIds.preserveInputOrder,
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });
@@ -449,10 +462,9 @@ export async function runHostedAssistantAutomation(
       ...(options?.beforeProviderAcceptedInputs
         ? { beforeProviderAcceptedInputs: options.beforeProviderAcceptedInputs }
         : {}),
-      ...(options?.providerStartCriticalPath
+      ...(providerStartCriticalPath
         ? {
-            providerStartCriticalPath:
-              options.providerStartCriticalPath,
+            providerStartCriticalPath,
           }
         : {}),
       executionContext,
@@ -793,6 +805,11 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
 
   // In-memory pre-provider and provider diagnostics ride the EXISTING
   // provider_started POST. No new request, await, or I/O is added.
+  const automationLaneSubdivision = input.providerStartCriticalPath
+    ? inspectHostedRuntimeAutomationLaneTimingSubdivision(
+        input.providerStartCriticalPath,
+      )
+    : { kind: "absent" } as const;
   const preProvider: NonNullable<
     HostedRuntimeLatencyPhaseBreakdown["preProvider"]
   > = {
@@ -802,6 +819,9 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
       ? {
           automationLaneToAssistantServiceMs:
             input.providerStartCriticalPath.automationLaneToAssistantServiceMs,
+          ...(automationLaneSubdivision.kind === "complete"
+            ? automationLaneSubdivision.subdivision
+            : {}),
           mailboxImportDoneToAssistantPhaseMs:
             input.providerStartCriticalPath.mailboxImportDoneToAssistantPhaseMs,
           workspaceAssistantPreAutomationMs:
@@ -809,6 +829,14 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
         }
       : {}),
   };
+  if (
+    inspectHostedRuntimeAutomationLaneTimingSubdivision(preProvider).kind
+      === "invalid"
+  ) {
+    for (const key of HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS) {
+      delete preProvider[key];
+    }
+  }
   const provider: NonNullable<
     HostedRuntimeLatencyPhaseBreakdown["provider"]
   > = {

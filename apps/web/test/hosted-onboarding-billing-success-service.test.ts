@@ -516,7 +516,6 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       checkoutSessionId: "cs_123",
       memberId: "member_123",
       prisma,
-      refundCheckoutPayment: true,
       sourceEventId:
         "checkout-success:cs_123:family-sponsored-checkout-cleanup",
       subscriptionId: "sub_superseded",

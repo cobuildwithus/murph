@@ -27,6 +27,9 @@ const CONTRACT_MIGRATION_LOCK_NAME = "hosted_web_contract_migrations";
 const CONTRACT_MIGRATION_LOCK_TIMEOUT = "5s";
 const CONTRACT_MIGRATION_STATEMENT_TIMEOUT = "30s";
 const SUPERSEDED_CONTRACT_MIGRATION_IDS = new Set([
+  // Prisma migration 20260809160000_add_hosted_family_max_plan_code now owns
+  // the complete Pulse/Edge/Max constraints for fresh and upgraded databases.
+  "20260714150000_require_hosted_family_plan_codes",
   "20260720233000_hosted_group_usage_funding_invariants",
   "20260726123000_allow_hosted_usage_referral_credit_entries",
 ]);

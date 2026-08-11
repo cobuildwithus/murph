@@ -23,7 +23,6 @@ import type {
 } from "@murphai/hosted-execution/contracts";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { advanceHostedMailboxLaneConsumedSeq } from "../hosted-mailbox/lane-counter-store";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 
@@ -138,6 +137,14 @@ export async function checkpointHostedWorkspace(input: {
   }));
 }
 
+interface CheckpointHostedWorkspaceMutationRow extends HostedWorkspaceRow {
+  replacedSnapshotRef: Prisma.JsonValue | null;
+}
+
+interface CheckpointHostedWorkspaceMailboxMutationRow {
+  conversationInputAhead: boolean;
+}
+
 export async function checkpointHostedWorkspaceTx(input: {
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;
@@ -168,157 +175,245 @@ export async function checkpointHostedWorkspaceTx(input: {
   const checkpointedAt = input.checkpointedAt === undefined || input.checkpointedAt === null
     ? new Date()
     : requireDate(input.checkpointedAt, "Hosted workspace checkpointedAt");
-  const updateData: Prisma.HostedWorkspaceUpdateManyMutationInput = {
-    checkpointedAt,
-    snapshotRef: toNullablePrismaJson(snapshotRef),
-    version: {
-      increment: 1,
-    },
-  };
+  const workspaceAssignments: Prisma.Sql[] = [
+    Prisma.sql`checkpointed_at = ${checkpointedAt}`,
+    Prisma.sql`snapshot_ref = ${snapshotRef === null ? null : JSON.stringify(snapshotRef)}::jsonb`,
+    Prisma.sql`version = workspace.version + 1`,
+    Prisma.sql`updated_at = NOW()`,
+  ];
 
   if ("nextWakeAt" in input) {
-    updateData.nextWakeAt = input.nextWakeAt === undefined || input.nextWakeAt === null
-      ? null
-      : requireDate(input.nextWakeAt, "Hosted workspace nextWakeAt");
+    workspaceAssignments.push(Prisma.sql`next_wake_at = ${
+      input.nextWakeAt === undefined || input.nextWakeAt === null
+        ? null
+        : requireDate(input.nextWakeAt, "Hosted workspace nextWakeAt")
+    }`);
   }
 
   if ("nextWakeReason" in input) {
-    updateData.nextWakeReason = normalizeNullableString(input.nextWakeReason);
+    workspaceAssignments.push(
+      Prisma.sql`next_wake_reason = ${normalizeNullableString(input.nextWakeReason)}`,
+    );
   }
 
   if ("inboxMediaRetentionWakeAt" in input) {
-    updateData.inboxMediaRetentionWakeAt =
-      input.inboxMediaRetentionWakeAt === undefined || input.inboxMediaRetentionWakeAt === null
+    workspaceAssignments.push(Prisma.sql`inbox_media_retention_wake_at = ${
+      input.inboxMediaRetentionWakeAt === undefined
+        || input.inboxMediaRetentionWakeAt === null
         ? null
         : requireDate(
           input.inboxMediaRetentionWakeAt,
           "Hosted workspace inboxMediaRetentionWakeAt",
-        );
+        )
+    }`);
   }
 
   if ("redactedStatusJson" in input) {
-    updateData.redactedStatusJson = input.redactedStatusJson === undefined
-      ? Prisma.DbNull
-      : toNullablePrismaJson(sanitizeHostedRuntimeRedactedJson(
+    const redactedStatusJson = input.redactedStatusJson === undefined
+      ? null
+      : sanitizeHostedRuntimeRedactedJson(
         input.redactedStatusJson,
         "Hosted workspace redactedStatusJson",
         HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEY_SET,
-      ));
+      );
+    workspaceAssignments.push(
+      Prisma.sql`redacted_status_json = ${
+        redactedStatusJson === null ? null : JSON.stringify(redactedStatusJson)
+      }::jsonb`,
+    );
   }
 
-  let conversationInputAhead: boolean | undefined;
-  let lockedWorkspace: HostedWorkspaceRow | null = null;
   const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
   const handledConversationMailboxItemIds =
     normalizeCheckpointHandledConversationMailboxItemIds(
       input.handledConversationMailboxItemIds,
     );
   const systemHandledThroughSeq = readCheckpointSystemHandledThroughSeq(input.redactedStatusJson);
-  if (reason === "idle_shutdown" && conversationImportedSeq !== null) {
-    await lockHostedWorkspaceForCheckpointTx({
-      tx: input.tx,
-      userId,
+  const shouldHandleConversation = reason === "idle_shutdown" && conversationImportedSeq !== null;
+  const shouldObserveConversationAhead = shouldHandleConversation
+    && !isHostedRuntimeMailboxContinuation({
+      nextWakeAt: input.nextWakeAt,
+      nextWakeReason: input.nextWakeReason,
+      redactedStatus: input.redactedStatusJson,
     });
-    lockedWorkspace = await input.tx.hostedWorkspace.findUnique({
+
+  const updatedRows = await input.tx.$queryRaw<CheckpointHostedWorkspaceMutationRow[]>(Prisma.sql`
+    WITH current_workspace AS MATERIALIZED (
+      SELECT snapshot_ref AS replaced_snapshot_ref
+      FROM hosted_workspace
+      WHERE user_id = ${userId}
+        AND version = ${expectedVersion}
+    )
+    UPDATE hosted_workspace AS workspace
+    SET ${Prisma.join(workspaceAssignments, ", ")}
+    FROM current_workspace
+    WHERE workspace.user_id = ${userId}
+      AND workspace.version = ${expectedVersion}
+    RETURNING
+      workspace.user_id AS "userId",
+      workspace.version,
+      workspace.snapshot_ref AS "snapshotRef",
+      workspace.browser_vault_replica_ref AS "browserVaultReplicaRef",
+      workspace.next_wake_at AS "nextWakeAt",
+      workspace.next_wake_reason AS "nextWakeReason",
+      workspace.inbox_media_retention_wake_at AS "inboxMediaRetentionWakeAt",
+      workspace.redacted_status_json AS "redactedStatusJson",
+      workspace.checkpointed_at AS "checkpointedAt",
+      workspace.created_at AS "createdAt",
+      workspace.updated_at AS "updatedAt",
+      current_workspace.replaced_snapshot_ref AS "replacedSnapshotRef"
+  `);
+
+  if (updatedRows.length === 0) {
+    const currentWorkspace = await input.tx.hostedWorkspace.findUnique({
       where: {
         userId,
       },
     });
-    if (!lockedWorkspace || lockedWorkspace.version !== expectedVersion) {
-      return {
-        replacedSnapshotRef: null,
-        status: "conflict",
-        workspace: lockedWorkspace ? projectHostedWorkspace(lockedWorkspace) : null,
-      };
-    }
-    if (!isHostedRuntimeMailboxContinuation({
-      nextWakeAt: input.nextWakeAt,
-      nextWakeReason: input.nextWakeReason,
-      redactedStatus: input.redactedStatusJson,
-    })) {
-      const pendingConversationSeq = await readForegroundPendingConversationSeqTx({
-        conversationImportedSeq,
-        tx: input.tx,
-        userId,
-      });
-      if (pendingConversationSeq !== null) {
-        conversationInputAhead = true;
-      }
-    }
+    return {
+      replacedSnapshotRef: null,
+      status: "conflict",
+      workspace: currentWorkspace ? projectHostedWorkspace(currentWorkspace) : null,
+    };
+  }
+  if (updatedRows.length !== 1 || !updatedRows[0]) {
+    throw new Error("Hosted workspace checkpoint CAS returned an invalid row count.");
   }
 
-  const currentWorkspace = lockedWorkspace ?? await input.tx.hostedWorkspace.findUnique({
-    where: {
-      userId,
-    },
-  });
-  const replacedSnapshotRef = currentWorkspace
-    ? parseHostedExecutionSnapshotRef(
-        currentWorkspace.snapshotRef,
-        "Hosted workspace checkpoint replaced snapshotRef",
+  let conversationInputAhead: true | undefined;
+  if (systemHandledThroughSeq !== null || shouldHandleConversation) {
+    const observedAt = new Date();
+    const handledConversationItemIdsSql = handledConversationMailboxItemIds.length > 0
+      ? Prisma.sql`ARRAY[${Prisma.join(handledConversationMailboxItemIds)}]::text[]`
+      : Prisma.sql`ARRAY[]::text[]`;
+    const conversationImportedBound = conversationImportedSeq ?? 0n;
+    const systemHandledBound = systemHandledThroughSeq ?? 0n;
+    const checkpointRetentionCutoff = new Date(
+      checkpointedAt.getTime() - HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS,
+    );
+    const observationRetentionCutoff = new Date(
+      observedAt.getTime() - HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS,
+    );
+    // PostgreSQL data-modifying CTEs share one snapshot. The prefix query
+    // therefore treats only rows returned by this statement's stamp as handled.
+    const mailboxRows = await input.tx.$queryRaw<
+      CheckpointHostedWorkspaceMailboxMutationRow[]
+    >(Prisma.sql`
+      WITH stamped_conversation AS (
+        UPDATE hosted_mailbox_item AS item
+        SET consumed_at = ${checkpointedAt},
+            updated_at = NOW()
+        WHERE ${shouldHandleConversation}
+          AND item.user_id = ${userId}
+          AND item.id = ANY(${handledConversationItemIdsSql})
+          AND item.lane = 'conversation'
+          AND item.kind = 'conversation.message'
+          AND item.lane_seq <= ${conversationImportedBound}
+          AND item.consumed_at IS NULL
+        RETURNING item.id
+      ),
+      conversation_progress AS MATERIALIZED (
+        SELECT
+          counter.user_id,
+          counter.lane,
+          GREATEST(
+            counter.consumed_seq,
+            COALESCE(
+              (
+                SELECT item.lane_seq - 1
+                FROM hosted_mailbox_item AS item
+                WHERE item.user_id = ${userId}
+                  AND item.lane = 'conversation'
+                  AND item.lane_seq > counter.consumed_seq
+                  AND item.lane_seq <= LEAST(
+                    ${conversationImportedBound},
+                    counter.next_seq - 1
+                  )
+                  AND item.created_at >= ${checkpointRetentionCutoff}
+                  AND (item.expires_at IS NULL OR item.expires_at > ${checkpointedAt})
+                  AND item.consumed_at IS NULL
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM stamped_conversation AS stamped
+                    WHERE stamped.id = item.id
+                  )
+                ORDER BY item.lane_seq ASC
+                LIMIT 1
+              ),
+              LEAST(${conversationImportedBound}, counter.next_seq - 1)
+            )
+          ) AS target_consumed_seq
+        FROM hosted_mailbox_lane_counter AS counter
+        WHERE ${shouldHandleConversation}
+          AND counter.user_id = ${userId}
+          AND counter.lane = 'conversation'
+      ),
+      advanced_conversation AS (
+        UPDATE hosted_mailbox_lane_counter AS counter
+        SET consumed_seq = progress.target_consumed_seq,
+            updated_at = NOW()
+        FROM conversation_progress AS progress
+        WHERE counter.user_id = progress.user_id
+          AND counter.lane = progress.lane
+          AND counter.consumed_seq < progress.target_consumed_seq
+        RETURNING counter.consumed_seq
+      ),
+      advanced_system AS (
+        UPDATE hosted_mailbox_lane_counter AS counter
+        SET consumed_seq = LEAST(${systemHandledBound}, counter.next_seq - 1),
+            updated_at = NOW()
+        WHERE ${systemHandledThroughSeq !== null}
+          AND counter.user_id = ${userId}
+          AND counter.lane = 'system'
+          AND counter.consumed_seq < LEAST(${systemHandledBound}, counter.next_seq - 1)
+        RETURNING counter.consumed_seq
+      ),
+      conversation_ahead AS (
+        SELECT ${shouldObserveConversationAhead}
+          AND EXISTS (
+            SELECT 1
+            FROM hosted_mailbox_item AS item
+            WHERE item.user_id = ${userId}
+              AND item.lane = 'conversation'
+              AND item.lane_seq > ${conversationImportedBound}
+              AND item.created_at >= ${observationRetentionCutoff}
+              AND (item.expires_at IS NULL OR item.expires_at > ${observedAt})
+          ) AS value
       )
-    : null;
+      SELECT
+        conversation_ahead.value AS "conversationInputAhead"
+      FROM conversation_ahead
+      CROSS JOIN (
+        SELECT COUNT(*) FROM stamped_conversation
+      ) AS stamped_count
+      CROSS JOIN (
+        SELECT COUNT(*) FROM advanced_conversation
+      ) AS conversation_count
+      CROSS JOIN (
+        SELECT COUNT(*) FROM advanced_system
+      ) AS system_count
+    `);
+    if (mailboxRows.length !== 1 || !mailboxRows[0]) {
+      throw new Error(
+        "Hosted workspace checkpoint mailbox mutation returned an invalid row count.",
+      );
+    }
+    if (mailboxRows[0].conversationInputAhead) {
+      conversationInputAhead = true;
+    }
+  }
 
-  const updated = await input.tx.hostedWorkspace.updateMany({
-    data: updateData,
-    where: {
-      userId,
-      version: expectedVersion,
-    },
-  });
-  if (updated.count === 1 && systemHandledThroughSeq !== null) {
-    // Couple the snapshot that removed handled local work to its durable lane
-    // acknowledgement. A checkpoint conflict or transaction rollback leaves
-    // the watermark untouched so restored pending work remains replayable.
-    await advanceHostedMailboxLaneConsumedSeq({
-      consumedSeq: systemHandledThroughSeq,
-      lane: "system",
-      prisma: input.tx,
-      userId,
-    });
-  }
-  if (
-    updated.count === 1
-    && reason === "idle_shutdown"
-    && conversationImportedSeq !== null
-  ) {
-    // Stamp only the exact terminal inputs carried by the accepted snapshot,
-    // then derive the largest contiguous prefix from same-user live rows. An
-    // old incomplete local index or missing event can never acknowledge an
-    // unstamped mailbox row.
-    await stampHostedMailboxHandledConversationInputsTx({
-      checkpointedAt,
-      importedThroughSeq: conversationImportedSeq,
-      itemIds: handledConversationMailboxItemIds,
-      tx: input.tx,
-      userId,
-    });
-    const handledThroughSeq = await readHostedMailboxContiguousHandledThroughSeqTx({
-      importedThroughSeq: conversationImportedSeq,
-      now: checkpointedAt,
-      tx: input.tx,
-      userId,
-    });
-    await advanceHostedMailboxLaneConsumedSeq({
-      consumedSeq: handledThroughSeq,
-      lane: "conversation",
-      prisma: input.tx,
-      userId,
-    });
-  }
-  const row = await input.tx.hostedWorkspace.findUnique({
-    where: {
-      userId,
-    },
-  });
+  const { replacedSnapshotRef: replacedSnapshotRefValue, ...updatedWorkspace } = updatedRows[0];
+  const replacedSnapshotRef = parseHostedExecutionSnapshotRef(
+    replacedSnapshotRefValue,
+    "Hosted workspace checkpoint replaced snapshotRef",
+  );
 
   return {
-    ...(updated.count === 1 && conversationInputAhead !== undefined
-      ? { conversationInputAhead }
-      : {}),
-    replacedSnapshotRef: updated.count === 1 ? replacedSnapshotRef : null,
-    status: updated.count === 1 ? "updated" : "conflict",
-    workspace: row ? projectHostedWorkspace(row) : null,
+    ...(conversationInputAhead === true ? { conversationInputAhead } : {}),
+    replacedSnapshotRef,
+    status: "updated",
+    workspace: projectHostedWorkspace(updatedWorkspace),
   };
 }
 
@@ -380,101 +475,6 @@ function normalizeCheckpointHandledConversationMailboxItemIds(
   return itemIds;
 }
 
-async function stampHostedMailboxHandledConversationInputsTx(input: {
-  checkpointedAt: Date;
-  importedThroughSeq: bigint;
-  itemIds: readonly string[];
-  tx: HostedWorkspaceMutationTx;
-  userId: string;
-}): Promise<void> {
-  if (input.itemIds.length === 0) {
-    return;
-  }
-  await input.tx.hostedMailboxItem.updateMany({
-    data: {
-      consumedAt: input.checkpointedAt,
-    },
-    where: {
-      consumedAt: null,
-      id: {
-        in: [...input.itemIds],
-      },
-      kind: "conversation.message",
-      lane: "conversation",
-      laneSeq: {
-        lte: input.importedThroughSeq,
-      },
-      userId: input.userId,
-    },
-  });
-}
-
-async function readHostedMailboxContiguousHandledThroughSeqTx(input: {
-  importedThroughSeq: bigint;
-  now: Date;
-  tx: HostedWorkspaceMutationTx;
-  userId: string;
-}): Promise<bigint> {
-  const counter = await input.tx.hostedMailboxLaneCounter.findUnique({
-    where: {
-      userId_lane: {
-        lane: "conversation",
-        userId: input.userId,
-      },
-    },
-  });
-  if (!counter) {
-    return 0n;
-  }
-  const appendHighWater = counter.nextSeq - 1n;
-  const upperBound = input.importedThroughSeq < appendHighWater
-    ? input.importedThroughSeq
-    : appendHighWater;
-  if (upperBound <= counter.consumedSeq) {
-    return counter.consumedSeq;
-  }
-
-  const firstUnconsumed = await input.tx.hostedMailboxItem.findFirst({
-    orderBy: {
-      laneSeq: "asc",
-    },
-    select: {
-      laneSeq: true,
-    },
-    where: {
-      consumedAt: null,
-      createdAt: {
-        gte: new Date(
-          input.now.getTime() - HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS,
-        ),
-      },
-      lane: "conversation",
-      laneSeq: {
-        gt: counter.consumedSeq,
-        lte: upperBound,
-      },
-      OR: [
-        { expiresAt: null },
-        { expiresAt: { gt: input.now } },
-      ],
-      userId: input.userId,
-    },
-  });
-  return firstUnconsumed ? firstUnconsumed.laneSeq - 1n : upperBound;
-}
-
-async function lockHostedWorkspaceForCheckpointTx(input: {
-  tx: HostedWorkspaceMutationTx;
-  userId: string;
-}): Promise<void> {
-  await input.tx.$queryRaw`
-    SELECT user_id
-    FROM hosted_workspace
-    WHERE user_id = ${input.userId}
-    FOR UPDATE
-  `;
-}
-
 function readCheckpointRedactedConversationImportedSeq(
   redactedStatusJson: Record<string, unknown> | null | undefined,
 ): string | null {
@@ -483,54 +483,6 @@ function readCheckpointRedactedConversationImportedSeq(
   }
   const value = redactedStatusJson["hostedMailboxConversationImportedSeq"];
   return typeof value === "string" && /^\d+$/u.test(value) ? value : null;
-}
-
-async function readForegroundPendingConversationSeqTx(input: {
-  conversationImportedSeq: bigint;
-  tx: HostedWorkspaceMutationTx;
-  userId: string;
-}): Promise<bigint | null> {
-  await input.tx.$executeRaw`
-    INSERT INTO hosted_mailbox_lane_counter (user_id, lane, next_seq, updated_at)
-    VALUES (${input.userId}, ${"conversation"}, 1, NOW())
-    ON CONFLICT (user_id, lane) DO NOTHING
-  `;
-  await input.tx.$queryRaw`
-    SELECT next_seq
-    FROM hosted_mailbox_lane_counter
-    WHERE user_id = ${input.userId}
-      AND lane = ${"conversation"}
-    FOR UPDATE
-  `;
-
-  const now = new Date();
-  const latest = await input.tx.hostedMailboxItem.findFirst({
-    orderBy: {
-      laneSeq: "desc",
-    },
-    select: {
-      laneSeq: true,
-    },
-    where: {
-      createdAt: {
-        gte: new Date(now.getTime() - HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS),
-      },
-      lane: "conversation",
-      OR: [
-        {
-          expiresAt: null,
-        },
-        {
-          expiresAt: {
-            gt: now,
-          },
-        },
-      ],
-      userId: input.userId,
-    },
-  });
-  const maxSeq = latest?.laneSeq ?? 0n;
-  return maxSeq > input.conversationImportedSeq ? maxSeq : null;
 }
 
 export async function publishLatestBrowserVaultReplicaRef(input: {
