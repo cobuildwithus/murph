@@ -226,10 +226,6 @@ export async function sendTelegramRichMessage(
   let target = parseTelegramTargetOrThrow(input.target)
   let targetLabel = serializeTelegramThreadTarget(target)
   const cleanupTargetAliases = new Set<string>()
-  let retryCount = 0
-  const maxDeliveryAttempts = requireTelegramMaxDeliveryAttempts(
-    dependencies.maxDeliveryAttempts,
-  )
 
   assertTelegramAuthorityBoundTarget({
     authorityBoundTarget: dependencies.authorityBoundTarget,
@@ -282,15 +278,23 @@ export async function sendTelegramRichMessage(
       outcome.kind === 'failed' &&
       isDefinitiveTelegramRichMessageRejection(outcome.failure)
     ) {
-      const fallback = await sendTelegramMessageDetailed(
-        {
-          idempotencyKey: input.idempotencyKey ?? null,
-          message: input.fallbackMessage,
-          replyToMessageId: input.replyToMessageId ?? null,
-          target: targetLabel,
-        },
-        dependencies,
-      )
+      let fallback
+      try {
+        fallback = await sendTelegramMessageDetailed(
+          {
+            idempotencyKey: input.idempotencyKey ?? null,
+            message: input.fallbackMessage,
+            replyToMessageId: input.replyToMessageId ?? null,
+            target: targetLabel,
+          },
+          { ...dependencies, maxDeliveryAttempts: 1 },
+        )
+      } catch (error) {
+        if (providerRequestWasSkipped(error)) {
+          throw error
+        }
+        throw markTelegramRichDeliveryAmbiguous(error, targetLabel)
+      }
       const fallbackAliases = new Set([
         ...cleanupTargetAliases,
         ...(fallback.cleanupTargetAliases ?? []),
@@ -303,22 +307,7 @@ export async function sendTelegramRichMessage(
       }
     }
 
-    if (
-      outcome.kind === 'failed' ||
-      retryCount >= maxDeliveryAttempts - 1
-    ) {
-      throw outcome.failure
-    }
-
-    await waitForTelegramRetryDelay(
-      retryCount,
-      outcome.retryAfterSeconds,
-      dependencies.signal,
-    )
-    if (dependencies.signal?.aborted) {
-      throw outcome.failure
-    }
-    retryCount += 1
+    throw markTelegramRichDeliveryAmbiguous(outcome.failure, targetLabel)
   }
 }
 
@@ -2356,6 +2345,9 @@ async function sendTelegramRichMessageOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (providerRequestWasSkipped(error)) {
+      throw error
+    }
     return {
       kind: 'request-error',
       failure: Object.assign(
@@ -2376,6 +2368,26 @@ async function sendTelegramRichMessageOnce(input: {
       ),
     }
   }
+}
+
+function markTelegramRichDeliveryAmbiguous(
+  error: unknown,
+  target: string,
+): Error & {
+  deliveryMayHaveSucceeded: true
+  retryable: false
+} {
+  const marked = error instanceof Error
+    ? error
+    : new VaultCliError(
+      'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      'Outbound Telegram rich-message delivery could not be confirmed.',
+      { error: describeUnknownError(error), target },
+    )
+  return Object.assign(marked, {
+    deliveryMayHaveSucceeded: true as const,
+    retryable: false as const,
+  })
 }
 
 async function sendTelegramTextChunkOnce(input: {

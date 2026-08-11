@@ -1074,6 +1074,66 @@ describe('assistant channels runtime seam', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1)
   })
 
+  it.each([408, 409, 425, 429, 500])(
+    'makes one rich request and no fallback for ambiguous HTTP %s',
+    async (status) => {
+      const fetchImplementation = createQueuedFetch([
+        createTelegramResponse(status, {
+          description: `Telegram returned ${status}`,
+          error_code: status,
+          ok: false,
+        }),
+      ])
+
+      await expect(sendTelegramRichMessage(
+        {
+          fallbackMessage: 'Do not duplicate this',
+          richMessage: { html: '<h2>Routine</h2>' },
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      )).rejects.toMatchObject({
+        deliveryMayHaveSucceeded: true,
+        retryable: false,
+      })
+
+      expect(fetchImplementation).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('preserves a proven pre-provider rich-message rejection', async () => {
+    const providerEntryError = Object.assign(
+      new Error('provider entry rejected'),
+      { deliveryMayHaveSucceeded: false as const },
+    )
+    const fetchImplementation = vi.fn(async () => {
+      throw providerEntryError
+    })
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: 'Provider was not called',
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toBe(providerEntryError)
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
   it('projects a frozen Telegram response card into the rich-message path', async () => {
     const sendTelegramRich = vi.fn().mockResolvedValue({
       providerMessageId: 'rich-card-1',

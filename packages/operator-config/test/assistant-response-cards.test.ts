@@ -17,6 +17,7 @@ import {
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
   type ExerciseRoutineResponseCardV1,
+  type AssistantResponseCard,
 } from '../src/assistant-response-cards.ts'
 
 const COMPLETE_CARD: DailyNutritionResponseCard = {
@@ -356,6 +357,70 @@ describe('assistant response cards', () => {
     expect(richMessage.html).toContain('<details><summary>Goals</summary>')
     expect(richMessage.html).toContain('calories goal 2,100 cal, under target')
     expect(richMessage.html).toContain('<table bordered striped>')
+  })
+
+  it('renders generic tables, workouts, and standings as Telegram rich cards', () => {
+    const genericTable = {
+      columns: ['Result <now>'],
+      footer: null,
+      kind: 'compact_table',
+      rows: [{ label: 'Mobility', values: ['Complete & calm'] }],
+      rowHeader: 'Exercise',
+      subtitle: null,
+      title: 'Today',
+      tracking: null,
+      version: 1,
+    } satisfies AssistantResponseCard
+    const workout = {
+      footer: 'Reply to log a set.',
+      kind: 'compact_table',
+      subtitle: null,
+      title: 'Strength',
+      tracking: {
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        kind: 'workout',
+        snapshotAt: '2026-08-11T10:00:00.000Z',
+      },
+      version: 1,
+      workout: {
+        exercises: [{
+          name: 'Goblet squat',
+          sets: [{ actual: '10', status: 'completed', target: '8–10' }],
+        }],
+        state: 'active',
+        version: 1,
+      },
+    } satisfies AssistantResponseCard
+    const standings = {
+      entries: [{
+        coverage: 'complete',
+        detail: null,
+        label: 'Team <A>',
+        points: 120,
+      }],
+      footer: null,
+      format: 'teams',
+      kind: 'challenge_standings',
+      objective: { kind: 'ranking' },
+      subtitle: null,
+      title: 'Weekly standings',
+      version: 1,
+    } satisfies AssistantResponseCard
+
+    expect(buildTelegramRichMessage(genericTable).html).toContain(
+      'Result &lt;now&gt;',
+    )
+    expect(buildTelegramRichMessage(genericTable).html).toContain(
+      'Complete &amp; calm',
+    )
+    expect(buildTelegramRichMessage(workout).html).toContain('Goblet squat')
+    expect(buildTelegramRichMessage(workout).html).toContain(
+      '1/1 sets complete',
+    )
+    expect(buildTelegramRichMessage(standings).html).toContain('Team &lt;A&gt;')
+    expect(renderAssistantResponseCardText(standings)).toContain(
+      'Team <A>: 120 points',
+    )
   })
 
   it('keeps exercise routine cards on the deterministic iMessage text fallback', () => {
