@@ -36,6 +36,7 @@ import {
   summarizeHostedTelegramWebhook,
 } from "./telegram";
 import {
+  HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS,
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   prewarmHostedLinqMessageEditPreparation,
@@ -2130,7 +2131,13 @@ export async function runHostedLinqMessageEditPreparedTransaction(input: {
   event: Parameters<typeof readHostedLinqMessageEditPreparation>[0]["event"];
   prisma: PrismaClient;
 }): Promise<Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // Every mismatch means another accepted correction changed the bounded
+  // lineage. Reuse that lineage cap as the single finite retry budget.
+  for (
+    let attempt = 0;
+    attempt < HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS;
+    attempt += 1
+  ) {
     const preparation: HostedLinqMessageEditPreparation =
       await readHostedLinqMessageEditPreparation({
         event: input.event,
@@ -2166,7 +2173,7 @@ export async function runHostedLinqMessageEditPreparedTransaction(input: {
         throw preparationFailures[0];
       }
       if (
-        attempt === 0
+        attempt + 1 < HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS
         && isHostedMailboxSourceConversationPreparationMismatchError(error)
       ) {
         logHostedOnboardingDiagnostic(

@@ -658,7 +658,7 @@ async function isHostedLinqMailboxRootPrewarmEligible(input: {
 }
 
 const HOSTED_LINQ_MESSAGE_EDIT_RETRY_WINDOW_MS = 25 * 60_000;
-const HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS = 6;
+export const HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS = 6;
 
 export type HostedLinqMessageEditPreparation =
   HostedMailboxSourceConversationPreparation | null;

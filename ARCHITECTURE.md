@@ -2298,7 +2298,10 @@ owner, plus the active mailbox root only when another correction could be
 appended. Inside the transaction, Web reacquires the sorted source locks,
 repeats and exactly revalidates that snapshot, opens payloads only from the
 prepared request scope, repeats all direct or group authority checks, and
-appends atomically. A changed snapshot receives one fresh preparation retry;
+appends atomically. A changed snapshot is prepared again sequentially, using
+the existing six-row accepted-correction cap as the sole finite attempt bound;
+each attempt completes its set read and bounded root preparation before opening
+one short transaction, with no queue, backoff loop, or second retry owner.
 direct authority reads only the existing blind home-route columns rather than
 decrypting unrelated routing state. The lock is edit-only: ordinary accepted
 messages write the blind source index without an additional source-lock query.

@@ -30,6 +30,7 @@ import {
   readHostedMailboxSourceConversationPreparation,
 } from "@/src/lib/hosted-mailbox/store";
 import {
+  createHostedLinqChatLookupKey,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
@@ -51,7 +52,10 @@ import {
   acquireHostedLinqParticipantPhoneLockTx,
   createHostedLinqParticipantContact,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
-import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
+import {
+  parseHostedLinqWebhookEvent,
+  requireHostedLinqMessageEditedEvent,
+} from "@/src/lib/hosted-onboarding/linq";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import {
   buildHostedTelegramMessagePayload,
@@ -60,6 +64,7 @@ import {
 } from "@/src/lib/hosted-onboarding/telegram";
 import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 import { planHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
+import { runHostedLinqMessageEditPreparedTransaction } from "@/src/lib/hosted-onboarding/webhook-service";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const handlerPrismaClients = vi.hoisted(() => [] as PrismaClient[]);
@@ -80,6 +85,16 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
     ...actual,
     provisionActiveHostedDomainRootEnvelopeForUserOnly:
       vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+vi.mock("@/src/lib/hosted-mailbox/encryption", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-mailbox/encryption")
+  >();
+  return {
+    ...actual,
+    prewarmHostedMailboxPayloadActiveRoot: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -141,6 +156,20 @@ async function waitForBlockedBackend(input: {
   throw new Error(
     "Expected the PostgreSQL contender to wait on its current owner.",
   );
+}
+
+async function acquireHostedMailboxSourceLocksForTest(input: {
+  sourceMessageLookupKeys: readonly string[];
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  for (const sourceMessageLookupKey of [...input.sourceMessageLookupKeys].sort()) {
+    await input.tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+        hashtext('mailbox-source-message'),
+        hashtext(${sourceMessageLookupKey})
+      )
+    `;
+  }
 }
 
 describe.skipIf(!runPostgresConcurrencyProof)(
@@ -308,6 +337,217 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
         }
         await disconnectClients([observer, owner, contender]);
+      }
+    });
+
+    it("accepts three ordered edit contenders across two stale snapshots", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const firstBlocker = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const retryBlocker = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const editClients = Array.from(
+        { length: 3 },
+        () => createPrismaClient({ databaseUrl, poolMax: 1 }),
+      );
+      const memberId = `member_edit_three_contenders_${randomUUID()}`;
+      const messageId = `message_edit_three_contenders_${randomUUID()}`;
+      const chatId = `chat_edit_three_contenders_${randomUUID()}`;
+      const sender = "+15551112222";
+      const sourceMessageLookupKey = requireString(
+        createHostedLinqMessageLookupKey(messageId),
+      );
+      const sourceMessageLookupKeyReadCandidates =
+        createHostedLinqMessageLookupKeyReadCandidates(messageId);
+      const accountLookupKey = requireString(
+        createHostedPhoneLookupKey("+15550000000"),
+      );
+      const contactLookupKey = requireString(
+        createHostedPhoneLookupKey(sender),
+      );
+      const chatLookupKey = requireString(createHostedLinqChatLookupKey(chatId));
+      const originalOccurredAt = new Date("2026-08-11T13:00:00.000Z");
+      const originalWake = buildHostedExecutionLinqConversationMessageWake({
+        accountLookupKey,
+        contactKind: "phone",
+        contactLookupKey,
+        eventId: `event_edit_three_contenders_original_${randomUUID()}`,
+        linqMessage: {
+          chatId,
+          from: sender,
+          isFromMe: false,
+          messageId,
+          parts: [{ type: "text", value: "Original wording" }],
+          service: "iMessage",
+          threadIsDirect: true,
+        },
+        occurredAt: originalOccurredAt.toISOString(),
+        phoneLookupKey: contactLookupKey,
+        userId: memberId,
+      });
+      const events = Array.from({ length: 3 }, (_, index) => {
+        const editedAt = new Date(originalOccurredAt.getTime() + index + 1)
+          .toISOString();
+        const event = parseHostedLinqWebhookEvent(JSON.stringify({
+          api_version: "v3",
+          created_at: editedAt,
+          data: {
+            chat: { id: chatId },
+            direction: "inbound",
+            edited_at: editedAt,
+            id: messageId,
+            part: {
+              index: 0,
+              text: `Corrected wording ${index + 1}`,
+            },
+            sender_handle: {
+              handle: sender,
+              id: `sender_handle_edit_three_contenders_${index + 1}`,
+              is_me: false,
+              service: "iMessage",
+            },
+          },
+          event_id: `event_edit_three_contenders_${index + 1}_${randomUUID()}`,
+          event_type: "message.edited",
+          webhook_version: "2026-02-03",
+        }));
+        if (!event) {
+          throw new Error("Expected a valid Linq message.edited fixture.");
+        }
+        return requireHostedLinqMessageEditedEvent(event);
+      });
+      const firstBlockerLocked = createDeferred();
+      const retryBlockerLocked = createDeferred();
+      const releaseFirstBlocker = createDeferred();
+      const releaseRetryBlocker = createDeferred();
+      let memberCreated = false;
+      let firstBlockerTransaction: Promise<void> | null = null;
+      let retryBlockerTransaction: Promise<void> | null = null;
+      const editRequests: Array<ReturnType<
+        typeof runHostedLinqMessageEditPreparedTransaction
+      >> = [];
+
+      try {
+        await observer.$transaction(async (tx) => {
+          await tx.hostedMember.create({
+            data: {
+              billingStatus: HostedBillingStatus.active,
+              id: memberId,
+            },
+          });
+          memberCreated = true;
+          await tx.hostedMemberRouting.create({
+            data: {
+              linqChatLookupKey: chatLookupKey,
+              linqParticipantContactKind: "phone",
+              linqParticipantContactLookupKey: contactLookupKey,
+              memberId,
+            },
+          });
+          await appendHostedMailboxEnvelopeWithSourceMessageTx({
+            envelope: originalWake,
+            sourceMessageLookupKey,
+            tx,
+          });
+        }, transactionOptions);
+
+        const editPids = await Promise.all(editClients.map((client) =>
+          client.$transaction(readBackendPid, transactionOptions)
+        ));
+        firstBlockerTransaction = firstBlocker.$transaction(async (tx) => {
+          await acquireHostedMailboxSourceLocksForTest({
+            sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
+            tx,
+          });
+          firstBlockerLocked.resolve();
+          await releaseFirstBlocker.promise;
+        }, transactionOptions);
+        await Promise.race([
+          firstBlockerLocked.promise,
+          firstBlockerTransaction.then(() => {
+            throw new Error("The first edit blocker released before the contenders queued.");
+          }),
+        ]);
+
+        for (const [index, client] of editClients.entries()) {
+          const event = events[index];
+          const pid = editPids[index];
+          if (!event || pid === undefined) {
+            throw new Error("Expected one client, event, and backend per edit contender.");
+          }
+          editRequests.push(runHostedLinqMessageEditPreparedTransaction({
+            event,
+            prisma: client,
+          }));
+          await waitForBlockedBackend({ observer, pid });
+        }
+
+        const retryBlockerPid = await retryBlocker.$transaction(
+          readBackendPid,
+          transactionOptions,
+        );
+        retryBlockerTransaction = retryBlocker.$transaction(async (tx) => {
+          await acquireHostedMailboxSourceLocksForTest({
+            sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
+            tx,
+          });
+          retryBlockerLocked.resolve();
+          await releaseRetryBlocker.promise;
+        }, transactionOptions);
+        await waitForBlockedBackend({ observer, pid: retryBlockerPid });
+        releaseFirstBlocker.resolve();
+        await Promise.race([
+          retryBlockerLocked.promise,
+          Promise.all(editRequests).then(() => {
+            throw new Error("All edit contenders completed before the retry blocker acquired.");
+          }),
+        ]);
+
+        await Promise.all(editPids.slice(1).map((pid) =>
+          waitForBlockedBackend({ observer, pid })
+        ));
+        releaseRetryBlocker.resolve();
+        const plans = await Promise.all(editRequests);
+
+        expect(plans.map((plan) => plan.response.reason)).toEqual([
+          "wake-appended-message-edit",
+          "wake-appended-message-edit",
+          "wake-appended-message-edit",
+        ]);
+        expect(plans[2]?.wakeHandoffs).toEqual([
+          expect.objectContaining({
+            eventId: events[2]?.event_id,
+            userId: memberId,
+          }),
+        ]);
+        const finalPreparation = await readHostedMailboxSourceConversationPreparation({
+          prisma: observer,
+          sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
+        });
+        await expect(observer.$transaction((tx) =>
+          readHostedMailboxSourceConversationEntriesTx({
+            preparation: finalPreparation,
+            sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
+            tx,
+          }), transactionOptions)).resolves.toHaveLength(4);
+      } finally {
+        releaseFirstBlocker.resolve();
+        releaseRetryBlocker.resolve();
+        await Promise.allSettled([
+          ...editRequests,
+          ...[firstBlockerTransaction, retryBlockerTransaction].filter(
+            (transaction): transaction is Promise<void> => transaction !== null,
+          ),
+        ]);
+        if (memberCreated) {
+          await observer.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+        }
+        await disconnectClients([
+          observer,
+          firstBlocker,
+          retryBlocker,
+          ...editClients,
+        ]);
       }
     });
 

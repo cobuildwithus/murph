@@ -54,6 +54,7 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "../src/lib/hosted-onboarding/linq-observability-identifiers";
 import {
+  HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS,
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook as planHostedOnboardingLinqWebhookWithoutPreparedCrypto,
   shouldPrepareHostedLinqThreadContainerCrypto,
@@ -1924,7 +1925,7 @@ describe("Linq message edit correction planning", () => {
     ).toHaveBeenCalledOnce();
   });
 
-  it("allows only one fresh prepare retry for repeated lineage mismatch", async () => {
+  it("uses the finite source-lineage bound for repeated preparation mismatches", async () => {
     const prisma = createPrisma();
     vi.mocked(mailboxStore.readHostedMailboxSourceConversationEntriesTx)
       .mockRejectedValue(
@@ -1940,11 +1941,64 @@ describe("Linq message edit correction planning", () => {
 
     expect(
       mailboxStore.readHostedMailboxSourceConversationPreparation,
-    ).toHaveBeenCalledTimes(2);
-    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    ).toHaveBeenCalledTimes(HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(
+      HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS,
+    );
     expect(
       mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
     ).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid edit after every earlier admissible correction invalidates its snapshot", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: true,
+    });
+    const originalWake = buildAcceptedGroupLinqOriginalWake();
+    const sourceConversationRead = vi.mocked(
+      mailboxStore.readHostedMailboxSourceConversationEntriesTx,
+    );
+    for (
+      let committedCorrectionCount = 1;
+      committedCorrectionCount < HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS;
+      committedCorrectionCount += 1
+    ) {
+      sourceConversationRead.mockRejectedValueOnce(
+        new mailboxStore.HostedMailboxSourceConversationPreparationMismatchError(),
+      );
+    }
+    sourceConversationRead.mockResolvedValueOnce([
+      {
+        contentAvailable: true,
+        itemId: "mailbox_group_original_123",
+        userId: originalWake.userId,
+        wake: originalWake,
+      },
+    ]);
+
+    await expect(runHostedLinqMessageEditPreparedTransaction({
+      event: buildLinqMessageEditedEvent(),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: false,
+        reason: "wake-appended-message-edit",
+      },
+    });
+
+    expect(
+      mailboxStore.readHostedMailboxSourceConversationPreparation,
+    ).toHaveBeenCalledTimes(HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS);
+    expect(
+      mailboxStore.prewarmHostedMailboxSourceConversationPreparation,
+    ).toHaveBeenCalledTimes(HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(
+      HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS,
+    );
+    expect(
+      mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx,
+    ).toHaveBeenCalledOnce();
   });
 
   it("preserves the original prewarm failure when a prepared root is required", async () => {
