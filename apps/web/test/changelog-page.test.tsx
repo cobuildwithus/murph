@@ -60,7 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Training, Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
+      "Training, Starter access, patterns, personality, health history, referrals, reminders, cards, voices, and search",
     );
     expect(markup).toContain("Review your training in one private view");
     expect(markup).toContain("Blood-pressure history waits for the whole sync");

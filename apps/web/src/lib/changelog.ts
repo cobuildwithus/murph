@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Training, Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
+      "Training, Starter access, patterns, personality, health history, referrals, reminders, cards, voices, and search",
     summary:
-      "Training brings workouts together; Starter usage waits; patterns connect actions with next-day sleep; blood-pressure history survives source-access changes; referrals stay in the intended conversation; reminders keep local time; workout rows and voice choices stay clear; search reaches current information; homepage starts lighter; and Environment reports show their shape while loading.",
+      "Training brings workouts together; Starter usage waits until used; patterns link actions and next-day sleep; personality is editable in Settings or chat; blood-pressure history survives source changes; referrals stay in intended chats; reminders keep local time; workout rows and voices stay clear; search stays current; Home starts lighter; and Environment reports show shape while loading.",
     items: [
       {
         id: "private-training-review",
@@ -132,6 +132,22 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           href: "/patterns",
           label: "View your patterns",
+        },
+      },
+      {
+        id: "personality-settings-and-chat",
+        kind: "feature",
+        priority: 4,
+        title: "Choose how Murph shows up",
+        summary:
+          "Choose Murph's main and optional supporting personality in Settings, or ask Murph to change them in chat.",
+        details:
+          "Both paths update the same saved personality. Explicit tone, voice, Humor, Push, and Detail choices stay unchanged; where you have not customized tone or voice, Settings shows the selected personality's defaults. A group request changes only that room's Murph rather than anyone's private settings.",
+        relevanceTags: ["personality", "settings", "chat", "groups"],
+        sourcePullRequests: [1589],
+        tryIt: {
+          href: "/settings",
+          label: "Edit Murph's personality",
         },
       },
       {
