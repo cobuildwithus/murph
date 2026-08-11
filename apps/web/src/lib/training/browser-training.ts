@@ -131,17 +131,9 @@ export function isTrainingHandoffComplete(
     const originalSession = sessions.find(
       (session) => session.id === baseline.activeSessionId,
     );
-    if (originalSession) {
-      return fingerprintTrainingSession(originalSession)
+    return originalSession === undefined
+      || fingerprintTrainingSession(originalSession)
         !== baseline.activeSessionFingerprint;
-    }
-
-    const replacementActiveSession = sessions.find(
-      (session) => session.state === "in_progress",
-    );
-    if (replacementActiveSession) {
-      return true;
-    }
   }
 
   return hasNewOrChangedManualSession(

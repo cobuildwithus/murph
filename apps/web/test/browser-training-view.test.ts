@@ -118,7 +118,10 @@ test("Training handoff completion follows the requested workout instead of any p
   );
 
   const continueBaseline = createTrainingHandoffBaseline(
-    await createTrainingClient([activeWorkout], "continue-baseline"),
+    await createTrainingClient(
+      [activeWorkout, manualRun],
+      "continue-baseline",
+    ),
   );
   assert.equal(continueBaseline.kind, "continue");
   assert.equal(
@@ -138,6 +141,13 @@ test("Training handoff completion follows the requested workout instead of any p
         [changedActiveWorkout, deviceWorkout],
         "continued-workout-update",
       ),
+    ),
+    true,
+  );
+  assert.equal(
+    isTrainingHandoffComplete(
+      continueBaseline,
+      await createTrainingClient([deviceWorkout], "deleted-active-workout"),
     ),
     true,
   );
