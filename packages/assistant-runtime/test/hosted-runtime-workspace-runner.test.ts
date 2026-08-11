@@ -4720,7 +4720,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     let admissionCount = 0;
-    const liveSteerInputs: unknown[] = [];
+    const liveSteerInputs: Array<{
+      prompt: string;
+      relativeDateReferenceAt: string;
+      userMessageContent?: unknown;
+    }> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
@@ -4890,7 +4894,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(importedSeqs, ["1", "2", "3"]);
       assert.equal(admissionCount, 1);
       assert.equal(liveSteerInputs.length, 1);
-      assert.deepEqual(liveSteerInputs[0], {
+      const liveSteerInput = liveSteerInputs[0];
+      assert.ok(liveSteerInput);
+      assert.match(
+        liveSteerInput.relativeDateReferenceAt,
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+      );
+      assert.deepEqual({
+        prompt: liveSteerInput.prompt,
+        userMessageContent: liveSteerInput.userMessageContent,
+      }, {
         prompt: "late same-conversation input 2\n\nlate same-conversation input 3",
         userMessageContent: [
           {
