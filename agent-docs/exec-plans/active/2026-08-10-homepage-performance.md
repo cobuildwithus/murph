@@ -123,8 +123,15 @@ Updated: 2026-08-10
   after the same closed dialog successfully preloaded the panel. Closing now
   clears that transient error alongside the existing per-open focus state. An
   isolated fail, close, successful preload, then reopen regression proves the
-  recovered panel appears without a fallback and retains phone autofocus. The
-  correction is pending final round 6.
+  recovered panel appears without a fallback and retains phone autofocus.
+- Final round 6 found that the delayed-mount autofocus suppression remained
+  false for the whole open session, so a later "Use a different number" or
+  email-to-phone remount could lose its normal focus target. The suppression is
+  now consumed after the first telephone input mounts: updating the existing
+  input does not refocus it or steal deliberate Close focus, while later phone
+  entry mounts receive the restored autofocus value. The production-shaped
+  regression proves both Close preservation and same-session phone-entry
+  refocus. The correction is pending final round 7.
 - Current `main` was merged before round 6 so GitHub can construct the PR merge
   commit. The three changelog conflicts retained every upstream Aug 10 item and
   added the homepage improvement last in the same edition; focused tests,

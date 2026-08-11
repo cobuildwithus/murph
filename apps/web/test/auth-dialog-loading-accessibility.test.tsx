@@ -4,6 +4,7 @@ import {
   type HTMLAttributes,
   type ReactNode,
   type Ref,
+  useState,
 } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => {
     dialogInitialFocus: null as null | { current: HTMLElement | null },
     dialogInitialFocusHistory: [] as Array<null | { current: HTMLElement | null }>,
     moduleGate: Promise.resolve(),
+    panelAutoFocusHistory: [] as Array<boolean | undefined>,
     panelRender: vi.fn(),
     panelProps: null as null | { phoneInputAutoFocus?: boolean },
     releaseModule: () => {},
@@ -31,7 +33,9 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", async () 
   await mocks.moduleGate;
   return {
     HostedAuthPanelIsland(props: { phoneInputAutoFocus?: boolean }) {
+      const [phoneEntryVersion, setPhoneEntryVersion] = useState(0);
       mocks.panelRender();
+      mocks.panelAutoFocusHistory.push(props.phoneInputAutoFocus);
       mocks.panelProps = props;
       return createElement(
         "div",
@@ -44,8 +48,20 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", async () 
         createElement("input", {
           "aria-label": "Phone number",
           autoFocus: props.phoneInputAutoFocus,
+          key: phoneEntryVersion,
           type: "tel",
         }),
+        phoneEntryVersion === 0
+          ? createElement(
+              "button",
+              {
+                "data-use-different-number": "true",
+                onClick: () => setPhoneEntryVersion(1),
+                type: "button",
+              },
+              "Use a different number",
+            )
+          : null,
       );
     },
   };
@@ -99,6 +115,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.dialogInitialFocus = null;
   mocks.dialogInitialFocusHistory = [];
+  mocks.panelAutoFocusHistory = [];
   mocks.panelProps = null;
   mocks.resetModuleGate();
 });
@@ -138,7 +155,8 @@ test("announces cold auth loading and restores focus when the panel becomes usab
     'button[aria-label="Country or region"]',
   );
   expect(country).toBeTruthy();
-  expect(mocks.panelProps?.phoneInputAutoFocus).toBe(false);
+  expect(mocks.panelAutoFocusHistory).toContain(false);
+  expect(mocks.panelProps?.phoneInputAutoFocus).toBe(true);
   expect(focus.mock.instances).toContain(country);
   expect(focus).toHaveBeenCalledWith({ preventScroll: true });
   expect(rendered.window.document.activeElement).toBe(country);
@@ -159,9 +177,27 @@ test("does not steal focus from the surviving close control", async () => {
   await releaseAuthPanelModule();
 
   expect(rendered.container.querySelector('input[aria-label="Phone number"]')).toBeTruthy();
-  expect(mocks.panelProps?.phoneInputAutoFocus).toBe(false);
+  expect(mocks.panelAutoFocusHistory).toContain(false);
+  expect(mocks.panelProps?.phoneInputAutoFocus).toBe(true);
   expect(focus).not.toHaveBeenCalled();
   expect(rendered.window.document.activeElement).toBe(close);
+
+  const useDifferentNumber = rendered.container.querySelector<HTMLButtonElement>(
+    '[data-use-different-number="true"]',
+  );
+  expect(useDifferentNumber?.textContent).toBe("Use a different number");
+  useDifferentNumber?.focus();
+  focus.mockClear();
+  await act(async () => {
+    useDifferentNumber?.click();
+  });
+
+  const remountedInput = rendered.container.querySelector<HTMLInputElement>(
+    'input[aria-label="Phone number"]',
+  );
+  expect(remountedInput).toBeTruthy();
+  expect(focus.mock.instances).toContain(remountedInput);
+  expect(rendered.window.document.activeElement).toBe(remountedInput);
 });
 
 test("preserves phone autofocus when the auth panel is ready before open", async () => {

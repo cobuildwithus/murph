@@ -43,6 +43,7 @@ const AUTH_DIALOG_PANEL_CONTROL_SELECTOR = [
   "a[href]",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
+const AUTH_DIALOG_PHONE_INPUT_SELECTOR = "input[type='tel']";
 
 export function resolveAuthDialogHeaderPresentation({
   description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
@@ -287,6 +288,38 @@ export function AuthDialog({
     observer.observe(panel, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, [open, readyAuthPanelModule]);
+
+  useEffect(() => {
+    if (!open || !readyAuthPanelModule || phoneInputAutoFocus) {
+      return;
+    }
+
+    const panel = loadedPanelRef.current;
+    if (!panel) {
+      return;
+    }
+
+    const releaseInitialAutoFocusSuppression = () => {
+      if (!panel.querySelector(AUTH_DIALOG_PHONE_INPUT_SELECTOR)) {
+        return false;
+      }
+
+      setPhoneInputAutoFocus(true);
+      return true;
+    };
+
+    if (releaseInitialAutoFocusSuppression()) {
+      return;
+    }
+
+    const observer = new MutationObserver(() => {
+      if (releaseInitialAutoFocusSuppression()) {
+        observer.disconnect();
+      }
+    });
+    observer.observe(panel, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [open, phoneInputAutoFocus, readyAuthPanelModule]);
 
   const dismissLocked = panelView !== "auth";
   const consentPresentation = panelView === "consent";
