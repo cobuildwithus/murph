@@ -2714,11 +2714,17 @@ describe("production-watch static safety contracts", () => {
 
     const fakeHome = path.join(os.tmpdir(), "prod-watch-home");
     const fakeNode = path.join(fakeHome, "tools", "node");
+    const fakeCodex = path.join(fakeHome, "tools", "codex");
+    const fakeCodexSha256 = "a".repeat(64);
     const rendered = renderLaunchdPlistTemplate(
       template,
       path.join(fakeHome, "project"),
       fakeHome,
       fakeNode,
+      path.join(fakeHome, "project", ".runtime"),
+      "0".repeat(40),
+      fakeCodex,
+      fakeCodexSha256,
     );
     expect(rendered).toContain("$HOME/project");
     expect(rendered).toContain("$HOME/tools/node");
@@ -2728,7 +2734,7 @@ describe("production-watch static safety contracts", () => {
     expect(rendered).toContain("scripts/prod-watch.ts&quot; run --scheduled");
     expect(rendered).toContain("export CODEX_HOME=&quot;$HOME/.codex-5&quot;");
     expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_PROFILE=&quot;prod-watch&quot;");
-    expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_BIN=&quot;$HOME/.codex/packages/standalone/releases/");
+    expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_BIN=&quot;$HOME/tools/codex&quot;");
     expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_SHA256=&quot;");
     expect(rendered).toContain("unset NODE_ENV NODE_OPTIONS MURPH_PROD_WATCH_TEST_RUNTIME_ROOT");
     expect(rendered).not.toContain("__CODEX_EXECUTABLE__");
@@ -2738,7 +2744,16 @@ describe("production-watch static safety contracts", () => {
     expect(rendered).not.toContain("--remediation-shadow");
     expect(rendered).not.toContain("exec pnpm");
     expect(rendered).not.toContain(fakeHome);
-    expect(() => renderLaunchdPlistTemplate(template, path.join(fakeHome, "..", "project"), fakeHome))
+    expect(() => renderLaunchdPlistTemplate(
+      template,
+      path.join(fakeHome, "..", "project"),
+      fakeHome,
+      fakeNode,
+      path.join(fakeHome, "project", ".runtime"),
+      "0".repeat(40),
+      fakeCodex,
+      fakeCodexSha256,
+    ))
       .toThrow("scheduler_repo_path_unsafe");
     await expect(verifySchedulerExecutableChain(repoRoot, path.join(fakeHome, "missing-node"), fakeHome))
       .rejects.toThrow("scheduler_executable_chain_unavailable");
