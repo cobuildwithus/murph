@@ -6,6 +6,8 @@ const VIEWPORTS = [
 ] as const;
 const OVERFLOW_TOLERANCE_PX = 1;
 
+test.use({ deviceScaleFactor: 3 });
+
 function isLoopbackUrl(rawUrl: string): boolean {
   try {
     const { hostname } = new URL(rawUrl);
@@ -19,7 +21,7 @@ function isLoopbackUrl(rawUrl: string): boolean {
 
 test("shared-card fragments open a private, accessible App Store handoff", async ({
   page,
-}) => {
+}, testInfo) => {
   test.setTimeout(180_000);
 
   const requestEvidence: string[] = [];
@@ -54,26 +56,27 @@ test("shared-card fragments open a private, accessible App Store handoff", async
     expect(response?.status(), `${label} homepage should respond 200`).toBe(200);
 
     const dialog = page.getByRole("dialog", {
-      name: "Open this card with Murph",
+      name: "Continue on iPhone",
     });
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(
-      "Murph adds interactive workout and nutrition cards",
+      "Install or open Murph from the App Store. Then return to Messages and tap the card again.",
     );
+    await expect(dialog).not.toContainText("Shared from Messages");
     await expect(dialog).not.toContainText(envelope);
     await expect(
       dialog.getByRole("link", {
-        name: "Get Murph for iPhone in the App Store (opens in a new tab)",
+        name: "Open Murph in the App Store (opens in a new tab)",
       }),
     ).toHaveAttribute(
       "href",
       "https://apps.apple.com/us/app/murph-ai/id6786145859",
     );
-    await expect(dialog.getByRole("button", { name: "Not now" })).toHaveCount(
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toHaveCount(
       1,
     );
-    await expect(dialog.getByRole("button", { name: "Close" })).toHaveCount(0);
-    await expect(dialog.locator("a[href], button")).toHaveCount(2);
+    await expect(dialog.getByRole("button", { name: "Close" })).toHaveCount(1);
+    await expect(dialog.locator("a[href], button")).toHaveCount(3);
 
     const focusIsContained = await dialog.evaluate((element) =>
       element.contains(document.activeElement),
@@ -93,6 +96,15 @@ test("shared-card fragments open a private, accessible App Store handoff", async
       false,
     );
 
+    const screenshotPath = testInfo.outputPath(
+      `murph-card-handoff-${label}.png`,
+    );
+    await dialog.screenshot({ path: screenshotPath });
+    await testInfo.attach(`murph-card-handoff-${label}`, {
+      contentType: "image/png",
+      path: screenshotPath,
+    });
+
     if (label === "desktop") {
       await page.keyboard.press("Escape");
       await expect(dialog).toBeHidden();
@@ -108,7 +120,7 @@ test("shared-card fragments open a private, accessible App Store handoff", async
       await expect(dialog).toBeVisible();
     }
 
-    await dialog.getByRole("button", { name: "Not now" }).click();
+    await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(dialog).toBeHidden();
     await expect(page).toHaveURL(new RegExp(`#murph-card=${envelope}$`, "u"));
 
@@ -116,5 +128,33 @@ test("shared-card fragments open a private, accessible App Store handoff", async
       window.location.hash = "#ordinary-homepage-section";
     });
     await expect(dialog).toBeHidden();
+  }
+
+  for (const { height, label, width } of VIEWPORTS) {
+    await page.setViewportSize({ height, width });
+    await page.goto("about:blank");
+    const response = await page.goto(
+      "/design?tab=components#murph-card-handoff-dialog",
+      { waitUntil: "load" },
+    );
+    expect(response?.status(), `${label} design catalog should respond 200`).toBe(
+      200,
+    );
+
+    const study = page.locator(
+      '[data-design-component="murph-card-handoff-dialog"]',
+    );
+    await expect(study).toBeVisible();
+    const surface = study.locator(":scope > div");
+    await expect(surface.getByRole("button", { name: "Close" })).toHaveCount(1);
+
+    const screenshotPath = testInfo.outputPath(
+      `murph-card-handoff-study-${label}.png`,
+    );
+    await surface.screenshot({ path: screenshotPath });
+    await testInfo.attach(`murph-card-handoff-study-${label}`, {
+      contentType: "image/png",
+      path: screenshotPath,
+    });
   }
 });

@@ -212,7 +212,8 @@ cream field, large calorie value, calorie progress ring, and one-row protein,
 carbohydrates, fat, and fiber readings visually aligned with the Messages
 extension. The bitmap stays rectangular and badge-free because Messages owns
 the outer corner mask. Installed extensions retain their native icon;
-app-absent static cards omit the optional square App Store artwork. Status
+app-absent cards may show the provider-owned App Store install affordance from
+Murph's canonical app identity, while the bitmap never imitates that chrome. Status
 color may tint nutrient values, but
 the ring draws quantitative progress only for a complete calorie total with an
 assessed goal; V1, partial, null-goal, and unavailable-status cards keep only

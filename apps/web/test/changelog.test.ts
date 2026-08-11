@@ -385,7 +385,7 @@ describe("changelog registry", () => {
     expect(items.get("shared-card-app-handoff")).toMatchObject({
       details: expect.stringContaining("keeps the card details opaque"),
       sourcePullRequests: [1630],
-      summary: expect.stringContaining("return to the card in Messages"),
+      summary: expect.stringContaining("Messages can offer Murph from the App Store"),
     });
     expect(items.get("shared-card-app-handoff")?.tryIt).toBeUndefined();
     expect(items.get("environment-report-loading-preview")).toMatchObject({

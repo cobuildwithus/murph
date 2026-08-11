@@ -72,8 +72,9 @@ When the same shared-card fragment reaches the public homepage outside the
 Messages extension, Web recognizes only the exact non-empty `#murph-card=`
 prefix after hydration and opens the App Store handoff. It never decodes,
 displays, stores, logs, or transmits the fragment value. Dismissal leaves the
-shared URL unchanged, every other homepage fragment stays quiet, and the Linq
-response-card payload and installed-extension path remain unchanged.
+shared URL unchanged, and every other homepage fragment stays quiet. The web
+fallback complements the canonical App Store identity in Linq's card payload;
+neither path changes the installed-extension route or application authority.
 
 ## Plan versus actual
 

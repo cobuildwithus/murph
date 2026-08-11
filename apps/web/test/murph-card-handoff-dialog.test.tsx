@@ -60,15 +60,13 @@ vi.mock("@/src/components/ui/dialog", () => ({
     children?: ReactNode;
     showCloseButton?: boolean;
   }) => {
-    return createElement(
-      "div",
-      props,
-      showCloseButton === false
-        ? null
-        : createElement("button", { "aria-label": "Close" }),
-      children,
-    );
+    void showCloseButton;
+    return createElement("div", props, children);
   },
+  DialogFooter: (props: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", props),
+  DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", props),
 }));
 
 import {
@@ -108,23 +106,27 @@ test("opens the App Store handoff without exposing the opaque card value", async
 
   try {
     expect(rendered.container.querySelector('[data-dialog="open"]')).not.toBeNull();
-    expect(rendered.container.textContent).toContain("Open this card with Murph");
+    expect(rendered.container.textContent).toContain("Continue on iPhone");
+    expect(rendered.container.textContent).toContain(
+      "Install or open Murph from the App Store. Then return to Messages and tap the card again.",
+    );
+    expect(rendered.container.textContent).not.toContain("Shared from Messages");
     expect(rendered.container.innerHTML).not.toContain("opaque-test-envelope");
     expect(fetchMock).not.toHaveBeenCalled();
 
     const appStoreLink = rendered.container.querySelector(
       `a[href="${MURPH_IOS_APP_STORE_URL}"]`,
     );
-    expect(appStoreLink?.textContent).toContain("Get Murph for iPhone");
+    expect(appStoreLink?.textContent).toContain("Open App Store");
     expect(appStoreLink?.getAttribute("target")).toBe("_blank");
     expect(appStoreLink?.getAttribute("rel")).toBe("noopener noreferrer");
     expect(
       rendered.container.querySelector('button[aria-label="Close"]'),
-    ).toBeNull();
-    expect(rendered.container.querySelectorAll("button")).toHaveLength(1);
+    ).not.toBeNull();
+    expect(rendered.container.querySelectorAll("button")).toHaveLength(2);
 
     const dismissButton = [...rendered.container.querySelectorAll("button")]
-      .find((button) => button.textContent?.trim() === "Not now");
+      .find((button) => button.textContent?.trim() === "Cancel");
     expect(dismissButton).not.toBeNull();
     await act(async () => {
       dismissButton?.click();
