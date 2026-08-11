@@ -68,6 +68,23 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
+  it("keeps cleaner plan and model settings scoped to the visible outcome", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "cleaner-plan-and-model-settings",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      kind: "improvement",
+      priority: 1,
+      sourcePullRequests: [1621],
+      summary: expect.stringContaining("Starter usage and unavailable models"),
+      title: "Cleaner plan and model settings",
+    });
+    expect(item?.details).toBeUndefined();
+    expect(item?.tryIt).toBeUndefined();
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -545,6 +562,7 @@ describe("changelog registry", () => {
         id: "2026-08-10",
         itemIds: [
           "non-expiring-starter-access",
+          "cleaner-plan-and-model-settings",
           "personal-patterns",
           "referral-notification-route-recovery",
           "reminders-keep-requested-timezone",
