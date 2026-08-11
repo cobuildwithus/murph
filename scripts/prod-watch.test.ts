@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   statSync,
@@ -57,6 +58,7 @@ import {
   buildImmutableRemediationPushArgs,
   buildRemediationChildEnv,
   buildRemediationReviewRequest,
+  collectStripeEvidence,
   collectVercelRowsForEvidence,
   fetchVercelJson,
   fetchVercelRequestSample,
@@ -67,6 +69,7 @@ import {
   renderLaunchdPlistTemplate,
   renderVerificationSandboxConfig,
   shouldContinueVercelPagination,
+  spawnCodexJsonChild,
   splitVercelWindow,
   validateRemediationPatch,
   verifySchedulerExecutableChain,
@@ -277,6 +280,110 @@ describe("production-watch snapshot contract", () => {
     expect(cancelled).toBe(true);
     expect(generatedBytes).toBeLessThanOrEqual(responseLimitBytes + 2 * chunkBytes);
     expect(generatedBytes).toBeLessThan(totalChunks * chunkBytes);
+  });
+
+  it.each([
+    [401, "EAUTH"],
+    [403, "EAUTH"],
+    [429, "EHELPER"],
+    [500, "EHELPER"],
+  ] as const)("cancels a streaming Vercel %i response before returning %s", async (status, code) => {
+    let generatedBytes = 0;
+    let cancelled = false;
+    let abortObserved = false;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input, init) => {
+      init?.signal?.addEventListener("abort", () => {
+        abortObserved = true;
+      }, { once: true });
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          generatedBytes += 64 * 1_024;
+          controller.enqueue(new Uint8Array(64 * 1_024));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      return new Response(body, { status });
+    }) as typeof fetch;
+
+    try {
+      await expect(fetchVercelJson("https://example.invalid/vercel", "test-token"))
+        .rejects.toMatchObject({ code });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(abortObserved).toBe(true);
+    expect(cancelled).toBe(true);
+    const bytesAtReturn = generatedBytes;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(generatedBytes).toBe(bytesAtReturn);
+  });
+
+  it("does not spawn a Codex child for an already-aborted signal", async () => {
+    const runtimeRoot = makeTempRoot();
+    const markerPath = path.join(runtimeRoot, "codex-started");
+    const childPath = path.join(runtimeRoot, "codex-child.cjs");
+    writeFileSync(childPath, [
+      "const { writeFileSync } = require('node:fs');",
+      "writeFileSync(process.env.TEST_CODEX_MARKER, 'started');",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const controller = new AbortController();
+    controller.abort(new Error("test_abort"));
+
+    await expect(spawnCodexJsonChild(process.execPath, [childPath], {
+      stdin: "",
+      timeoutMs: 5_000,
+      signal: controller.signal,
+      outputLimitBytes: 1_024,
+      env: { ...process.env, TEST_CODEX_MARKER: markerPath },
+    })).rejects.toMatchObject({ code: "ABORT_ERR" });
+    expect(existsSync(markerPath)).toBe(false);
+  });
+
+  it("aborts and settles the sibling Stripe process after an output-limit failure", async () => {
+    const runtimeRoot = makeTempRoot();
+    const binRoot = path.join(runtimeRoot, "bin");
+    const markerPath = path.join(runtimeRoot, "stripe-events");
+    mkdirSync(binRoot, { recursive: true });
+    const stripePath = path.join(binRoot, "stripe");
+    writeFileSync(stripePath, [
+      "#!/usr/bin/env node",
+      "const { appendFileSync } = require('node:fs');",
+      "const failedDelivery = process.argv.includes('--delivery-success=false');",
+      "if (!failedDelivery) {",
+      "  setTimeout(() => process.stdout.write('x'.repeat(5 * 1024 * 1024)), 100);",
+      "} else {",
+      "  appendFileSync(process.env.TEST_STRIPE_MARKER, 'started\\n');",
+      "  process.on('SIGTERM', () => { appendFileSync(process.env.TEST_STRIPE_MARKER, 'terminated\\n'); process.exit(0); });",
+      "  setTimeout(() => { appendFileSync(process.env.TEST_STRIPE_MARKER, 'finished\\n'); process.stdout.write('{\"object\":\"list\",\"data\":[],\"has_more\":false}\\n'); }, 1000);",
+      "}",
+      "",
+    ].join("\n"), { mode: 0o755 });
+    chmodSync(stripePath, 0o755);
+    const previousPath = process.env.PATH;
+    const previousMarker = process.env.TEST_STRIPE_MARKER;
+    process.env.PATH = `${binRoot}:${previousPath ?? ""}`;
+    process.env.TEST_STRIPE_MARKER = markerPath;
+    try {
+      const end = new Date("2026-08-10T20:10:00.000Z");
+      await expect(collectStripeEvidence({
+        previousStart: new Date("2026-08-10T20:00:00.000Z"),
+        currentStart: new Date("2026-08-10T20:05:00.000Z"),
+        end,
+      })).rejects.toMatchObject({ code: "EFBIG" });
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousMarker === undefined) delete process.env.TEST_STRIPE_MARKER;
+      else process.env.TEST_STRIPE_MARKER = previousMarker;
+    }
+    expect(readFileSync(markerPath, "utf8")).toBe("started\nterminated\n");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(readFileSync(markerPath, "utf8")).toBe("started\nterminated\n");
   });
 
   it("rejects a Vercel page above the partition row ceiling before normalization", async () => {
@@ -2669,6 +2776,68 @@ describe("production-watch locking and dry-run behavior", () => {
     };
     expect(after.incidents.find((candidate) => candidate.id === incident!.id)?.owner).toBeUndefined();
     expect(after.remediation.sessions).toEqual([]);
+  });
+
+  it("keeps run cancellation sticky and starts no later child or state phase", () => {
+    const runtimeRoot = makeTempRoot();
+    const binRoot = path.join(runtimeRoot, "bin");
+    const databaseMarker = path.join(runtimeRoot, "database-events");
+    const codexMarker = path.join(runtimeRoot, "codex-started");
+    const gitMarker = path.join(runtimeRoot, "git-started");
+    mkdirSync(binRoot, { recursive: true });
+
+    const helperPath = path.join(binRoot, "murph-prod-psql-ro");
+    writeFileSync(helperPath, [
+      "#!/usr/bin/env node",
+      "const { appendFileSync } = require('node:fs');",
+      "appendFileSync(process.env.TEST_DATABASE_MARKER, 'started\\n');",
+      "process.stdin.resume();",
+      "process.on('SIGTERM', () => { appendFileSync(process.env.TEST_DATABASE_MARKER, 'settled\\n'); process.exit(0); });",
+      "setTimeout(() => process.kill(process.ppid, 'SIGTERM'), 25);",
+      "setTimeout(() => { appendFileSync(process.env.TEST_DATABASE_MARKER, 'finished\\n'); process.exit(0); }, 1000);",
+      "",
+    ].join("\n"), { mode: 0o755 });
+    chmodSync(helperPath, 0o755);
+
+    const codexPath = path.join(binRoot, "codex");
+    writeFileSync(codexPath, [
+      "#!/usr/bin/env node",
+      "require('node:fs').writeFileSync(process.env.TEST_CODEX_MARKER, 'started');",
+      "",
+    ].join("\n"), { mode: 0o755 });
+    chmodSync(codexPath, 0o755);
+    const gitPath = path.join(binRoot, "git");
+    writeFileSync(gitPath, [
+      "#!/usr/bin/env node",
+      "require('node:fs').writeFileSync(process.env.TEST_GIT_MARKER, 'started');",
+      "process.exit(1);",
+      "",
+    ].join("\n"), { mode: 0o755 });
+    chmodSync(gitPath, 0o755);
+
+    const result = runProdWatch([
+      "run",
+      "--dry-run",
+      "--provider-child",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot, {
+      PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+      MURPH_PROD_WATCH_CODEX_BIN: codexPath,
+      MURPH_PROD_WATCH_CODEX_PROFILE: "test-profile",
+      TEST_DATABASE_MARKER: databaseMarker,
+      TEST_CODEX_MARKER: codexMarker,
+      TEST_GIT_MARKER: gitMarker,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("ABORT_ERR");
+    expect(readFileSync(databaseMarker, "utf8")).toBe("started\nsettled\n");
+    expect(existsSync(codexMarker)).toBe(false);
+    expect(existsSync(gitMarker)).toBe(false);
+    expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json"))).toBe(false);
+    expect(existsSync(path.join(runtimeRoot, "projections", "prod-watch", "latest.snapshot.v1.json"))).toBe(false);
+    expect(readdirSync(path.join(runtimeRoot, "tmp", "prod-watch", "run.lock"))).toEqual([]);
   });
 
   it("rejects ambiguous database helper stdout instead of selecting one JSON-looking line", () => {

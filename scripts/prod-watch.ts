@@ -352,33 +352,43 @@ async function runScheduledCommand(argv: string[]): Promise<void> {
 
   try {
     const overlap = await readOverlapEvent();
+    throwIfAborted(abortController.signal);
     const result = await collectSnapshot(parsed, {
       runId,
       signal: abortController.signal,
       skippedOverlap: overlap !== undefined,
     });
+    throwIfAborted(abortController.signal);
     if (parsed.dryRun) {
       process.stdout.write(`${JSON.stringify(result.snapshot, null, 2)}\n`);
       return;
     }
 
+    throwIfAborted(abortController.signal);
     const update = await withStateLock(runId, async () => {
+      throwIfAborted(abortController.signal);
       const now = new Date();
       const latestState = await readState(statePath, parsed.configuredSources, now);
+      throwIfAborted(abortController.signal);
       const next = parsed.dispatchWorkers
         ? updateStateAndQueueRemediation(latestState, result.snapshot, {
             maxConcurrency: parsed.remediationConcurrency,
           })
         : { ...updateStateFromSnapshot(latestState, result.snapshot), dispatches: [] };
-      await writeStateAndProjections(next.state, result.snapshot);
+      throwIfAborted(abortController.signal);
+      await writeStateAndProjections(next.state, result.snapshot, abortController.signal);
+      throwIfAborted(abortController.signal);
       return next;
     });
+    throwIfAborted(abortController.signal);
     const dispatchedWorkers = parsed.dispatchWorkers
-      ? await launchRemediationDispatches(update.dispatches, parsed)
+      ? await launchRemediationDispatches(update.dispatches, parsed, abortController.signal)
       : [];
+    throwIfAborted(abortController.signal);
     if (overlap !== undefined) {
       await rm(overlapEventPath, { force: true });
     }
+    throwIfAborted(abortController.signal);
     if (!parsed.scheduled || update.promotedIncidentIds.length > 0 || result.snapshot.monitor.status === "degraded") {
       process.stdout.write(`${JSON.stringify({
         status: result.snapshot.monitor.status,
@@ -562,13 +572,17 @@ async function runRemediateCommand(argv: string[]): Promise<void> {
 async function launchRemediationDispatches(
   dispatches: RemediationDispatch[],
   options: CommonCollectOptions,
+  signal?: AbortSignal,
 ): Promise<RemediationDispatch[]> {
   const launched: RemediationDispatch[] = [];
   for (const dispatch of dispatches) {
+    throwIfAborted(signal);
     try {
       await spawnDetachedWorker(dispatch, { shadow: options.remediationShadow });
+      throwIfAborted(signal);
       launched.push(dispatch);
     } catch {
+      throwIfAborted(signal);
       // The durable queued session is intentionally left retryable for the next collection tick.
     }
   }
@@ -1066,7 +1080,9 @@ async function verifyCloudflareOnlyMcpConfiguration(input: {
   profile: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
 }): Promise<void> {
+  throwIfAborted(input.signal);
   const result = await spawnCaptured(
     input.codex,
     [
@@ -1082,8 +1098,10 @@ async function verifyCloudflareOnlyMcpConfiguration(input: {
       outputLimitBytes: 64 * 1_024,
       cwd: input.cwd,
       env: input.env,
+      signal: input.signal,
     },
   );
+  throwIfAborted(input.signal);
   if (result.status !== 0 || result.timedOut) {
     throw new Error("provider_mcp_allowlist_unavailable");
   }
@@ -2088,8 +2106,10 @@ async function collectSnapshot(
   options: CommonCollectOptions,
   runtime: { runId?: string; signal?: AbortSignal; skippedOverlap?: boolean } = {},
 ): Promise<SnapshotResult> {
+  throwIfAborted(runtime.signal);
   const startedAt = new Date();
   const stateBefore = await readState(statePath, options.configuredSources, startedAt);
+  throwIfAborted(runtime.signal);
   const end = new Date(startedAt.getTime() - options.settlingDelaySeconds * 1_000);
   const currentStart = new Date(end.getTime() - options.lookbackMinutes * 60 * 1_000);
   const previousStart = new Date(currentStart.getTime() - options.lookbackMinutes * 60 * 1_000);
@@ -2108,8 +2128,10 @@ async function collectSnapshot(
       : await readFixtureEvidence(options.fixture, startedAt);
     evidences.push(databaseEvidence);
   } catch (error) {
+    throwIfAborted(runtime.signal);
     failures.push(classifyAdapterFailure("database", error));
   }
+  throwIfAborted(runtime.signal);
 
   if (options.providerEvidencePath !== undefined) {
     try {
@@ -2124,6 +2146,7 @@ async function collectSnapshot(
         options.configuredSources.includes(failure.source)
       ));
     } catch {
+      throwIfAborted(runtime.signal);
       for (const source of options.configuredSources.filter((candidate) => candidate !== "database")) {
         failures.push({
           source,
@@ -2152,6 +2175,7 @@ async function collectSnapshot(
         ));
       }
     } catch (error) {
+      throwIfAborted(runtime.signal);
       const failure = classifyProviderChildFailure(error);
       for (const source of options.configuredSources.filter((candidate) => candidate !== "database")) {
         failures.push({ ...failure, source });
@@ -2159,7 +2183,9 @@ async function collectSnapshot(
     }
   }
 
-  const repositorySha = await resolveRepositorySha();
+  throwIfAborted(runtime.signal);
+  const repositorySha = await resolveRepositorySha(runtime.signal);
+  throwIfAborted(runtime.signal);
   const previousRunAt = stateBefore.monitor.lastRunAt === undefined
     ? undefined
     : new Date(stateBefore.monitor.lastRunAt);
@@ -2169,6 +2195,7 @@ async function collectSnapshot(
   const schedulerLagMs = scheduledFor === undefined
     ? undefined
     : Math.max(0, startedAt.getTime() - scheduledFor.getTime());
+  throwIfAborted(runtime.signal);
   const snapshot = buildSnapshot({
     now: new Date(),
     runId: runtime.runId ?? randomUUID(),
@@ -2296,15 +2323,20 @@ async function collectProviderEvidenceWithCodex(input: {
   timeoutMs: number;
   signal?: AbortSignal;
 }): Promise<ProviderEvidenceEnvelope> {
+  throwIfAborted(input.signal);
   const deterministic = await collectDeterministicProviderEvidence(input);
+  throwIfAborted(input.signal);
   const tempRoot = await createPrivateTempDirectory("provider");
-  const providerPath = path.join(tempRoot, "provider-evidence.v1.json");
-  const handle = await open(providerPath, "wx", 0o600);
-  await handle.close();
-  await chmod(providerPath, 0o600);
   try {
+    throwIfAborted(input.signal);
+    const providerPath = path.join(tempRoot, "provider-evidence.v1.json");
+    const handle = await open(providerPath, "wx", 0o600);
+    await handle.close();
+    await chmod(providerPath, 0o600);
+    throwIfAborted(input.signal);
     const profile = requireCodexProfile();
     const codex = await resolveTrustedCodexExecutable();
+    throwIfAborted(input.signal);
     const childEnv = buildIsolatedCodexChildEnv(tempRoot);
     const mcpConfigArgs = cloudflareOnlyMcpConfigArgs();
     const schemaPath = path.join(
@@ -2320,7 +2352,9 @@ async function collectProviderEvidenceWithCodex(input: {
         profile,
         cwd: tempRoot,
         env: childEnv,
+        signal: input.signal,
       });
+      throwIfAborted(input.signal);
       const result = await spawnCodexJsonChild(
         codex,
         [
@@ -2353,6 +2387,7 @@ async function collectProviderEvidenceWithCodex(input: {
           env: childEnv,
         },
       );
+      throwIfAborted(input.signal);
       if (result.timedOut) {
         throw Object.assign(new Error("provider_child_timeout"), { code: "ETIMEDOUT" });
       }
@@ -2363,6 +2398,7 @@ async function collectProviderEvidenceWithCodex(input: {
         throw Object.assign(new Error("provider_child_failed"), { code: "ECHILD" });
       }
       const childEnvelope = await readProviderEvidence(providerPath, false);
+      throwIfAborted(input.signal);
       const cloudflare = childEnvelope.sources.find((source) => source.source === "cloudflare");
       if (cloudflare === undefined) {
         throw new Error("provider_cloudflare_evidence_missing");
@@ -2376,6 +2412,7 @@ async function collectProviderEvidenceWithCodex(input: {
         ],
       );
     } catch (error) {
+      throwIfAborted(input.signal);
       const failure = classifyProviderChildFailure(error);
       return combineProviderEvidence(
         deterministic.sources,
@@ -2442,9 +2479,11 @@ async function collectDeterministicProviderEvidence(input: {
   end: Date;
   signal?: AbortSignal;
 }): Promise<{ sources: AdapterEvidence[]; failures: CollectorFailure[] }> {
+  throwIfAborted(input.signal);
   const testFixture = testOverrides?.providerFixture;
   if (testFixture !== undefined) {
     const fixture = await readProviderEvidence(testFixture, true);
+    throwIfAborted(input.signal);
     return {
       sources: fixture.sources.filter((source) => source.source === "vercel" || source.source === "stripe"),
       failures: fixture.failures.filter((failure) => failure.source === "vercel" || failure.source === "stripe"),
@@ -2461,6 +2500,7 @@ async function collectDeterministicProviderEvidence(input: {
     },
   ];
   const settled = await Promise.allSettled(collectors.map(async (collector) => await collector.collect()));
+  throwIfAborted(input.signal);
   const sources: AdapterEvidence[] = [];
   const failures: CollectorFailure[] = [];
   for (const [index, result] of settled.entries()) {
@@ -2642,28 +2682,61 @@ export async function collectStripeEvidence(input: {
   signal?: AbortSignal;
 }): Promise<AdapterEvidence> {
   const createdGte = Math.floor(input.previousStart.getTime() / 1_000);
-  const [allResult, failedDeliveryResult] = await Promise.all([
-    spawnCaptured(
-      "stripe",
-      ["events", "list", "--live", "--limit", String(STRIPE_EVENT_LIMIT), "-d", `created[gte]=${createdGte}`],
-      {
+  throwIfAborted(input.signal);
+  const branchController = new AbortController();
+  const forwardAbort = () => branchController.abort(input.signal?.reason);
+  if (input.signal?.aborted) {
+    forwardAbort();
+  } else {
+    input.signal?.addEventListener("abort", forwardAbort, { once: true });
+  }
+  let primaryFailure: unknown;
+  let hasPrimaryFailure = false;
+  const runQuery = async (args: string[]) => {
+    try {
+      const result = await spawnCaptured("stripe", args, {
         timeoutMs: DEFAULT_ADAPTER_TIMEOUT_MS,
-        signal: input.signal,
+        signal: branchController.signal,
         outputLimitBytes: 4 * MAX_SUBPROCESS_OUTPUT_BYTES,
-      },
-    ),
-    spawnCaptured(
-      "stripe",
-      ["events", "list", "--live", "--delivery-success=false", "--limit", String(STRIPE_EVENT_LIMIT), "-d", `created[gte]=${createdGte}`],
-      {
-        timeoutMs: DEFAULT_ADAPTER_TIMEOUT_MS,
-        signal: input.signal,
-        outputLimitBytes: 4 * MAX_SUBPROCESS_OUTPUT_BYTES,
-      },
-    ),
-  ]);
-  assertProviderCommandSucceeded("stripe", allResult);
-  assertProviderCommandSucceeded("stripe", failedDeliveryResult);
+      });
+      assertProviderCommandSucceeded("stripe", result);
+      return result;
+    } catch (error) {
+      if (!hasPrimaryFailure) {
+        primaryFailure = error;
+        hasPrimaryFailure = true;
+        branchController.abort(error);
+      }
+      throw error;
+    }
+  };
+  let allResult: Awaited<ReturnType<typeof spawnCaptured>>;
+  let failedDeliveryResult: Awaited<ReturnType<typeof spawnCaptured>>;
+  try {
+    const settled = await Promise.allSettled([
+      runQuery([
+        "events", "list", "--live", "--limit", String(STRIPE_EVENT_LIMIT), "-d", `created[gte]=${createdGte}`,
+      ]),
+      runQuery([
+        "events", "list", "--live", "--delivery-success=false", "--limit", String(STRIPE_EVENT_LIMIT), "-d", `created[gte]=${createdGte}`,
+      ]),
+    ] as const);
+    throwIfAborted(input.signal);
+    if (hasPrimaryFailure) {
+      throw primaryFailure;
+    }
+    const [allSettled, failedDeliverySettled] = settled;
+    if (allSettled.status !== "fulfilled") {
+      throw allSettled.reason;
+    }
+    if (failedDeliverySettled.status !== "fulfilled") {
+      throw failedDeliverySettled.reason;
+    }
+    allResult = allSettled.value;
+    failedDeliveryResult = failedDeliverySettled.value;
+  } finally {
+    input.signal?.removeEventListener("abort", forwardAbort);
+  }
   const allEvents = parseStripeEventList(allResult.stdout);
   const failedDeliveryEvents = parseStripeEventList(failedDeliveryResult.stdout);
   if (allEvents.hasMore || failedDeliveryEvents.hasMore) {
@@ -3065,7 +3138,7 @@ async function readResponseTextWithinLimit(
 
 export async function fetchVercelJson(url: string, token: string, signal?: AbortSignal): Promise<unknown> {
   const controller = new AbortController();
-  const onAbort = () => controller.abort();
+  const onAbort = () => controller.abort(signal?.reason);
   if (signal?.aborted) {
     controller.abort(signal.reason);
   } else {
@@ -3078,11 +3151,19 @@ export async function fetchVercelJson(url: string, token: string, signal?: Abort
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     });
-    if (response.status === 401 || response.status === 403) {
-      throw Object.assign(new Error("vercel_api_auth_failed"), { code: "EAUTH" });
-    }
-    if (!response.ok) {
-      throw Object.assign(new Error("vercel_api_failed"), { code: "EHELPER" });
+    const responseFailure = response.status === 401 || response.status === 403
+      ? Object.assign(new Error("vercel_api_auth_failed"), { code: "EAUTH" })
+      : !response.ok
+        ? Object.assign(new Error("vercel_api_failed"), { code: "EHELPER" })
+        : undefined;
+    if (responseFailure !== undefined) {
+      controller.abort(responseFailure);
+      try {
+        await response.body?.cancel(responseFailure);
+      } catch {
+        // Preserve the bounded status failure even if the body was already cancelled.
+      }
+      throw responseFailure;
     }
     const raw = await readResponseTextWithinLimit(
       response,
@@ -3452,14 +3533,22 @@ function classifyAdapterFailure(source: WatchSource, error: unknown): CollectorF
 async function writeStateAndProjections(
   state: ProductionWatchState,
   snapshot?: ProductionWatchSnapshot,
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal);
   await Promise.all([ensurePrivateDirectory(operationRoot), ensurePrivateDirectory(projectionRoot)]);
+  throwIfAborted(signal);
   await atomicWriteJson(statePath, state);
+  throwIfAborted(signal);
   await atomicWriteText(activeIncidentsPath, renderActiveIncidents(state));
+  throwIfAborted(signal);
   await atomicWriteText(incidentHistoryPath, renderIncidentHistory(state));
+  throwIfAborted(signal);
   await atomicWriteText(monitorStatusPath, renderMonitorStatus(state));
+  throwIfAborted(signal);
   if (snapshot !== undefined) {
     await atomicWriteJson(latestSnapshotPath, snapshot);
+    throwIfAborted(signal);
   }
 }
 
@@ -3494,11 +3583,14 @@ async function readOverlapEvent(): Promise<{ at: string } | undefined> {
   }
 }
 
-async function resolveRepositorySha(): Promise<string | undefined> {
+async function resolveRepositorySha(signal?: AbortSignal): Promise<string | undefined> {
+  throwIfAborted(signal);
   const result = await spawnCaptured("git", ["rev-parse", "HEAD"], {
     timeoutMs: 2_000,
     outputLimitBytes: 1_024,
+    signal,
   });
+  throwIfAborted(signal);
   const sha = result.stdout.trim().toLowerCase();
   return result.status === 0 && /^[a-f0-9]{7,64}$/u.test(sha) ? sha : undefined;
 }
@@ -3626,7 +3718,7 @@ interface CodexJsonSummary {
   terminalStatus?: string;
 }
 
-async function spawnCodexJsonChild(
+export async function spawnCodexJsonChild(
   command: string,
   args: string[],
   options: {
@@ -3643,6 +3735,9 @@ async function spawnCodexJsonChild(
   outputTooLarge: boolean;
   summary: CodexJsonSummary;
 }> {
+  if (options.signal?.aborted === true) {
+    throw Object.assign(new Error("provider_child_aborted"), { code: "ABORT_ERR" });
+  }
   return await new Promise((resolve, reject) => {
     const detached = process.platform !== "win32";
     const child = spawn(command, args, {
@@ -4596,4 +4691,13 @@ function installSignalAbort(controller: AbortController): () => void {
     process.off("SIGTERM", abort);
     process.off("SIGHUP", abort);
   };
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted !== true) {
+    return;
+  }
+  throw Object.assign(new Error("operation_aborted", { cause: signal.reason }), {
+    code: "ABORT_ERR",
+  });
 }
