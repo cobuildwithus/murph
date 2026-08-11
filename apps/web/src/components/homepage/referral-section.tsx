@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Link2, UsersRound } from "lucide-react";
+import { ArrowRight, Link2, UsersRound } from "lucide-react";
 
 import {
   formatHostedPublicReferralRewardValue,
@@ -15,16 +15,13 @@ export function ReferralSection({
     return null;
   }
 
-  const featuredRewards = rewards.filter(
-    ({ id }) => id === "signup-link" || id === "active-group",
-  );
   const signupAvailable = rewards.some(({ id }) => id === "signup-link");
   const groupAvailable = rewards.some(({ id }) => id !== "signup-link");
   const description = signupAvailable && groupAvailable
-    ? "Explore your personal link or a group mission. Eligibility, rolling-limit, and completion checks determine whether Murph applies usage automatically."
+    ? "Share your link or start a group with Murph."
     : signupAvailable
-    ? "Share your personal link. A genuinely new completed signup can earn usage after Murph’s eligibility and rolling-limit checks pass."
-    : "Explore a group mission. Murph applies usage automatically after the mission is accepted and reaches its real-participation requirements.";
+    ? "Share your personal link with someone new."
+    : "Start a fresh group with Murph.";
 
   return (
     <section className="bg-[#f5f0e8] px-4 py-10 sm:px-8 sm:py-16 lg:px-16 lg:py-20">
@@ -38,7 +35,7 @@ export function ReferralSection({
           }}
         />
 
-        <div className="relative grid items-end gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.82fr)] lg:gap-14">
+        <div className="relative grid items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.82fr)] lg:gap-14">
           <div>
             <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#d4b87a]">
               Murph referrals
@@ -53,7 +50,7 @@ export function ReferralSection({
               className="group mt-7 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#f5f0e8] px-5 py-3.5 text-[0.9375rem] font-semibold text-[#2d3436] transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a]"
               href="/refer"
             >
-              See the referral program
+              See ways to earn
               <ArrowRight
                 aria-hidden="true"
                 className="size-4 transition-transform group-hover:translate-x-0.5"
@@ -62,7 +59,7 @@ export function ReferralSection({
           </div>
 
           <div className="grid gap-3">
-            {featuredRewards.map((reward) => {
+            {rewards.map((reward) => {
               const Icon = reward.id === "signup-link" ? Link2 : UsersRound;
               return (
                 <article
@@ -76,34 +73,18 @@ export function ReferralSection({
                     <p className="text-sm font-semibold text-[#f5f0e8]">
                       {reward.title}
                     </p>
-                    <p className="mt-1 text-xs leading-[1.55] text-[#f5f0e8]/60">
-                      {reward.availabilityLabel}
-                    </p>
                   </div>
-                  <div className="col-span-2 flex items-baseline justify-between gap-3 border-t border-white/10 pt-3 sm:col-span-1 sm:block sm:border-0 sm:pt-0 sm:text-right">
-                    <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#d4b87a]">
-                      If eligible
-                    </p>
-                    <p className="text-sm font-semibold text-[#f5f0e8] sm:mt-1">
-                      {formatHostedPublicReferralRewardValue(
-                        reward.rewardUsdMicros,
-                      )}
+                  <div className="col-span-2 border-t border-white/10 pt-3 sm:col-span-1 sm:max-w-[13rem] sm:border-0 sm:pt-0 sm:text-right">
+                    <p className="text-pretty text-sm font-semibold leading-[1.45] text-[#f5f0e8]">
+                      {formatHostedPublicReferralRewardValue(reward)}
                     </p>
                   </div>
                 </article>
               );
             })}
-            <div className="flex items-start gap-2.5 px-1 pt-1 text-xs leading-[1.6] text-[#f5f0e8]/55">
-              <CheckCircle2
-                aria-hidden="true"
-                className="mt-0.5 size-4 shrink-0 text-[#d4b87a]"
-              />
-              <p>
-                Qualifying rewards are applied automatically to the Murph they
-                were earned for. Dollar labels state exact cost-weighted usage
-                credit; actual message capacity varies.
-              </p>
-            </div>
+            <p className="px-1 pt-1 text-xs leading-[1.5] text-[#f5f0e8]/55">
+              Typical-use estimate. Actual capacity varies.
+            </p>
           </div>
         </div>
       </div>

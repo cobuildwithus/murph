@@ -1,6 +1,6 @@
 import { HostedBillingStatus } from "@prisma/client";
 
-import { hasHostedMemberOwnActiveBilling, isHostedMemberSuspended } from "./entitlement";
+import { hasHostedMemberOwnActiveAccess, isHostedMemberSuspended } from "./entitlement";
 import {
   resolveHostedAccessibleOnboardingStage,
   type HostedOnboardingStage,
@@ -30,8 +30,8 @@ export function isHostedLapsedBillingStatus(
 /**
  * Whether the member is recovering existing billing rather than acquiring it.
  * `incomplete` cannot be read from status alone: the Stripe status mapper also
- * writes it while an already-owned subscription settles, including the expired
- * pulse-trial transition. Owning a subscription is the durable signal, so it
+ * writes it while an already-owned subscription settles, including bounded
+ * legacy-trial cleanup. Owning a subscription is the durable signal, so it
  * decides, and every surface asks this one question instead of re-deriving it.
  */
 export function hasHostedRecoverableBilling(input: {
@@ -106,7 +106,7 @@ function hasHostedOnboardingRecoverySurfaceAccess(input: {
   // dead end.
   return !isHostedMemberSuspended(input.suspendedAt)
     && (
-      hasHostedMemberOwnActiveBilling(input)
+      hasHostedMemberOwnActiveAccess(input)
       || input.sponsoredAccessActive === true
       || hasHostedRecoverableBilling(input)
     );

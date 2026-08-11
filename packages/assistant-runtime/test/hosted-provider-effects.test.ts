@@ -396,6 +396,10 @@ describe("hosted provider effects", () => {
       },
       fetchImplementation: fetchMock as typeof fetch,
     })).resolves.toEqual({
+      providerMessageEffects: [{
+        message: "hello\n\nDead bug setup",
+        providerMessageId: "recovered-message",
+      }],
       providerMessageId: "recovered-message",
       providerThreadId: "recovered-chat",
       target: "recovered-chat",
@@ -519,6 +523,10 @@ describe("hosted provider effects", () => {
       persistAppCardTextFallback,
     })).resolves.toEqual({
       idempotencyKey: "hosted-card-rejected:fallback",
+      providerMessageEffects: [{
+        message: "Nutrition summary",
+        providerMessageId: "direct-fallback-message",
+      }],
       providerMessageId: "direct-fallback-message",
       providerThreadId: null,
       target: "direct-chat",
@@ -725,6 +733,10 @@ describe("hosted provider effects", () => {
       persistAppCardTextFallback,
     })).resolves.toEqual({
       idempotencyKey: expectedIdempotencyKey,
+      providerMessageEffects: [{
+        message: "Nutrition summary",
+        providerMessageId: "recovered-card-message",
+      }],
       providerMessageId: "recovered-card-message",
       providerThreadId: "recovered-card-chat",
       target: "recovered-card-chat",
@@ -854,6 +866,10 @@ describe("hosted provider effects", () => {
       },
       fetchImplementation,
     })).resolves.toEqual({
+      providerMessageEffects: [{
+        message: "hello\n\nDead bug setup",
+        providerMessageId: "recovered-message",
+      }],
       providerMessageId: "recovered-message",
       providerThreadId: "recovered-chat",
       target: "recovered-chat",
@@ -1228,6 +1244,10 @@ describe("hosted provider effects", () => {
       fetchImplementation: fetchMock as typeof fetch,
     })).resolves.toEqual({
       idempotencyKey: "assistant-outbox:intent_1",
+      providerMessageEffects: [{
+        message: "hello",
+        providerMessageId: "materialized-message",
+      }],
       providerMessageId: "materialized-message",
       providerThreadId: "materialized-chat",
       target: "materialized-chat",

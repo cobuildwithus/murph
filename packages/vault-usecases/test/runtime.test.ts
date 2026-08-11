@@ -74,6 +74,7 @@ function createQueryRuntimeStub() {
     summarizeWearableMetricTrendRuntime: vi.fn(async () => undefined),
     summarizeWearableSleepRuntime: vi.fn(async () => undefined),
     summarizeWearableSleepPatternRuntime: vi.fn(async () => undefined),
+    buildPersonalPatternReportRuntime: vi.fn(async () => undefined),
     summarizeWearableActivityRuntime: vi.fn(async () => undefined),
     summarizeWearableBodyStateRuntime: vi.fn(async () => undefined),
     summarizeWearableDayRuntime: vi.fn(async () => undefined),

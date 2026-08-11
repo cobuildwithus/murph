@@ -11,11 +11,11 @@ import {
 import {
   canUpgradeHostedBillingPlan,
   isHostedBillingPlanImmediateUpgrade,
-  isHostedPulseTrialBillingState,
   parseHostedBillingPlanCode,
+  readHostedBillingPlanChangePortalConfigurationId,
   type HostedBillingPlanCode,
 } from "./billing-plans";
-import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
+import { assertHostedMemberOwnPaidBillingAllowed } from "./entitlement";
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
@@ -38,14 +38,6 @@ import {
   logHostedStripeFailure,
   withHostedStripeActionFailureAlert,
 } from "./stripe-error-log";
-
-const HOSTED_BILLING_PLAN_CHANGE_PORTAL_CONFIGURATION_ENV_BY_TARGET = {
-  launch_edge_monthly:
-    "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY",
-  launch_group_monthly: null,
-  launch_monthly:
-    "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MONTHLY",
-} as const satisfies Record<HostedBillingPlanCode, string | null>;
 
 export type HostedBillingPlanUpgradeResult =
   | {
@@ -249,11 +241,13 @@ async function readHostedBillingPlanUpgradeOwner(input: {
           message: "Finish signup from your latest Murph link before continuing.",
         });
       }
-      assertHostedMemberOwnActiveBillingAllowed(member);
-
       const billingRef = await readHostedMemberStripeBillingRef({
         memberId: input.memberId,
         prisma: tx,
+      });
+      assertHostedMemberOwnPaidBillingAllowed({
+        ...member,
+        billingRef,
       });
       return buildHostedBillingPlanUpgradeOwnerSnapshot({
         billingRef,
@@ -372,16 +366,6 @@ function assertHostedBillingPlanUpgradeSourceState(input: {
   })) {
     return;
   }
-  if (isHostedPulseTrialBillingState({
-    currentBillingPhase: input.billingRef?.currentBillingPhase,
-    currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
-  })) {
-    throw hostedOnboardingError({
-      code: "HOSTED_BILLING_PLAN_UPGRADE_TRIAL_UNSUPPORTED",
-      httpStatus: 409,
-      message: "Finish your Pulse trial before changing to this plan.",
-    });
-  }
   throw hostedOnboardingError({
     code: "HOSTED_BILLING_PLAN_UPGRADE_SOURCE_INVALID",
     httpStatus: 409,
@@ -480,13 +464,8 @@ function buildHostedBillingPlanChangeReturnUrls(input: {
 function requireHostedBillingPlanChangePortalConfigurationId(
   targetPlanCode: HostedBillingPlanCode,
 ): string {
-  const environmentKey =
-    HOSTED_BILLING_PLAN_CHANGE_PORTAL_CONFIGURATION_ENV_BY_TARGET[
-      targetPlanCode
-    ];
-  const configurationId = normalizeNullableString(
-    environmentKey ? process.env[environmentKey] : undefined,
-  );
+  const configurationId =
+    readHostedBillingPlanChangePortalConfigurationId(targetPlanCode);
   if (configurationId) {
     return configurationId;
   }

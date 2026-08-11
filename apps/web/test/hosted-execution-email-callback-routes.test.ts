@@ -337,7 +337,7 @@ describe("hosted execution email callback routes", () => {
     );
 
     expect(response.status).toBe(413);
-    expect(prismaClient.hostedWebInternalRequestNonce.create).not.toHaveBeenCalled();
+    expect(prismaClient.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
@@ -857,29 +857,6 @@ describe("hosted execution email callback routes", () => {
 
 function createPrismaMock() {
   const consumedNonces = new Set<string>();
-  const hostedWebInternalRequestNonce = {
-    create: vi.fn(async (input: {
-      data: {
-        method: string;
-        nonceHash: string;
-        path: string;
-        search: string;
-        userId: string;
-      };
-    }) => {
-      const key = input.data.nonceHash;
-
-      if (consumedNonces.has(key)) {
-        throw Object.assign(new Error("Nonce already consumed in test."), {
-          code: "P2002",
-        });
-      }
-
-      consumedNonces.add(key);
-      return input.data;
-    }),
-    deleteMany: vi.fn(async () => ({ count: 0 })),
-  };
   const transactionClient = {
     hostedAccountGroupInvite: {
       count: vi.fn(async () => 0),
@@ -887,10 +864,20 @@ function createPrismaMock() {
   };
 
   return {
+    $queryRaw: vi.fn(async (
+      _strings: TemplateStringsArray,
+      nonceHash: string,
+    ) => {
+      if (consumedNonces.has(nonceHash)) {
+        return [];
+      }
+
+      consumedNonces.add(nonceHash);
+      return [{ admitted: true }];
+    }),
     $transaction: vi.fn(async (
       callback: (transaction: typeof transactionClient) => Promise<unknown>,
     ) => callback(transactionClient)),
-    hostedWebInternalRequestNonce,
     hostedMember: {
       findUnique: vi.fn(async (): Promise<unknown | null> => createHostedMemberAccessState({})),
     },

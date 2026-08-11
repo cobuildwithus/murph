@@ -365,6 +365,10 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
     {
       chatId: 'chat-created',
       messageId: 'message-created',
+      providerMessageEffects: [{
+        message: 'hi',
+        providerMessageId: 'message-created',
+      }],
     },
   )
 
@@ -448,7 +452,6 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
         idempotency_key: 'card-delivery-1',
         parts: [{
           app: {
-            app_store_id: 6786145859,
             bundle_id: 'ai.withmurph.app.messages',
             name: 'Murph',
             team_id: 'G9DJH2XUMK',
@@ -456,10 +459,11 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
           fallback_text: 'Ask Murph for this card in text',
           interactive: true,
           layout: {
-            caption: 'Jul 28 · 4 meals · PARTIAL TOTALS',
-            subcaption: '1,490.25 cal',
-            trailing_caption: '94.5g protein · 193.125g carbs',
-            trailing_subcaption: '34.75g fat · 26.5g fiber',
+            caption: 'Jul 28 · 4 meals',
+            image_url: expect.stringMatching(
+              /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+            ),
+            subcaption: 'Some calorie and nutrition estimates were partial.',
           },
           type: 'imessage_app',
           url: buildLinqIMessageAppCardUrl(NUTRITION_CARD),
@@ -715,7 +719,7 @@ test('linq runtime serializes reply targets only for marked native replies', asy
     })
   })
 
-  await sendLinqChatMessage(
+  const result = await sendLinqChatMessage(
     {
       chatId: 'chat-123',
       message: 'ordinary automatic reply',
@@ -821,6 +825,16 @@ test('linq runtime sends a terminal payment URL as a separate rich-link message'
 
   assert.equal(result.message.id, 'message-link')
   assert.deepEqual(result.providerMessageIds, ['message-text', 'message-link'])
+  assert.deepEqual(result.providerMessageEffects, [
+    {
+      message: 'Complete payment here:',
+      providerMessageId: 'message-text',
+    },
+    {
+      message: null,
+      providerMessageId: 'message-link',
+    },
+  ])
   assert.deepEqual(bodies, [
     {
       message: {
@@ -1044,6 +1058,10 @@ test('linq runtime keeps a selected link-only payment URL on the text reply anch
       },
     },
   })
+  assert.deepEqual(result.providerMessageEffects, [{
+    message: 'https://pay.example.test/checkout/session_123',
+    providerMessageId: 'message-link',
+  }])
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
 })
 
@@ -1061,7 +1079,7 @@ test('linq runtime sanitizes but still promotes an uppercase terminal HTTPS URL'
     })
   })
 
-  await sendLinqChatMessage(
+  const result = await sendLinqChatMessage(
     {
       chatId: 'chat-123',
       message: 'HTTPS://PAY.EXAMPLE.TEST/checkout/session_123',
@@ -1077,6 +1095,10 @@ test('linq runtime sanitizes but still promotes an uppercase terminal HTTPS URL'
       }],
     },
   })
+  assert.deepEqual(result.providerMessageEffects, [{
+    message: null,
+    providerMessageId: 'message-link',
+  }])
 })
 
 test('linq runtime creates a chat with caller text before the rich-link follow-up', async () => {
@@ -1116,6 +1138,16 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
 
   assert.equal(result.messageId, 'message-link')
   assert.deepEqual(result.providerMessageIds, ['message-text', 'message-link'])
+  assert.deepEqual(result.providerMessageEffects, [
+    {
+      message: 'Your secure payment link:',
+      providerMessageId: 'message-text',
+    },
+    {
+      message: null,
+      providerMessageId: 'message-link',
+    },
+  ])
   assert.deepEqual(requests, [
     {
       body: {
@@ -1304,6 +1336,16 @@ test('linq runtime falls back to URL text after a definitive rich-link rejection
     'message-text',
     'message-fallback',
   ])
+  assert.deepEqual(result.providerMessageEffects, [
+    {
+      message: 'Complete payment here:',
+      providerMessageId: 'message-text',
+    },
+    {
+      message: 'https://pay.example.test/checkout/session_123',
+      providerMessageId: 'message-fallback',
+    },
+  ])
   assert.deepEqual(bodies[2], {
     message: {
       idempotency_key: 'payment-message-123:link:fallback',
@@ -1456,7 +1498,7 @@ test('linq runtime converts supported text styles to iMessage text decorations',
     })
   })
 
-  await sendLinqChatMessage(
+  const result = await sendLinqChatMessage(
     {
       chatId: 'chat-123',
       message: '  This is **bold**, *italic*, _short aside_, ~~gone~~, and ++underlined++. Keep durable/home/*/rollout-*.jsonl intact.  ',
@@ -1465,6 +1507,10 @@ test('linq runtime converts supported text styles to iMessage text decorations',
   )
 
   assert.equal(seenRequests.length, 1)
+  assert.deepEqual(result.providerMessageEffects, [{
+    message: 'This is bold, italic, short aside, gone, and underlined. Keep durable/home/*/rollout-*.jsonl intact.',
+    providerMessageId: 'message-1',
+  }])
   assert.deepEqual(parseJsonRequestBody(seenRequests[0]?.body), {
     message: {
       parts: [
@@ -3224,6 +3270,10 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
     message: {
       id: 'msg-retry-succeeded',
     },
+    providerMessageEffects: [{
+      message: 'hello',
+      providerMessageId: 'msg-retry-succeeded',
+    }],
   })
   assert.equal(idempotentSendRequests.length, 2)
   assert.deepEqual(

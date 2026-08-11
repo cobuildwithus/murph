@@ -7,6 +7,9 @@ import {
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
+import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -85,6 +88,9 @@ export interface HostedRuntimeHealthDataConsentReconcileResult {
 }
 
 const HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS = 60_000;
+// The retained hint measured a 693 ms provider-start p50 gain. Abandon its
+// optional admission before it can consume even half of that useful overlap.
+const HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS = 250;
 
 export class HostedUserRunner {
   protected readonly stateStore: RunnerStateStore;
@@ -139,10 +145,22 @@ export class HostedUserRunner {
       readHostedWorkspaceFromWeb: async (userId, input) => await this.readHostedWorkspaceFromWeb(userId, input),
     });
     this.runtimeInvocation = runtimeInvocation;
+    this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
+      bucket,
+      runnerStoreCache: this.runnerStoreCache,
+      state,
+      stateStore: this.stateStore,
+      assertWorkspaceBelongsToRunnerUser: (workspace, userId) => {
+        this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
+      },
+      readHostedWorkspaceFromWeb: async (userId) => await this.readHostedWorkspaceFromWeb(userId),
+    });
     const runtimeProcessing = new RuntimeProcessingController({
       env,
       invocationService: runtimeInvocation,
       runnerContainerNamespace,
+      readCheckpointHandoff: async (input) =>
+        await this.workspaceSnapshotSessions.readCurrentOwnerHandoff(input),
       runnerRuntimeEnvSource,
       runtimeRetryAnalytics,
       stateStore: this.stateStore,
@@ -155,16 +173,6 @@ export class HostedUserRunner {
       state,
       stateStore: this.stateStore,
     };
-    this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
-      bucket,
-      runnerStoreCache: this.runnerStoreCache,
-      state,
-      stateStore: this.stateStore,
-      assertWorkspaceBelongsToRunnerUser: (workspace, userId) => {
-        this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
-      },
-      readHostedWorkspaceFromWeb: async (userId) => await this.readHostedWorkspaceFromWeb(userId),
-    });
   }
 
   async bindUser(userId: string): Promise<{ userId: string }> {
@@ -208,13 +216,15 @@ export class HostedUserRunner {
   }
 
   async deleteHostedUserData(userId: string): Promise<HostedRunnerUserDataDeletionResult> {
-    return this.withPrivateMediaMutationLock(async () => {
-      this.runnerStoreCache.clearIfUser(userId);
-      return await deleteHostedRunnerUserData({
-        ...this.userDataDeletionInput,
-        userId,
-      });
-    });
+    return this.withRuntimeConsentMutationLock(async () =>
+      await this.withPrivateMediaMutationLock(async () => {
+        this.runnerStoreCache.clearIfUser(userId);
+        return await deleteHostedRunnerUserData({
+          ...this.userDataDeletionInput,
+          userId,
+        });
+      })
+    );
   }
 
   async publishHostedPrivateMedia(
@@ -280,6 +290,61 @@ export class HostedUserRunner {
         };
       }
       return await this.runtimeProcessing.ensureForUser(processingInput);
+    });
+  }
+
+  async prewarmRuntimeShellForUser(
+    userId: string,
+    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+  ): Promise<void> {
+    if (this.runtimeConsentMutationLock) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_consent_busy",
+          shellPrewarmSource: source ?? "unknown",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+        phase: "scheduled",
+        userId,
+      });
+      return;
+    }
+    await this.withRuntimeConsentMutationLock(async () => {
+      let admission: HostedRuntimeHealthDataAdmissionResponse;
+      try {
+        admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
+          userId,
+          { timeoutMs: HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS },
+        );
+      } catch {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
+            shellPrewarmSource: source ?? "unknown",
+          },
+          level: "warn",
+          message: "Hosted runner shell prewarm admission decided.",
+          phase: "scheduled",
+          userId,
+        });
+        return;
+      }
+      if (!admission.processingAllowed) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
+            shellPrewarmSource: source ?? "unknown",
+          },
+          message: "Hosted runner shell prewarm admission decided.",
+          phase: "scheduled",
+          userId,
+        });
+        return;
+      }
+      await this.runtimeProcessing.beginShellPrewarmForUser(userId, source);
     });
   }
 
@@ -455,6 +520,24 @@ export class HostedUserRunner {
     return await this.workspaceSnapshotSessions.create(input);
   }
 
+  async heartbeatHostedWorkspaceSnapshotUploadSession(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.heartbeatCurrentOwner(input);
+  }
+
+  async completeHostedWorkspaceSnapshotUploadSession(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.completeCurrentOwner(input);
+  }
+
   async rememberHostedWorkspaceSnapshotReplacedRef(input: {
     expectedSession: HostedWorkspaceSnapshotUploadSession;
     replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
@@ -527,6 +610,7 @@ export class HostedUserRunner {
 
   private async readHostedRuntimeHealthDataAdmissionFromWeb(
     userId: string,
+    input: { timeoutMs?: number } = {},
   ): Promise<HostedRuntimeHealthDataAdmissionResponse> {
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       ...(this.env.hostedWebAllowHttpHosts
@@ -537,7 +621,7 @@ export class HostedUserRunner {
       callbackSigning: this.env.webCallbackSigning,
       method: "GET",
       path: HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
-      timeoutMs: this.env.webControlTimeoutMs,
+      timeoutMs: input.timeoutMs ?? this.env.webControlTimeoutMs,
     });
 
     if (!response.ok) {

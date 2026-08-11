@@ -99,7 +99,7 @@ import {
 } from "../src/parsers.ts";
 
 describe("hosted runtime control contracts", () => {
-  it("parses health-data runtime admission and rejects inconsistent decisions", () => {
+  it("parses fail-closed health-data admission and rejects revoked processing", () => {
     expect(parseHostedRuntimeHealthDataAdmissionResponse({
       consentState: "missing",
       processingAllowed: true,
@@ -107,6 +107,15 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       consentState: "missing",
       processingAllowed: true,
+      userId: "member_123",
+    });
+    expect(parseHostedRuntimeHealthDataAdmissionResponse({
+      consentState: "missing",
+      processingAllowed: false,
+      userId: "member_123",
+    })).toEqual({
+      consentState: "missing",
+      processingAllowed: false,
       userId: "member_123",
     });
     expect(parseHostedRuntimeHealthDataAdmissionResponse({
@@ -122,7 +131,7 @@ describe("hosted runtime control contracts", () => {
       consentState: "revoked",
       processingAllowed: true,
       userId: "member_123",
-    })).toThrow(/processingAllowed did not match consentState/u);
+    })).toThrow(/cannot allow processing after consent revocation/u);
     expect(() => parseHostedRuntimeHealthDataAdmissionResponse({
       consentState: "unknown",
       processingAllowed: true,
@@ -1537,6 +1546,12 @@ describe("hosted runtime control contracts", () => {
         freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
+        shellPrewarmFirstHintAtEpochMs: 1_777_000_000_061,
+        shellPrewarmFinishedAtEpochMs: 1_777_000_000_063,
+        shellPrewarmOperationElapsedMs: 2,
+        shellPrewarmHintCount: 2,
+        shellPrewarmOutcome: "cold_start_observed",
+        shellPrewarmSource: "linq-typing-started",
         workspaceReadElapsedMs: 30,
         runtimeStoreEnsureElapsedMs: 40,
         runtimeInvocationPreparationElapsedMs: 60,
@@ -1602,6 +1617,16 @@ describe("hosted runtime control contracts", () => {
         mailboxImportDoneToAssistantPhaseMs: 29,
         workspaceAssistantPreAutomationMs: 11,
         automationLaneToAssistantServiceMs: 7,
+        automationReadinessMs: 1,
+        automationInputSelectionMs: 1,
+        automationPassSetupMs: 1,
+        automationCandidateScanMs: 1,
+        automationGroupAndOperationScopeMs: 1,
+        automationTerminalEvidenceMs: 1,
+        automationSessionPreflightMs: 1,
+        automationCrossSessionContextMs: 0,
+        automationPromptPreparationMs: 0,
+        automationServiceHandoffMs: 0,
         executionTargetHydrateMs: 2,
         systemMailboxMaintenanceMs: 3,
         memberPreferencesPrePlanningMs: 4,
@@ -1710,6 +1735,24 @@ describe("hosted runtime control contracts", () => {
       { outboxScanBytesRead: -1 }, // counts must be non-negative
       { receiptScanBytesRead: -1 }, // counts must be non-negative
       { outboxScanElapsedMs: "23" }, // durations must stay numeric
+      { automationSessionPreflightMs: "2" }, // nested durations must stay numeric
+      {
+        automationLaneToAssistantServiceMs: 7,
+        automationReadinessMs: 7,
+      }, // a partial subdivision is ambiguous and must be dropped
+      {
+        automationLaneToAssistantServiceMs: 7,
+        automationReadinessMs: 2,
+        automationInputSelectionMs: 1,
+        automationPassSetupMs: 1,
+        automationCandidateScanMs: 1,
+        automationGroupAndOperationScopeMs: 1,
+        automationTerminalEvidenceMs: 1,
+        automationSessionPreflightMs: 1,
+        automationCrossSessionContextMs: 0,
+        automationPromptPreparationMs: 0,
+        automationServiceHandoffMs: 0,
+      }, // all leaves are required to sum exactly to their parent
       { mailboxImportDoneToAssistantPhaseMs: -1 }, // durations must be non-negative
       { receiptScanFilesRead: 12, receiptScanPath: 1 }, // arbitrary metadata is forbidden
     ]) {
@@ -1743,6 +1786,10 @@ describe("hosted runtime control contracts", () => {
       { activeWakeFoundNoActiveChild: "true" }, // boolean leaf must stay boolean
       { activeWakeElapsedMs: 1.5 }, // duration must be an integer
       { freshStartRequestedAtEpochMs: "1777000000070" }, // string leaf
+      { shellPrewarmHintCount: -1 }, // counts must be non-negative
+      { shellPrewarmFirstHintAtEpochMs: "1777000000061" }, // timestamps stay numeric
+      { shellPrewarmOutcome: "started" }, // outcomes stay in the bounded enum
+      { shellPrewarmSource: "linq" }, // sources stay in the bounded enum
       { runtimeStoreEnsureElapsedMs: -1 }, // duration must be non-negative
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({

@@ -65,6 +65,10 @@ describe("upgradeHostedBillingPlan", () => {
       "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MONTHLY",
       "bpc_pulse_plan_change",
     );
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MAX_MONTHLY",
+      "bpc_max_plan_change",
+    );
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.withHostedMemberStripeMutationLock.mockImplementation(
       async (input: { run: (tx: unknown) => Promise<unknown> }) =>
@@ -172,6 +176,57 @@ describe("upgradeHostedBillingPlan", () => {
       }),
     );
   });
+
+  test.each([
+    ["Core", "launch_group_monthly", "price_group"],
+    ["Pulse", "launch_monthly", "price_pulse"],
+    ["Edge", "launch_edge_monthly", "price_edge"],
+  ] as const)(
+    "builds an exact %s-to-Max Stripe confirmation",
+    async (_sourceName, sourcePlanCode, sourcePriceId) => {
+      mocks.readHostedMemberStripeBillingRef.mockResolvedValue(
+        makeBillingRef({ currentBillingPlanCode: sourcePlanCode }),
+      );
+      mocks.stripe.subscriptions.retrieve.mockResolvedValue(
+        makeSubscription({ priceId: sourcePriceId }),
+      );
+
+      await expect(upgradeHostedBillingPlan({
+        expectedCurrentPlanCode: sourcePlanCode,
+        memberId: "member_fixture",
+        targetPlanCode: "launch_max_monthly",
+      })).resolves.toEqual({
+        billingPlanCode: sourcePlanCode,
+        paymentUrl: "https://billing.stripe.test/session_fixture",
+        status: "pending_payment",
+      });
+
+      expect(mocks.stripe.billingPortal.sessions.create).toHaveBeenCalledWith({
+        configuration: "bpc_max_plan_change",
+        customer: "cus_fixture",
+        flow_data: {
+          after_completion: {
+            redirect: {
+              return_url:
+                "https://join.example.test/settings?planUpdate=launch_max_monthly#subscription",
+            },
+            type: "redirect",
+          },
+          subscription_update_confirm: {
+            items: [{
+              id: "si_plan",
+              price: "price_max",
+              quantity: 1,
+            }],
+            subscription: "sub_fixture",
+          },
+          type: "subscription_update_confirm",
+        },
+        return_url:
+          "https://join.example.test/settings?planUpdate=canceled#subscription",
+      });
+    },
+  );
 
   test("delivers request-id-free plan upgrade failures with stable replay identity", async () => {
     stubAlertEnvironment();
@@ -428,7 +483,7 @@ describe("upgradeHostedBillingPlan", () => {
     });
   });
 
-  test("rejects paid plan changes from a trial", async () => {
+  test("requires paid billing for a retained legacy trial", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
       currentBillingPhase: "trial",
       currentCheckoutOffer: "pulse_trial_7d",
@@ -438,7 +493,7 @@ describe("upgradeHostedBillingPlan", () => {
       memberId: "member_fixture",
       targetPlanCode: "launch_edge_monthly",
     })).rejects.toMatchObject({
-      code: "HOSTED_BILLING_PLAN_UPGRADE_TRIAL_UNSUPPORTED",
+      code: "HOSTED_PAID_SUBSCRIPTION_REQUIRED",
       httpStatus: 409,
     });
   });
@@ -448,6 +503,7 @@ function makePlanConfig(input: {
   billingPlanCode:
     | "launch_edge_monthly"
     | "launch_group_monthly"
+    | "launch_max_monthly"
     | "launch_monthly";
 }) {
   return {
@@ -455,6 +511,7 @@ function makePlanConfig(input: {
     priceId: {
       launch_edge_monthly: "price_edge",
       launch_group_monthly: "price_group",
+      launch_max_monthly: "price_max",
       launch_monthly: "price_pulse",
     }[input.billingPlanCode],
     stripe: mocks.stripe,
@@ -467,6 +524,7 @@ function makeBillingRef(input: {
   currentBillingPlanCode?:
     | "launch_edge_monthly"
     | "launch_group_monthly"
+    | "launch_max_monthly"
     | "launch_monthly";
   currentCheckoutOffer?: "pulse_trial_7d" | "standard";
   stripeSubscriptionId?: string;

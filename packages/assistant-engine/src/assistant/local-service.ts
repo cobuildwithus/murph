@@ -815,6 +815,7 @@ export async function sendAssistantMessageLocal(
                     sendVaultFile: async (
                       ref: string,
                       toolCallId?: string | null,
+                      retireExportPackIds?: readonly string[],
                     ) => {
                       const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
                         input: currentInput,
@@ -852,6 +853,7 @@ export async function sendAssistantMessageLocal(
                         explicitTarget: deliveryFields.explicitTarget,
                         identityId: deliveryFields.identityId,
                         ref,
+                        retireExportPackIds,
                         replyToMessageId: deliveryFields.replyToMessageId,
                         sessionId: currentSession.sessionId,
                         threadId: deliveryFields.threadId,

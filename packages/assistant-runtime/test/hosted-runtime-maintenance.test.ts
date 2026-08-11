@@ -33,12 +33,18 @@ const mocks = vi.hoisted(() => ({
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
 }));
 
-vi.mock("@murphai/device-syncd/config", () => ({
-  createConfiguredDeviceSyncProvidersFromConfigs:
-    mocks.createConfiguredDeviceSyncProvidersFromConfigs,
-  readConfiguredJunctionDeviceSyncProviderConfig:
-    mocks.readConfiguredJunctionDeviceSyncProviderConfig,
-}));
+vi.mock("@murphai/device-syncd/config", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/device-syncd/config")
+  >();
+  return {
+    ...actual,
+    createConfiguredDeviceSyncProvidersFromConfigs:
+      mocks.createConfiguredDeviceSyncProvidersFromConfigs,
+    readConfiguredJunctionDeviceSyncProviderConfig:
+      mocks.readConfiguredJunctionDeviceSyncProviderConfig,
+  };
+});
 
 vi.mock("@murphai/device-syncd/registry", () => ({
   createDeviceSyncRegistry: mocks.createDeviceSyncRegistry,
@@ -224,7 +230,7 @@ function createHostedAutomationRuntime(input: {
 }
 
 beforeEach(async () => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   await rm(FIXED_MAINTENANCE_VAULT_ROOT, {
     force: true,
     recursive: true,
@@ -1700,6 +1706,71 @@ describe("runHostedDeviceSyncPass", () => {
     );
   });
 
+  it("builds a member-only provider runtime from one credential-bearing snapshot", async () => {
+    const memberProviderConfigs = {
+      strava: {
+        clientId: "member-client",
+        clientSecret: "member-secret",
+      },
+    };
+    const snapshot = {
+      connections: [{ connection: { id: "dsc_strava", status: "active" } }],
+      providerConfigs: memberProviderConfigs,
+      userId: "member_123",
+    };
+    const port = createMaintenanceDeviceSyncPortStub();
+    port.fetchSnapshot.mockResolvedValue(snapshot);
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 0),
+      getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["strava"]);
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: () => ["strava"],
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_member_provider_config",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      {
+        providerConfigs: {},
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
+      port,
+      45_000,
+    );
+
+    expect(port.fetchSnapshot).toHaveBeenCalledTimes(1);
+    expect(port.fetchSnapshot).toHaveBeenCalledWith({
+      includeCredentialMaterial: true,
+      signal: null,
+    });
+    expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith(
+      memberProviderConfigs,
+    );
+    expect(mocks.createHostedRuntimeDeviceSyncService).toHaveBeenCalledTimes(1);
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot,
+      }),
+    );
+    expect(
+      mocks.syncHostedDeviceSyncControlPlaneState.mock.calls[0]?.[0]?.snapshot,
+    ).toBe(snapshot);
+  });
+
   it("stops a superseded connection wake after hydration without running device-sync work", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 0);
@@ -2831,8 +2902,8 @@ describe("runHostedDeviceSyncPass", () => {
     expect(runSchedulerOnce).not.toHaveBeenCalled();
     expect(drainWorker).not.toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
-    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
-    expect(close).toHaveBeenCalledTimes(1);
+    await expectDenseRawRetentionMailboxWakeAt(null);
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("carries staged dirty acks when foreground input arrives after dirty fetch", async () => {
@@ -2840,6 +2911,7 @@ describe("runHostedDeviceSyncPass", () => {
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
     const shouldYield = vi.fn()
+      .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValue(true);
 
@@ -2918,6 +2990,7 @@ describe("runHostedDeviceSyncPass", () => {
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
     const shouldYield = vi.fn()
+      .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValue(true);
@@ -3650,6 +3723,9 @@ describe("runHostedAssistantAutomationLane", () => {
       preProviderPhase: {
         workspaceAssistantPreAutomationMs: 11,
       },
+      providerStartCriticalPath: {
+        mailboxImportDoneAtMonotonicMs: 0,
+      },
       vaultRoot: "/tmp/vault-root",
     });
 
@@ -3695,6 +3771,12 @@ describe("runHostedAssistantAutomationLane", () => {
       onProviderRequestStarted: expect.any(Function),
       onTerminalNonReplyCommitted: expect.any(Function),
       onTraceEvent: expect.any(Function),
+      providerStartCriticalPath: {
+        automationInputSelectionDoneAtMonotonicMs: 0,
+        automationLaneStartedAtMonotonicMs: 0,
+        automationReadinessDoneAtMonotonicMs: 0,
+        mailboxImportDoneAtMonotonicMs: 0,
+      },
       requestId: "req_123",
       shouldDeferCron: expect.any(Function),
       shouldYieldBackgroundMaintenance: null,
@@ -3731,7 +3813,17 @@ describe("runHostedAssistantAutomationLane", () => {
       codexAppServerWarmReuseMs: 0,
       providerStartCriticalPath: {
         assistantServicePreLockMs: 5,
+        automationCandidateScanMs: 1,
+        automationCrossSessionContextMs: 0,
+        automationGroupAndOperationScopeMs: 1,
+        automationInputSelectionMs: 1,
         automationLaneToAssistantServiceMs: 7,
+        automationPassSetupMs: 1,
+        automationPromptPreparationMs: 0,
+        automationReadinessMs: 1,
+        automationServiceHandoffMs: 0,
+        automationSessionPreflightMs: 1,
+        automationTerminalEvidenceMs: 1,
         codexAppServerPreProviderMs: 19,
         codexProcessPreparationMs: 3,
         mailboxImportDoneToAssistantPhaseMs: 29,
@@ -3751,6 +3843,10 @@ describe("runHostedAssistantAutomationLane", () => {
         at: "2026-04-08T00:00:01.000Z",
         phaseBreakdown: {
           preProvider: {
+            automationCandidateScanMs: 1,
+            automationCrossSessionContextMs: 0,
+            automationGroupAndOperationScopeMs: 1,
+            automationInputSelectionMs: 1,
             outboxScanBytesRead: 8_192,
             outboxScanElapsedMs: 23,
             outboxScanFilesRead: 10,
@@ -3761,6 +3857,12 @@ describe("runHostedAssistantAutomationLane", () => {
             receiptScanLockWaitMs: 3,
             receiptScanPerformed: true,
             automationLaneToAssistantServiceMs: 7,
+            automationPassSetupMs: 1,
+            automationPromptPreparationMs: 0,
+            automationReadinessMs: 1,
+            automationServiceHandoffMs: 0,
+            automationSessionPreflightMs: 1,
+            automationTerminalEvidenceMs: 1,
             mailboxImportDoneToAssistantPhaseMs: 29,
             workspaceAssistantPreAutomationMs: 17,
           },
@@ -3848,6 +3950,72 @@ describe("runHostedAssistantAutomationLane", () => {
         source: "telegram",
         type: "provider_started",
       },
+    });
+    const canonicalCriticalPath = {
+      assistantServicePreLockMs: 5,
+      automationLaneToAssistantServiceMs: 7,
+      codexAppServerPreProviderMs: 19,
+      codexProcessPreparationMs: 3,
+      mailboxImportDoneToAssistantPhaseMs: 29,
+      preProviderSetupMs: 11,
+      providerPlanAndGateMs: 13,
+      turnLockWaitMs: 2,
+      workspaceAssistantPreAutomationMs: 17,
+    };
+    automationPassInput.onProviderRequestStarted?.({
+      assistantInputIds: ["input_partial_subdivision"],
+      providerRequestOrdinal: 1,
+      providerStartCriticalPath: {
+        ...canonicalCriticalPath,
+        automationReadinessMs: 7,
+      },
+      source: "linq",
+      startedAt: "2026-04-08T00:00:03.000Z",
+    });
+    await Promise.resolve();
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(5);
+    expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+      event: expect.objectContaining({
+        phaseBreakdown: expect.objectContaining({
+          preProvider: {
+            automationLaneToAssistantServiceMs: 7,
+            mailboxImportDoneToAssistantPhaseMs: 29,
+            workspaceAssistantPreAutomationMs: 17,
+          },
+        }),
+      }),
+    });
+    automationPassInput.onProviderRequestStarted?.({
+      assistantInputIds: ["input_mismatched_subdivision"],
+      providerRequestOrdinal: 2,
+      providerStartCriticalPath: {
+        ...canonicalCriticalPath,
+        automationCandidateScanMs: 1,
+        automationCrossSessionContextMs: 0,
+        automationGroupAndOperationScopeMs: 1,
+        automationInputSelectionMs: 1,
+        automationPassSetupMs: 1,
+        automationPromptPreparationMs: 0,
+        automationReadinessMs: 2,
+        automationServiceHandoffMs: 0,
+        automationSessionPreflightMs: 1,
+        automationTerminalEvidenceMs: 1,
+      },
+      source: "linq",
+      startedAt: "2026-04-08T00:00:04.000Z",
+    });
+    await Promise.resolve();
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(6);
+    expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+      event: expect.objectContaining({
+        phaseBreakdown: expect.objectContaining({
+          preProvider: {
+            automationLaneToAssistantServiceMs: 7,
+            mailboxImportDoneToAssistantPhaseMs: 29,
+            workspaceAssistantPreAutomationMs: 17,
+          },
+        }),
+      }),
     });
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });

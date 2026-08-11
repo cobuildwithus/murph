@@ -1,7 +1,7 @@
 import "server-only";
 
 import type {
-  HostedRuntimeFamilyPlanCreateInviteRequest,
+  HostedFamilyPlanCode,
   HostedRuntimeFamilyPlanToolInvite,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
@@ -12,16 +12,21 @@ import type {
 
 import {
   createHostedFamilyBillingCheckout,
-  type HostedFamilyChatInviteResult,
   ensureHostedAccountGroupForOwnerTx,
   readHostedFamilyAccessForMember,
   issueHostedFamilyInviteFromOwnerTx,
   readHostedFamilyOwnerSnapshotForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
+  HOSTED_FAMILY_PLAN_DISPLAY,
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
+  parseHostedBillingPhase,
+  parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  readHostedMemberStripeBillingRef,
+} from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
@@ -52,7 +57,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
       action: "start_checkout",
       result: await startHostedRuntimeFamilyPlanCheckout(
         input.memberId,
-        input.request.invite ?? null,
+        input.request.confirmedTrialConversion,
       ),
     };
   }
@@ -96,7 +101,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
 
 async function startHostedRuntimeFamilyPlanCheckout(
   memberId: string,
-  inviteRequest: HostedRuntimeFamilyPlanCreateInviteRequest | null,
+  confirmedTrialConversion?: true,
 ): Promise<HostedRuntimeFamilyPlanToolStartCheckoutResponse> {
   const prisma = getPrisma();
   const ownerSnapshot = await readHostedFamilyOwnerSnapshotForMember({
@@ -104,48 +109,12 @@ async function startHostedRuntimeFamilyPlanCheckout(
     prisma,
   });
   if (ownerSnapshot?.billingActive) {
-    if (inviteRequest) {
-      const prepared = await prisma.$transaction(async (tx) => {
-        return await issueHostedFamilyInviteFromOwnerTx({
-          ownerMemberId: memberId,
-          planCode: inviteRequest.planCode ?? "pulse",
-          targetEmail: inviteRequest.targetEmail ?? null,
-          targetLabel: inviteRequest.targetLabel ?? null,
-          targetPhoneNumber: inviteRequest.targetPhoneNumber ?? null,
-          targetTelegramUsername: inviteRequest.targetTelegramUsername ?? null,
-          tx,
-        });
-      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-      const refreshedSnapshot = await readHostedFamilyOwnerSnapshotForMember({
-        memberId,
-        prisma,
-      });
-
-      return {
-        alreadyActive: true,
-        billingActive: true,
-        billingStatus: refreshedSnapshot?.billingStatus ?? ownerSnapshot.billingStatus,
-        checkoutUrl: null,
-        owner: true,
-        preparedInvite: projectPreparedHostedRuntimeFamilyPlanToolInvite(
-          prepared,
-          refreshedSnapshot,
-        ),
-        preparedInviteReplyText: prepared.replyText,
-        plans: refreshedSnapshot?.plans ?? ownerSnapshot.plans,
-        seats: refreshedSnapshot?.seats ?? ownerSnapshot.seats,
-        unavailableReason: null,
-      };
-    }
-
     return {
       alreadyActive: true,
       billingActive: true,
       billingStatus: ownerSnapshot.billingStatus,
       checkoutUrl: null,
       owner: true,
-      preparedInvite: null,
-      preparedInviteReplyText: null,
       plans: ownerSnapshot.plans,
       seats: ownerSnapshot.seats,
       unavailableReason: null,
@@ -162,8 +131,6 @@ async function startHostedRuntimeFamilyPlanCheckout(
       billingStatus: ownerSnapshot?.billingStatus ?? "none",
       checkoutUrl: null,
       owner: false,
-      preparedInvite: null,
-      preparedInviteReplyText: null,
       plans: emptyHostedRuntimeFamilyPlanPlans(),
       seats: emptyHostedRuntimeFamilyPlanSeatStatus(),
       unavailableReason: "already_sponsored",
@@ -177,6 +144,9 @@ async function startHostedRuntimeFamilyPlanCheckout(
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const checkout = await createHostedFamilyBillingCheckout({
+    ...(confirmedTrialConversion
+      ? { confirmedTrialConversion: true }
+      : {}),
     groupId: group.id,
     ownerMemberId: memberId,
     prisma,
@@ -192,8 +162,6 @@ async function startHostedRuntimeFamilyPlanCheckout(
     billingStatus: snapshot?.billingStatus ?? group.billingStatus,
     checkoutUrl: checkout.url,
     owner: true,
-    preparedInvite: null,
-    preparedInviteReplyText: null,
     plans: snapshot?.plans ?? emptyHostedRuntimeFamilyPlanPlans(),
     seats: snapshot?.seats ?? emptyHostedRuntimeFamilyPlanSeatStatus(),
     unavailableReason: null,
@@ -203,11 +171,39 @@ async function startHostedRuntimeFamilyPlanCheckout(
 async function readHostedRuntimeFamilyPlanToolStatus(
   memberId: string,
 ): Promise<HostedRuntimeFamilyPlanToolStatusResponse> {
-  const snapshot = await readHostedFamilyOwnerSnapshotForMember({
-    memberId,
-  });
+  const prisma = getPrisma();
+  const [snapshot, directBillingRef, familyAccess, member] = await Promise.all([
+    readHostedFamilyOwnerSnapshotForMember({ memberId, prisma }),
+    readHostedMemberStripeBillingRef({ memberId, prisma }),
+    readHostedFamilyAccessForMember({ memberId, prisma }),
+    prisma.hostedMember.findUnique({
+      select: { billingStatus: true, suspendedAt: true },
+      where: { id: memberId },
+    }),
+  ]);
+  const activeTrialConversion =
+    !snapshot?.billingActive
+    && !familyAccess
+    && member?.billingStatus === "active"
+    && !member.suspendedAt
+    && parseHostedBillingPhase(directBillingRef?.currentBillingPhase) === "trial"
+    && parseHostedBillingPlanCode(directBillingRef?.currentBillingPlanCode)
+      === "launch_monthly"
+    && Boolean(directBillingRef?.stripeCustomerId)
+    && Boolean(directBillingRef?.stripeSubscriptionId)
+      ? {
+          includedPulseSeats: HOSTED_FAMILY_PLAN_DISPLAY.minSeats,
+          monthlyAmountUsdCents:
+            HOSTED_FAMILY_PLAN_DISPLAY.minSeats
+            * HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
+          perSeatMonthlyAmountUsdCents:
+            HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
+          trialEndsImmediately: true as const,
+        }
+      : null;
   if (!snapshot) {
     return {
+      activeTrialConversion,
       billingActive: false,
       billingStatus: "none",
       members: [],
@@ -219,6 +215,7 @@ async function readHostedRuntimeFamilyPlanToolStatus(
   }
 
   return {
+    activeTrialConversion,
     billingActive: snapshot.billingActive,
     billingStatus: snapshot.billingStatus,
     members: snapshot.members.map((member) => ({
@@ -238,7 +235,7 @@ async function readHostedRuntimeFamilyPlanToolStatus(
 function projectHostedRuntimeFamilyPlanToolInvite(input: {
   acceptUrl: string | null;
   expiresAt: Date;
-  planCode: "edge" | "pulse";
+  planCode: HostedFamilyPlanCode;
   status: string;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -255,36 +252,10 @@ function projectHostedRuntimeFamilyPlanToolInvite(input: {
   };
 }
 
-function projectPreparedHostedRuntimeFamilyPlanToolInvite(
-  prepared: HostedFamilyChatInviteResult,
-  snapshot: { invites: Array<{
-    acceptUrl: string | null;
-    expiresAt: Date;
-    id: string;
-    planCode: "edge" | "pulse";
-    status: string;
-    targetLabel: string | null;
-    targetPhoneHint: string | null;
-    telegramInviteUrl: string | null;
-  }> } | null | undefined,
-): HostedRuntimeFamilyPlanToolInvite {
-  const snapshotInvite = snapshot?.invites.find(
-    (row) => row.id === prepared.invite.id,
-  );
-  return projectHostedRuntimeFamilyPlanToolInvite(snapshotInvite ?? {
-    acceptUrl: null,
-    expiresAt: prepared.invite.expiresAt,
-    planCode: prepared.invite.planCode,
-    status: prepared.invite.status,
-    targetLabel: prepared.invite.targetLabel,
-    targetPhoneHint: prepared.invite.targetPhoneHint,
-    telegramInviteUrl: null,
-  });
-}
-
 function emptyHostedRuntimeFamilyPlanPlans() {
   return {
     edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+    max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
     pulse: {
       active: 0,
       billed: HOSTED_FAMILY_MIN_SEATS,

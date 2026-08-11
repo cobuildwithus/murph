@@ -40,6 +40,13 @@ import {
   HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX,
 } from "../hosted-orchestration/browser-vault-refresh-control";
 import { getPrisma } from "../prisma";
+import {
+  HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+  buildHostedStarterUsageSemanticSourceKey,
+  buildHostedStarterUsageSourceReferenceLookupKey,
+  parseHostedStarterUsageSourceReferenceLookupKey,
+  type HostedStarterUsageSource,
+} from "./starter-usage";
 
 const HOSTED_PRIVY_PHONE_TRANSFER_AUTHORITY_TIMEOUT_MS = 5_000;
 const HOSTED_PRIVY_PHONE_TRANSFER_MAX_SCAFFOLD_SESSIONS = 20;
@@ -243,6 +250,7 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
     await classifyHostedPrivyPhoneTransferSourceScaffoldTx({
       identity: sourceIdentity,
       memberId: sourceMember.id,
+      now: input.now,
       phoneNumber,
       prisma: input.prisma,
       sourcePrivyUserId: input.transfer.sourcePrivyUserId,
@@ -330,6 +338,7 @@ export async function assertHostedPrivyPhoneTransferSourceRetirementFenceTx(
 async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
   identity: NonNullable<Awaited<ReturnType<typeof readHostedMemberIdentity>>>;
   memberId: string;
+  now: Date;
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
   sourcePrivyUserId: string;
@@ -408,6 +417,7 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
 
   await assertNoHostedPrivyPhoneTransferExternalMaterialTx({
     memberId: input.memberId,
+    now: input.now,
     phoneNumber: input.phoneNumber,
     prisma: input.prisma,
   });
@@ -417,6 +427,8 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
       source.billingRef
       || source.hostedWorkspace
       || source.routing
+      || (source.usageCreditBalanceUsdMicros ?? 0n) !== 0n
+      || (source.usageCreditLedgerVersion ?? 0n) !== 0n
       || hasUnexpectedHostedPrivyPhoneTransferRelationCount(source._count, {
         hostedCryptoAudits: 1,
         hostedCryptoEnvelopes: 1,
@@ -432,15 +444,44 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
     return null;
   }
 
+  if (source.billingRef) {
+    if (
+      (
+        source.billingStatus !== HostedBillingStatus.active
+        && source.billingStatus !== HostedBillingStatus.canceled
+        && source.billingStatus !== HostedBillingStatus.incomplete
+      )
+      || !source.hostedWorkspace
+      || !source.routing
+      || (source.usageCreditBalanceUsdMicros ?? 0n) !== 0n
+      || (source.usageCreditLedgerVersion ?? 0n) !== 0n
+      || hasUnexpectedHostedPrivyPhoneTransferRelationCount(
+        source._count,
+        {
+          consentEvents: 2,
+          consentGrants: 2,
+          hostedCryptoAudits: 4,
+          hostedCryptoEnvelopes: 4,
+        },
+        HOSTED_PRIVY_PHONE_TRANSFER_RUNTIME_OWNED_RELATIONS,
+      )
+    ) {
+      throwHostedPrivyPhoneTransferSourceNotDisposable();
+    }
+
+    return assertHostedPrivyPhoneTransferAutoTrialScaffoldTx({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+  }
+
   if (
-    (
-      source.billingStatus !== HostedBillingStatus.active
-      && source.billingStatus !== HostedBillingStatus.canceled
-      && source.billingStatus !== HostedBillingStatus.incomplete
-    )
-    || !source.billingRef
+    source.billingStatus !== HostedBillingStatus.active
     || !source.hostedWorkspace
     || !source.routing
+    || source.usageCreditBalanceUsdMicros
+      !== HOSTED_STARTER_USAGE_GRANT_USD_MICROS
+    || source.usageCreditLedgerVersion !== 1n
     || hasUnexpectedHostedPrivyPhoneTransferRelationCount(
       source._count,
       {
@@ -448,6 +489,7 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
         consentGrants: 2,
         hostedCryptoAudits: 4,
         hostedCryptoEnvelopes: 4,
+        usageCreditEntries: 1,
       },
       HOSTED_PRIVY_PHONE_TRANSFER_RUNTIME_OWNED_RELATIONS,
     )
@@ -455,10 +497,11 @@ async function classifyHostedPrivyPhoneTransferSourceScaffoldTx(input: {
     throwHostedPrivyPhoneTransferSourceNotDisposable();
   }
 
-  return assertHostedPrivyPhoneTransferAutoTrialScaffoldTx({
+  await assertHostedPrivyPhoneTransferStarterScaffoldTx({
     memberId: input.memberId,
     prisma: input.prisma,
   });
+  return null;
 }
 
 async function readHostedPrivyPhoneTransferSourceShapeTx(input: {
@@ -494,8 +537,6 @@ async function readHostedPrivyPhoneTransferSourceShapeTx(input: {
       hostedWorkspace: { select: { userId: true } },
       pendingActivationTimeZone: true,
       routing: { select: { memberId: true } },
-      signupNotificationEmailAttemptedAt: true,
-      signupWelcomeEmailAttemptedAt: true,
       threadContainer: { select: { memberId: true } },
       usageCreditBalanceUsdMicros: true,
       usageCreditLedgerVersion: true,
@@ -557,9 +598,7 @@ function hasHostedPrivyPhoneTransferSourceCoreCustomization(
   >,
 ): boolean {
   return (
-    (source.usageCreditBalanceUsdMicros ?? 0n) !== 0n
-    || (source.usageCreditLedgerVersion ?? 0n) !== 0n
-    || Boolean(
+    Boolean(
       source.addressBookProjection
       || source.codexAuthConnection
       || source.connectedAppsSession
@@ -567,8 +606,6 @@ function hasHostedPrivyPhoneTransferSourceCoreCustomization(
       || source.hostedGroupRuntime
       || source.threadContainer
       || source.pendingActivationTimeZone
-      || source.signupNotificationEmailAttemptedAt
-      || source.signupWelcomeEmailAttemptedAt
     )
     || [
       source.assistantDetail,
@@ -682,6 +719,7 @@ function isExactHostedPrivyPhoneTransferSourceIdentity(input: {
 
 async function assertNoHostedPrivyPhoneTransferExternalMaterialTx(input: {
   memberId: string;
+  now: Date;
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
@@ -698,7 +736,13 @@ async function assertNoHostedPrivyPhoneTransferExternalMaterialTx(input: {
     input.prisma.deviceSyncCompanionCaptureReceipt.findFirst({ where: { userId: input.memberId }, select: { id: true } }),
     input.prisma.deviceAgentSession.findFirst({ where: { userId: input.memberId }, select: { id: true } }),
     input.prisma.deviceBrowserAssertionNonce.findFirst({ where: { userId: input.memberId }, select: { nonceHash: true } }),
-    input.prisma.hostedWebInternalRequestNonce.findFirst({ where: { userId: input.memberId }, select: { nonceHash: true } }),
+    input.prisma.hostedWebInternalRequestNonce.findFirst({
+      where: {
+        expiresAt: { gte: input.now },
+        userId: input.memberId,
+      },
+      select: { nonceHash: true },
+    }),
     input.prisma.hostedIngressLatencyTrace.findFirst({ where: { userId: input.memberId }, select: { id: true } }),
     input.prisma.hostedLinqDelivery.findFirst({
       where: {
@@ -848,7 +892,7 @@ async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
   const hasAssignedHomeLine = Boolean(assignedHomeLine);
 
   if (
-    !isHostedPrivyPhoneTransferAutoTrialRoutingScaffold({
+    !isHostedPrivyPhoneTransferActivationRoutingScaffold({
       hasAssignedHomeLine,
       routing,
     })
@@ -861,12 +905,14 @@ async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
       memberId: input.memberId,
       stripeSubscriptionId: billingRef.stripeSubscriptionId,
     })
-    || !isHostedPrivyPhoneTransferAutoTrialMailboxCounters(
-      mailboxLaneCounters,
-    )
-    || !isHostedPrivyPhoneTransferAutoTrialConsentScaffold({
+    || !isHostedPrivyPhoneTransferActivationMailboxCounters({
+      counters: mailboxLaneCounters,
+      items: mailboxItems,
+    })
+    || !isHostedPrivyPhoneTransferActivationConsentScaffold({
       events: consentEvents,
       grants: consentGrants,
+      source: "homepage-auth-dialog",
     })
   ) {
     throwHostedPrivyPhoneTransferSourceNotDisposable();
@@ -881,6 +927,164 @@ async function assertHostedPrivyPhoneTransferAutoTrialScaffoldTx(input: {
     stripeCustomerId: billingRef.stripeCustomerId,
     stripeSubscriptionId: billingRef.stripeSubscriptionId,
   };
+}
+
+async function assertHostedPrivyPhoneTransferStarterScaffoldTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const semanticSourceKey = buildHostedStarterUsageSemanticSourceKey(
+    input.memberId,
+  );
+  const [
+    starterGrant,
+    routing,
+    workspace,
+    mailboxItems,
+    mailboxLaneCounters,
+    consentEvents,
+    consentGrants,
+  ] = await Promise.all([
+    input.prisma.hostedUsageCreditEntry.findUnique({
+      where: { semanticSourceKey },
+      select: {
+        amountUsdMicros: true,
+        beneficiaryMemberId: true,
+        beneficiarySequence: true,
+        grant: {
+          select: { remainingUsdMicros: true },
+        },
+        kind: true,
+        parentGrantEntryId: true,
+        purchaseId: true,
+        referralId: true,
+        sourceReferenceLookupKey: true,
+        sourceUsageId: true,
+      },
+    }),
+    input.prisma.hostedMemberRouting.findUnique({
+      where: { memberId: input.memberId },
+    }),
+    input.prisma.hostedWorkspace.findUnique({
+      where: { userId: input.memberId },
+    }),
+    input.prisma.hostedMailboxItem.findMany({
+      where: { userId: input.memberId },
+      orderBy: { laneSeq: "asc" },
+      select: {
+        causalSeq: true,
+        consumedAt: true,
+        contentRetiredAt: true,
+        dedupeKey: true,
+        kind: true,
+        lane: true,
+        laneSeq: true,
+        occurredAt: true,
+        payloadSchema: true,
+      },
+    }),
+    input.prisma.hostedMailboxLaneCounter.findMany({
+      where: { userId: input.memberId },
+      orderBy: { lane: "asc" },
+      select: {
+        consumedSeq: true,
+        lane: true,
+        nextSeq: true,
+      },
+    }),
+    input.prisma.hostedConsentEvent.findMany({
+      where: { memberId: input.memberId },
+      select: {
+        action: true,
+        scope: true,
+        source: true,
+      },
+    }),
+    input.prisma.hostedConsentGrant.findMany({
+      where: { memberId: input.memberId },
+      select: {
+        revokedAt: true,
+        scope: true,
+        source: true,
+        status: true,
+      },
+    }),
+  ]);
+  const starterSource = parseHostedStarterUsageSourceReferenceLookupKey(
+    starterGrant?.sourceReferenceLookupKey,
+  );
+  if (
+    !starterGrant
+    || !isHostedPrivyPhoneTransferDisposableStarterSource(starterSource)
+    || starterGrant.amountUsdMicros
+      !== HOSTED_STARTER_USAGE_GRANT_USD_MICROS
+    || starterGrant.beneficiaryMemberId !== input.memberId
+    || starterGrant.beneficiarySequence !== 1n
+    || starterGrant.kind !== "starter_grant"
+    || starterGrant.parentGrantEntryId !== null
+    || starterGrant.purchaseId !== null
+    || starterGrant.referralId !== null
+    || starterGrant.sourceUsageId !== null
+    || starterGrant.sourceReferenceLookupKey
+      !== buildHostedStarterUsageSourceReferenceLookupKey(starterSource)
+    || starterGrant.grant?.remainingUsdMicros
+      !== HOSTED_STARTER_USAGE_GRANT_USD_MICROS
+  ) {
+    throwHostedPrivyPhoneTransferSourceNotDisposable();
+  }
+
+  const assignedHomeLine = routing?.linqRecipientPhoneLookupKey
+    ? await input.prisma.hostedLinqLine.findUnique({
+        where: { phoneNumberLookupKey: routing.linqRecipientPhoneLookupKey },
+        select: { phoneNumberLookupKey: true },
+      })
+    : null;
+  const activationEventId = [
+    "member.activated",
+    "hosted.starter_usage.enrolled",
+    input.memberId,
+    semanticSourceKey,
+  ].join(":");
+  if (
+    !isHostedPrivyPhoneTransferActivationRoutingScaffold({
+      hasAssignedHomeLine: Boolean(assignedHomeLine),
+      routing,
+    })
+    || !workspace
+    || !isHostedPrivyPhoneTransferStarterMailboxScaffold({
+      activationEventId,
+      items: mailboxItems,
+      memberId: input.memberId,
+      source: starterSource,
+    })
+    || !isHostedPrivyPhoneTransferActivationMailboxCounters({
+      counters: mailboxLaneCounters,
+      items: mailboxItems,
+    })
+    || !isHostedPrivyPhoneTransferActivationConsentScaffold({
+      events: consentEvents,
+      grants: consentGrants,
+      source: starterSource === "companion_onboarding"
+        ? "native-companion"
+        : "homepage-auth-dialog",
+    })
+  ) {
+    throwHostedPrivyPhoneTransferSourceNotDisposable();
+  }
+  await assertHostedPrivyPhoneTransferCryptoScaffoldTx({
+    domains: ["control", "device", "ingress", "runtime"],
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+}
+
+function isHostedPrivyPhoneTransferDisposableStarterSource(
+  source: HostedStarterUsageSource | null,
+): source is Extract<
+  HostedStarterUsageSource,
+  "companion_onboarding" | "web_onboarding"
+> {
+  return source === "companion_onboarding" || source === "web_onboarding";
 }
 
 async function assertHostedPrivyPhoneTransferCryptoScaffoldTx(input: {
@@ -942,7 +1146,7 @@ async function assertHostedPrivyPhoneTransferCryptoScaffoldTx(input: {
   }
 }
 
-function isHostedPrivyPhoneTransferAutoTrialRoutingScaffold(input: {
+function isHostedPrivyPhoneTransferActivationRoutingScaffold(input: {
   hasAssignedHomeLine: boolean;
   routing: Awaited<
     ReturnType<Prisma.TransactionClient["hostedMemberRouting"]["findUnique"]>
@@ -988,18 +1192,20 @@ function isHostedPrivyPhoneTransferAutoTrialRoutingScaffold(input: {
   );
 }
 
+type HostedPrivyPhoneTransferMailboxItem = {
+  causalSeq: bigint | null;
+  consumedAt: Date | null;
+  contentRetiredAt: Date | null;
+  dedupeKey: string;
+  kind: string;
+  lane: string;
+  laneSeq: bigint;
+  occurredAt: Date;
+  payloadSchema: string;
+};
+
 function isHostedPrivyPhoneTransferAutoTrialMailboxScaffold(input: {
-  items: ReadonlyArray<{
-    causalSeq: bigint | null;
-    consumedAt: Date | null;
-    contentRetiredAt: Date | null;
-    dedupeKey: string;
-    kind: string;
-    lane: string;
-    laneSeq: bigint;
-    occurredAt: Date;
-    payloadSchema: string;
-  }>;
+  items: readonly HostedPrivyPhoneTransferMailboxItem[];
   memberId: string;
   stripeSubscriptionId: string;
 }): boolean {
@@ -1038,34 +1244,100 @@ function isHostedPrivyPhoneTransferAutoTrialMailboxScaffold(input: {
   );
 }
 
-function isHostedPrivyPhoneTransferAutoTrialMailboxCounters(
+function isHostedPrivyPhoneTransferStarterMailboxScaffold(input: {
+  activationEventId: string;
+  items: readonly HostedPrivyPhoneTransferMailboxItem[];
+  memberId: string;
+  source: Extract<
+    HostedStarterUsageSource,
+    "companion_onboarding" | "web_onboarding"
+  >;
+}): boolean {
+  const [activation, second, ...rest] = input.items;
+  if (
+    !activation
+    || activation.kind !== "member.activated"
+    || activation.dedupeKey !== input.activationEventId
+    || activation.laneSeq !== 1n
+    || activation.causalSeq !== 1n
+  ) {
+    return false;
+  }
+
+  const welcomeEventId =
+    `assistant.notification.requested:signup-welcome:${input.memberId}:${input.activationEventId}`;
+  const hasExpectedWelcome = Boolean(
+    second
+    && second.kind === "assistant.notification.requested"
+    && second.dedupeKey === welcomeEventId
+    && second.laneSeq === 2n
+    && second.causalSeq === 2n
+  );
+  // Web enrollment always owns the signup welcome. Companion admission may
+  // suppress it because the native flow presents its own first-run surface,
+  // while direct companion sign-in keeps the ordinary hosted welcome. Accept
+  // only those two exact platform-authored companion shapes.
+  if (input.source === "web_onboarding" && !hasExpectedWelcome) {
+    return false;
+  }
+  const runtimeControls = hasExpectedWelcome
+    ? rest
+    : input.items.slice(1);
+
+  return runtimeControls.every((item) =>
+      item.kind === "runtime.browser-vault-refresh-requested"
+      && item.dedupeKey.startsWith(
+        HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX,
+      )
+    )
+    && input.items.every((item) =>
+      item.lane === "system"
+      && item.payloadSchema === "murph.hosted-mailbox-item.v1"
+    );
+}
+
+function isHostedPrivyPhoneTransferActivationMailboxCounters(input: {
   counters: ReadonlyArray<{
     consumedSeq: bigint;
     lane: string;
     nextSeq: bigint;
-  }>,
-): boolean {
-  const causal = counters.filter((counter) => counter.lane === "causal");
-  const system = counters.filter((counter) => counter.lane === "system");
-  const conversation = counters.filter((counter) =>
+  }>;
+  items: readonly HostedPrivyPhoneTransferMailboxItem[];
+}): boolean {
+  const causal = input.counters.filter((counter) => counter.lane === "causal");
+  const system = input.counters.filter((counter) => counter.lane === "system");
+  const conversation = input.counters.filter((counter) =>
     counter.lane === "conversation"
+  );
+  const minimumSystemNextSeq = input.items.reduce(
+    (nextSeq, item) => item.laneSeq >= nextSeq ? item.laneSeq + 1n : nextSeq,
+    1n,
+  );
+  const minimumCausalNextSeq = input.items.reduce(
+    (nextSeq, item) =>
+      item.causalSeq !== null && item.causalSeq >= nextSeq
+        ? item.causalSeq + 1n
+        : nextSeq,
+    1n,
   );
   // Causal/system counters advance as the runtime enqueues and consumes
   // its own control events. The conversation counter is the durable
   // record that a member conversation input ever existed: the runtime
   // creates it eagerly at nextSeq 1, and any enqueued conversation
   // message moves it past 1 forever.
-  return counters.length === causal.length + system.length + conversation.length
+  return input.counters.length
+      === causal.length + system.length + conversation.length
     && causal.length === 1
     && system.length === 1
     && conversation.length <= 1
-    && [...causal, ...system].every((counter) => counter.nextSeq >= 4n)
+    && causal[0]!.nextSeq >= minimumCausalNextSeq
+    && system[0]!.nextSeq >= minimumSystemNextSeq
     && conversation.every((counter) =>
       counter.nextSeq === 1n && counter.consumedSeq === 0n
     );
 }
 
-function isHostedPrivyPhoneTransferAutoTrialConsentScaffold(input: {
+function isHostedPrivyPhoneTransferActivationConsentScaffold(input: {
   events: ReadonlyArray<{
     action: string;
     scope: string;
@@ -1077,6 +1349,7 @@ function isHostedPrivyPhoneTransferAutoTrialConsentScaffold(input: {
     source: string;
     status: string;
   }>;
+  source: string;
 }): boolean {
   const scopes = ["launch.health-data", "launch.legal"] as const;
   return input.events.length === scopes.length
@@ -1085,11 +1358,11 @@ function isHostedPrivyPhoneTransferAutoTrialConsentScaffold(input: {
       input.events.some((event) =>
         event.action === "accepted"
         && event.scope === scope
-        && event.source === "homepage-auth-dialog"
+        && event.source === input.source
       )
       && input.grants.some((grant) =>
         grant.scope === scope
-        && grant.source === "homepage-auth-dialog"
+        && grant.source === input.source
         && grant.status === "granted"
         && !grant.revokedAt
       )

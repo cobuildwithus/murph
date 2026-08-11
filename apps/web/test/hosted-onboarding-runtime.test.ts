@@ -6,6 +6,7 @@ import {
   requireHostedStripeCheckoutConfig,
   requireHostedStripeBillingPlanConfig,
   requireHostedStripeFamilyPlanConfig,
+  requireHostedStripeApiMode,
   requireHostedStripeUsageCreditCheckoutConfig,
   requireValidatedHostedStripeBillingPlanConfig,
   isHostedBillingPlanSelectionAvailable,
@@ -50,11 +51,13 @@ function createHostedOnboardingEnvironment(
     publicBaseUrl: "https://join.example.test",
     stripeFamilyPriceIdsByPlan: {
       edge: "price_family_edge_123",
+      max: "price_family_max_123",
       pulse: "price_family_pulse_123",
     },
     stripePriceIdsByPlan: {
       launch_edge_monthly: "price_edge_monthly_123",
       launch_group_monthly: "price_group_monthly_123",
+      launch_max_monthly: "price_max_monthly_123",
       launch_monthly: "price_monthly_123",
     },
     stripeUsageCreditPriceIdsByOffer: {
@@ -204,6 +207,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         stripePriceIdsByPlan: {
           launch_edge_monthly: "price_edge_monthly_123",
           launch_group_monthly: "price_monthly_123",
+          launch_max_monthly: "price_max_monthly_123",
           launch_monthly: "price_monthly_123",
         },
       });
@@ -224,6 +228,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         stripePriceIdsByPlan: {
           launch_edge_monthly: "price_edge_monthly_123",
           launch_group_monthly: "price_monthly_123",
+          launch_max_monthly: "price_max_monthly_123",
           launch_monthly: "price_monthly_123",
         },
       });
@@ -293,6 +298,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         stripePriceIdsByPlan: {
           launch_edge_monthly: "price_edge_monthly_123",
           launch_group_monthly: null,
+          launch_max_monthly: "price_max_monthly_123",
           launch_monthly: "price_monthly_123",
         },
       });
@@ -342,6 +348,19 @@ describe("requireHostedStripeCheckoutConfig", () => {
       code: "HOSTED_USAGE_CREDIT_LIVE_STRIPE_REQUIRED",
       httpStatus: 500,
     }));
+  });
+
+  it("rejects test-mode Stripe when Vercel identifies production", () => {
+    process.env.VERCEL_ENV = "production";
+    globalForHostedOnboarding.__murphHostedOnboardingEnv =
+      createHostedOnboardingEnvironment({ isProduction: false });
+
+    expect(() => requireHostedStripeApiMode()).toThrowError(
+      expect.objectContaining({
+        code: "HOSTED_USAGE_CREDIT_LIVE_STRIPE_REQUIRED",
+        httpStatus: 500,
+      }),
+    );
   });
 
   it("allows test-mode usage-credit Stripe configuration in a Vercel preview", () => {

@@ -213,9 +213,17 @@ describe("hosted retention cleanup", () => {
       executeRaw,
       'DELETE FROM "hosted_web_internal_request_nonce"',
     );
-    expect(sqlOf(callbackNonceCall)).toContain("WITH doomed AS MATERIALIZED");
     expect(sqlOf(callbackNonceCall)).toContain(
-      'WHERE request_nonce."expires_at" < ?',
+      "WITH database_clock AS MATERIALIZED",
+    );
+    expect(sqlOf(callbackNonceCall)).toContain("doomed AS MATERIALIZED");
+    expect(sqlOf(callbackNonceCall)).toContain("date_trunc(");
+    expect(sqlOf(callbackNonceCall)).toContain("'milliseconds'");
+    expect(sqlOf(callbackNonceCall)).toContain(
+      "clock_timestamp() AT TIME ZONE 'UTC'",
+    );
+    expect(sqlOf(callbackNonceCall)).toContain(
+      'WHERE request_nonce."expires_at" < database_clock."now"',
     );
     expect(sqlOf(callbackNonceCall)).toContain(
       'request_nonce."expires_at" ASC',
@@ -231,7 +239,6 @@ describe("hosted retention cleanup", () => {
       'WHERE request_nonce."nonce_hash" = doomed."nonce_hash"',
     );
     expect(callbackNonceCall.slice(1)).toEqual([
-      now,
       HOSTED_RETENTION_BATCH_SIZE,
     ]);
 

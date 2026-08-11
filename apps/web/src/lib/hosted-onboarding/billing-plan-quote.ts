@@ -24,7 +24,6 @@ const QUOTE_TTL_MS = 10 * 60 * 1_000;
 const SHA256_BASE64URL_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 
 export type HostedBillingPlanQuoteTiming =
-  | "at_trial_end"
   | "immediate"
   | "now"
   | "period_end";
@@ -242,10 +241,10 @@ function isHostedBillingPlanQuotePayload(
       targetPlanCode === "launch_group_monthly"
       || targetPlanCode === "launch_monthly"
       || targetPlanCode === "launch_edge_monthly"
+      || targetPlanCode === "launch_max_monthly"
     )
     && (
-      timing === "at_trial_end"
-      || timing === "immediate"
+      timing === "immediate"
       || timing === "now"
       || timing === "period_end"
     );
@@ -290,20 +289,16 @@ function buildHostedBillingPlanQuoteLabel(input: {
   const price = formatHostedBillingPrice(
     definition.recurringAmountUsdCents,
   );
-  const verb = input.timing === "at_trial_end"
-    ? input.targetPlanCode === "launch_monthly"
-      ? "Keep Pulse after your trial"
-      : `Choose ${definition.displayName} after your trial`
-    : input.timing === "period_end"
-      ? `Switch to ${definition.displayName}`
-      : input.timing === "now"
-        ? `Start ${definition.displayName} now`
-        : `Upgrade to ${definition.displayName}`;
+  const verb = input.timing === "period_end"
+    ? `Switch to ${definition.displayName}`
+    : input.timing === "now"
+      ? `Start ${definition.displayName} now`
+      : `Upgrade to ${definition.displayName}`;
 
   return `${verb} (${price}/month)`;
 }
 
-function buildHostedBillingPlanQuoteStaleError() {
+export function buildHostedBillingPlanQuoteStaleError() {
   return hostedOnboardingError({
     code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
     httpStatus: 409,

@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   hostedRuntimeLinqProviderErrorMessageForCode,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedRuntimeGroupChatParticipant,
@@ -45,10 +46,12 @@ import {
   getHostedLinqChatSummary,
   type HostedLinqChatHandleSummary,
   sendHostedLinqChatMessage,
+  sendHostedLinqReactionBoundChatMessage,
   updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
 import {
+  resolveHostedLinqPersonalizedContactCardDeadlines,
   shareMurphHostedLinqContactCardVcfToChat,
 } from "../hosted-onboarding/linq-contact-card-share";
 import { createHostedLinqParticipantContactLookupKey } from "../hosted-onboarding/linq-participant-contact";
@@ -76,6 +79,9 @@ import {
   resolveHostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+import {
+  assertHostedLinqRecentInboundEngagementForRuntime,
+} from "../hosted-onboarding/linq-egress-engagement";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { handleHostedUsageReferralGroupTool } from "../hosted-growth/usage-referral";
 import { issueHostedSignupReferralLink } from "../hosted-growth/signup-referral";
@@ -87,6 +93,7 @@ import {
 } from "./group-assistant-ask";
 import {
   requestHostedGroupCurrentSenderAssistantAsk,
+  requestHostedGroupCurrentSenderPrivateAssistantAsk,
 } from "./group-current-sender-assistant-ask";
 import {
   admitHostedGroupDisclosurePermissionAppendTx,
@@ -120,9 +127,9 @@ import {
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
-  normalizeHostedGroupAccessOfferProjectionScopes,
   normalizeHostedVaultShareProjectionScopes,
   projectHostedVaultShareProjectionDisplays,
+  resolveHostedGroupAccessOfferProjectionScopes,
 } from "./join-policy";
 import { sha256Hex } from "../primitives";
 import {
@@ -138,12 +145,13 @@ import {
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
 
-const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v2:";
+const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v3:";
 const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH = 40;
 
 export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   groupId: string;
   joinCode: string;
+  offerGeneration: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
@@ -158,6 +166,7 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   const digest = sha256Hex(JSON.stringify({
     groupId: input.groupId,
     joinCode: input.joinCode,
+    offerGeneration: input.offerGeneration,
     projectionScopeKeys,
   }));
   return `${HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX}${digest.slice(
@@ -174,6 +183,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
   ask_current_sender: "participant_aware",
+  message_current_sender: "participant_aware",
   ask_member: "participant_aware",
   arm_usage_referral: "participant_aware",
   cancel_usage_referral: "participant_aware",
@@ -207,6 +217,12 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
 export async function handleHostedRuntimeGroupTool(input: {
   memberId: string;
   request: HostedRuntimeGroupToolRequest;
+  /**
+   * When the web-control request arrived, owned by the route so body reading,
+   * signature verification, and nonce consumption are charged to the same
+   * budget as the work below. Direct unit callers may omit it.
+   */
+  requestStartedAtMs?: number;
   scheduleMailboxWake?: (input: {
     expectedUserId: string;
     mailboxItemId: string;
@@ -235,6 +251,17 @@ export async function handleHostedRuntimeGroupTool(input: {
       await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask_current_sender", result: admission.result };
+  }
+
+  if (input.request.action === "message_current_sender") {
+    const admission = await requestHostedGroupCurrentSenderPrivateAssistantAsk({
+      groupRuntimeMemberId: input.memberId,
+      origin: input.request.origin,
+    });
+    if (admission.mailboxWake) {
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
+    }
+    return { action: "message_current_sender", result: admission.result };
   }
 
   if (input.request.action === "ask_member") {
@@ -347,7 +374,29 @@ export async function handleHostedRuntimeGroupTool(input: {
   }
 
   if (input.request.action === "share_contact_card") {
+    if (input.request.contactCardImageUrl !== undefined) {
+      if (!input.request.directLinqChatId) {
+        return {
+          action: "share_contact_card",
+          result: {
+            status: "unavailable",
+            unavailableReason: "direct_attachment_route_unavailable",
+          },
+        };
+      }
+      return handleHostedRuntimeGroupShareContactCard({
+        kind: "personalized",
+        contactCardImageUrl: input.request.contactCardImageUrl,
+        contactCardShareKey: input.request.contactCardShareKey,
+        directLinqChatId: input.request.directLinqChatId,
+        memberId: input.memberId,
+        ...(input.requestStartedAtMs === undefined
+          ? {}
+          : { requestStartedAtMs: input.requestStartedAtMs }),
+      });
+    }
     return handleHostedRuntimeGroupShareContactCard({
+      kind: "canonical",
       linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
@@ -402,6 +451,7 @@ export async function handleHostedRuntimeGroupTool(input: {
             usage: {
               fundingNeeded: usage.fundingNeeded,
               fundingUrl: usage.fundingUrl,
+              includedUsageUsedPercent: usage.includedUsageUsedPercent,
             },
           }
         : {
@@ -1017,10 +1067,9 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
       return { kind: ownerAccess.unavailableReason };
     }
     const requestedVaultShareProjectionScopes =
-      normalizeHostedGroupAccessOfferProjectionScopes(
+      resolveHostedGroupAccessOfferProjectionScopes(
         input.joinLink?.requestedVaultShareProjectionScopes
-          ?? input.joinLink?.requestedVaultShareProjectionKinds
-          ?? [],
+          ?? input.joinLink?.requestedVaultShareProjectionKinds,
       );
     const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: ownerAccess.ownerMemberId,
@@ -1223,10 +1272,9 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const prisma = getPrisma();
   const now = new Date();
-  const projectionScopes = normalizeHostedGroupAccessOfferProjectionScopes(
+  const projectionScopes = resolveHostedGroupAccessOfferProjectionScopes(
     input.joinOffer?.projectionScopes
-      ?? input.joinOffer?.projectionKinds
-      ?? [],
+      ?? input.joinOffer?.projectionKinds,
   );
   const created = await prisma.$transaction(async (tx) => {
     const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
@@ -1246,6 +1294,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     });
     const offerPost = await prepareHostedGroupJoinOfferPostTx({
       groupId: result.group.id,
+      now,
       projectionScopes,
       tx,
     });
@@ -1281,6 +1330,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       },
     };
   }
+  const offerGeneration = created.offerPost.offerGeneration;
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
@@ -1289,11 +1339,12 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
-    sent = await sendHostedLinqChatMessage({
+    sent = await sendHostedLinqReactionBoundChatMessage({
       chatId: authorized.chatId,
       idempotencyKey: buildHostedGroupJoinOfferProviderIdempotencyKey({
         groupId: created.group.id,
         joinCode: created.offerPost.joinCode,
+        offerGeneration,
         projectionScopes,
       }),
       message,
@@ -1329,6 +1380,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   try {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
+        expectedOfferGeneration: offerGeneration,
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
         postedAt,
@@ -1505,16 +1557,20 @@ async function checkHostedRuntimeGroupLinqChatMutationAccess(input: {
   return { status: "ok", chatId: authorized.chatId };
 }
 
-function buildHostedGroupJoinOfferMessage(input: {
+export function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
-  // The link stays as the control for choosing different permissions, and works
-  // for everyone.
-  return `Like or heart this message if these default sharing choices look right: ${
-    renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
-  }. Use ${input.joinUrl} to choose different permissions.`;
+  return HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE
+    .replace(
+      HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
+      () => renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
+    )
+    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, () => input.joinUrl);
 }
+
+const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
+const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
   group: {
@@ -1739,6 +1795,33 @@ function formatHumanList(values: readonly string[]): string {
 type HostedRuntimeGroupLinqThreadAuthorization =
   | { chatId: string }
   | { unavailableReason: string };
+
+/**
+ * Authorize a personalized contact card against the direct/home Linq owner.
+ * `hostedMemberRouting` is the sole owner of a direct chat, and the same chat
+ * is forbidden from existing in the group thread-route store, so the group
+ * assertion can never admit one. This reuses the existing runtime egress
+ * assertion rather than introducing a second direct-route owner.
+ */
+async function authorizeHostedRuntimeDirectLinqChat(input: {
+  chatId: string;
+  memberId: string;
+}): Promise<HostedRuntimeGroupLinqThreadAuthorization> {
+  try {
+    const assertion = await assertHostedLinqRecentInboundEngagementForRuntime({
+      authorityCheckOnly: true,
+      memberId: input.memberId,
+      prisma: getPrisma(),
+      target: input.chatId,
+    });
+    if (assertion.threadIsDirect !== true) {
+      return { unavailableReason: "linq_thread_unauthorized" };
+    }
+  } catch {
+    return { unavailableReason: "linq_thread_unauthorized" };
+  }
+  return { chatId: input.chatId };
+}
 
 async function authorizeHostedRuntimeGroupLinqThread(input: {
   linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
@@ -2217,39 +2300,105 @@ function logHostedThreadContainerParticipantReconcileCapped(input: {
   });
 }
 
-async function handleHostedRuntimeGroupShareContactCard(input: {
-  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
-  memberId: string;
-}): Promise<HostedRuntimeGroupToolResponse> {
+type HostedRuntimeGroupShareContactCardInput =
+  | {
+      kind: "canonical";
+      linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+      memberId: string;
+    }
+  | {
+      kind: "personalized";
+      contactCardImageUrl: string;
+      contactCardShareKey: string;
+      directLinqChatId: string;
+      memberId: string;
+      requestStartedAtMs?: number;
+    };
+
+async function handleHostedRuntimeGroupShareContactCard(
+  input: HostedRuntimeGroupShareContactCardInput,
+): Promise<HostedRuntimeGroupToolResponse> {
   const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
     action: "share_contact_card",
     result: { status: "unavailable", unavailableReason },
   });
 
-  const authorized = await authorizeHostedRuntimeGroupLinqThread(input);
+  // Anchored to when the web-control request arrived, so the body read,
+  // signature verification, and nonce consumption that already happened are
+  // charged to the same budget as the work below. Falling back to now is only
+  // for direct unit callers; production always supplies the route's value.
+  // Authorization and the backup-number read take no signal, so they are
+  // checked against the deadline instead; everything after them either
+  // consumes it or is past the point of no return.
+  const deadlines = input.kind === "personalized"
+    ? resolveHostedLinqPersonalizedContactCardDeadlines(
+      input.requestStartedAtMs ?? Date.now(),
+    )
+    : null;
+
+  const authorized = input.kind === "personalized"
+    ? await authorizeHostedRuntimeDirectLinqChat({
+      chatId: input.directLinqChatId,
+      memberId: input.memberId,
+    })
+    : await authorizeHostedRuntimeGroupLinqThread({
+      linqThread: input.linqThread,
+      memberId: input.memberId,
+    });
   if ("unavailableReason" in authorized) {
     return unavailable(authorized.unavailableReason);
   }
 
   const prisma = getPrisma();
-  const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
-    memberId: input.memberId,
-    prisma,
-  });
-  if (ownerAccess.status !== "ok") {
-    return unavailable(ownerAccess.unavailableReason);
+  let outcome: Awaited<ReturnType<typeof shareMurphHostedLinqContactCardVcfToChat>>;
+  if (input.kind === "personalized") {
+    const contactCardImageUrl = normalizeHostedGroupChatIconUrl(
+      input.contactCardImageUrl,
+    );
+    if (!contactCardImageUrl) {
+      return unavailable("contact_card_image_url_unavailable");
+    }
+    // Authorization takes no signal, so this is where its cost is charged
+    // against the deadline. Refusing here is provably before any provider
+    // work, which is why it is an ordinary unavailable rather than uncertainty.
+    if (deadlines && Date.now() >= deadlines.preSendDeadlineAt) {
+      return unavailable("contact_card_presend_deadline_exceeded");
+    }
+    outcome = await shareMurphHostedLinqContactCardVcfToChat({
+      chatId: authorized.chatId,
+      idempotencyKeyPrefix: "personalized-contact-card",
+      imageUrl: contactCardImageUrl,
+      memberId: input.memberId,
+      prisma,
+      shareKey: input.contactCardShareKey,
+      ...(deadlines ? { operationDeadlineAt: deadlines.operationDeadlineAt } : {}),
+    });
+  } else {
+    const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+      memberId: input.memberId,
+      prisma,
+    });
+    if (ownerAccess.status !== "ok") {
+      return unavailable(ownerAccess.unavailableReason);
+    }
+    outcome = await shareMurphHostedLinqContactCardVcfToChat({
+      chatId: authorized.chatId,
+      idempotencyKeyPrefix: "group-contact-card",
+      memberId: input.memberId,
+      prisma,
+    });
   }
 
-  const outcome = await shareMurphHostedLinqContactCardVcfToChat({
-    chatId: authorized.chatId,
-    idempotencyKeyPrefix: "group-contact-card",
-    memberId: input.memberId,
-    prisma,
-  });
   if (outcome.status === "already_shared") {
     return {
       action: "share_contact_card",
       result: { status: "already_shared" },
+    };
+  }
+  if (outcome.status === "unconfirmed") {
+    return {
+      action: "share_contact_card",
+      result: { status: "unconfirmed" },
     };
   }
   if (outcome.status !== "sent") {

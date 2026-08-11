@@ -100,8 +100,15 @@ describe("hosted group tool route", () => {
     expect(mocks.handleTool).toHaveBeenCalledWith({
       memberId: "member_group_runtime",
       request: body,
+      // Anchored before the signed-callback read above, so the verification and
+      // nonce work it covers is charged to whatever budget the tool derives.
+      requestStartedAtMs: expect.any(Number),
       scheduleMailboxWake: expect.any(Function),
     });
+    const [handled] = mocks.handleTool.mock.calls.at(-1) as [
+      { requestStartedAtMs: number },
+    ];
+    expect(handled.requestStartedAtMs).toBeLessThanOrEqual(Date.now());
   });
 
   it.each([
@@ -267,6 +274,19 @@ describe("hosted group tool route", () => {
       expectedUserId: "member-sender",
       mailboxItemId: "aask_req_current_sender",
       responseAction: "ask_current_sender",
+    },
+    {
+      body: {
+        action: "message_current_sender",
+        origin: {
+          assistantInputId: `ain_${"d".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      expectedUserId: "member-sender",
+      mailboxItemId: "aask_req_private_sender",
+      responseAction: "message_current_sender",
     },
   ])(
     "does not acknowledge an accepted $responseAction when its durable handoff rejects",

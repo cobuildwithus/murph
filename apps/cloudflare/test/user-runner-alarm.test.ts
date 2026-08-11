@@ -152,6 +152,441 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
   });
 
+  it("does not address the runner container when shell prewarm observes revoked consent", async () => {
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "revoked",
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
+          shellPrewarmSource: "unknown",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+      }),
+    );
+  });
+
+  it("carries the bounded shell-prewarm source through the existing container RPC", async () => {
+    const prewarmShell = vi.fn(async () => ({
+      action: "start_issued" as const,
+      kind: "started" as const,
+    }));
+    const { runner } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+    });
+
+    await runner.prewarmRuntimeShellForUser(
+      TEST_USER_ID,
+      "linq-typing-started",
+    );
+
+    expect(prewarmShell).toHaveBeenCalledWith({
+      source: "linq-typing-started",
+      timeoutMs: 20_000,
+      userId: TEST_USER_ID,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "scheduled",
+          shellPrewarmSource: "linq-typing-started",
+        },
+      }),
+    );
+  });
+
+  it("abandons a slow shell hint admission before authoritative processing begins", async () => {
+    vi.useFakeTimers();
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const authoritativeAdmissionStarted = createDeferred<void>();
+    const releaseAuthoritativeAdmission = createDeferred<"granted">();
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
+          });
+        }
+        expect(timeoutMs).toBe(30_000);
+        authoritativeAdmissionStarted.resolve(undefined);
+        return releaseAuthoritativeAdmission.promise;
+      },
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-slow-hint-admission",
+      userId: TEST_USER_ID,
+    });
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(admissionReads).toBe(1);
+    expect(runnerContainerNames).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(prewarm).resolves.toBeUndefined();
+    await authoritativeAdmissionStarted.promise;
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
+          shellPrewarmSource: "unknown",
+        },
+        level: "warn",
+      }),
+    );
+
+    releaseAuthoritativeAdmission.resolve("granted");
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+  });
+
+  it("drops repeated shell hints instead of queuing them ahead of authoritative processing", async () => {
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const releaseFirstAdmission = createDeferred<"granted">();
+    const authoritativeAdmissionStarted = createDeferred<void>();
+    const releaseAuthoritativeAdmission = createDeferred<"granted">();
+    const prewarmShell = vi.fn(async () => ({
+      action: "start_issued" as const,
+      kind: "started" as const,
+    }));
+    const { runner } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return releaseFirstAdmission.promise;
+        }
+        expect(timeoutMs).toBe(30_000);
+        authoritativeAdmissionStarted.resolve(undefined);
+        return releaseAuthoritativeAdmission.promise;
+      },
+    });
+
+    const firstPrewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    let settledDuplicateCount = 0;
+    const duplicatePrewarms = Array.from({ length: 4 }, () =>
+      runner.prewarmRuntimeShellForUser(TEST_USER_ID).finally(() => {
+        settledDuplicateCount += 1;
+      })
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(settledDuplicateCount).toBe(4);
+    expect(admissionReads).toBe(1);
+
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-repeated-hints",
+      userId: TEST_USER_ID,
+    });
+    releaseFirstAdmission.resolve("granted");
+    await expect(firstPrewarm).resolves.toBeUndefined();
+    await authoritativeAdmissionStarted.promise;
+
+    expect(admissionReads).toBe(2);
+    expect(prewarmShell).toHaveBeenCalledOnce();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "scheduled",
+          shellPrewarmSource: "unknown",
+        },
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls.filter(
+      ([entry]) =>
+        entry.details?.shellPrewarmAdmissionOutcome === "skipped_consent_busy",
+    )).toHaveLength(4);
+    await expect(Promise.all(duplicatePrewarms)).resolves.toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+
+    await expect(runner.prewarmRuntimeShellForUser(TEST_USER_ID))
+      .resolves.toBeUndefined();
+    expect(admissionReads).toBe(2);
+    expect(prewarmShell).toHaveBeenCalledOnce();
+
+    releaseAuthoritativeAdmission.resolve("granted");
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+  });
+
+  it("releases consent withdrawal after the bounded shell hint admission budget", async () => {
+    vi.useFakeTimers();
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const withdrawalAdmissionStarted = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => undefined);
+    const prewarmShell = vi.fn();
+    const { runner } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
+          });
+        }
+        expect(timeoutMs).toBe(30_000);
+        withdrawalAdmissionStarted.resolve(undefined);
+        return "revoked";
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(
+      TEST_USER_ID,
+    );
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(admissionReads).toBe(1);
+    expect(destroyInstance).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(prewarm).resolves.toBeUndefined();
+    await withdrawalAdmissionStarted.promise;
+    await expect(withdrawal).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
+  });
+
+  it("lets a new Worker withdraw the exact prior-version shell while prewarm is pending", async () => {
+    let consentState: "granted" | "revoked" = "granted";
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const prewarmStarted = createDeferred<void>();
+    const releasePrewarm = createDeferred<void>();
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    const events: string[] = [];
+    const prewarmShell = vi.fn(async () => {
+      events.push("prewarm");
+      prewarmStarted.resolve(undefined);
+      await releasePrewarm.promise;
+      return { action: "start_issued" as const, kind: "started" as const };
+    });
+    const destroyInstance = vi.fn(async () => {
+      events.push("destroy");
+      destroyStarted.resolve(undefined);
+      releasePrewarm.resolve(undefined);
+      await releaseDestroy.promise;
+    });
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: () => consentState,
+      runnerRuntimeEnvSource,
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await prewarmStarted.promise;
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    consentState = "revoked";
+    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID);
+    await destroyStarted.promise;
+    let withdrawalSettled = false;
+    void withdrawal.finally(() => {
+      withdrawalSettled = true;
+    });
+    await Promise.resolve();
+    expect(withdrawalSettled).toBe(false);
+    expect(runnerContainerNames).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
+      priorRunnerContainerName,
+    );
+
+    releaseDestroy.resolve(undefined);
+    await expect(prewarm).resolves.toBeUndefined();
+    await expect(withdrawal).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+    expect(events).toEqual(["prewarm", "destroy"]);
+    expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
+  });
+
+  it("lets authoritative readiness overtake a pending shell prewarm", async () => {
+    const prewarmStarted = createDeferred<void>();
+    const releasePrewarm = createDeferred<void>();
+    const readinessStarted = createDeferred<void>();
+    const events: string[] = [];
+    const prewarmShell = vi.fn(async () => {
+      events.push("prewarm");
+      prewarmStarted.resolve(undefined);
+      await releasePrewarm.promise;
+      return { action: "start_issued" as const, kind: "started" as const };
+    });
+    const ensureReadyForProcessing = vi.fn(async () => {
+      events.push("ensure-ready");
+      readinessStarted.resolve(undefined);
+      releasePrewarm.resolve(undefined);
+      return { action: "started" as const, kind: "ready" as const };
+    });
+    const { runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await prewarmStarted.promise;
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-prewarm",
+      userId: TEST_USER_ID,
+    });
+    await readinessStarted.promise;
+
+    await expect(prewarm).resolves.toBeUndefined();
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+    expect(events).toEqual(["prewarm", "ensure-ready"]);
+  });
+
+  it("destroys a prior-version pending prewarm before binding a current fence", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
+    const priorDestroyInstance = vi.fn(async () => undefined);
+    let priorRunnerContainerAccessCount = 0;
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      prewarmShell: vi.fn(async () => ({
+        action: "start_issued" as const,
+        kind: "started" as const,
+      })),
+      readHealthDataConsentState: () => "granted",
+      runnerContainerStubForName(name, defaultStub) {
+        if (name !== priorRunnerContainerName) {
+          return defaultStub;
+        }
+        priorRunnerContainerAccessCount += 1;
+        return priorRunnerContainerAccessCount === 1
+          ? defaultStub
+          : { ...defaultStub, destroyInstance: priorDestroyInstance };
+      },
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "current-after-prior-prewarm",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(runnerContainerNames.slice(0, 2)).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(runnerContainerNames).toContain(currentRunnerContainerName);
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
+  });
+
+  it("does not replace a pending prior-version stop target with another hint", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const prewarmShell = vi.fn(async () => ({
+      action: "start_issued" as const,
+      kind: "started" as const,
+    }));
+    const { runner, sql } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(prewarmShell).toHaveBeenCalledOnce();
+    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
+      priorRunnerContainerName,
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_runtime_busy",
+          shellPrewarmSource: "unknown",
+        },
+      }),
+    );
+  });
+
+  it("does not recreate a shell after completed consent withdrawal", async () => {
+    const prewarmShell = vi.fn();
+    const destroyInstance = vi.fn(async () => undefined);
+    const { runner } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: () => "revoked",
+    });
+
+    await expect(
+      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
+    ).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+    });
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(prewarmShell).not.toHaveBeenCalled();
+  });
+
   it("captures existing control-plane boundaries without writing retry analytics for an accepted start", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -957,6 +1392,38 @@ describe("HostedUserRunner execution coordination", () => {
     expect(JSON.stringify(job)).not.toContain(logFingerprintSecret);
   });
 
+  it("places the exact Android rollout gate in the trusted invocation platform env", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({ importedSeq: "1", lag: "0", maxSeq: "1" })],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        MURPH_ANDROID_APP_ENABLED: "1",
+      },
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const job = invoke.mock.calls[0]?.[0].job;
+    expect(job?.runtime?.platformEnv?.MURPH_ANDROID_APP_ENABLED).toBe("1");
+    expect(job?.runtime?.forwardedEnv?.MURPH_ANDROID_APP_ENABLED).toBeUndefined();
+    expect(job?.runtime?.userEnv?.MURPH_ANDROID_APP_ENABLED).toBeUndefined();
+  });
+
   it("accepts runtime processing start before the invocation reaches idle", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -1296,7 +1763,17 @@ describe("HostedUserRunner execution coordination", () => {
     let preparationStartedAtEpochMs: number | null = null;
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
-    >(async () => ({ kind: "ready" }));
+    >(async () => ({
+      kind: "ready",
+      shellPrewarmObservation: {
+        firstHintAtEpochMs: 1_777_000_000_010,
+        finishedAtEpochMs: 1_777_000_000_030,
+        hintCount: 2,
+        operationElapsedMs: 20,
+        outcome: "cold_start_observed",
+        source: "linq-typing-started",
+      },
+    }));
     const { invoke, runner } = createRunnerHarness({
       ensureReadyForProcessing,
       onCryptoContextRead: () => {
@@ -1371,6 +1848,12 @@ describe("HostedUserRunner execution coordination", () => {
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
       runtimeInvocationPreparationElapsedMs: 1_250,
       runtimeStoreEnsureElapsedMs: 250,
+      shellPrewarmFirstHintAtEpochMs: 1_777_000_000_010,
+      shellPrewarmFinishedAtEpochMs: 1_777_000_000_030,
+      shellPrewarmHintCount: 2,
+      shellPrewarmOperationElapsedMs: 20,
+      shellPrewarmOutcome: "cold_start_observed",
+      shellPrewarmSource: "linq-typing-started",
       workspaceReadElapsedMs: 1_000,
     });
     expect(invocationOrchestration?.freshStartContainerReadyAtEpochMs)
@@ -2703,6 +3186,24 @@ describe("HostedUserRunner execution coordination", () => {
     });
     activeAttemptId = token.attemptId;
     activeGeneration = String(token.generation);
+    const snapshotId =
+      `snapshot_preempt_${activeProcessingMode}_${processingMode ?? "default"}`;
+    const snapshotObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}${snapshotId}.snapshot.enc`;
+    await expect(runner.createHostedWorkspaceSnapshotUploadSession({
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: snapshotObjectKey,
+        snapshotId,
+      }),
+      attemptId: token.attemptId,
+      expectedWorkspaceVersion: "7",
+      leaseGeneration: String(token.generation),
+      workspaceVersion: "7",
+    })).resolves.toMatchObject({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      snapshotId,
+    });
 
     const ensureRuntimeProcessing = runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId:
@@ -3541,6 +4042,297 @@ describe("HostedUserRunner execution coordination", () => {
       expect(readRunnerMeta(sql)).toMatchObject({
         active_attempt_id: null,
         last_invocation_at: expect.any(String),
+      })
+    );
+  });
+
+  it("preserves an inactive fence while its shutdown checkpoint handoff is fresh", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "4" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_1",
+      generation: 9,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_shutdown_handoff.snapshot.enc`,
+        snapshotId: "snapshot_shutdown_handoff",
+      }),
+    );
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-checkpoint-handoff",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:01.000Z",
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_generation: token.generation,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeProcessingRetryReason: "checkpoint_handoff_pending",
+        }),
+        message: "Hosted runner runtime processing could not be accepted yet.",
+      }),
+    );
+  });
+
+  it("preserves a long-running checkpoint while its exact owner keeps heartbeating", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "4" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_1",
+      generation: 9,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+    const session = createWorkspaceSnapshotUploadSessionForTest({
+      objectKey:
+        `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_long_handoff.snapshot.enc`,
+      snapshotId: "snapshot_long_handoff",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(session);
+    vi.setSystemTime(new Date("2026-04-27T00:00:29.000Z"));
+    await expect(runner.heartbeatHostedWorkspaceSnapshotUploadSession({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      snapshotId: session.snapshotId,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-long-checkpoint-handoff",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:30.000Z",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_generation: token.generation,
+    });
+  });
+
+  it("does not delay replacement after the exact checkpoint handoff completes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "4" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_1",
+      generation: 9,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+    const session = createWorkspaceSnapshotUploadSessionForTest({
+      objectKey:
+        `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_completed_handoff.snapshot.enc`,
+      snapshotId: "snapshot_completed_handoff",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(session);
+    await expect(runner.completeHostedWorkspaceSnapshotUploadSession({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      snapshotId: session.snapshotId,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-completed-checkpoint-handoff",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    invocationResult.resolve({ nextWakeAt: null, status: "idle" });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({ active_attempt_id: null })
+    );
+  });
+
+  it("replaces an inactive fence after its checkpoint heartbeat becomes stale", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "4" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_1",
+      generation: 9,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_stuck_handoff.snapshot.enc`,
+        snapshotId: "snapshot_stuck_handoff",
+      }),
+    );
+    vi.setSystemTime(new Date("2026-04-27T00:00:10.001Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-stuck-checkpoint-handoff",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.not.stringMatching(token.attemptId),
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+      })
+    );
+  });
+
+  it("does not delay replacement for another attempt's snapshot session", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "4" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_1",
+      generation: 9,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_previous_attempt.snapshot.enc`,
+        snapshotId: "snapshot_previous_attempt",
+      }),
+    );
+    const token = writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_2",
+      generation: 10,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-mismatched-checkpoint-handoff",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
       })
     );
   });
@@ -4745,6 +5537,83 @@ describe("HostedUserRunner execution coordination", () => {
     },
   );
 
+  it("deletes the exact prior-version target reserved by shell prewarm", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const priorDestroyInstance = vi.fn(async () => undefined);
+    const currentDestroyInstance = vi.fn(async () => undefined);
+    let priorRunnerContainerAccessCount = 0;
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      prewarmShell: vi.fn(async () => ({
+        action: "start_issued" as const,
+        kind: "started" as const,
+      })),
+      runnerContainerStubForName(name, defaultStub) {
+        if (name === priorRunnerContainerName) {
+          priorRunnerContainerAccessCount += 1;
+          if (priorRunnerContainerAccessCount === 1) {
+            return defaultStub;
+          }
+        }
+        return {
+          ...defaultStub,
+          destroyInstance: name === priorRunnerContainerName
+            ? priorDestroyInstance
+            : currentDestroyInstance,
+        };
+      },
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
+      ok: true,
+      userId: TEST_USER_ID,
+    });
+
+    expect(runnerContainerNames).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
+    expect(currentDestroyInstance).not.toHaveBeenCalled();
+  });
+
+  it("drops shell prewarm while account deletion owns the consent lock", async () => {
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => {
+      destroyStarted.resolve(undefined);
+      await releaseDestroy.promise;
+    });
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      destroyInstance,
+      healthDataProcessingAllowed: false,
+      prewarmShell,
+      readHealthDataConsentState: () => "missing",
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const deletion = runner.deleteHostedUserData(TEST_USER_ID);
+    await destroyStarted.promise;
+    await expect(runner.prewarmRuntimeShellForUser(TEST_USER_ID))
+      .resolves.toBeUndefined();
+
+    releaseDestroy.resolve(undefined);
+    await expect(deletion).resolves.toMatchObject({ ok: true });
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toHaveLength(1);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+  });
+
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
     const destroyInstance = vi.fn(async () => {});
     const bucket = new ListableMemoryEncryptedR2Bucket();
@@ -5081,7 +5950,10 @@ describe("HostedUserRunner execution coordination", () => {
       snapshotId: "snapshot_stale_create",
     });
     await expect(runner.createHostedWorkspaceSnapshotUploadSession(staleSession))
-      .resolves.toEqual(staleSession);
+      .resolves.toEqual({
+        ...staleSession,
+        checkpointHandoffHeartbeatAt: FIXED_NOW,
+      });
 
     sql.exec(
       `UPDATE runner_meta
@@ -5105,14 +5977,20 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceVersion: "5",
     };
     await expect(runner.createHostedWorkspaceSnapshotUploadSession(activeSession))
-      .resolves.toEqual(activeSession);
+      .resolves.toEqual({
+        ...activeSession,
+        checkpointHandoffHeartbeatAt: FIXED_NOW,
+      });
 
     await expect(runner.createHostedWorkspaceSnapshotUploadSession(staleSession))
       .resolves.toBeNull();
     await expect(runner.readHostedWorkspaceSnapshotUploadSession({
       snapshotId: activeSession.snapshotId,
       userId: TEST_USER_ID,
-    })).resolves.toEqual(activeSession);
+    })).resolves.toEqual({
+      ...activeSession,
+      checkpointHandoffHeartbeatAt: FIXED_NOW,
+    });
     expect(storageValues.get(
       workspaceSnapshotOrphanCandidateStorageKey(activeSession.snapshotId),
     )).toBeUndefined();
@@ -5188,7 +6066,10 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.readHostedWorkspaceSnapshotUploadSession({
       snapshotId: activeSession.snapshotId,
       userId: TEST_USER_ID,
-    })).resolves.toEqual(activeSession);
+    })).resolves.toEqual({
+      ...activeSession,
+      checkpointHandoffHeartbeatAt: FIXED_NOW,
+    });
     expect(storageValues.get(
       workspaceSnapshotOrphanCandidateStorageKey(replacedSnapshotRef.snapshotId),
     )).toMatchObject({
@@ -5857,16 +6738,18 @@ function createRunnerHarness(input: {
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onCryptoContextRead?: () => Promise<void> | void;
-  readHealthDataConsentState?: () =>
+  readHealthDataConsentState?: (input: { timeoutMs: number }) =>
     | "granted"
     | "missing"
     | "revoked"
     | Promise<"granted" | "missing" | "revoked">;
+  healthDataProcessingAllowed?: boolean | (() => boolean);
   onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
   onStatusRead?: () => Promise<void> | void;
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   platformAiUsageAllowed?: boolean | (() => boolean);
+  prewarmShell?: HostedExecutionContainerStubLike["prewarmShell"];
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
@@ -5924,6 +6807,37 @@ function createRunnerHarness(input: {
         }
       : {}),
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
+    ...(input.prewarmShell
+      ? {
+          beginShellPrewarm: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["beginShellPrewarm"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              prewarmInput,
+            ) {
+              expect(this).toBe(stub);
+              const operation = input.prewarmShell?.call(this, prewarmInput);
+              void operation?.catch(() => undefined);
+              return { accepted: true };
+            },
+          ),
+          prewarmShell: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["prewarmShell"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              prewarmInput,
+            ) {
+              expect(this).toBe(stub);
+              return await input.prewarmShell?.call(this, prewarmInput) ?? {
+                action: "start_issued",
+                kind: "started",
+              };
+            },
+          ),
+        }
+      : {}),
     ...(input.ensureProcessing
       ? {
           ensureProcessing: createDirectOnlyRpcMethod<
@@ -5995,6 +6909,7 @@ function createRunnerHarness(input: {
   };
 
   installWebControlResponses(input.workspace ?? createWorkspaceState(), {
+    healthDataProcessingAllowed: input.healthDataProcessingAllowed,
     readMailboxLag: () => input.mailboxLag ?? [createMailboxLag()],
     onCryptoContextRead: input.onCryptoContextRead,
     readHealthDataConsentState: input.readHealthDataConsentState,
@@ -6194,8 +7109,9 @@ function createDurableObjectState(input: {
 function installWebControlResponses(
   workspace: HostedWorkspaceState | null,
   hooks: {
+    healthDataProcessingAllowed?: boolean | (() => boolean);
     onCryptoContextRead?: () => Promise<void> | void;
-    readHealthDataConsentState?: () =>
+    readHealthDataConsentState?: (input: { timeoutMs: number }) =>
       | "granted"
       | "missing"
       | "revoked"
@@ -6232,10 +7148,16 @@ function installWebControlResponses(
       }
 
       if (input.path === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH) {
-        const consentState = await hooks.readHealthDataConsentState?.() ?? "granted";
+        const consentState = await hooks.readHealthDataConsentState?.({
+          timeoutMs: input.timeoutMs,
+        }) ?? "granted";
+        const processingAllowed =
+          typeof hooks.healthDataProcessingAllowed === "function"
+            ? hooks.healthDataProcessingAllowed()
+            : hooks.healthDataProcessingAllowed ?? consentState !== "revoked";
         return jsonResponse({
           consentState,
-          processingAllowed: consentState !== "revoked",
+          processingAllowed,
           userId: input.boundUserId,
         });
       }

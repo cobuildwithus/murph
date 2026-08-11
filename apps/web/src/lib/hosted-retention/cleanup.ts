@@ -72,10 +72,7 @@ export async function runHostedRetentionCleanup(input: {
   // Serial by design: these are background deletes and must never fan out
   // across the same pool that serves user-facing control-plane work.
   const expiredCallbackRequestNoncesDeleted =
-    await deleteExpiredHostedCallbackRequestNonces({
-      now,
-      prisma,
-    });
+    await deleteExpiredHostedCallbackRequestNonces({ prisma });
   const expiredIngressLatencyTracesDeleted = await deleteExpiredIngressLatencyTraces({
     now,
     prisma,
@@ -450,17 +447,23 @@ export async function retireExpiredMailboxContent(input: {
   });
 }
 
-// Callback freshness accepts the exact expiry millisecond, so cleanup uses a
-// strict cutoff and cannot remove a nonce while the signed request is admissible.
+// Callback freshness accepts the exact expiry millisecond, so cleanup uses the
+// same truncated UTC database clock and a strict cutoff.
 export async function deleteExpiredHostedCallbackRequestNonces(input: {
-  now: Date;
   prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
   return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS MATERIALIZED (
+    WITH database_clock AS MATERIALIZED (
+      SELECT date_trunc(
+        'milliseconds',
+        clock_timestamp() AT TIME ZONE 'UTC'
+      ) AS "now"
+    ),
+    doomed AS MATERIALIZED (
       SELECT request_nonce."nonce_hash"
       FROM "hosted_web_internal_request_nonce" AS request_nonce
-      WHERE request_nonce."expires_at" < ${input.now}
+      CROSS JOIN database_clock
+      WHERE request_nonce."expires_at" < database_clock."now"
       ORDER BY
         request_nonce."expires_at" ASC,
         request_nonce."nonce_hash" ASC

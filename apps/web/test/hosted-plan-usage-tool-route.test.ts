@@ -12,11 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   prisma: {
+    $queryRaw: vi.fn(async () => [{ admitted: true }]),
     $transaction: vi.fn(),
-    hostedWebInternalRequestNonce: {
-      create: vi.fn(async () => undefined),
-      deleteMany: vi.fn(async () => ({ count: 0 })),
-    },
   },
   readHostedPersonalAiUsageStatus: vi.fn(),
   withJsonError: vi.fn(
@@ -110,12 +107,7 @@ describe("hosted plan usage tool route", () => {
       includeScheduledPlan: true,
       memberId: "member_bound",
     });
-    expect(
-      mocks.prisma.hostedWebInternalRequestNonce.create,
-    ).toHaveBeenCalledTimes(1);
-    expect(
-      mocks.prisma.hostedWebInternalRequestNonce.deleteMany,
-    ).not.toHaveBeenCalled();
+    expect(mocks.prisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 

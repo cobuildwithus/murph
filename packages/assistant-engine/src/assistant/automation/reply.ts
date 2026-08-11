@@ -26,8 +26,9 @@ import {
   isAssistantProviderStalledError,
 } from '../provider-failure-diagnostics.js'
 import type { AssistantProviderRequestStartTiming } from '../providers/types.js'
-import type {
-  AssistantProviderStartCriticalPathContext,
+import {
+  stampAssistantProviderStartCriticalPath,
+  type AssistantProviderStartCriticalPathContext,
 } from '../provider-start-critical-path.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
@@ -195,6 +196,7 @@ interface AssistantAutoReplyReplyDecision {
   operatorAuthority: AssistantOperatorAuthority
   primaryInput: AssistantAutoReplyPrimaryInput
   prompt: string
+  providerStartCriticalPath: AssistantProviderStartCriticalPathContext | null
   turnContext: string | null
   userMessageContent: AssistantUserMessageContentPart[] | null
 }
@@ -567,6 +569,9 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     group: context,
     onEvent: input.onEvent,
     historyReader: input.historyReader,
+    ...(input.providerStartCriticalPath
+      ? { providerStartCriticalPath: input.providerStartCriticalPath }
+      : {}),
     receiptFallbackEnabled: shouldUseAssistantAutoReplyReceiptFallback({
       deliveryDispatchMode: input.deliveryDispatchMode,
       executionContext: input.executionContext,
@@ -692,8 +697,8 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     ...(input.beforeProviderAcceptedInputs
       ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
       : {}),
-    ...(input.providerStartCriticalPath
-      ? { providerStartCriticalPath: input.providerStartCriticalPath }
+    ...(decision.providerStartCriticalPath
+      ? { providerStartCriticalPath: decision.providerStartCriticalPath }
       : {}),
     captureIds: context.optionalInboxCaptureIds,
     inputIds: context.inputIds,
@@ -1270,12 +1275,14 @@ async function evaluateAssistantAutoReplyGroup(input: {
   historyReader: AssistantAutoReplyHistoryReader
   group: AssistantAutoReplyGroupContext
   onEvent?: (event: AssistantRunEvent) => void
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   receiptFallbackEnabled: boolean
   requestId: string | null
   sessionMaxAgeMs: number | null
   signal?: AbortSignal
   vault: string
 }): Promise<AssistantAutoReplyDecision> {
+  let providerStartCriticalPath = input.providerStartCriticalPath ?? null
   if (!input.enabledChannels.includes(input.group.firstItem.summary.source)) {
     return createAdvancingSkipDecision(
       'channel not enabled for assistant auto-reply',
@@ -1370,6 +1377,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
       'assistant reply terminal evidence is incomplete; will retry this input after evidence is rebuilt.',
     )
   }
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    'automationTerminalEvidenceDoneAtMonotonicMs',
+  )
 
   let promptInputs = await loadAssistantAutoReplyPromptInputs({
     group: input.group,
@@ -1424,6 +1435,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
     maxSessionAgeMs: input.sessionMaxAgeMs,
     vault: input.vault,
   })
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    'automationSessionPreflightDoneAtMonotonicMs',
+  )
   const bindingDeliveryTarget = readAutoReplyBindingDeliveryTarget(input.group)
   const conversationDeliveryTarget =
     bindingDeliveryTarget ?? readAutoReplyConversationDeliveryTarget(input.group)
@@ -1470,12 +1485,17 @@ async function evaluateAssistantAutoReplyGroup(input: {
           : readPromptInputsCrossSessionReplyToMessageId(promptInputs),
         session: existingSession,
       })
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    'automationCrossSessionContextDoneAtMonotonicMs',
+  )
   const affirmativeReaction =
     primaryReplyInput.sourceMetadata?.kind === 'linq' &&
     primaryReplyInput.sourceMetadata.affirmativeReaction === true
   if (
     affirmativeReaction &&
-    outboxContext.replyTargetDelivery === null
+    (outboxContext.replyTargetDelivery === null ||
+      outboxContext.replyTargetDelivery.message === null)
   ) {
     return createAdvancingSkipDecision(
       'affirmative Linq reaction target is not an attested assistant delivery',
@@ -1505,6 +1525,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
   if (preparedInput.kind === 'skip') {
     return createAdvancingSkipDecision(preparedInput.reason)
   }
+  providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    providerStartCriticalPath,
+    'automationPromptPreparationDoneAtMonotonicMs',
+  )
 
   return {
     bindingDeliveryTarget,
@@ -1525,6 +1549,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     operatorAuthority: 'direct-operator',
     primaryInput: primaryReplyInput,
     prompt: preparedInput.prompt,
+    providerStartCriticalPath,
     turnContext: buildAssistantAutoReplyTurnContext({
       baseContext: affirmativeReaction
       ? buildAssistantAutoReplyReactionTurnContext(
@@ -2408,6 +2433,9 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
           historyReader: input.historyReader,
           input: createAssistantAutoReplyPrimaryInput(firstLatePromptInput),
           inputs: latePromptInputs,
+          priorInputs: selectionContext.items.map((item) =>
+            createAssistantAutoReplyPromptInputFromEvent(item),
+          ),
           session: null,
         })).inputs
       : latePromptInputs
@@ -4354,18 +4382,19 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
   }
 
   textCandidates.push(
-    ...matchingDeliveries
-      .filter((delivery) =>
-        delivery.sentAtMs <= causalUpperBoundMs &&
-        (
-          inputProviderMessageId === null ||
-          delivery.providerMessageIds.length === 0
-        ),
+    ...matchingDeliveries.flatMap((delivery) =>
+      delivery.message !== null &&
+      delivery.sentAtMs <= causalUpperBoundMs &&
+      (
+        inputProviderMessageId === null ||
+        delivery.providerMessageIds.length === 0
       )
-      .map((delivery) => ({
-        message: delivery.message,
-        messageTime: delivery.sentAtMs,
-      })),
+        ? [{
+            message: delivery.message,
+            messageTime: delivery.sentAtMs,
+          }]
+        : [],
+    ),
   )
 
   return isAssistantAutoReplyNearestTextEchoMatch({
@@ -4426,12 +4455,15 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     }
   }
 
+  // Every consumer of this resolver quotes delivery text (latest fallback,
+  // reaction context, cross-session context), so media-only records stay out
+  // and its behavior is unchanged by their attestation elsewhere.
   const matchingDeliveries =
-    await listAssistantAutoReplyMatchingOutboxDeliveries({
+    (await listAssistantAutoReplyMatchingOutboxDeliveries({
       deliveryTarget,
       historyReader: input.historyReader,
       input: input.input,
-    })
+    })).filter((delivery) => delivery.message !== null)
   const replyToMessageId = input.replyToMessageId
   const replyTargetDelivery = replyToMessageId === null
     ? null
@@ -4506,6 +4538,7 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
   historyReader: AssistantAutoReplyHistoryReader
   input: AssistantAutoReplyPrimaryInput
   inputs: readonly AssistantAutoReplyPromptInput[]
+  priorInputs?: readonly AssistantAutoReplyPromptInput[]
   session: AssistantSession | null
 }): Promise<{
   crossSessionDelivery: AssistantAutoReplyMatchingOutboxDelivery | null
@@ -4513,12 +4546,17 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
   inputs: AssistantAutoReplyPromptInput[]
   primaryReplyTargetDelivery: AssistantAutoReplyMatchingOutboxDelivery | null
 }> {
-  const replyToMessageIds = input.inputs.map((promptInput) =>
+  const nativeReplyReferences = input.inputs.map((promptInput) =>
     promptInput.sourceMetadata?.kind === 'linq'
-      ? normalizeNullableString(promptInput.sourceMetadata.replyToMessageId)
+      ? normalizeNullableString(
+          promptInput.sourceMetadata.replyToMessageId,
+        )
       : null,
   )
-  const hasExplicitReply = replyToMessageIds.some(
+  const replyToMessageIds = nativeReplyReferences.map((replyToMessageId) =>
+    readAssistantTargetProviderScalar(replyToMessageId),
+  )
+  const hasExplicitReply = nativeReplyReferences.some(
     (replyToMessageId) => replyToMessageId !== null,
   )
   if (!hasExplicitReply) {
@@ -4530,47 +4568,204 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
     }
   }
 
-  const matchingDeliveries =
-    await listAssistantAutoReplyMatchingOutboxDeliveries({
-      deliveryTarget: input.deliveryTarget,
-      historyReader: input.historyReader,
-      input: input.input,
-    })
+  const matchingDeliveries = replyToMessageIds.some(
+    (replyToMessageId) => replyToMessageId !== null,
+  )
+    ? await listAssistantAutoReplyMatchingOutboxDeliveries({
+        deliveryTarget: input.deliveryTarget,
+        historyReader: input.historyReader,
+        input: input.input,
+      })
+    : []
   const exactDeliveries = replyToMessageIds.map((replyToMessageId) =>
     replyToMessageId === null
       ? null
-      : matchingDeliveries.find((delivery) =>
-          delivery.providerMessageIds.includes(replyToMessageId),
-        ) ?? null,
+      : resolveAssistantAutoReplyExactOutboxDelivery(
+          matchingDeliveries,
+          replyToMessageId,
+        ),
   )
   const crossSessionDelivery = exactDeliveries.reduce<
     AssistantAutoReplyMatchingOutboxDelivery | null
   >((selected, delivery) => {
     if (
       delivery === null ||
-      (input.session !== null && delivery.sessionId === input.session.sessionId)
+      (input.session !== null &&
+        delivery.sessionId === input.session.sessionId)
     ) {
       return selected
     }
     return delivery
   }, null)
 
+  const participantMessageRefsByProviderId = new Map<
+    string,
+    string | null
+  >()
+  for (const priorInput of input.priorInputs ?? []) {
+    indexAssistantAutoReplyParticipantMessage(
+      participantMessageRefsByProviderId,
+      readAssistantAutoReplyIMessageGroupParticipantMessage(priorInput),
+    )
+  }
+
+  const contextualizedInputs: AssistantAutoReplyPromptInput[] = []
+  for (const [index, promptInput] of input.inputs.entries()) {
+    const delivery = exactDeliveries[index] ?? null
+    const hasNativeReplyReference =
+      (nativeReplyReferences[index] ?? null) !== null
+    const replyToMessageId = replyToMessageIds[index] ?? null
+    const participantMessage =
+      readAssistantAutoReplyIMessageGroupParticipantMessage(promptInput)
+    const targetMessageRef =
+      participantMessage !== null &&
+      replyToMessageId !== null &&
+      participantMessage.providerMessageId !== replyToMessageId
+        ? participantMessageRefsByProviderId.get(replyToMessageId) ?? null
+        : null
+
+    contextualizedInputs.push(
+      delivery === null
+        ? {
+            ...promptInput,
+            replyContext:
+              buildAssistantAutoReplyParticipantReplyContext({
+                hasNativeReplyReference,
+                participantMessage,
+                replyToMessageId,
+                targetMessageRef,
+              }),
+          }
+        : {
+            ...promptInput,
+            replyContext:
+              delivery.message !== null
+                ? buildAssistantAutoReplyExplicitReplyContext(
+                    delivery.message,
+                  )
+                : buildAssistantAutoReplyExplicitMediaReplyContext(),
+          },
+    )
+
+    indexAssistantAutoReplyParticipantMessage(
+      participantMessageRefsByProviderId,
+      participantMessage,
+    )
+  }
+
   return {
     crossSessionDelivery,
     hasExplicitReply: true,
-    inputs: input.inputs.map((promptInput, index) => {
-      const delivery = exactDeliveries[index] ?? null
-      return delivery === null
-        ? { ...promptInput, replyContext: null }
-        : {
-            ...promptInput,
-            replyContext: buildAssistantAutoReplyExplicitReplyContext(
-              delivery.message,
-            ),
-          }
-    }),
+    inputs: contextualizedInputs,
     primaryReplyTargetDelivery: exactDeliveries[0] ?? null,
   }
+}
+
+interface AssistantAutoReplyParticipantMessage {
+  correctionSourceMessageRef: string | null
+  messageRef: string
+  providerMessageId: string
+}
+
+function readAssistantAutoReplyIMessageGroupParticipantMessage(
+  input: AssistantAutoReplyPromptInput,
+): AssistantAutoReplyParticipantMessage | null {
+  if (
+    input.actorIsSelf ||
+    input.conversation.threadIsDirect !== false
+  ) {
+    return null
+  }
+
+  const messageRef = readAssistantInputMessageRef(input)
+  const providerMessageId = readPromptInputReplyTargetMessageId({
+    expectedChannel: 'linq',
+    input,
+  })
+  const correctionSourceMessageRef =
+    input.sourceMetadata?.kind === 'linq'
+      ? normalizeNullableString(input.sourceMetadata.editedSourceInputId)
+      : null
+  return messageRef && providerMessageId
+    ? { correctionSourceMessageRef, messageRef, providerMessageId }
+    : null
+}
+
+function indexAssistantAutoReplyParticipantMessage(
+  messageRefsByProviderId: Map<string, string | null>,
+  participantMessage: AssistantAutoReplyParticipantMessage | null,
+): void {
+  if (participantMessage === null) {
+    return
+  }
+
+  const hasExistingClaim = messageRefsByProviderId.has(
+    participantMessage.providerMessageId,
+  )
+  const existingMessageRef = messageRefsByProviderId.get(
+    participantMessage.providerMessageId,
+  )
+
+  // A trusted correction reuses its source message's provider id. It never
+  // resolves as a target itself: it either agrees with the already-claimed
+  // source ref or marks the provider id unresolvable.
+  if (participantMessage.correctionSourceMessageRef !== null) {
+    if (
+      existingMessageRef ===
+        participantMessage.correctionSourceMessageRef &&
+      hasExistingClaim
+    ) {
+      return
+    }
+    messageRefsByProviderId.set(
+      participantMessage.providerMessageId,
+      null,
+    )
+    return
+  }
+
+  if (!hasExistingClaim) {
+    messageRefsByProviderId.set(
+      participantMessage.providerMessageId,
+      participantMessage.messageRef,
+    )
+    return
+  }
+  if (existingMessageRef !== participantMessage.messageRef) {
+    messageRefsByProviderId.set(
+      participantMessage.providerMessageId,
+      null,
+    )
+  }
+}
+
+function buildAssistantAutoReplyParticipantReplyContext(input: {
+  hasNativeReplyReference: boolean
+  participantMessage: AssistantAutoReplyParticipantMessage | null
+  replyToMessageId: string | null
+  targetMessageRef: string | null
+}): string | null {
+  if (
+    input.participantMessage === null ||
+    !input.hasNativeReplyReference ||
+    input.replyToMessageId === input.participantMessage.providerMessageId
+  ) {
+    return null
+  }
+
+  if (input.targetMessageRef) {
+    return [
+      'Native reply context:',
+      `The sender used iMessage's native reply to Message ref ${input.targetMessageRef}, an earlier accepted non-Murph group message in this turn.`,
+      'The referenced input is the native reply target. Use its sender and content evidence; the reply edge alone does not address Murph.',
+    ].join('\n')
+  }
+
+  return [
+    'Native reply context:',
+    "The sender used iMessage's native reply, but the target cannot be attested as Murph-authored or linked to an earlier accepted input in this turn.",
+    "The native reply edge alone does not establish that Murph is addressed. Apply the current message text and normal group-floor policy without inferring the target's sender or content.",
+  ].join('\n')
 }
 
 function readAssistantAutoReplyConsumedCrossSessionIntentIds(
@@ -4611,7 +4806,11 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
   intentId: string
-  message: string
+  message: string | null
+  providerMessageEffects: Array<{
+    message: string | null
+    providerMessageId: string
+  }>
   providerMessageIds: string[]
   sentAtMs: number
   sessionId: string
@@ -4658,15 +4857,26 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       return []
     }
 
+    // A sent delivery is attested by its provider message id even when it
+    // carries only response media; media-only records keep a null message so
+    // no consumer can quote text that never existed.
     const message = normalizeNullableString(intent.message)
     const sentAtMs = Date.parse(delivery.sentAt)
-    if (!message || !Number.isFinite(sentAtMs)) {
+    if (
+      (!message && (intent.media?.length ?? 0) === 0) ||
+      !Number.isFinite(sentAtMs)
+    ) {
       return []
     }
 
     return [{
       intentId: intent.intentId,
-      message,
+      message: message ?? null,
+      providerMessageEffects:
+        delivery.providerMessageEffects?.map((effect) => ({
+          message: effect.message,
+          providerMessageId: effect.providerMessageId,
+        })) ?? [],
       providerMessageIds: readAssistantAutoReplyOutboxDeliveryProviderMessageIds(
         delivery,
       ),
@@ -4674,6 +4884,33 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       sessionId: intent.sessionId,
     }]
   })
+}
+
+function resolveAssistantAutoReplyExactOutboxDelivery(
+  deliveries: readonly AssistantAutoReplyMatchingOutboxDelivery[],
+  providerMessageId: string,
+): AssistantAutoReplyMatchingOutboxDelivery | null {
+  const matchingDeliveries = deliveries.filter((delivery) =>
+    delivery.providerMessageIds.includes(providerMessageId),
+  )
+  if (matchingDeliveries.length !== 1) {
+    return null
+  }
+
+  const delivery = matchingDeliveries[0]!
+  if (delivery.providerMessageEffects.length === 0) {
+    return delivery
+  }
+
+  const matchingEffects = delivery.providerMessageEffects.filter((effect) =>
+    effect.providerMessageId === providerMessageId,
+  )
+  return matchingEffects.length === 1
+    ? {
+        ...delivery,
+        message: matchingEffects[0]!.message,
+      }
+    : null
 }
 
 async function resolveAssistantAutoReplyExistingSession(input: {
@@ -4834,6 +5071,13 @@ function buildAssistantAutoReplyExplicitReplyContext(
     normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
     '',
     'Use it only to interpret this message.',
+  ].join('\n')
+}
+
+function buildAssistantAutoReplyExplicitMediaReplyContext(): string {
+  return [
+    'The sender explicitly replied to an exact prior assistant media delivery that has no quotable text.',
+    'Use only that authorship fact to interpret this message; do not infer or describe the unseen media content.',
   ].join('\n')
 }
 

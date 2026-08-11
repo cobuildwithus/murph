@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -52,8 +53,35 @@ describe('assistant generated delivery files', () => {
     expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
       'never move or copy existing, user-owned, canonical, or durable files there',
     )
+    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
+      'pass those exact included ids in retire_export_pack_ids',
+    )
+    expect(
+      MURPH_SEND_VAULT_FILE_TOOL.inputSchema.properties.retire_export_pack_ids,
+    ).toMatchObject({ maxItems: 20, minItems: 1 })
     expect(
       MURPH_SEND_VAULT_FILE_TOOL.inputSchema.properties.ref.description,
     ).toContain('all other hidden paths')
+  })
+
+  it('parses exact export-pack ids from the vault-file tool boundary', () => {
+    expect(readTestMurphDynamicToolRequest({
+      id: 1,
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/vault.zip`,
+          retire_export_pack_ids: ['pack-one'],
+        },
+        callId: 'call-export-pack',
+        namespace: 'murph',
+        tool: 'send_vault_file',
+      },
+    })).toEqual({
+      kind: 'send-vault-file',
+      ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/vault.zip`,
+      retireExportPackIds: ['pack-one'],
+      toolCallId: 'call-export-pack',
+    })
   })
 })

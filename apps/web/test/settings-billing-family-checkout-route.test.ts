@@ -79,6 +79,7 @@ test("starts Family checkout for the authenticated hosted owner", async () => {
     },
   });
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+    confirmedTrialConversion: undefined,
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
@@ -86,10 +87,10 @@ test("starts Family checkout for the authenticated hosted owner", async () => {
   });
 });
 
-test("starts Family checkout with an explicit paid seat count", async () => {
+test("forwards an explicit seat count and trial-conversion confirmation", async () => {
   const response = await billingFamilyCheckoutRoute.POST(
     new Request("https://join.example.test/api/settings/billing/family/checkout", {
-      body: JSON.stringify({ seatCount: 3 }),
+      body: JSON.stringify({ confirmedTrialConversion: true, seatCount: 3 }),
       headers: {
         "content-type": "application/json",
         origin: "https://join.example.test",
@@ -100,6 +101,7 @@ test("starts Family checkout with an explicit paid seat count", async () => {
 
   expect(response.status).toBe(200);
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+    confirmedTrialConversion: true,
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),

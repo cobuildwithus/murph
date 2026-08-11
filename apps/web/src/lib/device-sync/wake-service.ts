@@ -8,6 +8,7 @@ import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
 import type {
+  DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
   DeviceSyncJobInput,
   DeviceSyncRegistry,
@@ -67,6 +68,10 @@ import {
   isHostedSourceDisconnectFenced,
 } from "./connection-source-lifecycle";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
+import {
+  normalizeHostedDeviceSyncLifecycleStatus,
+  normalizeHostedDeviceSyncSetupPhase,
+} from "./prisma-store/connection-records";
 import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import {
@@ -960,6 +965,8 @@ export async function cleanupRejectedHostedDeviceSyncConnectionSource(input: {
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
   registry: DeviceSyncRegistry;
+  revokeAccess?: DeviceConnectionHandler["revokeAccess"] | null;
+  revokeUnavailableWarning?: { code: string; message: string } | null;
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<{
@@ -1016,8 +1023,9 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   let revokeFailure: { code: string; message: string } | undefined;
 
   if (storedAccount) {
-    const provider = input.registry.get(existing.provider);
-    const revokeAccess = provider?.connectionHandler?.revokeAccess;
+    const revokeAccess = input.revokeAccess === undefined
+      ? input.registry.get(existing.provider)?.connectionHandler?.revokeAccess
+      : input.revokeAccess ?? undefined;
 
     const shouldRevoke = revokeAccess && (
       existing.status !== "disconnected"
@@ -1038,6 +1046,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
         revokeFailure = { code, message };
       }
+    } else if (input.revokeUnavailableWarning) {
+      revokeFailure = input.revokeUnavailableWarning;
     }
   }
 
@@ -1641,12 +1651,13 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   };
   claimToken: string;
   now: string;
+  ownerId: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
   traceId?: string | null;
   webhook: DeviceSyncIngressWebhook;
 }): Promise<void> {
   const traceId = normalizeNullableString(input.traceId);
-  const ownerId = await input.store.getConnectionOwnerId(input.account.id);
+  const ownerId = normalizeNullableString(input.ownerId);
 
   if (!ownerId) {
     console.warn("Rejecting hosted device-sync webhook without an owner mapping.", {
@@ -2200,23 +2211,50 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       input.userId,
       input.connectionId,
       async (tx) => {
-      const current = await input.store.getConnectionForUser(
-        input.userId,
-        input.connectionId,
-        tx,
-      );
+      const current = await tx.deviceConnection.findUnique({
+        where: {
+          id: input.connectionId,
+        },
+        select: {
+          connectedAt: true,
+          provider: true,
+          providerApplicationId: true,
+          providerApplicationRevision: true,
+          setupPhase: true,
+          status: true,
+          userId: true,
+        },
+      });
       if (
         !current
+        || current.userId !== input.userId
         || current.provider !== input.provider
-        || current.status !== "active"
-        || current.connectedAt !== input.expectedConnectedAt
+        || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
+        || current.connectedAt.toISOString() !== input.expectedConnectedAt
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {
           wakeMailboxItemId: null,
         };
       }
-      if (isDeviceSyncConnectionSetupPending(current)) {
+      // The hosted webhook endpoint authenticates only the shared/operator
+      // provider application. A provider-account row may have been rebound to
+      // a private application after the webhook's initial account lookup, so
+      // the durable admission owner must reject that stale authority while it
+      // holds the connection lock. Private connections continue through their
+      // scheduled reconciliation path until private webhook ownership exists.
+      if (
+        current.providerApplicationId !== null
+        || current.providerApplicationRevision !== null
+      ) {
+        await completeHostedWebhookTraceTx(input, tx);
+        return {
+          wakeMailboxItemId: null,
+        };
+      }
+      if (isDeviceSyncConnectionSetupPending({
+        setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
+      })) {
         throw deviceSyncError({
           code: "WEBHOOK_ACCOUNT_NOT_READY",
           message: "Device sync setup changed before webhook work could be committed.",

@@ -10,6 +10,7 @@ const codexMocks = vi.hoisted(() => ({
   dynamicToolCalls: [] as Array<{
     assistantStyleSettingsAvailable?: boolean
     deliveryContextOrdinal: number | null
+    generateSongTurnState?: unknown
     kind: string
     voiceMemoRuntime: unknown
   }>,
@@ -43,6 +44,12 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
               }
             : {}),
           deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+          ...(input.request.kind === 'generate-song'
+            ? {
+                generateSongTurnState:
+                  input.generateSongTurnState ?? null,
+              }
+            : {}),
           kind: input.request.kind,
           voiceMemoRuntime: input.voiceMemoRuntime ?? null,
         })
@@ -198,7 +205,7 @@ describe('Codex dynamic tool runtime routing', () => {
     ])
   })
 
-  it('passes voice memo and exact-turn style capabilities only to their tools', async () => {
+  it('passes voice memo, generated-song policy, and exact-turn style capabilities only to their tools', async () => {
     const workingDirectory = await createTempDir('assistant-codex-dynamic-runtime-work-')
     const codexHome = await createTempDir('assistant-codex-dynamic-runtime-home-')
     const voiceMemoRuntime: VoiceMemoToolRuntime = {
@@ -230,7 +237,11 @@ describe('Codex dynamic tool runtime routing', () => {
           CODEX_HOME: codexHome,
           PATH: '/usr/bin',
         },
-        prompt: 'Use three tools.',
+        generateSongPolicy: {
+          maxAttempts: 1,
+          requiredDurationSeconds: 15,
+        },
+        prompt: 'Use four tools.',
         sandbox: 'workspace-write',
         hostedToolContext: {
           beforeToolExecution,
@@ -268,21 +279,36 @@ describe('Codex dynamic tool runtime routing', () => {
         voiceMemoRuntime,
       },
       {
+        deliveryContextOrdinal: 0,
+        generateSongTurnState: {
+          attemptCount: 0,
+          policy: {
+            maxAttempts: 1,
+            requiredDurationSeconds: 15,
+          },
+        },
+        kind: 'generate-song',
+        voiceMemoRuntime,
+      },
+      {
         assistantStyleSettingsAvailable: true,
         deliveryContextOrdinal: 1,
         kind: 'assistant-style',
         voiceMemoRuntime: null,
       },
     ])
-    expect(beforeToolExecution).toHaveBeenCalledTimes(3)
+    expect(beforeToolExecution).toHaveBeenCalledTimes(4)
     expect(beforeToolExecution).toHaveBeenNthCalledWith(1, 0)
     expect(beforeToolExecution).toHaveBeenNthCalledWith(2, 0)
-    expect(beforeToolExecution).toHaveBeenNthCalledWith(3, 1)
+    expect(beforeToolExecution).toHaveBeenNthCalledWith(3, 0)
+    expect(beforeToolExecution).toHaveBeenNthCalledWith(4, 1)
     expect(codexMocks.executionOrder).toEqual([
       'checkpoint',
       'tool:send-progress-update',
       'checkpoint',
       'tool:generate-voice-memo',
+      'checkpoint',
+      'tool:generate-song',
       'checkpoint',
       'tool:assistant-style',
     ])
@@ -585,6 +611,7 @@ async function runScriptedOverlappingPendingVaultFilesTurn(
     method: 'item/tool/call',
     params: {
       arguments: { action: 'list' },
+      callId: 'call-31',
       namespace: 'murph',
       threadId: 'thread-pending-file-order',
       tool: 'pending_vault_files',
@@ -599,6 +626,7 @@ async function runScriptedOverlappingPendingVaultFilesTurn(
         action: 'cancel',
         intentIds: [`outbox_${'a'.repeat(32)}`],
       },
+      callId: 'call-32',
       namespace: 'murph',
       threadId: 'thread-pending-file-order',
       tool: 'pending_vault_files',
@@ -612,8 +640,8 @@ async function runScriptedOverlappingPendingVaultFilesTurn(
     params: {
       item: {
         id: 'assistant-pending-file-order',
-        message: 'pending file ordered',
-        type: 'assistant_message',
+        text: 'pending file ordered',
+        type: 'agentMessage',
       },
     },
   }))
@@ -649,8 +677,8 @@ async function runScriptedRequestContextTurn(
     params: {
       item: {
         id: 'user-request-context-initial',
-        message: 'Handle two tool requests and both live follow ups.',
-        type: 'user_message',
+        text: 'Handle two tool requests and both live follow ups.',
+        type: 'userMessage',
       },
     },
   }))
@@ -662,7 +690,9 @@ async function runScriptedRequestContextTurn(
       method: 'item/tool/call',
       params: {
         arguments: {},
+        callId: 'call-31',
         namespace: 'murph',
+        threadId: 'thread-request-context',
         tool: 'finish_without_reply',
         turnId: 'turn-request-context',
       },
@@ -671,8 +701,8 @@ async function runScriptedRequestContextTurn(
       params: {
         item: {
           id: 'user-request-context-first-steer',
-          message: 'Actually, please keep going.',
-          type: 'user_message',
+          text: 'Actually, please keep going.',
+          type: 'userMessage',
         },
       },
     }),
@@ -685,7 +715,9 @@ async function runScriptedRequestContextTurn(
       method: 'item/tool/call',
       params: {
         arguments: { text: 'Continuing with the update.' },
+        callId: 'call-32',
         namespace: 'murph',
+        threadId: 'thread-request-context',
         tool: 'send_progress_update',
         turnId: 'turn-request-context',
       },
@@ -694,8 +726,8 @@ async function runScriptedRequestContextTurn(
       params: {
         item: {
           id: 'user-request-context-second-steer',
-          message: 'Please answer this latest follow up too.',
-          type: 'user_message',
+          text: 'Please answer this latest follow up too.',
+          type: 'userMessage',
         },
       },
     }),
@@ -706,8 +738,8 @@ async function runScriptedRequestContextTurn(
     params: {
       item: {
         id: 'assistant-request-context',
-        message: 'The latest follow up still receives this reply.',
-        type: 'assistant_message',
+        text: 'The latest follow up still receives this reply.',
+        type: 'agentMessage',
       },
     },
   }))
@@ -747,8 +779,8 @@ async function runScriptedOverlappingProgressTurn(
       params: {
         item: {
           id,
-          message,
-          type: 'user_message',
+          text: message,
+          type: 'userMessage',
         },
       },
     }))
@@ -764,7 +796,9 @@ async function runScriptedOverlappingProgressTurn(
       method: 'item/tool/call',
       params: {
         arguments: { text },
+        callId: `call-${id}`,
         namespace: 'murph',
+        threadId: 'thread-overlapping-preflight',
         tool: 'send_progress_update',
         turnId: 'turn-overlapping-preflight',
       },
@@ -777,8 +811,8 @@ async function runScriptedOverlappingProgressTurn(
     params: {
       item: {
         id: 'assistant-overlapping-preflight',
-        message: 'overlapping progress complete',
-        type: 'assistant_message',
+        text: 'overlapping progress complete',
+        type: 'agentMessage',
       },
     },
   }))
@@ -816,7 +850,9 @@ async function runScriptedOverlappingStyleTurn(
       method: 'item/tool/call',
       params: {
         arguments: { action: 'set', setting: 'humor', value },
+        callId: `call-${id}`,
         namespace: 'murph',
+        threadId: 'thread-style-order',
         tool: 'assistant_style',
         turnId: 'turn-style-order',
       },
@@ -829,8 +865,8 @@ async function runScriptedOverlappingStyleTurn(
     params: {
       item: {
         id: 'assistant-style-order',
-        message: 'ordered',
-        type: 'assistant_message',
+        text: 'ordered',
+        type: 'agentMessage',
       },
     },
   }))
@@ -867,7 +903,9 @@ async function runScriptedInvalidComputerThenStyleTurn(
     method: 'item/tool/call',
     params: {
       arguments: { runId: 'run_123' },
+      callId: 'call-13',
       namespace: 'murph',
+      threadId: 'thread-invalid-computer-order',
       tool: 'computer_act',
       turnId: 'turn-invalid-computer-order',
     },
@@ -877,7 +915,9 @@ async function runScriptedInvalidComputerThenStyleTurn(
     method: 'item/tool/call',
     params: {
       arguments: { action: 'set', setting: 'humor', value: 6 },
+      callId: 'call-14',
       namespace: 'murph',
+      threadId: 'thread-invalid-computer-order',
       tool: 'assistant_style',
       turnId: 'turn-invalid-computer-order',
     },
@@ -889,8 +929,8 @@ async function runScriptedInvalidComputerThenStyleTurn(
     params: {
       item: {
         id: 'assistant-invalid-computer-order',
-        message: 'invalid computer ordered',
-        type: 'assistant_message',
+        text: 'invalid computer ordered',
+        type: 'agentMessage',
       },
     },
   }))
@@ -940,8 +980,8 @@ async function runScriptedDynamicToolTurn(
     params: {
       item: {
         id: 'user-dynamic-runtime-initial',
-        message: 'Use three tools.',
-        type: 'user_message',
+        text: 'Use four tools.',
+        type: 'userMessage',
       },
     },
   }))
@@ -954,7 +994,9 @@ async function runScriptedDynamicToolTurn(
       arguments: {
         text: 'Checking one thing.',
       },
+      callId: 'call-1',
       namespace: 'murph',
+      threadId: 'thread-dynamic-runtime',
       tool: 'send_progress_update',
       turnId: 'turn-dynamic-runtime',
     },
@@ -968,7 +1010,9 @@ async function runScriptedDynamicToolTurn(
       arguments: {
         text: 'Short memo.',
       },
+      callId: 'call-2',
       namespace: 'murph',
+      threadId: 'thread-dynamic-runtime',
       tool: 'generate_voice_memo',
       turnId: 'turn-dynamic-runtime',
     },
@@ -976,26 +1020,18 @@ async function runScriptedDynamicToolTurn(
   await child.waitForRpcId(2)
 
   child.stdout.write(jsonLine({
-    method: 'item/completed',
-    params: {
-      item: {
-        id: 'user-dynamic-runtime-steered',
-        message: 'Show my current style too.',
-        type: 'user_message',
-      },
-    },
-  }))
-  await new Promise((resolve) => setTimeout(resolve, 0))
-
-  child.stdout.write(jsonLine({
     id: 3,
     method: 'item/tool/call',
     params: {
       arguments: {
-        action: 'show',
+        durationSeconds: 30,
+        instrumental: false,
+        prompt: 'An original group theme.',
       },
+      callId: 'call-3',
       namespace: 'murph',
-      tool: 'assistant_style',
+      threadId: 'thread-dynamic-runtime',
+      tool: 'generate_song',
       turnId: 'turn-dynamic-runtime',
     },
   }))
@@ -1005,9 +1041,37 @@ async function runScriptedDynamicToolTurn(
     method: 'item/completed',
     params: {
       item: {
+        id: 'user-dynamic-runtime-steered',
+        text: 'Show my current style too.',
+        type: 'userMessage',
+      },
+    },
+  }))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  child.stdout.write(jsonLine({
+    id: 4,
+    method: 'item/tool/call',
+    params: {
+      arguments: {
+        action: 'show',
+      },
+      callId: 'call-4',
+      namespace: 'murph',
+      threadId: 'thread-dynamic-runtime',
+      tool: 'assistant_style',
+      turnId: 'turn-dynamic-runtime',
+    },
+  }))
+  await child.waitForRpcId(4)
+
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: {
         id: 'assistant-dynamic-runtime',
-        message: 'done',
-        type: 'assistant_message',
+        text: 'done',
+        type: 'agentMessage',
       },
     },
   }))

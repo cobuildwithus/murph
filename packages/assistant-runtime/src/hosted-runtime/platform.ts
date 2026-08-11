@@ -70,6 +70,9 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution/contracts";
 import type {
+  HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
+} from "@murphai/hosted-execution";
+import type {
   HostedVaultShareDeliverRequest,
   HostedVaultShareDeliverResponse,
   HostedVaultShareProjectionScope,
@@ -336,6 +339,9 @@ export interface HostedRuntimeAssistantAskCompletionAuthority {
   idempotencyKey: string;
 }
 
+export type HostedRuntimeAssistantAskPrivateCompletionAuthority =
+  HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority;
+
 export interface HostedRuntimeExternalThreadRouteAuthorityResult {
   assistantAskFallbackRequired?: boolean | null;
 }
@@ -405,6 +411,10 @@ type HostedRuntimeEffectsPortBase = {
       signal?: AbortSignal | null;
     },
   ): Promise<HostedRuntimeExternalThreadRouteAuthorityResult | void>;
+  assertAssistantAskPrivateCompletionAuthority?(
+    authority: HostedRuntimeAssistantAskPrivateCompletionAuthority,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
   resolveCurrentVerifiedEmailRecipient?(
     context?: { signal?: AbortSignal | null },
   ): Promise<string | null>;
@@ -530,6 +540,14 @@ export interface HostedRuntimeGroupToolPort {
     request: HostedRuntimeGroupToolRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeGroupToolResponse>;
+  /**
+   * Trusted-host direct-attachment route eligibility for the current turn.
+   * Only the turn-context wrapper knows the resolved route, so ports that are
+   * not route-aware omit this and leave post-generation binding as the gate.
+   */
+  directAttachmentRouteStatus?():
+    | { status: "ok" }
+    | { status: "unavailable"; unavailableReason: string };
 }
 
 export interface HostedRuntimeNewsletterToolPort {

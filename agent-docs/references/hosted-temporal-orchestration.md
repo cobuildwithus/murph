@@ -223,11 +223,12 @@ should be evaluated with slot availability plus Activity and Workflow Task
 schedule-to-start latency rather than process memory alone.
 Those Activity ceilings also bound peak pressure across the existing
 reconciliation path. Each signed hosted-Web callback replay admission performs
-one direct `hostedWebInternalRequestNonce.create`, not an application
-transaction; the `nonce_hash` primary key and Prisma P2002 convergence are the
-replay linearization point. Expiry is handled by the existing bounded
-background retention owner rather than the callback, while bounded per-user
-Prisma reads remain. When AI-gated work is present, the default Workflow path
+one direct `INSERT ... ON CONFLICT DO NOTHING`, not an application transaction;
+the `nonce_hash` primary key is the replay linearization point. The same
+statement uses the database clock to refuse admission if a delayed insert has
+already reached expiry, while retaining that row as a replay tombstone. Expiry
+is handled by the existing bounded background retention owner rather than the
+callback, while bounded per-user Prisma reads remain. When AI-gated work is present, the default Workflow path
 also runs the mutating allowance transaction; denied
 fresh conversation work can claim durable usage-notice delivery and send
 through Linq or Telegram, while allowed pending work issues a signed

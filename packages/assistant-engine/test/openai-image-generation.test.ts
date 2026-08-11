@@ -55,6 +55,7 @@ describe('generateOpenAiImage', () => {
     const result = await generateOpenAiImage({
       apiKey: 'test-key',
       fetchImpl,
+      outputCompression: 40,
       outputFormat: 'webp',
       prompt: 'Draw a clean icon.',
       quality: 'medium',
@@ -70,6 +71,7 @@ describe('generateOpenAiImage', () => {
     })
     expect(JSON.parse(String(capturedInit?.body))).toEqual({
       model: OPENAI_IMAGE_GENERATION_MODEL,
+      output_compression: 40,
       output_format: 'webp',
       prompt: 'Draw a clean icon.',
       quality: 'medium',
@@ -93,7 +95,8 @@ describe('generateOpenAiImage', () => {
     await generateOpenAiImage({
       apiKey: 'test-key',
       fetchImpl,
-      outputFormat: 'png',
+      outputCompression: 55,
+      outputFormat: 'jpeg',
       prompt: 'Use image 1 as the product reference.',
       quality: 'high',
       referenceImages: [
@@ -118,7 +121,8 @@ describe('generateOpenAiImage', () => {
     expect(form.get('prompt')).toBe('Use image 1 as the product reference.')
     expect(form.get('quality')).toBe('high')
     expect(form.get('size')).toBe('1024x1536')
-    expect(form.get('output_format')).toBe('png')
+    expect(form.get('output_format')).toBe('jpeg')
+    expect(form.get('output_compression')).toBe('55')
     expect(form.getAll('image[]')).toHaveLength(1)
     expect((form.getAll('image[]')[0] as { name?: string }).name).toBe(
       'reference-image-1.png',

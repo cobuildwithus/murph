@@ -52,6 +52,7 @@ import {
 
 export interface GenerateImageToolArgs {
   alt: string | null
+  outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
   prompt: string
   quality: OpenAiImageQuality
@@ -233,6 +234,9 @@ export async function executeGenerateImageTool(input: {
         abortSignal: input.abortSignal ?? null,
         apiKey,
         fetchImpl: input.fetchImpl,
+        ...(input.args.outputCompression !== undefined
+          ? { outputCompression: input.args.outputCompression }
+          : {}),
         outputFormat: input.args.outputFormat,
         prompt: buildGenerateImagePromptWithReferences({
           prompt: input.args.prompt,
@@ -518,6 +522,9 @@ function buildGeneratedImageUsageDraft(input: {
       inputTokens: input.usage?.input_tokens ?? null,
       outputTokens: input.usage?.output_tokens ?? null,
       providerMetadataJson: {
+        ...(input.args.outputCompression !== undefined
+          ? { imageOutputCompression: input.args.outputCompression }
+          : {}),
         imageOutputFormat: input.args.outputFormat,
         imageQuality: input.args.quality,
         imageSize: input.args.size,

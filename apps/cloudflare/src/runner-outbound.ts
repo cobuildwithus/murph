@@ -191,7 +191,7 @@ export async function handleRunnerOutboundRequest(
         });
       }
 
-      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap|\/presign-get|\/presign-put)?$/u.exec(
+      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap|\/heartbeat|\/presign-get|\/presign-put)?$/u.exec(
         url.pathname,
       );
       if (!match?.groups) {
@@ -206,6 +206,18 @@ export async function handleRunnerOutboundRequest(
           bucket: env.BUNDLES,
           env,
           environment,
+          request,
+          snapshotId: match.groups.snapshotId,
+          userId,
+        });
+      }
+
+      if (match.groups.suffix === "/heartbeat") {
+        if (request.method !== "POST") {
+          return methodNotAllowed();
+        }
+        return handleRunnerWorkspaceSnapshotHeartbeatRequest({
+          env,
           request,
           snapshotId: match.groups.snapshotId,
           userId,
@@ -626,6 +638,40 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
     objectKey,
     snapshotId,
   });
+}
+
+async function handleRunnerWorkspaceSnapshotHeartbeatRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  snapshotId: string;
+  userId: string;
+}): Promise<Response> {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
+    return unauthorized();
+  }
+  const body = await readJsonObject(input.request, {
+    limitBytes: 4 * 1024,
+  });
+  const requestedSnapshotId = requireSnapshotDataKeyString(body.snapshotId, "snapshotId");
+  if (requestedSnapshotId !== input.snapshotId) {
+    return jsonError("Hosted workspace snapshot heartbeat snapshotId does not match its route.", 400);
+  }
+  const alive = await heartbeatWorkspaceSnapshotUploadSession({
+    attemptId: writeFence.attemptId,
+    env: input.env,
+    leaseGeneration: writeFence.generation,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+  if (!alive) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
+  return json({ alive: true, ok: true });
 }
 
 async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
@@ -1625,9 +1671,13 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   }
   if (!checkpoint.checkpointed) {
     const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotResponse({
+      attemptId: writeFence.attemptId,
       checkpoint,
+      env: input.env,
+      leaseGeneration: writeFence.generation,
       session,
       snapshotRef,
+      userId: input.userId,
     });
     if (cleanupRetryResponse) {
       return cleanupRetryResponse;
@@ -1672,6 +1722,14 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     }
     return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
   }
+
+  await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
+    attemptId: writeFence.attemptId,
+    env: input.env,
+    leaseGeneration: writeFence.generation,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
 
   return json({
     checkpoint,
@@ -1834,11 +1892,15 @@ async function recordReplacedWorkspaceSnapshotOrphanCandidate(input: {
   });
 }
 
-function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
+async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
+  attemptId: string;
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
   session: HostedWorkspaceSnapshotUploadSession;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
-}): Response | null {
+  userId: string;
+}): Promise<Response | null> {
   const currentSnapshotRef = input.checkpoint.workspace.snapshotRef;
   if (
     !isHostedWorkspaceSnapshotV2Ref(currentSnapshotRef) ||
@@ -1847,6 +1909,13 @@ function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
     return null;
   }
   const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
+  await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
+    attemptId: input.attemptId,
+    env: input.env,
+    leaseGeneration: input.leaseGeneration,
+    snapshotId: input.session.snapshotId,
+    userId: input.userId,
+  });
 
   return json({
     checkpoint: {
@@ -2546,6 +2615,78 @@ async function createWorkspaceSnapshotUploadSession(input: {
     "createHostedWorkspaceSnapshotUploadSession",
   );
   return await stub.createHostedWorkspaceSnapshotUploadSession(input.session);
+}
+
+async function heartbeatWorkspaceSnapshotUploadSession(input: {
+  attemptId: string;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
+  snapshotId: string;
+  userId: string;
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(
+    stub,
+    "heartbeatHostedWorkspaceSnapshotUploadSession",
+  );
+  return await stub.heartbeatHostedWorkspaceSnapshotUploadSession({
+    attemptId: input.attemptId,
+    leaseGeneration: input.leaseGeneration,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+}
+
+async function completeWorkspaceSnapshotUploadSessionHandoff(input: {
+  attemptId: string;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
+  snapshotId: string;
+  userId: string;
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(
+    stub,
+    "completeHostedWorkspaceSnapshotUploadSession",
+  );
+  return await stub.completeHostedWorkspaceSnapshotUploadSession({
+    attemptId: input.attemptId,
+    leaseGeneration: input.leaseGeneration,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+}
+
+async function completeWorkspaceSnapshotUploadSessionHandoffBestEffort(input: {
+  attemptId: string;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
+  snapshotId: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    if (await completeWorkspaceSnapshotUploadSessionHandoff(input)) {
+      return;
+    }
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: { checkpointHandoffCompletionRecorded: false },
+      level: "warn",
+      message: "Hosted workspace snapshot handoff completion marker was stale.",
+      phase: "checkpoint",
+      userId: input.userId,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: { checkpointHandoffCompletionRecorded: false },
+      error,
+      level: "warn",
+      message: "Hosted workspace snapshot handoff completion marker failed.",
+      phase: "checkpoint",
+      userId: input.userId,
+    });
+  }
 }
 
 async function readWorkspaceSnapshotUploadSession(input: {

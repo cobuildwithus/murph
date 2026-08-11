@@ -74,6 +74,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantVoiceCausalSeq BigInt? @map("assistant_voice_causal_seq")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
+    "deviceProviderApplications DeviceProviderApplication[]",
     'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
     'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
@@ -1083,6 +1084,14 @@ describe("hosted Prisma baseline migration", () => {
       "20260806170000_hosted_pulse_trial_start_source",
       "20260806180000_fix_hosted_usage_plan_transition_bridge",
       "20260807140000_hosted_growth_snapshot_mrr_breakdown",
+      "20260807203000_hosted_starter_usage_entry_kind",
+      "20260807204000_non_expiring_starter_usage",
+      "20260807210000_add_group_sponsorship_creative_request",
+      "20260809160000_add_hosted_family_max_plan_code",
+      "20260810010000_member_owned_device_provider_applications",
+      "20260810020000_device_sync_dirty_payload_credential_independence",
+      "20260810050000_relax_detached_automatic_refill_failure",
+      "20260810150000_hosted_usage_credit_grant_slot_release",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(

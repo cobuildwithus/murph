@@ -158,9 +158,10 @@ export interface CloudflareHostedControlClient {
     orchestrationAttemptId: string;
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
-  prewarmRuntimeShell(
-    userId: string,
-  ): Promise<CloudflareHostedControlRuntimeShellPrewarmAcceptedAck>;
+  prewarmRuntimeShell(input: {
+    source: CloudflareHostedControlRuntimeShellPrewarmSource;
+    userId: string;
+  }): Promise<CloudflareHostedControlRuntimeShellPrewarmAcceptedAck>;
   reconcileRuntimeHealthDataConsent(
     userId: string,
   ): Promise<CloudflareHostedControlRuntimeHealthDataConsentResult>;
@@ -196,6 +197,10 @@ export interface CloudflareHostedControlRuntimeEnsureProcessingAcceptedAck {
 export interface CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
   accepted: true;
 }
+
+export type CloudflareHostedControlRuntimeShellPrewarmSource =
+  | "linq-instant-start"
+  | "linq-typing-started";
 
 export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
   | HostedRuntimeEnsureProcessingResponse
@@ -390,8 +395,8 @@ export function createCloudflareHostedControlClient(
         timeoutMs: options.timeoutMs,
       });
     },
-    prewarmRuntimeShell(userId) {
-      const expectedUserId = requireCloudflareHostedControlUserId(userId);
+    prewarmRuntimeShell(input) {
+      const expectedUserId = requireCloudflareHostedControlUserId(input.userId);
 
       return requestHostedExecutionAuthorizedJson({
         baseUrl,
@@ -402,7 +407,7 @@ export function createCloudflareHostedControlClient(
         parse: parseCloudflareHostedControlRuntimeShellPrewarmResponse,
         path: buildCloudflareHostedControlRuntimeShellPrewarmPath(expectedUserId),
         request: {
-          body: "{}",
+          body: JSON.stringify({ source: input.source }),
           headers: {
             "content-type": "application/json; charset=utf-8",
           },

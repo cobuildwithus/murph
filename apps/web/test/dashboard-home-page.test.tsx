@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   resolveConnectedAppCompletionDialogModel: vi.fn(),
   resolveDeviceSyncCompletionDialogModel: vi.fn(),
-  readHostedMemberBillingEligibilityState: vi.fn(),
   readHostedInitialOnboardingState: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
@@ -167,10 +166,6 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
-  readHostedMemberBillingEligibilityState: mocks.readHostedMemberBillingEligibilityState,
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberMessagingSetupState: mocks.readHostedMemberMessagingSetupState,
 }));
@@ -193,14 +188,6 @@ const MEMBER = {
   id: "member_123",
   suspendedAt: null,
   updatedAt: new Date("2026-05-01T00:00:00.000Z"),
-};
-
-const PULSE_TRIAL_BILLING_STATE = {
-  currentBillingPhase: "trial",
-  currentBillingPlanCode: "launch_monthly",
-  currentCheckoutOffer: "pulse_trial_7d",
-  hasStripeCustomerId: true,
-  hasStripeSubscriptionId: true,
 };
 
 beforeEach(() => {
@@ -260,7 +247,6 @@ beforeEach(() => {
       };
     },
   );
-  mocks.readHostedMemberBillingEligibilityState.mockResolvedValue(null);
   mocks.readHostedInitialOnboardingState.mockResolvedValue({
     preferences: { persona: null, tone: null, voice: null },
     status: "pending",
@@ -312,7 +298,6 @@ test("HomePage stops before page loaders when dashboard auth redirects", async (
     await HomePage({ searchParams: Promise.resolve({}) });
   }, /NEXT_REDIRECT:\/join/);
   assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls.length, 0);
-  assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 0);
   assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 0);
 });
 
@@ -344,7 +329,6 @@ test("HomePage degrades a failed read-only usage projection without mutating all
   assert.match(markup, /Some dashboard details are unavailable/);
   assert.doesNotMatch(markup, /Account notice/);
   assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 1);
-  assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 0);
 });
 
 test("HomePage retains an authoritative usage notice when its action projection fails", async () => {
@@ -485,41 +469,6 @@ test("HomePage hides the connect devices card when device sync is already active
   );
 });
 
-test("HomePage keeps active Pulse Trial users in the product without a start-paid banner", async () => {
-  mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
-
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
-
-  assert.match(markup, /Welcome to Murph/);
-  assert.doesNotMatch(markup, /Start Pulse now/);
-  assert.doesNotMatch(markup, /End the remaining trial and start paid Pulse now/);
-  assert.doesNotMatch(markup, /hit this month/);
-  assert.doesNotMatch(markup, /Resume Pulse billing/);
-});
-
-test("HomePage shows the resume billing banner for paused Pulse Trial users", async () => {
-  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
-    authenticated: true,
-    authenticatedMember: {
-      ...MEMBER,
-      billingStatus: "paused",
-    },
-    session: null,
-  });
-  mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
-
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
-
-  assert.match(markup, /Resume Pulse billing/);
-  assert.match(markup, /Add a payment method and resume billing/);
-  assert.match(markup, /href="\/settings"/);
-  assert.doesNotMatch(markup, /hit this month/);
-  assert.doesNotMatch(markup, /Start Pulse now/);
-  assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 1);
-});
-
 test("HomePage does not show a blocked banner while purchased usage remains", async () => {
   mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: true,
@@ -592,10 +541,50 @@ test("HomePage shows blocked Pulse usage with an add-usage action", async () => 
   );
 });
 
-test("HomePage keeps the exhausted Pulse block notice when action resolution fails closed", async () => {
-  mocks.readHostedMemberBillingEligibilityState.mockRejectedValue(
-    new Error("billing eligibility unavailable"),
+test("HomePage identifies exhausted Max usage without Pulse or Edge copy", async () => {
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: false,
+    allowanceSource: "direct_paid_member_plan",
+    billingPlanCode: "launch_max_monthly",
+    limitUsdMicros: 40_000_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-06-01T00:00:00.000Z"),
+    spentUsdMicros: 40_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
+    userNotice: {
+      code: "max_usage_limit_reached",
+      message:
+        "You've used 100% of this month's included Max usage. New usage is blocked.",
+    },
+  });
+  mocks.projectHostedPersonalAiUsageStatus.mockResolvedValueOnce({
+    generatedAt: "2026-05-26T12:00:00.000Z",
+    recommendedAction: {
+      kind: "add_usage",
+      label: "Add usage",
+      url: "/settings?addUsage=true#subscription",
+    },
+    status: "unavailable",
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
+
+  assert.match(markup, /included Max usage/u);
+  assert.doesNotMatch(markup, /included (?:Pulse|Edge) usage/u);
+  assert.match(markup, />Add usage</);
+  assert.equal(
+    mocks.projectHostedPersonalAiUsageStatus.mock.calls[0]?.[0]?.decision.userNotice.code,
+    "max_usage_limit_reached",
   );
+});
+
+test("HomePage keeps the exhausted Pulse block notice when action resolution fails closed", async () => {
   mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
     allowanceSource: "direct_paid_member_plan",
@@ -639,7 +628,6 @@ test("HomePage keeps the exhausted Pulse block notice when action resolution fai
   assert.doesNotMatch(markup, /You can add more usage now/);
   assert.doesNotMatch(markup, />Add usage</);
   assert.doesNotMatch(markup, /addUsage=true/);
-  assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 0);
 });
 
 test("UsageLimitBanner omits thread-container notices from the personal dashboard", async () => {
@@ -751,12 +739,12 @@ test("HomePage shows a blocked Family usage notice with the fallback add-usage a
   assert.match(markup, /href="\/settings\?addUsage=true#subscription"/);
 });
 
-test("HomePage shows blocked trial usage with the existing Start Pulse action", async () => {
+test("HomePage shows exhausted starter usage with the existing Start Pulse action", async () => {
   mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
-    allowanceSource: "direct_trial",
+    allowanceSource: "direct_starter",
     billingPlanCode: "launch_monthly",
-    limitUsdMicros: 4_500_000n,
+    limitUsdMicros: 0n,
     memberId: MEMBER.id,
     periodEnd: new Date("2026-05-08T00:00:00.000Z"),
     periodStart: new Date("2026-05-01T00:00:00.000Z"),
@@ -767,8 +755,8 @@ test("HomePage shows blocked trial usage with the existing Start Pulse action", 
     usageCreditBalanceUsdMicros: 0n,
     usageCreditLedgerVersion: 0n,
     userNotice: {
-      code: "trial_usage_limit_reached",
-      message: "You've used 100% of your included trial usage. New usage is blocked.",
+      code: "starter_usage_limit_reached",
+      message: "You've used 100% of your starter usage. New usage is blocked.",
     },
   });
   mocks.projectHostedPersonalAiUsageStatus.mockResolvedValueOnce({
@@ -780,44 +768,15 @@ test("HomePage shows blocked trial usage with the existing Start Pulse action", 
     },
     status: "unavailable",
   });
-  mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce(PULSE_TRIAL_BILLING_STATE);
 
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
 
-  assert.match(markup, /used 100% of your included trial usage/u);
-  assert.match(markup, /Murph is paused because your included trial usage is exhausted/);
+  assert.match(markup, /used 100% of your starter usage/u);
+  assert.match(markup, /Murph is paused because your starter usage is exhausted/);
   assert.match(markup, /Start Pulse to continue/iu);
   assert.match(markup, /Start from usage projection/);
   assert.match(markup, /href="https:\/\/example\.test\/settings#subscription"/);
-  assert.doesNotMatch(markup, /Resets in/u);
-});
-
-test("HomePage shows non-limit denied usage notices without a reset countdown", async () => {
-  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
-    allowed: false,
-    billingPlanCode: "launch_monthly",
-    limitUsdMicros: 4_500_000n,
-    memberId: MEMBER.id,
-    periodEnd: new Date("2026-05-08T00:00:00.000Z"),
-    periodStart: new Date("2026-05-01T00:00:00.000Z"),
-    reason: "trial_expired_pending_billing",
-    remainingUsdMicros: 0n,
-    retryAfter: new Date("2026-05-26T12:05:00.000Z"),
-    spentUsdMicros: 4_500_000n,
-    userNotice: {
-      code: "trial_conversion_pending",
-      message: "Your trial ended and billing is still pending.",
-    },
-  });
-
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
-  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
-
-  assert.match(markup, /Your trial just ended/);
-  assert.match(markup, /included trial access is no longer active/);
-  assert.doesNotMatch(markup, /Start Pulse|Upgrade to Edge/);
-  assert.doesNotMatch(markup, /href="\/settings/);
   assert.doesNotMatch(markup, /Resets in/u);
 });
 

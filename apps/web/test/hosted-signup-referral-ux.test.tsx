@@ -36,11 +36,11 @@ describe("hosted signup referral UX", () => {
     });
   });
 
-  it("keeps stable links out of indexes and referrer headers", async () => {
+  it("keeps stable links out of indexes while preserving same-origin claim proof", async () => {
     const page = await import("../app/r/[referralCode]/page");
 
     expect(page.metadata).toMatchObject({
-      referrer: "no-referrer",
+      referrer: "strict-origin",
       robots: {
         follow: false,
         index: false,
@@ -56,8 +56,9 @@ describe("hosted signup referral UX", () => {
 
     assert.match(markup, /You&#x27;re invited/);
     assert.match(markup, />Join Murph</);
-    assert.match(markup, /Murph credits whoever shared this link/);
+    assert.match(markup, /This link tells Murph who introduced you/);
     assert.match(markup, /cannot see your conversations or health information/);
+    assert.doesNotMatch(markup, /credits whoever shared|extra usage|reward/i);
     expect(mocks.claimHostedSignupReferralLink).not.toHaveBeenCalled();
   });
 

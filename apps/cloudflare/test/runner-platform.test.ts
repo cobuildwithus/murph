@@ -163,6 +163,16 @@ function requireFetchRequest(call: readonly unknown[] | undefined, label: string
   return input instanceof Request ? input : new Request(input, init);
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
 async function delayWithAbort(delayMs: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
     throw signal.reason;
@@ -353,6 +363,36 @@ function createWorkspaceSnapshotV2Ref(input: {
     upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
     userId: "member_123",
   };
+}
+
+function createWorkspaceSnapshotSessionStartResponse(input: {
+  dataKeyBase64: string;
+  objectKey: string;
+  snapshotId: string;
+}): Response {
+  return new Response(JSON.stringify({
+    encryption: {
+      aad: buildHostedWorkspaceSnapshotV2Aad({
+        objectKey: input.objectKey,
+        snapshotId: input.snapshotId,
+        userId: "member_123",
+      }),
+      dataKeyBase64: input.dataKeyBase64,
+      ivBase64: "AQIDBAUGBwgJCgsM",
+      rootKeyId: "root_key_test",
+      scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+      wrappedDataKey: "wrapped_data_key_test",
+    },
+    limits: {
+      maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+      warnEncryptedBytes: 128 * 1024 * 1024,
+    },
+    objectKey: input.objectKey,
+    snapshotId: input.snapshotId,
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  });
 }
 
 function createEncryptedWorkspaceSnapshotBytes(input: {
@@ -1144,6 +1184,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           },
         );
       }
+      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (request.url.endsWith(`/workspace-snapshots/${snapshotId}`)) {
         return new Response(JSON.stringify({ aborted: true, ok: true }), {
           headers: {
@@ -1177,15 +1223,254 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       snapshotId,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const abortRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot abort");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const abortRequest = requireFetchRequest(fetchMock.mock.calls[2], "workspace snapshot abort");
     expect(abortRequest.method).toBe("DELETE");
     expect(abortRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(abortRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(abortRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
   });
 
+  it("heartbeats immediately and stops on abort before session cleanup settles", async () => {
+    vi.useFakeTimers();
+    const snapshotId = "snapshot_runner_platform_heartbeat";
+    const objectKey =
+      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    const abortResponse = createDeferred<Response>();
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot heartbeat fetch");
+      if (request.url.endsWith("/workspace-snapshots/start")) {
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey,
+          snapshotId,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}`)) {
+        return await abortResponse.promise;
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    });
+    const snapshotAbort = new AbortController();
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+      signal: snapshotAbort.signal,
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const heartbeatRequest = requireFetchRequest(
+      fetchMock.mock.calls[1],
+      "workspace snapshot heartbeat",
+    );
+    expect(heartbeatRequest.method).toBe("POST");
+    expect(heartbeatRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(heartbeatRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+
+    snapshotAbort.abort(new Error("foreground preemption"));
+    const abortSnapshotSession = platform.workspaceSnapshotPort!.abortSnapshotSession({
+      objectKey,
+      snapshotId,
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    abortResponse.resolve(new Response(JSON.stringify({ aborted: true, ok: true }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    await abortSnapshotSession;
+  });
+
+  it("caps delayed session start and heartbeats before the stale boundary", async () => {
+    vi.useFakeTimers();
+    const startedAtMs = Date.parse("2026-04-27T00:00:00.000Z");
+    vi.setSystemTime(startedAtMs);
+    const snapshotId = "snapshot_runner_platform_delayed_start";
+    const objectKey =
+      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    const startResponse = createDeferred<Response>();
+    const timeoutCalls: number[] = [];
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((delayMs) => {
+      timeoutCalls.push(delayMs);
+      return new AbortController().signal;
+    });
+    let firstHeartbeatAtMs: number | null = null;
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "delayed workspace snapshot start");
+      if (request.url.endsWith("/workspace-snapshots/start")) {
+        return await startResponse.promise;
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}/heartbeat`)) {
+        firstHeartbeatAtMs = Date.now();
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const snapshotAbort = new AbortController();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      commitTimeoutMs: 30_000,
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    try {
+      const startSnapshotSession = platform.workspaceSnapshotPort!.startSnapshotSession({
+        expectedWorkspaceVersion: "4",
+        reason: "idle_shutdown",
+        signal: snapshotAbort.signal,
+      });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+      vi.setSystemTime(startedAtMs + 5_500);
+      startResponse.resolve(createWorkspaceSnapshotSessionStartResponse({
+        dataKeyBase64,
+        objectKey,
+        snapshotId,
+      }));
+      await startSnapshotSession;
+      await vi.waitFor(() => expect(firstHeartbeatAtMs).not.toBeNull());
+
+      expect(timeoutCalls).toContain(6_000);
+      expect(firstHeartbeatAtMs).toBe(startedAtMs + 5_500);
+      expect((firstHeartbeatAtMs ?? Infinity) - startedAtMs).toBeLessThan(10_000);
+    } finally {
+      snapshotAbort.abort(new Error("test complete"));
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it("abandons session start when its handoff timeout fires", async () => {
+    const timeoutControllers: Array<{
+      controller: AbortController;
+      delayMs: number;
+    }> = [];
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((delayMs) => {
+      const controller = new AbortController();
+      timeoutControllers.push({ controller, delayMs });
+      return controller.signal;
+    });
+    const fetchMock = vi.fn(async () => new Response(
+      new ReadableStream<Uint8Array>({ start: () => undefined }),
+      {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      },
+    ));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      commitTimeoutMs: 30_000,
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    try {
+      const startSnapshotSession = platform.workspaceSnapshotPort!.startSnapshotSession({
+        expectedWorkspaceVersion: "4",
+        reason: "idle_shutdown",
+      });
+      await vi.waitFor(() =>
+        expect(timeoutControllers.some(({ delayMs }) => delayMs === 6_000)).toBe(true)
+      );
+      const startTimeout = timeoutControllers.find(({ delayMs }) => delayMs === 6_000);
+      if (!startTimeout) {
+        throw new Error("Workspace snapshot start timeout was not created.");
+      }
+      const timeoutError = new Error("The operation timed out.");
+      timeoutError.name = "TimeoutError";
+      startTimeout.controller.abort(timeoutError);
+
+      await expect(startSnapshotSession).rejects.toBe(timeoutError);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it("starts the next serialized heartbeat without another idle interval", async () => {
+    vi.useFakeTimers();
+    const startedAtMs = Date.parse("2026-04-27T00:00:00.000Z");
+    vi.setSystemTime(startedAtMs);
+    const snapshotId = "snapshot_runner_platform_serial_heartbeat";
+    const objectKey =
+      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    const firstHeartbeat = createDeferred<Response>();
+    const heartbeatStartedAt: number[] = [];
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "serialized workspace snapshot heartbeat");
+      if (request.url.endsWith("/workspace-snapshots/start")) {
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey,
+          snapshotId,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}/heartbeat`)) {
+        heartbeatStartedAt.push(Date.now());
+        if (heartbeatStartedAt.length === 1) {
+          return await firstHeartbeat.promise;
+        }
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const snapshotAbort = new AbortController();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      commitTimeoutMs: 30_000,
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+      signal: snapshotAbort.signal,
+    });
+    await vi.waitFor(() => expect(heartbeatStartedAt).toEqual([startedAtMs]));
+    vi.setSystemTime(startedAtMs + 2_000);
+    const timeoutError = new Error("The operation timed out.");
+    timeoutError.name = "TimeoutError";
+    firstHeartbeat.reject(timeoutError);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(heartbeatStartedAt).toHaveLength(2));
+
+    expect(heartbeatStartedAt).toEqual([startedAtMs, startedAtMs + 2_000]);
+    snapshotAbort.abort(new Error("test complete"));
+  });
+
   it("reuses the snapshot session write fence when completing after the runtime lease changes", async () => {
+    vi.useFakeTimers();
     const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
       Uint8Array.from({ length: 32 }, (_, index) => index + 1),
@@ -1228,6 +1513,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           },
         );
       }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
         return new Response(JSON.stringify({ error: "stale" }), {
           headers: {
@@ -1267,12 +1558,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ref,
     })).rejects.toThrow("Hosted workspace snapshot complete failed with HTTP 409.");
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot complete");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[2], "workspace snapshot complete");
     expect(completeRequest.method).toBe("POST");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("returns foreground-pending snapshot completion checkpoints to the runtime", async () => {
@@ -1317,6 +1610,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             status: 200,
           },
         );
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
         return new Response(
@@ -1386,8 +1685,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }));
     expect(completed.snapshotRef).toEqual(ref);
     expect(recordCheckpoint).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[1], "workspace snapshot complete");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[2], "workspace snapshot complete");
     expect(completeRequest.method).toBe("POST");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
@@ -4586,6 +4885,85 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       .toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("binds private Assistant Ask completion proof to its exact authorized direct route", async () => {
+    const privateCompletionRequest = {
+      answeredMailboxItemIds: ["aask_done_private_provider_entry"],
+      assistantAskCompletionExpiresAt: "2026-08-09T18:00:00.000Z",
+      idempotencyKey:
+        "assistant-ask-private:aask_done_private_provider_entry",
+      responseTextDigest:
+        "01e93e1ac156d325ccf1df0f18518b899140ae48588be6a01876aa20ece0cadd",
+      route: {
+        actorId: null,
+        channel: "telegram" as const,
+        delivery: {
+          kind: "thread" as const,
+          target: "telegram_direct_456",
+        },
+        identityId: `hid_${"1".repeat(32)}`,
+        threadId: `hid_${"2".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    };
+    let authorized = true;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(
+        HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+      );
+      await expect(request.json()).resolves.toEqual({
+        authority: privateCompletionRequest.route,
+        privateAssistantAskCompletion: {
+          answeredMailboxItemIds: privateCompletionRequest.answeredMailboxItemIds,
+          expiresAt: privateCompletionRequest.assistantAskCompletionExpiresAt,
+          idempotencyKey: privateCompletionRequest.idempotencyKey,
+          responseTextDigest: privateCompletionRequest.responseTextDigest,
+        },
+      });
+      return new Response(JSON.stringify({ authorized }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const assertAssistantAskPrivateCompletionAuthority =
+      platform.effectsPort.assertAssistantAskPrivateCompletionAuthority;
+    if (!assertAssistantAskPrivateCompletionAuthority) {
+      throw new Error("Expected private Assistant Ask completion authority effect.");
+    }
+
+    await expect(
+      assertAssistantAskPrivateCompletionAuthority(privateCompletionRequest),
+    ).resolves.toBeUndefined();
+
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "private Assistant Ask completion authority request",
+    );
+    expect(request.url).toBe(
+      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}`,
+    );
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature"))
+      .toMatch(/^[A-Za-z0-9\-_]+$/u);
+
+    authorized = false;
+    await expect(
+      assertAssistantAskPrivateCompletionAuthority(privateCompletionRequest),
+    ).rejects.toThrow(
+      "Hosted Assistant Ask private completion authority response is invalid.",
+    );
+  });
+
   it("carries reviewed Assistant Ask proof through external route authority", async () => {
     const authority = {
       channel: "telegram" as const,
@@ -6618,6 +6996,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           },
         );
       }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
         return new Response(
           JSON.stringify({
@@ -6687,7 +7071,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ref,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     const startRequest = requireFetchRequest(fetchMock.mock.calls[1], "advanced snapshot start");
     expect(startRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(startRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
@@ -6696,7 +7080,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expectedWorkspaceVersion: "5",
       reason: "idle_shutdown",
     }));
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[2], "advanced snapshot complete");
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[3], "advanced snapshot complete");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");

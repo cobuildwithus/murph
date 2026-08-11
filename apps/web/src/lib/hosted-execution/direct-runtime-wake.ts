@@ -13,13 +13,13 @@ export type HostedDirectRuntimeWakeSource =
   | "linq";
 
 /**
- * Issues an owner-neutral container start hint and always settles. This does
- * not resolve a runtime owner, read workspace state, create a fence, or wait
- * for readiness; the ordinary post-Temporal ensure remains authoritative for
+ * Issues a consent-serialized container start hint and always settles. This
+ * does not create a write fence, resolve processing ownership, or invoke
+ * workspace work; the ordinary post-Temporal ensure remains authoritative for
  * all of those steps.
  */
 export function startHostedRuntimeShellPrewarmBestEffort(input: {
-  source: "linq-instant-start";
+  source: "linq-instant-start" | "linq-typing-started";
   userId: string;
 }): Promise<void> {
   const wakeSource = input.source;
@@ -39,7 +39,10 @@ export function startHostedRuntimeShellPrewarmBestEffort(input: {
 
   try {
     return client
-      .prewarmRuntimeShell(input.userId)
+      .prewarmRuntimeShell({
+        source: input.source,
+        userId: input.userId,
+      })
       .then((result) => {
         console.info("Hosted runtime shell prewarm accepted.", {
           accepted: result.accepted,

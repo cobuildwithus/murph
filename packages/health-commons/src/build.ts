@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -9,6 +10,10 @@ import {
   buildHealthCommonsSourceIndex,
 } from "./catalog.ts";
 import { buildHealthCommonsBiomarkerDesiredDirectionsArtifact } from "./biomarker-runtime-artifacts.ts";
+import {
+  HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE,
+  writeHealthCommonsKnowledgeIndex,
+} from "./knowledge-index.ts";
 import { stablePrettyJson } from "./normalize.ts";
 import { buildHealthCommonsProtocolGeneratedArtifacts } from "./protocol-artifacts.ts";
 import { buildHealthCommonsWebGeneratedArtifacts } from "./web-artifacts.ts";
@@ -26,11 +31,11 @@ export async function writeHealthCommonsGeneratedArtifacts(options: CliOptions):
   const files = buildGeneratedFiles(catalog);
 
   if (options.check) {
-    await assertGeneratedArtifactsCurrent(options.contentRoot, options.generatedRoot, files);
+    await assertGeneratedArtifactsCurrent(options.contentRoot, options.generatedRoot, files, catalog);
     return;
   }
 
-  await replaceGeneratedRoot(options.generatedRoot, files);
+  await replaceGeneratedRoot(options.generatedRoot, files, catalog);
 }
 
 async function writeGeneratedFiles(outputRoot: string, files: ReadonlyMap<string, string>): Promise<void> {
@@ -41,7 +46,11 @@ async function writeGeneratedFiles(outputRoot: string, files: ReadonlyMap<string
   }
 }
 
-async function replaceGeneratedRoot(generatedRoot: string, files: ReadonlyMap<string, string>): Promise<void> {
+async function replaceGeneratedRoot(
+  generatedRoot: string,
+  files: ReadonlyMap<string, string>,
+  catalog: Awaited<ReturnType<typeof buildHealthCommonsCatalog>>,
+): Promise<void> {
   const targetRoot = path.resolve(generatedRoot);
   const targetParent = path.dirname(targetRoot);
   const targetBaseName = path.basename(targetRoot);
@@ -54,6 +63,10 @@ async function replaceGeneratedRoot(generatedRoot: string, files: ReadonlyMap<st
   await mkdir(targetParent, { recursive: true });
   try {
     await writeGeneratedFiles(temporaryRoot, files);
+    writeHealthCommonsKnowledgeIndex(
+      path.join(temporaryRoot, HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE),
+      catalog,
+    );
   } catch (error) {
     await rm(temporaryRoot, { force: true, recursive: true }).catch(() => {});
     throw error;
@@ -142,6 +155,7 @@ async function assertGeneratedArtifactsCurrent(
   contentRoot: string,
   generatedRoot: string,
   expectedFiles: ReadonlyMap<string, string>,
+  firstCatalog: Awaited<ReturnType<typeof buildHealthCommonsCatalog>>,
 ): Promise<void> {
   const secondCatalog = await buildHealthCommonsCatalog({ contentRoot });
   const secondFiles = buildGeneratedFiles(secondCatalog);
@@ -155,6 +169,33 @@ async function assertGeneratedArtifactsCurrent(
 
   if (mismatches.length > 0) {
     throw new Error(`Health Commons generated artifacts are nondeterministic: ${mismatches.join(", ")}.`);
+  }
+
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-check-"));
+  try {
+    const firstIndexPath = path.join(temporaryRoot, "first.sqlite");
+    const secondIndexPath = path.join(temporaryRoot, "second.sqlite");
+    writeHealthCommonsKnowledgeIndex(firstIndexPath, firstCatalog);
+    writeHealthCommonsKnowledgeIndex(secondIndexPath, secondCatalog);
+    const [firstIndex, secondIndex] = await Promise.all([
+      readFile(firstIndexPath),
+      readFile(secondIndexPath),
+    ]);
+    if (!firstIndex.equals(secondIndex)) {
+      throw new Error(
+        `Health Commons generated artifacts are nondeterministic: ${HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE}.`,
+      );
+    }
+    const currentIndex = await readFile(
+      path.join(generatedRoot, HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE),
+    ).catch(() => null);
+    if (!currentIndex || !firstIndex.equals(currentIndex)) {
+      throw new Error(
+        `Health Commons generated artifacts are out of date; changed 1: ${HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE}. Run pnpm --filter @murphai/health-commons generate.`,
+      );
+    }
+  } finally {
+    await rm(temporaryRoot, { force: true, recursive: true });
   }
 
   const actualFiles = await readGeneratedTree(generatedRoot);
@@ -173,9 +214,15 @@ async function assertGeneratedArtifactsCurrent(
   }
 
   for (const fileName of actualFiles.keys()) {
-    if (!expectedFiles.has(fileName)) {
+    if (!expectedFiles.has(fileName) && fileName !== HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE) {
       staleFiles.push(fileName);
     }
+  }
+
+  const expectedIndexPath = path.join(generatedRoot, HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE);
+  const indexExists = await readFile(expectedIndexPath).then(() => true, () => false);
+  if (!indexExists) {
+    missingFiles.push(HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE);
   }
 
   if (missingFiles.length > 0 || changedFiles.length > 0 || staleFiles.length > 0) {
@@ -220,7 +267,12 @@ async function collectGeneratedTreeFiles(
       continue;
     }
 
-    files.set(relativePath, entry.isFile() ? await readFile(absolutePath, "utf8") : null);
+    files.set(
+      relativePath,
+      entry.isFile() && relativePath !== HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE
+        ? await readFile(absolutePath, "utf8")
+        : null,
+    );
   }
 }
 

@@ -177,6 +177,7 @@ import {
   wearablesBodyStateListResultSchema,
   wearablesDayResultSchema,
   wearablesDriftResultSchema,
+  wearablesPersonalPatternsResultSchema,
   wearablesLatestResultSchema,
   wearablesMetricLatestResultSchema,
   wearablesMetricTrendResultSchema,
@@ -1058,6 +1059,10 @@ export const vaultCliCommandDescriptors = [
         description: measurementCommandDescriptions.list,
       },
       {
+        path: ['measurement', 'entry', 'list'],
+        description: measurementCommandDescriptions.entryList,
+      },
+      {
         path: ['measurement', 'manifest'],
         description: measurementCommandDescriptions.manifest,
       },
@@ -1534,6 +1539,11 @@ export const vaultCliCommandDescriptors = [
         description: 'Explain the biggest normalized wearable drift Murph sees across the current wearable surfaces.',
         output: wearablesDriftResultSchema,
       },
+      {
+        path: ['wearables', 'patterns'],
+        description: 'Compare repeated activity and intervention days with next-day sleep and recovery outcomes.',
+        output: wearablesPersonalPatternsResultSchema,
+      },
     ],
     directVaultServiceBindings: assumeDirectVaultServiceBindings({
       query: [
@@ -1548,6 +1558,7 @@ export const vaultCliCommandDescriptors = [
         'listWearableRecovery',
         'listWearableSources',
         'showWearableDrift',
+        'showPersonalPatterns',
       ],
     }),
     register({ cli, services }) {

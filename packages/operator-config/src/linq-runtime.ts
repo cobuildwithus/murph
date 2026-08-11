@@ -59,6 +59,7 @@ import {
 } from './assistant-response-cards.js'
 import type {
   AssistantMessageReaction,
+  AssistantProviderMessageEffect,
 } from './assistant-cli-contracts.js'
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
@@ -201,7 +202,6 @@ type LinqIMessageAppCardRequest = {
         name: 'Murph'
         team_id: 'G9DJH2XUMK'
         bundle_id: 'ai.withmurph.app.messages'
-        app_store_id: 6786145859
       }
       interactive: true
       url: string
@@ -283,10 +283,12 @@ export interface ProbeLinqApiResult {
 export interface CreateLinqChatResult {
   chatId: string | null
   messageId: string | null
+  providerMessageEffects?: AssistantProviderMessageEffect[]
   providerMessageIds?: string[]
 }
 
 export type LinqMessageSendResponse = MessageSendResponse & {
+  providerMessageEffects?: AssistantProviderMessageEffect[]
   providerMessageIds?: string[]
 }
 
@@ -488,6 +490,10 @@ export async function sendLinqChatMessage(
     primaryMessageId,
     linkResponse.message?.id,
   )
+  const providerMessageEffects = [
+    ...(primaryResponse.providerMessageEffects ?? []),
+    ...(linkResponse.providerMessageEffects ?? []),
+  ]
   if (providerMessageIds.length !== 2) {
     throw createLinqRichLinkPartialDeliveryFailure({
       error: new Error(
@@ -502,6 +508,7 @@ export async function sendLinqChatMessage(
   }
   return {
     ...linkResponse,
+    ...(providerMessageEffects.length > 0 ? { providerMessageEffects } : {}),
     providerMessageIds,
   }
 }
@@ -533,13 +540,21 @@ async function sendLinqChatMessageParts(
     replyToMessageId,
   })
 
-  return sendLinqChatMessageBody({
+  const response = await sendLinqChatMessageBody({
     body,
     chatId,
     idempotencyKey,
     replyToMessageId:
       input.nativeReplyRequested === true ? replyToMessageId : null,
   }, dependencies)
+  const providerMessageEffects = buildLinqProviderMessageEffects({
+    body,
+    providerMessageId: response.message?.id,
+  })
+  return {
+    ...response,
+    ...(providerMessageEffects.length > 0 ? { providerMessageEffects } : {}),
+  }
 }
 
 async function sendLinqChatRichLink(
@@ -562,16 +577,25 @@ async function sendLinqChatRichLink(
     ? normalizeRequiredString(input.replyToMessageId, 'native reply target message id')
     : null
 
-  return sendLinqChatMessageBody({
-    body: buildLinqRichLinkMessageBody({
-      idempotencyKey,
-      linkUrl: input.linkUrl,
-      replyToMessageId,
-    }),
+  const body = buildLinqRichLinkMessageBody({
+    idempotencyKey,
+    linkUrl: input.linkUrl,
+    replyToMessageId,
+  })
+  const response = await sendLinqChatMessageBody({
+    body,
     chatId,
     idempotencyKey,
     replyToMessageId,
   }, dependencies)
+  const providerMessageEffects = buildLinqProviderMessageEffects({
+    body,
+    providerMessageId: response.message?.id,
+  })
+  return {
+    ...response,
+    ...(providerMessageEffects.length > 0 ? { providerMessageEffects } : {}),
+  }
 }
 
 async function sendLinqChatRichLinkWithTextFallback(
@@ -699,11 +723,12 @@ export async function sendLinqIMessageAppCard(
       idempotency_key: idempotencyKey,
       parts: [{
         type: 'imessage_app',
+        // `app_store_id` is intentionally absent. Linq otherwise substitutes
+        // square artwork in app-absent static Messages cards.
         app: {
           name: 'Murph',
           team_id: 'G9DJH2XUMK',
           bundle_id: 'ai.withmurph.app.messages',
-          app_store_id: 6786145859,
         },
         interactive: true,
         url: buildLinqIMessageAppCardUrl(input.card),
@@ -1212,6 +1237,10 @@ export async function createLinqChat(
     primaryMessageId,
     linkMessageId,
   )
+  const providerMessageEffects = [
+    ...(result.providerMessageEffects ?? []),
+    ...(linkResponse.providerMessageEffects ?? []),
+  ]
   if (providerMessageIds.length !== 2) {
     throw createLinqRichLinkPartialDeliveryFailure({
       error: new Error(
@@ -1227,6 +1256,7 @@ export async function createLinqChat(
   return {
     ...result,
     messageId: linkMessageId,
+    ...(providerMessageEffects.length > 0 ? { providerMessageEffects } : {}),
     providerMessageIds,
   }
 }
@@ -1248,13 +1278,14 @@ async function createLinqChatWithPrimaryMessage(
   const from = normalizeRequiredString(input.from, 'from')
   const recipients = normalizeLinqStringList(input.to, 'recipient')
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
+  const messageBody = buildLinqMessageBody({
+    idempotencyKey: input.idempotencyKey,
+    media: input.media ?? [],
+    message: input.message,
+  })
   const body: ChatCreateParams = {
     from,
-    message: buildLinqMessageBody({
-      idempotencyKey: input.idempotencyKey,
-      media: input.media ?? [],
-      message: input.message,
-    }).message,
+    message: messageBody.message,
     to: recipients,
   }
   const response = await requestLinqJson<ChatCreateResponse>({
@@ -1272,9 +1303,15 @@ async function createLinqChatWithPrimaryMessage(
     signal: dependencies.signal,
   })
 
+  const messageId = normalizeNullableString(response.chat?.message?.id ?? null)
+  const providerMessageEffects = buildLinqProviderMessageEffects({
+    body: messageBody,
+    providerMessageId: messageId,
+  })
   return {
     chatId: normalizeNullableString(response.chat?.id ?? null),
-    messageId: normalizeNullableString(response.chat?.message?.id ?? null),
+    messageId,
+    ...(providerMessageEffects.length > 0 ? { providerMessageEffects } : {}),
   }
 }
 
@@ -1337,6 +1374,29 @@ function collectLinqProviderMessageIds(
     }
   }
   return output
+}
+
+function buildLinqProviderMessageEffects(input: {
+  body: MessageSendParams
+  providerMessageId: unknown
+}): AssistantProviderMessageEffect[] {
+  const providerMessageId = normalizeNullableString(
+    typeof input.providerMessageId === 'string'
+      ? input.providerMessageId
+      : null,
+  )
+  if (!providerMessageId) {
+    return []
+  }
+
+  const textParts = (input.body.message.parts ?? []).filter(
+    (part): part is TextPart => part.type === 'text',
+  )
+  const text = textParts.length === 1 ? textParts[0]!.value : null
+  return [{
+    message: typeof text === 'string' && text.length > 0 ? text : null,
+    providerMessageId,
+  }]
 }
 
 function createLinqRichLinkPartialDeliveryFailure(input: {
