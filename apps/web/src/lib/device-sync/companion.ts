@@ -7,6 +7,7 @@ import {
 } from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { normalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 import { isEstablishedDeviceSyncConnection } from "@murphai/device-syncd/public-account";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 import {
@@ -577,7 +578,9 @@ export async function readCompanionDeviceSyncStatus(input: {
   const projectedSources = await input.store.listBoundedConnectionSourcesForConnections({
     connectionIds: connections.map((connection) => connection.id),
     excludeDisconnected: false,
-    limitPerConnection: COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
+    limitPerConnection: sourceProviderSlug === null
+      ? HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT
+      : COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
     sourceProviderSlugs: sourceProviderSlug === null ? null : [sourceProviderSlug],
   });
   const sourcesByConnectionId = new Map<string, typeof projectedSources>();

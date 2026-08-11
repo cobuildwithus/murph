@@ -60,6 +60,8 @@ companion bearer status
       app-bound runtime/companion overlap against isolated PostgreSQL.
 - [x] Separate the 64-source runtime authority ceiling from the 32-connection
       page ceiling and pin the configured Junction catalog below that bound.
+- [x] Preserve that 64-source authority for unscoped companion status while
+      retaining the narrower 32-row exact-source projection.
 - [x] Run focused tests, direct replay, typecheck, lint, diff, and privacy
       checks.
 - [ ] Complete the terminal exact-head ReviewGPT audit and obtain green
@@ -87,7 +89,10 @@ unrelated source rows in SQL, and fails closed only when the requested source
 itself reaches 33 rows on one connection. A dedicated authority proof retains
 all 33 currently configured Junction sources in both redacted and credentialed
 runtime snapshots, uses one source-set query per request, and fails closed only
-above the independent 64-source ceiling.
+above the independent 64-source ceiling. The same fixture proves the unscoped
+companion function returns truthful resource/timestamp status for all 33
+sources with no added decrypt work and fails closed at 65; the actual
+no-query-parameter HTTP route pins the 64-source request contract.
 
 Round-four retrospective: the accepted finding exposed a distinct cardinality
 conflation between connection pages and source authority, not another instance
@@ -95,6 +100,14 @@ of the previously corrected single-page consumer. The remediation adds one
 protocol-owned constant and boundary proofs while retaining the existing set
 query, fail-closed overflow detector, and ownership model. No cursor, cache,
 service, retry owner, or persisted state was added.
+
+Round-five retrospective: the accepted round-four finding was the remaining
+consumer-side use of the connection ceiling, limited to the production-reachable
+unscoped iOS companion status route. The correction selects the already-owned
+64-source ceiling only when no exact source is requested; the filtered Health
+Connect path remains at 32. This adds no constant, query, owner, state, cursor,
+or lifecycle. Route and real-PostgreSQL proofs exercise the existing status
+function and set projection directly.
 
 ## Rollout
 

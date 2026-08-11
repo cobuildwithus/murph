@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "@murphai/device-syncd/hosted-runtime";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
@@ -1204,10 +1205,55 @@ describe("device sync companion routes", () => {
       expect(mocks.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
         connectionIds: [],
         excludeDisconnected: false,
-        limitPerConnection: 32,
+        limitPerConnection:
+          HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
         sourceProviderSlugs: null,
       });
       expect(mocks.listRecentConnectionWebhookSignals).not.toHaveBeenCalled();
+    });
+
+    it("returns unscoped status for a Junction connection with all 33 configured sources", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listMemberConnectionStatuses.mockResolvedValue([{
+        id: "dsc_1",
+        status: "active",
+      }]);
+      mocks.listBoundedConnectionSourcesForConnections.mockResolvedValue(
+        Array.from({ length: 33 }, (_, index) => ({
+          connectionId: "dsc_1",
+          resourceAvailabilitySummary: index === 0 ? { sleep: true } : {},
+          sourceProviderSlug: index === 32 ? "strava" : `source_${index}`,
+          status: index === 32 ? "disconnected" : "connected",
+        })),
+      );
+      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+        connectionId: "dsc_1",
+        createdAt: "2026-07-09T11:30:00.000Z",
+        eventType: "daily.data.sleep.updated",
+        sourceProviderSlug: "source_0",
+      }]);
+
+      const response = await statusRoute.GET(statusRequest());
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        lastDataReceivedAt: "2026-07-09T11:30:00.000Z",
+        observedAt: "2026-07-09T12:00:00.000Z",
+        resources: {
+          sleep: { lastReceivedAt: "2026-07-09T11:30:00.000Z" },
+        },
+      });
+      expect(mocks.listBoundedConnectionSourcesForConnections).toHaveBeenCalledOnce();
+      expect(mocks.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
+        connectionIds: ["dsc_1"],
+        excludeDisconnected: false,
+        limitPerConnection:
+          HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+        sourceProviderSlugs: null,
+      });
+      expect(mocks.listRecentConnectionWebhookSignals).toHaveBeenCalledOnce();
+      expect(mocks.listConnectionSources).not.toHaveBeenCalled();
+      expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
     });
 
     it("maps webhook receipts and source availability into per-resource evidence", async () => {
@@ -1283,7 +1329,8 @@ describe("device sync companion routes", () => {
       expect(mocks.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
         connectionIds: ["dsc_1"],
         excludeDisconnected: false,
-        limitPerConnection: 32,
+        limitPerConnection:
+          HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
         sourceProviderSlugs: null,
       });
       expect(mocks.listConnectionSources).not.toHaveBeenCalled();
@@ -1520,7 +1567,8 @@ describe("device sync companion routes", () => {
       expect(mocks.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
         connectionIds,
         excludeDisconnected: false,
-        limitPerConnection: 32,
+        limitPerConnection:
+          HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
         sourceProviderSlugs: null,
       });
       expect(mocks.listRecentConnectionWebhookSignals).toHaveBeenCalledOnce();

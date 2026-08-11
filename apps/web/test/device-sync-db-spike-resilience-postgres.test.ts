@@ -647,9 +647,10 @@ describe.skipIf(!runPostgresProof)(
         ),
         poolMax: 4,
       });
+      const decryptSourceAuthoritySecret = vi.fn((value: string) => value);
       const store = new PrismaDeviceSyncControlPlaneStore({
         codec: {
-          decrypt: (value) => value,
+          decrypt: decryptSourceAuthoritySecret,
           encrypt: (value) => value,
           keyVersion: "test-v1",
         },
@@ -754,10 +755,32 @@ describe.skipIf(!runPostgresProof)(
           );
         }
         expect(sourceRead).toHaveBeenCalledTimes(2);
+        expect(decryptSourceAuthoritySecret).toHaveBeenCalledOnce();
         expect(sourceRead.mock.calls.every(
           ([sourceInput]) => sourceInput.limitPerConnection
             === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
         )).toBe(true);
+
+        await expect(readCompanionDeviceSyncStatus({
+          memberId,
+          now: () => new Date("2026-08-11T12:00:00.000Z"),
+          store,
+        })).resolves.toEqual({
+          lastDataReceivedAt: null,
+          observedAt: "2026-08-11T12:00:00.000Z",
+          resources: {
+            activity: { lastReceivedAt: null },
+          },
+        });
+        expect(sourceRead).toHaveBeenCalledTimes(3);
+        expect(sourceRead).toHaveBeenLastCalledWith({
+          connectionIds: [connectionId],
+          excludeDisconnected: false,
+          limitPerConnection:
+            HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+          sourceProviderSlugs: null,
+        });
+        expect(decryptSourceAuthoritySecret).toHaveBeenCalledOnce();
 
         const overflowCount =
           HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT
@@ -776,6 +799,16 @@ describe.skipIf(!runPostgresProof)(
           })),
         });
 
+        await expect(readCompanionDeviceSyncStatus({
+          memberId,
+          store,
+        })).rejects.toMatchObject({
+          code: "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
+          retryable: false,
+        });
+        expect(sourceRead).toHaveBeenCalledTimes(4);
+        expect(decryptSourceAuthoritySecret).toHaveBeenCalledOnce();
+
         await expect(fetchCompleteHostedDeviceSyncRuntimeSnapshot({
           deviceSyncPort,
           includeCredentialMaterial: false,
@@ -783,7 +816,7 @@ describe.skipIf(!runPostgresProof)(
           code: "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
           retryable: false,
         });
-        expect(sourceRead).toHaveBeenCalledTimes(3);
+        expect(sourceRead).toHaveBeenCalledTimes(5);
       } finally {
         await prisma.deviceConnection.deleteMany({
           where: { userId: memberId },

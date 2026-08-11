@@ -360,9 +360,10 @@ this policy into the execution plane.
 Native companion status remains Privy-bearer-authenticated, consent-gated, and
 member-isolated. After those checks, Web performs one narrow member-owned
 Junction connection read selecting only `id` and `status` with a 32+1
-saturation check, one bounded set source read for those ids with its existing
-32+1 source-scoped per-connection check, and one set receipt-signal read. The
-path never selects or decrypts an external account id or OAuth token. It preserves the
+saturation check, one bounded set source read for those ids with a 64+1
+unscoped authority check or a narrower 32+1 source-filtered check, and one set
+receipt-signal read. The path never selects or decrypts an external account id
+or OAuth token. It preserves the
 established active/not-disconnected predicates, source-scoped first-webhook
 behavior, disconnected-source `lastSeenAt` receipt cutoff, resource alias
 normalization, and timestamp-only response contract. Web remains the sole
