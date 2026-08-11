@@ -18,6 +18,7 @@ import { buildAutomationSupportSeriesTag } from '@murphai/contracts'
 import {
   createExperiment,
   initializeVault,
+  loadVault,
   patchAutomation,
   scaffoldAutomationPayload,
   showAutomation,
@@ -44,6 +45,7 @@ import {
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
 import {
+  buildOnboardingGoalCheckinSeed,
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import {
@@ -3854,23 +3856,31 @@ describe('assistant outbox runtime', () => {
     const { vaultRoot } = await createInitializedAssistantVault(
       'assistant-outbox-onboarding-goal-checkin-',
     )
-    await completeAssistantOnboarding({
-      completedAt: '2026-06-01T17:30:00.000Z',
+    const completedAt = '2026-07-17T17:30:00.000Z'
+    const answeredOnboarding = await completeAssistantOnboarding({
+      completedAt,
       reason: 'user_answered',
       vault: vaultRoot,
     })
+    const vault = await loadVault({ vaultRoot })
+    const goalCheckinSeed = buildOnboardingGoalCheckinSeed({
+      now: new Date('2026-07-18T12:00:00.000Z'),
+      onboardingState: answeredOnboarding,
+      stableKey: vault.metadata.vaultId,
+      timeZone: vault.metadata.timezone,
+    })
+    if (!goalCheckinSeed || goalCheckinSeed.schedule.kind !== 'at') {
+      throw new Error('Expected an onboarding goal check-in seed.')
+    }
     const scaffold = scaffoldAutomationPayload()
     const automation = await upsertAutomation({
       ...scaffold,
-      activeUntil: '2026-07-27T17:30:00.000Z',
+      activeUntil: goalCheckinSeed.activeUntil,
       automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
       continuityPolicy: 'preserve',
       instructions: 'Offer one low-pressure health direction choice.',
       now: new Date('2026-07-20T17:29:00.000Z'),
-      schedule: {
-        at: '2026-07-20T17:30:00.000Z',
-        kind: 'at',
-      },
+      schedule: goalCheckinSeed.schedule,
       slug: 'onboarding-goal-choice-point',
       status: 'active',
       tags: ['assistant', 'scheduled', 'murph-managed'],
@@ -3947,7 +3957,7 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
 
     await completeAssistantOnboarding({
-      completedAt: '2026-06-01T17:30:00.000Z',
+      completedAt,
       reason: 'user_answered',
       vault: vaultRoot,
     })
