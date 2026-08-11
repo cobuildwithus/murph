@@ -264,6 +264,10 @@ function createAuthorityHarness(input: {
     },
   };
 
+  const connectionSources = (input.connectionSources ?? []).map((source) => ({
+    ...source,
+    sourceInstanceKey: source.sourceInstanceKey ?? source.sourceProviderSlug,
+  }));
   const store = {
     getConnectionForUser: vi.fn(async () =>
       buildPublicConnection({
@@ -271,17 +275,22 @@ function createAuthorityHarness(input: {
         externalAccountId: currentRecord.externalAccountId ?? "acct_123",
       })),
     getStoredConnectionAccountForUser: vi.fn(async () => currentStoredAccount),
-    listConnectionSources: vi.fn(async () =>
-      (input.connectionSources ?? []).map((source) => ({
-        ...source,
-        sourceInstanceKey: source.sourceInstanceKey ?? source.sourceProviderSlug,
-      }))
+    listConnectionSources: vi.fn(async () => connectionSources),
+    listConnectionSourcesForConnections: vi.fn(async (connectionIds: readonly string[]) =>
+      connectionSources.filter((source) => connectionIds.includes(source.connectionId))
     ),
-    listRuntimeSnapshotConnectionSources: vi.fn(async () =>
-      (input.connectionSources ?? []).map((source) => ({
-        ...source,
-        sourceInstanceKey: source.sourceInstanceKey ?? source.sourceProviderSlug,
-      }))
+    listRuntimeSnapshotConnectionSources: vi.fn(async () => connectionSources),
+    materializeDurableConnectionRecord: vi.fn(async (record: ReturnType<typeof buildHostedRecord>) =>
+      buildPublicConnection({
+        ...record,
+        externalAccountId: record.externalAccountId ?? "acct_123",
+      })
+    ),
+    materializeStoredConnectionAccount: vi.fn(
+      async (record: ReturnType<typeof buildHostedRecord>) => {
+        void record;
+        return currentStoredAccount;
+      },
     ),
     persistStoredConnectionTokenBundle,
     providerApplicationFindFirst,
@@ -2654,7 +2663,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-    harness.store.getConnectionForUser.mockResolvedValue({
+    harness.store.materializeDurableConnectionRecord.mockResolvedValue({
       ...buildPublicConnection(buildHostedRecord()),
       externalAccountId: "acct_123",
     });
@@ -2669,7 +2678,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       trustedUserId: "user_123",
     });
 
-    expect(harness.store.getConnectionForUser).toHaveBeenCalledWith("user_123", "conn_123");
+    expect(harness.store.materializeDurableConnectionRecord).toHaveBeenCalledWith(harness.record);
+    expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
+    expect(harness.store.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
+    expect(harness.store.listConnectionSourcesForConnections).toHaveBeenCalledWith(["conn_123"]);
+    expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
     expect(mocks.buildHostedPublicDeviceSyncAccount).toHaveBeenCalledWith(
       expect.objectContaining({
         fallback: expect.objectContaining({
@@ -2688,6 +2701,70 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       ],
       userId: "user_123",
     });
+  });
+
+  it("uses one set-based source read and no connection re-reads for unscoped snapshots", async () => {
+    const harness = createAuthorityHarness();
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    const records = [
+      buildHostedRecord({ id: "conn_a", updatedAt: "2026-04-06T10:03:00.000Z" }),
+      buildHostedRecord({ id: "conn_b", updatedAt: "2026-04-06T10:02:00.000Z" }),
+      buildHostedRecord({ id: "conn_c", updatedAt: "2026-04-06T10:01:00.000Z" }),
+    ];
+    const sources = records.map((record, index) => ({
+      connectionId: record.id,
+      displayName: `Source ${index + 1}`,
+      firstSeenAt: "2026-04-06T09:00:00.000Z",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: `2026-04-06T10:0${index}:00.000Z`,
+      resourceAvailabilitySummary: {},
+      sourceInstanceKey: `source-${index + 1}`,
+      sourceProviderSlug: `source_${index + 1}`,
+      status: "connected" as const,
+    }));
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
+    harness.store.materializeStoredConnectionAccount.mockImplementation(async (record) =>
+      buildStoredAccount(record)
+    );
+    harness.store.listConnectionSourcesForConnections.mockResolvedValue(sources);
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledTimes(1);
+    expect(harness.store.listConnectionSourcesForConnections).toHaveBeenCalledTimes(1);
+    expect(harness.store.listConnectionSourcesForConnections).toHaveBeenCalledWith([
+      "conn_a",
+      "conn_b",
+      "conn_c",
+    ]);
+    expect(harness.store.materializeStoredConnectionAccount).toHaveBeenCalledTimes(3);
+    expect(harness.store.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
+    expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
+    expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
+    expect(harness.store.listRuntimeSnapshotConnectionSources).not.toHaveBeenCalled();
+    expect(response.connections).toHaveLength(3);
+    expect(response.connections.map((connection) => ({
+      connectionId: connection.connection.id,
+      sourceProviderSlugs: (connection.sources ?? []).map(
+        (source) => source.sourceProviderSlug,
+      ),
+    }))).toEqual([
+      { connectionId: "conn_a", sourceProviderSlugs: ["source_1"] },
+      { connectionId: "conn_b", sourceProviderSlugs: ["source_2"] },
+      { connectionId: "conn_c", sourceProviderSlugs: ["source_3"] },
+    ]);
   });
 
   it("filters hosted snapshots by direct providers and aggregator-backed source aliases", async () => {
@@ -2784,6 +2861,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       limit: 4,
       sourceProviderSlugs: ["whoop", "whoop_v2", "whoop-v2"],
     });
+    expect(harness.store.listConnectionSourcesForConnections).not.toHaveBeenCalled();
     expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
     expect(response.connections[0]?.sources).toEqual([
       expect.objectContaining({
@@ -2965,7 +3043,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-    harness.store.getConnectionForUser.mockResolvedValue({
+    harness.store.materializeDurableConnectionRecord.mockResolvedValue({
       ...buildPublicConnection(buildHostedRecord({
         provider: "junction",
       })),

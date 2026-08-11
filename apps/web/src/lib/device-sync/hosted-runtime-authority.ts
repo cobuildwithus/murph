@@ -158,24 +158,35 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     userId: input.trustedUserId,
   });
 
-  // Sequential on purpose: each record fans out two to three store queries, so
-  // running records in parallel can pin most of the shared connection pool.
+  const useBoundedSourceProjection = boundedSourceLimit !== null
+    && boundedSourceProviderKeys.length > 0;
+  const unboundedSources = useBoundedSourceProjection
+    ? []
+    : await controlPlane.store.listConnectionSourcesForConnections(
+        records.map((record) => record.id),
+      );
+  const unboundedSourcesByConnectionId = new Map<string, HostedDeviceConnectionSource[]>();
+  for (const source of unboundedSources) {
+    const sources = unboundedSourcesByConnectionId.get(source.connectionId) ?? [];
+    sources.push(source);
+    unboundedSourcesByConnectionId.set(source.connectionId, sources);
+  }
+
+  // Account materialization may decrypt credential material, so keep records
+  // sequential without re-reading the connection rows already selected above.
   const connections: HostedRuntimeConnectionSnapshot[] = [];
   for (const record of records) {
-    const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
-      input.trustedUserId,
-      record.id,
-    );
+    const storedAccount = await controlPlane.store.materializeStoredConnectionAccount(record);
     const durableConnection = storedAccount
       ? null
-      : await controlPlane.store.getConnectionForUser(input.trustedUserId, record.id);
-    const sources = boundedSourceLimit && boundedSourceProviderKeys.length > 0
+      : await controlPlane.store.materializeDurableConnectionRecord(record);
+    const sources = useBoundedSourceProjection && boundedSourceLimit !== null
       ? await controlPlane.store.listRuntimeSnapshotConnectionSources({
           connectionId: record.id,
           limit: boundedSourceLimit,
           sourceProviderSlugs: boundedSourceProviderKeys,
         })
-      : await controlPlane.store.listConnectionSources(record.id);
+      : unboundedSourcesByConnectionId.get(record.id) ?? [];
 
     connections.push(buildHostedRuntimeConnectionSnapshot(
       record,

@@ -68,6 +68,10 @@ import {
   isHostedSourceDisconnectFenced,
 } from "./connection-source-lifecycle";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
+import {
+  normalizeHostedDeviceSyncLifecycleStatus,
+  normalizeHostedDeviceSyncSetupPhase,
+} from "./prisma-store/connection-records";
 import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import {
@@ -1647,12 +1651,13 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   };
   claimToken: string;
   now: string;
+  ownerId: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
   traceId?: string | null;
   webhook: DeviceSyncIngressWebhook;
 }): Promise<void> {
   const traceId = normalizeNullableString(input.traceId);
-  const ownerId = await input.store.getConnectionOwnerId(input.account.id);
+  const ownerId = normalizeNullableString(input.ownerId);
 
   if (!ownerId) {
     console.warn("Rejecting hosted device-sync webhook without an owner mapping.", {
@@ -2206,15 +2211,25 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       input.userId,
       input.connectionId,
       async (tx) => {
-      const current = await input.store.getConnectionRecordForUser(
-        input.userId,
-        input.connectionId,
-        tx,
-      );
+      const current = await tx.deviceConnection.findUnique({
+        where: {
+          id: input.connectionId,
+        },
+        select: {
+          connectedAt: true,
+          provider: true,
+          providerApplicationId: true,
+          providerApplicationRevision: true,
+          setupPhase: true,
+          status: true,
+          userId: true,
+        },
+      });
       if (
         !current
+        || current.userId !== input.userId
         || current.provider !== input.provider
-        || current.status !== "active"
+        || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
         || current.connectedAt.toISOString() !== input.expectedConnectedAt
       ) {
         await completeHostedWebhookTraceTx(input, tx);
@@ -2237,7 +2252,9 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
           wakeMailboxItemId: null,
         };
       }
-      if (isDeviceSyncConnectionSetupPending(current)) {
+      if (isDeviceSyncConnectionSetupPending({
+        setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
+      })) {
         throw deviceSyncError({
           code: "WEBHOOK_ACCOUNT_NOT_READY",
           message: "Device sync setup changed before webhook work could be committed.",

@@ -23,7 +23,11 @@ import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-
 import type { DeviceProviderApplicationBinding } from "./provider-applications/types";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
-import { PrismaHostedConnectionStore } from "./prisma-store/connections";
+import {
+  PrismaHostedConnectionStore,
+  type HostedConnectionRecord,
+  type HostedStoredDeviceSyncAccount,
+} from "./prisma-store/connections";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
 import type { CompanionHrvNightReceiptInspection } from "./prisma-store/dirty-connections";
@@ -262,6 +266,26 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getStoredConnectionAccountForUser(userId, connectionId, tx);
   }
 
+  async materializeDurableConnectionRecord(
+    record: HostedConnectionRecord,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<PublicDeviceSyncAccount> {
+    return this.connections.materializeDurableConnectionRecord(
+      record,
+      tx ?? this.prisma,
+    );
+  }
+
+  async materializeStoredConnectionAccount(
+    record: HostedConnectionRecord,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedStoredDeviceSyncAccount | null> {
+    return this.connections.materializeStoredConnectionAccount(
+      record,
+      tx ?? this.prisma,
+    );
+  }
+
   async getConnectionOwnerId(connectionId: string): Promise<string | null> {
     return this.connections.getConnectionOwnerId(connectionId);
   }
@@ -449,6 +473,13 @@ export class PrismaDeviceSyncControlPlaneStore
       (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
       && (!input.status || source.status === input.status)
     );
+  }
+
+  async listConnectionSourcesForConnections(
+    connectionIds: readonly string[],
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedDeviceConnectionSource[]> {
+    return this.sources.listConnectionSourcesForConnections(connectionIds, tx);
   }
 
   async listRuntimeSnapshotConnectionSources(

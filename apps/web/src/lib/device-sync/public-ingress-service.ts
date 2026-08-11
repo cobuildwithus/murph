@@ -189,7 +189,11 @@ export class HostedDeviceSyncPublicIngressService {
           provider,
           now,
         }) => {
-          if (await this.hasWithdrawnHealthDataConsent(account.id)) {
+          const ownerId = await this.context.store.getConnectionOwnerId(account.id);
+          if (
+            ownerId
+            && await this.hasWithdrawnHealthDataConsentForMember(ownerId)
+          ) {
             const completed = await this.context.store.completeWebhookTrace(
               provider.provider,
               traceId,
@@ -210,6 +214,7 @@ export class HostedDeviceSyncPublicIngressService {
             account,
             claimToken,
             now,
+            ownerId,
             store: this.context.store,
             traceId,
             webhook,
@@ -795,10 +800,12 @@ export class HostedDeviceSyncPublicIngressService {
 
   private async hasWithdrawnHealthDataConsent(connectionId: string): Promise<boolean> {
     const memberId = await this.context.store.getConnectionOwnerId(connectionId);
-    if (!memberId) {
-      return false;
-    }
+    return memberId
+      ? await this.hasWithdrawnHealthDataConsentForMember(memberId)
+      : false;
+  }
 
+  private async hasWithdrawnHealthDataConsentForMember(memberId: string): Promise<boolean> {
     return await readHostedHealthDataConsentState({
       memberId,
       prisma: this.context.store.prisma,
