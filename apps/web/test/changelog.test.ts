@@ -336,6 +336,14 @@ describe("changelog registry", () => {
     expect(
       items.get("referral-notification-route-recovery")?.tryIt,
     ).toBeUndefined();
+    expect(items.get("blood-pressure-history-completion")).toMatchObject({
+      sourcePullRequests: [1523, 1625],
+      summary: expect.stringContaining("unfinished history import"),
+      details: expect.stringContaining("every remaining day finishes"),
+    });
+    expect(
+      items.get("blood-pressure-history-completion")?.tryIt,
+    ).toBeUndefined();
     expect(items.get("group-sleep-challenges-use-fresh-data")).toMatchObject({
       sourcePullRequests: [1565, 1593],
       summary: expect.stringContaining("explicit manual corrections"),
@@ -559,6 +567,7 @@ describe("changelog registry", () => {
           "non-expiring-starter-access",
           "personal-patterns",
           "referral-notification-route-recovery",
+          "blood-pressure-history-completion",
           "reminders-keep-requested-timezone",
           "voice-memos-use-your-voice",
           "web-search-restored",
