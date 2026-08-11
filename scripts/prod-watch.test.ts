@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -68,6 +69,7 @@ import {
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const prodWatchPath = path.join(repoRoot, "scripts", "prod-watch.ts");
+const prodWatchTestEntryPath = path.join(repoRoot, "scripts", "prod-watch.test-entry.ts");
 const fixtureRoot = path.join(repoRoot, "scripts", "prod-watch", "fixtures");
 const addFormats = createRequire(import.meta.url)("ajv-formats") as FormatsPlugin;
 const tempRoots: string[] = [];
@@ -2572,6 +2574,73 @@ describe("production-watch locking and dry-run behavior", () => {
 });
 
 describe("production-watch static safety contracts", () => {
+  it("rejects test-only environment controls through the production entrypoint", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", prodWatchPath, "scheduler", "status"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...Object.fromEntries(Object.entries(process.env).filter(([key]) => (
+            key !== "NODE_ENV"
+            && key !== "NODE_OPTIONS"
+            && key !== "MURPH_PROD_WATCH_TEST_RUNTIME_ROOT"
+            && !key.startsWith("TEST_")
+          ))),
+          NODE_ENV: "test",
+          TEST_PROVIDER_FIXTURE: path.join(fixtureRoot, "healthy.providers.json"),
+        },
+      },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("production_test_controls_forbidden");
+    expect(result.stderr).not.toContain(repoRoot);
+  });
+
+  it.runIf(process.platform === "darwin")(
+    "rejects an alternate production Codex executable",
+    () => {
+      const result = spawnSync(
+        process.execPath,
+        ["--experimental-strip-types", prodWatchPath, "scheduler", "preflight"],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          env: {
+            ...Object.fromEntries(Object.entries(process.env).filter(([key]) => (
+              key !== "NODE_ENV"
+              && key !== "NODE_OPTIONS"
+              && key !== "MURPH_PROD_WATCH_TEST_RUNTIME_ROOT"
+              && !key.startsWith("TEST_")
+            ))),
+            MURPH_PROD_WATCH_CODEX_BIN: "/bin/true",
+            MURPH_PROD_WATCH_CODEX_PROFILE: "prod-watch",
+          },
+        },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(/scheduler_codex_(?:untrusted|unavailable)/u);
+    },
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "rejects a changed installer-pinned Codex digest",
+    () => {
+      const runtimeRoot = makeTempRoot();
+      const result = runProdWatch(
+        ["scheduler", "preflight"],
+        runtimeRoot,
+        {
+          ...installFakeCodex(runtimeRoot),
+          MURPH_PROD_WATCH_CODEX_SHA256: "0".repeat(64),
+        },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("scheduler_codex_digest_mismatch");
+    },
+  );
+
   it("keeps the database query read-only and excludes private event fields", () => {
     const sql = readFileSync(path.join(repoRoot, "scripts", "prod-watch", "collect-v1.sql"), "utf8");
     const runtimeIssueDomain = readFileSync(
@@ -2656,6 +2725,11 @@ describe("production-watch static safety contracts", () => {
     expect(rendered).toContain("scripts/prod-watch.ts&quot; run --scheduled");
     expect(rendered).toContain("export CODEX_HOME=&quot;$HOME/.codex-5&quot;");
     expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_PROFILE=&quot;prod-watch&quot;");
+    expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_BIN=&quot;$HOME/.codex/packages/standalone/releases/");
+    expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_SHA256=&quot;");
+    expect(rendered).toContain("unset NODE_ENV NODE_OPTIONS MURPH_PROD_WATCH_TEST_RUNTIME_ROOT");
+    expect(rendered).not.toContain("__CODEX_EXECUTABLE__");
+    expect(rendered).not.toContain("__CODEX_SHA256__");
     expect(rendered).toContain("--provider-child");
     expect(rendered).not.toContain("--dispatch-workers");
     expect(rendered).not.toContain("--remediation-shadow");
@@ -2686,6 +2760,7 @@ describe("production-watch static safety contracts", () => {
         "tsconfig.base.json",
         "tsconfig.tools.json",
         "scripts/prod-watch.ts",
+        "scripts/prod-watch.test-entry.ts",
         "scripts/prod-watch/core.ts",
         "scripts/prod-watch/collect-v1.sql",
       ]) {
@@ -2736,7 +2811,8 @@ describe("production-watch static safety contracts", () => {
         "",
       ].join("\n"), { mode: 0o755 });
       chmodSync(helperPath, 0o755);
-      writeFakeCodexExecutable(path.join(helperRoot, "codex"));
+      const schedulerCodexPath = path.join(helperRoot, "codex");
+      writeFakeCodexExecutable(schedulerCodexPath);
       writeFakeProviderCliExecutables(helperRoot);
       const template = readFileSync(
         path.join(repoRoot, "scripts", "prod-watch", "com.murph.prod-watch.plist.template"),
@@ -2751,6 +2827,8 @@ describe("production-watch static safety contracts", () => {
           process.execPath,
           runtimeRoot,
           approvedHead,
+          schedulerCodexPath,
+          createHash("sha256").update(readFileSync(schedulerCodexPath)).digest("hex"),
         ),
       );
       await expect(verifySchedulerExecutableChain(checkoutRoot, process.execPath, schedulerHome))
@@ -2761,7 +2839,13 @@ describe("production-watch static safety contracts", () => {
         { encoding: "utf8" },
       );
       expect(commandResult.status).toBe(0);
-      const run = spawnSync("/bin/zsh", ["-c", commandResult.stdout.trim()], {
+      const testCommand = commandResult.stdout.trim()
+        .replace("scripts/prod-watch.ts", "scripts/prod-watch.test-entry.ts")
+        .replace(
+          "unset NODE_ENV NODE_OPTIONS MURPH_PROD_WATCH_TEST_RUNTIME_ROOT TEST_PROVIDER_FIXTURE TEST_NODE_MODULES_SOURCE TEST_DIAGNOSIS_FIXTURE TEST_CODEX_EXTRA_MCP; ",
+          "",
+        );
+      const run = spawnSync("/bin/zsh", ["-c", testCommand], {
         cwd: path.parse(checkoutRoot).root,
         encoding: "utf8",
         env: {
@@ -3345,7 +3429,7 @@ function runProdWatch(
 ): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(
     process.execPath,
-    ["--experimental-strip-types", prodWatchPath, ...args],
+    ["--experimental-strip-types", prodWatchTestEntryPath, ...args],
     {
       cwd: repoRoot,
       encoding: "utf8",
@@ -3376,7 +3460,7 @@ function runProdWatchFromCheckout(
     [
       "--preserve-symlinks-main",
       "--experimental-strip-types",
-      path.join(checkoutRoot, "scripts", "prod-watch.ts"),
+      path.join(checkoutRoot, "scripts", "prod-watch.test-entry.ts"),
       ...args,
     ],
     {

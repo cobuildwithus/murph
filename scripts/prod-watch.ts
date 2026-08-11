@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, chmod, lstat, mkdtemp, open, readFile, realpath, rm, unlink } from "node:fs/promises";
 import os from "node:os";
@@ -56,7 +56,53 @@ import {
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
-const runtimeRoot = resolveRuntimeRoot();
+const isMain = process.argv[1] !== undefined && path.resolve(process.argv[1]) === scriptPath;
+const TEST_OVERRIDES_KEY = "__MURPH_PROD_WATCH_TEST_OVERRIDES__";
+
+interface ProdWatchTestOverrides {
+  runtimeRoot: string;
+  providerFixture?: string;
+  diagnosisFixture?: string;
+  nodeModulesSource?: string;
+  codexBin?: string;
+  extraMcp?: boolean;
+}
+
+function readProdWatchTestOverrides(): ProdWatchTestOverrides | undefined {
+  const value = (globalThis as Record<string, unknown>)[TEST_OVERRIDES_KEY];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("test_overrides_invalid");
+  }
+  const object = value as Record<string, unknown>;
+  if (typeof object.runtimeRoot !== "string") {
+    throw new Error("test_overrides_invalid");
+  }
+  for (const key of ["providerFixture", "diagnosisFixture", "nodeModulesSource", "codexBin"] as const) {
+    if (object[key] !== undefined && typeof object[key] !== "string") {
+      throw new Error("test_overrides_invalid");
+    }
+  }
+  if (object.extraMcp !== undefined && typeof object.extraMcp !== "boolean") {
+    throw new Error("test_overrides_invalid");
+  }
+  return object as unknown as ProdWatchTestOverrides;
+}
+
+function assertNoProductionTestControls(): void {
+  const hasTestControl = process.env.NODE_ENV === "test"
+    || process.env.NODE_OPTIONS !== undefined
+    || process.env.MURPH_PROD_WATCH_TEST_RUNTIME_ROOT !== undefined
+    || Object.keys(process.env).some((key) => key.startsWith("TEST_"));
+  if (hasTestControl) {
+    throw new Error("production_test_controls_forbidden");
+  }
+}
+
+const testOverrides = readProdWatchTestOverrides();
+const runtimeRoot = resolveRuntimeRoot(testOverrides);
 const operationRoot = path.join(runtimeRoot, "operations", "prod-watch");
 const projectionRoot = path.join(runtimeRoot, "projections", "prod-watch");
 const lockRoot = path.join(runtimeRoot, "tmp", "prod-watch");
@@ -89,6 +135,7 @@ const LAUNCHD_MANAGED_MARKER = "murph-prod-watch-managed:v1";
 const SCHEDULER_SYSTEM_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] as const;
 const CODEX_PROFILE_ENV = "MURPH_PROD_WATCH_CODEX_PROFILE";
 const CODEX_BIN_ENV = "MURPH_PROD_WATCH_CODEX_BIN";
+const CODEX_SHA256_ENV = "MURPH_PROD_WATCH_CODEX_SHA256";
 const APPROVED_HEAD_ENV = "MURPH_PROD_WATCH_APPROVED_HEAD";
 const VERCEL_PROJECT = "murph";
 const VERCEL_SCOPE = "cobuildwithus";
@@ -103,7 +150,8 @@ const STRIPE_EVENT_LIMIT = 100;
 const CLOUDFLARE_WORKER = "murph-hosted";
 const CLOUDFLARE_OBSERVABILITY_MCP = "cloudflare_observability_oauth";
 const REVIEW_GPT_REQUIRED_VERSION = "0.5.124";
-const CODEX_REQUIRED_VERSION = "codex-cli 0.144.4";
+const CODEX_PACKAGE_VERSION = "0.144.4";
+const CODEX_REQUIRED_VERSION = `codex-cli ${CODEX_PACKAGE_VERSION}`;
 // Automatic repository mutation remains disabled until deployment identity,
 // editor isolation, attempt fencing, and external-effect reconciliation have
 // production-faithful implementations. The launchable watcher is monitor-only.
@@ -211,9 +259,9 @@ export function assertSafeRemediationDiff(
   }
 }
 
-const isMain = process.argv[1] !== undefined && path.resolve(process.argv[1]) === scriptPath;
 if (isMain) {
   try {
+    assertNoProductionTestControls();
     await runCli(process.argv.slice(2));
   } catch (error) {
     console.error(`prod-watch: ${safeErrorCode(error)}`);
@@ -1509,8 +1557,8 @@ function buildParentPackageInstallEnv(): NodeJS.ProcessEnv {
     npm_config_ignore_scripts: "true",
     npm_config_offline: "true",
   };
-  if (process.env.NODE_ENV === "test") {
-    env.TEST_NODE_MODULES_SOURCE = process.env.TEST_NODE_MODULES_SOURCE;
+  if (testOverrides?.nodeModulesSource !== undefined) {
+    env.TEST_NODE_MODULES_SOURCE = testOverrides.nodeModulesSource;
   }
   return env;
 }
@@ -2376,10 +2424,10 @@ function buildIsolatedCodexChildEnv(privateHome: string): NodeJS.ProcessEnv {
   if (codexHome !== undefined) {
     env.CODEX_HOME = codexHome;
   }
-  if (process.env.NODE_ENV === "test") {
-    env.TEST_PROVIDER_FIXTURE = process.env.TEST_PROVIDER_FIXTURE;
-    env.TEST_DIAGNOSIS_FIXTURE = process.env.TEST_DIAGNOSIS_FIXTURE;
-    env.TEST_CODEX_EXTRA_MCP = process.env.TEST_CODEX_EXTRA_MCP;
+  if (testOverrides !== undefined) {
+    env.TEST_PROVIDER_FIXTURE = testOverrides.providerFixture;
+    env.TEST_DIAGNOSIS_FIXTURE = testOverrides.diagnosisFixture;
+    env.TEST_CODEX_EXTRA_MCP = testOverrides.extraMcp === true ? "1" : undefined;
   }
   return env;
 }
@@ -2390,7 +2438,7 @@ async function collectDeterministicProviderEvidence(input: {
   end: Date;
   signal?: AbortSignal;
 }): Promise<{ sources: AdapterEvidence[]; failures: CollectorFailure[] }> {
-  const testFixture = process.env.NODE_ENV === "test" ? process.env.TEST_PROVIDER_FIXTURE : undefined;
+  const testFixture = testOverrides?.providerFixture;
   if (testFixture !== undefined) {
     const fixture = await readProviderEvidence(testFixture, true);
     return {
@@ -3723,13 +3771,26 @@ async function renderLaunchdPlist(): Promise<string> {
     throw new Error("launchd_requires_macos");
   }
   await verifySchedulerExecutableChain(repoRoot, process.execPath, os.homedir());
+  const codexExecutable = await resolveTrustedCodexExecutable();
+  const codexSha256 = await sha256File(codexExecutable);
   const template = await readFile(schedulerTemplatePath, "utf8");
-  return renderLaunchdPlistTemplate(template, repoRoot, os.homedir(), process.execPath);
+  return renderLaunchdPlistTemplate(
+    template,
+    repoRoot,
+    os.homedir(),
+    process.execPath,
+    path.join(repoRoot, ".runtime"),
+    "0".repeat(40),
+    codexExecutable,
+    codexSha256,
+  );
 }
 
 async function renderPinnedLaunchdPlist(
   pinnedRepositoryRoot: string,
   approvedHead: string,
+  codexExecutable: string,
+  codexSha256: string,
 ): Promise<string> {
   await verifySchedulerExecutableChain(pinnedRepositoryRoot, process.execPath, os.homedir());
   const template = await readFile(
@@ -3743,6 +3804,8 @@ async function renderPinnedLaunchdPlist(
     process.execPath,
     runtimeRoot,
     approvedHead,
+    codexExecutable,
+    codexSha256,
   );
 }
 
@@ -3753,6 +3816,8 @@ export function renderLaunchdPlistTemplate(
   nodeExecutable = process.execPath,
   stateRuntimeRoot = path.join(repositoryRoot, ".runtime"),
   approvedHead = "0".repeat(40),
+  codexExecutable = approvedCodexExecutablePath(homeDirectory),
+  codexSha256 = "0".repeat(64),
 ): string {
   const relativeRepoPath = path.relative(path.resolve(homeDirectory), path.resolve(repositoryRoot));
   if (
@@ -3773,14 +3838,18 @@ export function renderLaunchdPlistTemplate(
     || path.isAbsolute(relativeRuntimePath)
     || !/^[A-Za-z0-9._ /-]+$/u.test(relativeRuntimePath)
     || !/^[a-f0-9]{40}$/u.test(approvedHead)
+    || !/^[a-f0-9]{64}$/u.test(codexSha256)
   ) {
     throw new Error("scheduler_runtime_identity_unsafe");
   }
   const portableNodeExecutable = launchdShellPath(nodeExecutable, homeDirectory);
+  const portableCodexExecutable = launchdShellPath(codexExecutable, homeDirectory);
   return template
     .replaceAll("__LABEL__", xmlEscape(LAUNCHD_LABEL))
     .replaceAll("__REPO_HOME_RELATIVE__", xmlEscape(portableRepoPath))
     .replaceAll("__NODE_EXECUTABLE__", xmlEscape(portableNodeExecutable))
+    .replaceAll("__CODEX_EXECUTABLE__", xmlEscape(portableCodexExecutable))
+    .replaceAll("__CODEX_SHA256__", xmlEscape(codexSha256))
     .replaceAll("__RUNTIME_HOME_RELATIVE__", xmlEscape(relativeRuntimePath.split(path.sep).join("/")))
     .replaceAll("__APPROVED_HEAD__", xmlEscape(approvedHead))
     .replaceAll("__SCHEDULER_PATH__", xmlEscape(schedulerShellPath()));
@@ -3840,9 +3909,7 @@ async function preparePinnedSchedulerRuntime(approvedHead: string): Promise<{ ro
     }
   }
   await chmod(root, 0o700);
-  const testModules = process.env.NODE_ENV === "test"
-    ? process.env.TEST_NODE_MODULES_SOURCE
-    : undefined;
+  const testModules = testOverrides?.nodeModulesSource;
   const installed = testModules === undefined
     ? await spawnCaptured(
         "pnpm",
@@ -3903,12 +3970,17 @@ export async function verifySchedulerExecutableChain(
   }
 }
 
-async function verifySchedulerPreflight(): Promise<void> {
-  await verifySchedulerExecutableChain(repoRoot, process.execPath, os.homedir());
-  await verifyCodexPreflight();
+interface ApprovedCodexRuntime {
+  executable: string;
+  sha256: string;
 }
 
-async function verifyCodexPreflight(): Promise<void> {
+async function verifySchedulerPreflight(): Promise<ApprovedCodexRuntime> {
+  await verifySchedulerExecutableChain(repoRoot, process.execPath, os.homedir());
+  return await verifyCodexPreflight();
+}
+
+async function verifyCodexPreflight(): Promise<ApprovedCodexRuntime> {
   const codex = await resolveTrustedCodexExecutable();
   requireCodexProfile();
   const [help, version] = await Promise.all([
@@ -3948,6 +4020,7 @@ async function verifyCodexPreflight(): Promise<void> {
   if (provider.failures.length > 0) {
     throw new Error("scheduler_provider_coverage_unavailable");
   }
+  return { executable: codex, sha256: await sha256File(codex) };
 }
 
 async function verifyGhPreflight(): Promise<void> {
@@ -3997,7 +4070,7 @@ function requireCodexProfile(): string {
 }
 
 function resolveCodexExecutable(): string {
-  const configured = process.env[CODEX_BIN_ENV];
+  const configured = testOverrides?.codexBin ?? process.env[CODEX_BIN_ENV];
   if (configured === undefined || configured.length === 0) {
     return "codex";
   }
@@ -4007,21 +4080,69 @@ function resolveCodexExecutable(): string {
   return configured;
 }
 
+function approvedCodexExecutablePath(homeDirectory: string): string {
+  const target = process.arch === "arm64"
+    ? "aarch64-apple-darwin"
+    : process.arch === "x64"
+      ? "x86_64-apple-darwin"
+      : undefined;
+  if (process.platform !== "darwin" || target === undefined) {
+    throw new Error("scheduler_codex_platform_unsupported");
+  }
+  return path.join(
+    homeDirectory,
+    ".codex",
+    "packages",
+    "standalone",
+    "releases",
+    `${CODEX_PACKAGE_VERSION}-${target}`,
+    "bin",
+    "codex",
+  );
+}
+
+async function sha256File(targetPath: string): Promise<string> {
+  return createHash("sha256").update(await readFile(targetPath)).digest("hex");
+}
+
 async function resolveTrustedCodexExecutable(): Promise<string> {
-  const configured = resolveCodexExecutable();
-  const candidates = path.isAbsolute(configured)
-    ? [configured]
-    : schedulerExecutableDirectories(os.homedir()).map((directory) => path.join(directory, configured));
-  for (const candidate of candidates) {
-    try {
-      const executable = await realpath(candidate);
-      await access(executable, fsConstants.X_OK);
-      return executable;
-    } catch {
-      // Continue through the fixed executable search path.
+  const testCandidate = testOverrides?.codexBin;
+  const approvedCandidate = approvedCodexExecutablePath(os.homedir());
+  const configured = process.env[CODEX_BIN_ENV];
+  const candidate = testCandidate ?? configured ?? approvedCandidate;
+  if (!path.isAbsolute(candidate) || candidate.includes("\0")) {
+    throw new Error("scheduler_codex_untrusted");
+  }
+  let executable: string;
+  let approvedExecutable: string;
+  try {
+    [executable, approvedExecutable] = await Promise.all([
+      realpath(candidate),
+      testCandidate === undefined ? realpath(approvedCandidate) : Promise.resolve(candidate),
+    ]);
+    await access(executable, fsConstants.X_OK);
+  } catch {
+    throw new Error("scheduler_codex_unavailable");
+  }
+  if (testCandidate === undefined && executable !== approvedExecutable) {
+    throw new Error("scheduler_codex_untrusted");
+  }
+  const metadata = await lstat(executable);
+  const currentUid = process.getuid?.();
+  if (
+    !metadata.isFile()
+    || (currentUid !== undefined && metadata.uid !== currentUid)
+    || (process.platform !== "win32" && (metadata.mode & 0o022) !== 0)
+  ) {
+    throw new Error("scheduler_codex_untrusted");
+  }
+  const expectedSha256 = process.env[CODEX_SHA256_ENV];
+  if (expectedSha256 !== undefined) {
+    if (!/^[a-f0-9]{64}$/u.test(expectedSha256) || await sha256File(executable) !== expectedSha256) {
+      throw new Error("scheduler_codex_digest_mismatch");
     }
   }
-  throw new Error("scheduler_codex_unavailable");
+  return executable;
 }
 
 async function verifySchedulerDatabaseHelper(homeDirectory: string): Promise<void> {
@@ -4068,9 +4189,14 @@ async function installScheduler(): Promise<void> {
   const launchAgents = path.join(os.homedir(), "Library", "LaunchAgents");
   const plistPath = path.join(launchAgents, `${LAUNCHD_LABEL}.plist`);
   const existing = await readManagedSchedulerFile(plistPath);
-  await verifySchedulerPreflight();
+  const codex = await verifySchedulerPreflight();
   const pinned = await preparePinnedSchedulerRuntime(approvedHead);
-  const renderedPlist = await renderPinnedLaunchdPlist(pinned.root, pinned.head);
+  const renderedPlist = await renderPinnedLaunchdPlist(
+    pinned.root,
+    pinned.head,
+    codex.executable,
+    codex.sha256,
+  );
   await ensurePrivateDirectory(operationRoot);
   const domain = `gui/${process.getuid?.() ?? 0}`;
   if (existing !== undefined) {
@@ -4229,8 +4355,8 @@ async function createPrivateTempDirectory(label: string): Promise<string> {
 }
 
 
-function resolveRuntimeRoot(): string {
-  const override = process.env.MURPH_PROD_WATCH_TEST_RUNTIME_ROOT;
+function resolveRuntimeRoot(overrides: ProdWatchTestOverrides | undefined): string {
+  const override = overrides?.runtimeRoot;
   if (override === undefined) {
     const configured = process.env.MURPH_PROD_WATCH_RUNTIME_ROOT;
     if (configured === undefined) {
@@ -4242,9 +4368,6 @@ function resolveRuntimeRoot(): string {
       throw new Error("runtime_root_must_be_under_home");
     }
     return resolved;
-  }
-  if (process.env.NODE_ENV !== "test") {
-    throw new Error("test_runtime_root_requires_test_environment");
   }
   const resolved = path.resolve(override);
   const temporaryRoot = `${path.resolve(os.tmpdir())}${path.sep}`;

@@ -13,6 +13,7 @@ Use this skill only for Murph production-watch runs and incidents.
 - Provider reads must aggregate before returning data. The Cloudflare child may use only Cloudflare Observability; its parent verifies that this is the complete effective MCP set before launch. Vercel and Stripe remain deterministic local adapters. Return only `prod-watch.provider-evidence.v1`; reject rather than summarize raw text into a free-form field.
 - Monitoring state under `.runtime/**` is operational coordination only. It is never application, account, billing, clinical, or product truth.
 - The installed scheduler is monitor-only. Automatic worker dispatch, repository edits, commits, ReviewGPT calls, pushes, pull requests, merges, deployments, and production/provider mutation are disabled. A `resolved` transition is record-only and is allowed only after fresh, complete evidence from the incident's authoritative deterministic source independently observes an externally applied fix.
+- Scheduled provider collection must use the installer-pinned Codex standalone path and digest. Production runs must reject test-only environment controls; never route production through the test dependency-injection entrypoint.
 - Billing, authentication, privacy, deletion/data-loss, credential, payment, medical, or health-data signals are alert-and-escalate only.
 
 ## Scheduled evidence pass

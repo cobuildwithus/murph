@@ -15,6 +15,8 @@ Activate a machine-local, five-minute monitor-only production watcher that colle
 - Reject automatic worker dispatch, repository edits, ReviewGPT invocation, push, and draft-PR creation in the launchable production CLI.
 - Derive the scheduler's immutable revision only from the exact clean checkout executing installation; reject conflicting caller assertions.
 - Refuse to start the provider child unless the effective MCP set is exactly Cloudflare Observability.
+- Pin the installer-approved Codex standalone executable and SHA-256 into the scheduler and revalidate both before child launch.
+- Reject test-only environment controls in the production entrypoint; keep dependency injection in a separate test-only entrypoint.
 - Never merge, enable auto-merge, deploy, or mutate production/provider state.
 
 ## Verification
