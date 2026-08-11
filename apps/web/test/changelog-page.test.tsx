@@ -95,7 +95,8 @@ describe("ChangelogPage", () => {
     );
     expect(correctedEdition.summary).toContain("Training shows saved workouts");
     expect(correctedEdition.summary).toContain("group photos on request");
-    expect(correctedEdition.summary).toContain("one available first photo");
+    expect(correctedEdition.summary).toContain("Luna, Terra, and Sol on OpenAI");
+    expect(correctedEdition.summary).toContain("one first photo");
     expect(correctedEdition.summary).not.toContain("original detail");
 
     expect(markup).toContain('aria-label="Changelog pages"');

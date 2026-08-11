@@ -1077,15 +1077,33 @@ describe('assistant codex runtime', () => {
   it.each([
     {
       expectedImageDetail: 'original',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-5.6-luna',
       modelProvider: 'openai',
       providerRequestOrdinal: 0,
+    },
+    {
+      expectedImageDetail: 'original',
+      model: 'gpt-5.6-terra',
+      modelProvider: 'openai',
+      providerRequestOrdinal: 1,
+    },
+    {
+      expectedImageDetail: 'original',
+      model: 'gpt-5.6-sol',
+      modelProvider: 'openai',
+      providerRequestOrdinal: 2,
+    },
+    {
+      expectedImageDetail: 'high',
+      model: 'gpt-5.2',
+      modelProvider: 'openai',
+      providerRequestOrdinal: 3,
     },
     {
       expectedImageDetail: 'high',
       model: 'member-model',
       modelProvider: 'hosted-custom-inference',
-      providerRequestOrdinal: 3,
+      providerRequestOrdinal: 4,
     },
   ] as const)(
     'executes Codex app-server turns for $modelProvider at provider ordinal $providerRequestOrdinal',
