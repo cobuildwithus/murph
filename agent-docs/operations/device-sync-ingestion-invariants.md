@@ -148,20 +148,26 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    (more imports, more visible skips); it must never make it quieter (a new
    silent skip, a deferred floor, a gated import).
 
-   Successful hosted webhook imports emit a best-effort
+   Eligible hosted webhook imports emit a best-effort
    `device-sync.import_completed` runtime log after the canonical job succeeds.
-   At ingress, the existing dirty-resource carrier reduces provider event time
-   to a coarse event-to-send delay bucket, computes the verified signed-envelope
-   send-to-receipt duration, and preserves the earliest Murph receipt long
-   enough to derive receipt-to-import duration after import. Coalesced hints
+   At ingress, the new timing fields on the existing dirty-resource carrier
+   reduce provider event time to a coarse event-to-send delay bucket, compute
+   the verified signed-envelope send-to-receipt duration, and preserve the
+   earliest Murph receipt long enough to derive receipt-to-import duration
+   after import. This reduction applies to the timing carrier and runtime log;
+   pre-existing ingestion fields still use provider occurrence for dirty-window
+   and clean-transition wake ownership. Coalesced hints
    keep the slowest upstream bucket, longest signed delivery, and earliest
    receipt without pairing timestamps from different events. The runtime log contains only the
    coarse upstream bucket, provider/job kind, provider-send-to-receipt,
    receipt-to-import, queue, and execution durations. It deliberately omits raw
    stage timestamps, event/resource semantics, counts, and exactly reversible
    event-origin intervals. Missing or negatively ordered clocks omit only the
-   affected measurement. This telemetry is buffered and cannot delay
-   acceptance, import, or the pull floor; it is not a recovery owner.
+   affected measurement. The runtime timing association is pass-local, so a
+   compact job that remains queued or retrying beyond its admitting pass can
+   later succeed without a completion event. This telemetry is buffered and
+   cannot delay acceptance, import, or the pull floor; it is not a recovery
+   owner or an exhaustive import ledger.
 
 6. **Historical completion is source/resource coverage, not account-level
    traffic.** A useful activity record cannot complete an advertised sleep

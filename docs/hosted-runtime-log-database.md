@@ -110,7 +110,7 @@ authority only after acquiring the same isolated advisory lock used by cleanup.
 
 ## Wearable import timing
 
-Successful hosted webhook imports write the buffered info event
+Eligible hosted webhook imports write the buffered info event
 `device-sync.import_completed`. Its privacy-limited `redacted_json` separates
 the operational stages instead of treating all missing-data time as one delay:
 
@@ -126,14 +126,22 @@ the operational stages instead of treating all missing-data time as one delay:
 Clock skew does not become a negative latency; only the affected measurement is
 omitted. The log deliberately excludes raw stage timestamps, event or resource
 types, source-device/provider semantics, counts, health values, webhook bodies,
-and exact event-to-import intervals. The dirty-resource carrier holds only the
-coarse upstream bucket, exact signed-send-to-receipt duration, and earliest
-Murph receipt needed for the remaining duration. Compact timing and job fields
+and exact event-to-import intervals. The new timing fields on the dirty-resource
+carrier hold only the coarse upstream bucket, exact signed-send-to-receipt
+duration, and earliest Murph receipt needed for the remaining duration.
+Pre-existing ingestion fields still use provider occurrence for dirty-window
+and clean-transition wake ownership; those fields are not copied into this
+runtime event. Compact timing and job fields
 can remain in the existing dirty row; oversized job payloads use the existing
 encrypted dirty-payload row. Coalesced hints keep the slowest upstream bucket,
 longest signed delivery, and earliest receipt, so timestamps from different
 events are never paired into a synthetic duration.
-Like other debug/info logs, the event uses the nonblocking runtime-log buffer
+
+The timing association is pass-local and deliberately best-effort. A compact
+job that remains queued or retrying beyond its admitting runtime pass can later
+succeed without a `device-sync.import_completed` event. Canonical import and
+retry behavior remain authoritative; this event is not an exhaustive import
+ledger. Like other debug/info logs, it uses the nonblocking runtime-log buffer
 and seven-day retention.
 
 Example bounded diagnostic read:

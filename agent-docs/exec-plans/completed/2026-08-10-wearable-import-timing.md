@@ -1,8 +1,8 @@
 # Timezone-safe assistant timestamps and wearable import timing
 
-Status: active
+Status: completed
 Created: 2026-08-10
-Updated: 2026-08-10
+Updated: 2026-08-11
 
 ## Goal
 
@@ -12,8 +12,8 @@ Updated: 2026-08-10
 
 - Inbound event timestamps shown to the assistant include a deterministically formatted local clock in the vault's canonical IANA timezone plus the original UTC instant.
 - A focused regression proves that an August UTC instant renders with the correct America/New_York daylight-saving offset.
-- Exact signed provider-send-to-receipt duration and the earliest webhook receipt survive the existing webhook-to-runtime handoff when available; exact provider event time is reduced to a coarse upstream-delay bucket before persistence.
-- Successful hosted imports emit privacy-limited structured timing logs that distinguish coarse event-to-provider delay, exact provider-send-to-receipt and Murph webhook-to-import delay, runtime queue time, and import execution time.
+- Exact signed provider-send-to-receipt duration and the earliest webhook receipt survive the existing webhook-to-runtime handoff when available; exact provider event time is reduced to a coarse upstream-delay bucket before it enters the new timing carrier.
+- Eligible same-pass hosted imports emit privacy-limited structured timing logs that distinguish coarse event-to-provider delay, exact provider-send-to-receipt and Murph webhook-to-import delay, runtime queue time, and import execution time; the best-effort event is not an exhaustive import ledger.
 - Invalid, unavailable, clock-skewed, or coalesced timing data is represented honestly without blocking webhook acceptance or import execution.
 - Focused tests, affected package typechecks, exact-head CI, and required ReviewGPT gates pass.
 
@@ -89,20 +89,25 @@ Updated: 2026-08-10
   the same object through occurrence rendering, developer/system planning, and
   late-input admission. Missing or invalid vault timezone metadata stays exact
   UTC-only and never inherits a runtime-local label.
-- Ingress reduces event-origin time to the coarse bucket before persistence,
+- Ingress reduces event-origin time before it enters the new timing carrier,
   measures signed-send-to-receipt exactly, and retains the earliest Murph
-  receipt. Coalesced hints merge those measurements without adding wakes;
-  compact jobs, encrypted-payload jobs, and locally deduplicated jobs each emit
-  at most one completion record per unique local job while all payload ids are
-  acknowledged.
+  receipt. Pre-existing dirty-window and clean-transition wake fields continue
+  to use occurrence time. Coalesced hints merge the privacy-reduced measurements
+  without adding wakes; compact jobs, encrypted-payload jobs, and locally
+  deduplicated jobs emit at most one completion record per unique local job
+  while all payload ids are acknowledged. A compact retry that crosses runtime
+  passes can complete without this best-effort event because the timing
+  association is pass-local.
 - The real Codex App Server scenario passed against the target model: the first
   turn did not invent an absent run, and a resumed turn after the controlled
   import appeared reported the synthetic 2.4-mile activity and the original
   question as 1:45 PM local / 17:45 UTC in the same session.
-- Focused verification currently passes: Assistant Engine 340 tests, Assistant
-  Runtime 163 tests, Web device-sync 139 tests, and device-syncd 397 tests, plus
-  typechecks for all four affected packages/app. The exact-head PR CI and final
-  remediation ReviewGPT round remain pending.
+- Post-merge focused verification passes: Assistant Engine 341 tests, Assistant
+  Runtime 166 tests, Web device-sync/changelog 145 tests, and device-syncd 442
+  tests, plus typechecks for all four affected packages/app. The separate
+  synthetic real-model E2E passes with one executed case and 61 gated cases
+  skipped. Exact-head release CI passes; the sole failed rerun used the original
+  pull-request body event and will be replaced by the final-head event.
 - Final ReviewGPT round 1 findings were accepted and remediated by removing raw
   health-event facts and exact event-origin intervals from member-linked logs,
   making timezone failure UTC-only, correcting Strava event occurrence, and
@@ -110,3 +115,10 @@ Updated: 2026-08-10
 - The preliminary specialist findings were remediated with terminal real-model
   proof, one turn-owned time authority, missing/malformed/valid Strava coverage,
   and complete coalesced/compact/deduplicated job timing coverage.
+- Final ReviewGPT round 2 returned `ROUND_OUTCOME: PASS` with no qualifying
+  findings. Its four documentation discrepancies were accepted: the timezone
+  read moved from planning to the foreground owner; already-dirty level hints
+  now use the existing upsert path; privacy reduction applies to the new timing
+  carrier rather than pre-existing dirty-window fields; and cross-pass compact
+  retries can omit the best-effort completion event.
+Completed: 2026-08-11
