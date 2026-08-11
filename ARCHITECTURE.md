@@ -1,6 +1,32 @@
 # Murph Architecture
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
+
+## Local Frog Autofix
+
+Murph's optional local Frog repair loop is an operator-owned macOS process, not
+product runtime, hosted automation, or Frog publication authority. One
+user-session LaunchAgent invokes the repository's primary checkout at load and
+every two hours. Each invocation handles at most one issue and uses GitHub as
+its only durable queue and completion ledger; local state is limited to a
+process-identity lock, home-relative checkout/Codex-home locators, and a bounded
+metadata-only event log.
+
+Admission requires an open `enhancement` issue authored by the exact Frog App
+and exactly one matching `issue:` binding already committed beneath
+`.agents/friction-log/*/friction.md` on `origin/main`. The issue number is the
+only issue datum placed in the parent worker prompt. Issue content remains
+untrusted evidence. A deterministic branch owns one sanctioned worktree, so a
+later run can recover an incomplete PR without a second task database.
+
+One ephemeral Codex worker must ask a fresh ReviewGPT Pro thread to author a
+downloadable patch before implementation. Missing, ambiguous, stale, unsafe, or
+prose-only output ends the run; Codex cannot silently substitute its own patch.
+After application, the ordinary Murph plan, focused proof, preliminary
+ReviewGPT, final ReviewGPT when routed, PR metadata, required exact-head CI, and
+current-base proof remain mandatory. Only a normal non-admin merge may precede
+issue closure. The worker has no branch-protection, ruleset, GitHub Actions, or
+Frog App bypass authority.
 
 ## Accepted-Message Targeting
 

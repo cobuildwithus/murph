@@ -51,9 +51,10 @@ create pull requests. The workflow instead mints a short-lived installation
 token for a dedicated GitHub App installed only on this repository. The App has
 only Contents, Issues, and Pull requests read/write permissions; it has no rule
 bypass, organization, or administration authority. The workflow contains no
-approval or merge operation, so review and merge remain human-owned. Its token
-is explicitly narrowed to those three repository permissions for each run and
-is revoked when the job ends.
+approval or merge operation, so it cannot merge its reconciliation PR. Its
+token is explicitly narrowed to those three repository permissions for each
+run and is revoked when the job ends. The optional local repair loop below is a
+separate operator-authorized process and never receives this App token.
 
 Repository administrators provide `FROG_APP_CLIENT_ID` and
 `FROG_APP_BOT_LOGIN` as Actions variables and `FROG_APP_PRIVATE_KEY` as a
@@ -69,3 +70,32 @@ repository-owned `frog/sync` pull request created by the configured App bot and
 replaces one private marker-owned Architecture and Changelog footer. Zero
 matches are a no-op, ambiguous or untrusted matches fail closed, and retries are
 byte-identical.
+
+## Optional local repair loop
+
+The Frog workflow still does not implement fixes, approve reviews, or merge
+pull requests. A separate optional macOS operator tool can process trusted
+published issues from an authenticated local developer session:
+
+```sh
+scripts/frog-autofix scan
+scripts/frog-autofix install --codex-home <CODEX_HOME>
+scripts/frog-autofix status
+```
+
+Its LaunchAgent runs at load and every two hours, handles at most one issue, and
+admits only an open `enhancement` issue authored by the exact Frog App with one
+matching binding already committed on `main`. The issue number is the only
+issue field in the parent Codex prompt; all issue content remains untrusted
+evidence. Codex must obtain an attached implementation patch from a fresh
+ReviewGPT Pro thread, then follow the ordinary Murph plan, verification,
+ReviewGPT review, PR, required-CI, and non-admin merge gates. It closes an issue
+only after verifying the PR merged.
+
+GitHub is the repair queue and completion ledger. Local owner-only state stores
+only relative checkout/Codex-home locators, one process-identity lock, and a
+bounded metadata log. Missing browser auth, missing or unsafe patches, dirty or
+ambiguous state, red checks, and blocked merges remain open for a later run;
+the tool never bypasses repository policy. Use `scripts/frog-autofix uninstall`
+to unload the exact local job and remove its local state. Uninstall refuses
+while the verified scheduler or detached worker process is still alive.

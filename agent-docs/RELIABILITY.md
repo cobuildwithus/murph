@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Current Guardrails
 
@@ -134,6 +134,40 @@ Last verified: 2026-08-10
   completion. Availability before admission and shutdown stay outside Murph
   rather than introducing a daemon or lease-recovery owner.
 - Use the concrete runtime contracts first: hosted runner wake/checkpoint behavior lives in `agent-docs/references/hosted-runtime-protocol.md` plus `apps/cloudflare/README.md`; deploy recovery and smoke expectations live in `apps/cloudflare/DEPLOY.md`; local device-sync and assistant daemon retry/control-plane behavior live in their package READMEs and tests.
+
+## Local Frog autofix scheduling
+
+- One macOS user-session LaunchAgent owns the optional local schedule with
+  `RunAtLoad` and a 7,200-second interval. There is no endless shell loop,
+  hosted scheduler, GitHub Actions merge job, or second retry queue. Launchd
+  coalesces an interval while the exact job is still running, and the runner's
+  process-start-token lock also rejects overlapping manual runs without
+  signaling another process. Uninstall must acquire that same lock and refuses
+  to remove local state while the verified scheduler or detached worker is
+  still alive.
+- Each invocation fetches the default branch, advances only an exact clean
+  primary checkout by fast-forward, revalidates repository and issue authority,
+  and admits the oldest eligible issue. It processes one issue, uses a
+  deterministic branch/worktree identity, and recovers from GitHub branch, PR,
+  merge, and issue state. It does not persist issue bodies or duplicate GitHub
+  state locally. The owner lock records both the scheduler process identity and
+  the exact detached worker process identity, so an orphaned still-live child
+  also blocks a replacement run after a launcher crash.
+- The worker process group has a four-hour outer deadline. The runner sends
+  `SIGTERM`, then a bounded `SIGKILL` only to the exact detached process group it
+  created and still owns. ReviewGPT and CI instructions impose their own
+  three-hour waits. Timeout, browser unavailability, missing patch, dirty or
+  ambiguous worktree state, red CI, blocked merge, and failed issue closure all
+  leave recoverable GitHub/worktree state for a later pass.
+- A successful pass verifies both a merged PR for the deterministic branch and
+  the closed issue before attempting ordinary worktree retirement. Retirement
+  still uses `scripts/retire-worktree` and silently preserves the checkout when
+  its cleanliness, process, history, or reference guards do not permit removal.
+- The event log is append-only metadata during a run and compacts from 256 KiB
+  to the newest 128 KiB. It stores no issue title/body, model content, command
+  output, credential, direct identifier, or absolute path. Malformed or
+  ownership-ambiguous locks fail closed; a dead PID or a live PID with a
+  different start token is safely recoverable without sending a signal.
 
 ## Runtime Expectations
 

@@ -604,6 +604,28 @@ only when a non-PR task would otherwise require a broader local command. The
 text-only docs/process fast path remains the default for eligible Markdown-only
 docs work unless the change will be pushed directly to a shared default branch.
 
+The local Frog autofix entrypoint uses `scripts/frog-autofix scan` for a
+non-repairing live admission proof. The command may fetch `origin/main` and
+query public issue metadata, but it must not create durable autofix state or a
+worktree, start Codex, edit GitHub state, or print issue titles/bodies. Focused
+implementation proof is:
+
+```sh
+pnpm exec vitest run scripts/frog-autofix.test.ts \
+  --config scripts/vitest.config.ts --no-coverage
+bash -n scripts/frog-autofix
+scripts/frog-autofix scan
+```
+
+After the owning PR merges, installation proof must run from the exact clean
+primary checkout: install with the intended Codex home, confirm `status`
+reports `loaded=yes` and `interval_seconds=7200`, inspect the generated plist,
+launcher, relative locators, lock, and bounded event log for owner-only modes
+and identifier/credential absence, then invoke one manual `run`. When no
+committed eligible binding exists, success is a no-worker event. When one does
+exist, the exact GitHub PR/check/merge/issue lifecycle is the required end-to-
+end proof; a locally successful child exit alone is not completion evidence.
+
 ## Hosted Temporal Replay Proof
 
 Private `cobuildwithus/murph-cloud` owns the Temporal Workflows, Activities,

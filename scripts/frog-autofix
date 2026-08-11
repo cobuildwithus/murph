@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+case "${1:-}" in
+  install|uninstall|status|scan|run) ;;
+  -h|--help|help)
+    cat <<'EOF'
+Usage: scripts/frog-autofix {install|uninstall|status|scan|run} [options]
+
+Commands:
+  install [--codex-home <dir>]  Install and load the two-hour LaunchAgent.
+  uninstall                     Unload the exact LaunchAgent and remove its local state.
+  status                        Report loaded state and bounded metadata events.
+  scan                          List eligible trusted Frog issue numbers without editing.
+  run                           Process at most one eligible issue now.
+EOF
+    exit 0
+    ;;
+  *)
+    echo "Usage: scripts/frog-autofix {install|uninstall|status|scan|run} [options]" >&2
+    exit 2
+    ;;
+esac
+
+unset \
+  DATABASE_URL \
+  FROG_DATABASE_URL \
+  FROG_NAMESPACE \
+  FROG_SCHEMA \
+  GH_TOKEN \
+  GITHUB_TOKEN
+
+tsx_bin="$repo_root/node_modules/.bin/tsx"
+if [[ ! -x "$tsx_bin" ]]; then
+  echo "Frog autofix tooling is not installed; run pnpm install --frozen-lockfile." >&2
+  exit 2
+fi
+
+cd "$repo_root"
+exec "$tsx_bin" scripts/frog-autofix.ts "$@"

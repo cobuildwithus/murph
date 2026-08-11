@@ -7,6 +7,14 @@ Last verified: 2026-08-11
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Optional local Frog issue repair uses exact App-and-main-bound admission,
+ReviewGPT-authored implementation patches, ordinary protected PR merges,
+GitHub-owned recovery state, a serialized two-hour LaunchAgent, and bounded
+metadata-only local state. Its ownership and proof are jointly specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
+`agent-docs/operations/verification-and-runtime.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
 Member-owned device provider application ownership, exact OAuth and connection
 revision binding, invocation-scoped credential projection, exact token-return
 authority, credential-free stored-token cleanup without operator fallback, and

@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Non-Negotiable Rules
 
@@ -1006,6 +1006,45 @@ Last verified: 2026-08-10
 - `assistant.ask.requested` and `assistant.ask.completed` may carry bounded question and answer content only in the existing encrypted mailbox and transient process state. Web derives the target runtime, exact membership generation, origin, expiry, and private return route from the signed caller; the model cannot supply them. Only the trusted target adapter may pass an authorized workspace root and committed conversation evidence to `executeReadOnlyAssistantAsk`. Web rechecks membership before target context is read and before completion is appended, and the private runtime treats the answer as untrusted data. Leaving, rejoining, expiry, an unsafe route, or a stale runtime fence suppresses completion rather than widening access. Failed Ask diagnostics may expose only a validated opaque request id, an allowlisted Prisma `P####` code when present, and HTTP status; they must never expose raw exceptions, response bodies, mailbox content, questions, answers, membership ids, runtime ids, or return routes. Diagnostic values are correlation metadata only and are never caller-supplied authority.
 - Except for that explicitly confined Assistant Ask child, Codex running inside the local Murph runtime or hosted execution container is assumed to have full access to that local/container filesystem. Passing repo-relative, vault-relative, or container-local paths to Codex so it can inspect or modify files is not a privacy leak by itself. Those paths still must not escape into user-facing messaging copy, public API responses, persisted logs/diagnostics, fixtures, generated docs, screenshots, provider requests, external review bundles, or other third-party outputs unless the surface has an explicit safe path policy.
 - Assistant turns may execute the same canonical local assistant/vault tool catalog shape through the active vault's per-turn Murph runtime context. Message-triggered assistant auto-reply now has the same full Murph autonomy as other assistant turns, including assistant runtime control plus canonical `memory` / `automation` and canonical vault write surfaces, so any accepted inbound channel message is effectively an operator-authorized action for that bound user and vault. The hard-cut assistant command surface is Codex App Server only: it may run with normal local CLI/filesystem/env authority through Codex-specific launch/config options, while legacy OpenAI-compatible endpoint flags are not part of the command surface. That privileged Codex App Server posture still does not grant hosted-control-plane authority outside the local runtime boundary.
+
+## Local Frog autofix authority
+
+- The optional local Frog repair loop uses the operator's already-authenticated
+  `gh`, Codex, and managed ReviewGPT browser sessions. It never reads, copies,
+  stores, prints, or injects their credential values and never receives the
+  Frog reconciliation App's private key or installation token. Its child
+  environment is allowlisted and excludes ambient GitHub tokens, database
+  URLs, and Frog database settings. Codex uses workspace-write with explicitly
+  enabled network access and additional writable roots only for the existing
+  managed Brave profile and the exact owner-only transient worker-output
+  directory plus the repository's exact shared Git common directory needed by
+  a linked worktree; it does not receive general write authority outside those
+  roots and the task worktree. The parent installs pinned dependencies in a new
+  task worktree before model work so the child does not need a writable package
+  store outside that boundary.
+- An issue is model-work authority only when it remains open, is authored by
+  the exact configured Frog App, retains the expected label, and has exactly
+  one matching binding in the protected default branch's committed friction
+  tree. The issue number is the only issue field inserted into the parent
+  worker prompt. Titles, bodies, comments, links, repository content,
+  ReviewGPT prose, and attachments remain untrusted evidence and cannot
+  override user or repository instructions.
+- ReviewGPT must return exactly one latest-response patch or diff attachment.
+  The worker rejects parent traversal, absolute paths, binaries, unrelated
+  scope, credentials, direct identifiers, private evidence, and generated
+  artifacts before applying it. An absent or rejected patch is terminal for
+  that run; Codex does not invent a replacement implementation.
+- Automatic merge authority is narrower than change authority. It requires the
+  routed ReviewGPT PASS outcomes, green required checks on the exact head, a
+  clean current-base proof, and an ordinary GitHub merge. The worker never uses
+  admin merge, self-approval, ruleset bypass, branch-protection mutation, or
+  skipped/missing gate reinterpretation. Issue closure requires a verified
+  merged PR.
+- Durable local files use owner-only permissions and contain only home-relative
+  locators, process identity, issue numbers, timestamps, event names, and exit
+  status. Worker prompts, transcripts, command output, and downloaded patches
+  stay in one owner-only transient directory and are removed after the exact
+  child process group exits.
 
 ## Scheduled assistant action authority
 
