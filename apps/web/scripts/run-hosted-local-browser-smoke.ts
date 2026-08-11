@@ -50,9 +50,9 @@ async function main(): Promise<void> {
         page.setDefaultTimeout(config.timeoutMs);
         page.setDefaultNavigationTimeout(config.timeoutMs);
         await prepareStablePrivatePage(page, webBaseUrl);
-        let pageErrorCount = 0;
-        page.on("pageerror", () => {
-          pageErrorCount += 1;
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => {
+          pageErrors.push(sanitizeBrowserSmokeFailure(error));
         });
 
         await proveConnectJourney({
@@ -60,9 +60,10 @@ async function main(): Promise<void> {
           page,
           webBaseUrl,
         });
-        if (pageErrorCount !== 0) {
+        if (pageErrors.length !== 0) {
+          const distinctErrors = [...new Set(pageErrors)].slice(0, 4);
           throw new Error(
-            `Hosted browser ${browserCase.name} emitted ${pageErrorCount} uncaught page error(s).`,
+            `Hosted browser ${browserCase.name} emitted ${pageErrors.length} uncaught page error(s): ${JSON.stringify(distinctErrors)}`,
           );
         }
       } finally {
