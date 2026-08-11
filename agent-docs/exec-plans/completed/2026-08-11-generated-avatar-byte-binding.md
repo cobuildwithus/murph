@@ -1,6 +1,6 @@
 # Generated avatar exact-byte binding
 
-Status: active — round 14 finding reproduced; correction and round 15 pending
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -78,12 +78,21 @@ bytes reach the private publisher or image provider.
   across group-tool, outbox, service, response-media, and both image-generation
   suites. Assistant Engine typecheck passes.
 - Runner CLI/entry bundle policy passes 50 tests and deploy-preflight coverage
-  passes 85 tests. After a final conflict-free main merge, fresh full assembly
-  passes with an 8,717,119-byte Vault CLI, 1,619,381-byte runner entry,
-  7,778,630-byte static closure, and 9,711,325-byte total against the retained
-  9,711,424-byte ceiling.
-- The correction was committed and pushed at `70be0f52c220`. Current `main` then
-  merged without conflicts as `68d4603f004f`; the complete 303-test affected
-  set, Assistant Engine typecheck, and 50 runner-policy tests still pass on that
-  merged tree. `git diff --check` and the scoped identifier scan pass. Final
-  evidence commit/push, PR-body refresh, exact-head CI, and round 15 remain.
+  passes 85 tests. After the final latest-main conflict resolution, fresh full
+  assembly passes with an 8,815,310-byte Vault CLI, 1,619,381-byte runner entry,
+  7,845,802-byte static closure, and 9,808,583-byte total against the ratcheted
+  9,841,351-byte ceiling.
+- The correction was committed and pushed at `70be0f52c220`. Round 15 used
+  ReviewGPT 0.5.124 on exact head `878a0ffe38c3`, requested `gpt-5.6-sol`,
+  verified response model `gpt-5-6-pro`, and returned `ROUND_OUTCOME: PASS` plus
+  `REVIEW_COMPLETE` with response SHA-256
+  `c77f1f45c49d42d1ec445b0c9908da6fb4c408f6ea528baa9ed809999d27c253`.
+- Latest `origin/main` was merged normally as `a48042a264`. The four conflicts
+  were additive: combined changelog copy and proof, retained runner bundle
+  limits, and a regenerated CLI skill hash. The reconciled tree passes 304
+  affected assistant tests, 41 changelog tests, Assistant Engine typecheck, 50
+  runner-policy tests, 85 deploy-preflight tests, full runner assembly,
+  `git diff --check`, and the scoped identifier scan. No ReviewGPT rerun is
+  required solely for this post-PASS base reconciliation; fresh exact-head CI
+  remains the final remote merge gate.
+Completed: 2026-08-11
