@@ -872,12 +872,15 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
     userId: input.userId,
   });
 
-  const finalStatus = deviceSyncStatus.workspace?.browserVaultReplicaRef
-    ? deviceSyncStatus
-    : await waitForScheduledBrowserVaultReplica({
-        scenario: input.scenario,
-        userId: input.userId,
-      });
+  const finalStatus = await input.scenario.waitForHostedIdle(input.userId, {
+    timeoutMs: 240_000,
+  });
+  if (finalStatus.lastErrorCode ?? null) {
+    throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+      "Hosted runner recorded an error before publishing the drained Junction replica.",
+      `last error code: ${finalStatus.lastErrorCode}`,
+    ]));
+  }
   const replicaRef = requireReplicaRef(finalStatus.workspace?.browserVaultReplicaRef ?? null);
   const replica = await readBrowserVaultReplica({
     replicaRef,
