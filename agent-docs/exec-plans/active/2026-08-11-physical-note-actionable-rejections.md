@@ -43,11 +43,13 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Add one nullable column to `hosted_physical_note` so a definite rejection has
   the same answer on the original call and every replay. Existing failed rows
   remain compatible with a null reason and use the unknown recovery path.
-- Deploy the tolerant Cloudflare/runner consumer first, then the additive Web
-  migration and response producer. The new response field is optional so the
-  new consumer accepts older Web responses; older warm runners ignore the
-  added result property after the Worker validates it. Do not deploy the new
-  strict Web response through an older Worker parser.
+- Deploy the Cloudflare Worker and runner bundle with
+  `container_rollout=immediate`, then require managed-container smoke proof of
+  the exact new runner-bundle fingerprint before deploying the additive Web
+  migration and response producer. The new consumer accepts older Web
+  responses because the reason is optional; an old strict runner rejects the
+  new field and fails closed to pending, so it must not coexist with the new
+  producer. Roll back Web before Cloudflare.
 
 ## Implementation
 
@@ -70,8 +72,11 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Assistant tool tests prove each member-facing recovery path and preserve the
   pending no-retry instruction.
 - Focused Hosted Execution, Web, Assistant Engine, and Cloudflare tests pass:
-  6, 50, 13, and 5 tests respectively. Prisma validation and generation pass,
-  as do all four affected package/app typechecks.
+  6, 84, 13, and 5 tests respectively. Prisma validation and generation pass,
+  as do all four affected package/app typechecks. The opt-in real-model journey
+  compiles and selected the exact test locally, but its paid execution is
+  blocked when the provider credential is absent; deterministic owner tests
+  remain the authoritative local proof.
 - Complete first-provider request capture used the pinned real Codex App
   Server, local scripted provider, `gpt-5.6-terra`, low reasoning, production
   code mode, an explicit physical-note request, and `gpt-tokenizer` 3.4.0
@@ -83,3 +88,17 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   assembled initial instructions, tool schemas, and generated guidance are
   byte-identical. Model selection, reasoning, storage, streaming, service-tier,
   cache, account, client, and transport metadata were excluded identically.
+
+## Review retrospective
+
+- Round 2 required a requirement-level retrospective because the active plan
+  retained the same old-runner compatibility assumption that round 1 had
+  already corrected in the product contract and PR body.
+- The original and current runtime shape remain the same bounded enum, nullable
+  column, allowlisted mapper, and existing-owner recovery path. Review-driven
+  growth is focused tests and corrected guidance, not a new state owner, queue,
+  retry path, compatibility shim, or reconciliation mechanism.
+- Continue with the existing implementation after converging every operative
+  rollout instruction on immediate consumer convergence, exact runner
+  fingerprint proof, Web-last deployment, and Web-first rollback. Adding a
+  second protocol or compatibility path is not justified.
