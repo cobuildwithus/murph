@@ -212,6 +212,13 @@ function browserVaultRetainedReplicaUnavailableError() {
 function scheduleBrowserVaultRefreshAfterResponse(input: { userId: string }): void {
   const task = async () => {
     try {
+      const healthDataConsentState = await readHostedHealthDataConsentState({
+        memberId: input.userId,
+        prisma: getPrisma(),
+      });
+      if (healthDataConsentState !== "granted") {
+        return;
+      }
       await signalHostedBrowserVaultRefreshRuntime({ userId: input.userId });
     } catch {
       // Browser-vault freshness is a best-effort derived read-model refresh.
