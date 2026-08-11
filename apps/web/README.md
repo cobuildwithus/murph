@@ -878,12 +878,18 @@ Hosted AI usage metering:
   attributed stable-link activations. Conversational referrals also use
   immediate post-commit reconciliation, and that same cron converges on one
   final referral grant and one atomic source-mailbox celebration fence.
-  Recovery also re-signals bounded oldest unconsumed celebration items after a
-  failed Temporal signal. Personal arming freezes
-  only the source channel, blinded exact-thread locator, and directness fact;
-  celebration requires the same direct thread, and personal Linq delivery uses
-  an explicit source target that cannot fall back to a newer home route. Group
-  celebration carries live thread authority. The isolated completion formatter
+  Recovery also re-signals bounded oldest unconsumed celebration pointers after
+  a failed Temporal signal; Web does not read or rewrite their encrypted
+  payloads. If an authority-less legacy direct-Linq wake was already imported,
+  the local runtime reasserts its frozen target through Web's existing route
+  owner before model work. An exact live match continues through the normal
+  audience and provider-entry guards, a definitive stale match ends without a
+  send so ordered work advances, and unavailable authority retains normal
+  retry. Personal arming freezes only the source channel, blinded exact-thread
+  locator, and directness fact; celebration requires the same direct thread,
+  and personal Linq delivery uses an explicit source target that cannot fall
+  back to a newer home route. Group celebration carries live thread authority.
+  The isolated completion formatter
   receives only resolved tone, Humor, and Unhinged values, never transcript
   history.
   Durable celebration copy is unnamed. Unlinked Telegram group evidence stays

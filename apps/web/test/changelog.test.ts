@@ -294,7 +294,7 @@ describe("changelog registry", () => {
       sourcePullRequests: [1592],
       summary: expect.stringContaining("intended direct conversation"),
       details: expect.stringContaining(
-        "nothing is sent to a different conversation",
+        "ends without sending so later notifications can continue",
       ),
     });
     expect(

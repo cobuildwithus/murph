@@ -16,7 +16,8 @@ Allow validated direct Linq assistant notifications to pass the existing audienc
 - The audience guard is unchanged and valid direct Linq notifications pass only when existing trusted authority exactly matches member, channel, directness, and delivery target.
 - Missing, stale, mismatched, non-direct, wrong-member, and wrong-channel authority still fail closed.
 - Referral producers reuse one owning helper to attach direct-route authority for supported direct channels without introducing another state owner.
-- The existing encrypted mailbox head can be transactionally upgraded in place, preserving item identity, lane sequence, dedupe identity, and pointer order before re-signaling.
+- An already-imported legacy referral head is recovered by the runtime's existing route-authority owner without rewriting encrypted mailbox data, rewinding the import watermark, or adding another queue.
+- A definitively stale legacy route becomes a terminal no-send for that same item so later mailbox work can advance; temporary authority-owner failures retain the ordinary same-item retry.
 - Group routes, fallback prevention, and inactive-member gates retain their current behavior.
 
 ## Implementation
@@ -31,18 +32,20 @@ Allow validated direct Linq assistant notifications to pass the existing audienc
 ## Verification
 
 - Assistant-engine coverage exercises the real audience guard for exact-match and mismatch cases.
-- Assistant-runtime coverage proves explicit delivery gains binding authority only from an exact hosted-member, channel, directness, and target match.
-- Web producer and recovery coverage proves direct Linq authority is attached and an existing head is atomically upgraded without appending or reordering.
+- Assistant-runtime coverage proves an exact legacy referral shape gains in-memory authority only after the live owner validates hosted member, channel, directness, and target, including warm and restored workspaces whose import watermark already advanced.
+- Runtime coverage proves a definitive stale route terminally advances without sending, a temporary authority outage retries, and lookalike notifications remain blocked by the unchanged guard.
+- Web producer and recovery coverage proves new direct Linq items carry authority and recovery only re-signals the existing mailbox pointer without decrypting or replacing its payload.
 - Focused tests and typechecks pass for every changed package and app surface.
 - Exact pushed-head CI and required independent ReviewGPT gates are green before merge or production recovery.
 
 ## Candidate proof
 
-- ReviewGPT returned a complete patch artifact; the parent inspected every hunk, confirmed privacy and whitespace cleanliness, and verified exact reverse-apply equivalence after application.
-- The focused Web suite passed 116 tests across destination binding, both referral producers, bounded recovery, and mailbox replacement; the corrected mailbox test then passed all 71 tests in its file.
-- The hosted-runtime event suite passed 45 tests, including exact authority and every fail-closed mismatch.
+- ReviewGPT's preliminary and final first-round reviews independently found that replacing the remote encrypted payload could not repair a runtime-local head already persisted beyond the import watermark. The parent verified that mechanism in the pointer import, watermark, and retry paths.
+- ReviewGPT returned a runtime-owned replacement patch. The parent inspected every hunk, proved the permanent route error preserves `retryable: false` across the Web-to-runtime transport, confirmed privacy and whitespace cleanliness, and verified exact reverse-apply equivalence after application.
+- The corrected runtime suite passed 326 tests across the system mailbox, warm/restored legacy recovery, events, and callbacks. It proves exact provider target delivery once, no home-route fallback, stale-route terminal progress, authority-outage retry, and lookalike rejection.
+- The focused Web suite passed 126 tests across both referral producers, pointer-only recovery, mailbox storage, and changelog behavior.
 - The assistant-engine audience-authority integration suite passed 8 tests through the real guard.
 - Web, assistant-runtime, and assistant-engine typechecks passed.
-- The public changelog now describes the member-visible referral recovery without exposing incident details; its focused page, route, and contract suite passed 42 tests.
-- `pnpm docs:drift` and `git diff --check` passed.
-- Exact-head CI and the preliminary and final ReviewGPT PR gates remain pending on the pushed candidate.
+- The public changelog describes the member-visible referral recovery without exposing incident details.
+- `git diff --check` passed; documentation drift will be rerun with this corrected active-plan declaration.
+- Corrected-head CI and final ReviewGPT round 2 remain pending; the preliminary specialist pass is not rerun after substantive remediation.

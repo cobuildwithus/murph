@@ -625,6 +625,19 @@ provider entry, replay observes the same intent, and an older generic
 notification or unrelated pending delivery cannot hitchhike. Fresh conversation
 input continues to preempt this pass.
 
+A legacy usage-referral notification can be authority-less even after Web has
+repaired its producer, because the local system mailbox may already have
+persisted the old wake and advanced the import watermark. The bounded Web scan
+therefore re-signals only the existing pointer. Immediately before system-
+mailbox execution, the runtime recognizes only the exact direct-Linq explicit
+referral identity and asks the existing signed external-route authority owner
+to reassert its frozen member, channel, directness, and target. An authorized
+candidate gains proof only in the in-memory wake and then uses the ordinary
+audience guard and provider-entry recheck. The exact non-retryable unauthorized code records a terminal no-send for the same pending item so the contiguous handled-through
+sequence can advance; missing transport, timeout, and other retryable failures
+leave that item ordered and pending. No payload mutation, replacement item,
+cursor rewind, or fallback route exists.
+
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks
 the exact membership generation, runtime fence, expiry, and original private

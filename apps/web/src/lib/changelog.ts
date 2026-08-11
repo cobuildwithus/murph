@@ -99,7 +99,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Referral reward celebrations now stay attached to their intended direct conversation, and an interrupted one can safely resume without leaving later work waiting behind it.",
         details:
-          "Murph rechecks that the route still belongs to the same member and conversation before retrying. If it no longer matches, nothing is sent to a different conversation.",
+          "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
         relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
         sourcePullRequests: [1592],
       },

@@ -340,15 +340,25 @@ the hosted runtime treats that target as binding evidence only when the wake
 member, hosted member, channel, directness, and authority target all agree
 exactly.
 
-For a legacy direct-Linq notice queued without that proof, the same bounded
-recovery owner decrypts the current item, locks the member's existing home-route
-owner, and revalidates the exact direct destination. It then replaces only the
-encrypted payload of that unconsumed mailbox row under an expected payload-hash
-precondition. The item id, causal sequence, lane, lane sequence, dedupe key,
-kind, and occurrence time remain unchanged; no second head is appended.
-Recovery re-signals the existing device pointer only after the transaction
-commits. Missing, consumed, moved, mismatched, expired, or retired state fails
-closed and remains unsignaled.
+For the one legacy direct-Linq notice shape imported without that proof, Web
+never decrypts or rewrites the mailbox payload: the runtime may already have
+persisted the wake and advanced its import watermark. The local system-mailbox
+boundary admits only an exact usage-referral event whose mailbox dedupe key,
+event id, delivery dedupe token, delivery idempotency key, queue-only mode,
+required-send policy, direct Linq explicit route, hosted member, and absent
+authority all agree. Before model work it submits the frozen explicit target to
+the existing signed external-route authority owner. A current exact member,
+channel, directness, and target match adds that authority only to the in-memory
+wake, which then traverses the unchanged audience guard and provider-entry
+recheck. The target is never replaced by a current-home fallback.
+
+A definitive non-retryable `HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED` result
+records a typed terminal no-send outcome for that same local pending item, so its ordered lane
+can advance without provider work. Missing authority transport, timeout, or any
+other unavailable or retryable owner result retains the ordinary retry of that
+same item. The bounded Web recovery pass only re-signals the existing mailbox
+pointer; it does not append a replacement, rewind a cursor, alter ciphertext,
+or own a second reconciliation lifecycle.
 
 The first reward enablement intentionally applies the same oldest-first scan to
 at most the preceding 30 days of attributed activations. That bounded window

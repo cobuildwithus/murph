@@ -985,8 +985,15 @@ Last verified: 2026-08-10
   write-ahead provider drain, and leaves generic notifications or unrelated
   pending outbox work checkpoint-gated. Fresh conversation input retains
   priority. Referral recovery also re-signals bounded oldest unconsumed
-  celebration items, so a post-commit signal failure remains recoverable from
-  the existing mailbox without another queue or state machine.
+  celebration pointers, so a post-commit signal failure remains recoverable
+  from the existing mailbox without another queue or state machine. Web must
+  not rewrite an encrypted payload after the runtime may have imported it and
+  advanced its watermark. For the exact authority-less direct-Linq
+  usage-referral shape, the local system-mailbox owner reasserts the frozen
+  member/channel/direct target before model work, adds proof only in memory on
+  success, terminally records a definitive stale route without sending, and
+  leaves unavailable or retryable authority-owner failures on the ordinary
+  same-item retry path. This recovery never falls back, appends, or rewinds.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution
