@@ -1,6 +1,6 @@
 # Restore Retained Vault Export
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -31,3 +31,22 @@ Updated: 2026-08-11
 - A missing replica never becomes an empty or fabricated export.
 - Health-data withdrawal never wakes processing.
 
+## Decisions
+
+- Serve the newest compatible retained replica when newer source work is pending instead of blocking the export on freshness.
+- Keep refresh as best-effort continuation through the existing hosted signal path.
+- Read current health-data consent inside the deferred refresh task and stop unless consent remains granted.
+- Add no new queue, export format, state owner, or dependency.
+
+## Verification
+
+- Focused route, Settings UI, and design-study tests: 65 passed.
+- Web TypeScript check: passed.
+- Diff whitespace check: passed.
+- Desktop and mobile design-study renders: inspected at 2368 × 844 and 1050 × 2085.
+- Preliminary specialist review: one accepted privacy race, resolved with a current-consent check and two deterministic regressions.
+- Final ReviewGPT round 2: `PASS` with no findings on `c09f14a34dfe0d7d90385111830dbf0b4ca58869`.
+- Refreshed product-purpose verdict: the flow is the smallest complete experience; it provides the retained download immediately, states possible incompleteness, preserves recovery, and keeps current consent authoritative for background work. No findings remain.
+
+Completed: 2026-08-11
+Completed: 2026-08-11
