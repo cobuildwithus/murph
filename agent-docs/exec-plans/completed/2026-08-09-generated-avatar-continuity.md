@@ -1,8 +1,8 @@
 # Generated image avatar continuity
 
-Status: active — valid round 13 finding remediated; round 14 exact-head review and CI pending
+Status: completed
 Created: 2026-08-09
-Updated: 2026-08-10
+Updated: 2026-08-11
 
 ## Goal
 
@@ -689,3 +689,33 @@ Updated: 2026-08-10
   7,754,155-byte static boot closure, and 9,676,426-byte runner total without a
   ratchet change. Round 14 must review the fresh pushed full patch while exact-
   head CI runs concurrently.
+- Valid substantive round 14 reviewed exact pushed head `99ff781624e8` with
+  ReviewGPT 0.5.124. The wrapper verified requested `gpt-5.6-sol`, response
+  `gpt-5-6-pro`, and response SHA-256
+  `cd6c6394825da7d205e1e3dd8b29f372955c7692ddcc9f59904dbc3c8004ddcf`.
+  It returned `ROUND_OUTCOME: PASS` with no qualifying correctness, privacy,
+  security, reliability, architecture, purpose, or product-experience finding.
+  Parent triage accepted zero findings. The PR change-shape table now separates
+  the generated CLI hash correctly, and the design-proof note truthfully says
+  the current desktop/mobile study captures are linked rather than packaged;
+  parent visual inspection found both current studies readable at their target
+  widths. Exact-head required CI on the reviewed head was green.
+- After the pass, current `main` advanced and made the PR non-mergeable. One
+  normal base update resolved four bounded conflicts under the documented
+  behavior-preserving exception. Runner policy and its test select current
+  main's newer, higher total ceiling while preserving the reviewed entry/static
+  baselines and fixed allowances. Changelog production copy and page proof
+  mechanically retain this PR's generated-photo entry plus current main's
+  private continuation, lighter-page, and clearer-report content within the
+  existing title and summary schema limits. No reviewed runtime behavior,
+  configuration contract, or authority boundary changed, so ReviewGPT was not
+  rerun solely for the base update.
+- On final merged head `7713d647a2`, the runner-policy file passes 42 tests,
+  the outbox/response-media/group-tool set passes 199 tests, and the changelog
+  pair passes 40 tests. Cloudflare, Assistant Engine, and Web typechecks pass.
+  Fresh full runner assembly passes with an 8,716,103-byte Vault CLI total,
+  1,619,381-byte runner entry, 7,778,735-byte static closure, and 9,707,670-byte
+  total against the retained 9,711,424-byte ceiling. `git diff --check` passes,
+  the worktree is clean, and `git merge-tree --write-tree HEAD origin/main`
+  succeeds. Required exact-head CI remains the final remote ready-state gate.
+Completed: 2026-08-11
