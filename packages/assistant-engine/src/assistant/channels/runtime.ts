@@ -2217,6 +2217,9 @@ async function sendTelegramTextChunkOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (providerRequestWasSkipped(error)) {
+      throw error
+    }
     return {
       kind: 'request-error',
       failure: Object.assign(

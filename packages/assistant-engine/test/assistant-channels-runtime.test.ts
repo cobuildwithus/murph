@@ -692,6 +692,38 @@ describe('assistant channels runtime seam', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1)
   })
 
+  it('preserves a Telegram failure proven to occur before provider entry', async () => {
+    const preProviderFailure = Object.assign(
+      new VaultCliError(
+        'ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_STALE',
+        'Private Assistant Ask route changed before provider entry.',
+        { retryable: false },
+      ),
+      { deliveryMayHaveSucceeded: false as const },
+    )
+    const fetchImplementation = vi.fn(async () => {
+      throw preProviderFailure
+    })
+
+    await expect(
+      sendTelegramMessage(
+        {
+          message: 'Reviewed private answer.',
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toBe(preProviderFailure)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+  })
+
   it('keeps the Telegram provider deadline active through response body consumption', async () => {
     vi.useFakeTimers()
     const fetchImplementation = vi.fn<typeof fetch>((_input, init) => {

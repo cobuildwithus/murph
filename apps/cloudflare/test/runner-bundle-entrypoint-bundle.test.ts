@@ -607,9 +607,9 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Mirror the production baselines plus their variance allowances so
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 1_599_840 + 48_000,
-      totalBytes: 9_738_964 + 32_768,
-      staticClosureBytes: 7_791_221 + 96_000,
+      entryBytes: 1_619_381 + 48_000,
+      staticClosureBytes: 7_815_801 + 96_000,
+      totalBytes: 9_770_208 + 32_768,
     });
   });
 

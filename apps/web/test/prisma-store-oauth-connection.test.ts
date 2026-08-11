@@ -10,16 +10,16 @@ const {
 } = vi.hoisted(() => ({
   lockHostedMemberRowMock: vi.fn(async () => undefined),
   openHostedUserSecureBoxStringMock: vi.fn(
-    async (_input: { prisma?: unknown; value?: unknown }) => "acct_456",
+    async (input: { prisma?: unknown; value?: unknown }) => {
+      void input;
+      return "acct_456";
+    },
   ),
   randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
   readHostedHealthDataConsentStateMock: vi.fn(
     async (): Promise<"granted" | "missing" | "revoked"> => "missing",
   ),
-  supersedeDirtyStateMock: vi.fn(async () => ({
-    retainedCredentialIndependentPayloadCount: 0,
-    supersededPayloadCount: 0,
-  })),
+  supersedeDirtyStateMock: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => ({
@@ -122,6 +122,7 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     readHostedHealthDataConsentStateMock.mockResolvedValue("missing");
+    supersedeDirtyStateMock.mockResolvedValue(undefined);
   });
 
   // Consume semantics (replay, expiry, mismatches) are owned by
@@ -185,6 +186,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     readHostedHealthDataConsentStateMock.mockResolvedValue("missing");
+    supersedeDirtyStateMock.mockResolvedValue(undefined);
   });
 
   it("denies health-data admission after locking and re-reading consent", async () => {
@@ -316,6 +318,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => createdArtifacts.connection),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -403,6 +406,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => createdArtifacts.connection),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -460,6 +464,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => createdArtifacts.connection),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -703,6 +708,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => null),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -779,6 +785,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => stored),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -866,6 +873,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => existing),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -903,6 +911,152 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     }));
     expect(tx.deviceConnection.create).not.toHaveBeenCalled();
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+  });
+
+  it("retries legacy classification once behind the consent and dirty-marker transaction", async () => {
+    let stored = createConnection({
+      accessTokenEncrypted: null,
+      id: "dsc_classification_retry",
+      keyVersion: null,
+      provider: "whoop",
+      refreshTokenEncrypted: null,
+      status: "disconnected",
+      tokenVersion: null,
+      userId: "user-123",
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(stored)),
+        update: vi.fn(async ({ data }: { data: Partial<MutableConnectionRecord> }) => {
+          stored = {
+            ...stored,
+            ...data,
+            updatedAt: new Date("2026-03-26T04:00:00.000Z"),
+          };
+          return cloneConnection(stored);
+        }),
+      },
+    };
+    const transaction = vi.fn(async <TResult>(
+      callback: (transactionClient: typeof tx) => Promise<TResult>,
+    ) => {
+      const snapshot = cloneConnection(stored)!;
+      try {
+        return await callback(tx);
+      } catch (error) {
+        stored = snapshot;
+        throw error;
+      }
+    });
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: transaction,
+        deviceConnection: createRootConnectionPreflight(() => stored),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+    supersedeDirtyStateMock
+      .mockRejectedValueOnce({
+        code: "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING",
+        retryable: true,
+      })
+      .mockResolvedValueOnce(undefined);
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "whoop",
+      externalAccountId: "acct_456",
+      displayName: "WHOOP",
+      scopes: ["read:recovery"],
+      tokens: {
+        accessToken: "new-access-token",
+        refreshToken: "new-refresh-token",
+      },
+      metadata: {},
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      nextReconcileAt: null,
+    })).resolves.toEqual(expect.objectContaining({
+      id: "dsc_classification_retry",
+      status: "active",
+    }));
+
+    expect(supersedeDirtyStateMock).toHaveBeenCalledTimes(2);
+    expect(supersedeDirtyStateMock).toHaveBeenNthCalledWith(1, {
+      connectionId: "dsc_classification_retry",
+      tx,
+      userId: "user-123",
+    });
+    expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]).toBeLessThan(
+      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0]).toBeLessThan(
+      supersedeDirtyStateMock.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds repeated connection unique-conflict recovery to one retry", async () => {
+    const stored = createConnection({
+      connectedAt: new Date("2026-03-25T00:00:00.000Z"),
+      id: "dsc_unique_retry",
+      provider: "whoop",
+      status: "disconnected",
+      userId: "user-123",
+    });
+    const uniqueConflict = Object.assign(new Error("Unique constraint failed"), {
+      code: "P2002",
+    });
+    const transaction = vi.fn(async () => {
+      throw uniqueConflict;
+    });
+    const findUnique = vi.fn(async (input: {
+      select?: Record<string, boolean>;
+      where: { id?: string; provider_providerAccountBlindIndex?: unknown };
+    }) => {
+      if (input.where.id) {
+        return { userId: stored.userId };
+      }
+      if (input.select?.connectedAt && Object.keys(input.select).length === 5) {
+        return {
+          connectedAt: stored.connectedAt,
+          id: stored.id,
+          setupPhase: stored.setupPhase,
+          status: stored.status,
+          userId: stored.userId,
+        };
+      }
+      return cloneConnection(stored);
+    });
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: transaction,
+        deviceConnection: { findUnique },
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnection({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "whoop",
+      externalAccountId: "acct_456",
+      displayName: "WHOOP",
+      scopes: ["read:recovery"],
+      tokens: {
+        accessToken: "new-access-token",
+        refreshToken: "new-refresh-token",
+      },
+      metadata: {},
+      connectedAt: "2026-03-26T03:00:00.000Z",
+      nextReconcileAt: null,
+    })).rejects.toBe(uniqueConflict);
+
+    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(supersedeDirtyStateMock).not.toHaveBeenCalled();
   });
 
   it("reactivates a disconnected hosted connection on successful OAuth reconnect", async () => {
@@ -943,6 +1097,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => stored),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -1021,6 +1176,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => existing),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -1080,6 +1236,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => existing),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -1133,6 +1290,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => existing),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -1191,6 +1349,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       codec: TEST_CODEC,
       prisma: {
         $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+        deviceConnection: createRootConnectionPreflight(() => existing),
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
@@ -2381,6 +2540,25 @@ function cloneOAuthSession(session: MutableOAuthSession | null): MutableOAuthSes
         expiresAt: new Date(session.expiresAt),
       }
     : null;
+}
+
+function createRootConnectionPreflight(
+  readConnection: () => MutableConnectionRecord | null,
+) {
+  return {
+    findUnique: vi.fn(async () => {
+      const connection = readConnection();
+      return connection
+        ? {
+            connectedAt: connection.connectedAt,
+            id: connection.id,
+            setupPhase: connection.setupPhase,
+            status: connection.status,
+            userId: connection.userId,
+          }
+        : null;
+    }),
+  };
 }
 
 function cloneConnection(record: MutableConnectionRecord | null): MutableConnectionRecord | null {
