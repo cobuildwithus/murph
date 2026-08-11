@@ -103,6 +103,16 @@ const RAW_CHANGELOG_EDITIONS = [
         },
       },
       {
+        id: "cleaner-plan-and-model-settings",
+        kind: "improvement",
+        priority: 1,
+        title: "Cleaner plan and model settings",
+        summary:
+          "Settings now presents Starter usage and unavailable models more concisely while keeping relevant plan and upgrade choices visible.",
+        relevanceTags: ["settings", "plans", "models"],
+        sourcePullRequests: [1621],
+      },
+      {
         id: "personal-patterns",
         kind: "feature",
         priority: 5,
