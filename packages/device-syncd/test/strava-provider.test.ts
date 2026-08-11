@@ -1569,6 +1569,9 @@ describe("Strava device-sync provider", () => {
     })).catch((error: unknown) => error);
     expect(revokeFailure).toMatchObject({
       code: "STRAVA_REVOKE_FAILED",
+      details: {
+        requestBodyFieldNames: "token.token_type_hint",
+      },
       retryable: true,
     });
     const serializedFailure = JSON.stringify(revokeFailure);

@@ -594,7 +594,7 @@ async function revokeStravaAccessToken(
           ),
           contentType: "application_x_www_form_urlencoded",
           bodyKind: "form_urlencoded",
-          bodyFieldNames: ["token", "token_type_hint"],
+          bodyFieldNames: ["token_type_hint", "token"],
         }),
       },
     );

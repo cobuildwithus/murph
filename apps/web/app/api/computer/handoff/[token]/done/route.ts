@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
-import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import type { MurphContactKind, MurphContactOption } from "@/src/lib/murph-contact-routing";
 
@@ -14,7 +14,7 @@ export async function POST(
   context: { params: Promise<{ token: string }> },
 ) {
   const token = await resolveDecodedRouteParam(context.params, "token");
-  const session = await requireHostedAppSessionFromRequest(request);
+  const session = await requireActiveHostedAppSessionFromRequest(request);
   const service = createComputerUseService();
 
   const completed = await service.completeHandoff({
