@@ -225,7 +225,41 @@ describe('hosted image completion effect authority', () => {
           tool: 'attach_response_media',
         },
       })
-      if (!exactRequest || !mismatchedRequest) {
+      const staleMetadataRequest = readTestMurphDynamicToolRequest({
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            media: [{
+              ...EXACT_MEDIA,
+              contentType: 'image/webp',
+              filename: 'stale.webp',
+              sha256: 'a'.repeat(64),
+              sizeBytes: EXACT_MEDIA.sizeBytes + 1,
+            }],
+          },
+          namespace: 'murph',
+          tool: 'attach_response_media',
+        },
+      })
+      const mismatchedAltRequest = readTestMurphDynamicToolRequest({
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            media: [{
+              ...EXACT_MEDIA,
+              alt: 'Different generated image',
+            }],
+          },
+          namespace: 'murph',
+          tool: 'attach_response_media',
+        },
+      })
+      if (
+        !exactRequest ||
+        !mismatchedRequest ||
+        !staleMetadataRequest ||
+        !mismatchedAltRequest
+      ) {
         throw new Error('Expected response-media requests.')
       }
 
@@ -247,6 +281,26 @@ describe('hosted image completion effect authority', () => {
         nextUsageOrdinal: () => 0,
         progressDelivery: null,
         request: mismatchedRequest,
+        vaultRoot,
+      })
+      const staleMetadata = await executeMurphDynamicToolRequest({
+        currentResponseMedia: [],
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 0,
+        progressDelivery: null,
+        request: staleMetadataRequest,
+        vaultRoot,
+      })
+      const mismatchedAlt = await executeMurphDynamicToolRequest({
+        currentResponseMedia: [],
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 0,
+        progressDelivery: null,
+        request: mismatchedAltRequest,
         vaultRoot,
       })
       await writeFile(
@@ -273,6 +327,19 @@ describe('hosted image completion effect authority', () => {
       expect(mismatched.rpcResult.contentItems[0]?.text).toContain(
         'carries no authority for that tool action',
       )
+      expect(staleMetadata.rpcResult.success).toBe(true)
+      expect(staleMetadata.responseMediaPatch).toEqual({
+        media: [EXACT_MEDIA],
+        op: 'replace',
+      })
+      expect(mismatchedAlt.rpcResult.success).toBe(false)
+      expect(mismatchedAlt.rpcResult.contentItems[0]?.text).toContain(
+        'no longer matches its saved media',
+      )
+      expect(mismatchedAlt.responseMediaPatch).toEqual({
+        media: [],
+        op: 'replace',
+      })
       expect(changed.rpcResult.success).toBe(false)
       expect(changed.rpcResult.contentItems[0]?.text).toContain(
         'no longer matches its saved media',
