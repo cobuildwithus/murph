@@ -63,3 +63,9 @@ this is credential access rather than a deployment. `FROG_APP_BOT_LOGIN` is
 the App's exact bot login, including the `[bot]` suffix. Never commit or print
 the private key. Missing credentials fail the workflow closed; Frog does not
 fall back to `GITHUB_TOKEN`.
+
+The same job owns Murph PR-body normalization. It selects only the
+repository-owned `frog/sync` pull request created by the configured App bot and
+replaces one private marker-owned Architecture and Changelog footer. Zero
+matches are a no-op, ambiguous or untrusted matches fail closed, and retries are
+byte-identical.

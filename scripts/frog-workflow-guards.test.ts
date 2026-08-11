@@ -16,6 +16,11 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  normalizeFrogPullRequestBody,
+  selectFrogPullRequest,
+} from "./frog-pr-context.ts";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const frogScriptPath = path.join(repoRoot, "scripts", "frog");
 const readRepoFile = (...parts: string[]) =>
@@ -330,7 +335,15 @@ fi
     expect(workflow).toContain(
       "GH_TOKEN: ${{ steps.frog-app-token.outputs.token }}",
     );
-    expect(workflow).toContain("--head \"$FROG_PR_BRANCH\"");
+    expect(workflow).toContain(
+      '-f head="${GITHUB_REPOSITORY_OWNER}:$FROG_PR_BRANCH"',
+    );
+    expect(workflow).toContain("-F per_page=2");
+    expect(workflow).toContain("frog-pr-context.ts select");
+    expect(workflow).toContain("frog-pr-context.ts normalize");
+    expect(workflow).toContain(
+      'cmp -s "$frog_current_body_file" "$frog_body_file"',
+    );
     expect(workflow).toContain("gh pr edit \"$frog_pr_number\"");
 
     const footerMarker = "          FROG_PR_BODY_FOOTER: |-\n";
@@ -347,13 +360,87 @@ fi
       .map((line) => line.replace(/^ {12}/u, ""))
       .join("\n")
       .trim();
+    const expectedPullRequest = {
+      appBotLogin: "murph-frog[bot]",
+      baseBranch: "main",
+      branch: "frog/sync",
+      repository: "cobuildwithus/murph",
+    };
+    const internalPullRequest = {
+      base: { ref: "main" },
+      head: {
+        ref: "frog/sync",
+        repo: { full_name: "cobuildwithus/murph" },
+      },
+      number: 17,
+      user: { login: "murph-frog[bot]" },
+    };
+    const forkPullRequest = {
+      base: { ref: "main" },
+      head: {
+        ref: "frog/sync",
+        repo: { full_name: "example/fork" },
+      },
+      number: 18,
+      user: { login: "contributor" },
+    };
+    expect(
+      selectFrogPullRequest(
+        [forkPullRequest, internalPullRequest],
+        expectedPullRequest,
+      ),
+    ).toBe(17);
+    expect(selectFrogPullRequest([], expectedPullRequest)).toBeUndefined();
+    expect(
+      selectFrogPullRequest([forkPullRequest], expectedPullRequest),
+    ).toBeUndefined();
+    expect(() =>
+      selectFrogPullRequest(
+        [internalPullRequest, { ...internalPullRequest, number: 19 }],
+        expectedPullRequest,
+      )
+    ).toThrow("exactly one repository-owned");
+    expect(() =>
+      selectFrogPullRequest(
+        [
+          {
+            ...internalPullRequest,
+            user: { login: "untrusted-bot[bot]" },
+          },
+        ],
+        expectedPullRequest,
+      )
+    ).toThrow("configured App bot");
+
+    const generatedBody = `Opened by the Frog action.
+
+## Linked
+
+- [cobuildwithus/murph#123](https://example.invalid/issues/123) Synthetic friction`;
+    const normalizedBody = normalizeFrogPullRequestBody(
+      generatedBody,
+      footer,
+    );
+    expect(normalizeFrogPullRequestBody(normalizedBody, footer)).toBe(
+      normalizedBody,
+    );
+    expect(normalizedBody.match(/^## Architecture and reuse$/gmu)).toHaveLength(
+      1,
+    );
+    expect(normalizedBody.match(/^## Changelog$/gmu)).toHaveLength(1);
+    expect(
+      normalizedBody.match(/<!-- murph:frog-pr-context:start -->/gu),
+    ).toHaveLength(1);
+    expect(
+      normalizedBody.match(/<!-- murph:frog-pr-context:end -->/gu),
+    ).toHaveLength(1);
     const architectureValidation = spawnSync(
       process.execPath,
       [path.join(repoRoot, "scripts", "check-pr-architecture-summary.mjs")],
       {
         cwd: repoRoot,
         encoding: "utf8",
-        env: { ...process.env, MURPH_PR_BODY: footer },
+        env: { ...process.env, MURPH_PR_BODY: normalizedBody },
       },
     );
     expect(
@@ -369,7 +456,7 @@ fi
         env: {
           ...process.env,
           MURPH_PR_BASE_SHA: "HEAD",
-          MURPH_PR_BODY: footer,
+          MURPH_PR_BODY: normalizedBody,
           MURPH_PR_HEAD_SHA: "HEAD",
         },
       },

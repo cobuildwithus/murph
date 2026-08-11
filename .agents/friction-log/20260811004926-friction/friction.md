@@ -13,7 +13,7 @@ The pinned Frog action generates its own reconciliation summary but has no input
 
 ## Possible Solution
 
-Keep normalization in the existing Friction Log job: after Frog creates or updates the sync pull request, append a fixed Murph-compliant footer with the same short-lived App token and validate the exact footer in the workflow guard tests.
+Keep normalization in the existing Friction Log job. Bind the target to the repository-owned branch and configured App author, fail on ambiguity, and replace one private marker-owned footer block so retries are byte-identical. Validate selection and the complete normalized body with executable fixtures.
 
 ## Minimal Reproducible Example
 
@@ -24,4 +24,4 @@ Keep normalization in the existing Friction Log job: after Frog creates or updat
 
 ## Context
 
-Frog remains the only reconciliation owner, and the sync pull request remains human-reviewed. This mismatch is between a generic upstream action body and repository-specific mandatory metadata, not a failure in Frog's issue bookkeeping.
+Frog remains the only reconciliation owner, and the sync pull request remains human-reviewed. This mismatch is between a generic upstream action body and repository-specific mandatory metadata, not a failure in Frog's issue bookkeeping. The normalizer must not edit a same-named fork pull request or duplicate its own footer on scheduled recovery runs.

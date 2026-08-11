@@ -74,6 +74,7 @@ jobs:
 
       - name: Add required Murph PR context
         env:
+          FROG_APP_BOT_LOGIN: ${{ vars.FROG_APP_BOT_LOGIN }}
           FROG_BASE_BRANCH: ${{ github.event.repository.default_branch }}
           FROG_PR_BODY_FOOTER: |-
             ## Architecture and reuse
@@ -92,28 +93,38 @@ jobs:
         run: |
           set -euo pipefail
 
+          frog_pull_requests="$(
+            gh api \
+              --method GET \
+              "repos/$GITHUB_REPOSITORY/pulls" \
+              -f state=open \
+              -f base="$FROG_BASE_BRANCH" \
+              -f head="${GITHUB_REPOSITORY_OWNER}:$FROG_PR_BRANCH" \
+              -F per_page=2
+          )"
           frog_pr_number="$(
-            gh pr list \
-              --repo "$GITHUB_REPOSITORY" \
-              --base "$FROG_BASE_BRANCH" \
-              --head "$FROG_PR_BRANCH" \
-              --state open \
-              --json number \
-              --jq '.[0].number // empty'
+            printf '%s' "$frog_pull_requests" \
+              | pnpm exec tsx scripts/frog-pr-context.ts select
           )"
           if [[ -z "$frog_pr_number" ]]; then
             echo "No open Frog reconciliation pull request requires Murph context."
             exit 0
           fi
 
+          frog_current_body_file="$(mktemp "${RUNNER_TEMP%/}/frog-pr-current.XXXXXX")"
           frog_body_file="$(mktemp "${RUNNER_TEMP%/}/frog-pr-body.XXXXXX")"
-          {
-            gh pr view "$frog_pr_number" \
-              --repo "$GITHUB_REPOSITORY" \
-              --json body \
-              --jq .body
-            printf '\n\n%s\n' "$FROG_PR_BODY_FOOTER"
-          } > "$frog_body_file"
+          gh pr view "$frog_pr_number" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq .body > "$frog_current_body_file"
+          pnpm exec tsx scripts/frog-pr-context.ts normalize \
+            < "$frog_current_body_file" \
+            > "$frog_body_file"
+
+          if cmp -s "$frog_current_body_file" "$frog_body_file"; then
+            echo "The Frog reconciliation pull request already has exact Murph context."
+            exit 0
+          fi
 
           gh pr edit "$frog_pr_number" \
             --repo "$GITHUB_REPOSITORY" \
