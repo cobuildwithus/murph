@@ -188,6 +188,27 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    that sparse resources such as workouts or body measurements should contain a
    row, so those resources do not become absence obligations.
 
+   Junction timeseries history follows the exhaustive static policy beside the
+   provider executor. Dense daily aggregates (`blood_oxygen`, `stress_level`,
+   `hrv`, `respiratory_rate`, and `glucose`) retain the bounded 14-day initial
+   window. Sparse daily aggregates (`afib_burden`, `vo2_max`,
+   `heart_rate_recovery_one_minute`, body and basal temperature resources,
+   `sleep_breathing_disturbance`, `caffeine`, `water`, and
+   `mindfulness_minutes`) use the summary-history window, 180 days by default.
+   Blood pressure and notes retain their existing extended policies. An
+   explicit timeseries-window override governs both classes.
+
+   Extended work is admitted only for a persisted connected source that
+   advertises the exact resource. Each `(source provider, resource)` migration
+   keeps the existing one-day fetch continuation and per-account serialization.
+   Rollout-added resources end at the current UTC day so existing connections
+   receive one migration; blood pressure remains anchored to source first-seen
+   time. Source-scoped completion is stored in connection metadata. Sparse
+   daily resources share one versioned bit-packed coverage value to stay within
+   the metadata entry bound, while blood pressure retains exact per-reading
+   repair and notes retain complete-fetch semantics. No second queue, retry
+   store, or persisted lifecycle owns this history.
+
    The importer is the sole owner of raw summary semantics. Historical coverage
    consumes the bounded `(source provider, resource)` normalization evidence
    emitted by the canonical adapter instead of maintaining a second metric

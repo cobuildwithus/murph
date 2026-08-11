@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
+  canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   encodeJunctionHistoricalBackfillStatus,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   mergeHostedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillEvidence,
@@ -102,5 +105,66 @@ describe("Junction historical backfill evidence versions", () => {
     expect(readJunctionHistoricalBackfillEvidence(
       `e3|${WINDOW_START}|${WINDOW_END}|garmin:2`,
     )).toBeNull();
+  });
+});
+
+describe("Junction sparse daily history coverage", () => {
+  it("packs independent resource coverage into one source-scoped metadata value", () => {
+    const caffeine = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingValue: null,
+      providerSlug: "omron",
+      resource: "caffeine",
+      version: 1,
+    });
+    const afibAndCaffeine = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingValue: caffeine,
+      providerSlug: "omron",
+      resource: "afib_burden",
+      version: 1,
+    });
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingValue: afibAndCaffeine,
+      providerSlug: "oura",
+      resource: "water",
+      version: 1,
+    });
+
+    expect(coverage).toBe("v1|omron:17,oura:512");
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      coverage,
+      "omron",
+      "afib_burden",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      coverage,
+      "oura",
+      "caffeine",
+      1,
+    )).toBe(false);
+    expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      "v2|omron:17",
+      "caffeine",
+      1,
+    )).toBe(false);
+  });
+
+  it("unions unpublished local resource bits without losing hosted coverage", () => {
+    expect(mergeHostedJunctionHistoricalBackfillMetadata({
+      hostedMetadata: {
+        junctionSparseDailyTimeseriesHistoryBackfillCoverage: "v1|omron:1",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionSparseDailyTimeseriesHistoryBackfillCoverage:
+          "v1|omron:16,oura:512",
+      },
+    })).toEqual({
+      metadata: {
+        junctionSparseDailyTimeseriesHistoryBackfillCoverage:
+          "v1|omron:17,oura:512",
+      },
+      preservedLocalProgress: true,
+    });
   });
 });

@@ -25,6 +25,18 @@ const SAME_DAY_LATER = "2026-06-11T18:00:00.000Z";
 const BACKFILL_WINDOW_END = "2026-06-11T00:00:00.000Z";
 const BP_HISTORY_COVERAGE_KEY = "junctionBloodPressureHistoryBackfillCoverage";
 const NOTE_HISTORY_COVERAGE_KEY = "junctionNoteHistoryBackfillCoverage";
+const SPARSE_DAILY_HISTORY_RESOURCES = [
+  "afib_burden",
+  "basal_body_temperature",
+  "body_temperature",
+  "body_temperature_delta",
+  "caffeine",
+  "heart_rate_recovery_one_minute",
+  "mindfulness_minutes",
+  "sleep_breathing_disturbance",
+  "vo2_max",
+  "water",
+] as const;
 const SOURCE_DISCONNECT_FENCE_CODES = [
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
@@ -284,6 +296,7 @@ function createProvider(input: {
   bloodPressureRecords?: readonly Record<string, unknown>[];
   includeNote?: boolean;
   noteRecords?: readonly Record<string, unknown>[];
+  timeseriesRecords?: Readonly<Record<string, readonly Record<string, unknown>[]>>;
   bloodPressureRequestFailure?: {
     active: boolean;
     fromRequest: number;
@@ -298,6 +311,7 @@ function createProvider(input: {
   requests: TimeseriesRequest[];
   summaryBackfillDays?: number;
   timeseriesBackfillDays?: number;
+  timeseriesResources?: readonly string[];
 }) {
   let bloodPressureRequestCount = 0;
   const providerState = input.providerState ?? {
@@ -315,9 +329,9 @@ function createProvider(input: {
     region: "us",
     summaryResources: ["activity"],
     summaryBackfillDays: input.summaryBackfillDays ?? 30,
-    timeseriesResources: input.includeNote
+    timeseriesResources: input.timeseriesResources ?? (input.includeNote
       ? ["blood_pressure", "stress_level", "note"]
-      : ["blood_pressure", "stress_level"],
+      : ["blood_pressure", "stress_level"]),
     ...(input.timeseriesBackfillDays === undefined
       ? {}
       : { timeseriesBackfillDays: input.timeseriesBackfillDays }),
@@ -399,14 +413,26 @@ function createProvider(input: {
             && (noteWindowStart === null || timestamp >= noteWindowStart)
             && (noteWindowEnd === null || timestamp < noteWindowEnd);
         });
+        const timeseriesRecords = (input.timeseriesRecords?.[resource] ?? []).filter((record) => {
+          const timestamp = typeof record.start === "string"
+            ? record.start
+            : typeof record.timestamp === "string"
+              ? record.timestamp
+              : null;
+          return timestamp !== null
+            && (noteWindowStart === null || timestamp >= noteWindowStart)
+            && (noteWindowEnd === null || timestamp < noteWindowEnd);
+        });
         const resourceGroups = resource === "note"
           ? { oura: noteRecords }
-          : bloodPressureGroups;
+          : resource === "blood_pressure"
+            ? bloodPressureGroups
+            : { omron: timeseriesRecords };
         const records = resource === "blood_pressure"
           ? Object.values(bloodPressureGroups).flat()
           : resource === "note"
             ? noteRecords
-            : [];
+            : timeseriesRecords;
         return createJsonResponse(
           records.length > 0
             ? {
@@ -430,9 +456,16 @@ function createProvider(input: {
 }
 
 function findBloodPressureJob(jobs: readonly DeviceSyncJobInput[]): DeviceSyncJobInput {
+  return findResourceJob(jobs, "blood_pressure");
+}
+
+function findResourceJob(
+  jobs: readonly DeviceSyncJobInput[],
+  resource: string,
+): DeviceSyncJobInput {
   return requireValue(jobs.find((job) =>
     job.kind === "resource"
-    && job.payload?.resource === "blood_pressure"
+    && job.payload?.resource === resource
   ));
 }
 
@@ -872,6 +905,99 @@ test("Oura notes receive one full summary-history migration while dense timeseri
   assert.equal(
     completed.jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
     false,
+  );
+});
+
+test("sparse daily resources receive one rollout-anchored summary-history job", () => {
+  const resourceAvailabilitySummary = Object.fromEntries([
+    ...SPARSE_DAILY_HISTORY_RESOURCES.map((resource) => [resource, true] as const),
+    ["stress_level", true],
+  ]);
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: resourceAvailabilitySummary,
+      status: "connected",
+    },
+    requests: [],
+    summaryBackfillDays: 180,
+    timeseriesResources: ["stress_level", ...SPARSE_DAILY_HISTORY_RESOURCES],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    resourceAvailabilitySummary,
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const nextDay = createScheduledJobs(
+    createStoredAccount({ sources }),
+    "2026-06-12T12:00:00.000Z",
+  );
+
+  for (const resource of SPARSE_DAILY_HISTORY_RESOURCES) {
+    const job = findResourceJob(scheduled.jobs, resource);
+    const nextDayJob = findResourceJob(nextDay.jobs, resource);
+    assert.equal(job.payload?.historicalWindowStart, "2025-12-13T00:00:00.000Z");
+    assert.equal(job.payload?.windowEnd, BACKFILL_WINDOW_END);
+    assert.equal(nextDayJob.dedupeKey, job.dedupeKey);
+  }
+  assert.equal(
+    scheduled.jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "stress_level"
+    ),
+    false,
+  );
+});
+
+test("a sparse daily aggregate completes when several readings reduce to one event", async () => {
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests: [],
+    summaryBackfillDays: 2,
+    timeseriesRecords: {
+      caffeine: [{
+        end: "2026-06-10T08:05:00.000Z",
+        start: "2026-06-10T08:00:00.000Z",
+        unit: "g",
+        value: 0.08,
+      }, {
+        end: "2026-06-10T14:05:00.000Z",
+        start: "2026-06-10T14:00:00.000Z",
+        unit: "g",
+        value: 0.04,
+      }],
+    },
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const resourceAvailabilitySummary = { caffeine: true };
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    resourceAvailabilitySummary,
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const caffeine = findResourceJob(scheduled.jobs, "caffeine");
+  const { result } = await executeImmediateResourceContinuations({
+    context: createJobContext(),
+    job: toJobRecord(caffeine, 1),
+    provider,
+    resource: "caffeine",
+  });
+
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assert.equal(
+    result.metadataPatch?.junctionSparseDailyTimeseriesHistoryBackfillCoverage,
+    "v1|omron:16",
   );
 });
 

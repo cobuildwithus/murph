@@ -99,6 +99,17 @@ that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
 
+Junction timeseries use one exhaustive static history policy. Dense daily
+aggregates keep the bounded 14-day initial window. Advertised AFib burden, VO2
+max, heart-rate recovery, body and basal temperatures, sleep-breathing
+disturbance, caffeine, water, and mindfulness use the summary-history window,
+180 days by default. The existing source-scoped sparse-history jobs fetch one
+day at a time, serialize per account, and record terminal coverage in compact
+connection metadata; they do not add another queue or lifecycle. Blood pressure
+keeps exact per-reading completion, and note history keeps complete-fetch
+semantics. An explicit timeseries backfill override still governs every
+timeseries resource.
+
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero
 rows, and Murph does not compare provider-specific history ranges with its own
