@@ -48,6 +48,15 @@ export const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS = Object.freeze({
   evidence: "junctionHistoricalBackfillEvidence",
 } as const);
 
+export const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
+  "junctionBloodPressureHistoryBackfillCoverage";
+const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX = "v";
+
+const JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS = Object.freeze([
+  ...Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS),
+  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+]);
+
 export function readJunctionHistoricalBackfillProgress(
   metadata: Record<string, unknown>,
 ): JunctionHistoricalBackfillProgress | null {
@@ -144,21 +153,59 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown>;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
-  if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.hostedMetadata)) {
+  const finalize = (result: {
+    metadata: Record<string, unknown>;
+    preservedLocalProgress: boolean;
+  }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } => {
+    const hostedCoverage = readJunctionBloodPressureHistoryBackfillCoverage(
+      input.hostedMetadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY],
+    );
+    const localCoverage = input.localConnectionStateUnpublished
+      ? readJunctionBloodPressureHistoryBackfillCoverage(
+        input.localMetadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY],
+      )
+      : null;
+    const mergedCoverage = mergeJunctionBloodPressureHistoryBackfillCoverage(
+      hostedCoverage,
+      localCoverage,
+    );
+    const selectedCoverage = readJunctionBloodPressureHistoryBackfillCoverage(mergedCoverage);
+    const preservedLocalCoverage = localCoverage !== null
+      && selectedCoverage !== null
+      && doesJunctionBloodPressureCoverageAdvance(localCoverage, hostedCoverage)
+      && selectedCoverage.version === localCoverage.version
+      && localCoverage.providerSlugs.every(
+        (providerSlug) => selectedCoverage.providerSlugs.includes(providerSlug),
+      );
+    const metadata = { ...result.metadata };
+
+    if (mergedCoverage === null) {
+      delete metadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY];
+    } else {
+      metadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY] = mergedCoverage;
+    }
+
     return {
+      metadata,
+      preservedLocalProgress: result.preservedLocalProgress || preservedLocalCoverage,
+    };
+  };
+
+  if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.hostedMetadata)) {
+    return finalize({
       metadata: { ...input.hostedMetadata },
       preservedLocalProgress: false,
-    };
+    });
   }
 
   if (
     input.localConnectionStateUnpublished
     && !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.localMetadata)
   ) {
-    return {
+    return finalize({
       metadata: { ...input.hostedMetadata, ...input.localMetadata },
       preservedLocalProgress: true,
-    };
+    });
   }
 
   const preserveLocalProgressMetadata = shouldPreserveLocalJunctionHistoricalBackfillProgress(input);
@@ -202,7 +249,7 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
         metadata[key] = value;
       }
     }
-    return { metadata, preservedLocalProgress };
+    return finalize({ metadata, preservedLocalProgress });
   }
 
   const metadata: Record<string, unknown> = {};
@@ -226,7 +273,7 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
     }
   }
 
-  return { metadata, preservedLocalProgress };
+  return finalize({ metadata, preservedLocalProgress });
 }
 
 /** Preserve provider-owned progress during a guarded replacement inside the store transaction. */
@@ -235,7 +282,7 @@ export function mergeGuardedJunctionHistoricalBackfillMetadata(input: {
   replacementMetadata: Record<string, unknown>;
 }): Record<string, unknown> {
   const existingHistoricalMetadata: Record<string, unknown> = {};
-  for (const key of Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS)) {
+  for (const key of JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS) {
     if (Object.prototype.hasOwnProperty.call(input.existingMetadata, key)) {
       existingHistoricalMetadata[key] = input.existingMetadata[key];
     }
@@ -248,7 +295,7 @@ export function mergeGuardedJunctionHistoricalBackfillMetadata(input: {
   }).metadata;
   const metadata: Record<string, unknown> = {};
 
-  for (const key of Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS)) {
+  for (const key of JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS) {
     if (Object.prototype.hasOwnProperty.call(mergedMetadata, key)) {
       metadata[key] = mergedMetadata[key];
     }
@@ -260,6 +307,134 @@ export function mergeGuardedJunctionHistoricalBackfillMetadata(input: {
   }
 
   return metadata;
+}
+
+interface JunctionBloodPressureHistoryBackfillCoverage {
+  providerSlugs: string[];
+  version: number;
+}
+
+export function addJunctionBloodPressureHistoryBackfillCoverage(input: {
+  existingValue: unknown;
+  providerSlug: string;
+  version: number;
+}): string | null {
+  const providerSlug = input.providerSlug.trim().toLowerCase();
+  if (
+    !Number.isSafeInteger(input.version)
+    || input.version < 1
+    || !isSafeJunctionHistoricalBackfillEvidenceSource(providerSlug)
+  ) {
+    return null;
+  }
+
+  const existing = readJunctionBloodPressureHistoryBackfillCoverage(input.existingValue);
+  if (existing !== null && existing.version > input.version) {
+    return encodeJunctionBloodPressureHistoryBackfillCoverage(existing);
+  }
+  const preservedExisting = existing?.version === input.version ? existing : null;
+  const providerSlugs = preservedExisting
+    ? [...preservedExisting.providerSlugs, providerSlug]
+    : [providerSlug];
+  return encodeJunctionBloodPressureHistoryBackfillCoverage({
+    providerSlugs,
+    version: preservedExisting?.version ?? input.version,
+  });
+}
+
+export function hasJunctionBloodPressureHistoryBackfillCoverage(
+  value: unknown,
+  providerSlug: string,
+  version: number,
+): boolean {
+  const coverage = readJunctionBloodPressureHistoryBackfillCoverage(value);
+  return coverage?.version === version
+    && coverage.providerSlugs.includes(providerSlug.trim().toLowerCase());
+}
+
+export function canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage(
+  value: unknown,
+  version: number,
+): boolean {
+  if (!Number.isSafeInteger(version) || version < 1) {
+    return false;
+  }
+  const coverage = readJunctionBloodPressureHistoryBackfillCoverage(value);
+  return coverage === null || coverage.version <= version;
+}
+
+function readJunctionBloodPressureHistoryBackfillCoverage(
+  value: unknown,
+): JunctionBloodPressureHistoryBackfillCoverage | null {
+  if (typeof value !== "string" || !value || value.length > DEVICE_SYNC_METADATA_MAX_STRING_LENGTH) {
+    return null;
+  }
+
+  const separatorIndex = value.indexOf("|");
+  if (separatorIndex <= 1 || separatorIndex === value.length - 1) {
+    return null;
+  }
+  const versionPart = value.slice(0, separatorIndex);
+  const providerSlugs = value.slice(separatorIndex + 1).split(",");
+  const version = Number(versionPart.slice(JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX.length));
+  if (
+    !versionPart.startsWith(JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX)
+    || !Number.isSafeInteger(version)
+    || version < 1
+    || providerSlugs.some((providerSlug) => !isSafeJunctionHistoricalBackfillEvidenceSource(providerSlug))
+  ) {
+    return null;
+  }
+
+  const coverage = { providerSlugs, version };
+  return encodeJunctionBloodPressureHistoryBackfillCoverage(coverage) === value ? coverage : null;
+}
+
+function encodeJunctionBloodPressureHistoryBackfillCoverage(
+  coverage: JunctionBloodPressureHistoryBackfillCoverage,
+): string | null {
+  if (!Number.isSafeInteger(coverage.version) || coverage.version < 1) {
+    return null;
+  }
+  const providerSlugs = [...new Set(coverage.providerSlugs)]
+    .filter(isSafeJunctionHistoricalBackfillEvidenceSource)
+    .sort((left, right) => left.localeCompare(right));
+  if (providerSlugs.length === 0) {
+    return null;
+  }
+  const encoded = `${JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX}${coverage.version}|${providerSlugs.join(",")}`;
+  return encoded.length <= DEVICE_SYNC_METADATA_MAX_STRING_LENGTH ? encoded : null;
+}
+
+function mergeJunctionBloodPressureHistoryBackfillCoverage(
+  hosted: JunctionBloodPressureHistoryBackfillCoverage | null,
+  local: JunctionBloodPressureHistoryBackfillCoverage | null,
+): string | null {
+  if (!hosted) {
+    return local ? encodeJunctionBloodPressureHistoryBackfillCoverage(local) : null;
+  }
+  if (!local || hosted.version > local.version) {
+    return encodeJunctionBloodPressureHistoryBackfillCoverage(hosted);
+  }
+  if (local.version > hosted.version) {
+    return encodeJunctionBloodPressureHistoryBackfillCoverage(local);
+  }
+  return encodeJunctionBloodPressureHistoryBackfillCoverage({
+    providerSlugs: [...hosted.providerSlugs, ...local.providerSlugs],
+    version: hosted.version,
+  }) ?? encodeJunctionBloodPressureHistoryBackfillCoverage(hosted);
+}
+
+function doesJunctionBloodPressureCoverageAdvance(
+  local: JunctionBloodPressureHistoryBackfillCoverage,
+  hosted: JunctionBloodPressureHistoryBackfillCoverage | null,
+): boolean {
+  return !hosted
+    || local.version > hosted.version
+    || (
+      local.version === hosted.version
+      && local.providerSlugs.some((providerSlug) => !hosted.providerSlugs.includes(providerSlug))
+    );
 }
 
 export function encodeJunctionHistoricalBackfillStatus(
