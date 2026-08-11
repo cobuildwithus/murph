@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Training, Starter access, patterns, reliable referrals, reminders, cards, voices, web search, and a lighter homepage",
+      "Training, Starter access, patterns, referrals, reminders, cards, voices, search, lighter pages, and clearer reports",
     summary:
-      "Training brings workouts together, Starter usage waits until used, patterns compare actions with next-day sleep and recovery, referral celebrations stay in the intended conversation, reminders keep local time, completed workout rows stay clear, voice memos keep their selected voice, managed web search reaches current information, and the public homepage starts with less to download.",
+      "Training brings workouts together, Starter usage waits until used, patterns link actions to next-day sleep and recovery, referrals celebrate in the intended conversation, reminders keep local time, workout rows stay clear, voice memos keep the selected voice, web search reaches current information, the homepage starts lighter, and private Environment reports show their shape while loading.",
     items: [
       {
         id: "private-training-review",
@@ -165,6 +165,18 @@ const RAW_CHANGELOG_EDITIONS = [
         sourcePullRequests: [1587],
       },
       {
+        id: "cleaner-workout-cards-in-messages",
+        kind: "improvement",
+        priority: 4,
+        title: "Response cards stay compact in Messages",
+        summary:
+          "Workout detail and nutrition goal direction now stay inside their cards instead of repeating a long summary beneath the static image.",
+        details:
+          "Fallback cards have no duplicate badge or corner mask. Nutrition goals use short in-card direction labels without repeating target amounts, older sent workout cards remain readable, and generic tables keep their optional subtitle.",
+        relevanceTags: ["workouts", "nutrition", "imessage", "cards", "design"],
+        sourcePullRequests: [1588],
+      },
+      {
         id: "web-search-restored",
         kind: "improvement",
         priority: 5,
@@ -219,6 +231,22 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           href: "/",
           label: "Visit the homepage",
+        },
+      },
+      {
+        id: "environment-report-loading-preview",
+        kind: "improvement",
+        priority: 3,
+        title: "Environment reports show their shape while loading",
+        summary:
+          "The private Environment report now opens with a clear preparing state and a report-shaped preview instead of a mostly empty page.",
+        details:
+          "The preview mirrors the printable report and gives immediate feedback while the existing private Browser Vault opens. The finished report, empty state, and error recovery continue unchanged.",
+        relevanceTags: ["environment", "reports", "web", "privacy"],
+        sourcePullRequests: [1617],
+        tryIt: {
+          href: "/environment/print",
+          label: "Open your Environment report",
         },
       },
     ],
@@ -408,11 +436,11 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Nutrition cards fit Messages cleanly",
         summary:
-          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card.",
+          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card unless totals are partial.",
         details:
-          "Calories and nutrient totals stay visible in the card without a second Murph badge or a long repeat below it. Partial totals and assessed goals keep only their short status labels.",
+          "Calories, nutrient totals, and goal status stay inside the card without a second Murph badge or a long repeat below it. Provider chrome keeps only a short partial-data warning when needed.",
         relevanceTags: ["imessage", "cards", "nutrition", "design"],
-        sourcePullRequests: [1567],
+        sourcePullRequests: [1567, 1588],
       },
       {
         id: "typing-prewarms-private-chat",

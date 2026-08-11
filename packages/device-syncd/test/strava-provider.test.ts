@@ -2,8 +2,11 @@ import { createHmac } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { createStravaDeviceSyncProvider } from "../src/providers/strava.ts";
-import { resolveStravaWebhookPreflightResponse } from "../src/providers/strava.ts";
+import {
+  createStravaDeviceSyncProvider,
+  resolveStravaWebhookPreflightResponse,
+  revokeStravaDeviceSyncAccess,
+} from "../src/providers/strava.ts";
 import { readUrl } from "./helpers.ts";
 import type {
   DeviceSyncAccount,
@@ -1274,6 +1277,22 @@ describe("Strava device-sync provider", () => {
     await expect(
       revokeAccess(buildStravaAccount()),
     ).resolves.toBeUndefined();
+  });
+
+  it("revokes stored Strava access without client credentials", async () => {
+    const fetchImpl = vi.fn(async () => new Response("", { status: 200 }));
+
+    await revokeStravaDeviceSyncAccess(buildStravaAccount({
+      accessToken: "cleanup-access-token",
+    }), {
+      authBaseUrl: "https://strava.example.test",
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://strava.example.test/oauth/deauthorize?access_token=cleanup-access-token",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("imports delete jobs, validates malformed jobs and webhook payloads, and handles deauthorize edge cases", async () => {

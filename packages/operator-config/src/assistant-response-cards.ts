@@ -14,6 +14,7 @@ import {
   compactTableResponseCardV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
+  nutritionCardGoalStatusLabels,
   nutritionCardGoalStatusValues,
   workoutSessionCardStateValues,
   workoutSessionCardV1Bounds,
@@ -25,7 +26,6 @@ import {
   type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
   type NutritionCardGoalSnapshot,
-  type NutritionCardGoalStatus,
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
 } from '@murphai/contracts'
@@ -49,22 +49,6 @@ const NUTRITION_CARD_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3,
   useGrouping: true,
 })
-const NUTRITION_CARD_GOAL_STATUS_LABELS = {
-  far_over_target: 'far over target',
-  far_under_target: 'far under target',
-  on_target: 'on target',
-  over_target: 'over target',
-  unavailable: 'status unavailable',
-  under_target: 'under target',
-} as const satisfies Record<NutritionCardGoalStatus, string>
-const LINQ_NUTRITION_CARD_GOAL_STATUS_LABELS = {
-  far_over_target: 'far over',
-  far_under_target: 'far under',
-  on_target: 'on target',
-  over_target: 'over',
-  unavailable: 'status unavailable',
-  under_target: 'under',
-} as const satisfies Record<NutritionCardGoalStatus, string>
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
   'Ask Murph for this card in text'
 export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
@@ -179,10 +163,19 @@ export function buildLinqIMessageAppLayout(
 ): LinqIMessageAppLayout {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind === 'compact_table') {
+    const imageUrl = buildLinqIMessageAppCardImageUrl(parsed)
+    if ('workout' in parsed) {
+      const progress = countWorkoutSessionSets(parsed.workout)
+      return {
+        caption: parsed.title,
+        image_url: imageUrl,
+        subcaption: `${progress.completed}/${progress.total} sets complete`,
+      }
+    }
     const semantic = renderCompactTableSemanticPresentation(parsed)
     return {
       caption: semantic.heading,
-      image_url: buildLinqIMessageAppCardImageUrl(parsed),
+      image_url: imageUrl,
       subcaption: semantic.detailLines.join('\n'),
       ...(semantic.footer === null
         ? {}
@@ -192,18 +185,12 @@ export function buildLinqIMessageAppLayout(
 
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
   const partialLabel = renderPartialNutritionLabel(parsed)
-  const goalStatusLabel = renderLinqNutritionGoalStatuses(parsed)
-  const detailLines = [partialLabel, goalStatusLabel].filter(
-    (line): line is string => line !== null,
-  )
   return {
     caption: `${formatNutritionCardDate(parsed.localDate)} · ${
       parsed.mealCount
     } ${mealLabel}`,
     image_url: buildLinqIMessageAppCardImageUrl(parsed),
-    ...(detailLines.length === 0
-      ? {}
-      : { subcaption: detailLines.join('\n') }),
+    ...(partialLabel === null ? {} : { subcaption: partialLabel }),
   }
 }
 
@@ -353,10 +340,10 @@ function renderCompactTableSemanticPresentation(
   detailLines: string[]
   footer: string | null
 } {
-  const heading = card.subtitle === null
-    ? card.title
-    : `${card.title} — ${card.subtitle}`
   if (!('workout' in card)) {
+    const heading = card.subtitle === null
+      ? card.title
+      : `${card.title} — ${card.subtitle}`
     return {
       heading,
       detailLines: card.rows.map((row) => {
@@ -392,7 +379,7 @@ function renderCompactTableSemanticPresentation(
     return `${exercise.name}: ${sets.join(' · ')}`
   })
   return {
-    heading,
+    heading: card.title,
     detailLines: [
       `${state} · ${progress.completed}/${progress.total} sets complete`,
       ...exercises,
@@ -467,7 +454,7 @@ function renderDailyNutritionGoals(
     goal === null
       ? `${label} target unavailable`
       : `${formatNutritionCardNumber(goal.target)}${unit} (${
-          NUTRITION_CARD_GOAL_STATUS_LABELS[goal.status]
+          nutritionCardGoalStatusLabels[goal.status]
         })`
   )
 }
@@ -496,32 +483,6 @@ function renderNutritionMetric(
   return metric.total === null
     ? null
     : `${formatNutritionCardNumber(metric.total)}${unit}`
-}
-
-function renderLinqNutritionGoalStatuses(
-  card: DailyNutritionResponseCard,
-): string | null {
-  if (!isDailyNutritionResponseCardV2(card)) {
-    return null
-  }
-  const statuses = [
-    renderLinqNutritionGoalStatus('Calories', card.goals.calories),
-    renderLinqNutritionGoalStatus('Protein', card.goals.proteinGrams),
-    renderLinqNutritionGoalStatus('Carbs', card.goals.carbsGrams),
-    renderLinqNutritionGoalStatus('Fat', card.goals.fatGrams),
-    renderLinqNutritionGoalStatus('Fiber', card.goals.fiberGrams),
-  ].filter((status): status is string => status !== null)
-  return statuses.length === 0 ? null : `Goals: ${statuses.join(' · ')}`
-}
-
-function renderLinqNutritionGoalStatus(
-  label: string,
-  goal: NutritionCardGoalSnapshot | null,
-): string | null {
-  if (goal === null || goal.status === 'unavailable') {
-    return null
-  }
-  return `${label} ${LINQ_NUTRITION_CARD_GOAL_STATUS_LABELS[goal.status]}`
 }
 
 function readRequiredCalorieTotal(card: DailyNutritionResponseCard): number {
@@ -848,6 +809,7 @@ function createAssistantResponseCardJsonSchema() {
           },
           {
             properties: {
+              subtitle: { type: 'null' },
               tracking: { type: 'object' },
             },
             required: ['workout'],

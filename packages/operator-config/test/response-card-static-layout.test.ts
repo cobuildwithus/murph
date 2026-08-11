@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
   buildLinqIMessageAppLayout,
+  renderAssistantResponseCardText,
   type CompactTableResponseCardV1,
 } from '../src/assistant-response-cards.js'
 
@@ -38,7 +39,7 @@ describe('response-card static Linq layouts', () => {
     )
   })
 
-  it('preserves complete table semantics without exposing tracking authority', () => {
+  it('preserves generic provider details without exposing tracking authority', () => {
     expect(buildLinqIMessageAppLayout(ONE_OFF_TABLE)).toEqual({
       caption: 'Weekly plan',
       image_url: expect.stringMatching(
@@ -54,7 +55,7 @@ describe('response-card static Linq layouts', () => {
       subcaption: 'Exercise A: Set 1: 10',
     })
 
-    expect(JSON.stringify(buildLinqIMessageAppLayout(TRACKED_TABLE))).toMatch(
+    expect(renderAssistantResponseCardText(TRACKED_TABLE)).toMatch(
       /Exercise A|10/u,
     )
     expect(JSON.stringify(buildLinqIMessageAppLayout(TRACKED_TABLE))).not.toMatch(
