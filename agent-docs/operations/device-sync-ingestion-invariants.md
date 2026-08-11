@@ -154,7 +154,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    reduce provider event time to a coarse event-to-send delay bucket, compute
    the verified signed-envelope send-to-receipt duration, and preserve the
    earliest Murph receipt long enough to derive receipt-to-import duration
-   after import. This reduction applies to the timing carrier and runtime log;
+   after import. A timing-only source field carries attribution without
+   participating in dirty-resource identity, counters, provider job payloads,
+   or executor routing; execution `sourceProviderSlug` retains its existing
+   meaning. This reduction applies to the timing carrier and runtime log;
    pre-existing ingestion fields still use provider occurrence for dirty-window
    and clean-transition wake ownership. Coalesced hints
    keep the slowest upstream bucket, longest signed delivery, and earliest

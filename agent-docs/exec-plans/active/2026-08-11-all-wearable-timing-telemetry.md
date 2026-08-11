@@ -66,10 +66,11 @@ Updated: 2026-08-11
 2. Risk: Deduped timing hints from different sources could be mislabeled.
    Mitigation: Merge source attribution only when it matches exactly; omit it
    on disagreement while retaining the conservative duration merge.
-3. Risk: Reusing `sourceProviderSlug` could alter import routing.
-   Mitigation: Preserve current provider-owned job shaping and pass the value
-   only through the existing dirty metadata/timing/log path; focused tests prove
-   the admitted job payload and connector provider remain unchanged.
+3. Risk: Reusing execution `sourceProviderSlug` for timing attribution could
+   split connector-wide Junction work and duplicate imports.
+   Mitigation: Keep provider-owned execution source unchanged and carry
+   attribution in a separate optional timing-only field that is excluded from
+   dirty identity, counters, job payloads, and executor routing.
 4. Risk: A source label could become an unbounded or identifying log value.
    Mitigation: Use the existing runtime-log code sanitizer and assert that
    identifiers, payloads, event/resource semantics, and health values remain absent.
@@ -94,8 +95,12 @@ Updated: 2026-08-11
 
 ## Decisions
 
-- Reuse `HostedExecutionDeviceSyncDirtyResource.sourceProviderSlug`; it already
-  owns normalized source attribution and avoids another state owner.
+- Add `timingSourceProviderSlug` to the existing dirty-resource carrier rather
+  than reusing execution `sourceProviderSlug`. This is metadata on the existing
+  owner, not a new state owner, and preserves connector-wide job cardinality.
+- Preserve three timing-source states across deployment skew: omitted means an
+  older producer and uses legacy fallback, a string is exact attribution, and
+  explicit `null` means coalesced sources disagreed and must be omitted.
 - Keep both connector `provider` and wearable `sourceProvider` because they
   answer different operational questions (delivery path versus source).
 - Do not broaden the event to polling-only jobs. The existing event is tied to
@@ -128,10 +133,21 @@ Updated: 2026-08-11
   it. Garmin/Fitbit require no new provider parser.
 - 2026-08-11: Implemented source propagation, direct-provider fallback,
   exact-match coalescing, sanitized log output, and canonical doc updates.
+- 2026-08-11: Preliminary ReviewGPT found that the first candidate reused the
+  execution-source field and could split source-free Junction reconcile work.
+  Accepted the finding and separated timing attribution from job identity.
 - 2026-08-11: Focused proof passed:
   - assistant-runtime timing/promotion/logging: 164 tests
   - hosted Web webhook admission/dirty shaping: 123 tests
   - assistant-runtime, device-syncd, and hosted Web typechecks
   - focused hosted Web ESLint and `git diff --check`
-- Pending: exact-head CI, preliminary coverage ReviewGPT, final sensitive
-  ReviewGPT, merge/deploy proof, and worktree retirement.
+- 2026-08-11: Initial exact-head CI passed. Preliminary ReviewGPT completed with
+  the accepted cardinality finding above.
+- 2026-08-11: Remediation focused proof passed:
+  - hosted Web ingestion and dirty-store coalescing: 147 tests
+  - assistant-runtime timing/promotion/logging: 165 tests
+  - shared hosted-runtime timing parsing: 95 tests
+  - assistant-runtime, device-syncd, and hosted Web typechecks
+  - focused hosted Web ESLint, `git diff --check`, and privacy scan
+- Pending: remediated exact-head CI, final sensitive ReviewGPT, merge/deploy
+  proof, and worktree retirement.

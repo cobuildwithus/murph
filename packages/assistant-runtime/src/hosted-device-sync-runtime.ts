@@ -885,7 +885,9 @@ function buildHostedDeviceSyncImportTiming(
       eventToProviderSendBucket,
       firstWebhookReceivedAt,
       providerSendToWebhookMs,
-      sourceProvider: input.resource.sourceProviderSlug ?? input.provider,
+      sourceProvider: input.resource.timingSourceProviderSlug === undefined
+        ? input.resource.sourceProviderSlug ?? input.provider
+        : input.resource.timingSourceProviderSlug,
     },
   };
 }

@@ -135,10 +135,11 @@ omitted. The log deliberately excludes raw stage timestamps, event or resource
 types, source-device identifiers, counts, health values, webhook bodies, and
 exact event-to-import intervals. Source-provider attribution is a product-wide
 provider slug, never a member, account, connection, or physical-device id. The
-new timing fields on the dirty-resource carrier hold only the coarse upstream
-bucket, exact signed-send-to-receipt duration, and earliest Murph receipt needed
-for the remaining duration; source attribution reuses the pre-existing
-`sourceProviderSlug` field.
+timing metadata on the dirty-resource carrier holds only the coarse upstream
+bucket, exact signed-send-to-receipt duration, earliest Murph receipt needed
+for the remaining duration, and a timing-only source slug. The timing source is
+separate from the pre-existing `sourceProviderSlug`, which remains part of
+resource execution identity and provider input.
 Pre-existing ingestion fields still use provider occurrence for dirty-window
 and clean-transition wake ownership; those fields are not copied into this
 runtime event. Compact timing and job fields

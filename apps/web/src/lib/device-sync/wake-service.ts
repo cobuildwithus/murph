@@ -2518,6 +2518,7 @@ function buildHostedWebhookDirtyResources(input: {
   const webhookSourceProviderSlug = readHostedDirtyResourceString(
     input.sourceProviderSlug,
   );
+  const providerSlug = readHostedDirtyResourceString(input.provider);
 
   for (const job of input.jobs) {
     const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);
@@ -2531,11 +2532,13 @@ function buildHostedWebhookDirtyResources(input: {
       payload: readHostedDirtyResourcePayload(payload),
       resource: readHostedDirtyResourceString(payload.resource),
       resourceCategory: readHostedDirtyResourceString(payload.resourceCategory),
-      // Resource jobs can promote this field back into provider input. Keep the
-      // provider-owned payload authoritative; other job kinds use it only for
-      // source attribution.
-      sourceProviderSlug: payloadSourceProviderSlug
-        ?? (job.kind === "resource" ? null : webhookSourceProviderSlug),
+      // This field participates in resource execution identity and can be
+      // promoted back into provider input, so only provider-owned payload data
+      // may populate it. Timing attribution remains metadata-only below.
+      sourceProviderSlug: payloadSourceProviderSlug,
+      timingSourceProviderSlug: payloadSourceProviderSlug
+        ?? webhookSourceProviderSlug
+        ?? providerSlug,
       windowEnd: readHostedDirtyResourceString(payload.windowEnd),
       windowStart: readHostedDirtyResourceString(payload.windowStart),
     });
@@ -2548,7 +2551,8 @@ function buildHostedWebhookDirtyResources(input: {
       jobKind: "reconcile",
       resource: null,
       resourceCategory: null,
-      sourceProviderSlug: webhookSourceProviderSlug,
+      sourceProviderSlug: null,
+      timingSourceProviderSlug: webhookSourceProviderSlug ?? providerSlug,
       windowEnd: null,
       windowStart: null,
     });

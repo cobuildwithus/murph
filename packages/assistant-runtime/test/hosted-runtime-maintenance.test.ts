@@ -1806,6 +1806,16 @@ describe("runHostedDeviceSyncPass", () => {
       provider: "strava",
       providerSendToWebhookMs: null,
       sourceProvider: "strava",
+    }, {
+      eventToProviderSendBucket: "under_5_minutes",
+      firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
+      importCompletedAt: "2026-04-08T00:06:00.000Z",
+      importExecutionStartedAt: "2026-04-08T00:05:00.000Z",
+      jobCreatedAt: "2026-04-08T00:04:30.000Z",
+      jobKind: "reconcile",
+      provider: "junction",
+      providerSendToWebhookMs: 60_000,
+      sourceProvider: null,
     }]);
 
     await runHostedDeviceSyncPass(
@@ -1863,6 +1873,11 @@ describe("runHostedDeviceSyncPass", () => {
     expect(skewedEntry.redactedJson).not.toHaveProperty("providerSendToWebhookMs");
     expect(skewedEntry.redactedJson).not.toHaveProperty("runtimeQueueMs");
     expect(skewedEntry.redactedJson).not.toHaveProperty("importExecutionMs");
+    const mixedSourceEntry = requests
+      .flatMap((request) => request.entries)
+      .find((candidate) => candidate.redactedJson?.jobKind === "reconcile");
+    assert.ok(mixedSourceEntry);
+    expect(mixedSourceEntry.redactedJson).not.toHaveProperty("sourceProvider");
     for (const privateField of [
       "connectionId",
       "deviceId",
@@ -1887,6 +1902,7 @@ describe("runHostedDeviceSyncPass", () => {
     ]) {
       expect(entry.redactedJson).not.toHaveProperty(privateField);
       expect(skewedEntry.redactedJson).not.toHaveProperty(privateField);
+      expect(mixedSourceEntry.redactedJson).not.toHaveProperty(privateField);
     }
   });
 

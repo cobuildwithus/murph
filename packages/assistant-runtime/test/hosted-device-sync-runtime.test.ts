@@ -2986,6 +2986,7 @@ describe("hosted device-sync runtime", () => {
             resource: "steps",
             resourceCategory: "timeseries",
             sourceProviderSlug: "garmin",
+            timingSourceProviderSlug: "garmin",
             windowEnd: "2026-04-04T00:00:00.000Z",
             windowStart: "2026-04-02T00:00:00.000Z",
           },
@@ -3154,6 +3155,7 @@ describe("hosted device-sync runtime", () => {
                   resource: "sleep",
                   resourceCategory: "summary",
                   sourceProviderSlug: null,
+                  timingSourceProviderSlug: undefined,
                 }],
                 dirtyRevision: "43",
                 eventCount: "1",
@@ -3200,7 +3202,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("deduplicated local imports emit one timing event and acknowledge every payload", async () => {
+  test("duplicate pending timing entries merge conservatively after local job deduplication", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-deduped-timing-",
     );
@@ -3292,6 +3294,102 @@ describe("hosted device-sync runtime", () => {
         processedRevision: "9",
       }]);
       assert.deepEqual(state.pendingDirtyPayloadJobs, []);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("one mixed-source compact reconcile stays one import and omits source attribution", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-mixed-source-timing-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({ provider: "demo" });
+      const connected = await service.handleOAuthCallback({
+        code: "mixed-source-timing",
+        provider: "demo",
+        state: begin.state,
+      });
+      const snapshot = buildRuntimeSnapshot({
+        connectionId: "hosted_conn_mixed_source_timing",
+        externalAccountId: connected.account.externalAccountId,
+      });
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [{
+                connectionId: "hosted_conn_mixed_source_timing",
+                dirtyRevision: "1",
+                dirtyResources: [{
+                  count: 2,
+                  eventToProviderSendBucket: "5_to_30_minutes",
+                  firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
+                  providerSendToWebhookMs: 120_000,
+                  jobKind: "reconcile",
+                  resource: null,
+                  resourceCategory: null,
+                  sourceProviderSlug: null,
+                  timingSourceProviderSlug: null,
+                  windowEnd: null,
+                  windowStart: null,
+                }],
+                eventCount: "2",
+                latestDirtyAt: "2026-04-08T00:03:00.000Z",
+                processedRevision: "0",
+                provider: "demo",
+                resourceCategoryCounts: { reconcile: 2 },
+                sourceProviderCounts: { unknown: 2 },
+                userId: "member_mixed_source_timing",
+                windowEnd: null,
+                windowStart: null,
+              }],
+              nextWakeAt: null,
+              userId: "member_mixed_source_timing",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_mixed_source_timing",
+          eventId: "evt_device_sync_mixed_source_timing",
+          hint: { reason: "dirty" },
+          occurredAt: "2026-04-08T00:03:00.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const jobs = readJobsForAccount(service, connected.account.id);
+      assert.equal(jobs.length, 1);
+      const payload = jobs[0]?.payloadJson ? JSON.parse(jobs[0].payloadJson) : {};
+      assert.deepEqual(payload, {
+        windowEnd: "2026-04-08T00:03:00.000Z",
+        windowStart: "2026-04-08T00:03:00.000Z",
+      });
+      assert.equal(Object.prototype.hasOwnProperty.call(payload, "sourceProviderSlug"), false);
+      assert.equal(state.pendingDirtyPayloadJobs.length, 1);
+      assert.equal(state.pendingDirtyPayloadJobs[0]?.timing?.sourceProvider, null);
+
+      assert.equal(await service.drainWorker(1), 1);
+      const completedImports = promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      assert.equal(completedImports.length, 1);
+      assert.equal(completedImports[0]?.sourceProvider, null);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

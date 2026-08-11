@@ -22,6 +22,7 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncDirtyPendingRequest,
+  parseHostedExecutionDeviceSyncDirtyStateResponse,
   parseHostedExecutionDeviceSyncReconcileRequest,
   parseHostedExecutionDeviceSyncReconcileResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
@@ -91,6 +92,51 @@ describe("wearable import delay buckets", () => {
       "5_to_30_minutes",
       "2_to_24_hours",
     )).toBe("2_to_24_hours");
+  });
+});
+
+describe("hosted device-sync dirty timing source parsing", () => {
+  it("preserves exact, mixed, and legacy timing-source states independently of execution source", () => {
+    const buildResource = (timingSourceProviderSlug: string | null | undefined) => ({
+      count: 1,
+      firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
+      jobKind: "reconcile",
+      resource: null,
+      resourceCategory: null,
+      sourceProviderSlug: null,
+      ...(timingSourceProviderSlug === undefined ? {} : { timingSourceProviderSlug }),
+      windowEnd: null,
+      windowStart: null,
+    });
+
+    const parsed = parseHostedExecutionDeviceSyncDirtyStateResponse({
+      connectionId: "dsc_timing_sources",
+      dirtyRevision: "3",
+      dirtyResources: [
+        buildResource("garmin"),
+        buildResource(null),
+        buildResource(undefined),
+      ],
+      eventCount: "3",
+      latestDirtyAt: "2026-04-08T00:04:00.000Z",
+      processedRevision: "0",
+      provider: "junction",
+      resourceCategoryCounts: { reconcile: 3 },
+      sourceProviderCounts: { unknown: 3 },
+      userId: "member_timing_sources",
+      windowEnd: null,
+      windowStart: null,
+    });
+
+    expect(parsed?.dirtyResources[0]).toMatchObject({
+      sourceProviderSlug: null,
+      timingSourceProviderSlug: "garmin",
+    });
+    expect(parsed?.dirtyResources[1]).toMatchObject({
+      sourceProviderSlug: null,
+      timingSourceProviderSlug: null,
+    });
+    expect(parsed?.dirtyResources[2]).not.toHaveProperty("timingSourceProviderSlug");
   });
 });
 
