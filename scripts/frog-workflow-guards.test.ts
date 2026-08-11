@@ -303,15 +303,18 @@ fi
       "bcd2ba49218906704ab6c1aa796996da409d3eb1",
       "7b71c098683d49a573c279a2031a24205ea76841",
     ]);
-    for (const input of [
+    const appTokenInputs =
+      /^        uses: actions\/create-github-app-token@[^\n]+\n        with:\n(?<inputs>(?:          [^\n]+\n)+)/mu
+        .exec(workflow)?.groups?.inputs;
+    expect(
+      appTokenInputs?.trim().split("\n").map((line) => line.trim()),
+    ).toEqual([
       "client-id: ${{ vars.FROG_APP_CLIENT_ID }}",
       "private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}",
       "permission-contents: write",
       "permission-issues: write",
       "permission-pull-requests: write",
-    ]) {
-      expect(workflow).toContain(input);
-    }
+    ]);
     for (const input of [
       "branch: frog/sync",
       "command: node_modules/.bin/frog",
