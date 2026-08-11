@@ -7,6 +7,8 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+  isMurphAndroidAppEnabled,
+  MURPH_ANDROID_APP_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
   HOSTED_ELEVENLABS_ENV_NAMES,
@@ -338,6 +340,16 @@ export function buildHostedRuntimePlatformEnv(
   const env: Record<string, string> = {};
 
   for (const key of HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES) {
+    if (key === MURPH_ANDROID_APP_ENABLED_ENV) {
+      const value = source[key];
+      if (isMurphAndroidAppEnabled({
+        [key]: typeof value === "string" ? value : undefined,
+      })) {
+        env[key] = "1";
+      }
+      continue;
+    }
+
     const value = normalizeHostedRuntimeEnvString(
       typeof source[key] === "string" ? source[key] : undefined,
     );
