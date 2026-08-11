@@ -24,6 +24,9 @@ import {
   isHostedAssistantAskCompletionPreemptedError,
 } from "./events/assistant-ask-completion-errors.ts";
 import type {
+  HostedLegacyUsageReferralAuthorityClassification,
+} from "./events/assistant-notification.ts";
+import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
@@ -67,12 +70,17 @@ export type {
 
 export type HostedSystemMailboxCheckpointPreparation =
   | {
+      attemptCount: number;
       errorCode: string | null;
       errorMessage: string | null;
       itemId: string;
+      legacyUsageReferralAuthorityClassification:
+        HostedLegacyUsageReferralAuthorityClassification | null;
       nextWakeAt: string;
       nextWakeReason: string | null;
+      routeAction: HostedSystemMailboxRouteAction;
       status: "retryable_failed";
+      wakeKind: HostedExecutionSystemWake["kind"];
     }
   | {
       item: HostedSystemMailboxPendingItem;
@@ -409,13 +417,31 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       },
       vaultRoot: input.vaultRoot,
     });
+    const legacyUsageReferralAuthorityClassification =
+      prepared.wake.kind === "assistant.notification.requested"
+        ? (await import("./events/assistant-notification.ts"))
+          .classifyLegacyHostedUsageReferralDirectLinqAuthority({
+            executionContext:
+              input.executionContext
+              ?? buildHostedSystemMailboxExecutionContext({
+                runtime: input.runtime,
+                wake: prepared.wake,
+              }),
+            mailboxDedupeKey: prepared.mailboxDedupeKey,
+            wake: prepared.wake,
+          })
+        : null;
     return {
+      attemptCount: prepared.attemptCount,
       errorCode: normalized.code,
       errorMessage: normalized.message,
       itemId: prepared.itemId,
+      legacyUsageReferralAuthorityClassification,
       nextWakeAt,
       nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(prepared),
+      routeAction: prepared.routeAction,
       status: "retryable_failed",
+      wakeKind: prepared.wake.kind,
     };
   }
 }

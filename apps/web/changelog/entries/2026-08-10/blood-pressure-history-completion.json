@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 425,
+  "item": {
+    "id": "blood-pressure-history-completion",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Blood-pressure history waits for the whole sync",
+    "summary": "When Murph is recovering older blood-pressure readings, a temporary change in source access no longer lets an unfinished history import look complete.",
+    "details": "Murph keeps the same history window available to retry after access returns and marks it complete only after every remaining day finishes under the currently connected source.",
+    "relevanceTags": ["blood-pressure", "wearables", "health-data", "reliability"],
+    "sourcePullRequests": [1523, 1625]
+  }
+}

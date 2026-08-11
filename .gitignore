@@ -19,6 +19,7 @@ coverage/
 .next-smoke/
 .next-smoke*/
 apps/web/next-env.d.ts
+apps/web/src/lib/changelog-fragments.generated.ts
 **/.agents/
 !/.agents/
 /.agents/*

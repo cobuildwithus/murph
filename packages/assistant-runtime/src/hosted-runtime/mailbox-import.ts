@@ -34,6 +34,8 @@ import type {
 const HOSTED_MAILBOX_RETRYABLE_BLOCK_RETRY_DELAY_MS = 15 * 1000;
 const HOSTED_MAILBOX_LEGACY_VAULT_SHARE_SKIP_REASON =
   "legacy_vault_share.web_owned";
+const HOSTED_MAILBOX_RETIRED_NEWSLETTER_SKIP_REASON =
+  "legacy_group_newsletter_email_needed.retired";
 export const HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE = "budget.mailbox_items";
 
 export type HostedMailboxItemImportOutcome =
@@ -356,12 +358,13 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       throw new TypeError("Hosted mailbox routed seq must be a valid decimal string.");
     }
 
-    if (isLegacyVaultShareImportAction(route.action)) {
+    const retiredSkipReason = resolveRetiredMailboxSkipReason(route.action);
+    if (retiredSkipReason !== null) {
       nextState = recordHostedMailboxTerminalSkip({
         item,
         lane,
         now: now(),
-        reasonCode: HOSTED_MAILBOX_LEGACY_VAULT_SHARE_SKIP_REASON,
+        reasonCode: retiredSkipReason,
         state: nextState,
       });
       expectedSeqByLane[lane] += 1n;
@@ -652,11 +655,21 @@ function recordHostedMailboxTerminalSkip(input: {
   return nextState;
 }
 
-function isLegacyVaultShareImportAction(
+function resolveRetiredMailboxSkipReason(
   action: HostedMailboxRoutePlan["action"],
-): boolean {
-  return action === "import-vault-share-delivery"
-    || action === "import-vault-share-revoke";
+): string | null {
+  if (
+    action === "import-vault-share-delivery"
+    || action === "import-vault-share-revoke"
+  ) {
+    return HOSTED_MAILBOX_LEGACY_VAULT_SHARE_SKIP_REASON;
+  }
+
+  if (action === "skip-retired-mailbox-item") {
+    return HOSTED_MAILBOX_RETIRED_NEWSLETTER_SKIP_REASON;
+  }
+
+  return null;
 }
 
 async function fetchHostedMailboxPrefix(input: {

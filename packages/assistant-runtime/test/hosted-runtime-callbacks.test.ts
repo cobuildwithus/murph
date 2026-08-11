@@ -1591,7 +1591,7 @@ describe("hosted runtime callbacks", () => {
       channel: "email",
       dedupeKey: "dedupe_unrelated_newsletter_recipient",
       deliveryIdempotencyKey:
-        "group-newsletter:automation_unrelated:2026-04-08T00:00:00.000Z:group_unrelated",
+        "group-email-effect:automation_unrelated:2026-04-08T00:00:00.000Z:group_unrelated",
       deliveryTransportIdempotent: false,
       explicitTarget: serializeHostedEmailThreadTarget({
         groupId: "group_unrelated",
@@ -4328,7 +4328,7 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("collects newsletter HTML and authorization proof from the durable parent intent", async () => {
+  it("collects a legacy accepted group-email parent through the generic effect boundary", async () => {
     const groupTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Weekly health note",
@@ -4374,20 +4374,20 @@ describe("hosted runtime callbacks", () => {
         effectId: "intent_newsletter",
         payload: expect.objectContaining({
           emailHtml: "<p>Weekly</p>",
-          newsletterAuthorizationProof: "a".repeat(64),
+          groupEmailAuthorizationProof: "a".repeat(64),
         }),
       }),
     ]);
   });
 
-  it("does not select newsletter recipients until their parent manifest is sent", async () => {
+  it("does not select group-email recipients until their parent manifest is sent", async () => {
     mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
       intent.status === "pending"
       || intent.status === "retryable"
       || intent.status === "sending"
     );
     const deliveryIdempotencyKey =
-      "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123";
+      "group-email-effect:automation_123:2026-07-12T13:00:00.000Z:group_123";
     const parentTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Weekly health note",
@@ -4461,7 +4461,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("abandons newsletter recipients whose parent manifest was not sent", async () => {
+  it("abandons group-email recipients whose parent manifest was not sent", async () => {
     mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
       intent.status === "pending"
       || intent.status === "retryable"
@@ -4481,7 +4481,7 @@ describe("hosted runtime callbacks", () => {
         createdAt: "2026-07-12T13:00:01.000Z",
         dedupeKey: "dedupe_newsletter_child",
         deliveryIdempotencyKey:
-          "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123",
+          "group-email-effect:automation_123:2026-07-12T13:00:00.000Z:group_123",
         deliveryTransportIdempotent: false,
         explicitTarget: childTarget,
         identityId: null,
@@ -4507,7 +4507,7 @@ describe("hosted runtime callbacks", () => {
     })).resolves.toEqual([]);
     expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
       error: expect.objectContaining({
-        code: "ASSISTANT_NEWSLETTER_PARENT_UNAVAILABLE",
+        code: "ASSISTANT_GROUP_EMAIL_PARENT_UNAVAILABLE",
       }),
       intentId: "intent_newsletter_child",
       onlyCurrentStatuses: ["awaiting_approval", "pending", "retryable", "sending"],
@@ -15939,7 +15939,7 @@ describe("hosted runtime callbacks", () => {
       html: null,
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
-      newsletterAuthorizationProof: null,
+      groupEmailAuthorizationProof: null,
       planGroupFanout: true,
       replyToMessageId: lastMessageId,
       subject,
@@ -16105,7 +16105,7 @@ describe("hosted runtime callbacks", () => {
       identityId: "identity_123",
       emailHtml: "<p>Group reply</p>",
       message: "Group reply",
-      newsletterAuthorizationProof: "a".repeat(64),
+      groupEmailAuthorizationProof: "a".repeat(64),
       subject: null,
       threadId: "thread_123",
       threadIsDirect: false,
@@ -16168,7 +16168,7 @@ describe("hosted runtime callbacks", () => {
       identityId: "identity_123",
       emailHtml: "<p>Group reply</p>",
       message: "Group reply",
-      newsletterAuthorizationProof: "a".repeat(64),
+      groupEmailAuthorizationProof: "a".repeat(64),
       subject: null,
       threadId: "thread_123",
       threadIsDirect: false,
@@ -16226,14 +16226,14 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.createAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
-  it("does not recreate sent, ambiguous, or exhausted newsletter recipients from the same parent attempt", async () => {
+  it("does not recreate sent, ambiguous, or exhausted group-email recipients from the same parent attempt", async () => {
     const fanoutTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Group subject",
       targetKind: "group",
     });
     const deliveryIdempotencyKey =
-      "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123";
+      "group-email-effect:automation_123:2026-07-12T13:00:00.000Z:group_123";
     const effect = createEffect({
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: fanoutTarget,

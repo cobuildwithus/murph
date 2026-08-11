@@ -53,8 +53,8 @@ import type {
   HostedRuntimeGroupSharedRecord,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
-  HostedRuntimeNewsletterToolRequest,
-  HostedRuntimeNewsletterToolResponse,
+  HostedRuntimeGroupEmailEffectRequest,
+  HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import type {
   HostedPhoneCallStartRequest,
@@ -360,10 +360,10 @@ export interface AssistantHostedGroupSharedReader {
   ): Promise<AssistantHostedGroupSharedReadResponse>
 }
 
-export interface AssistantHostedNewsletterTool {
+export interface AssistantHostedGroupEmailEffect {
   request(
-    request: HostedRuntimeNewsletterToolRequest,
-  ): Promise<HostedRuntimeNewsletterToolResponse>
+    request: HostedRuntimeGroupEmailEffectRequest,
+  ): Promise<HostedRuntimeGroupEmailEffectResponse>
 }
 
 export interface AssistantPhoneCallPort {
@@ -484,7 +484,6 @@ export interface AssistantHostedExecutionContext {
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   groupTool?: AssistantHostedGroupTool | null
   labsTool?: AssistantHostedLabsTool | null
-  newsletterTool?: AssistantHostedNewsletterTool | null
   planUsageTool?: AssistantHostedPlanUsageTool | null
   physicalNotes?: AssistantPhysicalNotePort | null
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null
@@ -592,7 +591,6 @@ export function normalizeAssistantExecutionContext(
     hosted?.groupSharedReader,
   )
   const labsTool = normalizeAssistantLabsTool(hosted?.labsTool)
-  const newsletterTool = normalizeAssistantNewsletterTool(hosted?.newsletterTool)
   const planUsageTool = normalizeAssistantPlanUsageTool(hosted?.planUsageTool)
   const subscriptionTool = normalizeAssistantSubscriptionTool(
     hosted?.subscriptionTool,
@@ -640,7 +638,6 @@ export function normalizeAssistantExecutionContext(
       ...(groupSharedReader ? { groupSharedReader } : {}),
       ...(groupTool ? { groupTool } : {}),
       ...(labsTool ? { labsTool } : {}),
-      ...(newsletterTool ? { newsletterTool } : {}),
       ...(planUsageTool ? { planUsageTool } : {}),
       ...(physicalNotes ? { physicalNotes } : {}),
       ...(privateImageUrlPublisher ? { privateImageUrlPublisher } : {}),
@@ -968,18 +965,6 @@ function normalizeAssistantGroupSharedReader(
 function normalizeAssistantLabsTool(
   input: AssistantHostedExecutionContext['labsTool'] | undefined,
 ): AssistantHostedLabsTool | undefined {
-  if (!input || typeof input.request !== 'function') {
-    return undefined
-  }
-
-  return {
-    request: input.request.bind(input),
-  }
-}
-
-function normalizeAssistantNewsletterTool(
-  input: AssistantHostedExecutionContext['newsletterTool'] | undefined,
-): AssistantHostedNewsletterTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

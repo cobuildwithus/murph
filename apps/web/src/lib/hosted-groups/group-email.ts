@@ -3,28 +3,19 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
-  buildHostedExecutionGroupNewsletterEmailNeededWake,
-  type HostedExecutionDirectRoute,
-} from "@murphai/hosted-execution";
-import {
-  HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
+  HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
 } from "@murphai/hosted-execution/runtime-control";
 import { normalizeHostedEmailAddress } from "@murphai/runtime-state";
 
-import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   readHostedMemberVerifiedEmailSnapshots,
 } from "../hosted-onboarding/hosted-member-store";
 import {
-  readHostedMemberRoutingState,
-} from "../hosted-onboarding/hosted-member-routing-store";
-import {
   activeHostedMemberAccessWhere,
   hasActiveHostedMemberAccess,
   hostedMemberAccessSelect,
   hostedMemberPersonAccessSelect,
-  readActiveHostedMemberAccess,
 } from "../hosted-onboarding/member-access";
 import { isHostedMemberSuspended } from "../hosted-onboarding/entitlement";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
@@ -33,42 +24,38 @@ import {
   HOSTED_HEALTH_DATA_CONSENT_SCOPE,
   resolveHostedHealthDataConsentState,
 } from "../legal/consent";
-import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
-import {
-  resolveHostedMemberDirectRoute,
-} from "../hosted-routing/member-direct-route";
 import { getPrisma } from "../prisma";
 import {
   activeHostedThreadContainerParticipantWhere,
 } from "./thread-container-participant-access";
 
-export interface HostedGroupNewsletterParticipant {
-  authorizedShares: HostedGroupNewsletterAuthorizedShare[];
+export interface HostedGroupEmailParticipant {
+  authorizedShares: HostedGroupEmailAuthorizedShare[];
   hasEmail: boolean;
   memberId: string;
 }
 
-interface HostedGroupNewsletterAuthorizationParticipant
-  extends HostedGroupNewsletterParticipant {
+interface HostedGroupEmailAuthorizationParticipant
+  extends HostedGroupEmailParticipant {
   emailIdentity: string | null;
 }
 
-export interface HostedGroupNewsletterAuthorizedShare {
+export interface HostedGroupEmailAuthorizedShare {
   projectionScopeKey: string;
   shareId: string;
 }
 
-export interface HostedGroupNewsletterEmailRecipient {
+export interface HostedGroupEmailRecipient {
   address: string;
   memberId: string;
 }
 
-export type HostedGroupNewsletterPreparationResult =
+export type HostedGroupEmailPreparationResult =
   | {
       authorizationProof: string;
       groupId: string;
-      missingEmailParticipants: HostedGroupNewsletterParticipant[];
-      participants: HostedGroupNewsletterParticipant[];
+      missingEmailParticipants: HostedGroupEmailParticipant[];
+      participants: HostedGroupEmailParticipant[];
       status: "ok";
     }
   | {
@@ -78,7 +65,7 @@ export type HostedGroupNewsletterPreparationResult =
 
 type ReadClient = PrismaClient;
 
-function buildHostedGroupNewsletterMemberAccessSelect(now: Date) {
+function buildHostedGroupEmailMemberAccessSelect(now: Date) {
   return Prisma.validator<Prisma.HostedMemberSelect>()({
     ...hostedMemberAccessSelect,
     consentGrants: {
@@ -125,118 +112,22 @@ function buildHostedGroupNewsletterMemberAccessSelect(now: Date) {
   });
 }
 
-type HostedGroupNewsletterMemberAccess = Prisma.HostedMemberGetPayload<{
-  select: ReturnType<typeof buildHostedGroupNewsletterMemberAccessSelect>;
+type HostedGroupEmailMemberAccess = Prisma.HostedMemberGetPayload<{
+  select: ReturnType<typeof buildHostedGroupEmailMemberAccessSelect>;
 }>;
 
-export async function enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort(input: {
-  groupId: string;
-  memberId: string;
-  prisma?: ReadClient;
-}): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-  try {
-    const group = await prisma.hostedGroup.findFirst({
-      where: {
-        id: input.groupId,
-        members: {
-          some: { memberId: input.memberId },
-        },
-      },
-      select: {
-        displayName: true,
-        id: true,
-        runtimeMemberId: true,
-      },
-    });
-    if (!group?.runtimeMemberId) {
-      return;
-    }
-    if (!await hasHostedRuntimeActiveAccess(group.runtimeMemberId, { prisma })) {
-      return;
-    }
-
-    const emailGrant = await prisma.hostedVaultShare.findFirst({
-      where: {
-        destinationMemberId: group.runtimeMemberId,
-        grantorMemberId: input.memberId,
-        projectionKind: "group-email.v0",
-        status: "granted",
-      },
-      select: { grantorMemberId: true },
-    });
-    if (!emailGrant) {
-      return;
-    }
-    if (!await readActiveHostedMemberAccess({ memberId: input.memberId, prisma })) {
-      return;
-    }
-
-    const [emailSnapshot] = await readHostedMemberVerifiedEmailSnapshots({
-      memberIds: [input.memberId],
-      prisma,
-    });
-    const address = normalizeHostedEmailAddress(
-      emailSnapshot?.verifiedEmail?.address ?? null,
-    );
-    if (address) {
-      return;
-    }
-
-    await appendGroupNewsletterEmailNeededWakeBestEffort({
-      groupDisplayName: group.displayName ?? null,
-      groupId: group.id,
-      memberId: input.memberId,
-      prisma,
-    });
-  } catch {
-    // Joining should not fail because a private missing-email nudge could not be evaluated.
-  }
-}
-
-export async function prepareHostedGroupNewsletterParticipants(input: {
+export async function prepareHostedGroupEmail(input: {
   prisma?: ReadClient;
   runtimeMemberId: string;
-}): Promise<HostedGroupNewsletterPreparationResult> {
-  const nudgeSnapshot = await readHostedGroupNewsletterParticipantEmailFacts(input);
-  if (nudgeSnapshot.status !== "ok") {
-    return nudgeSnapshot;
-  }
-
-  if (
-    nudgeSnapshot.participants.some((participant) =>
-      participant.authorizedShares.length
-      > HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX
-    )
-  ) {
-    return {
-      status: "unavailable",
-      unavailableReason: "authorization_snapshot_too_large",
-    };
-  }
-  const nudgeParticipants = nudgeSnapshot.participants.map((participant) => ({
-    authorizedShares: participant.authorizedShares,
-    emailIdentity: participant.emailIdentity,
-    hasEmail: participant.address !== null,
-    memberId: participant.memberId,
-  }));
-  await enqueueMissingNewsletterEmailWakesBestEffort({
-    groupDisplayName: nudgeSnapshot.groupDisplayName,
-    groupId: nudgeSnapshot.groupId,
-    missingMemberIds: nudgeParticipants
-      .filter((participant) => !participant.hasEmail)
-      .map((participant) => participant.memberId),
-    prisma: input.prisma ?? getPrisma(),
-  });
-
-  const resolved = await readHostedGroupNewsletterParticipantEmailFacts(input);
+}): Promise<HostedGroupEmailPreparationResult> {
+  const resolved = await readHostedGroupEmailParticipantEmailFacts(input);
   if (resolved.status !== "ok") {
     return resolved;
   }
   if (
     resolved.participants.some((participant) =>
       participant.authorizedShares.length
-      > HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX
+      > HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX
     )
   ) {
     return {
@@ -251,11 +142,11 @@ export async function prepareHostedGroupNewsletterParticipants(input: {
     memberId: participant.memberId,
   }));
   const participants = authorizationParticipants.map(
-    toHostedGroupNewsletterParticipant,
+    toHostedGroupEmailParticipant,
   );
 
   return {
-    authorizationProof: buildHostedGroupNewsletterAuthorizationProof({
+    authorizationProof: buildHostedGroupEmailAuthorizationProof({
       groupId: resolved.groupId,
       participants: authorizationParticipants,
     }),
@@ -266,14 +157,14 @@ export async function prepareHostedGroupNewsletterParticipants(input: {
   };
 }
 
-export async function readHostedGroupNewsletterEmailRecipients(input: {
-  expectedNewsletterAuthorizationProof?: string | null;
+export async function readHostedGroupEmailRecipients(input: {
+  expectedGroupEmailAuthorizationProof?: string | null;
   groupId: string;
   prisma?: ReadClient;
   runtimeMemberId: string;
 }): Promise<
   | {
-      recipients: HostedGroupNewsletterEmailRecipient[];
+      recipients: HostedGroupEmailRecipient[];
       status: "ok";
     }
   | {
@@ -281,15 +172,15 @@ export async function readHostedGroupNewsletterEmailRecipients(input: {
       unavailableReason: string;
     }
 > {
-  const resolved = await readHostedGroupNewsletterParticipantEmailFacts(input);
+  const resolved = await readHostedGroupEmailParticipantEmailFacts(input);
   if (resolved.status !== "ok") {
     return resolved;
   }
 
   if (
-    input.expectedNewsletterAuthorizationProof
-    && input.expectedNewsletterAuthorizationProof
-      !== buildHostedGroupNewsletterAuthorizationProof({
+    input.expectedGroupEmailAuthorizationProof
+    && input.expectedGroupEmailAuthorizationProof
+      !== buildHostedGroupEmailAuthorizationProof({
         groupId: resolved.groupId,
         participants: resolved.participants.map((participant) => ({
           authorizedShares: participant.authorizedShares,
@@ -301,11 +192,11 @@ export async function readHostedGroupNewsletterEmailRecipients(input: {
   ) {
     return {
       status: "unavailable",
-      unavailableReason: "newsletter_authorization_changed",
+      unavailableReason: "group_email_authorization_changed",
     };
   }
 
-  const recipients: HostedGroupNewsletterEmailRecipient[] = [];
+  const recipients: HostedGroupEmailRecipient[] = [];
   const seenAddresses = new Set<string>();
   for (const participant of resolved.participants) {
     if (!participant.address || seenAddresses.has(participant.address)) {
@@ -321,17 +212,16 @@ export async function readHostedGroupNewsletterEmailRecipients(input: {
   return { recipients, status: "ok" };
 }
 
-async function readHostedGroupNewsletterParticipantEmailFacts(input: {
+async function readHostedGroupEmailParticipantEmailFacts(input: {
   groupId?: string;
   prisma?: ReadClient;
   runtimeMemberId: string;
 }): Promise<
   | {
-      groupDisplayName: string | null;
       groupId: string;
       participants: Array<{
         address: string | null;
-        authorizedShares: HostedGroupNewsletterAuthorizedShare[];
+        authorizedShares: HostedGroupEmailAuthorizedShare[];
         emailIdentity: string | null;
         memberId: string;
       }>;
@@ -344,7 +234,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
 > {
   const prisma = input.prisma ?? getPrisma();
   const now = new Date();
-  const memberAccessSelect = buildHostedGroupNewsletterMemberAccessSelect(now);
+  const memberAccessSelect = buildHostedGroupEmailMemberAccessSelect(now);
   if (!await hasHostedRuntimeActiveAccess(input.runtimeMemberId, { prisma })) {
     return { status: "unavailable", unavailableReason: "runtime_inactive" };
   }
@@ -356,7 +246,6 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
     },
     select: {
       id: true,
-      displayName: true,
       members: {
         orderBy: { createdAt: "asc" },
         select: { memberId: true },
@@ -378,7 +267,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
   });
   const activeMemberIdSet = new Set(
     accessRecords
-      .filter(hasHostedGroupNewsletterMemberActiveAccess)
+      .filter(hasHostedGroupEmailMemberActiveAccess)
       .map((member) => member.id),
   );
   const activeMemberIds = memberIds.filter((memberId) =>
@@ -420,7 +309,6 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
       },
       select: {
         id: true,
-        displayName: true,
         members: {
           orderBy: { createdAt: "asc" },
           select: {
@@ -462,19 +350,19 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
   }
   if (
     !canonicalGroup.runtimeMember
-    || !hasHostedGroupNewsletterMemberActiveAccess(canonicalGroup.runtimeMember)
+    || !hasHostedGroupEmailMemberActiveAccess(canonicalGroup.runtimeMember)
   ) {
     return { status: "unavailable", unavailableReason: "runtime_inactive" };
   }
 
   const participants: Array<{
     address: string | null;
-    authorizedShares: HostedGroupNewsletterAuthorizedShare[];
+    authorizedShares: HostedGroupEmailAuthorizedShare[];
     emailIdentity: string | null;
     memberId: string;
   }> = [];
   for (const { member } of canonicalGroup.members) {
-    if (!hasHostedGroupNewsletterMemberActiveAccess(member)) {
+    if (!hasHostedGroupEmailMemberActiveAccess(member)) {
       continue;
     }
     if (!member.vaultSharesGranted.some((grant) =>
@@ -494,7 +382,7 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
         === candidate.verifiedEmailVerifiedAt.getTime()
         ? {
             address: candidate.address,
-            identity: buildHostedGroupNewsletterEmailIdentity({
+            identity: buildHostedGroupEmailIdentity({
               lookupKey: candidate.verifiedEmailLookupKey,
               verifiedAt: candidate.verifiedEmailVerifiedAt,
             }),
@@ -514,15 +402,14 @@ async function readHostedGroupNewsletterParticipantEmailFacts(input: {
   }
 
   return {
-    groupDisplayName: canonicalGroup.displayName ?? null,
     groupId: canonicalGroup.id,
     participants,
     status: "ok",
   };
 }
 
-function hasHostedGroupNewsletterMemberActiveAccess(
-  member: HostedGroupNewsletterMemberAccess,
+function hasHostedGroupEmailMemberActiveAccess(
+  member: HostedGroupEmailMemberAccess,
 ): boolean {
   if (resolveHostedHealthDataConsentState(member.consentGrants) === "revoked") {
     return false;
@@ -542,9 +429,9 @@ function hasHostedGroupNewsletterMemberActiveAccess(
     && Boolean(member.threadContainer?.participants.length);
 }
 
-function buildHostedGroupNewsletterAuthorizationProof(input: {
+function buildHostedGroupEmailAuthorizationProof(input: {
   groupId: string;
-  participants: readonly HostedGroupNewsletterAuthorizationParticipant[];
+  participants: readonly HostedGroupEmailAuthorizationParticipant[];
 }): string {
   const canonical = {
     groupId: input.groupId,
@@ -565,9 +452,9 @@ function buildHostedGroupNewsletterAuthorizationProof(input: {
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
-function toHostedGroupNewsletterParticipant(
-  participant: HostedGroupNewsletterAuthorizationParticipant,
-): HostedGroupNewsletterParticipant {
+function toHostedGroupEmailParticipant(
+  participant: HostedGroupEmailAuthorizationParticipant,
+): HostedGroupEmailParticipant {
   return {
     authorizedShares: participant.authorizedShares,
     hasEmail: participant.hasEmail,
@@ -575,7 +462,7 @@ function toHostedGroupNewsletterParticipant(
   };
 }
 
-function buildHostedGroupNewsletterEmailIdentity(input: {
+function buildHostedGroupEmailIdentity(input: {
   lookupKey: string;
   verifiedAt: Date;
 }): string {
@@ -585,87 +472,4 @@ function buildHostedGroupNewsletterEmailIdentity(input: {
       verifiedAt: input.verifiedAt.toISOString(),
     }))
     .digest("hex");
-}
-
-async function enqueueMissingNewsletterEmailWakesBestEffort(input: {
-  groupDisplayName: string | null;
-  groupId: string;
-  missingMemberIds: readonly string[];
-  prisma: ReadClient;
-}): Promise<void> {
-  for (const memberId of input.missingMemberIds) {
-    await appendGroupNewsletterEmailNeededWakeBestEffort({
-      groupDisplayName: input.groupDisplayName,
-      groupId: input.groupId,
-      memberId,
-      prisma: input.prisma,
-    });
-  }
-}
-
-async function appendGroupNewsletterEmailNeededWakeBestEffort(input: {
-  groupDisplayName: string | null;
-  groupId: string;
-  memberId: string;
-  prisma: ReadClient;
-}): Promise<void> {
-  const eventId = buildGroupNewsletterEmailNeededEventId({
-    groupId: input.groupId,
-    memberId: input.memberId,
-  });
-  try {
-    const directRoute = await readHostedMemberDirectNewsletterNudgeRoute({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
-    if (!directRoute) {
-      return;
-    }
-
-    const appended = await input.prisma.$transaction(async (tx) =>
-      appendHostedMailboxEnvelopeTx({
-        envelope: buildHostedExecutionGroupNewsletterEmailNeededWake({
-          directRoute,
-          eventId,
-          groupDisplayName: input.groupDisplayName,
-          groupId: input.groupId,
-          memberId: input.memberId,
-          occurredAt: new Date().toISOString(),
-        }),
-        tx,
-      })
-    );
-    if (!appended.inserted) {
-      return;
-    }
-    try {
-      await signalHostedMailboxAppendRuntime({
-        expectedUserId: input.memberId,
-        mailboxItemId: appended.item.id,
-      });
-    } catch {
-      // The mailbox item is durable; the destination runtime will observe it later.
-    }
-  } catch {
-    // Missing-email private nudges are best-effort and must not fail the caller.
-  }
-}
-
-async function readHostedMemberDirectNewsletterNudgeRoute(input: {
-  memberId: string;
-  prisma: ReadClient;
-}): Promise<HostedExecutionDirectRoute | null> {
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-
-  return resolveHostedMemberDirectRoute(routing);
-}
-
-function buildGroupNewsletterEmailNeededEventId(input: {
-  groupId: string;
-  memberId: string;
-}): string {
-  return `group-newsletter.email-needed:${input.memberId}:${input.groupId}`;
 }

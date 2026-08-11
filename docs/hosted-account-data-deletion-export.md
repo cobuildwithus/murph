@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-07-26
+Last verified: 2026-08-09
 
 ## Purpose
 
@@ -121,7 +121,7 @@ The Settings vault export does not include:
 | `prisma.clinical_record_connection` | Live delete | Metadata/counts | Deletes encrypted patient context and access/refresh tokens. Canonical imported records remain governed by the vault export/deletion path. |
 | `prisma.clinical_record_retrieval_run` | Live delete | Metadata/counts | Deletes generation/status/count metadata; raw FHIR bodies are never stored in this table. |
 | `prisma.clinical_record_retrieval_request` | Live delete | Not exported secret | Deletes run-scoped request idempotency fingerprints and byte accounting before runs and connections; provider page URLs are not persisted here. |
-| `prisma.hosted_web_internal_request_nonce` | Live delete | Metadata/counts | Deletes per-user anti-replay nonces. |
+| `prisma.hosted_web_internal_request_nonce` | Live delete | Metadata/counts | Deletes per-user anti-replay nonces; bounded hourly global expiry is additive and does not replace this delete. |
 | `prisma.device_webhook_trace` | Live delete | Documented only | Deletes webhook traces for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage. |
 | `kernel.managed_auth_connections` | Live delete | Not exported secret | Deletes durable domain connections, saved credentials, and active login workflows before the member profile. Murph does not persist connection ids or credential values locally. |
 | `cloudflare.runner_durable_object` | Best-effort delete | Documented only | Hosted execution control clears user runner SQL state and alarms when configured. |

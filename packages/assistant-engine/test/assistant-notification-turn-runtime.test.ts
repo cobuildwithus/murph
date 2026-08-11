@@ -2329,12 +2329,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     vault: '/vaults/skip',
   })
 
-  expect(scheduledNewsletterResult.postTurnDeliveryExpectations).toEqual({
-    newsletterSendResult: {
-      status: 'unavailable',
-      unavailableReason: 'newsletter_send_not_observed',
-    },
-  })
+  expect(scheduledNewsletterResult.postTurnDeliveryExpectations).toBeUndefined()
 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.not.objectContaining({
@@ -2739,11 +2734,16 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
   expect(observedHostedToolContexts[2]).toBeNull()
 })
 
-test('sendAssistantNotificationLocal exposes newsletter tools only with scheduled email authority', async () => {
+test('sendAssistantNotificationLocal exposes group email only with scheduled authority', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
   })
-  const newsletterTool = { request: vi.fn() }
+  const groupTool = {
+    request: vi.fn(async () => ({
+      action: 'prepare_email' as const,
+      result: { status: 'unavailable' as const, unavailableReason: 'not_used' },
+    })),
+  }
   const observedHostedToolContexts: Array<
     NotificationTurnProviderInput['hostedToolContext']
   > = []
@@ -2761,7 +2761,7 @@ test('sendAssistantNotificationLocal exposes newsletter tools only with schedule
   const executionContext = {
     hosted: {
       memberId: 'member-notification-newsletter-scope',
-      newsletterTool,
+      groupTool,
       userEnvKeys: [],
     },
   }
@@ -2784,8 +2784,8 @@ test('sendAssistantNotificationLocal exposes newsletter tools only with schedule
   })
 
   expect(observedHostedToolContexts).toHaveLength(2)
-  expect(observedHostedToolContexts[0]?.newsletterTool ?? null).toBeNull()
-  expect(observedHostedToolContexts[1]?.newsletterTool).not.toBeNull()
+  expect(observedHostedToolContexts[0]?.groupEmailEffect ?? null).toBeNull()
+  expect(observedHostedToolContexts[1]?.groupEmailEffect).not.toBeNull()
 })
 
 test.each([
@@ -2817,37 +2817,42 @@ test.each([
       const providerResult = createProviderResult({
         response: providerResponse,
       })
-      const newsletterTool = {
-        request: vi.fn(async () => ({
-          action: 'prepare' as const,
-          result: {
-            authorizationProof: 'a'.repeat(64),
-            groupId: 'group_notification_newsletter',
-            missingEmailParticipants: [],
-            participants: [{
-              authorizedShares: [],
-              hasEmail: true,
-              memberId: 'member_notification_newsletter_recipient',
-            }],
-            status: 'ok' as const,
-          },
-        })),
+      const groupTool = {
+        request: vi.fn(async (request: { action: string }) => {
+          if (request.action !== 'prepare_email') {
+            throw new Error('Expected group email preparation request.')
+          }
+          return {
+            action: 'prepare_email' as const,
+            result: {
+              authorizationProof: 'a'.repeat(64),
+              groupId: 'group_notification_newsletter',
+              missingEmailParticipants: [],
+              participants: [{
+                authorizedShares: [],
+                hasEmail: true,
+                memberId: 'member_notification_newsletter_recipient',
+              }],
+              status: 'ok' as const,
+            },
+          }
+        }),
       }
       const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
         onExecuteCodexTurnWithRecovery: async (providerInput) => {
           const hostedToolContext = providerInput.hostedToolContext
-          expect(hostedToolContext?.newsletterTool).not.toBeNull()
-          const executeNewsletterRequest = async (argumentsValue: unknown) => {
+          expect(hostedToolContext?.groupEmailEffect).not.toBeNull()
+          const executeGroupRequest = async (argumentsValue: unknown) => {
             const request = readTestMurphDynamicToolRequest({
               method: 'item/tool/call',
               params: {
                 arguments: argumentsValue,
                 namespace: 'murph',
-                tool: 'newsletter',
+                tool: 'group',
               },
             })
-            if (!request || request.kind !== 'newsletter') {
-              throw new Error('Expected a parsed newsletter request.')
+            if (!request || request.kind !== 'group') {
+              throw new Error('Expected a parsed group request.')
             }
             const result = await executeMurphDynamicToolRequest({
               env: {},
@@ -2861,9 +2866,13 @@ test.each([
             expect(result.rpcResult.success).toBe(true)
           }
 
-          await executeNewsletterRequest({ action: 'prepare' })
-          await executeNewsletterRequest({
-            action: 'send',
+          await executeGroupRequest({
+            action: 'read_shared',
+            audience: 'group_email',
+            projectionScopes: [{ projectionKind: 'steps-days.v0' }],
+          })
+          await executeGroupRequest({
+            action: 'send_email',
             html: '<p>Weekly note</p>',
             subject: 'Family Weekly',
             text: 'Weekly note',
@@ -2903,12 +2912,21 @@ test.each([
         executionContext: {
           hosted: {
             memberId: 'member-notification-newsletter-pending',
-            newsletterTool,
+            groupSharedReader: {
+              request: async ({ projectionScopes }) => ({
+                members: [],
+                requestedProjectionScopeKeys: projectionScopes.map(
+                  ({ projectionKind }) => projectionKind,
+                ),
+                status: 'none' as const,
+              }),
+            },
+            groupTool,
             userEnvKeys: [],
           },
         },
         instructions: 'Send the scheduled group email newsletter.',
-        onNewsletterPendingDeliveryIntentId: (intentId) => {
+        onGroupEmailPendingDeliveryIntentId: (intentId) => {
           pendingIntentIds.push(intentId)
         },
         scheduledAutomationAuthority: {
@@ -2922,9 +2940,9 @@ test.each([
       if (providerFailure === 'none') {
         await expect(notification).resolves.toMatchObject({
           postTurnDeliveryExpectations: {
-            newsletterPendingDeliveryIntentId:
+            groupEmailPendingDeliveryIntentId:
               expect.stringMatching(/^outbox_/u),
-            newsletterSendResult: {
+            groupEmailSendResult: {
               participantCount: 1,
               skippedNoEmailMemberIds: [],
               status: 'accepted',
@@ -2940,12 +2958,79 @@ test.each([
       expect(pendingIntentIds).toEqual([
         expect.stringMatching(/^outbox_/u),
       ])
-      expect(newsletterTool.request).toHaveBeenCalledOnce()
+      expect(groupTool.request).toHaveBeenCalledOnce()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
   },
 )
+
+test('sendAssistantNotificationLocal treats terminal group email as a structural skip', async () => {
+  const providerResult = createProviderResult({
+    finalAction: { kind: 'none' },
+    providerAuthoredResponse: '',
+    response: '',
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async (providerInput) => {
+        const hostedToolContext = providerInput.hostedToolContext
+        expect(hostedToolContext).not.toBeNull()
+        hostedToolContext?.recordGroupEmailSendResult?.({
+          action: 'send_email',
+          result: {
+            participantCount: 1,
+            skippedNoEmailMemberIds: [],
+            status: 'accepted',
+          },
+        })
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      },
+      providerResult,
+      turnId: 'turn-notification-group-email-terminal',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: {
+        memberId: 'member-notification-group-email-terminal',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Send the scheduled group email.',
+    scheduledAutomationAuthority: {
+      automationId: 'automation_group_email_terminal',
+      occurrenceAt: '2026-07-20T13:00:00.000Z',
+    },
+    scheduledOccurrenceAt: '2026-07-20T13:00:00.000Z',
+    vault: '/vaults/notification-group-email-terminal',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'skip',
+      privateSummary: 'Group email effect completed.',
+    },
+    postTurnDeliveryExpectations: {
+      groupEmailSendResult: {
+        participantCount: 1,
+        skippedNoEmailMemberIds: [],
+        status: 'accepted',
+      },
+    },
+    response: null,
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: null,
+      persistUserPromptToTranscript: false,
+    }),
+  )
+})
 
 test('sendAssistantNotificationLocal keeps scheduled group reads and offers model-triggered', async () => {
   const providerResult = createProviderResult({
@@ -5342,6 +5427,7 @@ async function loadNotificationTurnHarness(input: {
 function createProviderResult(input?: {
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
+  finalAction?: ExecutedAssistantProviderTurnResult['finalAction']
   providerAuthoredResponse?: string | null
   rawEvents?: readonly unknown[]
   responseCard?: ExecutedAssistantProviderTurnResult['responseCard']
@@ -5379,6 +5465,7 @@ function createProviderResult(input?: {
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
     codexThreadId: input?.codexThreadId ?? 'provider-session-1',
+    ...(input?.finalAction === undefined ? {} : { finalAction: input.finalAction }),
     providerAuthoredResponse: input?.providerAuthoredResponse ?? null,
     rawEvents: [...(input?.rawEvents ?? [])],
     response: input?.response ?? 'provider response',

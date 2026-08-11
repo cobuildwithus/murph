@@ -42,8 +42,6 @@ export const HOSTED_RUNTIME_GROUP_TOOL_PATH =
 export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_PATH =
   "/api/internal/hosted-execution/assistant-asks/runtime";
 export const HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_BODY_MAX_BYTES = 32 * 1_024;
-export const HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH =
-  "/api/internal/hosted-execution/groups/newsletter-tool";
 export const HOSTED_RUNTIME_CODEX_AUTH_PATH =
   "/api/internal/hosted-runtime/codex-auth";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =

@@ -94,20 +94,33 @@ test("hosted email send parsing preserves explicit group fanout planning", () =>
   }), /planGroupFanout must be a boolean/u);
 });
 
-test("hosted email send parsing validates the optional newsletter authorization proof", () => {
+test("hosted email send parsing validates the generic group-email authorization proof field", () => {
   const authorizationProof = "a".repeat(64);
   assert.equal(parseHostedEmailSendRequest({
     message: "hello group",
-    newsletterAuthorizationProof: authorizationProof,
+    groupEmailAuthorizationProof: authorizationProof,
     target: "group_123",
     targetKind: "group",
-  }).newsletterAuthorizationProof, authorizationProof);
+  }).groupEmailAuthorizationProof, authorizationProof);
   assert.throws(() => parseHostedEmailSendRequest({
     message: "hello group",
-    newsletterAuthorizationProof: "not-a-proof",
+    groupEmailAuthorizationProof: "not-a-proof",
     target: "group_123",
     targetKind: "group",
   }), /SHA-256 hex digest/u);
+  assert.throws(() => parseHostedEmailSendRequest({
+    message: "hello legacy group",
+    newsletterAuthorizationProof: authorizationProof,
+    target: "group_123",
+    targetKind: "group",
+  }), /retired newsletter authorization proof field/u);
+  assert.throws(() => parseHostedEmailSendRequest({
+    groupEmailAuthorizationProof: authorizationProof,
+    message: "hello mismatched group",
+    newsletterAuthorizationProof: "b".repeat(64),
+    target: "group_123",
+    targetKind: "group",
+  }), /retired newsletter authorization proof field/u);
 });
 
 test("hosted email send parsing rejects non-object payloads", () => {

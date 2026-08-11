@@ -431,7 +431,7 @@ or second service.
 
 Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather authority, server-owned fixed-write allowlist for primary-calendar creation and bounded Gmail/Outlook email sending, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results for its tools. Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, and accountless execution only for server-allowlisted built-in service tools. The existing current-weather tools use direct custom-auth execution through Composio. One fixed web-owned One Call read accepts only bounded latitude and longitude, requests only official national alerts, and returns a small normalized alert projection. It adds no scheduler, state, cache, or user-defined weather threshold. The direct and scheduled alert guidance must not deploy until One Call 3 is active for the exact production key and a signed Web-control smoke read returns a normalized success, including a valid empty alert list. Deploy Web first when activation and assistant deployment cannot happen together. Primary-calendar creation and bounded Gmail/Outlook email sends share one exact server-owned direct-execute policy table. Every route pins its toolkit and provider version, requires agent approval plus an active owned account from that toolkit, rejects missing, blank, unsupported, or server-owned model arguments before egress, and forces provider-owned fields such as the primary calendar, sender, and Outlook Sent-copy behavior. Email sends additionally require current accepted user input in a private direct turn at the assistant runtime boundary; scheduled, group, maintenance, system-notification, and output-only turns fail closed before provider egress. Failed or ambiguous writes are non-retryable; ambiguous email outcomes are reconciled only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and uncertain results remain unknown.
 
-Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, newsletters, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. One structured automation write creates the single group newsletter and stores its delivery choice as a system-owned tag: current-chat editions use the ordinary bound-route conversation outbox, while email editions alone receive the one-shot prepare/send capability. Email preparation derives the group from the signed runtime member rather than a model-supplied group id and persists the private authorization proof plus HTML on the existing assistant outbox parent. The outbox reports an accepted parent to cron immediately, so even a later provider, validation, or persistence error leaves the occurrence in its existing pending-delivery state while retaining the error on the run record. Web marks that parent sent only after durably persisting recipient fanout, and the existing cron reconciler settles the occurrence from the parent state. Recipient intents use only the generic outbox retry lifecycle, so newsletter retries never recompose the body or create a second recipient budget. Because newsletter email `From` identity is spoofable, group-email replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
+Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. A group newsletter is an ordinary automation whose instructions reopen the private editorial skill and record its chosen delivery and exact scopes. Its slug and instructions grant no capability, and cron never recognizes newsletter metadata. Current-chat editions use the ordinary consent-aware shared read and bound-route conversation outbox. Any scheduled non-direct group cron occurrence may instead use the generic one-shot group-email effect: `murph.group` prepares address-free authorized facts through `read_shared audience="group_email"`, then accepts a recipient-free `send_email`. Preparation derives the group from the signed runtime member and keeps its private authorization proof outside model-visible output. Send persists the proof plus HTML on the existing assistant outbox parent and ends the turn so the group outbox cannot duplicate the edition. The outbox reports an accepted parent to cron immediately, Web marks it sent only after current-authority revalidation and durable recipient fanout, and the existing cron reconciler settles the occurrence without another model turn. Recipient intents use only the generic outbox retry lifecycle. Bounded readers recognize prior newsletter idempotency keys and proof fields solely to drain already-accepted effects; new writes use generic group-email names. Because group-email `From` identity is spoofable, replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
 
 For retained group-participant activity reporting, an authenticated non-direct
 Linq or Telegram mailbox wake may carry the internal member id already accepted
@@ -1410,6 +1410,7 @@ application code.
 
 ## Trust Boundaries
 
+- Every verified Cloudflare-to-Web execution callback consumes one SHA-256 nonce row with a single primary-Postgres insert. The `nonce_hash` primary key is the replay linearization point: one concurrent exact nonce wins and every exact-nonce conflict replay loses. The insert uses the database clock to refuse a delayed first admission after the callback's inclusive expiry boundary while retaining that row as a replay tombstone. The callback path owns no expiry sweep, transaction callback, or application-visible lock orchestration. The existing hourly hosted-retention owner selects only strictly expired nonce rows in `expires_at`, `nonce_hash` order under the shared batch and max-batch ceilings, locks the bounded candidates with PostgreSQL `FOR UPDATE SKIP LOCKED`, and deletes those exact rows in the same statement. Account deletion independently retains its per-member nonce delete.
 - Canonical vault storage is file-native under the vault root.
 - Human-facing truth lives in Markdown documents such as `CORE.md`, journal pages, and experiment pages.
 - Canonical markdown writes now reduce to one shared `packages/core` document seam with three target shapes only: singleton documents (for example `CORE.md` and `bank/memory.md`), slugged documents (for example `bank/automations/*.md`, `bank/experiments/*.md`, and registry-backed bank records), and dated documents (for example `journal/YYYY/YYYY-MM-DD.md`). Typed singleton JSON documents such as `bank/preferences.json` remain canonical too, but they stay out of the markdown seam on purpose.
@@ -1631,10 +1632,13 @@ the same private-direct card values and never member identity, canonical record
 references, credentials, or other authority. The image route performs no
 database or remote read, writes no application log or analytics event, returns
 private no-store/no-index headers, and rejects malformed input before reading
-render assets. The fallback body remains value-free and names a truthful
-text-recovery action to avoid Apple data-detector downgrade. No persisted card
-state, authenticated card API, cleanup owner, extension network read, or second
-queue exists.
+render assets. The fallback body remains value-free and derives a stable preview
+label from the validated card kind so Messages can distinguish nutrition,
+workout, generic-summary, and challenge-standings cards without exposing card
+values or triggering Apple data-detector downgrade. Each label retains the
+member-directed request for the complete semantic text when the accepted card
+cannot render. No persisted card state, authenticated card API, cleanup owner,
+extension network read, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
@@ -2317,7 +2321,7 @@ correctness state. Outbound edit events are diagnostic only.
 
 Participant-derived thread-container authority is a seven-day lease over an
 authoritative provider observation, reused by ordinary access, AI admission,
-usage allowance, and newsletter projection. A non-direct Linq inbound may
+usage allowance, shared group reads, and group-email preparation. A non-direct Linq inbound may
 advance only the already-existing, nonremoved relationship for the
 server-resolved sender; it cannot create participant authority, clear a newer
 removal, move `lastSeenAt` backward, or use a provider timestamp later than
@@ -2805,6 +2809,39 @@ verified-private support escalation remain accepted-message capabilities; schedu
 turns create neither a feedback candidate nor a delivery-linked feedback obligation.
 Background image completion and its physical-note continuation remain bound to a
 real accepted message because they must return through that durable message route.
+The trusted completion keeps the foreground dynamic-tool contract so it resumes
+the same native provider thread, but provider continuity is not effect authority.
+An engine-owned turn-local restriction hides accepted-input capabilities and
+permits only the completion's exact hash-bound media attachment, no reply, or the
+existing exact-origin physical-note continuation until a later accepted foreground
+input becomes current. Exactly one trusted completion retains that restriction when
+the frozen batch also contains later same-route conversation input; compound batching
+does not erase generated-image provenance. That later input may use the retained
+`raw/captures/**` ref through an independently authorized action such as the existing
+group-avatar path.
+Native provider resume is only the fast path: the transcript owner also commits a
+bounded runtime-authored provenance marker for every trusted ready generated-image
+completion. An attached image retains its actual response ordinal; a completion
+that attaches nothing uses the completion turn's response ordinal so provider
+continuity cannot make a markerless generated capture look ordinary. When route
+support or a contract fingerprint prevents resume, planning restores that marker as
+provenance-only history. A native reply or later generated-ref action is eligible
+only after the outbox matches the same turn, ref, hash, media type, and byte size;
+neither the marker nor the reply relationship grants delivery or mutation authority.
+If bounded transcript retention has removed the marker, the existing generated-capture
+lookup may recover only the generated-origin classification; eligibility still
+requires a singleton same-session outbox intent for that exact ref with accepted
+physical-delivery evidence. Missing or conflicting evidence fails closed, while a
+reference absent from a retained marker, the current completion restriction, and the
+generated-capture lookup keeps the ordinary capture path.
+Multi-message provider deliveries persist one true-only fact on the exact
+physical effect that carried the intent media. That additive fact lives below a
+strict outbox schema boundary, so the first writer also establishes hosted
+runner state schema version 16 before any runner invocation. A version-15
+Worker rejects that Durable Object state during construction and cannot start a
+runner that would quarantine the newer outbox record. Version 16 is therefore a
+hard Cloudflare/runner rollback floor after deployment; recovery uses a forward
+fix on version 16 or newer.
 Ephemeral progress updates remain unavailable because queue-only background turns
 have no waiting audience and cannot durably order a progress send before the final
 reply. No scheduler-specific service, persisted authority row, queue, or second
