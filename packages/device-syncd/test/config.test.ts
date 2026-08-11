@@ -542,12 +542,16 @@ test("readConfiguredDeviceSyncRuntimeConfig returns null when hosted runtime pre
     }),
     null,
   );
-  assert.equal(
+  assert.deepEqual(
     readConfiguredDeviceSyncRuntimeConfig({
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
       DEVICE_SYNC_SECRET: "runtime-codec-secret",
     }),
-    null,
+    {
+      providerConfigs: {},
+      publicBaseUrl: "https://device-sync.example.test",
+      secret: "runtime-codec-secret",
+    },
   );
   assert.throws(
     () =>
