@@ -1,6 +1,6 @@
 # Linq message-edit batching
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -88,3 +88,21 @@ Updated: 2026-08-11
   unwraps in flight concurrently.
 - This is internal reliability work; no member-visible changelog entry is
   planned unless implementation changes a visible outcome.
+
+## Completion evidence
+
+- PR #1644 reached exact reviewed head
+  `ac1a9b0401f44c060816cb87c58f42a5ccea3dd6` with all required CI checks
+  passing and only the expected optional hosted Stripe browser lane skipped.
+- Post-base-update local proof passed app typecheck, scoped lint, docs drift,
+  the 194-test composed mailbox/crypto/service slice, and all 18 Linq
+  concurrency tests against a fresh loopback PostgreSQL database with all 176
+  migrations applied. The earlier broad diff gate passed 9,490 tests with 391
+  intentional skips and a production Next.js build.
+- ReviewGPT returned implementation, coverage, and retry-bound patch artifacts.
+  Every artifact was treated as untrusted intent, inspected, and apply-checked
+  against its stated base; only locally verified mechanisms were retained.
+- The sensitive final ReviewGPT round returned `ROUND_OUTCOME: PASS` with no
+  findings for PR #1644 at the exact reviewed head using verified
+  `gpt-5-6-pro` response metadata.
+Completed: 2026-08-11
