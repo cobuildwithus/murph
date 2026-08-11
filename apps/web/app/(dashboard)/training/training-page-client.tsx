@@ -120,15 +120,8 @@ export default function TrainingPageClient({
       setHandoffRefreshBaseline(baseline);
       void refresh({
         background: true,
-        requestRuntimeRefreshUntil: (client) => {
-          const complete = isTrainingHandoffComplete(baseline, client);
-          if (complete) {
-            setHandoffRefreshBaseline((current) =>
-              current === baseline ? undefined : current
-            );
-          }
-          return complete;
-        },
+        requestRuntimeRefreshUntil: (client) =>
+          isTrainingHandoffComplete(baseline, client),
       });
     },
     [refresh],
@@ -136,6 +129,12 @@ export default function TrainingPageClient({
   const replacementVisible = handoffRefreshBaseline !== undefined
     && client !== null
     && isTrainingHandoffComplete(handoffRefreshBaseline, client);
+  if (replacementVisible) {
+    const completedBaseline = handoffRefreshBaseline;
+    setHandoffRefreshBaseline((current) =>
+      current === completedBaseline ? undefined : current
+    );
+  }
   const handoffRefreshState: TrainingHandoffRefreshState =
     handoffRefreshBaseline === undefined
       || replacementVisible

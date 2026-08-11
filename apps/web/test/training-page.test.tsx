@@ -360,7 +360,7 @@ test("Training keeps canonical date-only labels stable across browser time zones
   }
 });
 
-test("Training requests one runtime-owned refresh after its messaging handoff returns", async () => {
+test("Training requests one runtime-owned refresh and latches a later ordinary adoption", async () => {
   const unchangedClient = await createActiveTrainingClient();
   const changedClient = createBrowserVaultQueryClient(
     await createBrowserVaultReplica({
@@ -461,13 +461,7 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
       /Start workout|Continue workout/,
     );
 
-    await act(async () => {
-      assert.equal(
-        refreshOptions?.requestRuntimeRefreshUntil?.(changedClient),
-        true,
-      );
-      currentClient = changedClient;
-    });
+    currentClient = changedClient;
     const cardioUpdate = selectBrowserVaultTraining(changedClient);
     assert.equal(cardioUpdate.recentSessions[0]?.distanceKm, 4.828032);
     await rendered.rerender(
