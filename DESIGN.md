@@ -221,6 +221,12 @@ tap-to-reveal target state. The provider caption retains only the date and meal
 count; visible totals and goals are not repeated beneath the image. V1 renders
 an unavailable fiber dash in the image without adding a fiber caption claim.
 
+Compact-table and workout fallback images use the same provider-owned chrome
+contract: keep the bitmap rectangular and badge-free, reserve empty upper-left
+clearance for the icon that Messages overlays, and let Messages supply that icon
+and the outer corner mask. Keep structural rounding only where it communicates
+an inner state, such as a progress track or set-status marker.
+
 ### iMessage Challenge Standings Card Image
 Render the app-absent standings fallback as the static counterpart to the
 shipping SwiftUI balloon. Keep the cream field, title, rank or collective
