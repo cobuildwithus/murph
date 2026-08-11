@@ -25,6 +25,7 @@ import {
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
+import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
@@ -509,7 +510,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Connect source actions and disconnect lifecycle">
-        <ConnectSourceCardStudy />
+        <ConnectSourceCardStudy
+          androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
+        />
       </StudySection>
 
       <Separator />
