@@ -1014,9 +1014,10 @@ Last verified: 2026-08-10
 - Cloudflare may exact-replay one Assistant Ask control request within the
   original request deadline after a replay-safe transport ambiguity or HTTP
   `5xx`. This applies only to group `ask`, `ask_member`, `ask_current_sender`,
-  and the dedicated `prepare` / `complete` control requests, whose stable
-  identities make identical replay idempotent. Caller cancellation, exhausted
-  deadlines, authority failures, and other `4xx` responses do not replay.
+  `message_current_sender`, and the dedicated `prepare` / `complete` control
+  requests, whose stable identities make identical replay idempotent. Caller
+  cancellation, exhausted deadlines, authority failures, and other `4xx`
+  responses do not replay.
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct
@@ -1032,27 +1033,41 @@ Last verified: 2026-08-10
   runtime and preview buckets to be ENAM Standard. Runtime code has no fallback
   bucket, migration phase, or storage-specific admission gate; ordinary retry
   and mailbox durability remain the failure boundary.
-- One-time current-sender Assistant Ask reuses the same mailbox lifecycle,
-  deterministic request identity, ten-minute expiry, isolated reviewed
-  personal read, completion append, and exact-origin group delivery. Exact
-  replay reopens and revalidates the stored group input; changed identity,
-  question, permission, target, route, or expiry becomes unavailable rather
-  than creating replacement work. It adds no scheduler, callback wait, status
-  row, grant row, retry owner, or delivery ledger.
-- The same dirty-runtime prefix admits only two server-identified,
+- One-time current-sender Assistant Ask has two target-bound completion adapters
+  over the same mailbox lifecycle, deterministic request identity, ten-minute
+  expiry, isolated reviewed personal read, and completion identity.
+  `ask_current_sender` retains exact-origin group delivery.
+  `message_current_sender` creates one deterministic
+  `assistant.notification.requested` for the same personal member: queue-only,
+  exact-text, idempotent, same source channel, current `direct-member` route
+  only, and no external group-route authority. The personal runtime's existing
+  notification consumer creates the delivery intent while retaining the
+  original completion expiry and proof anchor. Each provider-entry attempt asks
+  Web to revalidate that expiry, the exact reviewed-text digest, the same
+  personal member, and the current same-channel `direct-member` route. Expired,
+  revoked, text-mismatched, or route-drifted proof is terminal with no group or
+  alternate-route fallback. Exact replay reopens and revalidates the stored
+  group input; changed identity, question, permission, target, route, or expiry
+  becomes unavailable, and route drift cannot redirect existing work. Neither
+  path adds a scheduler, callback wait, status or grant row, retry owner,
+  delivery ledger, or second generation.
+- The same dirty-runtime prefix admits only three server-identified,
   replay-safe external-completion notification families:
   `assistant.notification.requested:phone-call-result:*` and
-  `assistant.notification.requested:usage-referral-reward:*`. Their stable
-  mailbox identity and idempotent delivery let them interrupt the idle floor;
-  the foreground-causal selector rechecks those exact dedupe-key families,
-  carries only the just-created causal outbox intent into the existing
-  write-ahead provider drain, and leaves generic notifications or unrelated
-  pending outbox work checkpoint-gated. Fresh conversation input retains
-  priority. Referral recovery also re-signals bounded oldest unconsumed
-  celebration pointers, so a post-commit signal failure remains recoverable
-  from the existing mailbox without another queue or state machine. Web must
-  not rewrite an encrypted payload after the runtime may have imported it and
-  advanced its watermark. For the exact authority-less direct-Linq
+  `assistant.notification.requested:usage-referral-reward:*`, plus exact private
+  Assistant Ask completions under `aask_done_*`. Their stable mailbox identity
+  lets them interrupt the idle floor; the foreground-causal selector rechecks
+  those exact dedupe-key families and carries only the just-created causal
+  outbox intent into the existing write-ahead provider drain. Private Assistant
+  Ask completion still repeats its Web-owned text, member, expiry, and direct
+  route authority before every provider attempt, and non-idempotent transport
+  work remains checkpoint-gated. Generic notifications or unrelated pending
+  outbox work cannot hitchhike. Fresh conversation input retains priority.
+  Referral recovery also re-signals bounded oldest unconsumed celebration
+  pointers, so a post-commit signal failure remains recoverable from the
+  existing mailbox without another queue or state machine. Web must not rewrite
+  an encrypted payload after the runtime may have imported it and advanced its
+  watermark. For the exact authority-less direct-Linq
   usage-referral shape, the local system-mailbox owner reasserts the frozen
   member/channel/direct target before model work, adds proof only in memory on
   success, terminally records a definitive stale route without sending, and

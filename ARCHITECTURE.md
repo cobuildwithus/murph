@@ -371,6 +371,24 @@ cross-runtime, scheduled, or replay-conflicting requests fail closed. This path
 creates no group, membership, permission, grant, queue, workflow, or table and
 grants no future disclosure authority.
 
+The sibling `group_sender_private` adapter powers `message_current_sender` only
+for the exact accepted group input whose author explicitly requested a private
+continuation. Web derives the canonical sender and targets only that sender's
+active personal runtime; thread-container, direct, unknown-audience, scheduled,
+stale-route, and unresolved-sender contexts fail closed. A reviewed completion
+never returns to the group. Web appends one deterministic, queue-only
+`assistant.notification.requested` for the same member's current same-channel
+`direct-member` route, with `threadIsDirect: true`, no external group-thread
+authority, and the exact reviewed text. The personal runtime consumes that
+notification through the existing delivery primitive while retaining the
+original completion expiry and proof anchor. Immediately before provider entry,
+Web reopens that proof and revalidates the unexpired private Assistant Ask, the
+exact reviewed-text digest, the same personal member, and the current
+same-channel `direct-member` route. Expired, revoked, text-mismatched, or
+route-drifted proof fails terminally with no group fallback. Replay cannot
+redirect the completion after member or route drift. This adds no second model
+turn, group wake, group outbox intent, route selector, queue, or table.
+
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
 one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
@@ -391,23 +409,23 @@ owned child before releasing the workspace. Further asks remain pending in the
 same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
 
-For a consented member or one-time current-sender target, the private read-only
-child receives the exact permission context and produces a candidate from the
-member workspace. One separate fresh-context outgoing reviewer receives only that immutable
+For a consented member, one-time current-sender disclosure, or private
+current-sender continuation, the private read-only child receives the exact
+permission context and produces a candidate from the member workspace. One
+separate fresh-context outgoing reviewer receives only that immutable
 permission, the question, and the candidate; it has no member workspace,
-history, application tools, network, or delivery authority and returns only `allow` or
-`deny`. There is no incoming reviewer and no rewrite loop. An allowed answer is
-placed on the bound group completion as untrusted data. For accepted-input
-requests, the caller group Murph runs one isolated output-only continuation with
-the existing room history, resolves references such as “that”, and writes the
-actual user-facing reply using only private facts present in the reviewed
-answer. The final outbox intent retains the completion id, expiry, and route
-proof for provider-entry revalidation. Denial or a candidate-declared
-cannot-answer yields fixed non-disclosing copy without another model turn.
-Invalid review output, provider failure, or stale
-authority discloses nothing and follows the existing retry, expiry, or terminal
-lifecycle. A denied candidate never becomes durable operation state. This adds no
-fan-out, scheduler, policy engine, result table, or second service.
+history, application tools, network, or delivery authority and returns only
+`allow` or `deny`. There is no incoming reviewer or rewrite loop. An allowed
+answer enters only its target-bound completion adapter. `consented_member` and
+`group_sender` retain the caller group's isolated output-only continuation and
+provider-entry authority recheck. `group_sender_private` instead seals the exact
+reviewed text into the personal queue-only notification above; no group
+continuation or second generation runs. Denial or a candidate-declared
+cannot-answer uses fixed non-disclosing copy. Invalid review output, provider
+failure, or stale authority discloses nothing and follows the existing retry,
+expiry, or terminal lifecycle. A denied candidate never becomes durable
+operation state. This adds no fan-out, scheduler, policy engine, result table,
+or second service.
 
 ## Hosted Connected Apps
 
