@@ -66,4 +66,5 @@ Updated: 2026-08-11
 - PostgreSQL proofs: three tests are present but skipped locally because the loopback PostgreSQL server is unavailable; exact-head CI owns their execution.
 - Review GPT round 1 accepted findings: repaired fresh-intent resolver ordering, concrete-receipt wake ownership, and maximum-cardinality transactional proof. The preliminary specialist pass returned the same wake-ownership finding plus the coverage bound; no patch artifact was returned.
 - Review GPT round 2 accepted the three round-1 repairs and required this retrospective for the repeated provider-acceptance phase-boundary defect before tactical remediation.
+- Current-main integration passed the affected assistant-engine files (314 tests), hosted callbacks plus the real Linq outbox regression (264 tests), focused Web mailbox/monitor coverage (159 passed and the same three PostgreSQL-only skips), assistant-engine/runtime/Web typechecks, and assistant-engine/runtime builds.
 - Remaining: push the corrected candidate, obtain a passing final Review GPT round, finish exact-head GitHub Actions, and close this plan.

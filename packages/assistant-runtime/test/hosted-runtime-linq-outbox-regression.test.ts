@@ -27,6 +27,7 @@ import type {
   HostedRuntimeActionApprovalPort,
 } from "../src/hosted-runtime/platform.ts";
 import {
+  buildHostedRuntimeResolvedLinqRoute,
   createHostedRuntimeEffectsPortStub,
   createHostedRuntimeWorkspace,
 } from "./hosted-runtime-test-helpers.ts";
@@ -51,11 +52,15 @@ it("sends a fresh exact-consume reaction once and retries only its Web confirmat
       headers: { "Content-Type": "application/json" },
     });
   });
-  const assertRecentInboundEngagement = vi.fn(async (request: {
-    authorityCheckOnly?: boolean;
-  }) => request.authorityCheckOnly === true
-    ? {}
-    : { providerDispatchClaimed: true });
+  const assertRecentInboundEngagement = vi.fn(async (request) => ({
+    ...(request.authorityCheckOnly === true
+      ? {}
+      : { providerDispatchClaimed: true }),
+    resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
+      directRecipientPhoneNumber: null,
+      fromPhoneNumber: null,
+    }),
+  }));
   const recordLinqDeliveryOutcome = vi.fn()
     .mockRejectedValueOnce(new Error("Web confirmation unavailable"))
     .mockResolvedValueOnce(undefined);
@@ -83,7 +88,7 @@ it("sends a fresh exact-consume reaction once and retries only its Web confirmat
     }),
   ]);
   expect(providerFetch).toHaveBeenCalledTimes(1);
-  expect(assertRecentInboundEngagement).toHaveBeenCalledTimes(1);
+  expect(assertRecentInboundEngagement).toHaveBeenCalledTimes(2);
   expect(recordLinqDeliveryOutcome).toHaveBeenCalledTimes(1);
   expect(recordLinqDeliveryOutcome).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -146,7 +151,7 @@ it("sends a fresh exact-consume reaction once and retries only its Web confirmat
     }),
   ]);
   expect(providerFetch).toHaveBeenCalledTimes(1);
-  expect(assertRecentInboundEngagement).toHaveBeenCalledTimes(1);
+  expect(assertRecentInboundEngagement).toHaveBeenCalledTimes(2);
   expect(recordLinqDeliveryOutcome).toHaveBeenCalledTimes(2);
   await expect(readAssistantOutboxIntent(
     fixture.vaultRoot,

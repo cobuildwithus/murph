@@ -99,6 +99,82 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
+        label="Unpaid Family draft with self-service abandonment"
+        state="family-draft-recovery"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canStartFamily
+            currentBillingPlanCode="launch_monthly"
+            familyDraftRecovery={{
+              checkoutAttemptId: null,
+              groupId: "design_family_draft",
+              state: "abandonable",
+            }}
+            familyState="none"
+            payerMemberId="design_family_draft_owner"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Family checkout still starting"
+        state="family-checkout-starting"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canStartFamily
+            currentBillingPlanCode="launch_monthly"
+            familyDraftRecovery={{
+              checkoutAttemptId: "design_family_checkout_attempt",
+              groupId: "design_family_checkout_draft",
+              state: "checkout_starting",
+            }}
+            familyState="none"
+            payerMemberId="design_family_checkout_starting"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Family checkout needs support recovery"
+        state="family-checkout-recovery-required"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canStartFamily
+            currentBillingPlanCode="launch_monthly"
+            familyDraftRecovery={{ state: "recovery_required" }}
+            familyState="none"
+            payerMemberId="design_family_checkout_recovery"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Family setup has state that must be preserved"
+        state="family-draft-not-abandonable"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canStartFamily
+            currentBillingPlanCode="launch_monthly"
+            familyDraftRecovery={{ state: "not_abandonable" }}
+            familyState="none"
+            payerMemberId="design_family_draft_preserved"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
         label="Group member on the $3.50 Core plan"
         state="active-core-usage"
       >

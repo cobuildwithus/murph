@@ -99,14 +99,14 @@ export const POST = withJsonError(async (request: Request) => {
   const lineLookupKey = readOptionalBodyString(body.lineLookupKey);
   const linqChatId = providerThreadId
     ?? (targetKind === "participant" ? null : providerTarget ?? target);
-  const routeLineLookupKey = lineLookupKey
-    ?? (fromPhoneNumber
-      ? null
-      : await readHostedLinqDeliveryMemberRouteLineLookupKey({
-        linqChatId,
-        memberId: userId,
-        prisma,
-      }));
+  const routeLineLookupKey = fromPhoneNumber
+    ? null
+    : lineLookupKey
+      ?? await readHostedLinqDeliveryMemberRouteLineLookupKey({
+          linqChatId,
+          memberId: userId,
+          prisma,
+        });
   const outcomeInput = {
     acceptedAt,
     answeredMailboxItemIds,

@@ -1682,6 +1682,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     jobs: input.webhook.jobs ?? [],
     provider: input.account.provider,
     providerSentAt: input.webhook.providerSentAt ?? null,
+    sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     webhookReceivedAt: input.now,
   });
   await persistHostedDeviceSyncWebhookAccepted({
@@ -2510,12 +2511,20 @@ function buildHostedWebhookDirtyResources(input: {
   jobs: readonly DeviceSyncJobInput[];
   provider: string;
   providerSentAt?: string | null;
+  sourceProviderSlug?: string | null;
   webhookReceivedAt?: string | null;
 }): HostedDeviceSyncDirtyResource[] {
   const resources: HostedDeviceSyncDirtyResource[] = [];
+  const webhookSourceProviderSlug = readHostedDirtyResourceString(
+    input.sourceProviderSlug,
+  );
+  const providerSlug = readHostedDirtyResourceString(input.provider);
 
   for (const job of input.jobs) {
     const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);
+    const payloadSourceProviderSlug = readHostedDirtyResourceString(
+      payload.sourceProviderSlug,
+    );
     resources.push({
       count: 1,
       ...buildHostedWebhookDirtyResourceTiming(input),
@@ -2523,7 +2532,13 @@ function buildHostedWebhookDirtyResources(input: {
       payload: readHostedDirtyResourcePayload(payload),
       resource: readHostedDirtyResourceString(payload.resource),
       resourceCategory: readHostedDirtyResourceString(payload.resourceCategory),
-      sourceProviderSlug: readHostedDirtyResourceString(payload.sourceProviderSlug),
+      // This field participates in resource execution identity and can be
+      // promoted back into provider input, so only provider-owned payload data
+      // may populate it. Timing attribution remains metadata-only below.
+      sourceProviderSlug: payloadSourceProviderSlug,
+      timingSourceProviderSlug: payloadSourceProviderSlug
+        ?? webhookSourceProviderSlug
+        ?? providerSlug,
       windowEnd: readHostedDirtyResourceString(payload.windowEnd),
       windowStart: readHostedDirtyResourceString(payload.windowStart),
     });
@@ -2537,6 +2552,7 @@ function buildHostedWebhookDirtyResources(input: {
       resource: null,
       resourceCategory: null,
       sourceProviderSlug: null,
+      timingSourceProviderSlug: webhookSourceProviderSlug ?? providerSlug,
       windowEnd: null,
       windowStart: null,
     });

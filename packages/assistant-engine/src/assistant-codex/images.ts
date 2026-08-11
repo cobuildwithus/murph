@@ -1,34 +1,184 @@
 import { constants as fsConstants } from 'node:fs'
 import { access, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
+
+import type {
+  AssistantModelImageDetail,
+  AssistantModelImagePart,
+  AssistantUserMessageContentPart,
+} from '../assistant/content-types.js'
 
 export interface CodexAppServerImageInput {
   bytes?: Uint8Array | Buffer
+  detail?: AssistantModelImageDetail
   mimeType?: string | null
   path?: string
 }
 
-export async function materializeCodexImagePaths(input: {
+export interface CodexAppServerPreparedImageInput {
+  detail?: AssistantModelImageDetail
+  path: string
+}
+
+const CODEX_ORIGINAL_IMAGE_DETAIL_MODELS = new Set<string>([
+  'gpt-5.6-luna',
+  'gpt-5.6-terra',
+  'gpt-5.6-sol',
+])
+const CODEX_ORIGINAL_IMAGE_DETAIL_PROVIDER_IDS = new Set<string>([
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+])
+
+export function extractCodexAppServerUserMessageImages(
+  userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
+): readonly CodexAppServerImageInput[] | undefined {
+  const images = (userMessageContent ?? []).flatMap((part) =>
+    part.type === 'image' ? [toCodexAppServerImageInput(part)] : [],
+  )
+
+  return images.length > 0 ? images : undefined
+}
+
+export function normalizeCodexAppServerImageDetails(input: {
+  images?: readonly CodexAppServerImageInput[] | null
+  model?: string | null
+  modelProvider?: string | null
+  turnKind: 'initial' | 'steer'
+}): readonly CodexAppServerImageInput[] | undefined {
+  const images = input.images ?? []
+  if (images.length === 0) {
+    return undefined
+  }
+
+  const originalDetailSupported =
+    input.turnKind === 'initial' &&
+    images.length === 1 &&
+    CODEX_ORIGINAL_IMAGE_DETAIL_MODELS.has(
+      normalizeNullableString(input.model) ?? '',
+    ) &&
+    CODEX_ORIGINAL_IMAGE_DETAIL_PROVIDER_IDS.has(
+      normalizeNullableString(input.modelProvider) ?? '',
+    )
+
+  return images.map((image) =>
+    image.detail === 'original' && !originalDetailSupported
+      ? { ...image, detail: 'high' }
+      : image,
+  )
+}
+
+export async function materializeCodexImages(input: {
   images?: readonly CodexAppServerImageInput[] | null
   tempRoot: string
-}): Promise<string[]> {
+}): Promise<CodexAppServerPreparedImageInput[]> {
   const imageInputs = input.images ?? []
-  const imagePaths: string[] = []
+  const preparedImages: CodexAppServerPreparedImageInput[] = []
 
   for (const [index, image] of imageInputs.entries()) {
-    imagePaths.push(
-      await materializeCodexImagePath({
+    preparedImages.push({
+      ...(image.detail ? { detail: image.detail } : {}),
+      path: await materializeCodexImagePath({
         image,
         index,
         tempRoot: input.tempRoot,
       }),
+    })
+  }
+
+  return preparedImages
+}
+
+function toCodexAppServerImageInput(
+  input: AssistantModelImagePart,
+): CodexAppServerImageInput {
+  const imageMetadata = {
+    ...(input.detail ? { detail: input.detail } : {}),
+    mimeType: input.mimeType ?? input.mediaType ?? null,
+  }
+
+  if (typeof input.image === 'string') {
+    if (input.image.startsWith('data:')) {
+      return {
+        bytes: decodeCodexDataUrlToBytes(input.image),
+        ...imageMetadata,
+      }
+    }
+
+    return {
+      path: input.image,
+      ...imageMetadata,
+    }
+  }
+
+  if (input.image instanceof URL) {
+    if (input.image.protocol === 'data:') {
+      return {
+        bytes: decodeCodexDataUrlToBytes(input.image.href),
+        ...imageMetadata,
+      }
+    }
+
+    if (input.image.protocol === 'file:') {
+      return {
+        path: fileURLToPath(input.image),
+        ...imageMetadata,
+      }
+    }
+
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_IMAGE_INVALID',
+      `Codex app-server image input does not support URL scheme "${input.image.protocol}".`,
     )
   }
 
-  return imagePaths
+  if (input.image instanceof ArrayBuffer) {
+    return {
+      bytes: new Uint8Array(input.image),
+      ...imageMetadata,
+    }
+  }
+
+  return {
+    bytes: input.image,
+    ...imageMetadata,
+  }
+}
+
+function decodeCodexDataUrlToBytes(dataUrl: string): Uint8Array {
+  const match = /^data:([^,]*?),(.*)$/su.exec(dataUrl)
+  if (!match) {
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_IMAGE_INVALID',
+      'Codex app-server image input data URL is malformed.',
+    )
+  }
+
+  const metadata = match[1] ?? ''
+  const payload = match[2] ?? ''
+  const metadataParts = metadata
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+
+  if (metadataParts.includes('base64')) {
+    return Uint8Array.from(Buffer.from(payload, 'base64'))
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CODEX_IMAGE_INVALID',
+    'Codex app-server image input data URLs must use base64 encoding.',
+  )
 }
 
 async function materializeCodexImagePath(input: {

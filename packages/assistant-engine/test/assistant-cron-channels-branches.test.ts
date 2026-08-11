@@ -638,6 +638,7 @@ describe('assistant channel descriptors and runtime edges', () => {
       createTelegramResponse(400, {
         description: 'forbidden',
         error_code: 403,
+        ok: false,
       }),
     ])
 
