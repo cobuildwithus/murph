@@ -263,3 +263,9 @@ Updated: 2026-08-11
   415 tests), app-local typecheck, scoped ESLint, and the real PostgreSQL
   one-connection incident replay (1 file, 4 tests, including the bounded
   32-candidate 8/13-statement shapes).
+- Diff-aware hosted-web verification passed on the merge successor: dependency,
+  workspace, orchestration, crypto, privacy-log, and provider-boundary guards;
+  prepared typecheck; 721 test files/9,594 tests; lint with only existing
+  warnings; dev smoke; and the production Next build. A fresh current-main
+  merge-tree was clean and its newer paths did not overlap this database path,
+  so no behind-only merge was added.
