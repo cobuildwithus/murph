@@ -31,8 +31,10 @@ import {
 } from "./errors";
 import {
   appendHostedFamilyChatNotificationTx,
+  buildHostedFamilyDraftCheckoutConflictNotification,
   buildHostedFamilyInviteAcceptedNotification,
   acceptHostedFamilyInviteFromTelegramTx,
+  HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
   resolveHostedFamilyInviteTokenForInbound,
   resolveHostedFamilyChatNotificationRouteTx,
 } from "./family-plan";
@@ -100,6 +102,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       text: telegramMessage.text ?? null,
     }) !== null;
     let familyInviteNotAccepted = false;
+    let familyDraftCheckoutConflictMemberId: string | null = null;
     let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
     let familyActivationWake: HostedWebhookWakeHandoff | null = null;
     try {
@@ -122,10 +125,28 @@ export async function planHostedOnboardingTelegramWebhook(input: {
         tx: input.prisma,
       });
     } catch (error) {
-      if (!isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error)) {
+      if (
+        isHostedOnboardingError(error)
+        && error.code === HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE
+      ) {
+        const memberLookup = await resolveHostedMemberCoreByTelegramUserId({
+          prisma: input.prisma,
+          telegramUserId: summary.senderTelegramUserId,
+        });
+        if (memberLookup.status !== "found") {
+          throw hostedOnboardingError({
+            code: "HOSTED_FAMILY_DRAFT_RECOVERY_MEMBER_MISSING",
+            httpStatus: 500,
+            message: "The Family invite recovery member could not be resolved.",
+            retryable: true,
+          });
+        }
+        familyDraftCheckoutConflictMemberId = memberLookup.core.id;
+      } else if (!isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error)) {
         throw error;
+      } else {
+        familyInviteNotAccepted = true;
       }
-      familyInviteNotAccepted = true;
     }
     if (familyAcceptance) {
       const route = await resolveHostedFamilyChatNotificationRouteTx({
@@ -158,6 +179,52 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           : familyActivationWake
             ? { wakeHandoffs: [familyActivationWake] }
             : {}),
+      };
+    }
+
+    if (familyDraftCheckoutConflictMemberId) {
+      const route = await resolveHostedFamilyChatNotificationRouteTx({
+        fallbackTelegramThreadId: telegramMessage.threadId,
+        fallbackTelegramUserId: summary.senderTelegramUserId,
+        memberId: familyDraftCheckoutConflictMemberId,
+        tx: input.prisma,
+      });
+      if (!route) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_DRAFT_RECOVERY_ROUTE_MISSING",
+          httpStatus: 500,
+          message: "The Family invite recovery route could not be resolved.",
+          retryable: true,
+        });
+      }
+      const notification = await appendHostedFamilyChatNotificationTx({
+        memberId: familyDraftCheckoutConflictMemberId,
+        notification: buildHostedFamilyDraftCheckoutConflictNotification(),
+        occurredAt: summary.occurredAt,
+        route,
+        sourceEventId: `${eventId}:family-draft-recovery`,
+        tx: input.prisma,
+      });
+      if (!notification.mailboxItemId) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_DRAFT_RECOVERY_NOTIFICATION_MISSING",
+          httpStatus: 500,
+          message: "The Family invite recovery message could not be queued.",
+          retryable: true,
+        });
+      }
+      return {
+        desiredSideEffects: [],
+        response: {
+          ok: true,
+          reason: "family-invite-draft-recovery-required",
+        },
+        wakeHandoffs: [{
+          eventId,
+          mailboxItemId: notification.mailboxItemId,
+          source: "telegram",
+          userId: familyDraftCheckoutConflictMemberId,
+        }],
       };
     }
 

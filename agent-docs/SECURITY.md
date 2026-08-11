@@ -315,6 +315,15 @@ Last verified: 2026-08-09
   membership check under the group transaction as a concurrency backstop.
   Contact hints, names, stale invitations, and a browser-supplied member id are
   never membership or payment authority.
+- An active Family owner membership without paid billing is not by itself
+  sponsorship authority. Automatic invite recovery may delete only the exact
+  accepting member's never-paid, owner-only group after proving it has no
+  invites, other memberships, paid capacity, Customer, Subscription, billing
+  period, or live or inconsistent Checkout claim. The authenticated Settings
+  recovery route must enforce the normal app session, same-origin mutation
+  check, and suspension fence. Stripe retrieval and expiry happen before the
+  transaction; the locked transaction then revalidates the exact group and
+  claim so completion, replacement, or new authority fails closed.
 - Group sponsorship separates funding authority from permission to speak into
   the room. A valid current funding locator may identify only the frozen group
   beneficiary. Alias, note, or running-bit content is accepted only from the

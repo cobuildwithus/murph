@@ -409,6 +409,19 @@ Last verified: 2026-08-10
   one-invoice/one-payment refund; partial refunds, balance credit, credit notes,
   pagination, or multiple allocations remain support-required rather than
   guessed.
+- A never-paid Family owner draft is recoverable without a repair queue or new
+  status. Invite acceptance may treat only an exact inert owner-only group as
+  removable, then claim the invite, write the destination membership, and
+  delete that draft in one transaction so a later validation failure cannot
+  strand or consume the invite. An authenticated manual abandonment first
+  retrieves and, when needed, expires the exact bound Checkout outside the
+  transaction. The owner lock then rechecks every draft relation, billing
+  authority field, and Checkout claim. A completed or replacement Checkout,
+  another member or invite, paid capacity, direct paid conversion, or any
+  inconsistent billing shape wins and leaves the group intact. An unbound
+  Checkout claim becomes removable only after the existing 24-hour stale-claim
+  boundary; delayed Checkout creation must expire its newly created Session
+  when the later bind finds that the claim or group no longer exists.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a

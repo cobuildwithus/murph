@@ -125,7 +125,7 @@ export async function closeUnboundHostedSubscriptionCheckout(input: {
   }
 }
 
-function isStripeResourceMissingError(error: unknown): boolean {
+export function isStripeResourceMissingError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) {
     return false;
   }

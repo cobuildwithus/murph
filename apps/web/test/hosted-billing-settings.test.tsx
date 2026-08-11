@@ -1110,7 +1110,7 @@ describe("HostedBillingSettings", () => {
         /Your Family plan needs billing attention/u,
       );
       assert.doesNotMatch(rendered.container.textContent ?? "", /Current plan/u);
-      assert.doesNotMatch(rendered.container.textContent ?? "", /Choose Family/u);
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Start your own Family plan/u);
 
       const manageButton = findButtonByText(
         rendered.window.document,
@@ -1195,9 +1195,77 @@ describe("HostedBillingSettings", () => {
       currentBillingPlanCode: "launch_monthly",
     }));
 
-    assert.match(markup, /Choose Family/);
+    assert.match(markup, /Start your own Family plan/);
     assert.match(markup, /Choose Pulse, Edge, or Max for each person/);
     assert.match(markup, /From \$7\/person/);
+  });
+
+  test("offers self-service recovery for an unfinished unpaid Family setup", async () => {
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new Error("Family billing changed before recovery."),
+    );
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftOwner: true,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Your unfinished Family setup is not paid/u,
+      );
+      const abandonButton = findButtonByText(
+        rendered.window.document,
+        "Abandon Family setup",
+        rendered.window,
+      );
+      await act(async () => {
+        abandonButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /expires any open checkout and removes only the unpaid Family setup/u,
+      );
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /join someone else's Family using their invite/u,
+      );
+
+      const confirmButton = findButtonByText(
+        rendered.window.document,
+        "Abandon unpaid setup",
+        rendered.window,
+      );
+      await act(async () => {
+        confirmButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+        method: "DELETE",
+        url: "/api/settings/billing/family/draft",
+      });
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /Family billing changed before recovery/u,
+      );
+    } finally {
+      await rendered.cleanup();
+    }
   });
 
   test("routes a current Max member through the canonical Family owner", async () => {
@@ -1222,13 +1290,34 @@ describe("HostedBillingSettings", () => {
       },
     ));
 
-    const chooseFamilyButton = findButtonByText(
+    const startFamilyButton = findButtonByText(
       rendered.window.document,
-      "Choose Family",
+      "Start your own Family plan",
       rendered.window,
     );
     await act(async () => {
-      chooseFamilyButton.dispatchEvent(
+      startFamilyButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /You will own this Family plan and pay for every included member/u,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /To join someone else's Family, use the invite they sent you/u,
+    );
+
+    const confirmButton = findButtonByText(
+      rendered.window.document,
+      "Start a plan I pay for",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(
         new rendered.window.Event("click", { bubbles: true }),
       );
     });

@@ -22,21 +22,37 @@ import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
+interface HostedFamilyCheckoutConfirmation {
+  cancelLabel: string;
+  confirmLabel: string;
+  description: string | null;
+  title: string;
+}
+
 export function HostedFamilyStartButton(props: {
   block?: boolean;
-  trialConversionConfirmation?: {
-    cancelLabel: string;
-    confirmLabel: string;
-    description: string;
-    title: string;
-  };
   label: string;
+  ownershipConfirmation?: boolean;
+  trialConversionConfirmation?: Omit<HostedFamilyCheckoutConfirmation, "description"> & {
+    description: string;
+  };
   variant?: "default" | "secondary";
 }) {
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const confirmation: HostedFamilyCheckoutConfirmation | null =
+    props.trialConversionConfirmation ?? (
+      props.ownershipConfirmation
+        ? {
+            cancelLabel: "I'll use an invite",
+            confirmLabel: "Start a plan I pay for",
+            description: null,
+            title: "Start your own Family plan?",
+          }
+        : null
+    );
 
   async function startCheckout() {
     setErrorMessage(null);
@@ -76,7 +92,7 @@ export function HostedFamilyStartButton(props: {
         type="button"
         variant={props.variant ?? "default"}
         onClick={() => {
-          if (props.trialConversionConfirmation) {
+          if (confirmation) {
             setConfirmationOpen(true);
             return;
           }
@@ -97,7 +113,7 @@ export function HostedFamilyStartButton(props: {
           {statusMessage}
         </p>
       ) : null}
-      {props.trialConversionConfirmation ? (
+      {confirmation ? (
         <Dialog
           open={confirmationOpen}
           onOpenChange={(open) => {
@@ -108,11 +124,18 @@ export function HostedFamilyStartButton(props: {
         >
           <DialogContent className="max-w-md gap-6 p-6 md:p-7">
             <DialogHeader className="pr-10">
-              <DialogTitle>
-                {props.trialConversionConfirmation.title}
-              </DialogTitle>
-              <DialogDescription>
-                {props.trialConversionConfirmation.description}
+              <DialogTitle>{confirmation.title}</DialogTitle>
+              <DialogDescription className="space-y-2">
+                <span className="block">
+                  You will own this Family plan and pay for every included member.
+                </span>
+                <span className="block">
+                  To join someone else&apos;s Family, use the invite they sent you
+                  instead of starting a plan here.
+                </span>
+                {confirmation.description ? (
+                  <span className="block">{confirmation.description}</span>
+                ) : null}
               </DialogDescription>
             </DialogHeader>
             {errorMessage ? (
@@ -128,9 +151,7 @@ export function HostedFamilyStartButton(props: {
                 disabled={isSubmitting}
                 className="w-full"
               >
-                {isSubmitting
-                  ? "Starting Family..."
-                  : props.trialConversionConfirmation.confirmLabel}
+                {isSubmitting ? "Starting Family..." : confirmation.confirmLabel}
               </Button>
               <Button
                 type="button"
@@ -140,7 +161,7 @@ export function HostedFamilyStartButton(props: {
                 disabled={isSubmitting}
                 className="w-full"
               >
-                {props.trialConversionConfirmation.cancelLabel}
+                {confirmation.cancelLabel}
               </Button>
             </DialogFooter>
           </DialogContent>

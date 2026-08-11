@@ -26,6 +26,7 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 import { BillingPortalButton } from "./billing-portal-button";
+import { HostedFamilyAbandonButton } from "./hosted-family-abandon-button";
 import { HostedFamilyStartButton } from "./hosted-family-start-button";
 import { HostedPlanChangeButton } from "./hosted-plan-change-button";
 import { HostedPlanCheckoutButton } from "./hosted-plan-checkout-button";
@@ -66,6 +67,7 @@ export function HostedBillingSettings(props: {
   currentBillingPlanCode?: unknown;
   currentPeriodEnd?: Date | null;
   familyBillingOwner?: boolean;
+  familyDraftOwner?: boolean;
   familyState?: "none" | "owner" | "sponsored";
   groupPaymentMethodSaved?: boolean;
   payerMemberId?: string | null;
@@ -107,6 +109,7 @@ export function HostedBillingSettings(props: {
   const familyCurrent = familyState === "owner" || familyState === "sponsored";
   const activeFamilyOwner = familyState === "owner";
   const familyBillingOwner = props.familyBillingOwner === true || activeFamilyOwner;
+  const familyDraftOwner = props.familyDraftOwner === true && !familyBillingOwner;
   const sponsoredMember = familyState === "sponsored";
   const ownAccessActive =
     props.billingStatus === "active"
@@ -477,7 +480,14 @@ export function HostedBillingSettings(props: {
             ? null
           : props.canStartFamily === true
             ? (
-                <HostedFamilyStartButton block label="Choose Family" />
+                <div className="flex w-full flex-col gap-1">
+                  <HostedFamilyStartButton
+                    block
+                    label="Start your own Family plan"
+                    ownershipConfirmation
+                  />
+                  {familyDraftOwner ? <HostedFamilyAbandonButton /> : null}
+                </div>
               )
             : null,
       current: familyCurrent,
@@ -502,7 +512,9 @@ export function HostedBillingSettings(props: {
   const retainedPlan = currentPlanCode
     ? getHostedBillingPlanDefinition(currentPlanCode)
     : null;
-  const noPlanText = familyBillingOwner && !activeFamilyOwner
+  const noPlanText = familyDraftOwner
+    ? "Your unfinished Family setup is not paid. Continue checkout to start a plan you own, or abandon it before joining someone else's Family."
+    : familyBillingOwner && !activeFamilyOwner
     ? "Your Family plan needs billing attention. Use Manage Family billing to repair or cancel it."
     : starterAccessActive
       ? "Your non-expiring starter usage is active. Choose a monthly plan whenever you want recurring included usage."

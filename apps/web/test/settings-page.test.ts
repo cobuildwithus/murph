@@ -90,6 +90,7 @@ const mocks = vi.hoisted(() => ({
     currentBillingPhase?: unknown;
     currentBillingPlanCode?: unknown;
     familyBillingOwner?: boolean;
+    familyDraftOwner?: boolean;
     familyState?: "none" | "owner" | "sponsored";
     groupPaymentMethodSaved?: boolean;
     payerMemberId?: string | null;
@@ -2294,6 +2295,7 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     canStartFamily: true,
     familyBillingOwner: false,
+    familyDraftOwner: true,
     familyState: "none",
   }), undefined);
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(

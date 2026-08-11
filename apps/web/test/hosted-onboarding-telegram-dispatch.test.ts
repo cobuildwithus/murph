@@ -1739,6 +1739,218 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
   });
 
+  it("queues an actionable recovery reply when an unfinished owner Checkout blocks a Telegram invite", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const acceptedMemberId = "member_telegram_family_draft";
+    const invite = {
+      acceptedAt: null,
+      acceptedByMemberId: null,
+      channel: "telegram",
+      createdAt: new Date("2026-06-18T12:00:00.000Z"),
+      expiresAt: new Date("2026-07-01T12:00:00.000Z"),
+      group: {
+        billingStatus: HostedBillingStatus.active,
+        id: "hbag_paid_family",
+        ownerMemberId: "member_paid_family_owner",
+        suspendedAt: null,
+      },
+      groupId: "hbag_paid_family",
+      id: "invite_telegram_draft_recovery",
+      inviteCode: "invite_telegram_draft_recovery",
+      invitedByMemberId: "member_paid_family_owner",
+      planCode: "pulse",
+      status: "pending",
+      targetEmailEncrypted: null,
+      targetEmailLookupKey: null,
+      targetLabel: "Invitee",
+      targetPhoneLookupKey: null,
+      targetPhoneNumberEncrypted: null,
+      targetTelegramUsernameEncrypted: null,
+      targetTelegramUsernameLookupKey:
+        createHostedTelegramUsernameLookupKey("@invitee_user"),
+      updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+    };
+    const hostedAccountGroupInviteUpdateMany = vi.fn();
+    const hostedAccountGroupPlanCapacityFindMany = vi.fn();
+    const hostedAccountGroupDeleteMany = vi.fn();
+    const hostedAccountGroupMembershipFindFirst = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        group: {
+          billingStatus: HostedBillingStatus.not_started,
+          id: "hbag_unpaid_draft",
+          ownerMemberId: acceptedMemberId,
+          suspendedAt: null,
+        },
+        role: "owner",
+      });
+    const routingRecord = {
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqHomeLineAssignedAt: null,
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      member: {
+        billingStatus: HostedBillingStatus.not_started,
+        createdAt: new Date("2026-06-18T12:00:00.000Z"),
+        id: acceptedMemberId,
+        suspendedAt: null,
+        updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+      },
+      memberId: acceptedMemberId,
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      replyAliasLookupKey: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: createHostedTelegramUserLookupKey("456"),
+    };
+    const prisma = withPrismaTransaction({
+      hostedAccountGroup: {
+        deleteMany: hostedAccountGroupDeleteMany,
+        findUnique: vi.fn().mockResolvedValue({
+          billingRef: {
+            billedSeatCount: null,
+            checkoutAttemptId: "hbfca_telegram_draft",
+            checkoutCreatedAt: new Date("2026-06-18T12:00:00.000Z"),
+            checkoutSeatCount: 2,
+            currentBillingPhase: null,
+            currentPeriodEnd: null,
+            currentPeriodStart: null,
+            lastStripeEventCreatedAt: null,
+            stripeCheckoutSessionIdEncrypted:
+              "encrypted:cs_test_telegram_draft",
+            stripeCheckoutSessionLookupKey:
+              "hbidx:stripe-checkout-session:v1:telegram-draft",
+            stripeCustomerIdEncrypted: null,
+            stripeCustomerLookupKey: null,
+            stripeSubscriptionIdEncrypted: null,
+            stripeSubscriptionItemIdEncrypted: null,
+            stripeSubscriptionItemLookupKey: null,
+            stripeSubscriptionLookupKey: null,
+          },
+          billingStatus: HostedBillingStatus.not_started,
+          id: "hbag_unpaid_draft",
+          invites: [],
+          memberships: [{
+            memberId: acceptedMemberId,
+            role: "owner",
+            status: "active",
+          }],
+          ownerMemberId: acceptedMemberId,
+          planCapacities: [],
+          suspendedAt: null,
+        }),
+      },
+      hostedAccountGroupInvite: {
+        count: vi.fn().mockResolvedValue(0),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        updateMany: hostedAccountGroupInviteUpdateMany,
+      },
+      hostedAccountGroupMembership: {
+        count: vi.fn().mockResolvedValue(1),
+        findFirst: hostedAccountGroupMembershipFindFirst,
+        upsert: vi.fn(),
+      },
+      hostedAccountGroupPlanCapacity: {
+        findMany: hostedAccountGroupPlanCapacityFindMany,
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingRef: null,
+          billingStatus: HostedBillingStatus.not_started,
+        }),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([routingRecord]),
+        findUnique: vi.fn().mockResolvedValue(routingRecord),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 334,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Invitee",
+            id: 456,
+            username: "invitee_user",
+          },
+          message_id: 5,
+          text: "/start family_invite_telegram_draft_recovery",
+        },
+        update_id: 334,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "family-invite-draft-recovery-required",
+    });
+
+    expect(hostedAccountGroupInviteUpdateMany).not.toHaveBeenCalled();
+    expect(hostedAccountGroupPlanCapacityFindMany).not.toHaveBeenCalled();
+    expect(hostedAccountGroupDeleteMany).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId:
+            "assistant.notification.requested:family-chat:member_telegram_family_draft:telegram:update:334:family-draft-recovery",
+          kind: "assistant.notification.requested",
+          notification: expect.objectContaining({
+            responsePolicy: {
+              kind: "require_send_exact_text",
+              text:
+                "Your Family invite was not used. You still have an unfinished Family checkout of your own. Open Murph Settings and choose Abandon Family setup, then use this invite again.",
+            },
+            route: expect.objectContaining({
+              channel: "telegram",
+              delivery: {
+                kind: "thread",
+                target: "123",
+              },
+            }),
+          }),
+          userId: acceptedMemberId,
+        }),
+      }),
+    );
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: acceptedMemberId,
+      mailboxItemId:
+        "mailbox_assistant.notification.requested:family-chat:member_telegram_family_draft:telegram:update:334:family-draft-recovery",
+    });
+  });
+
   it("routes unknown token-shaped Telegram text to the assistant", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedMemberRoutingFindUnique = vi.fn(async (args?: { where?: { memberId?: string } }) => {

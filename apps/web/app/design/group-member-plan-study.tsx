@@ -99,6 +99,23 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
+        label="Unpaid Family draft with self-service abandonment"
+        state="family-draft-recovery"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canStartFamily
+            currentBillingPlanCode="launch_monthly"
+            familyDraftOwner
+            familyState="none"
+            payerMemberId="design_family_draft_owner"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
         label="Group member on the $3.50 Core plan"
         state="active-core-usage"
       >

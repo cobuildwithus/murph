@@ -155,6 +155,13 @@ export class HostedBillingBrowserDriver {
   ): Promise<HostedBillingCheckoutStart> {
     return this.runStep("family-checkout-open", "murph-settings", async () => {
       await this.openSettings(actor);
+      await clickHydratedMurphControl(
+        actor.page,
+        actor.page.getByRole("button", {
+          exact: true,
+          name: "Start your own Family plan",
+        }),
+      );
       const [response] = await Promise.all([
         actor.page.waitForResponse(
           isApiResponse("/api/settings/billing/family/checkout", "POST"),
@@ -163,7 +170,7 @@ export class HostedBillingBrowserDriver {
           actor.page,
           actor.page.getByRole("button", {
             exact: true,
-            name: "Choose Family",
+            name: "Start a plan I pay for",
           }),
         ),
       ]);
@@ -178,6 +185,13 @@ export class HostedBillingBrowserDriver {
   ): Promise<void> {
     await this.runStep("settings-convert-paid-individual-to-family", "murph-settings", async () => {
       await this.openSettings(actor);
+      await clickHydratedMurphControl(
+        actor.page,
+        actor.page.getByRole("button", {
+          exact: true,
+          name: "Start your own Family plan",
+        }),
+      );
       const [response] = await Promise.all([
         actor.page.waitForResponse(
           isApiResponse("/api/settings/billing/family/checkout", "POST"),
@@ -186,7 +200,7 @@ export class HostedBillingBrowserDriver {
           actor.page,
           actor.page.getByRole("button", {
             exact: true,
-            name: "Choose Family",
+            name: "Start a plan I pay for",
           }),
         ),
       ]);

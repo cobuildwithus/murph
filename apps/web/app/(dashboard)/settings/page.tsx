@@ -186,6 +186,7 @@ export default async function SettingsPage({
   const activeFamilyOwner = familyOwner?.billingActive === true;
   const familyBillingOwner = familyOwner !== null
     && isHostedFamilyBillingPortalManageable(familyOwner.billingStatus);
+  const familyDraftOwner = familyOwner?.billingStatus === "not_started";
   const familyOwnerUsageTopUpMember =
     resolveActiveFamilyOwnerUsageTopUpMember(familyOwner);
   const sponsoredMember = familyAccess !== null && familyOwner === null;
@@ -520,6 +521,7 @@ export default async function SettingsPage({
           canSwitchToEdge={canSwitchToEdge}
           canSwitchToGroup={canSwitchToGroup}
           familyBillingOwner={familyBillingOwner}
+          familyDraftOwner={familyDraftOwner}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
           groupPaymentMethodSaved={groupPaymentMethodSaved}
           planChangePending={planChangePending}
