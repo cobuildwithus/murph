@@ -13,7 +13,9 @@ share authorization semantics.
 ## Success criteria
 
 - The preliminary group-membership read and canonical RepeatableRead snapshot
-  select at most the admitted participant maximum plus one overflow sentinel.
+  select at most the composed shared-read raw-member maximum plus one overflow
+  sentinel, while the result independently enforces the lower eligible email-
+  participant maximum.
 - Each canonical member share relation selects the email authorization grant,
   the full admitted authorized-share maximum, and only one overflow sentinel.
 - Oversized membership or share snapshots fail closed before access/email
@@ -34,7 +36,8 @@ share authorization semantics.
 
 ## Constraints
 
-- Reuse the existing hosted runtime participant and authorized-share limits.
+- Reuse the existing hosted runtime raw shared-read member, eligible email-
+  participant, and authorized-share limits.
 - Preserve the final RepeatableRead authority snapshot and stable proof
   derivation.
 - Keep queries and ordering deterministic, including stable row tie-breakers.
@@ -78,3 +81,10 @@ share authorization semantics.
   the exact Prisma order/take shape and composed reader call counts are covered
   here, while the unchanged verified-email owner already proves one email batch,
   one envelope batch, and concurrency-capped KMS unwraps in its own suite.
+- Final ReviewGPT found that the first candidate had applied the 100 eligible
+  email-participant limit to raw group memberships. The corrected reader reuses
+  the composed shared-read owner's 200-member raw bound for both membership
+  queries and separately rejects the 101st active, canonically authorized email
+  participant. Focused proof covers 101 raw members with 100 eligible through
+  preparation and final recipients, 101 eligible participants, both raw
+  201-member overflow stages, and the exact 201-row query sentinels.

@@ -5,6 +5,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
   HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
 } from "@murphai/hosted-execution/runtime-control";
 import { normalizeHostedEmailAddress } from "@murphai/runtime-state";
 
@@ -67,7 +68,7 @@ export type HostedGroupEmailPreparationResult =
 type ReadClient = PrismaClient;
 
 const HOSTED_GROUP_EMAIL_MEMBER_QUERY_TAKE =
-  HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1;
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS + 1;
 const HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY = "group-email.v0";
 // The selected relation also carries the exact group-email.v0 authorization
 // grant, so retain that row plus the first over-limit authorized-share row.
@@ -256,7 +257,7 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
   if (!group) {
     return { status: "unavailable", unavailableReason: "group_not_found" };
   }
-  if (group.members.length > HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX) {
+  if (group.members.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS) {
     return {
       status: "unavailable",
       unavailableReason: "authorization_snapshot_too_large",
@@ -369,7 +370,7 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
   }
   if (
     canonicalGroup.members.length
-    > HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX
+    > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS
   ) {
     return {
       status: "unavailable",
@@ -445,6 +446,12 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
             }),
           }
         : null;
+    if (participants.length >= HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX) {
+      return {
+        status: "unavailable",
+        unavailableReason: "authorization_snapshot_too_large",
+      };
+    }
     participants.push({
       address: emailUnchanged?.address ?? null,
       authorizedShares: member.vaultSharesGranted

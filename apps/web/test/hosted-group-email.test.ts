@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
   HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
 } from "@murphai/hosted-execution/runtime-control";
 
 const mocks = vi.hoisted(() => ({
@@ -70,13 +71,13 @@ describe("hosted group email authorization", () => {
     expect(preliminaryMembers).toEqual(expect.objectContaining({
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: { memberId: true },
-      take: HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1,
+      take: HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS + 1,
     }));
 
     const canonicalMembers = memberQueries[1]?.select?.members;
     expect(canonicalMembers).toEqual(expect.objectContaining({
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      take: HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1,
+      take: HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS + 1,
     }));
     expect(
       canonicalMembers?.select?.member?.select?.vaultSharesGranted,
@@ -109,6 +110,73 @@ describe("hosted group email authorization", () => {
     );
     expect(result.missingEmailParticipants).toEqual([]);
   });
+
+  it("admits 101 raw members when exactly 100 have canonical email authorization", async () => {
+    const memberIds = buildGroupEmailMemberIds(
+      HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1,
+    );
+    const eligibleMemberIds = memberIds.slice(
+      0,
+      HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+    );
+    const prisma = createPrismaMock({ groupEmailMemberIds: memberIds });
+    prisma.hostedVaultShare.findMany.mockResolvedValue(
+      eligibleMemberIds.map(buildGroupEmailGrant),
+    );
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    const prepared = await prepareHostedGroupEmail({
+      runtimeMemberId: "group_runtime_member",
+    });
+    if (prepared.status !== "ok") {
+      throw new Error("Expected 100 eligible participants to remain valid.");
+    }
+    expect(prepared.participants).toHaveLength(
+      HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+    );
+
+    const recipients = await readHostedGroupEmailRecipients({
+      expectedGroupEmailAuthorizationProof: prepared.authorizationProof,
+      groupId: prepared.groupId,
+      runtimeMemberId: "group_runtime_member",
+    });
+    expect(recipients.status).toBe("ok");
+    if (recipients.status !== "ok") {
+      throw new Error("Expected final recipient resolution to remain valid.");
+    }
+    expect(recipients.recipients).toHaveLength(
+      HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+    );
+  });
+
+  it.each(["prepare", "recipients"] as const)(
+    "fails 101 eligible email participants during %s",
+    async (operation) => {
+      const memberIds = buildGroupEmailMemberIds(
+        HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1,
+      );
+      const prisma = createPrismaMock({ groupEmailMemberIds: memberIds });
+      prisma.hostedVaultShare.findMany.mockResolvedValue(
+        memberIds.map(buildGroupEmailGrant),
+      );
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      const result = operation === "prepare"
+        ? await prepareHostedGroupEmail({
+            runtimeMemberId: "group_runtime_member",
+          })
+        : await readHostedGroupEmailRecipients({
+            expectedGroupEmailAuthorizationProof: "stale-proof",
+            groupId: "hgrp_123",
+            runtimeMemberId: "group_runtime_member",
+          });
+
+      expect(result).toEqual({
+        status: "unavailable",
+        unavailableReason: "authorization_snapshot_too_large",
+      });
+    },
+  );
 
   it("admits exactly the authorized-share maximum plus the email grant", async () => {
     const memberId = "member_share_boundary";
@@ -147,10 +215,10 @@ describe("hosted group email authorization", () => {
     });
   });
 
-  it("fails before access and email expansion when preliminary membership is one over", async () => {
+  it("fails before access and email expansion when raw membership is one over", async () => {
     const prisma = createPrismaMock({
       groupEmailMemberIds: buildGroupEmailMemberIds(
-        HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1,
+        HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS + 1,
       ),
     });
     mocks.getPrisma.mockReturnValue(prisma);
@@ -166,13 +234,13 @@ describe("hosted group email authorization", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it("fails canonical one-over membership before proof or recipient construction", async () => {
+  it("fails canonical one-over raw membership before proof or recipient construction", async () => {
     const prisma = createPrismaMock({
       groupEmailCanonicalMemberIds: buildGroupEmailMemberIds(
-        HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1,
+        HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS + 1,
       ),
       groupEmailPreliminaryMemberIds: buildGroupEmailMemberIds(
-        HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX,
+        HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
       ),
     });
     mocks.getPrisma.mockReturnValue(prisma);
