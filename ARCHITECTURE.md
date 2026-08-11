@@ -1792,7 +1792,20 @@ existing assistant-style fields and bounded explicit room-context Markdown. It
 stores no plaintext setup, chat id, roster, provider actor, message, contact
 label, or participant handle. Before the transaction for the first inbound on
 an unbound Linq group, Web performs one bounded current-chat read and resolves
-at most 32 active non-Murph roster handles to member ids. Inside the existing
+at most 32 active non-Murph roster handles to member ids. Across provisional
+ownership planning, live `read_chat_participants`, and participant-lease
+reconciliation, each cap-32 roster resolution performs at most one ID-only
+phone blind-index read and one ID-only verified-email blind-index read. The
+live activation projection adds at most two ID-only metadata reads (the
+activation mailbox fact and complete active crypto-domain envelopes) and zero
+private-field decrypt or KMS work. Live roster work therefore composes to at
+most two identity reads, two activation reads, and one lease statement;
+first-message roster planning reuses its handle-to-member result for
+request-local post-commit reconciliation and composes to at most two identity
+reads and one lease statement. On the signed live route,
+complete-roster lease reconciliation is one parameterized PostgreSQL statement
+only after route revalidation and a completed current-provider roster read.
+Inside the existing
 route transaction, a lone roster-matched intent wins; if several match, only
 the current sender's own intent breaks the tie. Otherwise the canonical
 first-active-sender fallback continues when the provider roster read completed.

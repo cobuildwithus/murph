@@ -26,6 +26,7 @@ import {
   readHostedThreadRouteByThreadIdentity,
 } from "../src/lib/hosted-routing/thread-route-store";
 import {
+  createHostedEmailLookupKey,
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedLinqMessageLookupKey,
@@ -7365,7 +7366,10 @@ describe("Linq group chat auto-provision", () => {
       .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
     mockSenderLookup(senderCore);
     prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
+      {
+        memberId: senderCore.id,
+        phoneLookupKey: createHostedPhoneLookupKey("+15551112222"),
+      },
     ]);
     prisma.hostedMember.findUnique.mockResolvedValue({
       accountGroupMemberships: [],
@@ -7414,7 +7418,10 @@ describe("Linq group chat auto-provision", () => {
       .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
     mockSenderLookup(senderCore);
     prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
+      {
+        memberId: senderCore.id,
+        phoneLookupKey: createHostedPhoneLookupKey("+15551112222"),
+      },
     ]);
     vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
       handles: [
@@ -7457,43 +7464,60 @@ describe("Linq group chat auto-provision", () => {
     vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
       .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
     vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
-      .mockImplementation(async ({ phoneNumber }) => {
-        if (phoneNumber === "+15551112222") {
-          return {
+      .mockImplementation(async ({ phoneNumber }) => phoneNumber === "+15551112222"
+        ? {
             core: senderCore,
             identity: {},
             matchedBy: "phoneNumber",
           } as Awaited<
             ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>
-          >;
-        }
-        if (phoneNumber === "+15552223333") {
-          return {
-            core: {
-              ...senderCore,
-              id: "member_participant_123",
-            },
-            identity: {},
-            matchedBy: "phoneNumber",
-          } as Awaited<
-            ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>
-          >;
-        }
-        return null;
-      });
-    prisma.hostedMemberIdentity.findMany.mockImplementation(async ({ where }: {
+          >
+        : null);
+    prisma.hostedMemberIdentity.findMany.mockImplementation(async ({ select, where }: {
+      select: {
+        member?: { select: { suspendedAt: boolean } };
+        memberId: boolean;
+        phoneLookupKey?: boolean;
+      };
       where: { phoneLookupKey: { in: string[] } };
     }) => {
-      const lookupKeys = where.phoneLookupKey.in;
-      return [
-        lookupKeys.includes(createHostedPhoneLookupKey("+15551112222") ?? "")
-          ? { memberId: "member_owner_123" }
-          : null,
-        lookupKeys.includes(createHostedPhoneLookupKey("+15552223333") ?? "")
-          ? { memberId: "member_participant_123" }
-          : null,
-      ].filter((record): record is { memberId: string } => record !== null);
+      const lookupKey = createHostedPhoneLookupKey("+15551112222");
+      if (select.phoneLookupKey === true) {
+        expect(select).toEqual({ memberId: true, phoneLookupKey: true });
+        return lookupKey && where.phoneLookupKey.in.includes(lookupKey)
+          ? [{ memberId: "member_owner_123", phoneLookupKey: lookupKey }]
+          : [];
+      }
+      expect(select).toEqual({
+        member: { select: { suspendedAt: true } },
+        memberId: true,
+      });
+      return lookupKey && where.phoneLookupKey.in.includes(lookupKey)
+        ? [{ member: { suspendedAt: null }, memberId: "member_owner_123" }]
+        : [];
     });
+    prisma.hostedMemberEmailAuthorization.findMany.mockImplementation(
+      async ({ select, where }: {
+        select: { memberId: boolean; verifiedEmailLookupKey: boolean };
+        where: {
+          verifiedEmailLookupKey: { in: string[] };
+          verifiedEmailVerifiedAt: { not: null };
+        };
+      }) => {
+        expect(select).toEqual({
+          memberId: true,
+          verifiedEmailLookupKey: true,
+        });
+        expect(where.verifiedEmailVerifiedAt).toEqual({ not: null });
+        const lookupKey = createHostedEmailLookupKey("participant@example.com");
+        return lookupKey && where.verifiedEmailLookupKey.in.includes(lookupKey)
+          ? [{
+              memberId: "member_participant_123",
+              verifiedEmailLookupKey: lookupKey,
+            }]
+          : [];
+      },
+    );
     mockSuccessfulGroupProvision({ prisma, senderCore });
     usageReferralMocks.observeHostedUsageReferralInboundTx.mockResolvedValue({
       isBoundReferralTarget: true,
@@ -7507,7 +7531,7 @@ describe("Linq group chat auto-provision", () => {
       return [
         { handle: "+15550000000", isMe: true, status: "active" },
         { handle: "+15551112222", isMe: false, status: "active" },
-        { handle: "+15552223333", isMe: false, status: "active" },
+        { handle: "participant@example.com", isMe: false, status: "active" },
       ];
     });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
@@ -7516,7 +7540,7 @@ describe("Linq group chat auto-provision", () => {
         handles: [
           { handle: "+15550000000", isMe: true, status: "active" },
           { handle: "+15551112222", isMe: false, status: "active" },
-          { handle: "+15552223333", isMe: false, status: "active" },
+          { handle: "participant@example.com", isMe: false, status: "active" },
         ],
         isGroup: true,
       };
@@ -7566,33 +7590,34 @@ describe("Linq group chat auto-provision", () => {
       prisma,
       referralId: "usage_referral_2",
     });
-    expect(prisma.hostedThreadContainerParticipant.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        create: expect.objectContaining({
-          containerMemberId: containerCreate.data.memberId,
-          participantMemberId: "member_participant_123",
-          removedAt: null,
-        }),
-        where: {
-          containerMemberId_participantMemberId: {
-            containerMemberId: containerCreate.data.memberId,
-            participantMemberId: "member_participant_123",
-          },
-        },
-      }),
+    const rosterPhoneReads = prisma.hostedMemberIdentity.findMany.mock.calls
+      .filter(([query]) => query.select?.phoneLookupKey === true);
+    expect(rosterPhoneReads).toHaveLength(1);
+    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
+    const participantReconciles = prisma.$executeRaw.mock.calls
+      .map(([query]) => query as Prisma.Sql)
+      .filter((query) => typeof query.sql === "string" && query.sql.includes(
+        "WITH input_participant(participant_member_id, handle_lookup_key)",
+      ));
+    expect(participantReconciles).toHaveLength(1);
+    expect(participantReconciles[0]?.sql).toContain(
+      "ON CONFLICT (container_member_id, participant_member_id)",
     );
-    expect(prisma.hostedThreadContainerParticipant.updateMany).toHaveBeenCalledWith({
-      data: {
-        removedAt: expect.any(Date),
-      },
-      where: {
-        containerMemberId: containerCreate.data.memberId,
-        participantMemberId: {
-          notIn: ["member_owner_123", "member_participant_123"],
-        },
-        removedAt: null,
-      },
-    });
+    expect(participantReconciles[0]?.sql).toContain(
+      "UPDATE hosted_thread_container_participant AS participant",
+    );
+    expect(participantReconciles[0]?.values).toEqual(expect.arrayContaining([
+      containerCreate.data.memberId,
+      "member_owner_123",
+      "member_participant_123",
+      true,
+    ]));
+    expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
+    const legacyRosterRemovalWrites =
+      prisma.hostedThreadContainerParticipant.updateMany.mock.calls
+        .filter(([query]) => query.data?.removedAt instanceof Date);
+    expect(legacyRosterRemovalWrites).toHaveLength(0);
     expect(signalRuntime.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: containerCreate.data.memberId,
@@ -7620,9 +7645,24 @@ describe("Linq group chat auto-provision", () => {
     vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
       .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
     mockSenderLookup(senderCore);
-    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: senderCore.id },
-    ]);
+    prisma.hostedMemberIdentity.findMany.mockImplementation(async ({ select, where }: {
+      select: {
+        member?: { select: { suspendedAt: boolean } };
+        memberId: boolean;
+        phoneLookupKey?: boolean;
+      };
+      where: { phoneLookupKey: { in: string[] } };
+    }) => {
+      const lookupKey = createHostedPhoneLookupKey("+15551112222");
+      if (select.phoneLookupKey === true) {
+        return lookupKey && where.phoneLookupKey.in.includes(lookupKey)
+          ? [{ memberId: senderCore.id, phoneLookupKey: lookupKey }]
+          : [];
+      }
+      return lookupKey && where.phoneLookupKey.in.includes(lookupKey)
+        ? [{ member: { suspendedAt: null }, memberId: senderCore.id }]
+        : [];
+    });
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
       expect(transactionOpen).toBe(false);
@@ -7660,6 +7700,27 @@ describe("Linq group chat auto-provision", () => {
       participantMemberIds: ["member_owner_123"],
       senderMemberId: "member_owner_123",
     }));
+    const rosterPhoneReads = prisma.hostedMemberIdentity.findMany.mock.calls
+      .filter(([query]) => query.select?.phoneLookupKey === true);
+    expect(rosterPhoneReads).toHaveLength(1);
+    expect(rosterPhoneReads[0]?.[0]).toEqual({
+      select: {
+        memberId: true,
+        phoneLookupKey: true,
+      },
+      where: {
+        phoneLookupKey: { in: expect.any(Array) },
+      },
+    });
+    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMemberEmailAuthorization.findMany).not.toHaveBeenCalled();
+    const participantReconciles = prisma.$executeRaw.mock.calls
+      .map(([query]) => query as Prisma.Sql)
+      .filter((query) => typeof query.sql === "string" && query.sql.includes(
+        "WITH input_participant(participant_member_id, handle_lookup_key)",
+      ));
+    expect(participantReconciles).toHaveLength(1);
+    expect(participantReconciles[0]?.values).toContain(false);
   });
 
   it("retries the first group message when roster authority is unavailable", async () => {
@@ -7729,7 +7790,10 @@ describe("Linq group chat auto-provision", () => {
           : null
       );
     prisma.hostedMemberIdentity.findMany.mockResolvedValue([
-      { memberId: preparedOwner.id },
+      {
+        memberId: preparedOwner.id,
+        phoneLookupKey: createHostedPhoneLookupKey("+15552223333"),
+      },
     ]);
     vi.mocked(linqClient.getHostedLinqChatSummary)
       .mockRejectedValueOnce(new Error("linq roster unavailable"))

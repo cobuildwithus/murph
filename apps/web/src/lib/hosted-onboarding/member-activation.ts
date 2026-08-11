@@ -12,17 +12,17 @@ import {
 } from "@murphai/hosted-execution";
 
 import {
-  hasActiveHostedCryptoDomainRootsForUserTx,
   provisionHostedCryptoDomainRootsForUserTx,
   provisionPreparedHostedCryptoDomainRootsTx,
+  readUserIdsWithActiveHostedCryptoDomainRootsTx,
   type PreparedHostedCryptoDomainRootCandidates,
   unwrapHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   appendHostedMailboxEnvelopeTx,
-  hasHostedMailboxItemByKind,
   readHostedMailboxItemByDedupeKey,
+  readHostedMailboxUserIdsByKind,
 } from "../hosted-mailbox/store";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
@@ -71,18 +71,43 @@ type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
   core: HostedMemberActivationCoreState;
 };
 
+export async function readHostedMemberActivationProofMemberIds(input: {
+  memberIds: readonly string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<ReadonlySet<string>> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return new Set();
+  }
+
+  const mailboxMemberIds = await readHostedMailboxUserIdsByKind({
+    kind: "member.activated",
+    prisma: input.prisma,
+    userIds: memberIds,
+  });
+  const unresolvedMemberIds = memberIds.filter(
+    (memberId) => !mailboxMemberIds.has(memberId),
+  );
+  if (unresolvedMemberIds.length === 0) {
+    return mailboxMemberIds;
+  }
+
+  const cryptoMemberIds = await readUserIdsWithActiveHostedCryptoDomainRootsTx({
+    tx: input.prisma,
+    userIds: unresolvedMemberIds,
+  });
+  return new Set([...mailboxMemberIds, ...cryptoMemberIds]);
+}
+
 export async function hasHostedMemberActivationProof(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
 }): Promise<boolean> {
-  return await hasHostedMailboxItemByKind({
-    kind: "member.activated",
+  const activatedMemberIds = await readHostedMemberActivationProofMemberIds({
+    memberIds: [input.memberId],
     prisma: input.prisma,
-    userId: input.memberId,
-  }) || await hasActiveHostedCryptoDomainRootsForUserTx({
-    tx: input.prisma,
-    userId: input.memberId,
   });
+  return activatedMemberIds.has(input.memberId);
 }
 
 export async function activateHostedMemberForPositiveSourceTx(input: {

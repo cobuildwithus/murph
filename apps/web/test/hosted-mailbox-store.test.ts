@@ -32,15 +32,16 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   projectHostedMailboxItem,
   readHostedMailboxConsumedSeqByLane,
-  readHostedMailboxLiveItemById,
-  readHostedMailboxRecentLiveConversationItemIds,
-  readHostedMailboxWakeByItemId,
-  readHostedMailboxLatestPendingConversationItem,
-  readHostedMailboxItemCheckpointById,
-  readHostedMailboxMaxSeqByLane,
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxConversationWakeByAssistantInputId,
+  readHostedMailboxItemCheckpointById,
+  readHostedMailboxLatestPendingConversationItem,
+  readHostedMailboxLiveItemById,
+  readHostedMailboxMaxSeqByLane,
+  readHostedMailboxRecentLiveConversationItemIds,
+  readHostedMailboxUserIdsByKind,
   readHostedMailboxWakeAfterDedupeLockTx,
+  readHostedMailboxWakeByItemId,
   resolveHostedMailboxRuntimeFetchLaneCursors,
   tryMarkHostedMailboxConversationAiUsageDenied,
   type HostedMailboxItemRow,
@@ -2445,6 +2446,30 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       where: {
         kind: "member.activated",
         userId: "member_mailbox_1",
+      },
+    });
+  });
+
+  it("reads activation mailbox facts for a maximum member set in one narrow query", async () => {
+    const userIds = Array.from({ length: 32 }, (_, index) => `member_${index}`);
+    const groupBy = vi.fn().mockResolvedValue([
+      { userId: "member_1" },
+      { userId: "member_31" },
+    ]);
+
+    await expect(readHostedMailboxUserIdsByKind({
+      kind: "member.activated",
+      prisma: {
+        hostedMailboxItem: { groupBy },
+      } as never,
+      userIds,
+    })).resolves.toEqual(new Set(["member_1", "member_31"]));
+
+    expect(groupBy).toHaveBeenCalledExactlyOnceWith({
+      by: ["userId"],
+      where: {
+        kind: "member.activated",
+        userId: { in: userIds },
       },
     });
   });
