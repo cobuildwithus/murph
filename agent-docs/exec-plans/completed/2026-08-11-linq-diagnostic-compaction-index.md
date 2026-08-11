@@ -1,6 +1,6 @@
 # Bound Linq diagnostic compaction scans
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -54,3 +54,4 @@ Updated: 2026-08-11
   durable duplicate-gate rows remain in the scanned index indefinitely.
 - Existing hosted Web migrations use concurrent, migration-only partial indexes
   with exact predicates and no transaction wrapper.
+Completed: 2026-08-11
