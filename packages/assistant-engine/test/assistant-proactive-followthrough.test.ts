@@ -42,6 +42,12 @@ describe('assistant proactive follow-through', () => {
       'A clear yes authorizes only the named plan and support writes',
     )
     expect(skill).toContain('without a second confirmation')
+    expect(skill).toContain('only in a private member conversation')
+    expect(skill).toContain("Never use a group participant's message")
+    expect(skill).toContain(
+      'private automation, memory, preference, plan, goal, or health context',
+    )
+    expect(skill).toContain('room-owned support')
     expect(skill).toContain('stop asking about a topic')
     expect(skill).toContain('pause or archive the narrowest matching automation')
     expect(skill).toContain('preserving unrelated support')
