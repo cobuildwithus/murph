@@ -250,9 +250,11 @@ projection. Alias decryption is best effort and degrades to `Anonymous` without
 blocking funding. The complete funding, management, cancellation, and recovery
 controls stream first; supporter recognition renders in a separate Suspense
 boundary with a null fallback. Its two-second abort signal is checked between
-database stages and is forwarded to the secure-box batch; Prisma does not cancel
-an in-flight query, so this is not a wall-clock database deadline. The primary
-funding and recovery controls never await this optional boundary.
+the initial database stages and is forwarded to the secure-box batch; Prisma
+does not cancel an in-flight query, and a secure-box metadata lookup immediately
+after an overlapping moment read may begin before external crypto observes the
+abort. This is not a wall-clock database deadline. The primary funding and
+recovery controls never await this optional boundary.
 
 The funding-page read reuses the page's participant-authority result, then adds
 at most four set-based database calls: sponsorship authorization and 20-row
@@ -261,9 +263,10 @@ batch for at most 21 purchase IDs. Peak added database concurrency is two. The
 secure-box owner opens alias ciphertexts in one batch and performs at most 21
 root unwraps with its existing concurrency cap of four; there are no per-row
 database reads, provider calls, or transactions. The optional read is outside
-the page's blocking data fanout. Once its signal is observed, later database
-stages stop and secure-box work aborts; an already-started Prisma query may
-still finish in the background without delaying the primary controls.
+the page's blocking data fanout. The shared signal bounds external secure-box
+work, but an already-started Prisma query and the immediate secure-box metadata
+lookup described above may still finish in the background without delaying the
+primary controls.
 
 Verified Stripe reconciliation remains the only activation authority. After a
 fulfilled group purchase, Web idempotently:

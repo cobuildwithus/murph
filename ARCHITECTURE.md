@@ -1016,10 +1016,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `Anonymous`, plus monthly versus one-time kind. Publication authority cannot
   be acquired by a later settlement replay. Historical aliases and moments
   settled after creator authority was lost remain anonymous. Recognition streams
-  below the primary funding controls. A two-second signal stops later query stages and bounds
-  secure-box work but cannot cancel an in-flight Prisma query; the independent
-  Suspense boundary keeps optional alias work from delaying funding, management,
-  cancellation, or recovery. The alias ciphertext remains legacy-readable plain
+  below the primary funding controls. A two-second signal is forwarded through
+  the optional stages and bounds external secure-box work but cannot cancel an
+  in-flight Prisma query; when the moment read overlaps expiry, the following
+  secure-box metadata lookup may begin before external crypto observes the abort.
+  The independent Suspense boundary keeps optional alias work from delaying funding,
+  management, cancellation, or recovery. The alias ciphertext remains legacy-readable plain
   text while consent and settlement publication stay in additive nullable
   metadata. It never exposes payer
   identity, amount, cap, balance, payment state, charge timing, or refill
