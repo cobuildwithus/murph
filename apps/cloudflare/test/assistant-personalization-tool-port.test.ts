@@ -18,11 +18,13 @@ describe("hosted assistant personalization tool port", () => {
     mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
       action: "update",
       result: {
+        mainPersona: "classic",
         model: "gpt-5.6-terra",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: true,
         status: "saved",
+        supportingPersona: null,
         tone: "casual",
         voice: "warm",
       },

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 300,
+  "item": {
+    "id": "web-search-restored",
+    "kind": "improvement",
+    "priority": 5,
+    "title": "Managed OpenAI web search works again",
+    "summary": "When Murph uses managed OpenAI, its built-in web search can reach current information again instead of stopping with a forbidden-request error.",
+    "details": "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
+    "relevanceTags": ["assistant", "search", "research", "reliability"],
+    "sourcePullRequests": [1583]
+  }
+}

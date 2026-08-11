@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 100,
+  "item": {
+    "id": "workout-card-status-rendering",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Completed workout rows keep their checkmark",
+    "summary": "Completed exercises now keep a clear checkmark in Messages workout cards, including their static previews.",
+    "details": "The status mark is part of the card image itself, so it stays visible anywhere the static preview is shown.",
+    "relevanceTags": ["workouts", "imessage", "cards", "reliability"],
+    "sourcePullRequests": [1599]
+  }
+}
