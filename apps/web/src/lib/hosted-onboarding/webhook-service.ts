@@ -2223,7 +2223,16 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
         && error.details?.preparationTarget === "pending_group_setup_payload"
         && error.details?.preparationFailureMatched === true
       ) {
-        throw pendingGroupSetupPreparationFailure;
+        throw hostedOnboardingError({
+          cause: pendingGroupSetupPreparationFailure,
+          code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_FAILED",
+          details: {
+            preparationTarget: "pending_group_setup_payload",
+          },
+          httpStatus: 503,
+          message: "Hosted pending group setup payload preparation failed.",
+          retryable: true,
+        });
       }
       if (
         preparationFailures.length > 0

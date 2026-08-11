@@ -253,6 +253,21 @@ function buildLinqMessageWebhookBody(input: {
   });
 }
 
+function buildWebhookRequest(rawBody: string): Request {
+  return new Request(
+    "https://join.example.test/api/hosted-onboarding/linq/webhook",
+    {
+      body: rawBody,
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-signature": "sha256=test",
+        "x-webhook-timestamp": "1774512000",
+      },
+      method: "POST",
+    },
+  );
+}
+
 function buildPrewarmPrisma() {
   return {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
@@ -740,7 +755,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       ]);
     });
 
-    it("preserves the original pending-root failure when the transaction proves it is required", async () => {
+    it("wraps the original pending-root failure as provider-retryable when the transaction proves it is required", async () => {
       const { prepareHostedPendingGroupSetupClaimForParticipants } = await import(
         "@/src/lib/hosted-groups/pending-group-setup"
       );
@@ -789,12 +804,22 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       );
       const prisma = buildPrewarmPrisma();
 
-      await expect(handleHostedOnboardingLinqWebhook({
+      const failure = await handleHostedOnboardingLinqWebhook({
         prisma: prisma as never,
         rawBody: buildLinqMessageWebhookBody({ chatIsGroup: true }),
         signature: null,
         timestamp: null,
-      })).rejects.toBe(preparationError);
+      }).catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({
+        cause: preparationError,
+        code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_FAILED",
+        details: {
+          preparationTarget: "pending_group_setup_payload",
+        },
+        httpStatus: 503,
+        retryable: true,
+      });
 
       expect(prepareHostedPendingGroupSetupClaimForParticipants)
         .toHaveBeenCalledTimes(1);
@@ -806,6 +831,123 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         "plan",
       ]);
     });
+
+    it.each([
+      ["malformed secure-box JSON", () => new SyntaxError("malformed persisted secure-box JSON")],
+      ["invalid secure-box schema", () => new TypeError("invalid persisted secure-box schema")],
+    ])(
+      "returns 503 for %s, preserves the setup, and consumes it exactly once on replay",
+      async (_label, createPreparationError) => {
+        const { getPrisma } = await import("@/src/lib/prisma");
+        const { prepareHostedPendingGroupSetupClaimForParticipants } =
+          await import("@/src/lib/hosted-groups/pending-group-setup");
+        const { hostedOnboardingError } = await import(
+          "@/src/lib/hosted-onboarding/errors"
+        );
+        const { planHostedOnboardingLinqWebhook } = await import(
+          "@/src/lib/hosted-onboarding/webhook-provider-linq"
+        );
+        const { readHostedThreadRouteByThreadIdentity } = await import(
+          "@/src/lib/hosted-routing/thread-route-store"
+        );
+        const route = await import(
+          "../app/api/hosted-onboarding/linq/webhook/route"
+        );
+        const preparedClaim = {
+          id: "hpgs_failed_preparation",
+          ownerMemberId: "member_pending_owner",
+          payloadEncrypted: "failed-pending-ciphertext",
+          payloadRootKeyId: "root_pending_failed",
+          recipientPhoneLookupKey: "hplk_pending_line",
+        };
+        const rawBody = buildLinqMessageWebhookBody({ chatIsGroup: true });
+        const prisma = buildPrewarmPrisma();
+        let pendingSetupPresent = true;
+        let routeCreationCount = 0;
+        let setupConsumptionCount = 0;
+
+        vi.mocked(getPrisma).mockReturnValue(prisma as never);
+        vi.mocked(readHostedThreadRouteByThreadIdentity)
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(null);
+        vi.mocked(prepareHostedPendingGroupSetupClaimForParticipants)
+          .mockImplementationOnce(async () => {
+            calls.push("prepare-pending-failed");
+            throw createPreparationError();
+          })
+          .mockImplementationOnce(async () => {
+            calls.push("prepare-pending-replay");
+            return preparedClaim;
+          });
+        vi.mocked(planHostedOnboardingLinqWebhook)
+          .mockImplementationOnce(async (input) => {
+            calls.push("plan-failed");
+            expect(pendingSetupPresent).toBe(true);
+            expect(input.failedPendingGroupSetupPreparationClaim).toEqual(
+              preparedClaim,
+            );
+            throw hostedOnboardingError({
+              code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+              details: {
+                preparationFailureMatched: true,
+                preparationTarget: "pending_group_setup_payload",
+              },
+              httpStatus: 503,
+              message: "Pending setup preparation required.",
+              retryable: true,
+            });
+          })
+          .mockImplementationOnce(async (input) => {
+            calls.push("plan-replay");
+            expect(pendingSetupPresent).toBe(true);
+            expect(input.preparedPendingGroupSetupClaim).toEqual(preparedClaim);
+            routeCreationCount += 1;
+            setupConsumptionCount += 1;
+            pendingSetupPresent = false;
+            return {
+              desiredSideEffects: [],
+              response: {
+                ok: true as const,
+                reason: "pending-setup-replay-consumed",
+              },
+            };
+          });
+
+        const firstResponse = await route.POST(buildWebhookRequest(rawBody));
+        expect(firstResponse.status).toBe(503);
+        await expect(firstResponse.json()).resolves.toMatchObject({
+          error: {
+            code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_FAILED",
+            retryable: true,
+          },
+        });
+        expect(pendingSetupPresent).toBe(true);
+        expect(routeCreationCount).toBe(0);
+        expect(setupConsumptionCount).toBe(0);
+
+        const replayResponse = await route.POST(buildWebhookRequest(rawBody));
+        expect(replayResponse.status).toBe(202);
+        await expect(replayResponse.json()).resolves.toMatchObject({
+          ok: true,
+          reason: "pending-setup-replay-consumed",
+        });
+        expect(pendingSetupPresent).toBe(false);
+        expect(routeCreationCount).toBe(1);
+        expect(setupConsumptionCount).toBe(1);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+        expect(calls).toEqual([
+          "prepare-pending-failed",
+          "prepare-container",
+          "begin",
+          "plan-failed",
+          "prepare-pending-replay",
+          "prepare-container",
+          "begin",
+          "plan-replay",
+          "commit",
+        ]);
+      },
+    );
 
     it("re-prepares instead of surfacing a stale pending-root failure for a changed winner", async () => {
       const { prepareHostedPendingGroupSetupClaimForParticipants } = await import(
