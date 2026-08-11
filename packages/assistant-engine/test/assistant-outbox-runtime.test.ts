@@ -3852,19 +3852,20 @@ describe('assistant outbox runtime', () => {
 
   it('revalidates answered onboarding when a queued goal check-in reaches provider entry', async () => {
     vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-20T17:31:00.000Z'))
     const { vaultRoot } = await createInitializedAssistantVault(
       'assistant-outbox-onboarding-goal-checkin-',
     )
-    const completedAt = '2026-07-16T17:30:00.000Z'
-    const onboardingState = await completeAssistantOnboarding({
+    const completedAt = '2026-07-17T17:30:00.000Z'
+    const answeredOnboarding = await completeAssistantOnboarding({
       completedAt,
       reason: 'user_answered',
       vault: vaultRoot,
     })
     const vault = await loadVault({ vaultRoot })
     const seed = buildOnboardingGoalCheckinSeed({
-      now: new Date('2026-07-16T18:00:00.000Z'),
-      onboardingState,
+      now: new Date('2026-07-18T12:00:00.000Z'),
+      onboardingState: answeredOnboarding,
       stableKey: vault.metadata.vaultId,
       timeZone: vault.metadata.timezone,
     })

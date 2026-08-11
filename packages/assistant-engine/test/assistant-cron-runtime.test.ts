@@ -219,6 +219,7 @@ import type { AssistantNotificationInput } from '../src/assistant/notification-t
 import type { AssistantChannelDependencies } from '../src/assistant/channels/types.ts'
 import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import {
+  buildOnboardingGoalCheckinSeed,
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import {
@@ -6612,21 +6613,35 @@ describe('assistant cron runtime orchestration', () => {
 
   it('skips a claimed onboarding goal check-in when onboarding was completed again too recently', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-07-06T13:30:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-onboarding-goal-checkin-recompleted-',
     )
-    await completeAssistantOnboarding({
-      completedAt: '2025-11-03T14:00:00.000Z',
+    const stableKey = 'vault-onboarding-goal-checkin-recompleted'
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'UTC',
+        vaultId: stableKey,
+      },
+    })
+    const initialOnboarding = await completeAssistantOnboarding({
+      completedAt: '2026-07-01T14:00:00.000Z',
       reason: 'user_answered',
       vault: vaultRoot,
     })
+    const seed = buildOnboardingGoalCheckinSeed({
+      now: new Date('2026-07-02T12:00:00.000Z'),
+      onboardingState: initialOnboarding,
+      stableKey,
+      timeZone: 'UTC',
+    })
+    if (!seed || seed.schedule.kind !== 'at') {
+      throw new Error('Expected an onboarding goal check-in seed.')
+    }
+    vi.setSystemTime(new Date(seed.schedule.at))
     getVaultAutomationStore(vaultRoot).push({
-      activeUntil: '2026-07-13T13:30:00.000Z',
-      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
-      continuityPolicy: 'preserve',
-      createdAt: '2026-07-01T12:00:00.000Z',
-      instructions: 'Offer one low-pressure health direction choice.',
+      ...seed,
+      continuityPolicy: seed.continuityPolicy ?? 'preserve',
+      createdAt: '2026-07-02T12:00:00.000Z',
       route: {
         channel: 'telegram',
         deliverySource: null,
@@ -6636,17 +6651,13 @@ describe('assistant cron runtime orchestration', () => {
         threadId: 'member-thread',
         threadIsDirect: true,
       },
-      schedule: { at: '2026-07-06T13:30:00.000Z', kind: 'at' },
-      slug: 'onboarding-goal-checkin',
       status: 'active',
-      summary: null,
-      tags: ['assistant', 'scheduled', 'murph-managed'],
-      title: 'First health direction check-in',
-      updatedAt: '2026-07-01T12:00:00.000Z',
+      tags: [...(seed.tags ?? [])],
+      updatedAt: '2026-07-02T12:00:00.000Z',
     })
     const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
     await completeAssistantOnboarding({
-      completedAt: '2026-07-05T14:00:00.000Z',
+      completedAt: '2026-07-02T15:00:00.000Z',
       reason: 'user_answered',
       vault: vaultRoot,
     })

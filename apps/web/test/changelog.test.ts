@@ -68,22 +68,21 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
-  it("keeps Terra on OpenAI's available first-photo detail separate from bounded image paths", () => {
+  it("keeps OpenAI's available first-photo detail separate from bounded image paths", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "sharper-single-photo-review",
     );
 
     expect(item).toMatchObject({
       editionId: "2026-08-10",
-      sourcePullRequests: [1616],
-      summary: expect.stringContaining("Terra on OpenAI"),
+      sourcePullRequests: [1616, 1674],
+      summary: expect.stringContaining("Luna, Terra, and Sol"),
       details: expect.stringContaining("follow-up photos"),
     });
     expect(item?.summary).toContain("one available initial photo");
     expect(item?.summary).toContain("more detail");
     expect(item?.details).toContain("Multiple available initial photos");
     expect(item?.details).toContain("Venice");
-    expect(item?.details).toContain("other models");
     expect(item?.details).toContain("custom inference");
     expect(`${item?.title} ${item?.summary} ${item?.details}`).not.toContain(
       "original detail",

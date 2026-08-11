@@ -351,47 +351,50 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
 
-  it('preserves original width for supported detail and bounds gallery widths through the real app server', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario({
-      modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
-    })
-    const imagePath = path.join(
-      scenario.turnInput.workingDirectory,
-      'fine-detail.png',
-    )
-    await writeFile(imagePath, createDeterministicPng(3072, 64))
-    scenario.stub.queue(
-      { text: 'SCRIPTED_ORIGINAL_IMAGE_OK' },
-      { text: 'SCRIPTED_GALLERY_IMAGE_OK' },
-    )
+  it.each(['gpt-5.6-luna', 'gpt-5.6-sol'])(
+    'preserves original width for %s and bounds gallery widths through the real app server',
+    { timeout: TURN_TIMEOUT_MS },
+    async (model) => {
+      const scenario = await prepareScriptedTurnScenario({
+        model,
+        modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+      })
+      const imagePath = path.join(
+        scenario.turnInput.workingDirectory,
+        'fine-detail.png',
+      )
+      await writeFile(imagePath, createDeterministicPng(3072, 64))
+      scenario.stub.queue(
+        { text: 'SCRIPTED_ORIGINAL_IMAGE_OK' },
+        { text: 'SCRIPTED_GALLERY_IMAGE_OK' },
+      )
 
-    const originalResult = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      images: [{
-        detail: 'original',
-        mimeType: 'image/png',
-        path: imagePath,
-      }],
-      prompt: 'Reply exactly SCRIPTED_ORIGINAL_IMAGE_OK.',
-    })
-    const galleryResult = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      images: [
-        { detail: 'original', mimeType: 'image/png', path: imagePath },
-        { detail: 'original', mimeType: 'image/png', path: imagePath },
-      ],
-      prompt: 'Reply exactly SCRIPTED_GALLERY_IMAGE_OK.',
-    })
+      const originalResult = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        images: [{
+          detail: 'original',
+          mimeType: 'image/png',
+          path: imagePath,
+        }],
+        prompt: 'Reply exactly SCRIPTED_ORIGINAL_IMAGE_OK.',
+      })
+      const galleryResult = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        images: [
+          { detail: 'original', mimeType: 'image/png', path: imagePath },
+          { detail: 'original', mimeType: 'image/png', path: imagePath },
+        ],
+        prompt: 'Reply exactly SCRIPTED_GALLERY_IMAGE_OK.',
+      })
 
-    expect(originalResult.finalMessage).toBe('SCRIPTED_ORIGINAL_IMAGE_OK')
-    expect(galleryResult.finalMessage).toBe('SCRIPTED_GALLERY_IMAGE_OK')
-    expect(scenario.stub.requestSummariesSinceBaseline()).toMatchObject([
-      { imageWidths: [3072] },
-      { imageWidths: [2048, 2048] },
-    ])
-  })
+      expect(originalResult.finalMessage).toBe('SCRIPTED_ORIGINAL_IMAGE_OK')
+      expect(galleryResult.finalMessage).toBe('SCRIPTED_GALLERY_IMAGE_OK')
+      expect(scenario.stub.requestSummariesSinceBaseline()).toMatchObject([
+        { imageWidths: [3072] },
+        { imageWidths: [2048, 2048] },
+      ])
+    },
+  )
 
   it('keeps a fresh onboarding greeting on the compact root and bounded resume read', {
     timeout: TURN_TIMEOUT_MS,
@@ -6060,6 +6063,7 @@ function buildScriptedHostedSystemPrompt(
 
 async function prepareScriptedTurnScenario(
   options: {
+    model?: string
     modelProvider?: string
     multiAgentV2?: boolean
   } = {},
@@ -6108,7 +6112,7 @@ async function prepareScriptedTurnScenario(
         PATH: process.env.PATH,
         TMPDIR: process.env.TMPDIR,
       },
-      model: SCRIPTED_MODEL,
+      model: options.model ?? SCRIPTED_MODEL,
       modelProvider,
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
