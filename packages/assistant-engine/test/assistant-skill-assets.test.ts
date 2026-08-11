@@ -1731,6 +1731,9 @@ describe('assistant skill assets', () => {
       'Make one targeted owning read only when the checkpoint needed now is omitted, truncated, or errored in the snapshot.',
     )
     expect(raw).toContain('vault-cli memory show --format json')
+    expect(compact).toContain(
+      'Save optional demographic context to the existing best-fit Identity or Context memory.',
+    )
     expect(compact).toContain('vault-cli blood-test list --format json')
     expect(compact).toContain(
       'Missing evidence is unresolved unless the visible conversation shows that the user said it was not relevant or explicitly skipped it.',

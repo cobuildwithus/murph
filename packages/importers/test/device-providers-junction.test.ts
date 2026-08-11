@@ -24,6 +24,7 @@ import {
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
   classifyJunctionSummaryNormalizationEvidence,
+  identifyJunctionBloodPressureProviderRecords,
   importDeviceProviderSnapshot,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
@@ -3330,6 +3331,51 @@ test("Junction normalizer lands sparse paired blood pressure readings as measure
   assert.doesNotMatch(artifactText, /"value":350|"systolic":350|"diastolic":95/u);
 });
 
+test("Junction exposes repair-stable opaque identities for blood pressure provider rows", () => {
+  const snapshot = (entry: Record<string, unknown>) => ({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      blood_pressure: [{
+        ...entry,
+        sourceProviderSlug: "omron",
+        sourceType: "cuff",
+        sourceInstanceId: "primary",
+      }],
+    },
+  });
+  const malformed = snapshot({
+    id: "provider-row-needing-repair",
+    timestamp: "2026-04-22T08:05:00Z",
+    systolic: 125,
+  });
+  const repaired = snapshot({
+    id: "provider-row-needing-repair",
+    timestamp: "2026-04-22T08:10:00Z",
+    systolic: 124,
+    diastolic: 78,
+  });
+  const malformedEvidence = identifyJunctionBloodPressureProviderRecords(malformed);
+  const repairedEvidence = identifyJunctionBloodPressureProviderRecords(repaired);
+  const repairedEvent = normalizeJunctionSnapshot(repaired).events?.[0];
+
+  assert.equal(malformedEvidence.providerRecordCount, 1);
+  assert.deepEqual(
+    repairedEvidence.repairStableExternalRefResourceIds,
+    malformedEvidence.repairStableExternalRefResourceIds,
+  );
+  assert.equal(
+    repairedEvent?.externalRef?.resourceId,
+    malformedEvidence.repairStableExternalRefResourceIds[0],
+  );
+  assert.deepEqual(
+    identifyJunctionBloodPressureProviderRecords(snapshot({
+      timestamp: "2026-04-22T08:05:00Z",
+      systolic: 125,
+    })).repairStableExternalRefResourceIds,
+    [null],
+  );
+});
+
 test("Junction blood pressure evidence is replay- and order-idempotent", () => {
   const reading = (timestamp: string, systolic: number, diastolic: number) =>
     ({ timestamp, systolic, diastolic, unit: "mmHg" });
@@ -4173,7 +4219,7 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
           { date: "2026-04-22", test_result: "indeterminate" },
         ],
         home_pregnancy_test: [
-          { date: "2026-04-28", test_result: "negative" },
+          { date: "2026-04-28", test_result: "positive" },
         ],
         detected_deviations: [
           { date: "2026-04-30", deviation: "irregular_menstrual_cycles" },
@@ -4264,9 +4310,9 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   const pregnancyEvent = measurementEvents.find((event) => event.title === "Junction pregnancy test");
   assert.deepEqual(readMeasurement(pregnancyEvent), {
     metric: "pregnancy-test",
-    value: 0,
+    value: 1,
     unit: "result",
-    qualifiers: { result: "negative" },
+    qualifiers: { result: "positive" },
   });
 
   const deviationEvent = measurementEvents.find((event) => event.title === "Junction cycle deviation");
