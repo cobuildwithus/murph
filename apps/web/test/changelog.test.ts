@@ -332,6 +332,14 @@ describe("changelog registry", () => {
     expect(items.get("personality-settings-and-chat")?.details).toContain(
       "changes only that room's Murph",
     );
+    expect(items.get("cleaner-workout-cards-in-messages")).toMatchObject({
+      sourcePullRequests: [1588],
+      summary: expect.stringContaining("nutrition goal direction"),
+      details: expect.stringContaining("without repeating target amounts"),
+    });
+    expect(
+      items.get("cleaner-workout-cards-in-messages")?.tryIt,
+    ).toBeUndefined();
     expect(items.get("lighter-accessible-homepage")).toMatchObject({
       sourcePullRequests: [1573],
       summary: expect.stringContaining("compact avatar images"),
@@ -582,6 +590,7 @@ describe("changelog registry", () => {
           "referral-notification-route-recovery",
           "reminders-keep-requested-timezone",
           "voice-memos-use-your-voice",
+          "cleaner-workout-cards-in-messages",
           "web-search-restored",
           "appointment-reminders-by-default",
           "workout-card-status-rendering",

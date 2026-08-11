@@ -14,7 +14,7 @@ const ACTIVE_WORKOUT_CARD = {
   kind: 'compact_table',
   version: 1,
   title: 'Push day',
-  subtitle: '1 of 3 sets complete',
+  subtitle: null,
   footer: null,
   tracking: {
     kind: 'workout',
@@ -73,6 +73,7 @@ describe('assistant live workout card skill', () => {
     expect(skill).toContain('exact displayed name and mapped order')
     expect(skill).toContain('--require-existing-set')
     expect(skill).toContain('`workout` detail')
+    expect(skill).toContain('Set the outer `subtitle` to `null`')
   })
 
   it('accepts the synthetic active workout card', () => {

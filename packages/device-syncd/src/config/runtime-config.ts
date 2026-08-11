@@ -1,6 +1,5 @@
 import { optionalEnv } from "./provider-config-helpers.ts";
 import {
-  hasConfiguredDeviceSyncProviderConfigs,
   readConfiguredDeviceSyncProviderConfigs,
 } from "./provider-configs.ts";
 import {
@@ -42,7 +41,7 @@ export function readConfiguredDeviceSyncRuntimeConfig(
   const publicBaseUrl = optionalEnv(env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS);
   const secret = optionalEnv(env, DEVICE_SYNC_SECRET_ENV_KEYS);
 
-  if (!publicBaseUrl || !secret || !hasConfiguredDeviceSyncProviderConfigs(providerConfigs)) {
+  if (!publicBaseUrl || !secret) {
     return null;
   }
 
