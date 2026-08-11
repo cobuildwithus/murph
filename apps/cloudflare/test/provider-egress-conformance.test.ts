@@ -18,6 +18,7 @@ import {
   sendLinqMessage,
   sendTelegramImageMessage,
   sendTelegramMessage,
+  sendTelegramRichMessage,
   sendTelegramVoiceMemoMessage,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
@@ -65,6 +66,7 @@ const WRITE_FENCE_HEADERS = {
 const TELEGRAM_CLIENT_ROUTES = [
   { method: "POST", operation: "sendMessage" },
   { method: "POST", operation: "sendPhoto" },
+  { method: "POST", operation: "sendRichMessage" },
   { method: "POST", operation: "sendVoice" },
   { method: "POST", operation: "sendChatAction" },
   { method: "POST", operation: "deleteMessages" },
@@ -234,6 +236,15 @@ describe("hosted provider egress conformance", () => {
       fetchImplementation,
       maxDeliveryAttempts: 1,
     });
+    await sendTelegramRichMessage({
+      fallbackMessage: "Rich fallback",
+      richMessage: { html: "<h2>Rich message</h2>" },
+      target: "123",
+    }, {
+      env: clientEnv,
+      fetchImplementation,
+      maxDeliveryAttempts: 1,
+    });
     await sendTelegramVoiceMemoMessage({
       filename: "memo",
       generation: {
@@ -319,7 +330,7 @@ describe("hosted provider egress conformance", () => {
       "https://api.telegram.org/file/bottelegram-worker-secret/photos/file_1.jpg",
     );
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledTimes(9);
+    expect(validateRuntimeProviderEgressToken).toHaveBeenCalledTimes(10);
     assertAuthorityHeadersStripped(forwarded);
   });
 });
@@ -369,6 +380,7 @@ function createProviderUpstreamFetch(
     if (
       operation === "sendMessage"
       || operation === "sendPhoto"
+      || operation === "sendRichMessage"
       || operation === "sendVoice"
     ) {
       return Response.json({

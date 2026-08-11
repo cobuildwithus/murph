@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 100,
+  "item": {
+    "id": "response-cards-without-another-ask",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Workout cards without another ask",
+    "summary": "Starting or resuming a verified live workout now returns its available card in the same private response instead of waiting for a second request.",
+    "details": "Murph also defaults to other already-authorized complete response cards, while ordinary meal and set updates stay concise and unsupported or unverifiable cases fall back to text.",
+    "relevanceTags": ["cards", "workouts", "nutrition", "imessage"],
+    "sourcePullRequests": [1680]
+  }
+}
