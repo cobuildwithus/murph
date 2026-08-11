@@ -5334,6 +5334,38 @@ describe("Linq group chat auto-provision", () => {
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
   });
 
+  it("offers ordinary setup after a required pending setup payload was permanently invalid", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+    preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
+      .mockResolvedValueOnce({
+        kind: "owner_unavailable",
+        pendingSetupResolution: "invalid_payload",
+      });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+      requiredPendingGroupSetupCandidateId: "hpgs_unreadable",
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
+      .toEqual(["group_setup"]);
+    expect(
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      fallbackOwnerMemberId: null,
+      requiredPendingSetupCandidateId: "hpgs_unreadable",
+      senderMemberId: null,
+    }));
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+  });
+
   it("screens an unknown group sender through first-contact admission before offering setup", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();

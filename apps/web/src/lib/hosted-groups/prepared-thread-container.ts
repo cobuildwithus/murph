@@ -91,7 +91,10 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     pendingSetupClaim.kind === "none"
     && (
       pendingSetupClaim.reason === "recipient_line_unmanaged"
-      || requiredPendingSetupCandidateId !== null
+      || (
+        requiredPendingSetupCandidateId !== null
+        && pendingSetupClaim.reason !== "invalid_payload"
+      )
     )
   ) {
     return {

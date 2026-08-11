@@ -3314,6 +3314,9 @@ async function planHostedLinqGroupChatWebhook(input: {
       ) {
         return ignored("recipient-line-unmanaged", senderIdentityMatch);
       }
+      if (preparedResult.pendingSetupResolution === "invalid_payload") {
+        requiredPendingSetupCandidateId = null;
+      }
       // A concurrent setup claimant may have committed this route while the
       // row lock was held. The canonical re-read below decides whether this
       // distinct message can append to that winner.

@@ -208,3 +208,33 @@ Updated: 2026-08-11
   finding. Its sole outcome was the 2,000-line retrospective gate; the next
   step is a fresh full-snapshot round-three audit on this docs-only successor
   head.
+
+### Final ReviewGPT round-three remediation
+
+- Harvested final ReviewGPT round three for PR #1642 from the retained response
+  and thread export. Accepted it as complete after validating the exact chat,
+  PR number, current reviewed head
+  `1d34f1f42796a248807d21c80e2c89cadb7dac9d`, immutable first-reviewed head
+  `7a16c35110654fd7991db68b22096bf1c5db48ce`, previous reviewed head
+  `3055a067b19d3a95c3facded2251f8365044128b`, compatible GPT-5.6 model
+  metadata, and `REVIEW_COMPLETE`.
+- Accepted the finding that an exact required replacement-line setup whose
+  locked payload/root was permanently unreadable still pinned retries as
+  route-free. The prepared-route helper now lets that consumed
+  `invalid_payload` state fall back to the active sender owner, while
+  `claim_raced`, transient preparation misses, selection changes, unmanaged
+  recipient lines, and other non-consumed required misses remain route-free.
+- The webhook planner now clears only that consumed `invalid_payload` required
+  id after the helper reports owner-unavailable. With an active sender, the
+  fallback owner path creates the route; without one, the same event can still
+  offer ordinary group setup instead of being suppressed as provisioning
+  unavailable.
+- Added focused regressions for both boundaries: the prepared helper falls
+  back to the sender without consuming setup style/room-model state, and the
+  Linq group planner offers ordinary setup for an unknown sender after the
+  exact unreadable required setup was permanently deleted.
+- Verification after remediation: focused hosted-web Vitest for the two changed
+  files passed 2 files/153 tests; `pnpm test:diff` for the four touched paths
+  passed the affected `apps/web verify` lane, including TypeScript, 720
+  hosted-web test files/9,566 tests, lint, dev smoke, and Next build. Lint and
+  Turbopack emitted existing warnings unrelated to this diff.
