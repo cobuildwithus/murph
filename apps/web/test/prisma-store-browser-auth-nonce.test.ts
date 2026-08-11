@@ -47,7 +47,7 @@ describe("PrismaHostedBrowserAssertionNonceStore", () => {
       'INSERT INTO "device_browser_assertion_nonce" AS browser_nonce',
     );
     expect(sql).toContain('ON CONFLICT ("nonce_hash") DO NOTHING');
-    expect(sql).toContain('browser_nonce."expires_at" >= date_trunc(');
+    expect(sql).toContain('browser_nonce."expires_at" > date_trunc(');
     expect(sql).toContain("'milliseconds'");
     expect(sql).toContain("clock_timestamp() AT TIME ZONE 'UTC'");
     expect(returningIndex).toBeGreaterThan(-1);

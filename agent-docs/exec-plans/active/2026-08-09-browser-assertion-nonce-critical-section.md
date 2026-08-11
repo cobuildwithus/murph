@@ -75,6 +75,9 @@ nonce state.
 - Keep delayed admission fail-closed in the same insert statement with the
   database clock instead of relying on old Web instances to drain before the
   retention owner runs.
+- Compare the persisted first-invalid instant strictly greater than the
+  millisecond-truncated database clock, because equality is already outside the
+  browser assertion acceptance window.
 - Keep mixed-version cleanup conservative instead of adding a migration or
   weakening the first-invalid verifier boundary.
 - Reuse the existing hourly retention invocation and shared batch ceilings

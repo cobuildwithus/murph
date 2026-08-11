@@ -36,7 +36,7 @@ export class PrismaHostedBrowserAssertionNonceStore {
       )
       ON CONFLICT ("nonce_hash") DO NOTHING
       RETURNING
-        browser_nonce."expires_at" >= date_trunc(
+        browser_nonce."expires_at" > date_trunc(
           'milliseconds',
           clock_timestamp() AT TIME ZONE 'UTC'
         ) AS "admitted"
