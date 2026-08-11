@@ -60,6 +60,10 @@ Updated: 2026-08-11
   separately from blood-pressure coverage, per connected source.
 - Anchor note history to the current scheduler run. Existing sources need the
   recent pre-rollout interval, not the interval before their first connection.
+- Treat a complete note scan as terminal even when some rows have no usable
+  tags. Such rows are intentional no-ops, not failed canonical writes.
+- Keep one stable history-job identity per note policy and source. Moving the
+  bounded window must not create another migration lane each day.
 - Derive UTC note dates from the ISO date prefix when the normal timestamp
   path has no local day key.
 

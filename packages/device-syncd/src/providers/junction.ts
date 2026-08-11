@@ -2227,6 +2227,20 @@ export function createJunctionDeviceSyncProvider(
       encodeJunctionHistoricalUnresolvedProviderRecords(unresolvedProviderRecords);
     const unresolvedProviderRecordsSeen = unresolvedProviderRecordCount > 0;
 
+    // A note without usable tags is an intentional importer no-op, not a
+    // canonical repair obligation. A complete note scan can therefore close
+    // its one-time source coverage even when it creates no events.
+    if (input.resource === "note" && input.importResult.fetchComplete) {
+      return withJunctionMetadataPatch(
+        input.result,
+        buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
+          input.context,
+          input.resource,
+          sourceProviderSlug,
+        ),
+      );
+    }
+
     if (
       input.importResult.fetchComplete
       && recordsSeen
@@ -6041,6 +6055,16 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     || !JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET.has(resource)
   ) {
     return null;
+  }
+
+  if (resource === "note") {
+    return sha256Text(JSON.stringify([
+      "junction",
+      "extended-timeseries-backfill",
+      normalizeProviderSlug(payload.sourceProviderSlug),
+      resource,
+      JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES.note.version,
+    ]));
   }
 
   return sha256Text(JSON.stringify([

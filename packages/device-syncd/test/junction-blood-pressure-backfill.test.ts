@@ -790,6 +790,11 @@ test("Oura notes receive one full summary-history migration while dense timeseri
       sourceType: "ring",
       start: "2026-01-05T20:00:00.000Z",
       tags: ["sauna"],
+    }, {
+      end: "2026-02-05T20:05:00.000Z",
+      start: "2026-02-05T20:00:00.000Z",
+      tags: [],
+      value: "SENSITIVE_EMPTY_TAG_NOTE",
     }],
     requests,
     summaryBackfillDays: 180,
@@ -824,18 +829,28 @@ test("Oura notes receive one full summary-history migration while dense timeseri
 
   const importedSnapshots: unknown[] = [];
   const { executionCount, result } = await executeImmediateResourceContinuations({
-    context: createJobContext({ canonicalEventCount: 1, importedSnapshots }),
+    context: createJobContext({ importedSnapshots }),
     job: toJobRecord(note, 1),
     provider,
     resource: "note",
   });
   assert.equal(executionCount, 180);
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 2);
   assert.equal(result.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v1|oura");
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
   assert.equal(
     requests.filter((request) => request.resource === "note").length,
     180,
   );
+
+  const nextDayPending = createScheduledJobs(
+    createStoredAccount({ sources }),
+    "2026-06-12T12:00:00.000Z",
+  );
+  const nextDayNote = requireValue(nextDayPending.jobs.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "note"
+  ));
+  assert.equal(nextDayNote.dedupeKey, note.dedupeKey);
 
   requests.length = 0;
   const bounded = requireValue(scheduled.jobs.find((job) => job.kind === "reconcile"));
@@ -850,6 +865,49 @@ test("Oura notes receive one full summary-history migration while dense timeseri
     7,
   );
 
+  const completed = createScheduledJobs(
+    createStoredAccount({ metadata: result.metadataPatch, sources }),
+    "2026-06-12T12:00:00.000Z",
+  );
+  assert.equal(
+    completed.jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
+    false,
+  );
+});
+
+test("empty Oura note history reaches terminal source coverage", async () => {
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { note: true },
+      slug: "oura",
+    }],
+    includeNote: true,
+    requests: [],
+    summaryBackfillDays: 180,
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "oura",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { note: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const note = requireValue(scheduled.jobs.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "note"
+  ));
+
+  const { result } = await executeImmediateResourceContinuations({
+    context: createJobContext(),
+    job: toJobRecord(note, 1),
+    provider,
+    resource: "note",
+  });
+
+  assert.equal(result.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v1|oura");
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
   const completed = createScheduledJobs(
     createStoredAccount({ metadata: result.metadataPatch, sources }),
     "2026-06-12T12:00:00.000Z",
