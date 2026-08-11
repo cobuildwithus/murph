@@ -66,6 +66,10 @@ import {
   listAssistantTranscriptEntries,
 } from '../store.js'
 import {
+  readAssistantGeneratedImageDeliveryTranscriptMarker,
+  renderAssistantGeneratedImageDeliveryHistoryText,
+} from '../response-media.js'
+import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
 } from '../turn-finalizer.js'
@@ -1160,6 +1164,21 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
         },
         userPromptKey: null,
       }]
+    }
+    if (entry.kind === 'status') {
+      const generatedImage =
+        readAssistantGeneratedImageDeliveryTranscriptMarker(entry.text)
+      return generatedImage
+        ? [{
+            message: {
+              content: renderAssistantGeneratedImageDeliveryHistoryText(
+                generatedImage,
+              ),
+              role: 'assistant',
+            },
+            userPromptKey: null,
+          }]
+        : []
     }
     if (entry.kind !== 'assistant' && entry.kind !== 'user') {
       return []

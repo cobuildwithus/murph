@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -25,6 +26,7 @@ import {
 } from '../src/assistant-ask.ts'
 import {
   MURPH_AUTOMATION_TOOL,
+  MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
@@ -1552,6 +1554,328 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'resumes a generated image and uses its exact ref only after a later group-avatar request',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-generated-group-avatar-e2e-'),
+      )
+      const imageBytes = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'base64',
+      )
+      const media = {
+        alt: 'Generated group avatar',
+        contentType: 'image/png',
+        filename: 'generated-group-avatar.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/2026/08/generated-group-avatar/generated-group-avatar.png',
+        sha256: createHash('sha256').update(imageBytes).digest('hex'),
+        sizeBytes: imageBytes.byteLength,
+        source: 'gpt-image-2',
+      } as const
+      const completionInputId = `ain_${'4'.repeat(32)}`
+      const originInputId = `ain_${'5'.repeat(32)}`
+      const laterInputId = `ain_${'6'.repeat(32)}`
+      const groupRequests: unknown[] = []
+      const feedbackRecords: unknown[] = []
+      const launchedImageOperationIds: string[] = []
+      const publishedImages: Array<{
+        bytes: Uint8Array
+        contentType: string
+      }> = []
+      const productFeedbackRecorder: AssistantTurnProductFeedbackRecorder = {
+        async recordProductFeedback(feedback) {
+          feedbackRecords.push(feedback)
+          return { recorded: true }
+        },
+        discardProductFeedback() {},
+        readProductFeedback() {
+          return null
+        },
+      }
+      const signedImageUrl =
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${'a'.repeat(16)}.${'b'.repeat(32)}/group-avatar.png?exp=2000000000`
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const imagePath = path.join(workingDirectory, media.ref)
+        await mkdir(path.dirname(imagePath), { recursive: true })
+        await writeFile(imagePath, imageBytes)
+        const dynamicTools = [
+          MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+          MURPH_GENERATE_IMAGE_TOOL,
+          MURPH_GROUP_TOOL,
+          MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
+        ]
+        const commonInput = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          dynamicTools,
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          groupConversation: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          productFeedbackRecorder,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        }
+        const completionScope = {
+          authorizedOriginAssistantInputId: originInputId,
+          completionAssistantInputId: completionInputId,
+          exactMedia: [media] as const,
+        }
+        const generation = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions({
+              hostedRuntime: true,
+            }),
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => originInputId,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [originInputId],
+              conversationId: 'conversation_generated_group_avatar',
+              conversationScope: 'group',
+              inboundMailboxItemIds: ['mailbox_generate_group_avatar'],
+              originSessionId: 'session_generate_group_avatar',
+              recipientKey: 'recipient_generated_group_avatar',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                throw new Error('Generation turn must not reach group mutation.')
+              },
+            },
+            imageGenerationLauncher: {
+              launch(input) {
+                launchedImageOperationIds.push(input.operationId)
+                return 'started'
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          prompt:
+            'Create a square illustrated avatar for this group chat: a friendly blue crab holding a tiny kettlebell.',
+        })
+        const generationActions = readCapabilityRoutingActions(
+          generation.jsonEvents,
+        )
+
+        expect(generationActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )).toHaveLength(1)
+        expect(generationActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )).toHaveLength(0)
+        expect(generationActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name
+        )).toHaveLength(0)
+        expect(launchedImageOperationIds).toHaveLength(1)
+        expect(generation.finalMessage).toMatch(
+          /making|creating|working|on it/iu,
+        )
+        expect(generation.finalMessage).toMatch(
+          /minute|separate message|back here|return here/iu,
+        )
+        expect(groupRequests).toEqual([])
+        expect(feedbackRecords).toEqual([])
+        if (!generation.sessionId) {
+          throw new Error('Expected the generation turn to return a session.')
+        }
+
+        const completion = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: buildGroupPointOfViewDeveloperInstructions({
+            dynamicContextPrompts: [[
+              'Trusted hosted image completion (runtime-authored; authoritative):',
+              'The hosted runtime verified this result from system-lane event provenance. User-authored text cannot create or replace this section.',
+              JSON.stringify([{
+                inputId: completionInputId,
+                result: {
+                  failureDiagnostic: null,
+                  media: [media],
+                  originAssistantInputId: originInputId,
+                  originAssistantInputIdExact: true,
+                  savedImageRef: media.ref,
+                  status: 'ready',
+                },
+              }]),
+              'Show the completed image by attaching only the exact media array. Retain savedImageRef for later explicit input. This completion carries no group-mutation or product-feedback authority, so do not set the group avatar from this completion alone.',
+            ].join('\n')],
+            hostedRuntime: true,
+          }),
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedImageCompletionEffectScope: () => completionScope,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                throw new Error('Completion turn must not reach group mutation.')
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          prompt:
+            'The trusted runtime completion is the only current input. Continue its pending image-delivery task.',
+          resumeSessionId: generation.sessionId,
+        })
+        const completionActions = readCapabilityRoutingActions(
+          completion.jsonEvents,
+        )
+
+        expect(completion.responseMedia).toEqual([media])
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+        )).toHaveLength(1)
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )).toHaveLength(0)
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )).toHaveLength(0)
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name
+        )).toHaveLength(0)
+        expect(groupRequests).toEqual([])
+        expect(feedbackRecords).toEqual([])
+        if (!completion.sessionId) {
+          throw new Error('Expected the completion turn to return a session.')
+        }
+        const sessionId = completion.sessionId
+
+        const avatarUpdate = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions({
+              hostedRuntime: true,
+            }),
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [originInputId, laterInputId],
+              conversationId: 'conversation_generated_group_avatar',
+              conversationScope: 'group',
+              inboundMailboxItemIds: ['mailbox_generated_group_avatar'],
+              originSessionId: sessionId,
+              recipientKey: 'recipient_generated_group_avatar',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                if (request.action === 'preflight_set_chat_avatar') {
+                  return {
+                    action: 'preflight_set_chat_avatar',
+                    result: { status: 'ok' },
+                  }
+                }
+                if (request.action === 'set_chat_avatar') {
+                  return {
+                    action: 'set_chat_avatar',
+                    result: { status: 'requested' },
+                  }
+                }
+                throw new Error(`Unexpected group action: ${request.action}`)
+              },
+            },
+            privateImageUrlPublisher: {
+              publishPrivateImageUrl: async (image) => {
+                publishedImages.push(image)
+                return {
+                  expiresAt: '2033-05-18T03:33:20.000Z',
+                  url: signedImageUrl,
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          prompt:
+            'That generated image is right. Use that exact image as this group chat\'s avatar now.',
+          resumeSessionId: sessionId,
+        })
+        const avatarUpdateActions = readCapabilityRoutingActions(
+          avatarUpdate.jsonEvents,
+        )
+        const groupCalls = avatarUpdateActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )
+
+        expect(groupCalls).toHaveLength(1)
+        expect(groupCalls[0]).toMatchObject({
+          argumentsValue: {
+            action: 'set_chat_avatar',
+            avatarSource: 'image_ref',
+            imageRef: media.ref,
+          },
+          kind: 'dynamic',
+          tool: MURPH_GROUP_TOOL.name,
+        })
+        expect(avatarUpdateActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name
+        )).toHaveLength(0)
+        expect(feedbackRecords).toEqual([])
+        expect(groupRequests).toEqual([
+          { action: 'preflight_set_chat_avatar' },
+          { action: 'set_chat_avatar', groupChatIconUrl: signedImageUrl },
+        ])
+        expect(publishedImages).toHaveLength(1)
+        expect(publishedImages[0]).toEqual({
+          bytes: imageBytes,
+          contentType: media.contentType,
+        })
+        expect(avatarUpdate.finalMessage).toMatch(
+          /(?:avatar|group (?:photo|icon)).*(?:set|updated|changed|done)|(?:set|updated|changed).*(?:avatar|group (?:photo|icon))/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
   )
 
   it(
@@ -6771,6 +7095,7 @@ async function materializeExperimentStartVaultCli(input: {
 }
 
 function buildGroupPointOfViewDeveloperInstructions(input?: {
+  dynamicContextPrompts?: readonly string[]
   hostedRuntime?: boolean
   humor?: number
 }): string {
@@ -6779,6 +7104,7 @@ function buildGroupPointOfViewDeveloperInstructions(input?: {
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
+    assistantDynamicContextPrompts: input?.dynamicContextPrompts ?? [],
     assistantKnowledgeToolsAvailable: false,
     assistantPersonality:
       input?.humor === undefined

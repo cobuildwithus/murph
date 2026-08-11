@@ -345,6 +345,15 @@ describe("changelog registry", () => {
       listPublishedChangelogItems().map((item) => [item.id, item]),
     );
 
+    expect(items.get("generated-image-group-photo")).toMatchObject({
+      sourcePullRequests: [1533],
+      summary: expect.stringContaining("same image"),
+      details: expect.stringContaining("explicit group request"),
+    });
+    expect(items.get("generated-image-group-photo")?.details).toContain(
+      "visible in the conversation",
+    );
+    expect(items.get("generated-image-group-photo")?.tryIt).toBeUndefined();
     expect(items.get("reminders-keep-requested-timezone")).toMatchObject({
       sourcePullRequests: [1546],
       summary: expect.stringContaining("preserves that local time"),

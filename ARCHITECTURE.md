@@ -2805,6 +2805,39 @@ verified-private support escalation remain accepted-message capabilities; schedu
 turns create neither a feedback candidate nor a delivery-linked feedback obligation.
 Background image completion and its physical-note continuation remain bound to a
 real accepted message because they must return through that durable message route.
+The trusted completion keeps the foreground dynamic-tool contract so it resumes
+the same native provider thread, but provider continuity is not effect authority.
+An engine-owned turn-local restriction hides accepted-input capabilities and
+permits only the completion's exact hash-bound media attachment, no reply, or the
+existing exact-origin physical-note continuation until a later accepted foreground
+input becomes current. Exactly one trusted completion retains that restriction when
+the frozen batch also contains later same-route conversation input; compound batching
+does not erase generated-image provenance. That later input may use the retained
+`raw/captures/**` ref through an independently authorized action such as the existing
+group-avatar path.
+Native provider resume is only the fast path: the transcript owner also commits a
+bounded runtime-authored provenance marker for every trusted ready generated-image
+completion. An attached image retains its actual response ordinal; a completion
+that attaches nothing uses the completion turn's response ordinal so provider
+continuity cannot make a markerless generated capture look ordinary. When route
+support or a contract fingerprint prevents resume, planning restores that marker as
+provenance-only history. A native reply or later generated-ref action is eligible
+only after the outbox matches the same turn, ref, hash, media type, and byte size;
+neither the marker nor the reply relationship grants delivery or mutation authority.
+If bounded transcript retention has removed the marker, the existing generated-capture
+lookup may recover only the generated-origin classification; eligibility still
+requires a singleton same-session outbox intent for that exact ref with accepted
+physical-delivery evidence. Missing or conflicting evidence fails closed, while a
+reference absent from a retained marker, the current completion restriction, and the
+generated-capture lookup keeps the ordinary capture path.
+Multi-message provider deliveries persist one true-only fact on the exact
+physical effect that carried the intent media. That additive fact lives below a
+strict outbox schema boundary, so the first writer also establishes hosted
+runner state schema version 16 before any runner invocation. A version-15
+Worker rejects that Durable Object state during construction and cannot start a
+runner that would quarantine the newer outbox record. Version 16 is therefore a
+hard Cloudflare/runner rollback floor after deployment; recovery uses a forward
+fix on version 16 or newer.
 Ephemeral progress updates remain unavailable because queue-only background turns
 have no waiting audience and cannot durably order a progress send before the final
 reply. No scheduler-specific service, persisted authority row, queue, or second
