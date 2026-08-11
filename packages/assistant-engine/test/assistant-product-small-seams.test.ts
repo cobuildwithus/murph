@@ -632,6 +632,7 @@ describe('assistant product small seams', () => {
           'Source: telegram',
           '',
           'Appointment source ref: ais_cccccccccccccccccccccccccccccccc',
+          'Correction-added appointment source ref: ais_dddddddddddddddddddddddddddddddd',
           'Message ref: ain_33333333333333333333333333333333',
           '',
           'Attachment context:',

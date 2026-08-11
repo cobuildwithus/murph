@@ -26,7 +26,10 @@ import {
   type AssistantDerivedEvidenceReadBudget,
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
-import { createAssistantAppointmentReminderSourceRef } from '../appointment-reminder-source-ref.js'
+import {
+  createAssistantAppointmentReminderSourceRef,
+  readAssistantAppointmentReminderCorrectionSourceInputId,
+} from '../appointment-reminder-source-ref.js'
 import { readAssistantInputMessageRef } from '../message-target-selection.js'
 import { normalizeNullableString } from '../shared.js'
 
@@ -131,6 +134,8 @@ export function buildAssistantAutoReplyPrompt(
 ): AssistantAutoReplyPrompt {
   const sections = inputs
     .map((entry, index) => {
+      const correctionSourceInputId =
+        readAssistantAppointmentReminderCorrectionSourceInputId(entry)
       const attachmentSections = buildAssistantAutoReplyAttachmentSections({
         lifecycleSection: renderAssistantInputAttachmentDescriptorPromptSection({
           attachments: entry.attachmentEvidence.attachments,
@@ -157,7 +162,12 @@ export function buildAssistantAutoReplyPrompt(
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
         appointmentReminderSourceRef:
-          createAssistantAppointmentReminderSourceRef(entry.inputId),
+          createAssistantAppointmentReminderSourceRef(
+            correctionSourceInputId ?? entry.inputId,
+          ),
+        correctionAddedAppointmentSourceRef: correctionSourceInputId
+          ? createAssistantAppointmentReminderSourceRef(entry.inputId)
+          : null,
         messageRef: readAssistantInputMessageRef(entry),
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
@@ -210,6 +220,8 @@ export async function prepareAssistantAutoReplyInput(
   }
   const textualSections = preparedInputs
     .map((entry, index) => {
+      const correctionSourceInputId =
+        readAssistantAppointmentReminderCorrectionSourceInputId(entry)
       const attachmentSections = buildAssistantAutoReplyAttachmentSections({
         lifecycleSection: renderAssistantInputAttachmentDescriptorPromptSection({
           attachmentBundles: entry.attachmentBundles,
@@ -237,7 +249,12 @@ export async function prepareAssistantAutoReplyInput(
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
         appointmentReminderSourceRef:
-          createAssistantAppointmentReminderSourceRef(entry.inputId),
+          createAssistantAppointmentReminderSourceRef(
+            correctionSourceInputId ?? entry.inputId,
+          ),
+        correctionAddedAppointmentSourceRef: correctionSourceInputId
+          ? createAssistantAppointmentReminderSourceRef(entry.inputId)
+          : null,
         messageRef: readAssistantInputMessageRef(entry),
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
@@ -507,6 +524,7 @@ function renderAssistantAutoReplyInputSection(input: {
   appointmentReminderSourceRef: string
   attachmentSections: readonly string[]
   correctionContext: string | null
+  correctionAddedAppointmentSourceRef: string | null
   evidenceReasonCode: string | null
   evidenceStatus: AssistantInputAttachmentEvidence['status']
   groupContext: string | null
@@ -579,6 +597,11 @@ function renderAssistantAutoReplyInputSection(input: {
 
   if (input.messageRef) {
     sections.unshift(`Message ref: ${input.messageRef}`)
+  }
+  if (input.correctionAddedAppointmentSourceRef) {
+    sections.unshift(
+      `Correction-added appointment source ref: ${input.correctionAddedAppointmentSourceRef}`,
+    )
   }
   sections.unshift(
     `Appointment source ref: ${input.appointmentReminderSourceRef}`,

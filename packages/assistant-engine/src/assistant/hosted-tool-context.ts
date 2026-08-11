@@ -169,6 +169,7 @@ export interface AssistantHostedToolContext {
   }): void
   currentScheduledPhoneCallScope?(): AssistantHostedScheduledPhoneCallScope | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
+  currentAppointmentReminderSourceInputIds?(): Promise<readonly string[]>
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly pendingVaultFilesAvailable?: boolean
@@ -191,6 +192,7 @@ export function createAssistantHostedToolContext(input: {
   beforeToolExecution?: (deliveryContextOrdinal: number) => Promise<void>
   getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
+  getAppointmentReminderSourceInputIds?: () => Promise<readonly string[]>
   getUserActionAcceptedInputIds?: () => readonly string[]
   getProductFeedbackAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
@@ -468,6 +470,10 @@ export function createAssistantHostedToolContext(input: {
     recordNewsletterSendResult: input.recordNewsletterSendResult,
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
     currentUserActionScope: readCurrentUserActionScope,
+    currentAppointmentReminderSourceInputIds: async () =>
+      await input.getAppointmentReminderSourceInputIds?.()
+      ?? input.getUserActionAcceptedInputIds?.()
+      ?? [],
     currentProductFeedbackAcceptedInputIds: () =>
       input.getProductFeedbackAcceptedInputIds?.() ?? [],
     pendingVaultFilesAvailable: input.pendingVaultFilesAvailable === true,
@@ -524,10 +530,11 @@ export function createAssistantHostedScheduledRequestKey(input: {
 
 export function createAssistantHostedAutomationCreateReplayKey(input: {
   scope: AssistantHostedUserActionScope
+  sourceInputIds?: readonly string[]
   sourceRef: string
 }): `automation_create_${string}` | null {
   const acceptedInputId = resolveAssistantAppointmentReminderSourceInputId({
-    acceptedInputIds: input.scope.acceptedInputIds,
+    acceptedInputIds: input.sourceInputIds ?? input.scope.acceptedInputIds,
     sourceRef: input.sourceRef,
   })
   if (!acceptedInputId) {

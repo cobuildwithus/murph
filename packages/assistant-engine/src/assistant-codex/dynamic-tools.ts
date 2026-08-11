@@ -1936,12 +1936,19 @@ export async function executeMurphDynamicToolRequest(input: {
           'create-only automation saves require fresh accepted user input',
         )
       }
+      const appointmentReminderSourceInputIds = createOnlyRequested
+        ? await input.hostedToolContext
+          ?.currentAppointmentReminderSourceInputIds?.()
+          ?? userActionScope?.acceptedInputIds
+          ?? []
+        : []
       const createOnlyReplayKey =
         userActionScope && input.request.createOnlySourceRef
           ? createAssistantHostedAutomationCreateReplayKey({
-              scope: userActionScope,
-              sourceRef: input.request.createOnlySourceRef,
-            })
+            scope: userActionScope,
+            sourceInputIds: appointmentReminderSourceInputIds,
+            sourceRef: input.request.createOnlySourceRef,
+          })
           : null
       if (createOnlyRequested && createOnlyReplayKey === null) {
         return toolTextResult(

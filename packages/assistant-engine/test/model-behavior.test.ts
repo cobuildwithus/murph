@@ -3113,6 +3113,12 @@ describe('assistant conversation scope', () => {
       'reuse the same source ref and ordinal across regeneration even when later inputs join or copy, tag order, or timestamp spelling changes',
     )
     expect(prompt).toContain(
+      'A trusted message correction revises the referenced input: recover and patch or archive existing owners from original and corrected evidence, never current list position.',
+    )
+    expect(prompt).toContain(
+      'only an appointment genuinely introduced by the correction may use its Correction-added appointment source ref',
+    )
+    expect(prompt).toContain(
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
     )
     expect(prompt).toContain(

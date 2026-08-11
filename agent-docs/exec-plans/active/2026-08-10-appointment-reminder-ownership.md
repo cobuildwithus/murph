@@ -153,6 +153,61 @@ This correction continues to use the existing automation record,
 accepted-input journal, and registry lock. It adds no durable owner, index,
 queue, reconciliation loop, or state machine.
 
+## Review retrospective — round 5
+
+ReviewGPT found that a provider-authenticated Linq edit has a new ingestion
+event id but is explicitly a correction to `editedSourceInputId`, not a
+separate request. Giving every ingestion event its own appointment authority
+would therefore duplicate an ambiguously committed reminder after a message
+edit, while merely replaying the original owner would leave its old schedule.
+
+The requirement-level decisions are:
+
+- A trusted correction is a revision of the original accepted message's
+  appointment-effect authority. Existing, changed, reordered, or removed
+  appointments inherit the original message's opaque appointment source ref;
+  ingestion-event identity alone never makes them new effects.
+- A correction also receives a separate opaque correction-added source ref,
+  but that ref is valid only for a genuinely new appointment introduced by the
+  correction. Its ordinal is one-based among appointments newly introduced by
+  that correction, not the correction's complete visible appointment order.
+- Appointment correspondence comes from the original and corrected evidence
+  plus persisted route-scoped owners, never list order. Existing appointments
+  retain and patch their exact owner, removed appointments archive their exact
+  owner, and reordering never reassigns an ordinal. If correspondence remains
+  ambiguous, the assistant makes no create or mutation and asks one narrow
+  identifying question.
+- After an ambiguous original commit, a trusted correction first recovers with
+  shared stable evidence such as destination or service plus the original and
+  corrected details. It patches the recovered owner to the authoritative
+  corrected schedule. A create-only replay may recover the owner id, but its
+  unchanged stored schedule is never treated as applying the correction; the
+  exact owner must then be patched.
+- A correction may create only when route-scoped reads establish that no
+  plausible owner exists. Original-lineage appointments use the original
+  source ref and original ordinal; genuinely added appointments use the
+  correction-added source ref and added-appointment ordinal.
+- Required proof discards A's committed result, admits trusted correction C
+  targeting A, recovers one owner and patches its schedule, preserves unrelated
+  owners across insert/remove/reorder cases, keeps independent input B
+  separately owned, and leaves no stale duplicate after cancellation.
+
+The host derives correction lineage from the existing trusted
+`editedSourceInputId` input-event metadata and accepted-input journal. The
+workflow continues to use the canonical automation record and registry lock;
+it adds no secondary identity index, reconciliation loop, queue, state machine,
+or durable owner.
+
+The implemented correction renders both refs only for trusted Linq correction
+inputs, validates the original lineage against the stored account, actor,
+thread, directness, and service authority before accepting the original ref,
+and keeps the correction event ref available only for genuinely introduced
+appointments. Stateful runtime proof now recovers an ambiguously committed
+owner, observes its unchanged replayed schedule, patches the exact owner,
+creates and removes a correction-added owner independently, preserves an
+unrelated accepted input across reorder and lifecycle operations, and leaves
+one archived owner after cancellation.
+
 ## Tasks
 
 1. [x] Add canonical create-only ownership and hosted current-conversation list.
@@ -176,7 +231,7 @@ Completed focused proof:
 
 - All four affected package typechecks pass.
 - Core: 25 focused automation tests pass.
-- Assistant Engine: 196 focused policy, tool, planning, and skill tests pass;
+- Assistant Engine: 242 focused policy, tool, planning, and skill tests pass;
   credential-gated real App Server cases remain registered and skipped without
   the live provider credential.
 - CLI: 86 focused automation and generated-contract tests pass.

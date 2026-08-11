@@ -5051,25 +5051,62 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             lookupId: expect.stringMatching(/^automation-[a-z0-9]+$/u),
             replayed: false,
           }));
-          await expect(executionContext.hosted?.automationTool?.request(
-            {
-              ...appointmentReminderRequest,
-              instructions: "Regenerated copy for the Midtown reminder.",
-              schedule: {
-                at: "2099-08-11T20:00:00-04:00",
-                kind: "at",
+          // Model an original write whose result never reached the provider.
+          // The test retains it only to assert that correction recovery found
+          // the exact hidden owner rather than creating another record.
+          const correctionRecovery =
+            await executionContext.hosted?.automationTool?.request(
+              {
+                ...appointmentReminderRequest,
+                instructions: "Corrected copy for the Midtown reminder.",
+                schedule: {
+                  at: "2099-08-11T20:00:00-04:00",
+                  kind: "at",
+                },
+                summary: "Corrected Midtown reminder copy",
+                tags: ["care-reminder", "appointment-reminder"],
+                title: "Corrected Midtown appointment title",
               },
-              summary: "Regenerated Midtown reminder copy",
-              tags: ["care-reminder", "appointment-reminder"],
-              title: "Regenerated Midtown appointment title",
-            },
-            { createOnlyReplayKey: "linq-accepted-input-appointment" },
-          )).resolves.toEqual(expect.objectContaining({
+              { createOnlyReplayKey: "linq-accepted-input-appointment" },
+            );
+          expect(correctionRecovery).toEqual(expect.objectContaining({
             automationId: appointmentReminder.automationId,
             created: false,
             lookupId: appointmentReminder.lookupId,
             replayed: true,
           }));
+          if (!correctionRecovery || correctionRecovery.action !== "save") {
+            throw new Error("Expected correction recovery of the hidden owner.");
+          }
+          expect(correctionRecovery.schedule).toEqual(
+            appointmentReminderRequest.schedule,
+          );
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            lookup: correctionRecovery.automationId,
+            schedule: { at: "2099-08-13T00:00:00.000Z", kind: "at" },
+            status: "active",
+            summary: "Midtown appointment corrected to August 13 at 9:30 AM",
+            title: "Midtown appointment corrected to August 13 at 9:30 AM",
+          })).resolves.toEqual(expect.objectContaining({
+            automationId: appointmentReminder.automationId,
+            lookupId: appointmentReminder.lookupId,
+            schedule: { at: "2099-08-13T00:00:00.000Z", kind: "at" },
+            status: "active",
+          }));
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "list",
+            exactTag: "appointment-reminder",
+            query: "Midtown August 13",
+          })).resolves.toEqual({
+            action: "list",
+            count: 1,
+            items: [expect.objectContaining({
+              automationId: appointmentReminder.automationId,
+              schedule: { at: "2099-08-13T00:00:00.000Z", kind: "at" },
+            })],
+            truncated: false,
+          });
           const secondAppointmentReminderRequest = {
             action: "save" as const,
             createOnly: true as const,
@@ -5107,6 +5144,30 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             lookupId: secondAppointmentReminder.lookupId,
             replayed: true,
           }));
+          const correctionAddedReminder =
+            await executionContext.hosted?.automationTool?.request({
+              action: "save",
+              createOnly: true,
+              createOnlyEffectKey: "appointment-reminder:1",
+              instructions: "Send the newly added Uptown appointment reminder.",
+              schedule: { at: "2099-08-15T13:00:00.000Z", kind: "at" },
+              summary: "Uptown appointment newly added by the correction",
+              tags: ["appointment-reminder"],
+              title: "Uptown appointment newly added by the correction",
+            }, {
+              createOnlyReplayKey: "linq-correction-input-appointment",
+            });
+          if (!correctionAddedReminder || correctionAddedReminder.action !== "save") {
+            throw new Error("Expected the correction-added appointment owner.");
+          }
+          expect(correctionAddedReminder.automationId).not.toBe(
+            appointmentReminder.automationId,
+          );
+          expect(correctionAddedReminder.automationId).not.toBe(
+            secondAppointmentReminder.automationId,
+          );
+          // A corrected presentation can reorder existing appointments, but
+          // lifecycle writes continue to address their exact recovered owners.
           await expect(executionContext.hosted?.automationTool?.request({
             action: "patch",
             lookup: appointmentReminder.automationId,
@@ -5130,6 +5191,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             schedule: secondAppointmentReminder.schedule,
             status: "archived",
           }));
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            lookup: correctionAddedReminder.automationId,
+            status: "archived",
+          })).resolves.toEqual(expect.objectContaining({
+            automationId: correctionAddedReminder.automationId,
+            lookupId: correctionAddedReminder.lookupId,
+            schedule: correctionAddedReminder.schedule,
+            status: "archived",
+          }));
           await expect(showAutomation({
             automationId: appointmentReminder.automationId,
             vaultRoot,
@@ -5142,6 +5213,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             vaultRoot,
           })).resolves.toEqual(expect.objectContaining({
             schedule: secondAppointmentReminder.schedule,
+            status: "archived",
+          }));
+          await expect(showAutomation({
+            automationId: correctionAddedReminder.automationId,
+            vaultRoot,
+          })).resolves.toEqual(expect.objectContaining({
+            schedule: correctionAddedReminder.schedule,
             status: "archived",
           }));
           for (const [index, title] of [
@@ -5380,7 +5458,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       });
       expect(linqAppointmentOwners).toEqual(expect.objectContaining({
         action: "list",
-        count: 6,
+        count: 7,
         items: expect.any(Array),
         truncated: true,
       }));
@@ -5409,6 +5487,46 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           automationId: expect.stringMatching(/^automation_/u),
           title: "Midtown appointment on August 14 at 3 PM",
         })],
+        truncated: false,
+      });
+      if (
+        !narrowedLinqAppointmentOwners
+        || narrowedLinqAppointmentOwners.action !== "list"
+        || !narrowedLinqAppointmentOwners.items[0]
+      ) {
+        throw new Error("Expected one corrected Midtown owner.");
+      }
+      const cancelledCorrectedOwner = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [linqInputId],
+        operation: async (executionContext) =>
+          await executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            lookup: narrowedLinqAppointmentOwners.items[0]!.automationId,
+            status: "archived",
+          }),
+        turnEnvironment: null,
+      });
+      expect(cancelledCorrectedOwner).toEqual(expect.objectContaining({
+        action: "patch",
+        automationId: narrowedLinqAppointmentOwners.items[0].automationId,
+        status: "archived",
+      }));
+      const cancelledCorrectedOwners = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [linqInputId],
+        operation: async (executionContext) =>
+          await executionContext.hosted?.automationTool?.request({
+            action: "list",
+            exactTag: "appointment-reminder",
+            query: "Midtown August 14",
+          }),
+        turnEnvironment: null,
+      });
+      expect(cancelledCorrectedOwners).toEqual({
+        action: "list",
+        count: 1,
+        items: [expect.objectContaining({ status: "archived" })],
         truncated: false,
       });
       const taggedLegacyOwners = await operationScope.runAutoReplyGroup({

@@ -622,6 +622,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
   it('renders trusted Linq corrections separately from untrusted message text', () => {
     const originalInputId = 'ain_11111111111111111111111111111111'
     const unrelatedInputId = 'ain_22222222222222222222222222222222'
+    const correctionInputId = 'ain_33333333333333333333333333333333'
     const linqReplyTarget = {
       channel: 'linq',
       messageId: 'provider-message',
@@ -664,7 +665,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
           source: 'linq',
           text: 'corrected wording',
         },
-        inputId: 'ain_33333333333333333333333333333333',
+        inputId: correctionInputId,
         replyTarget: linqReplyTarget,
         sourceMetadata: {
           editedSourceInputId: originalInputId,
@@ -694,6 +695,11 @@ describe('buildAssistantAutoReplyPrompt', () => {
     ].join('\n'))
     expect(result.prompt).toContain(`Message ref: ${originalInputId}`)
     expect(result.prompt).toContain(`Message ref: ${unrelatedInputId}`)
+    expect(result.prompt).toContain([
+      `Appointment source ref: ${createAssistantAppointmentReminderSourceRef(originalInputId)}`,
+      `Correction-added appointment source ref: ${createAssistantAppointmentReminderSourceRef(correctionInputId)}`,
+      `Message ref: ${correctionInputId}`,
+    ].join('\n\n'))
     expect(result.prompt).not.toContain(
       `Trusted message correction for Message ref ${unrelatedInputId}:`,
     )

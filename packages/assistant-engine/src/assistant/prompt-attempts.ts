@@ -68,7 +68,7 @@ export function extractAssistantAutoReplyFailedPromptText(prompt: string): strin
     return prompt
       .split('\n')
       .filter((line) =>
-        !/^(?:Appointment source ref: ais_|Message ref: ain_)[0-9a-f]{32}$/u.test(line)
+        !/^(?:Appointment source ref: ais_|Correction-added appointment source ref: ais_|Message ref: ain_)[0-9a-f]{32}$/u.test(line)
       )
       .join('\n')
       .replace(/\n{3,}/gu, '\n\n')

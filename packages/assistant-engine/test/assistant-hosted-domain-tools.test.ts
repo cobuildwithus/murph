@@ -18,7 +18,10 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.js'
-import { createAssistantAppointmentReminderSourceRef } from '../src/assistant/appointment-reminder-source-ref.js'
+import {
+  createAssistantAppointmentReminderSourceRef,
+  resolveAssistantAppointmentReminderSourceInputIds,
+} from '../src/assistant/appointment-reminder-source-ref.js'
 
 const APPOINTMENT_INPUT_A = `ain_${'a'.repeat(32)}`
 const APPOINTMENT_INPUT_B = `ain_${'b'.repeat(32)}`
@@ -685,6 +688,141 @@ describe('hosted domain dynamic tools', () => {
     expect(automationRequest).toHaveBeenCalledTimes(5)
   })
 
+  it('authorizes trusted correction lineage without trusting a cross-actor target', async () => {
+    const correctionInputId = `ain_${'c'.repeat(32)}`
+    const forgedCorrectionInputId = `ain_${'d'.repeat(32)}`
+    const conversation = {
+      accountId: 'account-1',
+      actorId: 'actor-1',
+      actorIsSelf: false,
+      source: 'linq',
+      threadId: 'thread-1',
+      threadIsDirect: true,
+    }
+    const ordinaryMetadata = {
+      externalThreadRouteAuthorityPresent: false,
+      kind: 'linq' as const,
+      partCount: 1,
+      reactionEligible: false,
+      replyToMessageId: null,
+      service: 'iMessage',
+    }
+    const events = new Map([
+      [APPOINTMENT_INPUT_A, {
+        conversation,
+        inputId: APPOINTMENT_INPUT_A,
+        sourceMetadata: ordinaryMetadata,
+      }],
+      [correctionInputId, {
+        conversation,
+        inputId: correctionInputId,
+        sourceMetadata: {
+          ...ordinaryMetadata,
+          editedSourceInputId: APPOINTMENT_INPUT_A,
+          editedTextPartIndex: 0,
+        },
+      }],
+      [forgedCorrectionInputId, {
+        conversation: { ...conversation, actorId: 'actor-2' },
+        inputId: forgedCorrectionInputId,
+        sourceMetadata: {
+          ...ordinaryMetadata,
+          editedSourceInputId: APPOINTMENT_INPUT_A,
+          editedTextPartIndex: 0,
+        },
+      }],
+    ])
+
+    await expect(resolveAssistantAppointmentReminderSourceInputIds({
+      acceptedInputIds: [correctionInputId],
+      readInputEvent: async (inputId) => events.get(inputId) ?? null,
+    })).resolves.toEqual([correctionInputId, APPOINTMENT_INPUT_A])
+    await expect(resolveAssistantAppointmentReminderSourceInputIds({
+      acceptedInputIds: [forgedCorrectionInputId],
+      readInputEvent: async (inputId) => events.get(inputId) ?? null,
+    })).resolves.toEqual([forgedCorrectionInputId])
+  })
+
+  it('keeps a trusted correction on the original replay scope and separates genuine additions', async () => {
+    const correctionInputId = `ain_${'c'.repeat(32)}`
+    const correctionSourceRef =
+      createAssistantAppointmentReminderSourceRef(correctionInputId)
+    const automationRequest = vi.fn<
+      NonNullable<AssistantHostedToolContext['automationTool']>['request']
+    >(async () => ({
+      action: 'save' as const,
+      automationId: 'automation-appointment-1',
+      created: true,
+      effectiveTimeZone: null,
+      lookupId: 'automation-opaque-owner-1',
+      nextOccurrenceAt: '2026-08-12T00:00:00.000Z',
+      routeBinding: 'current_conversation' as const,
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' as const },
+      status: 'active' as const,
+      timingVerified: true,
+    }))
+    let acceptedInputIds = [APPOINTMENT_INPUT_A]
+    let sourceInputIds = [APPOINTMENT_INPUT_A]
+    const hostedToolContext = createHostedToolContext({
+      automationTool: { request: automationRequest },
+      currentAppointmentReminderSourceInputIds: async () => sourceInputIds,
+      currentUserActionScope: () => ({
+        acceptedInputIds,
+        conversationId: 'conversation-appointment',
+        conversationScope: 'direct',
+        inboundMailboxItemIds: [],
+        originSessionId: 'session-appointment',
+        recipientKey: 'recipient-appointment',
+      }),
+    })
+    const createRequest = (sourceRef: string) => readToolRequest('automation', {
+      action: 'save',
+      createOnly: true,
+      createOnlyEffectKey: 'appointment-reminder:1',
+      createOnlySourceRef: sourceRef,
+      instructions: 'Send the appointment reminder.',
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+      title: 'Appointment reminder',
+    })
+    const initialRequest = createRequest(APPOINTMENT_SOURCE_REF_A)
+    if (!initialRequest) {
+      throw new Error('Expected the initial appointment request.')
+    }
+    await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: initialRequest,
+    })
+
+    acceptedInputIds = [correctionInputId]
+    sourceInputIds = [correctionInputId, APPOINTMENT_INPUT_A]
+    const correctionRequest = createRequest(APPOINTMENT_SOURCE_REF_A)
+    const addedAppointmentRequest = createRequest(correctionSourceRef)
+    if (!correctionRequest || !addedAppointmentRequest) {
+      throw new Error('Expected correction appointment requests.')
+    }
+    for (const request of [correctionRequest, addedAppointmentRequest]) {
+      await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 0,
+        progressDelivery: null,
+        request,
+      })
+    }
+
+    const originalKey = automationRequest.mock.calls[0]?.[1]?.createOnlyReplayKey
+    const correctionKey = automationRequest.mock.calls[1]?.[1]?.createOnlyReplayKey
+    const addedKey = automationRequest.mock.calls[2]?.[1]?.createOnlyReplayKey
+    expect(correctionKey).toBe(originalKey)
+    expect(addedKey).toMatch(/^automation_create_[a-f0-9]{64}$/u)
+    expect(addedKey).not.toBe(originalKey)
+  })
+
   it('executes support-series reconciliation through the injected port', async () => {
     const automationTool = {
       request: vi.fn(async () => ({
@@ -803,12 +941,17 @@ function readToolRequest(tool: 'automation' | 'device', argumentsValue: unknown)
 
 function createHostedToolContext(input: {
   automationTool?: AssistantHostedToolContext['automationTool']
+  currentAppointmentReminderSourceInputIds?:
+    AssistantHostedToolContext['currentAppointmentReminderSourceInputIds']
   currentUserActionScope?: AssistantHostedToolContext['currentUserActionScope']
   deviceTool?: AssistantHostedToolContext['deviceTool']
 }): AssistantHostedToolContext {
   return {
     automationTool: input.automationTool ?? null,
     computerToolsAvailable: false,
+    currentAppointmentReminderSourceInputIds:
+      input.currentAppointmentReminderSourceInputIds
+      ?? (async () => input.currentUserActionScope?.()?.acceptedInputIds ?? []),
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     currentUserActionScope: input.currentUserActionScope ?? (() => null),

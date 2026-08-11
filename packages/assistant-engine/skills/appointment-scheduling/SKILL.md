@@ -329,10 +329,32 @@ same source ref and ordinal when regenerating the same effect, including after
 later inputs join and when reminder copy, tag order, or timestamp spelling
 changes. Distinct appointments in one input use distinct ordinals, including
 when their reminders share a delivery instant. First appointments from
-separate inputs use their separate source refs with ordinal one. The trusted
-host resolves that opaque reference against accepted inputs and scopes the
-discriminator to the exact source input, so no mutable batch position or write
-field is identity. Use a privacy-safe but unmistakable title and summary
+separate non-correction inputs use their separate source refs with ordinal one.
+The trusted host resolves that opaque reference against accepted inputs and
+scopes the discriminator to the exact source input, so no mutable batch
+position or write field is identity.
+
+When the prompt marks a trusted message correction, treat it as a revision of
+the referenced accepted message, not a separate request. Existing, changed,
+reordered, or removed appointments keep the original `Appointment source ref`
+and their original correspondence; never reassign ownership from current list
+position. A genuinely new appointment introduced by the edit may use the
+separate `Correction-added appointment source ref`, with a one-based ordinal
+among appointments newly introduced by that correction.
+
+Before any correction create, list route-scoped owners using stable shared
+destination or service evidence plus both the original and corrected details;
+do not query only by the corrected date or time. Patch the exact existing owner
+to the authoritative corrected schedule, title or summary, and active status;
+archive the exact owner of an appointment removed by the correction. Reordering
+alone changes no owner. If an original create may have committed but its result
+was lost, recover that owner through the scoped read or exact create-only replay
+and then patch it: a replayed save returns unchanged stored state and never
+counts as applying the correction. Create only after those reads establish
+that no plausible owner exists. If appointment correspondence is ambiguous,
+make no mutation or create and ask one narrow identifying question.
+
+Use a privacy-safe but unmistakable title and summary
 that identify the destination or service plus the original local date and
 appointment time when known; never include a diagnosis, reason for care,
 confirmation code, or other sensitive identifier.

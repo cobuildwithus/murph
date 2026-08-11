@@ -155,6 +155,7 @@ import {
   normalizeNullableString,
 } from './shared.js'
 import { readAssistantInputEvent } from './input-store.js'
+import { resolveAssistantAppointmentReminderSourceInputIds } from './appointment-reminder-source-ref.js'
 import {
   resolveAssistantAcceptedMessageParticipant,
   resolveAssistantAcceptedMessageTarget,
@@ -798,6 +799,18 @@ export async function sendAssistantMessageLocal(
                 resolveAssistantConversationScope(
                   sharedPlan.conversationPolicy.audience,
                 ),
+              getAppointmentReminderSourceInputIds: async () =>
+                await resolveAssistantAppointmentReminderSourceInputIds({
+                  acceptedInputIds: resolveAssistantUserActionAcceptedInputIds({
+                    acceptedInputItems: acceptedInputItemsForProviderRequest,
+                    turnTrigger: currentInput.turnTrigger ?? null,
+                  }),
+                  readInputEvent: async (inputId) =>
+                    await readAssistantInputEvent({
+                      inputId,
+                      vault: currentInput.vault,
+                    }),
+                }),
               getUserActionAcceptedInputIds: () =>
                 resolveAssistantUserActionAcceptedInputIds({
                   acceptedInputItems: acceptedInputItemsForProviderRequest,

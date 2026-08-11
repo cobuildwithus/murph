@@ -99,7 +99,16 @@ describe('assistant appointment reminder policy', () => {
       'Distinct appointments in one input use distinct ordinals',
     )
     expect(normalizedSkill).toContain(
-      'First appointments from separate inputs use their separate source refs with ordinal one',
+      'First appointments from separate non-correction inputs use their separate source refs with ordinal one',
+    )
+    expect(normalizedSkill).toContain(
+      'Existing, changed, reordered, or removed appointments keep the original `Appointment source ref`',
+    )
+    expect(normalizedSkill).toContain(
+      'A genuinely new appointment introduced by the edit may use the separate `Correction-added appointment source ref`',
+    )
+    expect(normalizedSkill).toContain(
+      'a replayed save returns unchanged stored state and never counts as applying the correction',
     )
     expect(normalizedSkill).not.toContain('`--create-only`')
     expect(normalizedSkill).toContain(
