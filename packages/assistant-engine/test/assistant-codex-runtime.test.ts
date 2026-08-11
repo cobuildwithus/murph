@@ -80,6 +80,9 @@ import {
   stopCodexAppServerChild,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import {
+  extractCodexAppServerUserMessageImages,
+} from '../src/assistant-codex/images.ts'
+import {
   GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -1071,9 +1074,27 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it.each([0, 3])(
-    'executes Codex app-server turns, sanitizes env, and streams assistant output through JSON-RPC at provider ordinal %i',
-    async (providerRequestOrdinal) => {
+  it.each([
+    {
+      expectedImageDetail: 'original',
+      model: 'gpt-5.6-terra',
+      modelProvider: 'openai',
+      providerRequestOrdinal: 0,
+    },
+    {
+      expectedImageDetail: 'high',
+      model: 'member-model',
+      modelProvider: 'hosted-custom-inference',
+      providerRequestOrdinal: 3,
+    },
+  ] as const)(
+    'executes Codex app-server turns for $modelProvider at provider ordinal $providerRequestOrdinal',
+    async ({
+      expectedImageDetail,
+      model,
+      modelProvider,
+      providerRequestOrdinal,
+    }) => {
     const workingDirectory = await createTempDir('assistant-codex-workdir-')
     const codexHome = await createTempDir('assistant-codex-home-')
     const threadId = '00000000-0000-4000-8000-000000000001'
@@ -1119,8 +1140,8 @@ describe('assistant codex runtime', () => {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
               dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
-              model: 'gpt-5',
-              modelProvider: 'vercel-ai-gateway',
+              model,
+              modelProvider,
               sandbox: 'workspace-write',
               serviceName: 'murph',
             },
@@ -1144,7 +1165,7 @@ describe('assistant codex runtime', () => {
             method: 'turn/start',
             params: {
               effort: 'high',
-              model: 'gpt-5',
+              model,
               serviceTier: null,
               threadId,
             },
@@ -1159,7 +1180,7 @@ describe('assistant codex runtime', () => {
             text: 'Explain this',
           })
           expect(inputItems[1]).toMatchObject({
-            detail: 'original',
+            detail: expectedImageDetail,
             type: 'localImage',
           })
           const imagePath = readLocalImagePath(inputItems[1])
@@ -1378,9 +1399,9 @@ describe('assistant codex runtime', () => {
         onProviderRequestStarted,
         onTraceEvent,
         approvalPolicy: 'never',
-        configOverrides: ['model="gpt-5"'],
-        model: 'gpt-5',
-        modelProvider: 'vercel-ai-gateway',
+        configOverrides: [`model="${model}"`],
+        model,
+        modelProvider,
         reasoningEffort: 'high',
         providerRequestOrdinal,
         providerStartCriticalPath: {
@@ -1420,7 +1441,7 @@ describe('assistant codex runtime', () => {
       'codex',
       [
         '--config',
-        'model="gpt-5"',
+        `model="${model}"`,
         '--config',
         'model_catalog_json="/opt/murph/codex-model-catalog.openai-flex.json"',
         'app-server',
@@ -21080,6 +21101,16 @@ describe('steered final segments', () => {
 
           await liveTurnReady.promise
           const steerRequest = await waitForRpcMethod(child, 'turn/steer')
+          expect(asRecord(steerRequest.params).input).toEqual([
+            {
+              type: 'text',
+              text: 'Clarification accepted by the provider',
+            },
+            expect.objectContaining({
+              detail: 'high',
+              type: 'localImage',
+            }),
+          ])
           child.stdout.write([
             jsonLine({ id: steerRequest.id, result: {} }),
             jsonLine({
@@ -21145,13 +21176,20 @@ describe('steered final segments', () => {
             codexThreadId: liveTurn.threadId,
             providerTurnId: liveTurn.turnId,
             sessionId: 'session-batched-steer',
-            steer: (input) => liveTurn.steer(input),
+            steer: (input) => liveTurn.steer({
+              images: extractCodexAppServerUserMessageImages(
+                input.userMessageContent,
+              ),
+              prompt: input.prompt,
+            }),
             turnId: 'turn-batched-owner',
           })
           liveTurnReady.resolve()
           return releaseLiveTurn
         },
         prompt: 'Initial question',
+        model: 'gpt-5.6-terra',
+        modelProvider: 'openai',
         workingDirectory,
       })
 
@@ -21164,6 +21202,14 @@ describe('steered final segments', () => {
         },
         expectedActiveTurnId: 'turn-batched-owner',
         prompt: 'Clarification accepted by the provider',
+        userMessageContent: [
+          {
+            detail: 'original',
+            image: Buffer.from([0xff, 0xd8, 0xff]),
+            mediaType: 'image/jpeg',
+            type: 'image',
+          },
+        ],
         vault: '/vaults/test',
       })
       expect(completion).not.toBeNull()

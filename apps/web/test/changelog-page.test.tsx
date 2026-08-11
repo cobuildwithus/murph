@@ -250,7 +250,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('data-design-study="changelog-archive"');
     expect(markup).toContain('data-design-state="latest-production-edition"');
     expect(markup).toContain("Managed OpenAI web search works again");
-    expect(markup).toContain("Single photos keep their fine detail");
+    expect(markup).toContain("Lone first photos keep their fine detail");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("A week that closes its own loops");
     expect(markup).toContain("Follow-ups arrive where the work started");

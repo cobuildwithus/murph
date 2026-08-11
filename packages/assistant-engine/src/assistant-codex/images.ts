@@ -5,6 +5,11 @@ import { fileURLToPath } from 'node:url'
 
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
 
 import type {
   AssistantModelImageDetail,
@@ -24,6 +29,13 @@ export interface CodexAppServerPreparedImageInput {
   path: string
 }
 
+const CODEX_ORIGINAL_IMAGE_DETAIL_MODEL = 'gpt-5.6-terra'
+const CODEX_ORIGINAL_IMAGE_DETAIL_PROVIDER_IDS = new Set<string>([
+  HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+  OPENAI_CODEX_MODEL_PROVIDER_ID,
+])
+
 export function extractCodexAppServerUserMessageImages(
   userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
 ): readonly CodexAppServerImageInput[] | undefined {
@@ -32,6 +44,32 @@ export function extractCodexAppServerUserMessageImages(
   )
 
   return images.length > 0 ? images : undefined
+}
+
+export function normalizeCodexAppServerImageDetails(input: {
+  images?: readonly CodexAppServerImageInput[] | null
+  model?: string | null
+  modelProvider?: string | null
+  turnKind: 'initial' | 'steer'
+}): readonly CodexAppServerImageInput[] | undefined {
+  const images = input.images ?? []
+  if (images.length === 0) {
+    return undefined
+  }
+
+  const originalDetailSupported =
+    input.turnKind === 'initial' &&
+    images.length === 1 &&
+    normalizeNullableString(input.model) === CODEX_ORIGINAL_IMAGE_DETAIL_MODEL &&
+    CODEX_ORIGINAL_IMAGE_DETAIL_PROVIDER_IDS.has(
+      normalizeNullableString(input.modelProvider) ?? '',
+    )
+
+  return images.map((image) =>
+    image.detail === 'original' && !originalDetailSupported
+      ? { ...image, detail: 'high' }
+      : image,
+  )
 }
 
 export async function materializeCodexImages(input: {

@@ -133,6 +133,7 @@ import {
 } from './assistant/providers/helpers.js'
 import {
   materializeCodexImages,
+  normalizeCodexAppServerImageDetails,
   type CodexAppServerImageInput,
   type CodexAppServerPreparedImageInput,
 } from './assistant-codex/images.js'
@@ -694,7 +695,12 @@ export async function executeCodexAppServerTurn(
   const processInput = await prepareCodexAppServerProcessInput(input)
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-'))
   const preparedImages = await materializeCodexImages({
-    images: input.images,
+    images: normalizeCodexAppServerImageDetails({
+      images: input.images,
+      model: input.model,
+      modelProvider: input.modelProvider,
+      turnKind: 'initial',
+    }),
     tempRoot,
   })
   const normalizedInput = {
@@ -5055,7 +5061,12 @@ async function runCodexAppServerTurnOnProcess(
   ): Promise<void> => {
     const liveTurn = requireLiveTurnIds()
     const preparedSteerImages = await materializeCodexImages({
-      images: steerInput.images,
+      images: normalizeCodexAppServerImageDetails({
+        images: steerInput.images,
+        model: input.model,
+        modelProvider: input.modelProvider,
+        turnKind: 'steer',
+      }),
       tempRoot: input.tempRoot,
     })
     await withCodexRpcTimeout(

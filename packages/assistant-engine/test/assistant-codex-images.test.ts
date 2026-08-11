@@ -11,6 +11,7 @@ import {
 import {
   extractCodexAppServerUserMessageImages,
   materializeCodexImages,
+  normalizeCodexAppServerImageDetails,
 } from '../src/assistant-codex/images.ts'
 
 const tempRoots: string[] = []
@@ -124,6 +125,64 @@ describe('assistant codex image helpers', () => {
       ],
       threadId: 'thread-detail',
     })
+  })
+
+  it('keeps original detail only for one initial image on a supported managed target', () => {
+    const image = {
+      bytes: Buffer.from([0x01, 0x02, 0x03]),
+      detail: 'original' as const,
+      mimeType: 'image/webp',
+    }
+
+    expect(
+      normalizeCodexAppServerImageDetails({
+        images: [image],
+        model: 'gpt-5.6-terra',
+        modelProvider: 'hosted-openai',
+        turnKind: 'initial',
+      }),
+    ).toEqual([image])
+  })
+
+  it.each([
+    {
+      name: 'gallery',
+      images: [
+        { bytes: Buffer.from([0x01]), detail: 'original' as const },
+        { bytes: Buffer.from([0x02]), detail: 'original' as const },
+      ],
+      model: 'gpt-5.6-terra',
+      modelProvider: 'hosted-openai',
+      turnKind: 'initial' as const,
+    },
+    {
+      name: 'live steer',
+      images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
+      model: 'gpt-5.6-terra',
+      modelProvider: 'hosted-openai',
+      turnKind: 'steer' as const,
+    },
+    {
+      name: 'custom inference',
+      images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
+      model: 'member-model',
+      modelProvider: 'hosted-custom-inference',
+      turnKind: 'initial' as const,
+    },
+  ])('downgrades original detail for a $name input', ({
+    images,
+    model,
+    modelProvider,
+    turnKind,
+  }) => {
+    expect(
+      normalizeCodexAppServerImageDetails({
+        images,
+        model,
+        modelProvider,
+        turnKind,
+      }),
+    ).toEqual(images.map((image) => ({ ...image, detail: 'high' })))
   })
 
   it.each([

@@ -68,7 +68,7 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
-  it("keeps single-photo detail separate from bounded gallery detail", () => {
+  it("keeps lone first-photo detail separate from bounded follow-up and gallery detail", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "sharper-single-photo-review",
     );
@@ -77,9 +77,9 @@ describe("changelog registry", () => {
       editionId: "2026-08-10",
       sourcePullRequests: [1616],
       summary: expect.stringContaining("original detail"),
-      details: expect.stringContaining("Multi-photo comparisons stay at high detail"),
+      details: expect.stringContaining("follow-up photos"),
     });
-    expect(item?.details).toContain("follow-up images");
+    expect(item?.details).toContain("custom inference endpoints");
   });
 
   it("keeps support escalation private and contact disclosure opt-in", () => {

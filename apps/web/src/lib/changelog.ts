@@ -152,11 +152,11 @@ const RAW_CHANGELOG_EDITIONS = [
         id: "sharper-single-photo-review",
         kind: "improvement",
         priority: 3,
-        title: "Single photos keep their fine detail",
+        title: "Lone first photos keep their fine detail",
         summary:
-          "When you send one photo, Murph now preserves its original detail for closer visual review.",
+          "When a request starts with one photo on Murph's managed model, Murph now preserves its original detail for closer visual review.",
         details:
-          "Multi-photo comparisons stay at high detail to keep visual input cost bounded. The same detail choice carries into follow-up images added while Murph is already working.",
+          "Requests that start with multiple photos, follow-up photos added while Murph is working, and custom inference endpoints stay at high detail to keep visual input cost and compatibility bounded.",
         relevanceTags: ["assistant", "images", "messaging", "reliability"],
         sourcePullRequests: [1616],
       },
