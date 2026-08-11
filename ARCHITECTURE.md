@@ -1436,7 +1436,7 @@ application code.
 - Machine-facing truth lives in append-only JSONL ledgers for inbox captures, events, display-grade metric samples, explicit raw/debug samples, and audit records, with inbox capture intake canonicalized first through `ledger/inbox-captures/**`. Device observation events distinguish raw sample, compact summary, and derived-fact grain so dense telemetry admission does not depend on default query/search visibility.
 - Raw imported artifacts are immutable once copied into `raw/`, and they now live under owner-scoped directories derived from the owning canonical record or import session (`kind` + `id`, plus a partition only for batch families such as device/sample/workout imports). Dated media captures use the same owner-scoped raw path under `raw/captures/**` while staying durable as tagged note events rather than a separate medical record family. Each raw import directory keeps a `manifest.json` sidecar that records the same explicit owner metadata used to resolve the on-disk path, while normalized device/provider API snapshots continue to live under `raw/integrations/**`. Lookup-backed generated-image captures may also write a portable retry lookup in the compact index at `derived/captures/generated-image-lookups.json`; those capture events are immutable after creation except for `deleteEvent`, so the lookup can resolve the original event shard and raw media without scanning while still treating a tombstone as deleted. `raw/inbox/**` media bytes are the scoped privacy exception: image/audio/video bytes can be retention-expired after 14 days by an append-only retention ledger, while documents/PDFs and explicit promoted owner paths remain durable.
 - Raw-artifact repair helpers must stay explicit and proof-driven. `packages/core` keeps tested wearable storage repair primitives that may compact legacy payload-bearing wearable receipts, tombstone derived canonical-record artifacts, report legacy dense sample-debug ledger candidates without deleting them in v1, and tombstone dense raw provider timeseries only when an operator explicitly asks for dense raw pruning or the hosted device-sync runtime runs its bounded post-drain retention step. Each repair must prove manifest byte/sha state, preserve durable product facts, update raw manifests when raw tombstones are written, and emit metadata-only `vault_repair` audit entries; the hosted path must use the named core dense-prune primitive with recent dense raw excluded, bounded file/byte budgets, and metadata-only runtime logs. There is no separate hosted cron, generic raw delete API, or content-addressed raw store for this repair lane.
-- Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles; sparse or higher-sensitivity resources such as weight and glucose need a separate product/debug policy before any default ingestion or pruning.
+- Wearable provider timeseries should not be retained as full provider sample arrays by default. Product, assistant, and CLI wearable summaries consume compact summary observations, derived facts, or display-grade metric samples; any timeseries-derived product fact must come from an explicit importer/projector step that reduces provider samples in memory and persists only compact evidence. Junction `note` is a sparse product input: the importer keeps dated tag names as completed intervention events and compact evidence, but drops the free-text value before raw snapshot retention. Dense raw retention remains a legacy/debug cleanup lane for already-written high-volume timeseries roles; sparse or higher-sensitivity resources such as weight and glucose need a separate product/debug policy before any default ingestion or pruning.
 - Audio/video transcript outputs under `derived/inbox/**` are rebuildable and never canonical health facts. They may survive an earlier raw-media byte pass, but the owning inbound message-content pass deletes them at the receipt-plus-14-day deadline. PDFs, documents, CSVs, and other inspectable attachment files follow their existing raw-inbox lifecycle unless a user or importer creates durable promoted artifacts; they are not reclassified as message-body text by this policy.
 - `bank/library/**` is the stable health reference layer for durable shared entities such as biomarkers, domains, protocol variants, and source artifacts.
 - Model-authored compiled knowledge pages under `derived/knowledge/**` are the separate non-canonical, rebuildable personal wiki layer that synthesizes local vault evidence and saved research notes without becoming a second source of truth. `derived/knowledge/index.md` is the content catalog, `derived/knowledge/log.md` is the append-only write log, and `derived/knowledge/pages/*.md` stores the assistant-authored pages themselves.
@@ -1623,8 +1623,12 @@ layout with a generated image that mirrors the same compact native presentation.
 Nutrition images retain the calorie ring and metric row while remaining
 rectangular and badge-free so the provider owns the outer mask. The installed
 Messages extension retains its native icon and interactive identity. The
-provider request omits the optional App Store id so app-absent static cards do
-not substitute square App Store artwork into the wider Messages icon slot.
+provider request supplies Murph's canonical App Store id so app-absent cards
+can expose the provider-owned install affordance. That producer change remains
+rollout-blocked until physical no-extension iPhone and macOS proof confirms the
+wide static preview stays legible; if Linq substitutes square artwork for that
+preview, the App Store id must remain omitted until the provider offers a
+treatment that preserves both states.
 Their concise native caption keeps only the date and meal count instead of
 repeating visible totals or target amounts. Each assessed V2 goal keeps one
 concise directional label inside the image without relying on color alone;
@@ -1832,10 +1836,15 @@ ciphertext keeps the existing owning-ingress repair path without speculative
 KMS. Thread-container creation therefore does not use the legacy all-domain
 provisioning bridge or perform domain-root provisioning, delivery-route sealing,
 or activation-mailbox root unwraps while holding its route transaction.
-Transaction-owned authority reads remain inside that boundary and may reuse
-request-scoped root prewarms when available. In particular, opening a
-pending-group setup transfer payload remains a pre-existing transaction-owned
-authority read; it is not thread-container crypto preparation.
+Transaction-owned authority reads remain inside that boundary. Pending-group
+claim preparation now repeats the bounded candidate selection before `BEGIN`,
+binds the prospective winner's id, owner, blinded line key, ciphertext, and
+referenced root id, and prewarms only that decrypt root. The transaction repeats
+all authority and eligibility checks, locks the winner, requires an exact match
+to the prepared identity, and opens the payload with local authenticated crypto
+from the request-scoped cache. Winner, ciphertext, or root drift rolls back into
+the existing one-retry preparation path; provider, root, envelope, and
+authentication failures never consume the row.
 
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The
@@ -1869,9 +1878,11 @@ member's existing preference owner and carries explicit room context on the
 existing activation wake to initialize the fixed group-room-model page exactly
 once before conversation work. Existing-route convergence and transaction
 rollback leave the envelope unchanged without compensation; a concurrent loser
-re-reads the canonical route and appends its distinct message there. Unreadable
-or future encrypted payloads are consumed as unavailable optional setup so they
-cannot block an accepted group message. Expiry is query-time authority, and
+re-reads the canonical route and appends its distinct message there. Only
+successfully authenticated plaintext that is malformed JSON or fails the strict
+supported schema is consumed as unavailable optional setup; secure-box parse,
+envelope/root lookup, KMS/provider, authentication, and missing-preparation
+failures roll back and preserve the row. Expiry is query-time authority, and
 member deletion removes the intent by foreign-key cascade. Provider add-actor
 fields are not ownership authority. For a hard-blocked-line recovery, the
 existing delivery attempt is the retry owner: transport must durably record its

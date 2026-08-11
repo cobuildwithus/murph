@@ -81,6 +81,23 @@ describe("ChangelogPage", () => {
       expect(markup).not.toContain(`id="edition-${edition.id}"`);
     }
 
+    const correctedEdition = firstPage.editions.find(
+      (edition) => edition.id === "2026-08-10",
+    );
+    expect(correctedEdition).toBeDefined();
+    if (!correctedEdition) {
+      throw new TypeError(
+        "The current archive must include the corrected edition.",
+      );
+    }
+    expect(markup).toContain(
+      renderToStaticMarkup(<>{correctedEdition.summary}</>),
+    );
+    expect(correctedEdition.summary).toContain("Training shows saved workouts");
+    expect(correctedEdition.summary).toContain("group photos on request");
+    expect(correctedEdition.summary).toContain("one available first photo");
+    expect(correctedEdition.summary).not.toContain("original detail");
+
     expect(markup).toContain('aria-label="Changelog pages"');
     expect(markup).toContain(`href="${buildChangelogPagePath(2)}"`);
     expect(markup).toContain('aria-label="Changelog pages"');
@@ -217,20 +234,16 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Live storage maintenance");
   });
 
-  it("renders the latest production edition and synthetic archive studies", () => {
+  it("renders the synthetic archive study without production-entry coupling", () => {
     const markup = renderToStaticMarkup(<ChangelogArchiveStudy />);
 
     expect(markup).toContain('data-design-study="changelog-archive"');
-    expect(markup).toContain('data-design-state="latest-production-edition"');
-    expect(markup).toContain(
-      "Recognize the people who keep a group going",
-    );
-    expect(markup).toContain("The Group Historian");
-    expect(markup).toContain("Monthly sponsor");
-    expect(markup).toContain("Anonymous");
-    expect(markup).not.toContain("Ask Murph to search");
+    expect(markup).toContain('data-design-state="synthetic-edition"');
     expect(markup).toContain("A week of follow-through");
     expect(markup).toContain("Generated images can become group photos");
+    expect(markup).toContain("Confirmed appointments come with a reminder");
+    expect(markup).toContain("Tell Murph about an appointment");
+    expect(markup).toContain("Confirmed appointment");
     expect(markup).toContain("Recovery explains what to do next");
     expect(markup).toContain("Contact details stay tied to the right line");
     expect(markup).toContain("Corrections stay attached to the conversation");
@@ -241,7 +254,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Private conversation");
     expect(markup).toContain("Compact response");
     expect(markup).toContain("70 mg/dL");
-    expect(markup).toContain('href="#group-funding-supporters"');
+    expect(markup).toContain('href="#design-appointment-reminder"');
     expect(markup).toContain('href="#design-generated-group-photo"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");

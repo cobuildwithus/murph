@@ -3,8 +3,11 @@ export interface AssistantModelTextPart {
   text: string
 }
 
+export type AssistantModelImageDetail = 'high' | 'original'
+
 export interface AssistantModelImagePart {
   type: 'image'
+  detail?: AssistantModelImageDetail
   image: string | Uint8Array | Buffer | ArrayBuffer | URL
   mediaType?: string
   mimeType?: string
