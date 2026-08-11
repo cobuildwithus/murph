@@ -115,7 +115,6 @@ export default function EnvironmentPageClient({
   const voiceUploadBaselineValuesRef = useRef<string | null>(null);
   const voiceRefreshCompletedReplicaRef =
     useRef<HostedBrowserVaultReplicaRef | null>(null);
-  const runtimeRefreshPendingObservedRef = useRef(false);
   const values = useMemo(
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
@@ -265,7 +264,6 @@ export default function EnvironmentPageClient({
     if (voiceRefreshState.status !== "refreshing") {
       return;
     }
-    runtimeRefreshPendingObservedRef.current = false;
     voiceRefreshCompletedReplicaRef.current = null;
     const delayedTimeoutId = setTimeout(() => {
       setVoiceRefreshState((current) =>
@@ -299,7 +297,6 @@ export default function EnvironmentPageClient({
         && voiceRefreshState.phase !== "refreshing"
       )
     ) {
-      runtimeRefreshPendingObservedRef.current = false;
       return;
     }
     if (browserVaultReplicaRefsMatch(
@@ -319,29 +316,7 @@ export default function EnvironmentPageClient({
         cancelled = true;
       };
     }
-    if (voiceRefreshState.status === "delayed") {
-      return;
-    }
-    if (runtimeRefreshPending) {
-      runtimeRefreshPendingObservedRef.current = true;
-      return;
-    }
-    if (runtimeRefreshPendingObservedRef.current) {
-      let cancelled = false;
-      queueMicrotask(() => {
-        if (!cancelled) {
-          setVoiceRefreshState({
-            baselineValues: voiceRefreshState.baselineValues,
-            phase: "refreshing",
-            status: "delayed",
-          });
-        }
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
-  }, [ref, runtimeRefreshPending, valuesSignature, voiceRefreshState]);
+  }, [ref, valuesSignature, voiceRefreshState]);
 
   if (status === "loading") {
     return (
@@ -410,7 +385,6 @@ export default function EnvironmentPageClient({
             return;
           }
           if (!runtimeRefreshPending) {
-            runtimeRefreshPendingObservedRef.current = false;
             voiceRefreshCompletedReplicaRef.current = null;
             setVoiceRefreshState({
               baselineValues: voiceRefreshState.baselineValues,
