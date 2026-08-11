@@ -14184,6 +14184,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "assistant.notification.requested:usage-referral-reward:referral_123",
       label: "usage-referral reward",
     },
+    {
+      dedupeKey: "aask_done_private_completion",
+      label: "private Assistant Ask completion",
+    },
   ])("drains an exact $label through the causal-only fixed-route outbox once", async ({
     dedupeKey,
   }) => {
@@ -14262,6 +14266,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           allowedMailboxDedupeKeyPrefixes: [
             "assistant.notification.requested:phone-call-result:",
             "assistant.notification.requested:usage-referral-reward:",
+            "aask_done_",
           ],
           allowedRouteActions: ["dispatch-assistant-notification"],
           allowedWakeKinds: ["assistant.notification.requested"],

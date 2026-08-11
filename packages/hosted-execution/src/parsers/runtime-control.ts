@@ -175,6 +175,7 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupParticipantDisplayNameSource,
+  type HostedRuntimeGroupCurrentSenderMessageResult,
   type HostedRuntimeGroupMemberAskResult,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupSharedMember,
@@ -1126,8 +1127,11 @@ export function parseHostedRuntimeGroupToolRequest(
       ...parseHostedRuntimeGroupAssistantAskFields(record, label),
     };
   }
-  if (action === "ask_current_sender") {
-    const label = "Hosted runtime group tool ask_current_sender request";
+  if (
+    action === "ask_current_sender"
+    || action === "message_current_sender"
+  ) {
+    const label = `Hosted runtime group tool ${action} request`;
     assertAllowedObjectKeys(record, new Set(["action", "origin"]), label);
     const origin = parseHostedExecutionAssistantAskOrigin(
       record.origin,
@@ -2490,6 +2494,34 @@ function parseHostedRuntimeGroupCanonicalTimestamp(
   return timestamp;
 }
 
+function parseHostedRuntimeGroupCurrentSenderMessageResult(
+  value: unknown,
+): HostedRuntimeGroupCurrentSenderMessageResult {
+  const label =
+    "Hosted runtime group tool message_current_sender response result";
+  const result = requireObject(value, label);
+  const status = requireString(result.status, `${label} status`);
+  if (status === "accepted") {
+    assertAllowedObjectKeys(result, new Set(["status"]), label);
+    return { status };
+  }
+  if (status === "unavailable") {
+    assertAllowedObjectKeys(
+      result,
+      new Set(["status", "unavailableReason"]),
+      label,
+    );
+    return {
+      status,
+      unavailableReason: parseHostedRuntimeGroupUnavailableReason(
+        result,
+        `${label} unavailableReason`,
+      ),
+    };
+  }
+  throw new TypeError(`${label} status is invalid.`);
+}
+
 function parseHostedRuntimeGroupMemberAskResult(
   value: unknown,
   action: "ask_current_sender" | "ask_member",
@@ -2539,6 +2571,12 @@ export function parseHostedRuntimeGroupToolResponse(
   const action = requireString(record.action, "Hosted runtime group tool response action");
   assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
 
+  if (action === "message_current_sender") {
+    return {
+      action,
+      result: parseHostedRuntimeGroupCurrentSenderMessageResult(record.result),
+    };
+  }
   if (action === "ask_current_sender" || action === "ask_member") {
     return {
       action,
