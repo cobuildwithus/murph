@@ -88,6 +88,24 @@ Updated: 2026-08-11
 - Classify the change as internal reliability/performance work; no changelog
   item is planned because member-visible behavior intentionally does not change.
 
+## Preliminary ReviewGPT findings
+
+- Accepted all four findings; none were rejected.
+- Preserve a replacement-line candidate id as immutable request-local authority
+  across the existing single fresh-preparation retry. A different or absent
+  fresh selection now returns route-free instead of transferring ownership to a
+  different setup or the active-sender fallback.
+- Classify deterministic selected-root metadata/ciphertext failure separately
+  from transient provider failure. Permanent invalid state is consumed only
+  after exact lock and live revalidation; network, availability, missing-key,
+  and other retryable provider failures leave the setup untouched.
+- Read the bounded routing projection once, but open private home-line
+  ciphertext only for candidates already admitted by runtime access,
+  active-managed-line, and exact routing-lookup facts.
+- Add a production-shaped 32-participant webhook regression that traverses the
+  actual one-retry orchestration and proves sequential transactions, alongside
+  the owner-level deterministic and real-PostgreSQL incident replays.
+
 ## Verification
 
 - Focused Vitest: pending setup selection/claim, prepared container,
@@ -118,10 +136,13 @@ Updated: 2026-08-11
   review removed setup plaintext from the prepared package: preparation now
   prewarms only the selected root, and the locked transaction performs the
   authenticated local AES open through the request-scoped cache.
-- Final focused fanout, owner, pending-setup, prepared-container, crypto, and
-  full Linq thread-route matrix: 9 files and 390 tests passed.
+- Final focused provider, fanout, owner, pending-setup, prepared-container,
+  crypto, and full Linq thread-route matrix: 10 files and 414 tests passed.
 - App-local prepared typecheck and scoped ESLint passed with no warnings or
   errors.
-- Real PostgreSQL suite: 1 file and 4 tests passed. Its 32-candidate replay used
+- The broad hosted-web run reached 9,496 passing tests and exposed one legacy
+  diagnostic-message expectation; preserving that diagnostic in the new typed
+  permanent error made its focused rerun pass.
+- Real PostgreSQL suite after remediation: 1 file and 4 tests passed. Its 32-candidate replay used
   a one-connection pool and observed 8 SQL statements for no-sender ambiguity
   and 13 for a sender-selected locked claim, independent of roster cardinality.

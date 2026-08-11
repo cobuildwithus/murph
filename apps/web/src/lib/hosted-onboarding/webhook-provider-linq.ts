@@ -123,6 +123,7 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
 import { normalizePhoneNumber } from "./phone";
+import { normalizeNullableString } from "../primitives";
 import {
   refreshHostedThreadContainerDeliveryRouteTx,
   type PreparedHostedThreadContainerCreation,
@@ -1072,6 +1073,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
+  requiredPendingGroupSetupCandidateId?: string | null;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   if (input.event.event_type !== "message.received") {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
@@ -1130,6 +1132,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
       rosterUnavailable: input.pendingGroupRosterUnavailable ?? false,
       prisma: input.prisma,
       requireFirstContactAdmission: input.requireFirstContactAdmission,
+      requiredPendingGroupSetupCandidateId:
+        input.requiredPendingGroupSetupCandidateId,
       threadRouteAccountLookupKeys,
     });
   }
@@ -2986,6 +2990,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   rosterUnavailable: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
+  requiredPendingGroupSetupCandidateId?: string | null;
   threadRouteAccountLookupKeys: readonly string[];
 }): Promise<HostedOnboardingLinqDirectPlan> {
   const {
@@ -3164,7 +3169,9 @@ async function planHostedLinqGroupChatWebhook(input: {
   let pendingSetupParticipantMemberIds: readonly string[];
   let pendingSetupRecipientPhoneLookupKeys =
     input.threadRouteAccountLookupKeys;
-  let requiredPendingSetupCandidateId: string | null = null;
+  let requiredPendingSetupCandidateId = normalizeNullableString(
+    input.requiredPendingGroupSetupCandidateId,
+  );
   if (lineState.kind === "at_risk" || lineState.kind === "hard_blocked") {
     if (!activeSenderMemberId) {
       return ignored(
@@ -3259,14 +3266,21 @@ async function planHostedLinqGroupChatWebhook(input: {
           candidate.id === recoveredPendingSetupSelection.candidateId
         ) ?? null
       : null;
-    if (recoveredPendingSetup && recoveredPendingSetupSelection) {
+    if (
+      recoveredPendingSetup
+      && recoveredPendingSetupSelection
+      && (
+        requiredPendingSetupCandidateId === null
+        || requiredPendingSetupCandidateId === recoveredPendingSetup.id
+      )
+    ) {
       pendingSetupRecipientPhoneLookupKeys = [
         ...new Set([
           ...input.threadRouteAccountLookupKeys,
           recoveredPendingSetup.recipientPhoneLookupKey,
         ]),
       ];
-      requiredPendingSetupCandidateId = recoveredPendingSetup.id;
+      requiredPendingSetupCandidateId ??= recoveredPendingSetup.id;
     }
   }
 

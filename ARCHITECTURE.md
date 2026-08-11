@@ -1825,8 +1825,10 @@ most 32 active non-Murph roster handles to member ids, and prepares pending
 setup authority with one candidate projection, canonical set-based runtime
 access, one active-managed-line set, one narrow home-phone routing projection,
 and one recovery-intent set covering the five bounded attempt ids per
-candidate. Root metadata stays set-based and external unwrap concurrency stays
-at four. Inside the existing route transaction, Web repeats the complete live
+candidate. Only candidates that already pass access, managed-line, and exact
+routing-lookup eligibility have their private home-line ciphertext opened. Root
+metadata stays set-based and external unwrap concurrency stays at four. Inside
+the existing route transaction, Web repeats the complete live
 candidate set and sender precedence, locks the exact winner, then revalidates
 the same set, current access and consent, incoming and original managed lines,
 routing and setup ciphertext/root fingerprints, and exact replacement-line
@@ -1834,7 +1836,12 @@ recovery authority. A lone roster-matched intent wins; if several match, only
 the current sender's own intent breaks the tie. Otherwise the canonical
 first-active-sender fallback continues when the provider roster read completed.
 A changed selection or required fingerprint fails closed through the existing
-single typed fresh-preparation retry before route creation.
+single typed fresh-preparation retry before route creation. A replacement-line
+selection also pins its candidate id in request memory across that retry, so a
+fresh roster cannot silently transfer ownership to another setup or the
+first-active-sender fallback. Permanently invalid selected-root metadata or
+ciphertext is consumed only after exact lock and revalidation; transient KMS or
+network failure remains retryable and leaves the setup untouched.
 An unavailable roster leaves recovery-backed ownership indeterminate and
 returns a typed retry before route creation; a completed empty or oversized
 roster cannot match another member's setup but may retain the active-sender

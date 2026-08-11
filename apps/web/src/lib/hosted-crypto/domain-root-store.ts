@@ -26,6 +26,7 @@ import {
 import { getPrisma } from "../prisma";
 import { getHostedDomainRootUnwrapCache } from "./domain-root-unwrap-cache";
 import { getHostedWebCryptoConfig, selectActiveHostedCloudflareAutomationRecipient } from "./env";
+import { isHostedGcpKmsPermanentDecryptError } from "./gcp-kms";
 
 type HostedCryptoTx = Prisma.TransactionClient;
 type HostedCryptoClient = PrismaClient | Prisma.TransactionClient;
@@ -39,7 +40,15 @@ const WEB_BATCH_UNWRAP_CONCURRENCY = 4;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_POLICY_VERSION = "hosted-runtime-crypto-context-policy:v1";
 
-export class HostedDomainRootEnvelopeUnavailableError extends Error {
+export class HostedDomainRootPermanentUnwrapError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "HostedDomainRootPermanentUnwrapError";
+  }
+}
+
+export class HostedDomainRootEnvelopeUnavailableError
+  extends HostedDomainRootPermanentUnwrapError {
   constructor(input: { domain: HostedCryptoDomain }) {
     super(`Hosted ${input.domain} domain root envelope is not available for decrypt.`);
     this.name = "HostedDomainRootEnvelopeUnavailableError";
@@ -62,6 +71,12 @@ export function isHostedDomainRootEnvelopeUnavailableError(
   error: unknown,
 ): error is HostedDomainRootEnvelopeUnavailableError {
   return error instanceof HostedDomainRootEnvelopeUnavailableError;
+}
+
+export function isHostedDomainRootPermanentUnwrapError(
+  error: unknown,
+): error is HostedDomainRootPermanentUnwrapError {
+  return error instanceof HostedDomainRootPermanentUnwrapError;
 }
 
 interface HostedUserCryptoEnvelopeRow {
@@ -847,22 +862,39 @@ async function unwrapEnvelopeForWeb(input: {
   await verifyEnvelopeAuthoritySignature(input.envelope);
   const recipient = kmsRecipientForDomain(input.envelope.domain);
   if (!recipient) {
-    throw new Error(`Web has no KMS recipient for hosted ${input.envelope.domain} roots.`);
+    throw new HostedDomainRootPermanentUnwrapError(
+      `Web has no KMS recipient for hosted ${input.envelope.domain} roots.`,
+    );
   }
   const wrap = findHostedDomainRootWrap({ envelope: input.envelope, recipient });
   if (!wrap || wrap.kind !== "gcp-kms") {
-    throw new Error(`Hosted ${input.envelope.domain} root envelope is missing ${recipient} wrap.`);
+    throw new HostedDomainRootPermanentUnwrapError(
+      `Hosted ${input.envelope.domain} root envelope is missing ${recipient} wrap.`,
+    );
   }
   assertExpectedGcpKmsWrap({ envelope: input.envelope, recipient, wrap });
-  const decrypted = await config.gcpKms.decrypt({
-    additionalAuthenticatedData: wrap.additionalAuthenticatedData,
-    ciphertext: wrap.ciphertextBlob,
-    keyName: wrap.kmsKeyName,
-    signal: input.signal,
-  });
+  let decrypted: Awaited<ReturnType<typeof config.gcpKms.decrypt>>;
+  try {
+    decrypted = await config.gcpKms.decrypt({
+      additionalAuthenticatedData: wrap.additionalAuthenticatedData,
+      ciphertext: wrap.ciphertextBlob,
+      keyName: wrap.kmsKeyName,
+      signal: input.signal,
+    });
+  } catch (error) {
+    if (isHostedGcpKmsPermanentDecryptError(error)) {
+      throw new HostedDomainRootPermanentUnwrapError(
+        `Hosted ${input.envelope.domain} root wrap is permanently unreadable.`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
   if (decrypted.plaintext.byteLength !== 32) {
     decrypted.plaintext.fill(0);
-    throw new Error(`Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`);
+    throw new HostedDomainRootPermanentUnwrapError(
+      `Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`,
+    );
   }
   return decrypted.plaintext;
 }
@@ -889,7 +921,9 @@ function assertExpectedGcpKmsWrap(input: {
 }): void {
   const config = getHostedWebCryptoConfig();
   if (input.wrap.kmsKeyName !== config.webWrapKmsKeyName) {
-    throw new Error(`Hosted ${input.envelope.domain} root envelope uses an unexpected GCP KMS key.`);
+    throw new HostedDomainRootPermanentUnwrapError(
+      `Hosted ${input.envelope.domain} root envelope uses an unexpected GCP KMS key.`,
+    );
   }
   const expectedContext = buildHostedDomainRootWrapContext({
     domain: input.envelope.domain,
@@ -900,13 +934,17 @@ function assertExpectedGcpKmsWrap(input: {
   });
   const expectedAad = serializeAdditionalAuthenticatedData(expectedContext);
   if (input.wrap.additionalAuthenticatedData !== expectedAad) {
-    throw new Error("Hosted domain root KMS AAD mismatch.");
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root KMS AAD mismatch.",
+    );
   }
   if (
     serializeAdditionalAuthenticatedData(input.wrap.encryptionContext)
     !== serializeAdditionalAuthenticatedData(expectedContext)
   ) {
-    throw new Error("Hosted domain root KMS encryption context mismatch.");
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root KMS encryption context mismatch.",
+    );
   }
 }
 
@@ -1090,18 +1128,30 @@ async function parseAssertAndVerifyEnvelope(
   row: HostedUserCryptoEnvelopeRow,
   expected: { domain: HostedCryptoDomain; rootKeyId?: string | null; userId: string },
 ): Promise<HostedDomainRootKeyEnvelopeV1> {
-  const envelope = parseHostedDomainRootKeyEnvelope(row.signedEnvelopeJson);
-  if (envelope.userId !== expected.userId || envelope.domain !== expected.domain) {
-    throw new Error("Hosted domain root envelope row does not match requested user/domain.");
+  try {
+    const envelope = parseHostedDomainRootKeyEnvelope(row.signedEnvelopeJson);
+    if (envelope.userId !== expected.userId || envelope.domain !== expected.domain) {
+      throw new Error("Hosted domain root envelope row does not match requested user/domain.");
+    }
+    if (expected.rootKeyId && envelope.rootKeyId !== expected.rootKeyId) {
+      throw new Error("Hosted domain root envelope row does not match requested rootKeyId.");
+    }
+    if (envelope.rootKeyId !== row.rootKeyId) {
+      throw new Error("Hosted domain root envelope row rootKeyId mismatch.");
+    }
+    await verifyEnvelopeAuthoritySignature(envelope);
+    return envelope;
+  } catch (error) {
+    if (isHostedDomainRootPermanentUnwrapError(error)) {
+      throw error;
+    }
+    throw new HostedDomainRootPermanentUnwrapError(
+      error instanceof Error
+        ? error.message
+        : "Hosted domain root envelope is structurally invalid.",
+      { cause: error },
+    );
   }
-  if (expected.rootKeyId && envelope.rootKeyId !== expected.rootKeyId) {
-    throw new Error("Hosted domain root envelope row does not match requested rootKeyId.");
-  }
-  if (envelope.rootKeyId !== row.rootKeyId) {
-    throw new Error("Hosted domain root envelope row rootKeyId mismatch.");
-  }
-  await verifyEnvelopeAuthoritySignature(envelope);
-  return envelope;
 }
 
 function createHostedDomainRootReferenceKey(

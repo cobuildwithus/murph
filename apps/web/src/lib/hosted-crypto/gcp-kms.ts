@@ -138,6 +138,26 @@ class GoogleCloudApiError extends Error {
   }
 }
 
+class HostedGcpKmsPermanentDecryptError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "HostedGcpKmsPermanentDecryptError";
+  }
+}
+
+/** A decrypt request the same persisted ciphertext cannot make readable later. */
+export function isHostedGcpKmsPermanentDecryptError(
+  error: unknown,
+): boolean {
+  return error instanceof HostedGcpKmsPermanentDecryptError
+    || (
+      error instanceof GoogleCloudApiError
+      && error.googleCloudOperation === "cloudkms/decrypt"
+      && error.status === 400
+      && error.googleCloudReason === "INVALID_ARGUMENT"
+    );
+}
+
 export function createHostedGcpKmsClientFromEnv(
   source: NodeJS.ProcessEnv = process.env,
 ): HostedGcpKmsClient {
@@ -209,31 +229,49 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
   async decrypt(input: GcpKmsDecryptInput): Promise<{ plaintext: Uint8Array }> {
     const keyName = normalizeKmsCryptoKeyName(input.keyName, "Local KMS Decrypt keyName");
     if (!input.ciphertext.startsWith(LOCAL_KMS_CIPHERTEXT_PREFIX)) {
-      throw new TypeError("Local KMS ciphertext must use the local-kms-v1 envelope.");
+      throw new HostedGcpKmsPermanentDecryptError(
+        "Local KMS ciphertext must use the local-kms-v1 envelope.",
+      );
     }
 
     const packed = decodeBase64(input.ciphertext.slice(LOCAL_KMS_CIPHERTEXT_PREFIX.length));
     if (packed.byteLength <= LOCAL_KMS_IV_BYTES) {
-      throw new TypeError("Local KMS ciphertext is malformed.");
+      throw new HostedGcpKmsPermanentDecryptError(
+        "Local KMS ciphertext is malformed.",
+      );
     }
 
     const iv = packed.slice(0, LOCAL_KMS_IV_BYTES);
     const ciphertext = packed.slice(LOCAL_KMS_IV_BYTES);
     const key = await this.importWrapKey(["decrypt"]);
-    const plaintext = await crypto.subtle.decrypt(
-      {
-        additionalData: toArrayBuffer(
-          localKmsAad({
-            additionalAuthenticatedData: input.additionalAuthenticatedData,
-            keyName,
-          }),
-        ),
-        iv,
-        name: "AES-GCM",
-      },
-      key,
-      toArrayBuffer(ciphertext),
-    );
+    let plaintext: ArrayBuffer;
+    try {
+      plaintext = await crypto.subtle.decrypt(
+        {
+          additionalData: toArrayBuffer(
+            localKmsAad({
+              additionalAuthenticatedData: input.additionalAuthenticatedData,
+              keyName,
+            }),
+          ),
+          iv,
+          name: "AES-GCM",
+        },
+        key,
+        toArrayBuffer(ciphertext),
+      );
+    } catch (error) {
+      if (
+        error instanceof DOMException
+        && (error.name === "DataError" || error.name === "OperationError")
+      ) {
+        throw new HostedGcpKmsPermanentDecryptError(
+          "Local KMS ciphertext could not be authenticated.",
+          { cause: error },
+        );
+      }
+      throw error;
+    }
 
     return { plaintext: new Uint8Array(plaintext) };
   }

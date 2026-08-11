@@ -12,6 +12,7 @@ import {
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
+  isHostedDomainRootPermanentUnwrapError,
   unwrapHostedDomainRootsForWebByRootKeyIds,
 } from "../hosted-crypto/domain-root-store";
 import {
@@ -24,8 +25,8 @@ import {
 import { isHostedMemberSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
+  openHostedMemberRoutingHomeLinqRecipientPhoneRecords,
   readHostedMemberRoutingHomeLinqRecipientPhoneRecords,
-  readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots,
   type HostedMemberRoutingHomeLinqRecipientPhoneRecord,
   type HostedMemberRoutingHomeLinqRecipientPhoneSnapshot,
 } from "../hosted-onboarding/hosted-member-routing-store";
@@ -160,6 +161,10 @@ export type HostedPreparedPendingGroupSetupPayloadRoot =
       candidateId: string;
       error: unknown;
       kind: "failed";
+    }
+  | {
+      candidateId: string;
+      kind: "invalid";
     }
   | null;
 
@@ -499,16 +504,33 @@ export async function prepareHostedPendingGroupSetupForParticipants(input: {
           ],
           prisma: input.prisma,
         });
-      const routingSnapshots =
-        await readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots({
+      const routingRecords =
+        await readHostedMemberRoutingHomeLinqRecipientPhoneRecords({
           memberIds: ownerMemberIds,
           prisma: input.prisma,
+        });
+      const routingByMemberId = new Map(
+        routingRecords.map((routing) => [routing.memberId, routing]),
+      );
+      const eligibleRoutingRecords = candidateRows.flatMap((row) => {
+        const routing = routingByMemberId.get(row.ownerMemberId);
+        return allowedMemberIds.has(row.ownerMemberId)
+          && managedLineLookupKeys.has(row.recipientPhoneLookupKey)
+          && routing?.linqRecipientPhoneLookupKey === row.recipientPhoneLookupKey
+          ? [routing]
+          : [];
+      });
+      const routingSnapshots =
+        await openHostedMemberRoutingHomeLinqRecipientPhoneRecords({
+          prisma: input.prisma,
+          records: eligibleRoutingRecords,
           retainFailureInScopedCache: true,
         });
       return {
         allowedMemberIds,
         kind: "ready" as const,
         managedLineLookupKeys,
+        routingRecords,
         routingSnapshots,
       };
     } catch (error) {
@@ -525,16 +547,22 @@ export async function prepareHostedPendingGroupSetupForParticipants(input: {
   const {
     allowedMemberIds,
     managedLineLookupKeys,
+    routingRecords,
     routingSnapshots,
   } = preparedFacts;
+  const routingRecordByMemberId = new Map<
+    string,
+    HostedMemberRoutingHomeLinqRecipientPhoneRecord
+  >(routingRecords.map((routing) => [routing.memberId, routing]));
   const routingByMemberId = new Map<
     string,
     HostedMemberRoutingHomeLinqRecipientPhoneSnapshot
   >(routingSnapshots.map((routing) => [routing.memberId, routing]));
   const candidatesWithoutRecovery = candidateRows.map((row) => {
-    const routing = routingByMemberId.get(row.ownerMemberId) ?? null;
+    const routing = routingRecordByMemberId.get(row.ownerMemberId) ?? null;
+    const routingSnapshot = routingByMemberId.get(row.ownerMemberId) ?? null;
     const originalRecipientPhone = normalizePhoneNumber(
-      routing?.linqRecipientPhone,
+      routingSnapshot?.linqRecipientPhone,
     );
     const originalRecipientPhoneLookupKeys =
       createHostedPhoneLookupKeyReadCandidates(originalRecipientPhone);
@@ -544,13 +572,7 @@ export async function prepareHostedPendingGroupSetupForParticipants(input: {
       originalRecipientPhone,
       originalRecipientPhoneLookupKeys,
       recoveryAuthority: "none" as HostedLinqGroupLineRecoveryAuthority,
-      routing: routing
-        ? {
-            linqRecipientPhoneEncrypted: routing.linqRecipientPhoneEncrypted,
-            linqRecipientPhoneLookupKey: routing.linqRecipientPhoneLookupKey,
-            memberId: routing.memberId,
-          }
-        : null,
+      routing,
       runtimeAccessAllowed: allowedMemberIds.has(row.ownerMemberId),
     } satisfies HostedPreparedPendingGroupSetupCandidate;
   });
@@ -603,11 +625,16 @@ export async function prepareHostedPendingGroupSetupForParticipants(input: {
         kind: "ready",
       };
     } catch (error) {
-      selectedPayloadRoot = {
-        candidateId: selectedCandidate.id,
-        error,
-        kind: "failed",
-      };
+      selectedPayloadRoot = isHostedDomainRootPermanentUnwrapError(error)
+        ? {
+            candidateId: selectedCandidate.id,
+            kind: "invalid",
+          }
+        : {
+            candidateId: selectedCandidate.id,
+            error,
+            kind: "failed",
+          };
     }
   }
 
@@ -754,13 +781,14 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
   });
   if (
     !hasSameHostedPreparedPendingGroupSetupSelection(selection, prepared.selected)
-    || (
-      selection
-      && requiredCandidateId
-      && selection.candidateId !== requiredCandidateId
-    )
   ) {
     throwHostedPendingGroupSetupPreparationRequired();
+  }
+  if (
+    requiredCandidateId
+    && selection?.candidateId !== requiredCandidateId
+  ) {
+    return { kind: "none", reason: "claim_raced" };
   }
   if (!selection) {
     const genericSelection = selectHostedPendingGroupSetupCandidate({
@@ -840,6 +868,14 @@ export async function claimHostedPendingGroupSetupForParticipantsTx(input: {
     threadId,
     tx: input.tx,
   });
+  if (selectedPayloadRoot.kind === "invalid") {
+    await deleteHostedPendingGroupSetupTx({
+      id: claimed.id,
+      ownerMemberId: claimed.ownerMemberId,
+      tx: input.tx,
+    });
+    return { kind: "none", reason: "invalid_payload" };
+  }
   let setup: HostedRuntimePendingGroupSetupInput;
   try {
     setup = await openHostedPendingGroupSetupPayload({

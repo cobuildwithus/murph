@@ -2,7 +2,10 @@ import { Buffer } from "node:buffer";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createHostedGcpKmsClientFromEnv } from "../src/lib/hosted-crypto/gcp-kms";
+import {
+  createHostedGcpKmsClientFromEnv,
+  isHostedGcpKmsPermanentDecryptError,
+} from "../src/lib/hosted-crypto/gcp-kms";
 
 vi.mock("@vercel/oidc", () => ({
   getVercelOidcToken: vi.fn(async () => "vercel-oidc-token"),
@@ -73,6 +76,33 @@ describe("hosted crypto GCP KMS access-token guard", () => {
 });
 
 describe("hosted crypto GCP Workload Identity Federation", () => {
+  it("classifies only deterministic provider ciphertext rejection as permanent", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({
+        error: { status: "INVALID_ARGUMENT" },
+      }, { status: 400 }))
+      .mockResolvedValueOnce(jsonResponse({
+        error: { status: "NOT_FOUND" },
+      }, { status: 404 }))
+      .mockRejectedValueOnce(new TypeError("temporary network failure"));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createHostedGcpKmsClientFromEnv({
+      HOSTED_CRYPTO_ALLOW_STATIC_GCP_ACCESS_TOKEN_FOR_DEV: "1",
+      HOSTED_CRYPTO_ENV: "dev",
+      HOSTED_CRYPTO_GCP_ACCESS_TOKEN: "ya29.static-token",
+      NODE_ENV: "test",
+    });
+    const decrypt = () => client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: "encrypted-root-key",
+      keyName: LOCAL_KMS_KEY_NAME,
+    }).then(() => null, (error: unknown) => error);
+
+    expect(isHostedGcpKmsPermanentDecryptError(await decrypt())).toBe(true);
+    expect(isHostedGcpKmsPermanentDecryptError(await decrypt())).toBe(false);
+    expect(isHostedGcpKmsPermanentDecryptError(await decrypt())).toBe(false);
+  });
+
   it("bounds a stalled cold-token exchange with the operation deadline and no retry", async () => {
     const deadline = new AbortController();
     vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
@@ -591,11 +621,13 @@ describe("hosted crypto local KMS", () => {
       plaintext: new Uint8Array([1, 2, 3]),
     });
 
-    await expect(client.decrypt({
+    const error = await client.decrypt({
       additionalAuthenticatedData: "wrong-aad",
       ciphertext: encrypted.ciphertext,
       keyName: LOCAL_KMS_KEY_NAME,
-    })).rejects.toThrow();
+    }).then(() => null, (failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    expect(isHostedGcpKmsPermanentDecryptError(error)).toBe(true);
   });
 
   it("derives stable, key-version-bound 256-bit MACs without exposing the key", async () => {

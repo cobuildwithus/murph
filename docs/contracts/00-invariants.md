@@ -433,7 +433,8 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Public Linq unbound-group pending-setup admission is bounded by the
   provider-proven 32-member roster. Before `BEGIN`, its owner performs one
   candidate projection, canonical batch runtime-access read, active-managed-line
-  set read, narrow home-recipient-phone decrypt projection, and one recovery
+  set read, narrow home-recipient-phone projection whose plaintext open is
+  limited to already-eligible candidates, and one recovery
   intent read for all five bounded attempt ids per candidate; it prewarms only
   the exact selected payload root. Domain-root metadata is set-based,
   external unwrap concurrency is at most four, and no provider or KMS call may
@@ -441,7 +442,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   repeats the complete live candidate selection and exact authority/fingerprint
   checks, performs the selected payload's authenticated local AES open after
   taking its row lock, delegates final route authority to the canonical route
-  owner, and may request only the existing single fresh-preparation retry.
+  owner, and may request only the existing single fresh-preparation retry. A
+  replacement-line candidate id is immutable across that retry. Permanently
+  invalid root state is consumed only after exact lock and revalidation;
+  transient provider failure leaves the setup unconsumed.
 - A database transaction holds one pooled connection for its full duration.
   Never open one transaction per collection item concurrently; batch the items
   into one transaction or process them sequentially, and count concurrent

@@ -565,12 +565,26 @@ export async function readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots(
   },
 ): Promise<HostedMemberRoutingHomeLinqRecipientPhoneSnapshot[]> {
   const records = await readHostedMemberRoutingHomeLinqRecipientPhoneRecords(input);
-  const phones = await readHostedMemberRoutingHomeLinqRecipientPhones(
+  return openHostedMemberRoutingHomeLinqRecipientPhoneRecords({
+    prisma: input.prisma,
     records,
+    retainFailureInScopedCache: input.retainFailureInScopedCache,
+  });
+}
+
+export async function openHostedMemberRoutingHomeLinqRecipientPhoneRecords(
+  input: {
+    prisma: HostedOnboardingReadClient;
+    records: readonly HostedMemberRoutingHomeLinqRecipientPhoneRecord[];
+    retainFailureInScopedCache?: boolean;
+  },
+): Promise<HostedMemberRoutingHomeLinqRecipientPhoneSnapshot[]> {
+  const phones = await readHostedMemberRoutingHomeLinqRecipientPhones(
+    input.records,
     input.prisma,
     input.retainFailureInScopedCache,
   );
-  return records.map((record, index) => ({
+  return input.records.map((record, index) => ({
     ...record,
     linqRecipientPhone: phones[index] ?? null,
   }));

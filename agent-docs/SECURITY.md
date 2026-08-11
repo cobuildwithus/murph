@@ -50,13 +50,16 @@ Last verified: 2026-08-11
 - Do not echo model API keys, base headers, or other provider credentials in CLI output, fixtures, or persisted artifacts.
 - Hosted browser device OAuth is a same-host, same-member, initiating-browser boundary. Start must issue one short-lived host-only proof bound to provider, OAuth state, member, and app-session generation. Callback GET must validate that proof against the active session and pass the session member as exact `expectedOwnerId` before state consumption or provider exchange; it then redirects back into the app with no interstitial confirmation. A missing or invalid proof consumes only the OAuth state and redirects to Connect so a transferable provider callback cannot be relayed into the initiating member later. This proof is ephemeral and adds no durable state owner. `DEVICE_SYNC_PUBLIC_BASE_URL` may change the callback path but must use the hostname that served the authenticated browser start; Web start/runtime plus build validation must reject both explicit and derived split-host values before OAuth mutation. Cloudflare preflight verifies explicit callback overrides only. Keep both `__Host-` cookies host-only: do not add a Domain cookie or cross-host handoff. Suppress Vercel Analytics and Speed Insights on both hosted device callback path families so provider authorization query parameters never enter those vendors. Junction `pending_link` and `link_returned` accounts are inert until proof-verified callback completion: no webhook acceptance, dirty state, wake, scheduling, provider execution, canonical import, or sync-success promotion. Once a shared account is `source_confirmed`, adding or retrying another Junction-backed source must preserve that phase and all established siblings. Keep the target source `disconnected` and exclude only its webhook and pull work until the runtime establishment hook atomically commits source admission with durable initial work; shared ingress must not write that fact independently. Explicit disconnect or a newer connection epoch wins over a late callback, which fails without admitting the target. Retry cleanup may deregister only that target. Whole-account revoke remains exclusive to explicit connection-wide disconnect. Local and tunneled `device-syncd` callbacks remain a separate explicit daemon contract.
 - Public Linq pending-group admission carries candidate home-phone plaintext
-  only in one request-local preparation package. It prewarms only the selected
-  setup root; setup plaintext exists only after the locked transaction performs
+  only in one request-local preparation package, and only after the candidate
+  passes access, managed-line, and exact routing-lookup eligibility. It prewarms
+  only the selected setup root; setup plaintext exists only after the locked transaction performs
   the authenticated local AES open. Never persist, log, fixture, or document
   that plaintext. Authenticate the narrow routing and setup values with their
   existing AAD and exact ciphertext/root fingerprints; batch root metadata, cap
   external unwrap concurrency at four, wipe caller root copies, and perform no
-  provider or KMS work while a transaction or setup-row lock is active.
+  provider or KMS work while a transaction or setup-row lock is active. Preserve
+  a replacement-line candidate pin across the sole preparation retry; never
+  substitute a different setup or sender fallback after ownership was observed.
 - Member-owned device provider credentials are personal-member-only Web
   authority. Encrypt them in their dedicated hosted secure-box lane with AAD
   bound to the application row and revision; never project ciphertext,

@@ -540,10 +540,20 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
             })
           : null;
+      let requiredPendingGroupSetupCandidateId: string | null = null;
       const runPlan = (instantStartAllowed = true) =>
         runHostedThreadRoutingPreparedTransaction({
-          plan: ({ preparation, transaction }) =>
-            planHostedOnboardingLinqWebhook({
+          plan: ({ preparation, transaction }) => {
+            const preparedSelection =
+              preparation.preparedPendingGroupSetup?.selected;
+            if (
+              requiredPendingGroupSetupCandidateId === null
+              && preparedSelection?.admissionKind === "replacement_line"
+            ) {
+              requiredPendingGroupSetupCandidateId =
+                preparedSelection.candidateId;
+            }
+            return planHostedOnboardingLinqWebhook({
               affirmativeReaction,
               event: planningEvent,
               firstContactAdmissionDecision,
@@ -557,6 +567,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                     preparedPendingGroupSetup:
                       preparation.preparedPendingGroupSetup,
                   }
+                : {}),
+              ...(requiredPendingGroupSetupCandidateId
+                ? { requiredPendingGroupSetupCandidateId }
                 : {}),
               ...(preparation.preparedThreadContainerCreation
                 ? {
@@ -572,7 +585,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 : {}),
               requireFirstContactAdmission,
               prisma: transaction,
-            }),
+            });
+          },
           prepare: ({ attempt }) =>
             prepareHostedLinqThreadRoutingCrypto({
               event: planningEvent,

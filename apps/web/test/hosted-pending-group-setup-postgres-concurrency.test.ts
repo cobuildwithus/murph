@@ -916,7 +916,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           threadId,
         })).resolves.toEqual({
           kind: "none",
-          reason: "no_candidates",
+          reason: "claim_raced",
         });
       } finally {
         if (deliveryId) {

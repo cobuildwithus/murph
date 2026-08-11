@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   openHostedUserSecureBoxStrings: vi.fn(),
+  openHostedMemberRoutingHomeLinqRecipientPhoneRecords: vi.fn(),
   readActiveHostedLinqManagedLineLookupKeys: vi.fn(),
   readHostedLinqGroupLineRecoveryAuthoritiesTx: vi.fn(),
   readHostedMemberRoutingHomeLinqRecipientPhoneRecords: vi.fn(),
-  readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots: vi.fn(),
   readHostedRuntimeAiAllowedMemberIds: vi.fn(),
   unwrapHostedDomainRootsForWebByRootKeyIds: vi.fn(),
 }));
@@ -22,6 +22,9 @@ vi.mock("@murphai/runtime-state", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  isHostedDomainRootPermanentUnwrapError: (error: unknown) =>
+    error instanceof Error
+    && error.name === "HostedDomainRootPermanentUnwrapError",
   unwrapHostedDomainRootsForWebByRootKeyIds:
     mocks.unwrapHostedDomainRootsForWebByRootKeyIds,
 }));
@@ -50,10 +53,10 @@ vi.mock("@/src/lib/hosted-onboarding/errors", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  openHostedMemberRoutingHomeLinqRecipientPhoneRecords:
+    mocks.openHostedMemberRoutingHomeLinqRecipientPhoneRecords,
   readHostedMemberRoutingHomeLinqRecipientPhoneRecords:
     mocks.readHostedMemberRoutingHomeLinqRecipientPhoneRecords,
-  readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots:
-    mocks.readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
@@ -200,6 +203,10 @@ function queryText(query: unknown): string {
 }
 
 function createPrismaFixture() {
+  const executeRaw = vi.fn(async () => {
+    fixture.lockedRow = null;
+    return 1;
+  });
   const queryRaw = vi.fn(async (query: unknown) => {
     if (queryText(query).includes("FOR UPDATE")) {
       const lockedRow = fixture.lockedRow ? { ...fixture.lockedRow } : null;
@@ -212,7 +219,8 @@ function createPrismaFixture() {
     ).map((row) => ({ ...row }));
   });
   return {
-    prisma: { $queryRaw: queryRaw } as never,
+    executeRaw,
+    prisma: { $executeRaw: executeRaw, $queryRaw: queryRaw } as never,
     queryRaw,
   };
 }
@@ -224,8 +232,14 @@ function installOwnerMocks(): void {
   mocks.readActiveHostedLinqManagedLineLookupKeys.mockImplementation(async () =>
     new Set(fixture.managedLineLookupKeys)
   );
-  mocks.readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots
-    .mockImplementation(async () => fixture.routingSnapshots.map((row) => ({ ...row })));
+  mocks.openHostedMemberRoutingHomeLinqRecipientPhoneRecords
+    .mockImplementation(async (input: {
+      records: Array<{ memberId: string }>;
+    }) => input.records.map((record) => ({
+      ...fixture.routingSnapshots.find((routing) =>
+        routing.memberId === record.memberId
+      )!,
+    })));
   mocks.readHostedMemberRoutingHomeLinqRecipientPhoneRecords
     .mockImplementation(async () => routingRecords());
   mocks.readHostedLinqGroupLineRecoveryAuthoritiesTx
@@ -327,7 +341,7 @@ describe("pending-group preparation fanout", () => {
         routingCiphertextReads:
           mocks.readHostedMemberRoutingHomeLinqRecipientPhoneRecords.mock.calls.length,
         routingPlaintextReads:
-          mocks.readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots.mock.calls.length,
+          mocks.openHostedMemberRoutingHomeLinqRecipientPhoneRecords.mock.calls.length,
         runtimeAccessReads:
           mocks.readHostedRuntimeAiAllowedMemberIds.mock.calls.length,
         selected: prepared.selected,
@@ -344,14 +358,14 @@ describe("pending-group preparation fanout", () => {
       lineReads: 2,
       recoveryReads: 2,
       result: { kind: "none", reason: "no_candidates" },
-      routingCiphertextReads: 1,
+      routingCiphertextReads: 2,
       routingPlaintextReads: 1,
       runtimeAccessReads: 2,
       selected: null,
     });
     expect(
-      mocks.readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots
-        .mock.calls[0]?.[0]?.memberIds,
+      mocks.openHostedMemberRoutingHomeLinqRecipientPhoneRecords
+        .mock.calls[0]?.[0]?.records,
     ).toHaveLength(32);
     expect(
       mocks.readHostedLinqGroupLineRecoveryAuthoritiesTx
@@ -391,7 +405,7 @@ describe("pending-group preparation fanout", () => {
         routingCiphertextReads:
           mocks.readHostedMemberRoutingHomeLinqRecipientPhoneRecords.mock.calls.length,
         routingPlaintextReads:
-          mocks.readHostedMemberRoutingHomeLinqRecipientPhoneSnapshots.mock.calls.length,
+          mocks.openHostedMemberRoutingHomeLinqRecipientPhoneRecords.mock.calls.length,
         runtimeAccessReads:
           mocks.readHostedRuntimeAiAllowedMemberIds.mock.calls.length,
         selected,
@@ -412,7 +426,7 @@ describe("pending-group preparation fanout", () => {
       lineReads: 3,
       recoveryReads: 3,
       resultKind: "claimed",
-      routingCiphertextReads: 2,
+      routingCiphertextReads: 3,
       routingPlaintextReads: 1,
       runtimeAccessReads: 3,
       selection: {
@@ -431,6 +445,140 @@ describe("pending-group preparation fanout", () => {
       userId: thirtyTwo.selected.ownerMemberId,
     }]);
     expect(mocks.openHostedUserSecureBoxStrings).toHaveBeenCalledOnce();
+  });
+
+  it("opens private routing phones only for the eligible subset of a mixed K=32 roster", async () => {
+    fixture = buildFixture({ count: 32, selectedIndex: 0 });
+    const selected = fixture.candidateRows[0]!;
+    const accessDenied = fixture.candidateRows[31]!;
+    const unmanaged = fixture.candidateRows[30]!;
+    const staleRouting = fixture.candidateRows[29]!;
+    fixture.allowedMemberIds.delete(accessDenied.ownerMemberId);
+    fixture.managedLineLookupKeys.delete(unmanaged.recipientPhoneLookupKey);
+    fixture.routingSnapshots[29] = {
+      ...fixture.routingSnapshots[29]!,
+      linqRecipientPhoneLookupKey: "stale-routing-line",
+    };
+    installOwnerMocks();
+    mocks.openHostedMemberRoutingHomeLinqRecipientPhoneRecords
+      .mockImplementationOnce(async (input: {
+        records: Array<{ memberId: string }>;
+      }) => {
+        if (input.records.some((record) =>
+          record.memberId === accessDenied.ownerMemberId
+        )) {
+          throw new Error("ineligible corrupt routing ciphertext was opened");
+        }
+        return input.records.map((record) => ({
+          ...fixture.routingSnapshots.find((routing) =>
+            routing.memberId === record.memberId
+          )!,
+        }));
+      });
+    const { prisma } = createPrismaFixture();
+
+    const prepared = await prepare({
+      prisma,
+      senderMemberId: selected.ownerMemberId,
+    });
+
+    expect(prepared.selected).toMatchObject({ candidateId: selected.id });
+    expect(
+      mocks.readHostedMemberRoutingHomeLinqRecipientPhoneRecords,
+    ).toHaveBeenCalledOnce();
+    const openedRecords = mocks
+      .openHostedMemberRoutingHomeLinqRecipientPhoneRecords
+      .mock.calls[0]?.[0]?.records as Array<{ memberId: string }>;
+    expect(openedRecords).toHaveLength(29);
+    expect(openedRecords.map((record) => record.memberId)).not.toEqual(
+      expect.arrayContaining([
+        accessDenied.ownerMemberId,
+        unmanaged.ownerMemberId,
+        staleRouting.ownerMemberId,
+      ]),
+    );
+  });
+
+  it("consumes a permanently unreadable selected root only after exact lock", async () => {
+    fixture = buildFixture({ count: 1, selectedIndex: 0 });
+    installOwnerMocks();
+    const permanent = new Error("missing root metadata");
+    permanent.name = "HostedDomainRootPermanentUnwrapError";
+    mocks.unwrapHostedDomainRootsForWebByRootKeyIds.mockRejectedValueOnce(
+      permanent,
+    );
+    const { executeRaw, prisma, queryRaw } = createPrismaFixture();
+    const selected = fixture.candidateRows[0]!;
+    const prepared = await prepare({
+      prisma,
+      senderMemberId: selected.ownerMemberId,
+    });
+
+    await expect(claim({
+      prepared,
+      prisma,
+      requiredCandidateId: selected.id,
+      senderMemberId: selected.ownerMemberId,
+    })).resolves.toEqual({ kind: "none", reason: "invalid_payload" });
+    expect(queryRaw.mock.calls.some(([query]) =>
+      queryText(query).includes("FOR UPDATE")
+    )).toBe(true);
+    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(mocks.openHostedUserSecureBoxStrings).not.toHaveBeenCalled();
+  });
+
+  it("rethrows transient KMS failure without locking or consuming the setup", async () => {
+    fixture = buildFixture({ count: 1, selectedIndex: 0 });
+    installOwnerMocks();
+    const transient = new Error("temporary KMS outage");
+    mocks.unwrapHostedDomainRootsForWebByRootKeyIds.mockRejectedValueOnce(
+      transient,
+    );
+    const { executeRaw, prisma, queryRaw } = createPrismaFixture();
+    const selected = fixture.candidateRows[0]!;
+    const prepared = await prepare({
+      prisma,
+      senderMemberId: selected.ownerMemberId,
+    });
+
+    await expect(claim({
+      prepared,
+      prisma,
+      requiredCandidateId: selected.id,
+      senderMemberId: selected.ownerMemberId,
+    })).rejects.toBe(transient);
+    expect(queryRaw.mock.calls.some(([query]) =>
+      queryText(query).includes("FOR UPDATE")
+    )).toBe(false);
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("returns route-free when fresh preparation selects a different recovery owner than the immutable pin", async () => {
+    fixture = buildFixture({
+      count: 2,
+      selectedIndex: 1,
+      selectedViaRecovery: true,
+    });
+    installOwnerMocks();
+    const { executeRaw, prisma, queryRaw } = createPrismaFixture();
+    const pinned = fixture.candidateRows[0]!;
+    const replacement = fixture.candidateRows[1]!;
+    const prepared = await prepare({
+      prisma,
+      senderMemberId: replacement.ownerMemberId,
+    });
+
+    await expect(claim({
+      prepared,
+      prisma,
+      requiredCandidateId: pinned.id,
+      senderMemberId: replacement.ownerMemberId,
+    })).resolves.toEqual({ kind: "none", reason: "claim_raced" });
+    expect(queryRaw.mock.calls.some(([query]) =>
+      queryText(query).includes("FOR UPDATE")
+    )).toBe(false);
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(mocks.openHostedUserSecureBoxStrings).not.toHaveBeenCalled();
   });
 
   it("does not open BEGIN while an uncached selected payload root is blocked", async () => {

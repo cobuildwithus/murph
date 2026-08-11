@@ -528,7 +528,8 @@ Last verified: 2026-08-11
   admits at most 32 members. One request-local package then prepares candidate,
   canonical access, managed-line, narrow home-phone, recovery-intent, and exact
   selected-payload-root facts before `BEGIN`; it retains the observed failure,
-  uses set-based root metadata with at most
+  decrypts home-phone ciphertext only after access, managed-line, and routing-
+  lookup eligibility are known, and uses set-based root metadata with at most
   four external unwraps in flight, and performs no provider or KMS work while a
   transaction or setup-row lock is active. Provider timeout or failure leaves
   recovery-backed ownership indeterminate and must return the existing typed
@@ -548,7 +549,11 @@ Last verified: 2026-08-11
   and consent, both managed lines, routing and setup ciphertext/root
   fingerprints, and exact replacement-line recovery authority are revalidated.
   A changed required fact may spend only the existing single typed fresh-
-  preparation retry. The setup must cover the provider event time and remain
+  preparation retry. Replacement-line ownership is pinned in request memory
+  across that retry; a different fresh selection returns route-free. A
+  permanently invalid selected root is consumed only after exact lock and
+  revalidation, while transient KMS or network failure leaves the row available
+  for retry. The setup must cover the provider event time and remain
   unexpired at processing and lock time, so a delayed pre-arm event cannot spend
   a newer intent. Final ownership remains with the canonical route owner. The
   selected setup row stays locked until route admission finishes and is deleted
