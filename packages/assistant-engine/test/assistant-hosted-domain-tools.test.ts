@@ -126,6 +126,16 @@ describe('hosted domain dynamic tools', () => {
         action: 'save',
         instructions: 'Send a short reminder.',
         schedule: {
+          kind: 'every',
+          everyMs: 3_600_000,
+          timeZone: 'America/Chicago',
+        },
+        title: 'Scheduled reminder',
+      },
+      {
+        action: 'save',
+        instructions: 'Send a short reminder.',
+        schedule: {
           kind: 'dailyLocal',
           localTime: '09:00',
         },
