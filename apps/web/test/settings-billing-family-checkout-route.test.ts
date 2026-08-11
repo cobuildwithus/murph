@@ -188,7 +188,7 @@ test("resolves a starting Checkout and abandons it before returning to the invit
     prisma: expect.any(Object),
   });
   expect(mocks.abandonHostedFamilyDraftForOwner).toHaveBeenCalledWith({
-    expectedCheckoutClaim: {
+    expectedDraftClaim: {
       checkoutAttemptId: "hbfca_existing",
       groupId: "hbag_family",
     },

@@ -344,9 +344,11 @@ Last verified: 2026-08-10
   invites, other memberships, paid capacity, Customer, Subscription, billing
   period, or live or inconsistent Checkout claim. The authenticated Settings
   recovery route must enforce the normal app session, same-origin mutation
-  check, and suspension fence. Stripe retrieval and expiry happen before the
-  transaction; the locked transaction then revalidates the exact group and
-  claim so completion, replacement, or new authority fails closed. A stale
+  check, suspension fence, and the exact group plus nullable Checkout-attempt
+  pair projected into the rendered action. Every abandonment caller supplies
+  that pair before Stripe retrieval, expiry, or a transaction begins; the
+  locked transaction then revalidates the complete claim so completion,
+  replacement, or new authority fails closed. A stale
   duplicate binder must preserve an exact subscription already accepted by
   that group and may close a completed Session only after the locked owner
   boundary proves the original group is absent. Repeating a completed explicit

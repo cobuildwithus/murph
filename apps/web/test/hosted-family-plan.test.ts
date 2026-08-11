@@ -3969,6 +3969,73 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
+  it("abandons an unchanged inert draft with its exact rendered null claim", async () => {
+    const draft = createNeverPaidFamilyDraftRecord();
+    const tx = createTxMock();
+    tx.hostedAccountGroup.findUnique
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce(draft);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId: null,
+        groupId: "hbag_draft",
+      },
+      ownerMemberId: "member_mom",
+      prisma: prisma as never,
+    })).resolves.toEqual({ abandoned: true });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(tx.hostedAccountGroup.deleteMany).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an abandonment retry idempotent without adopting a replacement group", async () => {
+    const originalDraft = createNeverPaidFamilyDraftRecord({
+      groupId: "hbag_original_draft",
+    });
+    const replacementDraft = createNeverPaidFamilyDraftRecord({
+      groupId: "hbag_replacement_draft",
+    });
+    const tx = createTxMock();
+    tx.hostedAccountGroup.findUnique
+      .mockResolvedValueOnce(originalDraft)
+      .mockResolvedValueOnce(originalDraft)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(replacementDraft);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const input = {
+      expectedDraftClaim: {
+        checkoutAttemptId: null,
+        groupId: "hbag_original_draft",
+      },
+      ownerMemberId: "member_mom",
+      prisma: prisma as never,
+    };
+
+    await expect(abandonHostedFamilyDraftForOwner(input)).resolves.toEqual({
+      abandoned: true,
+    });
+    await expect(abandonHostedFamilyDraftForOwner(input)).resolves.toEqual({
+      abandoned: false,
+    });
+    await expect(abandonHostedFamilyDraftForOwner(input)).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DRAFT_CHANGED",
+      httpStatus: 409,
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(tx.hostedAccountGroup.deleteMany).toHaveBeenCalledOnce();
+  });
+
   it("expires an open owner Checkout before deleting the exact unpaid draft", async () => {
     const checkoutAttemptId = "hbfca_owner_recovery";
     const checkoutCreatedAt = new Date("2026-08-01T12:00:00.000Z");
@@ -4031,6 +4098,10 @@ describe("hosted Family plan", () => {
     });
 
     await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId,
+        groupId: "hbag_draft",
+      },
       now: new Date("2026-08-01T12:05:00.000Z"),
       ownerMemberId: "member_mom",
       prisma: prisma as never,
@@ -4073,6 +4144,10 @@ describe("hosted Family plan", () => {
     prisma.$transaction = vi.fn((callback) => callback(tx));
 
     await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId,
+        groupId: "hbag_draft",
+      },
       ownerMemberId: "member_mom",
       prisma: prisma as never,
     })).resolves.toEqual({ abandoned: true });
@@ -4115,6 +4190,10 @@ describe("hosted Family plan", () => {
     prisma.$transaction = vi.fn((callback) => callback(tx));
 
     await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId,
+        groupId: "hbag_draft",
+      },
       ownerMemberId: "member_mom",
       prisma: prisma as never,
     })).resolves.toEqual({ abandoned: true });
@@ -4150,6 +4229,10 @@ describe("hosted Family plan", () => {
     prisma.$transaction = vi.fn((callback) => callback(tx));
 
     await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId: "hbfca_provider_failure",
+        groupId: "hbag_draft",
+      },
       ownerMemberId: "member_mom",
       prisma: prisma as never,
     })).rejects.toBe(providerError);
@@ -4196,6 +4279,10 @@ describe("hosted Family plan", () => {
     prisma.$transaction = vi.fn((callback) => callback(tx));
 
     await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId,
+        groupId: "hbag_draft",
+      },
       ownerMemberId: "member_mom",
       prisma: prisma as never,
     })).rejects.toMatchObject({
@@ -4208,6 +4295,7 @@ describe("hosted Family plan", () => {
   it.each([
     ["group", "hbag_original", "hbfca_original"],
     ["attempt", "hbag_draft", "hbfca_original"],
+    ["attempt replacing an inert claim", "hbag_draft", null],
   ])(
     "rejects a replacement %s before provider cleanup",
     async (_replacementKind, expectedGroupId, expectedCheckoutAttemptId) => {
@@ -4243,7 +4331,7 @@ describe("hosted Family plan", () => {
       prisma.$transaction = vi.fn((callback) => callback(tx));
 
       await expect(abandonHostedFamilyDraftForOwner({
-        expectedCheckoutClaim: {
+        expectedDraftClaim: {
           checkoutAttemptId: expectedCheckoutAttemptId,
           groupId: expectedGroupId,
         },
@@ -4274,6 +4362,10 @@ describe("hosted Family plan", () => {
     prisma.$transaction = vi.fn((callback) => callback(tx));
 
     await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId: "hbfca_stale_unbound",
+        groupId: "hbag_draft",
+      },
       now: new Date("2026-08-01T12:00:00.000Z"),
       ownerMemberId: "member_mom",
       prisma: prisma as never,
@@ -4374,13 +4466,22 @@ describe("hosted Family plan", () => {
         now: new Date("2026-08-01T12:30:00.000Z"),
         ownerMemberId: "member_mom",
         prisma: tx,
-      })).resolves.toEqual(expectedState === "checkout_starting"
-        ? {
-            checkoutAttemptId: "hbfca_recent_projection",
-            groupId: "hbag_draft",
-            state: expectedState,
-          }
-        : { state: expectedState });
+      })).resolves.toEqual(
+        expectedState === "checkout_starting"
+          ? {
+              checkoutAttemptId: "hbfca_recent_projection",
+              groupId: "hbag_draft",
+              state: expectedState,
+            }
+          : expectedState === "abandonable"
+            ? {
+                checkoutAttemptId:
+                  draft.billingRef?.checkoutAttemptId ?? null,
+                groupId: "hbag_draft",
+                state: expectedState,
+              }
+            : { state: expectedState },
+      );
     },
   );
 
@@ -4423,6 +4524,10 @@ describe("hosted Family plan", () => {
     prisma.$transaction = vi.fn((callback) => callback(tx));
 
     await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId: null,
+        groupId: "hbag_draft",
+      },
       ownerMemberId: "member_mom",
       prisma: prisma as never,
     })).rejects.toMatchObject({
@@ -4477,6 +4582,10 @@ describe("hosted Family plan", () => {
     prisma.$transaction = vi.fn((callback) => callback(tx));
 
     await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId,
+        groupId: "hbag_draft",
+      },
       ownerMemberId: "member_mom",
       prisma: prisma as never,
     })).rejects.toMatchObject({
@@ -4506,6 +4615,10 @@ describe("hosted Family plan", () => {
     prisma.$transaction = vi.fn((callback) => callback(tx));
 
     await expect(abandonHostedFamilyDraftForOwner({
+      expectedDraftClaim: {
+        checkoutAttemptId: null,
+        groupId: "hbag_draft",
+      },
       ownerMemberId: "member_mom",
       prisma: prisma as never,
     })).rejects.toMatchObject({

@@ -23,6 +23,8 @@ import {
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
 export function HostedFamilyAbandonButton(props: {
+  checkoutAttemptId: string | null;
+  groupId: string;
   returnPath?: string | null;
 }) {
   const router = useRouter();
@@ -36,7 +38,11 @@ export function HostedFamilyAbandonButton(props: {
     try {
       await requestHostedOnboardingJson<{ abandoned: boolean }>({
         method: "DELETE",
-        url: "/api/settings/billing/family/draft",
+        payload: {
+          checkoutAttemptId: props.checkoutAttemptId,
+          groupId: props.groupId,
+        },
+        url: "/api/settings/billing/family/draft/claim",
       });
       if (props.returnPath) {
         router.replace(props.returnPath);

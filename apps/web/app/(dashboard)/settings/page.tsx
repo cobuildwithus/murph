@@ -66,7 +66,6 @@ import {
   readHostedFamilyAccessForMember,
   readHostedFamilyDraftRecoveryStateForOwner,
   readHostedFamilyOwnerSnapshotForMember,
-  type HostedFamilyDraftRecoveryState,
   type HostedFamilyOwnerMemberRow,
   type HostedFamilyOwnerSnapshot,
 } from "@/src/lib/hosted-onboarding/family-plan";
@@ -182,8 +181,7 @@ export default async function SettingsPage({
   const consentStatus = settingsData?.consentStatus ?? null;
   const freshPrivySession = settingsData?.freshPrivySession ?? null;
   const familyOwner = settingsData?.familyOwner ?? null;
-  const familyDraftRecoveryState =
-    settingsData?.familyDraftRecoveryState ?? null;
+  const familyDraftRecovery = settingsData?.familyDraftRecovery ?? null;
   const familyAccess = settingsData?.familyAccess ?? null;
   const secureApprovalStatus =
     settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const);
@@ -535,7 +533,7 @@ export default async function SettingsPage({
           canSwitchToEdge={canSwitchToEdge}
           canSwitchToGroup={canSwitchToGroup}
           familyBillingOwner={familyBillingOwner}
-          familyDraftRecoveryState={familyDraftRecoveryState}
+          familyDraftRecovery={familyDraftRecovery}
           familyInviteReturnPath={familyInviteReturnPath}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
           groupPaymentMethodSaved={groupPaymentMethodSaved}
@@ -784,8 +782,6 @@ async function readSettingsPageData(input: {
           prisma,
         })
       : null;
-  const familyDraftRecoveryState: HostedFamilyDraftRecoveryState | null =
-    familyDraftRecovery?.state ?? null;
   const familyAccess = await readHostedFamilyAccessForMember({
     memberId,
     prisma,
@@ -846,7 +842,7 @@ async function readSettingsPageData(input: {
   return {
     consentStatus,
     familyAccess,
-    familyDraftRecoveryState,
+    familyDraftRecovery,
     familyOwner,
     groupPlanAvailable,
     hasConfirmedGroupMembership,

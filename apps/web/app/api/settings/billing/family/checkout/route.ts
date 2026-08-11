@@ -124,7 +124,7 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }
     const abandonment = await abandonHostedFamilyDraftForOwner({
-      expectedCheckoutClaim: {
+      expectedDraftClaim: {
         checkoutAttemptId: inviteRecovery.checkoutAttemptId,
         groupId: inviteRecovery.groupId,
       },

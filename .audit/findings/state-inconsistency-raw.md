@@ -3,8 +3,9 @@
 ## Scope
 
 - Runtime: TypeScript, Next.js, Prisma/PostgreSQL, Stripe Node SDK.
-- Boundary: explicit Family invite recovery, Checkout attempt replay, provider
-  retirement, completion/expiry reconciliation, and owner-draft deletion.
+- Boundary: explicit Family invite recovery, manual Settings abandonment,
+  Checkout attempt replay, provider retirement, completion/expiry
+  reconciliation, and owner-draft deletion.
 
 ## Coupled state dependency map
 
@@ -69,3 +70,16 @@
   an already-bound exact Subscription, applies completion only while the exact
   claim survives, and destructively closes completed authority only when the
   original group is absent. Existing race regression passes. False positive.
+
+### SI-005 — Delayed manual abandonment can consume a replacement draft
+
+- Coupled pair: rendered group/nullable-attempt identity and the later
+  provider/deletion target.
+- Breaking path: the manual button and DELETE route carried no draft identity,
+  so the service rediscovered whichever group currently belonged to the owner.
+- Trigger: render G1/null or G1/K1; delay request A; abandon G1; create G2/K2;
+  resume A and retire/delete G2/K2.
+- Raw severity: Medium.
+- Verification: reproduced through the complete projection/button/route/service
+  trace and regressions; true positive fixed by requiring the rendered pair on
+  every abandonment call before provider or transaction work.

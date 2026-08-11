@@ -1213,7 +1213,11 @@ describe("HostedBillingSettings", () => {
         authenticated: true,
         canStartFamily: true,
         currentBillingPlanCode: "launch_monthly",
-        familyDraftRecoveryState: "abandonable",
+        familyDraftRecovery: {
+          checkoutAttemptId: null,
+          groupId: "hbag_rendered_draft",
+          state: "abandonable",
+        },
         familyState: "none",
         payerMemberId: TEST_PAYER_MEMBER_ID,
       },
@@ -1257,7 +1261,11 @@ describe("HostedBillingSettings", () => {
 
       assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
         method: "DELETE",
-        url: "/api/settings/billing/family/draft",
+        payload: {
+          checkoutAttemptId: null,
+          groupId: "hbag_rendered_draft",
+        },
+        url: "/api/settings/billing/family/draft/claim",
       });
       assert.match(
         rendered.window.document.body.textContent ?? "",
@@ -1294,7 +1302,13 @@ describe("HostedBillingSettings", () => {
         authenticated: true,
         canStartFamily: true,
         currentBillingPlanCode: "launch_monthly",
-        familyDraftRecoveryState,
+        familyDraftRecovery: familyDraftRecoveryState === "checkout_starting"
+          ? {
+              checkoutAttemptId: "hbfca_starting",
+              groupId: "hbag_starting",
+              state: familyDraftRecoveryState,
+            }
+          : { state: familyDraftRecoveryState },
         familyState: "none",
         payerMemberId: TEST_PAYER_MEMBER_ID,
       }));
@@ -1317,7 +1331,11 @@ describe("HostedBillingSettings", () => {
         authenticated: true,
         canStartFamily: true,
         currentBillingPlanCode: "launch_monthly",
-        familyDraftRecoveryState: "abandonable",
+        familyDraftRecovery: {
+          checkoutAttemptId: "hbfca_rendered_bound",
+          groupId: "hbag_rendered_bound",
+          state: "abandonable",
+        },
         familyInviteReturnPath: returnPath,
         familyState: "none",
         payerMemberId: TEST_PAYER_MEMBER_ID,
@@ -1368,7 +1386,11 @@ describe("HostedBillingSettings", () => {
         authenticated: true,
         canStartFamily: true,
         currentBillingPlanCode: "launch_monthly",
-        familyDraftRecoveryState: "checkout_starting",
+        familyDraftRecovery: {
+          checkoutAttemptId: "hbfca_starting",
+          groupId: "hbag_starting",
+          state: "checkout_starting",
+        },
         familyInviteReturnPath,
         familyState: "none",
         payerMemberId: TEST_PAYER_MEMBER_ID,
@@ -1421,7 +1443,11 @@ describe("HostedBillingSettings", () => {
         authenticated: true,
         canStartFamily: true,
         currentBillingPlanCode: "launch_monthly",
-        familyDraftRecoveryState: "checkout_starting",
+        familyDraftRecovery: {
+          checkoutAttemptId: "hbfca_starting",
+          groupId: "hbag_starting",
+          state: "checkout_starting",
+        },
         familyInviteReturnPath,
         familyState: "none",
         payerMemberId: TEST_PAYER_MEMBER_ID,
@@ -1475,7 +1501,7 @@ describe("HostedBillingSettings", () => {
         authenticated: true,
         canStartFamily: true,
         currentBillingPlanCode: "launch_monthly",
-        familyDraftRecoveryState: null,
+        familyDraftRecovery: null,
         familyInviteReturnPath,
         familyState: "none",
         payerMemberId: TEST_PAYER_MEMBER_ID,
@@ -1521,7 +1547,7 @@ describe("HostedBillingSettings", () => {
         authenticated: true,
         canStartFamily: true,
         currentBillingPlanCode: "launch_monthly",
-        familyDraftRecoveryState: "not_abandonable",
+        familyDraftRecovery: { state: "not_abandonable" },
         familyInviteReturnPath: "/family/accept/invite_return_target",
         familyState: "none",
         payerMemberId: TEST_PAYER_MEMBER_ID,

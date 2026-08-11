@@ -108,7 +108,11 @@ export function GroupMemberPlanStudy() {
             billingStatus="active"
             canStartFamily
             currentBillingPlanCode="launch_monthly"
-            familyDraftRecoveryState="abandonable"
+            familyDraftRecovery={{
+              checkoutAttemptId: null,
+              groupId: "design_family_draft",
+              state: "abandonable",
+            }}
             familyState="none"
             payerMemberId="design_family_draft_owner"
           />
@@ -125,7 +129,11 @@ export function GroupMemberPlanStudy() {
             billingStatus="active"
             canStartFamily
             currentBillingPlanCode="launch_monthly"
-            familyDraftRecoveryState="checkout_starting"
+            familyDraftRecovery={{
+              checkoutAttemptId: "design_family_checkout_attempt",
+              groupId: "design_family_checkout_draft",
+              state: "checkout_starting",
+            }}
             familyState="none"
             payerMemberId="design_family_checkout_starting"
           />
@@ -142,7 +150,7 @@ export function GroupMemberPlanStudy() {
             billingStatus="active"
             canStartFamily
             currentBillingPlanCode="launch_monthly"
-            familyDraftRecoveryState="recovery_required"
+            familyDraftRecovery={{ state: "recovery_required" }}
             familyState="none"
             payerMemberId="design_family_checkout_recovery"
           />
@@ -159,7 +167,7 @@ export function GroupMemberPlanStudy() {
             billingStatus="active"
             canStartFamily
             currentBillingPlanCode="launch_monthly"
-            familyDraftRecoveryState="not_abandonable"
+            familyDraftRecovery={{ state: "not_abandonable" }}
             familyState="none"
             payerMemberId="design_family_draft_preserved"
           />

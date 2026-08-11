@@ -90,11 +90,13 @@ const mocks = vi.hoisted(() => ({
     currentBillingPhase?: unknown;
     currentBillingPlanCode?: unknown;
     familyBillingOwner?: boolean;
-    familyDraftRecoveryState?:
-      | "abandonable"
-      | "checkout_starting"
-      | "not_abandonable"
-      | "recovery_required"
+    familyDraftRecovery?:
+      | {
+          checkoutAttemptId: string | null;
+          groupId: string;
+          state: "abandonable" | "checkout_starting";
+        }
+      | { state: "not_abandonable" | "recovery_required" }
       | null;
     familyInviteReturnPath?: string | null;
     familyState?: "none" | "owner" | "sponsored";
@@ -2341,7 +2343,11 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
     suspendedAt: null,
   });
   mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(
-    { state: "abandonable" },
+    {
+      checkoutAttemptId: null,
+      groupId: "hbag_rendered_draft",
+      state: "abandonable",
+    },
   );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
@@ -2355,7 +2361,11 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     canStartFamily: true,
     familyBillingOwner: false,
-    familyDraftRecoveryState: "abandonable",
+    familyDraftRecovery: {
+      checkoutAttemptId: null,
+      groupId: "hbag_rendered_draft",
+      state: "abandonable",
+    },
     familyInviteReturnPath: "/family/accept/invite_return_target",
     familyState: "none",
   }), undefined);

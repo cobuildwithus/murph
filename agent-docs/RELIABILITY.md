@@ -437,9 +437,15 @@ Last verified: 2026-08-10
   after the owner boundary proves the original group no longer exists. The
   explicit use-invite response is idempotent after cleanup commits, so response
   loss returns the already-validated invite without recreating billing state.
-  Before cleanup, the recovery projection owns the exact group and Checkout
-  attempt; replay and abandonment require that same pair, and reject a changed
-  group or attempt before any provider cleanup can affect the replacement.
+  Before cleanup, the recovery projection owns the exact group and nullable
+  Checkout attempt. Both the explicit use-invite flow and the rendered manual
+  abandonment action carry that pair into the route; every abandonment call
+  requires it and rejects a changed group or attempt before provider cleanup or
+  a transaction can affect the replacement. The proved browser action uses the
+  versioned `/api/settings/billing/family/draft/claim` route while the legacy
+  route also requires proof: a new browser on an old instance receives 404, and
+  an old browser on a new instance receives 400, so mixed-version traffic fails
+  safely during convergence.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a

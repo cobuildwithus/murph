@@ -24,7 +24,7 @@ import {
 } from "@/src/lib/hosted-onboarding/plan-features";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type {
-  HostedFamilyDraftRecoveryState,
+  HostedFamilyDraftRecoveryProjection,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { cn } from "@/src/lib/utils";
 
@@ -70,7 +70,7 @@ export function HostedBillingSettings(props: {
   currentBillingPlanCode?: unknown;
   currentPeriodEnd?: Date | null;
   familyBillingOwner?: boolean;
-  familyDraftRecoveryState?: HostedFamilyDraftRecoveryState | null;
+  familyDraftRecovery?: HostedFamilyDraftRecoveryProjection | null;
   familyInviteReturnPath?: string | null;
   familyState?: "none" | "owner" | "sponsored";
   groupPaymentMethodSaved?: boolean;
@@ -113,9 +113,10 @@ export function HostedBillingSettings(props: {
   const familyCurrent = familyState === "owner" || familyState === "sponsored";
   const activeFamilyOwner = familyState === "owner";
   const familyBillingOwner = props.familyBillingOwner === true || activeFamilyOwner;
-  const familyDraftRecoveryState = familyBillingOwner
+  const familyDraftRecovery = familyBillingOwner
     ? null
-    : props.familyDraftRecoveryState ?? null;
+    : props.familyDraftRecovery ?? null;
+  const familyDraftRecoveryState = familyDraftRecovery?.state ?? null;
   const sponsoredMember = familyState === "sponsored";
   const ownAccessActive =
     props.billingStatus === "active"
@@ -514,8 +515,10 @@ export function HostedBillingSettings(props: {
                       }
                     />
                   )}
-                  {familyDraftRecoveryState === "abandonable" ? (
+                  {familyDraftRecovery?.state === "abandonable" ? (
                     <HostedFamilyAbandonButton
+                      checkoutAttemptId={familyDraftRecovery.checkoutAttemptId}
+                      groupId={familyDraftRecovery.groupId}
                       returnPath={props.familyInviteReturnPath}
                     />
                   ) : null}

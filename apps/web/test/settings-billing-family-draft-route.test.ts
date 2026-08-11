@@ -26,7 +26,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
 }));
 
 type BillingFamilyDraftRouteModule =
-  typeof import("../app/api/settings/billing/family/draft/route");
+  typeof import("../app/api/settings/billing/family/draft/claim/route");
 
 let billingFamilyDraftRoute: BillingFamilyDraftRouteModule;
 
@@ -44,13 +44,17 @@ beforeEach(async () => {
   mocks.abandonHostedFamilyDraftForOwner.mockResolvedValue({ abandoned: true });
 
   billingFamilyDraftRoute = await import(
-    "../app/api/settings/billing/family/draft/route"
+    "../app/api/settings/billing/family/draft/claim/route"
   );
 });
 
 test("abandons the authenticated owner's exact unpaid Family draft", async () => {
   const response = await billingFamilyDraftRoute.DELETE(
-    new Request("https://join.example.test/api/settings/billing/family/draft", {
+    new Request("https://join.example.test/api/settings/billing/family/draft/claim", {
+      body: JSON.stringify({
+        checkoutAttemptId: null,
+        groupId: "hbag_rendered_draft",
+      }),
       headers: { origin: "https://join.example.test" },
       method: "DELETE",
     }),
@@ -59,9 +63,25 @@ test("abandons the authenticated owner's exact unpaid Family draft", async () =>
   expect(response.status).toBe(200);
   await expect(response.json()).resolves.toEqual({ abandoned: true });
   expect(mocks.abandonHostedFamilyDraftForOwner).toHaveBeenCalledWith({
+    expectedDraftClaim: {
+      checkoutAttemptId: null,
+      groupId: "hbag_rendered_draft",
+    },
     ownerMemberId: "member_owner",
     prisma: { label: "prisma" },
   });
+});
+
+test("rejects abandonment without the exact rendered draft claim", async () => {
+  const response = await billingFamilyDraftRoute.DELETE(
+    new Request("https://join.example.test/api/settings/billing/family/draft/claim", {
+      headers: { origin: "https://join.example.test" },
+      method: "DELETE",
+    }),
+  );
+
+  expect(response.status).toBe(400);
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
 });
 
 test("rejects cross-origin draft abandonment before reading the session", async () => {
@@ -74,7 +94,7 @@ test("rejects cross-origin draft abandonment before reading the session", async 
   });
 
   const response = await billingFamilyDraftRoute.DELETE(
-    new Request("https://join.example.test/api/settings/billing/family/draft", {
+    new Request("https://join.example.test/api/settings/billing/family/draft/claim", {
       headers: { origin: "https://other.example.test" },
       method: "DELETE",
     }),
@@ -95,7 +115,7 @@ test("rejects suspended owners before changing a Family draft", async () => {
   });
 
   const response = await billingFamilyDraftRoute.DELETE(
-    new Request("https://join.example.test/api/settings/billing/family/draft", {
+    new Request("https://join.example.test/api/settings/billing/family/draft/claim", {
       headers: { origin: "https://join.example.test" },
       method: "DELETE",
     }),
@@ -116,7 +136,11 @@ test("returns a recoverable conflict when Stripe billing wins the race", async (
   );
 
   const response = await billingFamilyDraftRoute.DELETE(
-    new Request("https://join.example.test/api/settings/billing/family/draft", {
+    new Request("https://join.example.test/api/settings/billing/family/draft/claim", {
+      body: JSON.stringify({
+        checkoutAttemptId: "hbfca_rendered_bound",
+        groupId: "hbag_rendered_bound",
+      }),
       headers: { origin: "https://join.example.test" },
       method: "DELETE",
     }),

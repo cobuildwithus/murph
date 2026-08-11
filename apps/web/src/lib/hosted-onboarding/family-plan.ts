@@ -411,16 +411,24 @@ export type HostedFamilyDraftRecoveryState =
 
 export type HostedFamilyDraftRecoveryProjection =
   | {
-      state: Exclude<HostedFamilyDraftRecoveryState, "checkout_starting">;
+      checkoutAttemptId: string | null;
+      groupId: string;
+      state: "abandonable";
     }
   | {
       checkoutAttemptId: string;
       groupId: string;
       state: "checkout_starting";
+    }
+  | {
+      state: Exclude<
+        HostedFamilyDraftRecoveryState,
+        "abandonable" | "checkout_starting"
+      >;
     };
 
-type HostedFamilyCheckoutClaimProof = {
-  checkoutAttemptId: string;
+type HostedFamilyDraftClaimProof = {
+  checkoutAttemptId: string | null;
   groupId: string;
 };
 
@@ -1055,7 +1063,7 @@ export async function readHostedFamilyBillingRecoveryForOwner(input: {
  * wins and the draft is preserved.
  */
 export async function abandonHostedFamilyDraftForOwner(input: {
-  expectedCheckoutClaim?: HostedFamilyCheckoutClaimProof;
+  expectedDraftClaim: HostedFamilyDraftClaimProof;
   now?: Date;
   ownerMemberId: string;
   prisma?: PrismaClient;
@@ -1070,12 +1078,9 @@ export async function abandonHostedFamilyDraftForOwner(input: {
     return { abandoned: false };
   }
   if (
-    input.expectedCheckoutClaim
-    && (
-      draft.id !== input.expectedCheckoutClaim.groupId
-      || draft.billingRef?.checkoutAttemptId
-        !== input.expectedCheckoutClaim.checkoutAttemptId
-    )
+    draft.id !== input.expectedDraftClaim.groupId
+    || (draft.billingRef?.checkoutAttemptId ?? null)
+      !== input.expectedDraftClaim.checkoutAttemptId
   ) {
     throw buildHostedFamilyDraftChangedError();
   }
@@ -6260,7 +6265,11 @@ export async function readHostedFamilyDraftRecoveryStateForOwner(input: {
     return { state: "not_abandonable" };
   }
   if (state === "inert" || state === "checkout_bound") {
-    return { state: "abandonable" };
+    return {
+      checkoutAttemptId: draft.billingRef?.checkoutAttemptId ?? null,
+      groupId: draft.id,
+      state: "abandonable",
+    };
   }
   if (state === "checkout_starting") {
     if (!hostedFamilyCheckoutClaimIsWithinSafeReplayWindow({
