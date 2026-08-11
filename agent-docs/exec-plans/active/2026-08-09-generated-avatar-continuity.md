@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — round 11 diagnostic remediation verified locally; valid round 11 and exact-head gates pending
+Status: active — valid round 11 finding remediated; round 12 exact-head review and CI pending
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -588,3 +588,37 @@ Updated: 2026-08-10
   8,691,853-byte Vault CLI total, 1,596,168-byte runner entry, 7,729,067-byte
   static boot closure, and 9,620,735-byte runner total without a ratchet
   change. Docs drift, whitespace, and candidate identifier/secret scans pass.
+- The valid sensitive round-11 full snapshot exactly reviewed pushed head
+  `54e026cf2777`. Its one accepted review-induced finding proved that a later
+  foreground input could be live-steered into an already-running completion
+  attempt whose native sandbox, process features, environments, and fetch
+  adapters were fixed at launch. The required repeated-mechanism retrospective
+  was recorded before source remediation and kept the correction at the
+  existing provider-attempt boundary.
+- The correction suppresses the existing live provider steering controller
+  only while the trusted completion-native restriction is current. A foreground
+  input present before provider launch still clears the scope and receives the
+  ordinary route; input arriving after restricted launch remains with the
+  existing admission/mailbox owner for the following unrestricted turn. No new
+  queue, state owner, authority profile, lifecycle, or compatibility path was
+  added.
+- Current `main` was then merged with two bounded changelog conflicts. The
+  resolution mechanically preserves this PR's generated-group-photo entry and
+  current main's Starter, patterns, reminders, workout-card, and managed
+  web-search items. The focused changelog/design set passes 53 tests and the
+  full Web typecheck passes.
+- The restricted-attempt regression failed before the one-boundary correction,
+  then passed with no live steering controller on the completion attempt and
+  the original controller restored on the later ordinary invocation. Six
+  affected Assistant Engine files pass 419 tests; the Assistant Engine
+  typecheck and 58 runner bundle-policy tests pass. Fresh full assembly passes
+  at an 8,691,916-byte Vault CLI total, 1,599,516-byte runner entry,
+  7,732,478-byte static boot closure, and 9,624,146-byte runner total without a
+  ratchet change. Docs drift, whitespace, and candidate identifier/secret scans
+  pass.
+- A later conflict-free merge reconciled main's Mobvoi/Health Connect lane and
+  is base-only relative to this PR's current patch. The PR body now explicitly
+  distinguishes the persisted Durable Object runner schema floor from the
+  absence of a SQL/application-database migration and the round-12 review
+  package declares all four existing rendered changelog screenshots. Round 12
+  must review the fresh pushed full patch while exact-head CI runs concurrently.
