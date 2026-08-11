@@ -104,17 +104,25 @@ export function buildOnboardingGoalCheckinSeed(
     onboardingState.completedAt,
     input.timeZone,
   ).dayKey
+  const originalWindow = buildOriginalOnboardingGoalCheckinWindow({
+    completionLocalDate,
+    timeZone: input.timeZone,
+  })
   const installedWindow = resolveInstalledOnboardingGoalCheckinWindow({
     completedAt: onboardingState.completedAt,
     completionLocalDate,
     existingAutomation: input.existingAutomation ?? null,
     timeZone: input.timeZone,
   })
-  const window = installedWindow ?? resolveDesiredOnboardingGoalCheckinWindow({
-    completionLocalDate,
+  const desiredWindow = resolveDesiredOnboardingGoalCheckinWindow({
     now,
+    originalWindow,
     timeZone: input.timeZone,
   })
+  const window = installedWindow ?? desiredWindow ??
+    (isManagedOnboardingGoalCheckinRecord(input.existingAutomation)
+      ? originalWindow
+      : null)
   if (!window) {
     return null
   }
@@ -248,38 +256,43 @@ function onboardingStateSupportsGoalCheckin(
   )
 }
 
-function resolveDesiredOnboardingGoalCheckinWindow(input: {
+function buildOriginalOnboardingGoalCheckinWindow(input: {
   completionLocalDate: string
+  timeZone: string
+}): { activeUntil: string; scheduledAt: string } {
+  return {
+    activeUntil: resolveLocalDateTimeInstant({
+      date: addDaysToIsoDate(
+        input.completionLocalDate,
+        ONBOARDING_GOAL_CHECKIN_ACTIVE_UNTIL_DAYS,
+      ),
+      hour: ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR,
+      minute: ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE,
+      timeZone: input.timeZone,
+    }),
+    scheduledAt: resolveLocalDateTimeInstant({
+      date: addDaysToIsoDate(
+        input.completionLocalDate,
+        ONBOARDING_GOAL_CHECKIN_DELAY_DAYS,
+      ),
+      hour: ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR,
+      minute: ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE,
+      timeZone: input.timeZone,
+    }),
+  }
+}
+
+function resolveDesiredOnboardingGoalCheckinWindow(input: {
   now: Date
+  originalWindow: { activeUntil: string; scheduledAt: string }
   timeZone: string
 }): { activeUntil: string; scheduledAt: string } | null {
-  const activeUntil = resolveLocalDateTimeInstant({
-    date: addDaysToIsoDate(
-      input.completionLocalDate,
-      ONBOARDING_GOAL_CHECKIN_ACTIVE_UNTIL_DAYS,
-    ),
-    hour: ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR,
-    minute: ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE,
-    timeZone: input.timeZone,
-  })
-  const originalScheduledAt = resolveLocalDateTimeInstant({
-    date: addDaysToIsoDate(
-      input.completionLocalDate,
-      ONBOARDING_GOAL_CHECKIN_DELAY_DAYS,
-    ),
-    hour: ONBOARDING_GOAL_CHECKIN_LOCAL_HOUR,
-    minute: ONBOARDING_GOAL_CHECKIN_LOCAL_MINUTE,
-    timeZone: input.timeZone,
-  })
   const nowMs = input.now.getTime()
-  const activeUntilMs = Date.parse(activeUntil)
-  const originalScheduledAtMs = Date.parse(originalScheduledAt)
+  const activeUntilMs = Date.parse(input.originalWindow.activeUntil)
+  const originalScheduledAtMs = Date.parse(input.originalWindow.scheduledAt)
 
   if (nowMs < originalScheduledAtMs + ONBOARDING_GOAL_CHECKIN_LATE_INSTALL_GRACE_MS) {
-    return {
-      activeUntil,
-      scheduledAt: originalScheduledAt,
-    }
+    return input.originalWindow
   }
   if (nowMs >= activeUntilMs) {
     return null
@@ -291,7 +304,7 @@ function resolveDesiredOnboardingGoalCheckinWindow(input: {
   })
   return Date.parse(catchUpAt) < activeUntilMs
     ? {
-        activeUntil,
+        activeUntil: input.originalWindow.activeUntil,
         scheduledAt: catchUpAt,
       }
     : null
@@ -354,6 +367,14 @@ function resolveInstalledOnboardingGoalCheckinWindow(input: {
     activeUntil: existing.activeUntil,
     scheduledAt: existing.schedule.at,
   }
+}
+
+function isManagedOnboardingGoalCheckinRecord(
+  automation: AutomationRecord | null | undefined,
+): automation is AutomationRecord {
+  return automation?.automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID &&
+    automation.slug === 'onboarding-goal-checkin' &&
+    automation.tags.includes('murph-managed:onboarding-goal-checkin')
 }
 
 function resolveNextLocalDaytimeInstant(input: {
