@@ -8047,12 +8047,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.arrayContaining([
         expect.objectContaining({
           includeCredentialMaterial: false,
-          limit: 4,
           signal: expect.any(AbortSignal),
           sourceProviderSlug: "whoop_v2",
         }),
       ]),
     );
+    for (const request of fetchSnapshotRequests) {
+      expect(request).not.toHaveProperty("limit");
+    }
     expect(assistantLaneCall?.signal).toBeUndefined();
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)

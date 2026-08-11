@@ -4,7 +4,9 @@ import {
   buildHostedDeviceSyncStatusPrompt,
   buildHostedDeviceSyncStatusPromptFromSnapshot,
 } from "../src/hosted-runtime/device-sync-status-prompt.ts";
-import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
+import type {
+  HostedDeviceSyncRuntimeSnapshotReader,
+} from "../src/hosted-runtime/device-sync-snapshot-pagination.ts";
 
 type PromptSnapshot = Parameters<
   typeof buildHostedDeviceSyncStatusPromptFromSnapshot
@@ -66,7 +68,9 @@ function buildSnapshot(
 
 describe("hosted device sync status prompt", () => {
   it("reads bounded credential-free snapshots and renders active and reconnecting sources", async () => {
-    const requests: Array<Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
+    const requests: Array<
+      Parameters<HostedDeviceSyncRuntimeSnapshotReader["fetchSnapshot"]>[0]
+    > = [];
     const baseSnapshot = buildSnapshot();
     const baseConnection = baseSnapshot.connections[0]!;
     const whoopSource = baseConnection.sources![0]!;
@@ -78,19 +82,7 @@ describe("hosted device sync status prompt", () => {
       sourceProviderSlug: "withings",
       status: "connected" as const,
     };
-    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
-      ackDirtyStateProcessed: async () => {
-        throw new Error("not used");
-      },
-      applyUpdates: async () => {
-        throw new Error("not used");
-      },
-      createConnectLink: async () => {
-        throw new Error("not used");
-      },
-      fetchDirtyStates: async () => {
-        throw new Error("not used");
-      },
+    const deviceSyncPort: HostedDeviceSyncRuntimeSnapshotReader = {
       fetchSnapshot: async (request) => {
         requests.push(request);
 
@@ -144,27 +136,184 @@ describe("hosted device sync status prompt", () => {
     expect(requests).toEqual([
       {
         includeCredentialMaterial: false,
-        limit: 4,
-        signal: null,
         sourceProviderSlug: "whoop_v2",
       },
       {
         includeCredentialMaterial: false,
-        limit: 4,
-        signal: null,
         sourceProviderSlug: "withings",
       },
       {
         includeCredentialMaterial: false,
-        limit: 4,
         provider: "oura",
-        signal: null,
       },
     ]);
     expect(prompt).toContain("WHOOP currently needs reconnect");
     expect(prompt).toContain("source `whoop_v2`");
     expect(prompt).toContain("Withings has an active connection");
     expect(prompt).not.toContain("Withings currently needs reconnect");
+  });
+
+  it("collects every bounded page before prioritizing a newly reconnecting account", async () => {
+    const requests: Array<
+      Parameters<HostedDeviceSyncRuntimeSnapshotReader["fetchSnapshot"]>[0]
+    > = [];
+    const baseSnapshot = buildSnapshot();
+    const baseConnection = baseSnapshot.connections[0]!;
+    const connections = Array.from({ length: 33 }, (_, index) => {
+      const createdAt = new Date(
+        Date.parse("2026-06-29T12:00:00.000Z") - index * 1_000,
+      ).toISOString();
+      const isOldestConnection = index === 32;
+      return {
+        ...baseConnection,
+        connection: {
+          ...baseConnection.connection,
+          createdAt,
+          id: `connection-${String(index).padStart(2, "0")}`,
+          status: isOldestConnection
+            ? "reauthorization_required" as const
+            : "active" as const,
+          updatedAt: isOldestConnection
+            ? "2026-06-29T13:00:00.000Z"
+            : createdAt,
+        },
+        sources: [
+          {
+            ...baseConnection.sources![0]!,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            status: "connected" as const,
+          },
+        ],
+      };
+    });
+    const continuation = {
+      createdAt: connections[31]!.connection.createdAt,
+      id: connections[31]!.connection.id,
+    };
+    const deviceSyncPort: HostedDeviceSyncRuntimeSnapshotReader = {
+      fetchSnapshot: async (request) => {
+        requests.push(request);
+        return {
+          ...baseSnapshot,
+          connections: request.cursor
+            ? connections.slice(32)
+            : connections.slice(0, 32),
+          nextCursor: request.cursor ? null : continuation,
+        };
+      },
+    };
+
+    const prompt = await buildHostedDeviceSyncStatusPrompt({
+      deviceSyncPort,
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          connectTargetCommandSafe: true,
+          label: "WHOOP",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+      ],
+    });
+
+    expect(requests).toEqual([
+      {
+        includeCredentialMaterial: false,
+        sourceProviderSlug: "whoop_v2",
+      },
+      {
+        cursor: continuation,
+        includeCredentialMaterial: false,
+        limit: 32,
+        sourceProviderSlug: "whoop_v2",
+      },
+    ]);
+    expect(prompt).toContain("WHOOP currently needs reconnect");
+    expect(prompt).toContain("`REAUTHORIZATION_REQUIRED`");
+    expect(prompt).toContain("Do not treat missing wearable data");
+  });
+
+  it("fails closed instead of rendering a partial status at the hydration ceiling", async () => {
+    const baseSnapshot = buildSnapshot();
+    const baseConnection = baseSnapshot.connections[0]!;
+    const connections = Array.from({ length: 100 }, (_, index) => ({
+      ...baseConnection,
+      connection: {
+        ...baseConnection.connection,
+        createdAt: new Date(
+          Date.parse("2026-06-29T12:00:00.000Z") - index * 1_000,
+        ).toISOString(),
+        id: `connection-${String(index).padStart(3, "0")}`,
+      },
+    }));
+    let pageIndex = 0;
+    const deviceSyncPort: HostedDeviceSyncRuntimeSnapshotReader = {
+      fetchSnapshot: async () => {
+        const start = pageIndex * 32;
+        const pageConnections = connections.slice(start, start + 32);
+        pageIndex += 1;
+        const lastConnection = pageConnections.at(-1)!;
+        return {
+          ...baseSnapshot,
+          connections: pageConnections,
+          nextCursor: {
+            createdAt: lastConnection.connection.createdAt,
+            id: lastConnection.connection.id,
+          },
+        };
+      },
+    };
+
+    await expect(buildHostedDeviceSyncStatusPrompt({
+      deviceSyncPort,
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          label: "WHOOP",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+      ],
+    })).resolves.toBeNull();
+    expect(pageIndex).toBe(4);
+  });
+
+  it("discards an incomplete snapshot when cancellation interrupts pagination", async () => {
+    const baseSnapshot = buildSnapshot();
+    const controller = new AbortController();
+    let requestCount = 0;
+    const deviceSyncPort: HostedDeviceSyncRuntimeSnapshotReader = {
+      fetchSnapshot: async (request) => {
+        requestCount += 1;
+        expect(request.signal).toBe(controller.signal);
+        if (request.cursor) {
+          throw new DOMException("aborted", "AbortError");
+        }
+        controller.abort();
+        return {
+          ...baseSnapshot,
+          nextCursor: {
+            createdAt: baseSnapshot.connections[0]!.connection.createdAt,
+            id: baseSnapshot.connections[0]!.connection.id,
+          },
+        };
+      },
+    };
+
+    await expect(buildHostedDeviceSyncStatusPrompt({
+      deviceSyncPort,
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          label: "WHOOP",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+      ],
+      signal: controller.signal,
+    })).resolves.toBeNull();
+    expect(requestCount).toBe(2);
   });
 
   it("renders WHOOP token refresh failures as reconnect-required dynamic context", () => {
@@ -736,19 +885,7 @@ describe("hosted device sync status prompt", () => {
   });
 
   it("returns no context when the authoritative snapshot is unavailable", async () => {
-    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
-      ackDirtyStateProcessed: async () => {
-        throw new Error("not used");
-      },
-      applyUpdates: async () => {
-        throw new Error("not used");
-      },
-      createConnectLink: async () => {
-        throw new Error("not used");
-      },
-      fetchDirtyStates: async () => {
-        throw new Error("not used");
-      },
+    const deviceSyncPort: HostedDeviceSyncRuntimeSnapshotReader = {
       fetchSnapshot: async () => {
         throw new Error("unavailable");
       },

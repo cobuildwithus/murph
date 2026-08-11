@@ -1,13 +1,20 @@
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+  type HostedExecutionDeviceSyncRuntimeSnapshotRequest,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 
-import type { HostedRuntimeDeviceSyncPort } from "./platform.ts";
+export interface HostedDeviceSyncRuntimeSnapshotReader {
+  fetchSnapshot(
+    input: Omit<HostedExecutionDeviceSyncRuntimeSnapshotRequest, "userId"> & {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
+}
 
 export async function fetchCompleteHostedDeviceSyncRuntimeSnapshot(input: {
-  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  deviceSyncPort: HostedDeviceSyncRuntimeSnapshotReader;
   includeCredentialMaterial: boolean;
   provider?: string | null;
   signal?: AbortSignal | null;
@@ -16,7 +23,7 @@ export async function fetchCompleteHostedDeviceSyncRuntimeSnapshot(input: {
   const connections: HostedExecutionDeviceSyncRuntimeSnapshotResponse["connections"] = [];
   const connectionIds = new Set<string>();
   const seenCursors = new Set<string>();
-  let cursor: NonNullable<Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0]>["cursor"] = null;
+  let cursor: HostedExecutionDeviceSyncRuntimeSnapshotRequest["cursor"] = null;
   let firstPage: HostedExecutionDeviceSyncRuntimeSnapshotResponse | null = null;
   let providerConfigs: HostedExecutionDeviceSyncRuntimeSnapshotResponse["providerConfigs"];
 

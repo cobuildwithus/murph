@@ -4,14 +4,16 @@ import {
   isEstablishedDeviceSyncConnection,
   requiresHistoricalResetDeviceSyncSource,
 } from "@murphai/device-syncd/public-account";
-
 import type {
-  HostedRuntimeDeviceSyncPort,
-} from "./platform.ts";
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+} from "@murphai/device-syncd/hosted-runtime";
 
-type HostedDeviceSyncRuntimeSnapshot = Awaited<
-  ReturnType<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>
->;
+import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+  type HostedDeviceSyncRuntimeSnapshotReader,
+} from "./device-sync-snapshot-pagination.ts";
+
+type HostedDeviceSyncRuntimeSnapshot = HostedExecutionDeviceSyncRuntimeSnapshotResponse;
 type HostedDeviceSyncRuntimeConnectionSnapshot =
   HostedDeviceSyncRuntimeSnapshot["connections"][number];
 type HostedDeviceSyncRuntimeConnectionSourceSnapshot = NonNullable<
@@ -47,7 +49,7 @@ const HOSTED_DEVICE_SYNC_RECONNECT_REQUIRED_SOURCE_ERROR_CODES = new Set([
 const HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT = 4;
 
 export async function buildHostedDeviceSyncStatusPrompt(input: {
-  deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
+  deviceSyncPort: HostedDeviceSyncRuntimeSnapshotReader | null | undefined;
   reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
   signal?: AbortSignal | null;
 }): Promise<string | null> {
@@ -71,7 +73,7 @@ export async function buildHostedDeviceSyncStatusPrompt(input: {
 }
 
 async function fetchHostedDeviceSyncStatusSnapshot(input: {
-  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  deviceSyncPort: HostedDeviceSyncRuntimeSnapshotReader;
   reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
   signal: AbortSignal | null;
 }): Promise<HostedDeviceSyncRuntimeSnapshot | null> {
@@ -87,9 +89,9 @@ async function fetchHostedDeviceSyncStatusSnapshot(input: {
         return null;
       }
 
-      return await input.deviceSyncPort.fetchSnapshot({
+      return await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: input.deviceSyncPort,
         includeCredentialMaterial: false,
-        limit: HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT,
         ...(sourceProviderSlug ? { sourceProviderSlug } : { provider }),
         signal: input.signal,
       }).catch(() => null);
@@ -128,10 +130,25 @@ function mergeHostedDeviceSyncStatusSnapshots(
   }
 
   return {
-    connections: [...connections.values()],
+    connections: sortHostedDeviceSyncStatusConnections(
+      [...connections.values()],
+    ),
     generatedAt,
     userId,
   };
+}
+
+function sortHostedDeviceSyncStatusConnections(
+  connections: readonly HostedDeviceSyncRuntimeConnectionSnapshot[],
+): HostedDeviceSyncRuntimeConnectionSnapshot[] {
+  return [...connections].sort((left, right) => {
+    const leftUpdatedAt = left.connection.updatedAt
+      ?? left.connection.createdAt;
+    const rightUpdatedAt = right.connection.updatedAt
+      ?? right.connection.createdAt;
+    return rightUpdatedAt.localeCompare(leftUpdatedAt)
+      || right.connection.id.localeCompare(left.connection.id);
+  });
 }
 
 function mergeHostedDeviceSyncStatusConnectionSnapshots(

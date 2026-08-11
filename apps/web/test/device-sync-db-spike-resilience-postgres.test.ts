@@ -20,6 +20,11 @@ import {
   runWithPrismaOperationTimings,
   type PrismaOperationTiming,
 } from "@/src/lib/prisma-operation-timing";
+import { buildHostedDeviceSyncStatusPrompt } from "../../../packages/assistant-runtime/src/hosted-runtime/device-sync-status-prompt.ts";
+
+type HostedDeviceSyncStatusSnapshotReader = NonNullable<
+  Parameters<typeof buildHostedDeviceSyncStatusPrompt>[0]["deviceSyncPort"]
+>;
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -491,6 +496,141 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
+    it("surfaces a newly reconnecting page-two account in background status context", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const prisma = createPrismaClient({
+        databaseUrl: withApplicationName(
+          databaseUrl,
+          `murph_device_sync_status_${suffix}`,
+        ),
+        poolMax: 4,
+      });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma });
+      const memberId = `hbm_device_sync_status_${suffix}`;
+      const createdAt = new Date("2026-08-10T20:00:00.000Z");
+      const connectionIds = Array.from(
+        { length: 33 },
+        (_, index) => `dsc_device_sync_status_${suffix}_${String(index).padStart(2, "0")}`,
+      );
+      const sourceRead = vi.spyOn(
+        store,
+        "listBoundedConnectionSourcesForConnections",
+      );
+      const snapshotRequests: Array<
+        Parameters<HostedDeviceSyncStatusSnapshotReader["fetchSnapshot"]>[0]
+      > = [];
+
+      controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+        store,
+      });
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceConnection.createMany({
+          data: connectionIds.map((id, index) => ({
+            connectedAt: new Date(createdAt.getTime() - index * 1_000),
+            createdAt: new Date(createdAt.getTime() - index * 1_000),
+            credentialKind: "none",
+            credentialMetadataJson: {},
+            id,
+            metadataJson: {},
+            provider: "junction",
+            providerAccountBlindIndex: `blind_device_sync_status_${suffix}_${index}`,
+            scopesJson: [],
+            setupPhase: "source_confirmed",
+            status: "active",
+            userId: memberId,
+          })),
+        });
+        await prisma.deviceConnectionSource.createMany({
+          data: connectionIds.map((connectionId, index) => ({
+            connectionId,
+            firstSeenAt: createdAt,
+            id: `dcs_device_sync_status_${suffix}_${String(index).padStart(2, "0")}`,
+            lastSeenAt: createdAt,
+            resourceAvailabilitySummaryJson: { sleep: true },
+            sourceInstanceKey: `whoop-${suffix}-${index}`,
+            sourceProviderSlug: "whoop_v2",
+            status: "connected",
+          })),
+        });
+
+        const pageTwoConnectionId = connectionIds.at(-1);
+        if (!pageTwoConnectionId) {
+          throw new Error("Synthetic status proof did not create a page-two connection.");
+        }
+        const pageTwoConnection = await store.getConnectionById(pageTwoConnectionId);
+        if (!pageTwoConnection) {
+          throw new Error("Synthetic status proof lost its page-two connection.");
+        }
+        await store.syncDurableConnectionState({
+          ...pageTwoConnection,
+          lastErrorCode: "TOKEN_REFRESH_STATE_UNKNOWN",
+          lastErrorMessage: "Reconnect this source.",
+          lastSyncErrorAt: "2026-08-11T10:00:00.000Z",
+          status: "reauthorization_required",
+          updatedAt: "2026-08-11T10:00:00.000Z",
+        });
+
+        const deviceSyncPort: HostedDeviceSyncStatusSnapshotReader = {
+          fetchSnapshot: async (snapshotRequest) => {
+            snapshotRequests.push(snapshotRequest);
+            return readHostedDeviceSyncRuntimeState({
+              request: runtimeSnapshotRequest({
+                cursor: snapshotRequest.cursor ?? undefined,
+                includeCredentialMaterial:
+                  snapshotRequest.includeCredentialMaterial,
+                limit: snapshotRequest.limit ?? undefined,
+                memberId,
+                provider: snapshotRequest.provider ?? undefined,
+                sourceProviderSlug:
+                  snapshotRequest.sourceProviderSlug ?? undefined,
+              }),
+              trustedUserId: memberId,
+            });
+          },
+        };
+
+        const prompt = await buildHostedDeviceSyncStatusPrompt({
+          deviceSyncPort,
+          reconnectTargets: [
+            {
+              connectTarget: "whoop",
+              connectTargetCommandSafe: true,
+              label: "WHOOP",
+              provider: "junction",
+              sourceProviderSlug: "whoop_v2",
+            },
+          ],
+        });
+
+        expect(snapshotRequests).toHaveLength(2);
+        expect(snapshotRequests[0]).toEqual({
+          includeCredentialMaterial: false,
+          sourceProviderSlug: "whoop_v2",
+        });
+        expect(snapshotRequests[1]).toMatchObject({
+          includeCredentialMaterial: false,
+          limit: 32,
+          sourceProviderSlug: "whoop_v2",
+        });
+        expect(snapshotRequests[1]?.cursor).toEqual(expect.any(Object));
+        expect(sourceRead).toHaveBeenCalledTimes(2);
+        expect(prompt).toContain("WHOOP currently needs reconnect");
+        expect(prompt).toContain("`TOKEN_REFRESH_STATE_UNKNOWN`");
+        expect(prompt).toContain("Do not treat missing wearable data");
+      } finally {
+        await prisma.deviceConnection.deleteMany({
+          where: { userId: memberId },
+        }).catch(() => undefined);
+        await prisma.hostedMember.deleteMany({
+          where: { id: memberId },
+        }).catch(() => undefined);
+        await prisma.$disconnect();
+        controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReset();
+      }
+    }, 60_000);
+
     it("bounds a 32-connection app-bound runtime snapshot overlapping scoped companion status", async () => {
       const suffix = randomUUID().replaceAll("-", "");
       const prisma = createPrismaClient({
@@ -822,16 +962,23 @@ function withApplicationName(value: string, applicationName: string): string {
 
 function runtimeSnapshotRequest(input: {
   cursor?: { createdAt: string; id: string };
+  includeCredentialMaterial?: boolean;
+  limit?: number;
   memberId: string;
   provider?: string;
+  sourceProviderSlug?: string;
 }): Request {
   return new Request(
     "https://control.example.test/api/internal/device-sync/runtime/snapshot",
     {
       body: JSON.stringify({
         ...(input.cursor ? { cursor: input.cursor } : {}),
-        includeCredentialMaterial: false,
+        includeCredentialMaterial: input.includeCredentialMaterial ?? false,
+        ...(input.limit ? { limit: input.limit } : {}),
         ...(input.provider ? { provider: input.provider } : {}),
+        ...(input.sourceProviderSlug
+          ? { sourceProviderSlug: input.sourceProviderSlug }
+          : {}),
         userId: input.memberId,
       }),
       method: "POST",
