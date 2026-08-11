@@ -85,6 +85,23 @@ describe("changelog registry", () => {
     expect(item?.tryIt).toBeUndefined();
   });
 
+  it("keeps iMessage card preview copy descriptive and value-free", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "descriptive-imessage-card-previews",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-11",
+      kind: "improvement",
+      priority: 1,
+      sourcePullRequests: [1631],
+      summary: expect.stringContaining("daily nutrition"),
+      title: "Clearer iMessage card previews",
+    });
+    expect(item?.details).toContain("free of card values");
+    expect(item?.tryIt).toBeUndefined();
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -579,13 +596,17 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through August 10 shipment set", () => {
+  it("publishes the complete July 20 through August 11 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 22).map((edition) => ({
+      listChangelogEditions().slice(0, 23).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-08-11",
+        itemIds: ["descriptive-imessage-card-previews"],
+      },
       {
         id: "2026-08-10",
         itemIds: [
@@ -1085,8 +1106,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-10");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-04");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-11");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-05");
   });
 
   it("resolves only known canonical edition cursors", () => {

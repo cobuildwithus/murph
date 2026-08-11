@@ -63,6 +63,33 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-11",
+    publishedOn: "2026-08-11",
+    title: "Clearer iMessage card previews",
+    summary:
+      "iMessage conversation previews now identify the kind of Murph card without exposing the private values inside it.",
+    items: [
+      {
+        id: "descriptive-imessage-card-previews",
+        kind: "improvement",
+        priority: 1,
+        title: "Clearer iMessage card previews",
+        summary:
+          "iMessage conversation previews now say whether Murph sent daily nutrition, a workout, a general summary, or challenge standings.",
+        details:
+          "The preview label stays free of card values in the conversation list, on the lock screen, and in notifications.",
+        relevanceTags: [
+          "imessage",
+          "cards",
+          "nutrition",
+          "workouts",
+          "challenges",
+        ],
+        sourcePullRequests: [1631],
+      },
+    ],
+  },
+  {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
