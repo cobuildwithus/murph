@@ -1618,10 +1618,12 @@ the same private-direct card values and never member identity, canonical record
 references, credentials, or other authority. The image route performs no
 database or remote read, writes no application log or analytics event, returns
 private no-store/no-index headers, and rejects malformed input before reading
-render assets. The fallback body remains value-free and names a truthful
-text-recovery action to avoid Apple data-detector downgrade. No persisted card
-state, authenticated card API, cleanup owner, extension network read, or second
-queue exists.
+render assets. The fallback body remains value-free and derives a stable preview
+label from the validated card kind so Messages can distinguish nutrition,
+workout, generic-summary, and challenge-standings cards without exposing card
+values or triggering Apple data-detector downgrade. No persisted card state,
+authenticated card API, cleanup owner, extension network read, or second queue
+exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a

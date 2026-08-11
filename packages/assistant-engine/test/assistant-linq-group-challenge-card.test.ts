@@ -72,7 +72,7 @@ describe('Linq group challenge standings delivery', () => {
           idempotency_key: 'group-challenge-card-1',
           parts: [{
             type: 'imessage_app',
-            fallback_text: 'Ask Murph for this card in text',
+            fallback_text: 'Challenge standings',
             layout: {
               caption: 'Weird Health Week — Day 4 of 7',
               subcaption: '1. Maya: 120 points',

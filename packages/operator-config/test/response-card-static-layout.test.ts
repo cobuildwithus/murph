@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+  buildLinqIMessageAppFallbackText,
   buildLinqIMessageAppLayout,
   renderAssistantResponseCardText,
   type CompactTableResponseCardV1,
@@ -33,9 +33,12 @@ const TRACKED_TABLE: CompactTableResponseCardV1 = {
 }
 
 describe('response-card static Linq layouts', () => {
-  it('uses generic value-free fallback copy across card kinds', () => {
-    expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
-      'Ask Murph for this card in text',
+  it('uses value-free fallback copy for generic and workout cards', () => {
+    expect(buildLinqIMessageAppFallbackText(ONE_OFF_TABLE)).toBe(
+      'Your Murph summary',
+    )
+    expect(buildLinqIMessageAppFallbackText(TRACKED_TABLE)).toBe(
+      'Your workout',
     )
   })
 
