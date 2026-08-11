@@ -9,7 +9,10 @@ import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
+import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
+import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
+import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { ReferralSection } from "@/src/components/homepage/referral-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
@@ -265,13 +268,27 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Homepage experiment flow">
-        <HowItWorksSection />
+        <div
+          id="homepage-experiment-flow"
+          data-design-section="homepage-experiment-flow"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <HowItWorksSection />
+        </div>
       </StudySection>
 
       <Separator />
 
       <StudySection title="Homepage personas">
-        <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
+        <div
+          id="homepage-personas"
+          data-design-section="homepage-personas"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
+        </div>
       </StudySection>
 
       <Separator />
@@ -285,6 +302,45 @@ export function SectionsContent() {
         >
           <TogetherSection />
           <AsksGridSection />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage nutrition research">
+        <div
+          id="homepage-nutrition-research"
+          data-design-section="homepage-nutrition-research"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <NutritionSection />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage integrations">
+        <div
+          id="homepage-integrations"
+          data-design-section="homepage-integrations"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <IntegrationsSection authenticated={false} />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage local installation">
+        <div
+          id="homepage-local-installation"
+          data-design-section="homepage-local-installation"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <LocalRunSection installCommandUrl="https://www.withmurph.ai/install.sh" />
         </div>
       </StudySection>
 

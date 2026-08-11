@@ -523,6 +523,18 @@ supported provider credential.
   Its `MURPH_HOSTED_LOCAL_RESEND_API_BASE_URL` override is accepted only as a
   plain-HTTP loopback origin while hosted-local E2E isolation is explicitly
   active; production deployments must leave both test-only settings unset.
+- `apps/web/test/hosted-runtime-progress-alert-monitor-postgres.test.ts` is an
+  opt-in local-PostgreSQL proof for the companion 15-minute durable mailbox
+  progress detector. It exercises the real paginated SQL together with exact
+  personal and thread-container AI authority, including current-participant
+  access and inactive, stale, removed, suspended, or consent-revoked
+  exclusions. It also proves usage-denial suppression and restart chronology
+  across staging, provider, delivery, and mailbox-consumption evidence, plus
+  the 20,000 eligible-row cap after exclusions. The hosted-local
+  foreground-priority leg drives this monitor through authenticated cron HTTP
+  and the same isolated Resend stub, proving paced lost-ack retry,
+  identifier-free aggregation, active-incident coalescing, recovery/rearm, and
+  independence from the latency monitor.
 - `apps/web/test/hosted-mailbox-usage-denial-postgres.test.ts` is an opt-in
   local-PostgreSQL proof that the usage-denial write marks only the observed
   conversation sequence window with database-owned chronology and leaves a
@@ -713,15 +725,22 @@ keep the one-second presentation-only deadline and late-result rejection.
 
 - Assistant Ask has focused contract, parser, Web authority/idempotency,
   assistant-tool policy, runtime mailbox routing, detached-process lifecycle,
-  one-time current-sender identity/route/disclosure coverage, and Cloudflare
-  runner-image confinement coverage. The production-like Linux
+  one-time current-sender group-disclosure coverage, private-current-sender
+  admission/completion/replay coverage, and Cloudflare runner-image confinement
+  coverage. The private path proves exact accepted-message attribution,
+  personal-runtime targeting, same-channel `direct-member` routing, queue-only
+  exact-text notification, absence of group-route authority, and retry
+  non-redirection. Provider-entry coverage binds the original private Assistant
+  Ask expiry, exact reviewed-text digest, same personal member, and current
+  same-channel direct route, then proves expiry, revocation, text mismatch, or
+  route drift fails terminally without group fallback. The production-like Linux
   proof must show committed group reads succeed while writes, `.runtime/**`,
   `.codex/**`, environment files, other roots, inherited shell secrets, and tool network are
   denied, and it must show child failure or cancellation cannot interrupt the
   resident foreground App Server. Routine CI uses scripted provider responses;
   it does not send a real private-to-group ask, an accepted-input
-  grant-bound group-to-member ask, one-time current-sender self-disclosure, or
-  a scheduled same-turn ask/replay
+  grant-bound group-to-member ask, one-time current-sender self-disclosure,
+  private-current-sender continuation, or a scheduled same-turn ask/replay
   through deployed Web, Temporal, Cloudflare, a live model provider, and the
   applicable messaging or no-delivery destination.
 
