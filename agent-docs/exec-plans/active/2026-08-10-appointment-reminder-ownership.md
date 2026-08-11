@@ -54,6 +54,33 @@ Updated: 2026-08-10
    Mitigation: share real tool state across resumed turns and add a fresh scoped
    runtime read proof independent of provider-thread memory.
 
+## Review retrospective — round 2
+
+ReviewGPT found that the first replay correction still treated the accepted
+input as the effect identity. That made two appointment creates from one
+accepted message collide, while the retained local create-only route used a
+fresh random identity and could duplicate an effect after result loss.
+
+The requirement-level decisions are:
+
+- Effect cardinality is one owner per distinct canonical appointment-reminder
+  payload. One accepted input may create multiple distinct reminder effects.
+- Hosted and privileged-local create-only routes are both retained and both
+  must be replay-safe. There is no random create-only ownership mode.
+- Core owns one contract: canonical payload identifies the product effect;
+  hosted accepted-input authority scopes that effect when available; an
+  execution attempt never participates in identity.
+- Exact payload replay returns the existing owner without a write. Distinct
+  payloads under one accepted input produce distinct owners. Later lifecycle
+  operations address only the returned owner id or opaque lookup id.
+- Required proof covers two creates from one accepted message, replay after an
+  ambiguous/lost result on each retained route with no additional record, and
+  independent reschedule/cancellation of the corresponding original owners.
+
+This redesign replaces both compensating modes in the prior correction: the
+accepted-input-only hosted id and the random local id. It adds no durable owner,
+secondary index, or lifecycle.
+
 ## Tasks
 
 1. [x] Add canonical create-only ownership and hosted current-conversation list.

@@ -545,11 +545,34 @@ describe('hosted domain dynamic tools', () => {
       progressDelivery: null,
       request,
     })
+    const distinctRequest = readToolRequest('automation', {
+      action: 'save',
+      createOnly: true,
+      instructions: 'Send the Lakeside appointment reminder.',
+      schedule: { at: '2026-08-14T12:00:00.000Z', kind: 'at' },
+      tags: ['appointment-reminder'],
+      title: 'Lakeside appointment on August 14 at 3 PM',
+    })
+    if (!distinctRequest) {
+      throw new Error('Expected a second create-only automation request.')
+    }
+    await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: distinctRequest,
+    })
 
     const firstContext = automationRequest.mock.calls[0]?.[1]
     const secondContext = automationRequest.mock.calls[1]?.[1]
+    const distinctContext = automationRequest.mock.calls[2]?.[1]
     expect(firstContext?.createOnlyReplayKey).toMatch(/^automation_create_[a-f0-9]{64}$/u)
     expect(secondContext?.createOnlyReplayKey).toBe(
+      firstContext?.createOnlyReplayKey,
+    )
+    expect(distinctContext?.createOnlyReplayKey).toBe(
       firstContext?.createOnlyReplayKey,
     )
   })

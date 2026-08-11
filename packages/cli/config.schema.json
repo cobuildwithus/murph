@@ -1250,7 +1250,7 @@
                           "minLength": 1
                         },
                         "createOnly": {
-                          "description": "Create a new opaque automation owner and refuse id or slug collisions.",
+                          "description": "Create or replay one payload-idempotent opaque owner and refuse selected ids or slugs.",
                           "type": "boolean"
                         },
                         "activeUntil": {

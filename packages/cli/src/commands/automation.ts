@@ -151,6 +151,7 @@ export const automationSaveResultSchema = z.object({
   lookupId: z.string().min(1),
   path: pathSchema,
   created: z.boolean(),
+  replayed: z.boolean().optional(),
 });
 
 export const automationScaffoldResultSchema = z.object({
@@ -614,7 +615,7 @@ const automationSaveOptionSchemas = {
   createOnly: z
     .boolean()
     .optional()
-    .describe("Create a new opaque automation owner and refuse id or slug collisions."),
+    .describe("Create or replay one payload-idempotent opaque owner and refuse selected ids or slugs."),
   ...automationSharedOptionSchemas,
   instructions: z
     .string()
@@ -762,6 +763,9 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         lookupId: result.record.slug,
         path: result.record.relativePath,
         created: result.created,
+        ...(context.options.createOnly === true
+          ? { replayed: result.created === false }
+          : {}),
       };
     },
   });

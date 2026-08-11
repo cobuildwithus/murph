@@ -316,14 +316,16 @@ current evidence and the scoped reads establish that no plausible owner exists.
 
 On the initial `murph.automation` save, set `createOnly: true`, omit both
 `automationId` and `slug`, and include the ordinary tag `appointment-reminder`.
-The trusted host binds the create to the accepted input: an exact replay returns
-the same owner without another write, while divergent reuse conflicts. On a
-privileged local route, run `vault-cli automation save --create-only` and omit
-both `--id` and `--slug`. Both surfaces generate an opaque owner and refuse a
-collision without mutating an existing automation. Use a privacy-safe but
-unmistakable title and summary that identify the destination or service plus
-the original local date and appointment time when known; never include a
-diagnosis, reason for care, confirmation code, or other sensitive identifier.
+The trusted host scopes each canonical reminder effect to the accepted input:
+an exact payload replay returns the same owner without another write, while
+distinct appointment payloads in one accepted input receive distinct owners.
+On a privileged local route, follow the shared automation guidance's typed
+create-only path and omit both `--id` and `--slug`. Both surfaces generate a
+payload-idempotent opaque owner without mutating an existing automation. Use a
+privacy-safe but unmistakable title and summary that identify the destination
+or service plus the original local date and appointment time when known; never
+include a diagnosis, reason for care, confirmation code, or other sensitive
+identifier.
 Treat the initial save as successful only when the result returns both an
 `automationId` and `lookupId` and says either `created: true`, or `created:
 false` with `replayed: true`. Retain those returned values in current

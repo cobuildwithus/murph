@@ -1588,20 +1588,12 @@ async function upsertAutomationWithLatestRegistry(
     ? resolveAutomationCreateOnlyReplayIdentity({ input, title })
     : null;
   const normalizedId = createOnlyReplayIdentity?.automationId
-    ?? (
-      input.createOnly === true && suppliedId === undefined
-        ? generateRecordId("automation")
-        : suppliedId
-    );
+    ?? suppliedId;
   const requestedSlug = createOnlyReplayIdentity?.slug
-    ?? (
-      input.createOnly === true && input.slug === undefined
-        ? normalizeSlug(undefined, "slug", normalizedId)
-        : resolveAutomationUpsertSlug({
-            slug: input.slug,
-            title,
-          })
-    );
+    ?? resolveAutomationUpsertSlug({
+      slug: input.slug,
+      title,
+    });
   const existingRecord = selectAutomationRecord(
     records ?? await loadAutomationRecords(input.vaultRoot),
     { automationId: normalizedId, slug: requestedSlug },
@@ -1739,19 +1731,16 @@ async function upsertAutomationWithLatestRegistry(
 function resolveAutomationCreateOnlyReplayIdentity(input: {
   input: UpsertAutomationInput;
   title: string;
-}): { automationId: string; slug: string } | null {
+}): { automationId: string; slug: string } {
   const replayKey = optionalString(
     input.input.createOnlyReplayKey,
     "createOnlyReplayKey",
     256,
   );
-  if (!replayKey) {
-    return null;
-  }
   if (input.input.automationId !== undefined || input.input.slug !== undefined) {
     throw new VaultError(
       "VAULT_INVALID_INPUT",
-      "Replay-safe create-only automation ownership cannot specify an id or slug.",
+      "Create-only automation ownership cannot specify an id or slug.",
     );
   }
   const schedule = normalizeAutomationSchedule(input.input.schedule);
@@ -1775,17 +1764,25 @@ function resolveAutomationCreateOnlyReplayIdentity(input: {
     tags: normalizeAutomationTags(input.input.tags),
     title: input.title,
   });
+  const effectIdentity = JSON.stringify({
+    fingerprint,
+    replayKey: replayKey ?? null,
+    schema: "murph.automation-create-effect.v2",
+  });
   return {
     automationId: deterministicContractId(
       "automation",
-      `murph.automation-create-owner.v1:${replayKey}`,
+      effectIdentity,
     ),
     slug: normalizeSlug(
       undefined,
       "slug",
       deterministicContractId(
         "automation",
-        `murph.automation-create-payload.v1:${replayKey}:${fingerprint}`,
+        JSON.stringify({
+          effectIdentity,
+          schema: "murph.automation-create-lookup.v2",
+        }),
       ),
     ),
   };

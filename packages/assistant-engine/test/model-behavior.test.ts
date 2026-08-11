@@ -3107,7 +3107,7 @@ describe('assistant conversation scope', () => {
       'Use `murph.automation` with `action: save` to create an ordinary automation, `action: list` to recover persisted owners for this conversation, and `action: patch` to change one.',
     )
     expect(prompt).toContain(
-      'Use `createOnly: true` without an automation id or slug when a new opaque owner must not replace any existing record.',
+      'Use `createOnly: true` without an automation id or slug when a new payload-idempotent opaque owner must not replace any existing record; exact payload replay recovers that owner, while distinct payloads in one accepted input create distinct owners.',
     )
     expect(prompt).toContain(
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
@@ -3163,7 +3163,7 @@ describe('assistant conversation scope', () => {
       'Scheduled assistant automation commands are available directly through `vault-cli automation ...`',
     )
     expect(prompt).toContain(
-      'Use `--create-only` without `--id` or `--slug` when a new opaque owner must not replace an existing record.',
+      'Use `--create-only` without `--id` or `--slug` when a new payload-idempotent opaque owner must not replace an existing record; exact payload replay recovers the original owner.',
     )
     expect(prompt).not.toContain('Use `createOnly: true`')
   })

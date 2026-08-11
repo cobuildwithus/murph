@@ -361,7 +361,7 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal("cursor" in listSchema.options.properties, true);
 });
 
-test("automation save create-only makes opaque owners and rejects selected ownership", async () => {
+test("automation save create-only replays an effect and distinguishes payloads", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-create-only-",
   );
@@ -371,21 +371,25 @@ test("automation save create-only makes opaque owners and rejects selected owner
       version: "0.0.0-test",
     });
     registerAutomationCommands(cli);
-    const save = () => runInProcessJsonCli<{
+    const save = (input: {
+      scheduleAt?: string;
+      title?: string;
+    } = {}) => runInProcessJsonCli<{
       automationId: string;
       created: boolean;
       lookupId: string;
+      replayed: boolean;
     }>(cli, [
       "automation",
       "save",
-      "Midtown appointment on August 12 at 9:30 AM",
+      input.title ?? "Midtown appointment on August 12 at 9:30 AM",
       "--create-only",
       "--instructions",
       "Send the privacy-safe appointment reminder.",
       "--schedule-kind",
       "at",
       "--schedule-at",
-      "2099-08-12T00:00:00.000Z",
+      input.scheduleAt ?? "2099-08-12T00:00:00.000Z",
       "--channel",
       "telegram",
       "--delivery-target",
@@ -396,19 +400,33 @@ test("automation save create-only makes opaque owners and rejects selected owner
 
     const first = await save();
     const second = await save();
+    const distinct = await save({
+      scheduleAt: "2099-08-14T12:00:00.000Z",
+      title: "Lakeside appointment on August 14 at 3 PM",
+    });
     assert.equal(first.exitCode, null);
     assert.equal(second.exitCode, null);
-    if (!first.envelope.ok || !second.envelope.ok) {
-      throw new Error("Expected both create-only saves to succeed.");
+    assert.equal(distinct.exitCode, null);
+    if (!first.envelope.ok || !second.envelope.ok || !distinct.envelope.ok) {
+      throw new Error("Expected all create-only saves to succeed.");
     }
     assert.equal(first.envelope.data?.created, true);
-    assert.equal(second.envelope.data?.created, true);
-    assert.notEqual(
+    assert.equal(first.envelope.data?.replayed, false);
+    assert.equal(second.envelope.data?.created, false);
+    assert.equal(second.envelope.data?.replayed, true);
+    assert.equal(
       first.envelope.data?.automationId,
       second.envelope.data?.automationId,
     );
+    assert.equal(first.envelope.data?.lookupId, second.envelope.data?.lookupId);
+    assert.equal(distinct.envelope.data?.created, true);
+    assert.equal(distinct.envelope.data?.replayed, false);
+    assert.notEqual(
+      first.envelope.data?.automationId,
+      distinct.envelope.data?.automationId,
+    );
     assert.match(first.envelope.data?.lookupId ?? "", /^automation-[a-z0-9]+$/u);
-    assert.match(second.envelope.data?.lookupId ?? "", /^automation-[a-z0-9]+$/u);
+    assert.match(distinct.envelope.data?.lookupId ?? "", /^automation-[a-z0-9]+$/u);
     const firstAutomationId = first.envelope.data?.automationId;
 
     const conflicting = await runInProcessJsonCli(cli, [

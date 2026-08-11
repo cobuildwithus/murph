@@ -84,7 +84,10 @@ describe('assistant appointment reminder policy', () => {
       'repeat the same bounded query once without `exactTag`',
     )
     expect(normalizedSkill).toContain(
-      '`vault-cli automation save --create-only`',
+      "the shared automation guidance's typed create-only path",
+    )
+    expect(normalizedSkill).toContain(
+      'distinct appointment payloads in one accepted input receive distinct owners',
     )
     expect(normalizedSkill).toContain(
       'patch that exact owner with the replacement one-shot schedule, current privacy-safe title or summary, and `status: "active"`',

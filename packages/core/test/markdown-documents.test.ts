@@ -317,7 +317,7 @@ describe("markdown document primitives", () => {
         slug: existing.record.slug,
         title: "Conflicting appointment reminder",
       }),
-    })).rejects.toThrow("Create-only automation ownership already exists.");
+    })).rejects.toThrow("Create-only automation ownership cannot specify an id or slug.");
     await expect(readAutomation({
       automationId: existing.record.automationId,
       vaultRoot,
@@ -326,7 +326,7 @@ describe("markdown document primitives", () => {
     }));
   });
 
-  it("replays a trusted create-only effect without a second write", async () => {
+  it("creates distinct trusted effects and replays each without another write", async () => {
     const vaultRoot = await makeVaultRoot();
     const request = {
       vaultRoot,
@@ -350,19 +350,55 @@ describe("markdown document primitives", () => {
       created: false,
       record: created.record,
     });
+
+    const secondRequest = {
+      ...request,
+      instructions: "Send the Lakeside appointment reminder.",
+      schedule: { at: "2026-08-14T12:00:00.000Z", kind: "at" as const },
+      summary: "Lakeside appointment on August 14 at 3 PM",
+      title: "Lakeside appointment on August 14 at 3 PM",
+    };
+    const secondCreated = await upsertAutomation(secondRequest);
+    const secondReplayed = await upsertAutomation(secondRequest);
+
+    expect(secondCreated.created).toBe(true);
+    expect(secondCreated.record.automationId).not.toBe(created.record.automationId);
+    expect(secondReplayed).toEqual({
+      auditPath: null,
+      created: false,
+      record: secondCreated.record,
+    });
     await expect(listAutomations({ vaultRoot })).resolves.toEqual({
-      count: 1,
-      items: [created.record],
+      count: 2,
+      items: expect.arrayContaining([created.record, secondCreated.record]),
     });
 
-    await expect(upsertAutomation({
-      ...request,
-      instructions: "Divergent instructions for the same accepted input.",
-    })).rejects.toThrow("Create-only automation ownership already exists.");
+    const rescheduled = await patchAutomation({
+      lookup: created.record.automationId,
+      schedule: { at: "2026-08-15T12:00:00.000Z", kind: "at" },
+      vaultRoot,
+    });
+    const cancelled = await patchAutomation({
+      lookup: secondCreated.record.automationId,
+      status: "archived",
+      vaultRoot,
+    });
+
+    expect(rescheduled.record.schedule).toEqual({
+      at: "2026-08-15T12:00:00.000Z",
+      kind: "at",
+    });
+    expect(rescheduled.record.status).toBe("active");
+    expect(cancelled.record.schedule).toEqual(secondCreated.record.schedule);
+    expect(cancelled.record.status).toBe("archived");
     await expect(readAutomation({
       automationId: created.record.automationId,
       vaultRoot,
-    })).resolves.toEqual(created.record);
+    })).resolves.toEqual(rescheduled.record);
+    await expect(readAutomation({
+      automationId: secondCreated.record.automationId,
+      vaultRoot,
+    })).resolves.toEqual(cancelled.record);
   });
 
   it("advances the schedule anchor only for timing transitions", async () => {
