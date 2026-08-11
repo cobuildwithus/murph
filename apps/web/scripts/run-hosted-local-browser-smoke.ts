@@ -197,6 +197,17 @@ async function assertConnectPage(input: {
       `Hosted browser ${input.caseName} overflowed horizontally by ${horizontalOverflow}px.`,
     );
   }
+
+  await connectButton.click();
+  const disclosureDialog = input.page.getByRole("dialog");
+  await disclosureDialog.getByRole("heading", {
+    exact: true,
+    name: "Connect Whoop to Murph",
+  }).waitFor({ state: "visible" });
+  await disclosureDialog.getByRole("button", {
+    exact: true,
+    name: "Continue to Whoop",
+  }).waitFor({ state: "visible" });
 }
 
 async function addHostedSessionCookie(input: {
