@@ -237,7 +237,7 @@ export function TrainingPageView({
           title="Training"
           description="Log sets by messaging Murph. Review recent workouts and see what is improving here."
         />
-        {primaryActionLabel ? (
+        {primaryActionLabel && handoffRefreshState === "idle" ? (
           <ContactAction
             authenticated={authenticated}
             className="w-full sm:w-auto"
@@ -333,7 +333,7 @@ export function TrainingPageView({
         && !awaitingRefresh
         && status !== "error"
         && !hasTraining
-        && handoffRefreshState !== "checking" ? (
+        && handoffRefreshState === "idle" ? (
         <EmptyTraining
           authenticated={authenticated}
           contactOption={startContactOptions[0] ?? null}
