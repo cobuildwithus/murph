@@ -372,7 +372,7 @@ export function resolveWorkerMode(
       }
       commands.require("git", ["reset", "--hard", "origin/main"], worktree);
       commands.require("git", ["clean", "-ffdx"], worktree);
-    } else if (remoteLookup.status !== 0) {
+    } else if (![0, 2].includes(remoteLookup.status)) {
       throw new Error(`git failed with status ${remoteLookup.status}`);
     }
     if (ahead === 0 && beforeAdvance !== main) {

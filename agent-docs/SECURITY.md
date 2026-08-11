@@ -1058,7 +1058,10 @@ Last verified: 2026-08-11
   parent retains a validated local body or creates a fixed authority-free
   recovery body, replaces the remote presentation, and reruns exact-head review.
   Only a fresh branch can authorize the implementation ReviewGPT request;
-  resume omits that command entirely. An interrupted dirty diff can resume only
+  resume omits that command entirely. A clean committed deterministic branch
+  ahead of `origin/main` may resume when its remote branch and PR do not yet
+  exist, preserving the parent-created commit and validated local body for the
+  first push and ordinary review path. An interrupted dirty diff can resume only
   when the one open parent-owned PR, remote branch, and local committed head
   match exactly; mutable body text is not needed to preserve the worktree. It
   returns to an edit-only child and every parent gate reruns.

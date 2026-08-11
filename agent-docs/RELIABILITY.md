@@ -178,7 +178,10 @@ Last verified: 2026-08-11
   identify the same repair; mutable remote body text is unnecessary for this
   worktree-preservation decision. The edit-only child finishes the interrupted
   diff and the parent reruns the review gates. Resumable runs cannot reacquire or
-  reapply an implementation patch. A merged PR paired with an open or reopened
+  reapply an implementation patch. A clean parent commit interrupted before its
+  first push also resumes when no remote branch or PR exists; the validated
+  local body skips a second child and the ordinary parent publishes the exact
+  existing commit. A merged PR paired with an open or reopened
   issue, multiple parent-owned PRs, branch divergence, mismatched ownership or
   head, and every other dirty state fail
   closed rather than guessing a continuation point or closing historical state.

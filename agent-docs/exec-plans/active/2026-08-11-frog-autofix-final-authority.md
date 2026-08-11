@@ -54,6 +54,11 @@ tooling automatically.
    supply review, baseline, hydration, closing, or queue-handoff authority.
 13. [x] Traverse the server-filtered deterministic-branch PR connection before
    applying the zero-or-one parent-owned cardinality rule.
+14. [x] Accept the exact clean post-commit/pre-first-push recovery state already
+   defined as resumable, without reacquiring an implementation patch or child.
+15. [ ] Obtain an explicit cap-continuation decision before any eighth
+   substantive ReviewGPT round; a later exact-head PASS remains required before
+   merge.
 
 ## Round-four scope retrospective
 
@@ -154,6 +159,33 @@ from the one predicate consuming its records. Continue to the seventh and
 final allowed substantive round after production-shaped provenance and
 pagination proof.
 
+### Round-seven cap retrospective
+
+Round seven verified the body-provenance and cursor-traversal corrections, then
+found one incomplete interruption state in the existing recovery classifier. A
+normal parent can commit the validated repair and stop before its first push.
+That leaves a clean deterministic branch ahead of `origin/main`, with no remote
+branch or PR. The pure classifier already returned `resume` for no PR plus an
+ahead commit, but the production adapter rejected remote status 2 before
+calling it. The finding is accepted and reproduced by the production-shaped
+adapter fixture.
+
+The correction changes only that adapter condition: remote absence is allowed
+to reach the existing classifier, while other remote failures, dirty no-PR
+state, divergence, and ambiguous PR state remain closed. The existing run path
+then validates the retained local PR body, skips another implementation request
+and edit-only child, pushes the exact existing commit, and enters ordinary
+parent review. This adds no owner, state, queue, retry mechanism, credential, or
+model turn.
+
+The seven-round hard cap is now active. Fixing this known bug is required and
+permitted, but no eighth substantive round or merge is authorized by this
+retrospective. After the fix, pause the ReviewGPT loop, complete local audit,
+verification, preliminary-gate confirmation, parent final review, and PR CI,
+then obtain an explicit continuation decision. Even if those other gates are
+green, the PR still requires a later exact-head `ROUND_OUTCOME: PASS` before it
+can merge.
+
 ## Verification
 
 - Native Codex permission smoke: passed workspace read/write, denied an
@@ -173,7 +205,10 @@ pagination proof.
   and returned the PR-identity, atomic-lock, and terminal-handoff findings
   captured in the continuation decision. Round six verified those mechanisms
   but returned body-provenance and pre-filter pagination findings captured
-  above; the seventh and final exact-head round remains required before merge.
+  above. Round seven verified those corrections and returned the accepted
+  post-commit/pre-first-push recovery finding captured in the cap retrospective;
+  the fix is landed locally, and an eighth round requires an explicit
+  continuation decision before it can provide the still-required PASS.
 
 Status: active
 Updated: 2026-08-11

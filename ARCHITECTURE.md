@@ -38,9 +38,11 @@ only when `editor`/`lastEditedAt` proves the live operator made the latest edit,
 with creator fallback only for a never-edited body. Otherwise the parent keeps
 an already validated local body or writes one fixed recovery body, overwrites
 the remote presentation, and reruns exact-head reviews.
-A clean implementation commit or open PR may also resume without requesting a
-second implementation patch. Divergence, mismatched ownership, merged or
-multiply-owned PR state, and other ambiguity fail closed. One exact
+A clean implementation commit interrupted before its first remote push, or an
+open PR, may resume without requesting a second implementation patch. The
+clean no-PR path reuses its validated local body, pushes the existing commit,
+and enters the ordinary parent review path. Divergence, mismatched ownership,
+merged or multiply-owned PR state, and other ambiguity fail closed. One exact
 closed-unmerged parent PR that lacks a trusted handoff is rewritten with the
 fixed recovery body plus a review-findings handoff, without reopening or
 reviewing it, so cancellation cannot pin later issues. After an unrelated

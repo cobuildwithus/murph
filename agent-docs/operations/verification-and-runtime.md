@@ -629,8 +629,9 @@ closed-unmerged and descendant-head handoff continuity, terminal versus
 transient required-check classification, conflict disposition, real native
 two-contender serialization, operator-created but foreign-edited baseline/PASS/
 open-and-closed-handoff rejection with safe body recovery, 100-plus-record
-cursor pagination before parent cardinality, and historical merged-PR reopen
-refusal. A macOS
+cursor pagination before parent cardinality, clean post-commit/pre-first-push
+resume without a second implementation request or child, and historical
+merged-PR reopen refusal. A macOS
 permission smoke must also apply the exact native worker profile and prove an
 in-worktree read/write succeeds while an outside-root read and a network
 request fail:

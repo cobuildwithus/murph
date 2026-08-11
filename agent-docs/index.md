@@ -16,8 +16,9 @@ Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
 protected PR merges, one authenticated-operator/same-repository PR predicate,
 fully traversed deterministic-branch PR history plus latest-body-editor
-provenance, GitHub-owned implement/resume recovery state with no historical
-close-only path, a native workspace-only Codex permission profile,
+provenance, GitHub-owned implement/resume recovery state including clean
+post-commit/pre-first-push continuation with no historical close-only path, a
+native workspace-only Codex permission profile,
 canonical parent-owned ReviewGPT gates whose complete prompt-preset surface is
 trusted-main-bound, durable descendant/closed-unmerged findings/retrospective
 handoffs for terminal checks and conflicts, one absolute process-group-bounded

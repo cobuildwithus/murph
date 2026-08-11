@@ -729,6 +729,15 @@ describe("Frog autofix guards", () => {
       localHead: implementationHead,
       remoteBranch: true,
     })).toMatchObject({ mode: "resume" });
+    const committedBeforeFirstPush = runScenario({
+      ahead: 1,
+      localHead: implementationHead,
+      remoteBranch: false,
+    });
+    expect(committedBeforeFirstPush).toMatchObject({ mode: "resume" });
+    expect(committedBeforeFirstPush.required)
+      .not.toContain("git reset --hard origin/main");
+    expect(committedBeforeFirstPush.required).not.toContain("git clean -ffdx");
     expect(runScenario({
       ahead: 1,
       localHead: implementationHead,
