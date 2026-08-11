@@ -686,6 +686,10 @@ describe("Frog autofix guards", () => {
       "permissions.frog-workspace-only.network.enabled=false",
     );
     expect(args).toContain('web_search="disabled"');
+    expect(args).toContain('shell_environment_policy.inherit="none"');
+    expect(args).toContain(
+      'shell_environment_policy.include_only=["CI","HOME","LANG","LC_ALL","PATH","TERM","TMPDIR","NO_COLOR"]',
+    );
     expect(args).not.toContain("--add-dir");
     expect(args).not.toContain("--sandbox");
     expect(args).not.toContain("--full-auto");
@@ -695,7 +699,9 @@ describe("Frog autofix guards", () => {
       "apps",
       "browser_use",
       "computer_use",
+      "hooks",
       "multi_agent",
+      "request_permissions_tool",
       "plugins",
       "standalone_web_search",
     ]) expect(args).toContain(feature);

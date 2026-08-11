@@ -1025,9 +1025,11 @@ Last verified: 2026-08-11
   Git common directory, parent review path, plugin, user config, or configured
   MCP server; browser, app, image, web-search, multi-agent, and MCP-install
   features are explicitly disabled, and project Codex/MCP config is rejected.
-  The parent installs pinned dependencies only on a clean fresh branch before
-  model work; resumable or model-touched state may never trigger package-manager
-  configuration or installation.
+  Shell commands inherit only a small benign environment allowlist that omits
+  `CODEX_HOME`, tokens, sockets, and provider variables. The parent installs
+  pinned dependencies only on a clean fresh branch before model work; resumable
+  or model-touched state may never trigger package-manager configuration or
+  installation.
 - An issue is model-work authority only when it remains open, is authored by
   the exact configured Frog App, retains the expected label, and has exactly
   one matching binding in the protected default branch's committed friction

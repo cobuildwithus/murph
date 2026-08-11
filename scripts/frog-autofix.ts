@@ -845,7 +845,7 @@ function runCodexPermissionSmoke(primary: string) {
         "frog-workspace-only",
         "/bin/zsh",
         "-c",
-        'test -r package.json && /usr/bin/touch "$1" && test -f "$1" && ! /bin/cat "$2" >/dev/null 2>&1 && ! /usr/bin/curl -fsS --max-time 2 https://example.com >/dev/null 2>&1',
+        'test -r package.json && test -z "${CODEX_HOME:-}" && /usr/bin/touch "$1" && test -f "$1" && ! /bin/cat "$2" >/dev/null 2>&1 && ! /usr/bin/curl -fsS --max-time 2 https://example.com >/dev/null 2>&1',
         "frog-permission-smoke",
         insideCanary,
         outsideCanary,

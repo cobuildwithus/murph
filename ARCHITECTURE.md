@@ -42,7 +42,9 @@ allows only minimal command-runtime reads plus issue-worktree reads and writes,
 and denies tool network. Its synthetic home and temporary directory live inside
 the ignored worktree output root. User config, plugins, configured MCP servers,
 SSH agents, browser roots, Git common metadata, and parent evidence paths are
-unavailable. It may integrate code, tests, docs, the plan, and a private PR
+unavailable. Shell commands inherit only a small benign environment allowlist,
+so the authentication-only `CODEX_HOME` locator does not enter model-visible
+command output. It may integrate code, tests, docs, the plan, and a private PR
 draft, but cannot commit, push, publish, review, merge, close, or manufacture
 authority evidence.
 
