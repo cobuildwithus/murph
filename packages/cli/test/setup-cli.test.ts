@@ -2735,7 +2735,6 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
   await saveAssistantOperatorDefaultsPatch(
     buildAssistantProviderDefaultsPatch({
       defaults: null,
-      provider: 'codex-cli',
       providerConfig: {
         codexCommand: '/opt/bin/codex-old',
         model: 'gpt-5.4',
@@ -2873,7 +2872,6 @@ test.sequential('setup persistence can replace unsupported assistant defaults', 
     await saveAssistantOperatorDefaultsPatch(
       buildAssistantProviderDefaultsPatch({
         defaults: null,
-        provider: 'codex-cli',
         providerConfig: {
           model: 'gpt-5.6-terra',
           modelProvider: 'vercel-ai-gateway',

@@ -8,15 +8,13 @@ import {
 import { splitAssistantHeadersForPersistence } from './redaction.js'
 import { normalizeNullableString } from './shared.js'
 import {
+  buildCodexAssistantContinuityFingerprint,
   createUnsupportedAssistantRuntimeTargetError,
   normalizeAssistantCodexModelProvider,
   resolveStrictAssistantCodexModelProvider,
-  resolveAssistantRuntimeTarget,
-  type AssistantResolvedRuntimeTarget,
 } from './target-runtime.js'
 
 export interface AssistantCodexTargetConfig {
-  kind: 'codex-cli'
   codexCommand: string | null
   codexHome: string | null
   model: string | null
@@ -24,8 +22,6 @@ export interface AssistantCodexTargetConfig {
   oss: boolean
   profile: string | null
 }
-
-export type AssistantProviderTargetConfig = AssistantCodexTargetConfig
 
 export interface AssistantProviderPolicyConfig {
   approvalPolicy: AssistantApprovalPolicy | null
@@ -35,7 +31,7 @@ export interface AssistantProviderPolicyConfig {
 
 export interface AssistantProviderConfig {
   policy: AssistantProviderPolicyConfig
-  target: AssistantProviderTargetConfig
+  target: AssistantCodexTargetConfig
 }
 
 export interface AssistantProviderDefaultsConfig {
@@ -81,80 +77,38 @@ const ASSISTANT_PROVIDER_CONFIG_FIELDS = [
   'sandbox',
 ] as const satisfies readonly (keyof AssistantProviderConfigInput)[]
 
-export function resolveAssistantProvider(
-  provider: AssistantProviderConfigInput['provider'] | null | undefined,
-): AssistantChatProvider {
-  if (!provider || provider === 'codex-cli') {
-    return 'codex-cli'
-  }
-  throw createUnsupportedAssistantRuntimeTargetError()
-}
-
 export function normalizeAssistantProviderConfig(
   input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderConfig {
   const providerConfigInput = isAssistantProviderConfig(input)
     ? assistantProviderConfigToInput(input)
     : input
-
-  return sanitizeAssistantProviderConfig(
-    resolveAssistantProvider(providerConfigInput?.provider ?? 'codex-cli'),
-    providerConfigInput,
-  )
-}
-
-export function sanitizeAssistantProviderConfig(
-  provider: AssistantProviderConfigInput['provider'],
-  input: AssistantProviderConfigInput | null | undefined,
-): AssistantProviderConfig {
-  resolveAssistantProvider(provider)
-
-  const policy: AssistantProviderPolicyConfig = {
-    approvalPolicy: input?.approvalPolicy ?? null,
-    reasoningEffort:
-      normalizeNullableString(input?.reasoningEffort) ??
-      DEFAULT_MURPH_CODEX_REASONING_EFFORT,
-    sandbox: input?.sandbox ?? null,
-  }
-
-  const modelProvider = normalizeAssistantCodexModelProvider(input?.modelProvider)
-  const target: AssistantCodexTargetConfig = {
-    kind: 'codex-cli',
-    codexCommand: normalizeNullableString(input?.codexCommand),
-    codexHome: normalizeNullableString(input?.codexHome),
-    model: normalizeNullableString(input?.model),
-    modelProvider,
-    oss: input?.oss === true,
-    profile: normalizeNullableString(input?.profile),
-  }
+  assertSupportedAssistantRuntimeIdentifier(providerConfigInput?.provider)
 
   return {
-    policy,
-    target,
+    policy: {
+      approvalPolicy: providerConfigInput?.approvalPolicy ?? null,
+      reasoningEffort:
+        normalizeNullableString(providerConfigInput?.reasoningEffort) ??
+        DEFAULT_MURPH_CODEX_REASONING_EFFORT,
+      sandbox: providerConfigInput?.sandbox ?? null,
+    },
+    target: {
+      codexCommand: normalizeNullableString(providerConfigInput?.codexCommand),
+      codexHome: normalizeNullableString(providerConfigInput?.codexHome),
+      model: normalizeNullableString(providerConfigInput?.model),
+      modelProvider: normalizeAssistantCodexModelProvider(
+        providerConfigInput?.modelProvider,
+      ),
+      oss: providerConfigInput?.oss === true,
+      profile: normalizeNullableString(providerConfigInput?.profile),
+    },
   }
 }
 
-export function resolveAssistantChatProviderFromConfig(
-  config: AssistantProviderConfig,
-): AssistantChatProvider {
-  if (config.target.kind !== 'codex-cli') {
-    throw createUnsupportedAssistantRuntimeTargetError()
-  }
-
-  return 'codex-cli'
-}
-
-export function isAssistantCodexTargetConfig(
-  config: AssistantProviderConfig,
-): config is AssistantProviderConfig & { target: AssistantCodexTargetConfig } {
-  return config.target.kind === 'codex-cli'
-}
-
-export function mergeAssistantProviderConfigsForProvider(
-  provider: AssistantProviderConfigInput['provider'],
+export function mergeAssistantProviderConfigs(
   ...inputs: ReadonlyArray<AssistantProviderConfigLike | null | undefined>
 ): AssistantProviderConfig {
-  resolveAssistantProvider(provider)
   const merged: AssistantProviderConfigInput = {}
 
   for (const rawInput of inputs) {
@@ -165,9 +119,7 @@ export function mergeAssistantProviderConfigsForProvider(
       continue
     }
 
-    if (input.provider) {
-      resolveAssistantProvider(input.provider)
-    }
+    assertSupportedAssistantRuntimeIdentifier(input.provider)
 
     for (const field of ASSISTANT_PROVIDER_CONFIG_FIELDS) {
       if (!(field in input)) {
@@ -180,13 +132,7 @@ export function mergeAssistantProviderConfigsForProvider(
     }
   }
 
-  return sanitizeAssistantProviderConfig('codex-cli', merged)
-}
-
-export function mergeAssistantProviderConfigs(
-  ...inputs: ReadonlyArray<AssistantProviderConfigLike | null | undefined>
-): AssistantProviderConfig {
-  return mergeAssistantProviderConfigsForProvider('codex-cli', ...inputs)
+  return normalizeAssistantProviderConfig(merged)
 }
 
 export function compactAssistantProviderConfigInput(
@@ -196,6 +142,7 @@ export function compactAssistantProviderConfigInput(
     return null
   }
 
+  assertSupportedAssistantRuntimeIdentifier(input.provider)
   const compacted: AssistantProviderConfigInput = {}
 
   for (const field of ASSISTANT_PROVIDER_CONFIG_FIELDS) {
@@ -215,24 +162,28 @@ export function serializeAssistantProviderSessionOptions(
 ): AssistantProviderSessionOptions {
   const strictModelProvider = resolveStrictAssistantProviderModelProvider(input)
   const normalized = normalizeAssistantProviderConfig(input)
-  const resolved = resolveAssistantRuntimeTarget(normalized)
-  const provider = resolveAssistantChatProviderFromConfig(normalized)
 
   return assistantProviderSessionOptionsSchema.parse({
-    continuityFingerprint: resolved.continuityFingerprint,
-    executionDriver: resolved.executionDriver,
-    provider,
+    continuityFingerprint: buildCodexAssistantContinuityFingerprint({
+      approvalPolicy: normalized.policy.approvalPolicy,
+      codexHome: normalized.target.codexHome,
+      model: normalized.target.model,
+      modelProvider: strictModelProvider,
+      oss: normalized.target.oss,
+      profile: normalized.target.profile,
+      sandbox: normalized.policy.sandbox,
+    }),
+    executionDriver: 'codex-app-server',
+    provider: 'codex-cli',
     model: normalized.target.model,
-    ...(strictModelProvider
-      ? { modelProvider: strictModelProvider }
-      : {}),
+    ...(strictModelProvider ? { modelProvider: strictModelProvider } : {}),
     reasoningEffort: normalized.policy.reasoningEffort,
-    resumeKind: resolved.resumeKind,
+    resumeKind: 'codex-thread',
     sandbox: normalized.policy.sandbox,
     approvalPolicy: normalized.policy.approvalPolicy,
-    profile: isAssistantCodexTargetConfig(normalized) ? normalized.target.profile : null,
-    oss: isAssistantCodexTargetConfig(normalized) ? normalized.target.oss : false,
-    ...(isAssistantCodexTargetConfig(normalized) && normalized.target.codexHome
+    profile: normalized.target.profile,
+    oss: normalized.target.oss,
+    ...(normalized.target.codexHome
       ? { codexHome: normalized.target.codexHome }
       : {}),
   })
@@ -244,21 +195,15 @@ export function serializeAssistantProviderOperatorDefaults(
   const normalized = normalizeAssistantProviderConfig(input)
 
   return {
-    codexCommand: isAssistantCodexTargetConfig(normalized)
-      ? normalized.target.codexCommand
-      : null,
-    codexHome: isAssistantCodexTargetConfig(normalized)
-      ? normalized.target.codexHome
-      : null,
+    codexCommand: normalized.target.codexCommand,
+    codexHome: normalized.target.codexHome,
     model: normalized.target.model,
-    modelProvider: isAssistantCodexTargetConfig(normalized)
-      ? normalized.target.modelProvider
-      : null,
+    modelProvider: normalized.target.modelProvider,
     reasoningEffort: normalized.policy.reasoningEffort,
     sandbox: normalized.policy.sandbox,
     approvalPolicy: normalized.policy.approvalPolicy,
-    profile: isAssistantCodexTargetConfig(normalized) ? normalized.target.profile : null,
-    oss: isAssistantCodexTargetConfig(normalized) ? normalized.target.oss : false,
+    profile: normalized.target.profile,
+    oss: normalized.target.oss,
   }
 }
 
@@ -278,31 +223,6 @@ export function assistantProviderConfigsEqual(
   const normalizedRight = normalizeAssistantProviderConfig(right)
 
   return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight)
-}
-
-export function resolveAssistantProviderRuntimeTarget(
-  input: AssistantProviderConfigLike | null | undefined,
-): AssistantResolvedRuntimeTarget {
-  resolveStrictAssistantProviderModelProvider(input)
-  return resolveAssistantRuntimeTarget(normalizeAssistantProviderConfig(input))
-}
-
-export function resolveAssistantProviderContinuityFingerprint(
-  input: AssistantProviderConfigLike | null | undefined,
-): string {
-  return resolveAssistantProviderRuntimeTarget(input).continuityFingerprint
-}
-
-export function supportsAssistantNativeResume(
-  input: AssistantProviderConfigLike | null | undefined,
-): boolean {
-  return resolveAssistantProviderRuntimeTarget(input).supportsNativeResume
-}
-
-export function supportsAssistantReasoningEffort(
-  input: AssistantProviderConfigLike | null | undefined,
-): boolean {
-  return resolveAssistantProviderRuntimeTarget(input).supportsReasoningEffort
 }
 
 export function normalizeAssistantHeaders(
@@ -337,7 +257,14 @@ export function normalizeAssistantHeaders(
 function assistantProviderConfigToInput(
   config: AssistantProviderConfig,
 ): AssistantProviderConfigInput {
-  if ((config.target as { kind?: string }).kind !== 'codex-cli') {
+  const legacyProvider = (config as { provider?: unknown }).provider
+  const legacyKind = (config.target as { kind?: unknown }).kind
+  if (
+    (legacyProvider !== undefined &&
+      legacyProvider !== null &&
+      legacyProvider !== 'codex-cli') ||
+    (legacyKind !== undefined && legacyKind !== 'codex-cli')
+  ) {
     throw createUnsupportedAssistantRuntimeTargetError()
   }
 
@@ -374,6 +301,14 @@ function isAssistantProviderConfig(
     'policy' in input &&
     'target' in input
   )
+}
+
+function assertSupportedAssistantRuntimeIdentifier(
+  provider: AssistantProviderConfigInput['provider'],
+): void {
+  if (provider && provider !== 'codex-cli') {
+    throw createUnsupportedAssistantRuntimeTargetError()
+  }
 }
 
 function canonicalizeAssistantHeaderName(key: string): string {
