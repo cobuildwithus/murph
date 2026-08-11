@@ -109,8 +109,14 @@ Success means:
   corrected by disclosing scheduled pre-model route/tool scoping, secure
   approval identity, terminal line-health attribution, and all four serial Web
   control calls on the scheduled native-card journey.
-- Pending: commit and push the Round 1 remediation, rerun required CI, and
-  complete the required next final ReviewGPT round against that corrected head.
+- Parent full-path reread found that the live route's direct/group bit was not
+  yet compared with the approval-bound vault-file intent. The guard now fails
+  before approval consumption, file access, or provider work on direct/group or
+  participant/thread audience drift; three negative cases pass with all 247
+  callback tests and the Assistant Runtime typecheck.
+- Pending: triage final ReviewGPT Round 2, commit the combined next remediation,
+  reconcile the bounded changelog-only current-base conflict, rerun required
+  CI, and complete the required next final ReviewGPT round.
 
 ## Deployment
 

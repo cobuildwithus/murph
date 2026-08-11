@@ -4021,6 +4021,7 @@ function createHostedAssistantLinqSendDependency(input: {
         || providerTargetKind !== (
           request.targetKind === "participant" ? "participant" : "thread"
         )
+        || resolvedRoute.threadIsDirect !== input.threadIsDirect
         || (
           providerTargetKind === "thread"
           && looksLikeHostedProviderRedactedLinqTarget(providerTarget)
@@ -4029,7 +4030,7 @@ function createHostedAssistantLinqSendDependency(input: {
     ) {
       throw createAssistantDeliveryTerminalError(
         "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
-        "Secure vault-file delivery target changed after approval.",
+        "Secure vault-file delivery target or audience changed after approval.",
       );
     }
     const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({

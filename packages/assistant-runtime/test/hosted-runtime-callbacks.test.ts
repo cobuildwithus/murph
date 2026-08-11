@@ -15205,6 +15205,107 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      approvedThreadIsDirect: true,
+      label: "direct approval becomes a group thread",
+      resolvedRoute: {
+        conversationThreadId: "conversation_same",
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: "+15550100002",
+        target: "chat_same",
+        targetKind: "thread" as const,
+        threadIsDirect: false,
+      },
+    },
+    {
+      approvedThreadIsDirect: false,
+      label: "group approval becomes a direct thread",
+      resolvedRoute: {
+        conversationThreadId: "conversation_same",
+        directRecipientPhoneNumber: "+15550100001",
+        fromPhoneNumber: "+15550100002",
+        target: "chat_same",
+        targetKind: "thread" as const,
+        threadIsDirect: true,
+      },
+    },
+    {
+      approvedThreadIsDirect: true,
+      label: "thread approval becomes a participant send",
+      resolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: "+15550100001",
+        fromPhoneNumber: "+15550100002",
+        target: "+15550100001",
+        targetKind: "participant" as const,
+        threadIsDirect: true,
+      },
+    },
+  ])("does not consume vault-file approval when $label", async ({
+    approvedThreadIsDirect,
+    resolvedRoute,
+  }) => {
+    const vaultFile = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "chat_same",
+      channel: "linq",
+      explicitTarget: "chat_same",
+      media: [vaultFile],
+      threadIsDirect: approvedThreadIsDirect,
+      transportIdempotent: true,
+    });
+    const actionApprovalPort = {
+      consume: vi.fn(),
+      read: vi.fn(),
+      request: vi.fn(),
+    };
+    const assertRecentInbound = vi.fn(async () => ({ resolvedRoute }));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          media: [vaultFile],
+          message: "Attached.",
+          replyToMessageId: null,
+          target: "chat_same",
+          targetKind: "explicit",
+        });
+        throw new Error("Provider dispatch unexpectedly remained reachable.");
+      },
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      actionApprovalPort,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+      retryable: false,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledTimes(1);
+    expect(actionApprovalPort.consume).not.toHaveBeenCalled();
+    expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
   it("does not consume vault-file approval for a redacted Linq target", async () => {
     const vaultFile = {
       approvalGeneration: "b".repeat(64),
