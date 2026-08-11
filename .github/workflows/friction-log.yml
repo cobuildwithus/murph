@@ -23,16 +23,17 @@ permissions: {}
 jobs:
   friction-log:
     name: Friction Log
+    environment:
+      name: frog-reconciliation
+      deployment: false
     if: >-
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
       (github.event_name != 'issues' ||
-      github.event.issue.user.login == 'github-actions[bot]')
+      github.event.issue.user.login == vars.FROG_APP_BOT_LOGIN)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+      contents: read
     steps:
       - name: Clone repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -52,10 +53,79 @@ jobs:
       - name: Install reviewed dependency graph
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Mint Frog GitHub App token
+        id: frog-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.FROG_APP_CLIENT_ID }}
+          private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
+
       - name: Report and reconcile frictions
         uses: wevm/frog/action@7b71c098683d49a573c279a2031a24205ea76841 # v1.1.0
         with:
           branch: frog/sync
           command: node_modules/.bin/frog
-          issue-author: github-actions[bot]
+          issue-author: ${{ vars.FROG_APP_BOT_LOGIN }}
           push: pull-request
+          token: ${{ steps.frog-app-token.outputs.token }}
+
+      - name: Add required Murph PR context
+        env:
+          FROG_APP_BOT_LOGIN: ${{ vars.FROG_APP_BOT_LOGIN }}
+          FROG_BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          FROG_PR_BODY_FOOTER: |-
+            ## Architecture and reuse
+
+            - **Existing systems reused:** The existing Frog reconciliation workflow, linked issues, and `frog/sync` branch remain the owners.
+            - **New logic:** This pull request only reconciles committed developer-friction metadata with its linked GitHub issues.
+            - **New abstractions:** None; the existing Frog workflow remains the sole synchronization owner.
+            - **Complexity intentionally avoided:** No product runtime, second reconciliation system, direct-main write, approval, or merge automation is added.
+
+            ## Changelog
+
+            - Changelog: not applicable
+            - Reason: This pull request only reconciles internal developer-friction bookkeeping and has no member-visible product behavior.
+          FROG_PR_BRANCH: frog/sync
+          GH_TOKEN: ${{ steps.frog-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          frog_pull_requests="$(
+            gh api \
+              --method GET \
+              "repos/$GITHUB_REPOSITORY/pulls" \
+              -f state=open \
+              -f base="$FROG_BASE_BRANCH" \
+              -f head="${GITHUB_REPOSITORY_OWNER}:$FROG_PR_BRANCH" \
+              -F per_page=2
+          )"
+          frog_pr_number="$(
+            printf '%s' "$frog_pull_requests" \
+              | pnpm exec tsx scripts/frog-pr-context.ts select
+          )"
+          if [[ -z "$frog_pr_number" ]]; then
+            echo "No open Frog reconciliation pull request requires Murph context."
+            exit 0
+          fi
+
+          frog_current_body_file="$(mktemp "${RUNNER_TEMP%/}/frog-pr-current.XXXXXX")"
+          frog_body_file="$(mktemp "${RUNNER_TEMP%/}/frog-pr-body.XXXXXX")"
+          gh pr view "$frog_pr_number" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq .body > "$frog_current_body_file"
+          pnpm exec tsx scripts/frog-pr-context.ts normalize \
+            < "$frog_current_body_file" \
+            > "$frog_body_file"
+
+          if cmp -s "$frog_current_body_file" "$frog_body_file"; then
+            echo "The Frog reconciliation pull request already has exact Murph context."
+            exit 0
+          fi
+
+          gh pr edit "$frog_pr_number" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file "$frog_body_file"
