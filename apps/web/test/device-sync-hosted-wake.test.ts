@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => {
     markConnectionSourcesDisconnected: vi.fn(),
     markDirtyConnectionProcessed: vi.fn(),
     persistStoredConnectionTokenBundle: vi.fn(),
-    prepareDirtyPayloads: vi.fn(),
     readHostedDeviceSyncEnvironment: vi.fn(),
     registryGet: vi.fn(),
     registryList: vi.fn(),
@@ -369,7 +368,6 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     markConnectionSourcesDisconnected = mocks.markConnectionSourcesDisconnected;
     markDirtyConnectionProcessed = mocks.markDirtyConnectionProcessed;
     persistStoredConnectionTokenBundle = mocks.persistStoredConnectionTokenBundle;
-    prepareDirtyPayloads = mocks.prepareDirtyPayloads;
     syncDurableConnectionState = mocks.syncDurableConnectionState;
     upsertDirtyConnection = mocks.upsertDirtyConnection;
     upsertConnectionSource = mocks.upsertConnectionSource;
@@ -587,7 +585,6 @@ describe("hosted device-sync wakes", () => {
     mocks.markConnectionSourcesDisconnected.mockResolvedValue(0);
     mocks.clearStoredProviderConfigCredential.mockResolvedValue(true);
     mocks.persistStoredConnectionTokenBundle.mockResolvedValue(undefined);
-    mocks.prepareDirtyPayloads.mockResolvedValue(undefined);
     mocks.registryGet.mockReturnValue(undefined);
     mocks.registryList.mockReturnValue([]);
     mocks.withConnectionMutationLock.mockImplementation(async (
@@ -4062,9 +4059,6 @@ describe("hosted device-sync wakes", () => {
         windowStart: null,
       }],
     }));
-    expect(mocks.upsertDirtyConnection.mock.calls[0]?.[0])
-      .not.toHaveProperty("preparedPayloads");
-    expect(mocks.prepareDirtyPayloads).not.toHaveBeenCalled();
     expect(mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.upsertDirtyConnection.mock.invocationCallOrder[0] ?? 0,
     );
@@ -5243,9 +5237,6 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
       resources: dirtyResources,
     }));
-    expect(mocks.upsertDirtyConnection.mock.calls[0]?.[0])
-      .not.toHaveProperty("preparedPayloads");
-    expect(mocks.prepareDirtyPayloads).not.toHaveBeenCalled();
     expect(mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.upsertDirtyConnection.mock.invocationCallOrder[0] ?? 0,
     );

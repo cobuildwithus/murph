@@ -29,7 +29,6 @@ import type {
   HostedDeviceSyncDirtyConnectionAckRecord,
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDirtyResource,
-  HostedPreparedDeviceSyncDirtyPayloads,
   HostedPrismaTransactionClient,
   UpsertHostedDeviceSyncDirtyConnectionInput,
   UpsertHostedDeviceSyncDirtyConnectionResult,
@@ -54,6 +53,22 @@ interface DirtyResourceBatch {
 
 interface DirtyPayloadCreateResult {
   resources: HostedDeviceSyncDirtyResource[];
+}
+
+interface PreparedDirtyPayloadRow {
+  connectionId: string;
+  credentialIndependent: boolean;
+  dirtyRevision: bigint;
+  id: string;
+  provider: string;
+  resourceEncrypted: string;
+  userId: string;
+}
+
+interface PreparedDirtyPayloadRows {
+  dirtyRevision: bigint;
+  resources: HostedDeviceSyncDirtyResource[];
+  rows: PreparedDirtyPayloadRow[];
 }
 
 const DIRTY_COUNTER_KEY_MAX_LENGTH = 96;
@@ -318,13 +333,13 @@ export class PrismaHostedDirtyConnectionStore {
       : "conflict";
   }
 
-  async prepareDirtyPayloads(input: {
+  private async prepareStoreOwnedDirtyPayloadRows(input: {
     connectionId: string;
     provider: string;
     resources?: readonly HostedDeviceSyncDirtyResource[];
     traceId?: string | null;
     userId: string;
-  }): Promise<HostedPreparedDeviceSyncDirtyPayloads | undefined> {
+  }): Promise<PreparedDirtyPayloadRows | undefined> {
     const resourceBatch = buildDirtyResourceBatch(input.resources ?? []);
     if (resourceBatch.payloadResources.length === 0) {
       return undefined;
@@ -358,16 +373,6 @@ export class PrismaHostedDirtyConnectionStore {
   ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
     const resourceBatch = buildDirtyResourceBatch(input.resources ?? []);
     if (input.tx) {
-      if (input.preparedPayloads) {
-        assertPreparedDirtyPayloads({
-          connectionId: input.connectionId,
-          preparedPayloads: input.preparedPayloads,
-          provider: input.provider,
-          resources: resourceBatch.payloadResources,
-          traceId: input.traceId,
-          userId: input.userId,
-        });
-      }
       return this.upsertDirtyConnectionOnce({
         ...input,
         resourceBatch,
@@ -377,12 +382,12 @@ export class PrismaHostedDirtyConnectionStore {
 
     for (let attempt = 0; attempt < DIRTY_CONNECTION_WRITE_MAX_ATTEMPTS; attempt += 1) {
       try {
-        const preparedPayloads = await this.prepareDirtyPayloads(input);
+        const precomputedPayloadRows = await this.prepareStoreOwnedDirtyPayloadRows(input);
 
         return await this.prisma.$transaction((tx) =>
           this.upsertDirtyConnectionOnce({
             ...input,
-            preparedPayloads,
+            precomputedPayloadRows,
             resourceBatch,
             tx,
           }),
@@ -404,7 +409,7 @@ export class PrismaHostedDirtyConnectionStore {
 
   private async upsertDirtyConnectionOnce(
     input: UpsertHostedDeviceSyncDirtyConnectionInput & {
-      preparedPayloads?: HostedPreparedDeviceSyncDirtyPayloads;
+      precomputedPayloadRows?: PreparedDirtyPayloadRows;
       resourceBatch: DirtyResourceBatch;
       tx: HostedPrismaTransactionClient;
     },
@@ -420,7 +425,7 @@ export class PrismaHostedDirtyConnectionStore {
     const hasCompanionNightResource = input.resourceBatch.payloadResources.some(
       (resource) => readCompanionHrvDirtyResourceNightDate(resource) !== null,
     );
-    let preparedDirtyPayloadRows = input.preparedPayloads;
+    let preparedDirtyPayloadRows = input.precomputedPayloadRows;
     if (
       input.resourceBatch.payloadResources.length > 0
       && !preparedDirtyPayloadRows
@@ -475,7 +480,7 @@ export class PrismaHostedDirtyConnectionStore {
       input.resourceBatch,
       companionNightClaims,
     );
-    const preparedPayloads = filterHostedPreparedDeviceSyncDirtyPayloads(
+    const filteredPayloadRows = filterPreparedDirtyPayloadRows(
       preparedDirtyPayloadRows,
       companionNightClaims,
     );
@@ -525,7 +530,7 @@ export class PrismaHostedDirtyConnectionStore {
         connectionId: input.connectionId,
         dirtyRevision: 1n,
         provider: input.provider,
-        precomputed: preparedPayloads,
+        precomputed: filteredPayloadRows,
         resources: resourceBatch.payloadResources,
         traceId: input.traceId,
         tx: prisma,
@@ -559,7 +564,7 @@ export class PrismaHostedDirtyConnectionStore {
         connectionId: input.connectionId,
         dirtyRevision: existing.dirtyRevision,
         provider: input.provider,
-        precomputed: preparedPayloads,
+        precomputed: filteredPayloadRows,
         resources: resourceBatch.payloadResources,
         traceId: input.traceId,
         tx: prisma,
@@ -599,7 +604,7 @@ export class PrismaHostedDirtyConnectionStore {
     // lock order.
     const payloadRowsForCreate = resourceBatch.payloadResources.length === 0
       ? undefined
-      : preparedPayloads ?? (await prepareDirtyPayloadRows({
+      : filteredPayloadRows ?? (await prepareDirtyPayloadRows({
           connectionId: input.connectionId,
           dirtyRevision: nextDirtyRevision,
           provider: input.provider,
@@ -996,7 +1001,7 @@ async function hasPendingDirtyPayloadForConnection(input: {
 async function createDirtyPayloadRows(input: {
   connectionId: string;
   dirtyRevision: bigint;
-  precomputed?: HostedPreparedDeviceSyncDirtyPayloads;
+  precomputed?: PreparedDirtyPayloadRows;
   provider: string;
   resources: readonly HostedDeviceSyncDirtyResource[];
   traceId?: string | null;
@@ -1040,7 +1045,7 @@ async function prepareDirtyPayloadRows(input: {
   resources: readonly HostedDeviceSyncDirtyResource[];
   traceId?: string | null;
   userId: string;
-}): Promise<HostedPreparedDeviceSyncDirtyPayloads> {
+}): Promise<PreparedDirtyPayloadRows> {
   const classifyResource = createDirtyPayloadCredentialClassifier();
   const prepared = await mapLimit(input.resources, DIRTY_PAYLOAD_PRESEAL_CONCURRENCY, async (resource, index) => {
     const payloadId = createDirtyPayloadId({
@@ -1085,67 +1090,6 @@ async function prepareDirtyPayloadRows(input: {
     resources: prepared.map((entry) => entry.resource),
     rows: prepared.map((entry) => entry.row),
   };
-}
-
-function assertPreparedDirtyPayloads(input: {
-  connectionId: string;
-  preparedPayloads: HostedPreparedDeviceSyncDirtyPayloads | undefined;
-  provider: string;
-  resources: readonly HostedDeviceSyncDirtyResource[];
-  traceId?: string | null;
-  userId: string;
-}): void {
-  if (input.resources.length === 0) {
-    if (
-      input.preparedPayloads
-      && (
-        input.preparedPayloads.rows.length > 0
-        || input.preparedPayloads.resources.length > 0
-      )
-    ) {
-      throw new TypeError("Prepared dirty payloads did not match the admitted resources.");
-    }
-    return;
-  }
-
-  const prepared = input.preparedPayloads;
-  if (
-    !prepared
-    || prepared.rows.length !== input.resources.length
-    || prepared.resources.length !== input.resources.length
-  ) {
-    throw new TypeError(
-      "Dirty payloads must be prepared before the database transaction begins.",
-    );
-  }
-
-  for (const [index, resource] of input.resources.entries()) {
-    const preparedResource = prepared.resources[index];
-    const row = prepared.rows[index];
-    if (
-      !preparedResource
-      || !row
-      || row.connectionId !== input.connectionId
-      || row.userId !== input.userId
-      || row.provider !== input.provider
-      || row.dirtyRevision !== prepared.dirtyRevision
-      || typeof row.credentialIndependent !== "boolean"
-      || typeof row.resourceEncrypted !== "string"
-      || row.resourceEncrypted.length === 0
-      || row.id !== preparedResource.dirtyPayloadId
-      || row.id !== createDirtyPayloadId({
-        connectionId: input.connectionId,
-        dirtyRevision: prepared.dirtyRevision,
-        index,
-        resource,
-        traceId: input.traceId,
-      })
-      || buildStrictDirtyResourceIdentity(resource)
-        !== buildStrictDirtyResourceIdentity(preparedResource)
-    ) {
-      throw new TypeError("Prepared dirty payloads did not match the admitted resources.");
-    }
-  }
 }
 
 function createDirtyPayloadCredentialClassifier(): (input: {
@@ -1385,10 +1329,10 @@ async function claimCompanionHrvNightReceipts(input: {
   return claims;
 }
 
-function filterHostedPreparedDeviceSyncDirtyPayloads(
-  prepared: HostedPreparedDeviceSyncDirtyPayloads | undefined,
+function filterPreparedDirtyPayloadRows(
+  prepared: PreparedDirtyPayloadRows | undefined,
   claims: readonly boolean[],
-): HostedPreparedDeviceSyncDirtyPayloads | undefined {
+): PreparedDirtyPayloadRows | undefined {
   if (!prepared) {
     return undefined;
   }

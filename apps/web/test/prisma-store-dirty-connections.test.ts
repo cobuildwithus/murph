@@ -255,18 +255,85 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       completedWindowCount: 96,
       acceptedWindowCount: 72,
     });
-    const prisma = {
-      deviceSyncDirtyConnection: {
-        findUnique: vi.fn(async () => null),
-      },
+    const classifyThroughAdmission = async (input: {
+      connectionId: string;
+      provider: string;
+      resource: {
+        count: number;
+        jobKind: string;
+        payload: Record<string, string>;
+        resource: string;
+        resourceCategory: string;
+        sourceProviderSlug: string;
+        windowEnd: null;
+        windowStart: null;
+      };
+    }): Promise<boolean | undefined> => {
+      const dirtyAt = new Date("2026-07-10T13:46:00.000Z");
+      const createdRecord = {
+        connectionId: input.connectionId,
+        createdAt: dirtyAt,
+        dirtyResourcesJson: {},
+        dirtyRevision: 1n,
+        eventCount: 1n,
+        firstDirtyAt: dirtyAt,
+        latestDirtyAt: dirtyAt,
+        latestEventType: "resource.created",
+        latestResourceCategory: input.resource.resourceCategory,
+        latestTraceId: null,
+        processedRevision: 0n,
+        provider: input.provider,
+        resourceCategoryCountsJson: {},
+        sourceProviderCountsJson: {},
+        updatedAt: dirtyAt,
+        userId: "member_classify",
+        windowEnd: null,
+        windowStart: null,
+      };
+      let payloadRows: Array<Record<string, unknown>> = [];
+      const tx = {
+        deviceSyncCompanionCaptureReceipt: {
+          count: vi.fn(async () => 0),
+          createMany: vi.fn(async () => ({ count: 1 })),
+          deleteMany: vi.fn(async () => ({ count: 0 })),
+          findUnique: vi.fn(async () => null),
+        },
+        deviceSyncDirtyConnection: {
+          createMany: vi.fn(async () => ({ count: 1 })),
+          findUnique: vi.fn()
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce(createdRecord),
+        },
+        deviceSyncDirtyPayload: {
+          createMany: vi.fn(async (createInput: {
+            data: Array<Record<string, unknown>>;
+          }) => {
+            payloadRows = createInput.data;
+            return { count: createInput.data.length };
+          }),
+        },
+      };
+      const store = new PrismaHostedDirtyConnectionStore({} as never);
+
+      await store.upsertDirtyConnection({
+        connectionId: input.connectionId,
+        dirtyAt: dirtyAt.toISOString(),
+        eventType: "resource.created",
+        provider: input.provider,
+        resourceCategory: input.resource.resourceCategory,
+        resources: [input.resource],
+        tx: tx as never,
+        userId: createdRecord.userId,
+      });
+
+      return payloadRows[0]?.credentialIndependent as boolean | undefined;
     };
-    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
 
     try {
-      const ouraDelete = await store.prepareDirtyPayloads({
+      const ouraDelete = await classifyThroughAdmission({
         connectionId: "dsc_classify_oura",
         provider: "oura",
-        resources: [{
+        resource: {
           count: 1,
           jobKind: "delete",
           payload: { objectId: "sleep-1" },
@@ -275,13 +342,12 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           sourceProviderSlug: "oura",
           windowEnd: null,
           windowStart: null,
-        }],
-        userId: "member_classify",
+        },
       });
-      const junctionCompanion = await store.prepareDirtyPayloads({
+      const junctionCompanion = await classifyThroughAdmission({
         connectionId: "dsc_classify_companion",
         provider: "junction",
-        resources: [{
+        resource: {
           count: 1,
           jobKind: "resource",
           payload: {
@@ -296,13 +362,12 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           sourceProviderSlug: "whoop",
           windowEnd: null,
           windowStart: null,
-        }],
-        userId: "member_classify",
+        },
       });
-      const junctionInline = await store.prepareDirtyPayloads({
+      const junctionInline = await classifyThroughAdmission({
         connectionId: "dsc_classify_inline",
         provider: "junction",
-        resources: [{
+        resource: {
           count: 1,
           jobKind: "resource",
           payload: {
@@ -316,13 +381,12 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           sourceProviderSlug: "garmin",
           windowEnd: null,
           windowStart: null,
-        }],
-        userId: "member_classify",
+        },
       });
-      const junctionCredentialScoped = await store.prepareDirtyPayloads({
+      const junctionCredentialScoped = await classifyThroughAdmission({
         connectionId: "dsc_classify_credential",
         provider: "junction",
-        resources: [{
+        resource: {
           count: 1,
           jobKind: "resource",
           payload: {
@@ -335,20 +399,19 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           sourceProviderSlug: "garmin",
           windowEnd: null,
           windowStart: null,
-        }],
-        userId: "member_classify",
+        },
       });
 
-      expect(ouraDelete?.rows[0]?.credentialIndependent).toBe(true);
-      expect(junctionCompanion?.rows[0]?.credentialIndependent).toBe(true);
-      expect(junctionInline?.rows[0]?.credentialIndependent).toBe(true);
-      expect(junctionCredentialScoped?.rows[0]?.credentialIndependent).toBe(false);
+      expect(ouraDelete).toBe(true);
+      expect(junctionCompanion).toBe(true);
+      expect(junctionInline).toBe(true);
+      expect(junctionCredentialScoped).toBe(false);
     } finally {
       setHostedSecureBoxStringTestCodecForTests(null);
     }
   });
 
-  it("binds prepared payloads to the dirty connection owner", async () => {
+  it("binds store-owned payload preparation to the dirty connection owner", async () => {
     const prisma = {
       deviceSyncDirtyConnection: {
         findUnique: vi.fn(async () => ({
@@ -360,8 +423,9 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     };
     const store = new PrismaHostedDirtyConnectionStore(prisma as never);
 
-    await expect(store.prepareDirtyPayloads({
+    await expect(store.upsertDirtyConnection({
       connectionId: "dsc_owner_binding",
+      dirtyAt: "2026-07-10T13:46:00.000Z",
       provider: "junction",
       resources: [{
         count: 1,
@@ -710,10 +774,8 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
 
       operationOrder.length = 0;
       const nextNightInput = buildInput(observation.rmssdMs, "2026-07-11");
-      const preparedPayloads = await store.prepareDirtyPayloads(nextNightInput);
       await store.upsertDirtyConnection({
         ...nextNightInput,
-        preparedPayloads,
         tx: prisma as never,
       });
       expect(operationOrder).toEqual([
@@ -927,36 +989,6 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       insideCallerOwnedTransaction = false;
       setHostedSecureBoxStringTestCodecForTests(null);
     }
-  });
-
-  it("rejects mismatched prepared payloads passed into a caller-owned transaction", async () => {
-    const store = new PrismaHostedDirtyConnectionStore({} as never);
-
-    await expect(store.upsertDirtyConnection({
-      connectionId: "dsc_unprepared_1",
-      dirtyAt: "2026-05-26T12:01:00.000Z",
-      eventType: "daily.data.steps.created",
-      provider: "junction",
-      resources: [{
-        count: 1,
-        jobKind: "resource",
-        payload: { webhookDataJson: "{}" },
-        resource: "steps",
-        resourceCategory: "timeseries",
-        sourceProviderSlug: "garmin",
-        windowEnd: null,
-        windowStart: null,
-      }],
-      preparedPayloads: {
-        dirtyRevision: 1n,
-        resources: [],
-        rows: [],
-      },
-      tx: {} as never,
-      userId: "member_unprepared_1",
-    })).rejects.toThrow(
-      "Dirty payloads must be prepared before the database transaction begins.",
-    );
   });
 
   it("recomputes store-owned dirty payload rows after a stale preseal revision contention", async () => {

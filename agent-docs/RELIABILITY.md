@@ -572,9 +572,10 @@ Last verified: 2026-08-10
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
   and authority failures, other HTTP responses, malformed data, and unclassified
   errors remain terminal; the runtime must not create a second artifact retry queue.
-- Store-owned device-sync dirty writes use an explicit prepare-then-commit
-  boundary: Web derives the credential-independence authority bit, compresses,
-  and secure-box seals each payload before opening the store transaction.
+- Store-owned device-sync dirty writes use a private prepare-then-commit
+  boundary: the dirty store derives the credential-independence authority bit,
+  compresses, and secure-box seals each payload before opening its transaction;
+  no caller can supply a prepared ciphertext or classification bundle.
   Consent-gated webhook and companion admissions instead perform that
   preparation inside the existing member-row transaction, after the consent
   re-read and before the dirty-marker lock or mutation. This keeps completed

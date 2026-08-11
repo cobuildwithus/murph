@@ -258,12 +258,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           traceId: "trace_delete_lock_proof",
           userId: fixture.userId,
         };
-        const preparedPayloads = await store.prepareDirtyPayloads(dirtyInput);
         webhookTransaction = fixture.webhookClient.$transaction(async (tx) => {
           webhookPid.resolve(await readBackendPid(tx));
           return store.upsertDirtyConnection({
             ...dirtyInput,
-            preparedPayloads,
             tx: pauseBeforeDirtyMarkerUpdate({
               allowUpdate: allowWebhookUpdate,
               beforeUpdate: beforeWebhookUpdate,
@@ -345,11 +343,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           traceId: "trace_companion_delete_lock_proof",
           userId: fixture.userId,
         };
-        const preparedPayloads = await store.prepareDirtyPayloads(dirtyInput);
         webhookTransaction = fixture.webhookClient.$transaction(
           async (tx) => store.upsertDirtyConnection({
             ...dirtyInput,
-            preparedPayloads,
             tx: pauseBeforeDirtyMarkerUpdate({
               allowUpdate: allowWebhookUpdate,
               beforeUpdate: beforeWebhookUpdate,
