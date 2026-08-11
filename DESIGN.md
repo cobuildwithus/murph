@@ -226,9 +226,11 @@ an unavailable fiber dash in the image without adding a fiber caption claim.
 
 Compact-table and workout fallback images use the same chrome contract: keep
 the bitmap rectangular, embed the canonical Murph mark in the native badge
-footprint, and let Messages supply only the outer corner mask and caption. Do
-not reserve a larger empty icon gutter. Keep structural rounding only where it
-communicates an inner state, such as a progress track or set-status marker.
+footprint, place the title beside that mark in one shared header, and let
+Messages supply only the outer corner mask and caption. Optional supporting
+text stays directly under the title inside that header. Do not reserve a larger
+empty icon gutter. Keep structural rounding only where it communicates an inner
+state, such as a progress track or set-status marker.
 When a generic table uses stacked fields, keep each measured header above its
 full-width measured value so every contract-valid token remains contained. The
 exact intrinsic width of the row-header, column-header, and value tracks plus
@@ -241,10 +243,11 @@ Render the app-absent standings fallback as the static counterpart to the
 shipping SwiftUI balloon. Keep the cream field, title, rank or collective
 progress, and score hierarchy aligned with the native card. The bitmap remains
 rectangular because Messages owns the outer chrome, while the canonical Murph
-mark is embedded in the native upper-left badge footprint. Place the title
-below that footprint instead of reserving a large empty gutter. Preserve
-scorer-owned order, scores, progress, and coverage while using the identity-free
-public presentation defined by the challenge standings delivery contract.
+mark is embedded in the native upper-left badge footprint. Reuse the same
+badge-and-title header as workout and compact-table cards, with optional
+supporting text directly under the title. Preserve scorer-owned order, scores,
+progress, and coverage while using the identity-free public presentation
+defined by the challenge standings delivery contract.
 
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep

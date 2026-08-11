@@ -220,7 +220,7 @@ test("real-font route keeps a fitting four-column eight-row table compact", asyn
     schemaVersion: 3,
     card: NARROW_FOUR_COLUMN_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 1_187]);
+  assert.deepEqual([image.width, image.height], [1_200, 1_046]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);
@@ -243,7 +243,7 @@ test("real-font route keeps positive-kerning text above the stacked-row divider"
   assert.equal(response.status, 200);
   const png = Buffer.from(await response.arrayBuffer());
   const image = decodePng(png);
-  assert.deepEqual([image.width, image.height], [1_200, 1_853]);
+  assert.deepEqual([image.width, image.height], [1_200, 1_712]);
 
   const dividerBands = findHorizontalDividerBands(image);
   assert.ok(dividerBands.length >= 1);
@@ -265,7 +265,7 @@ test("real-font collective status and coverage retain bottom padding", async () 
     schemaVersion: 5,
     card: PARTIAL_COLLECTIVE_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 768]);
+  assert.deepEqual([image.width, image.height], [1_200, 630]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);

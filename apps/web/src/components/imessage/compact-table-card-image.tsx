@@ -6,7 +6,6 @@ import type {
 import {
   IMessageCardHeader,
   IMESSAGE_CARD_COLOR,
-  IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP,
   IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET,
   IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
   IMESSAGE_CARD_HEADER_TEXT_GAP,
@@ -26,7 +25,7 @@ export const IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH = 1_200;
 const CARD_HORIZONTAL_PADDING = 45;
 const CARD_CONTENT_WIDTH =
   IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH - CARD_HORIZONTAL_PADDING * 2;
-const WORKOUT_HEADER_TEXT_WIDTH =
+const HEADER_TEXT_WIDTH =
   CARD_CONTENT_WIDTH - IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET;
 const FOOTER_FONT_SIZE = 49;
 const CAPTION_2_FONT_SIZE = 41;
@@ -111,7 +110,6 @@ export function CompactTableCardImage({
     >
       <IMessageCardHeader
         height={layout.headerHeight}
-        layout={"workout" in card ? "beside-badge" : "below-badge"}
         logoSrc={logoSrc}
         subtitle={"workout" in card ? null : layout.subtitle}
         title={layout.title}
@@ -592,10 +590,9 @@ function GenericStackedRows({
 function getCompactTableCardImageLayout(
   card: CompactTablePresentationCardV1,
 ): CompactTableCardImageLayout {
-  const isWorkout = "workout" in card;
   const title = wrapCardText(
     card.title,
-    isWorkout ? WORKOUT_HEADER_TEXT_WIDTH : CARD_CONTENT_WIDTH,
+    HEADER_TEXT_WIDTH,
     IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
     600,
   );
@@ -603,7 +600,7 @@ function getCompactTableCardImageLayout(
     ? null
     : wrapCardText(
       card.subtitle,
-      CARD_CONTENT_WIDTH,
+      HEADER_TEXT_WIDTH,
       IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
     );
   const footer = card.footer === null
@@ -616,9 +613,7 @@ function getCompactTableCardImageLayout(
       : IMESSAGE_CARD_HEADER_TEXT_GAP
         + subtitle.lineCount * IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE * 1.2),
   );
-  const headerHeight = isWorkout
-    ? Math.max(101, measuredHeaderHeight)
-    : measuredHeaderHeight;
+  const headerHeight = Math.max(101, measuredHeaderHeight);
   const footerHeight = footer === null
     ? 0
     : 45 + Math.ceil(footer.lineCount * FOOTER_FONT_SIZE * 1.2);
@@ -721,8 +716,7 @@ function getCompactTableCardImageLayout(
     : tableRows.reduce((total, row) => total + row.height, 0)
       + Math.max(0, tableRows.length - 1) * 2;
   const measuredHeight =
-    38 + IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP + headerHeight + 45
-    + tableHeight
+    38 + headerHeight + 45 + tableHeight
     + footerHeight + 42;
   return {
     footer,

@@ -75,7 +75,8 @@ export function ImessageChallengeStandingsCardStudy() {
           collective hierarchy. Generic labels preserve scorer order,
           incomplete ranks stay neutral, and a shared target remains group
           progress rather than an individual result. The canonical Murph mark
-          occupies the native upper-left badge footprint inside the raster.
+          and title share the same aligned header used by workout and table
+          cards, with optional supporting text directly under the title.
         </p>
       </div>
       <div className="flex flex-col gap-5 sm:gap-8">

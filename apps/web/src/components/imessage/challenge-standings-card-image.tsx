@@ -7,7 +7,7 @@ import type {
 import {
   IMessageCardHeader,
   IMESSAGE_CARD_COLOR,
-  IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP,
+  IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET,
   IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
   IMESSAGE_CARD_HEADER_TEXT_GAP,
   IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
@@ -25,6 +25,8 @@ export const IMESSAGE_CHALLENGE_STANDINGS_CARD_IMAGE_WIDTH = 1_200;
 
 const ACCENT_COLOR = "#AA571F";
 const CARD_CONTENT_WIDTH = 1_110;
+const HEADER_TEXT_WIDTH =
+  CARD_CONTENT_WIDTH - IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET;
 const FOOTER_FONT_SIZE = 49;
 const SUBHEADLINE_FONT_SIZE = 56;
 const CAPTION_FONT_SIZE = 45;
@@ -110,7 +112,6 @@ export function ChallengeStandingsCardImage({
     >
       <IMessageCardHeader
         height={layout.headerHeight}
-        layout="below-badge"
         logoSrc={logoSrc}
         subtitle={layout.subtitle}
         title={layout.title}
@@ -485,7 +486,7 @@ function getChallengeStandingsLayout(
 ): ChallengeStandingsLayout {
   const title = wrapCardText(
     card.title,
-    CARD_CONTENT_WIDTH,
+    HEADER_TEXT_WIDTH,
     IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
     600,
   );
@@ -493,7 +494,7 @@ function getChallengeStandingsLayout(
     ? null
     : wrapCardText(
       card.subtitle,
-      CARD_CONTENT_WIDTH,
+      HEADER_TEXT_WIDTH,
       IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
     );
   const footer = card.footer === null
@@ -505,7 +506,7 @@ function getChallengeStandingsLayout(
     ? 0
     : IMESSAGE_CARD_HEADER_TEXT_GAP
       + subtitle.lineCount * IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE * 1.2;
-  const headerHeight = Math.ceil(titleHeight + subtitleHeight);
+  const headerHeight = Math.max(101, Math.ceil(titleHeight + subtitleHeight));
   const footerHeight = footer === null
     ? 0
     : 53 + footer.lineCount * FOOTER_FONT_SIZE * 1.25;
@@ -520,7 +521,7 @@ function getChallengeStandingsLayout(
       footer,
       headerHeight,
       height: Math.ceil(
-        38 + IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP + headerHeight + 53
+        38 + headerHeight + 53
         + collectiveBodyHeight + footerHeight + 42,
       ),
       rows: [],
@@ -540,7 +541,7 @@ function getChallengeStandingsLayout(
     footer,
     headerHeight,
     height: Math.ceil(
-      38 + IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP + headerHeight + 53
+      38 + headerHeight + 53
         + rowsHeight + incompleteNoteHeight
         + footerHeight + 42,
     ),

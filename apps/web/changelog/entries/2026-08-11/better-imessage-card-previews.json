@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Response cards look like Murph in Messages",
     "summary": "Static nutrition, workout, table, and challenge previews now match their iPhone layouts more closely and carry Murph's mark instead of a blank corner.",
-    "details": "Cards keep their full rows and progress states, use consistent breathing room around Murph's mark, and keep nutrition status in the safe text fallback instead of repeating it beneath each value.",
+    "details": "Cards keep their full rows and progress states, align each title beside Murph's mark in one shared header, and keep nutrition status in the safe text fallback instead of repeating it beneath each value.",
     "relevanceTags": ["imessage", "cards", "nutrition", "workouts", "challenges", "design"],
     "sourcePullRequests": [1650]
   }

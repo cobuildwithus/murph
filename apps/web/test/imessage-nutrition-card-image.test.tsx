@@ -487,7 +487,7 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 908);
+  assert.equal(init.height, 737);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /imessage-native-compact-table-card/u);
   assert.match(serialized, /Weekly plan/u);
@@ -497,8 +497,10 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.doesNotMatch(serialized, /border-radius:105px/u);
   assert.match(serialized, /data-murph-card-badge="svg"/u);
   assert.match(serialized, /data-imessage-card-header="true"/u);
-  assert.match(serialized, /data-card-header="below-badge"/u);
-  assert.match(serialized, /margin-top:171px/u);
+  assert.match(serialized, /data-card-header="beside-badge"/u);
+  assert.match(serialized, /margin-left:205px/u);
+  assert.match(serialized, /gap:15px/u);
+  assert.doesNotMatch(serialized, /margin-top:171px/u);
   assert.match(serialized, /<h1/u);
   assert.match(serialized, /data-compact-table-layout="grid"/u);
 });
@@ -696,7 +698,7 @@ test("fitting four-column tables retain one shared header and compact height", a
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   const serialized = renderToStaticMarkup(imageTree);
-  assert.equal(init.height, 1_187);
+  assert.equal(init.height, 1_046);
   assert.match(serialized, /data-compact-table-layout="grid"/u);
   assert.equal(serialized.match(/>A<\/div>/gu)?.length, 1);
   assert.ok((serialized.match(/flex-shrink:0/gu)?.length ?? 0) >= 5);
@@ -755,10 +757,10 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 1_123);
+  assert.equal(init.height, 1_019);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /imessage-native-challenge-standings-card/u);
-  assert.match(serialized, /Summer movement challenge/u);
+  assert.match(serialized, /Summer movement\s+challenge/u);
   assert.match(serialized, /North team/u);
   assert.match(serialized, /210/u);
   assert.match(serialized, /OF 250 PTS/u);
@@ -771,8 +773,10 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   assert.doesNotMatch(rootTag[0], /border-radius|overflow:hidden/u);
   assert.match(serialized, /data-murph-card-badge="svg"/u);
   assert.match(serialized, /data-imessage-card-header="true"/u);
-  assert.match(serialized, /data-card-header="below-badge"/u);
-  assert.match(serialized, /margin-top:171px/u);
+  assert.match(serialized, /data-card-header="beside-badge"/u);
+  assert.match(serialized, /margin-left:205px/u);
+  assert.match(serialized, /gap:15px/u);
+  assert.doesNotMatch(serialized, /margin-top:171px/u);
   assert.match(serialized, /<h1/u);
   assert.doesNotMatch(
     serialized,
@@ -821,7 +825,7 @@ test("standings image keeps collective progress collective", async () => {
     ...COLLECTIVE_STANDINGS_CARD,
     title: "T".repeat(60),
     subtitle: "S".repeat(120),
-  })).toEqual({ width: 1_200, height: 1_186 });
+  })).toEqual({ width: 1_200, height: 1_082 });
 });
 
 test("standings image sizes semibold titles and maximum score context", async () => {
@@ -850,7 +854,7 @@ test("standings image sizes semibold titles and maximum score context", async ()
     <ChallengeStandingsCardImage card={boundaryCard} />,
   );
 
-  assert.match(serialized, /standings progress challenge\nmorning/u);
+  assert.match(serialized, /standings progress\nchallenge morning/u);
   assert.match(serialized, /OF 9,007,199,254,740,991 PTS/u);
   assert.match(serialized, /data-score-column-width="525"/u);
   assert.match(serialized, /data-score-points-font-size="47"/u);

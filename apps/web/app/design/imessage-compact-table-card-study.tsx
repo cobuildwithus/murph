@@ -129,8 +129,9 @@ export function ImessageCompactTableCardStudy() {
           keeps a fitting four-column card in one shared-header table. Genuinely
           overwide rows use stacked fields with each measured header above its
           full-width value so contract-limit text cannot collide or clip.
-          The rectangular raster embeds the canonical Murph mark in the native
-          badge footprint, while Messages supplies the outer corner mask.
+          The rectangular raster keeps its title and optional supporting text
+          beside the canonical Murph badge, while Messages supplies the outer
+          corner mask.
           Provider chrome stays concise; the complete semantic fallback remains
           available as text.
         </p>

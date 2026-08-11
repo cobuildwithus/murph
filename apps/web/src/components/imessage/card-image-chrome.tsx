@@ -22,8 +22,6 @@ const BADGE = {
 
 const IMESSAGE_CARD_BADGE_CONTENT_GAP = 40;
 
-export const IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP =
-  BADGE.top + BADGE.height + IMESSAGE_CARD_BADGE_CONTENT_GAP;
 export const IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET =
   BADGE.left + BADGE.width + IMESSAGE_CARD_BADGE_CONTENT_GAP;
 export const IMESSAGE_CARD_HEADER_TEXT_GAP = 15;
@@ -84,36 +82,28 @@ export function IMessageCardBadge({ logoSrc }: { logoSrc: string }) {
 /** Shared logo, heading, and optional subtitle hierarchy for card fallbacks. */
 export function IMessageCardHeader({
   height,
-  layout,
   logoSrc,
   subtitle,
   title,
 }: {
   height: number;
-  layout: "below-badge" | "beside-badge";
   logoSrc: string;
   subtitle: IMessageCardHeaderText | null;
   title: IMessageCardHeaderText;
 }) {
-  const isBesideBadge = layout === "beside-badge";
   return (
     <>
       <IMessageCardBadge logoSrc={logoSrc} />
       <div
-        data-card-header={layout}
+        data-card-header="beside-badge"
         data-imessage-card-header="true"
         style={{
           display: "flex",
           height,
           flexDirection: "column",
-          justifyContent: isBesideBadge ? "center" : "flex-start",
-          marginTop: isBesideBadge
-            ? 0
-            : IMESSAGE_CARD_HEADER_BELOW_BADGE_MARGIN_TOP,
-          marginLeft: isBesideBadge
-            ? IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET
-            : 0,
-          gap: isBesideBadge ? 0 : IMESSAGE_CARD_HEADER_TEXT_GAP,
+          justifyContent: "center",
+          marginLeft: IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET,
+          gap: IMESSAGE_CARD_HEADER_TEXT_GAP,
         }}
       >
         <h1
