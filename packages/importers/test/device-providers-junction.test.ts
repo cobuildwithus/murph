@@ -24,6 +24,7 @@ import {
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
   classifyJunctionSummaryNormalizationEvidence,
+  identifyJunctionBloodPressureProviderRecords,
   importDeviceProviderSnapshot,
   normalizeJunctionSnapshot,
   prepareDeviceProviderSnapshotImport,
@@ -3328,6 +3329,51 @@ test("Junction normalizer lands sparse paired blood pressure readings as measure
   assert.notEqual(readings[0]?.externalRef?.resourceId, readings[1]?.externalRef?.resourceId);
   const artifactText = JSON.stringify(findJunctionBloodPressureReadingArtifacts(payload));
   assert.doesNotMatch(artifactText, /"value":350|"systolic":350|"diastolic":95/u);
+});
+
+test("Junction exposes repair-stable opaque identities for blood pressure provider rows", () => {
+  const snapshot = (entry: Record<string, unknown>) => ({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      blood_pressure: [{
+        ...entry,
+        sourceProviderSlug: "omron",
+        sourceType: "cuff",
+        sourceInstanceId: "primary",
+      }],
+    },
+  });
+  const malformed = snapshot({
+    id: "provider-row-needing-repair",
+    timestamp: "2026-04-22T08:05:00Z",
+    systolic: 125,
+  });
+  const repaired = snapshot({
+    id: "provider-row-needing-repair",
+    timestamp: "2026-04-22T08:10:00Z",
+    systolic: 124,
+    diastolic: 78,
+  });
+  const malformedEvidence = identifyJunctionBloodPressureProviderRecords(malformed);
+  const repairedEvidence = identifyJunctionBloodPressureProviderRecords(repaired);
+  const repairedEvent = normalizeJunctionSnapshot(repaired).events?.[0];
+
+  assert.equal(malformedEvidence.providerRecordCount, 1);
+  assert.deepEqual(
+    repairedEvidence.repairStableExternalRefResourceIds,
+    malformedEvidence.repairStableExternalRefResourceIds,
+  );
+  assert.equal(
+    repairedEvent?.externalRef?.resourceId,
+    malformedEvidence.repairStableExternalRefResourceIds[0],
+  );
+  assert.deepEqual(
+    identifyJunctionBloodPressureProviderRecords(snapshot({
+      timestamp: "2026-04-22T08:05:00Z",
+      systolic: 125,
+    })).repairStableExternalRefResourceIds,
+    [null],
+  );
 });
 
 test("Junction blood pressure evidence is replay- and order-idempotent", () => {
