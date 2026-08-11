@@ -287,13 +287,22 @@ exact admitted group thread.
 Private assistant-image coverage is also owner-split. Shared contract tests
 accept only bounded `vault_image` descriptors; assistant-engine tests prove
 canonical generated-image captures plus path, hash, byte-count, filename, MIME,
-and image-signature verification; assistant-runtime tests prove verification
-finishes before provider dispatch; Linq and Telegram adapter tests prove
-attachment-id and rebuilt multipart delivery. Cloudflare Worker tests lock the
-legacy upload route to `410 Gone`. The hosted-local Codex image-media scenario
-generates through the real app-server tool relay, persists the vault capture,
-delivers a Linq attachment id, and reuses the same capture on retry without a
-public image URL.
+and image-signature verification. They also prove that a trusted completion
+persists provenance only for its exact attached generated capture, restores
+that bounded marker when route support or a contract fingerprint rejects native
+resume, binds an explicit native reply to the matching first of two delivered
+captures, and keeps that provenance separate from later group-mutation
+authority. Assistant-runtime tests prove verification finishes before provider
+dispatch; Linq and Telegram adapter tests prove attachment-id and rebuilt
+multipart delivery. Cloudflare Worker tests lock the legacy upload route to
+`410 Gone`. The hosted-local Codex image-media scenario generates through the
+real app-server tool relay, persists the vault capture, delivers a Linq
+attachment id, and reuses the same capture on retry without a public image URL.
+The opt-in live-provider Assistant Engine scenario covers the natural
+generation acknowledgement, trusted completion attachment without mutation,
+and later explicit exact-ref group-avatar update while the eager feedback tool
+is also available. Routine CI compiles that scenario but skips it without the
+explicit live-provider gate and supported credential.
 
 Managed group automation coverage is likewise owner-split. Assistant-engine
 reconciliation tests prove default member ownership, explicit group ownership,

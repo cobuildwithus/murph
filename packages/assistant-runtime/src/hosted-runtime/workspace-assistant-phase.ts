@@ -5591,24 +5591,30 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
   await writeHostedSystemMailboxRuntimeLog({
     assistantAskCompletionFirstAttemptDelayed,
+    attemptCount: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.attemptCount
+      : systemMailboxPreparation.item.attemptCount,
+    errorCode: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.errorCode
+      : null,
+    errorMessage: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.errorMessage
+      : null,
     input: phaseInput,
+    legacyUsageReferralAuthorityClassification:
+      systemMailboxPreparation.status === "retryable_failed"
+        ? systemMailboxPreparation.legacyUsageReferralAuthorityClassification
+        : null,
     nextWakeAt,
     recorded: null,
     recordFailed: null,
+    routeAction: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.routeAction
+      : systemMailboxPreparation.item.routeAction,
     status: systemMailboxPreparation.status,
-    ...("item" in systemMailboxPreparation
-      ? {
-          attemptCount: systemMailboxPreparation.item.attemptCount,
-          routeAction: systemMailboxPreparation.item.routeAction,
-          wakeKind: systemMailboxPreparation.item.wake.kind,
-        }
-      : {
-          attemptCount: null,
-          errorCode: systemMailboxPreparation.errorCode,
-          errorMessage: systemMailboxPreparation.errorMessage,
-          routeAction: null,
-          wakeKind: null,
-        }),
+    wakeKind: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.wakeKind
+      : systemMailboxPreparation.item.wake.kind,
   });
 
   return {
@@ -5873,6 +5879,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
     await writeHostedSystemMailboxRuntimeLog({
       attemptCount: input.systemMailboxPreparation.item.attemptCount,
       input: input.input,
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: statusNextWakeAt,
       recorded: statusCallback.recorded,
       recordFailed: statusCallback.failed,
@@ -7538,6 +7545,7 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
   errorCode?: string | null;
   errorMessage?: string | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  legacyUsageReferralAuthorityClassification: string | null;
   nextWakeAt: string | null;
   recorded: number | null;
   recordFailed: number | null;
@@ -7574,6 +7582,8 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
         assistantAskCompletionFirstAttemptDelayed:
           input.assistantAskCompletionFirstAttemptDelayed ?? false,
         errorCode: input.errorCode ? errorCode : null,
+        legacyUsageReferralAuthorityClassification:
+          input.legacyUsageReferralAuthorityClassification,
         nextWakeAtPresent: input.nextWakeAt !== null,
         recordFailed: input.recordFailed,
         recorded: input.recorded,
