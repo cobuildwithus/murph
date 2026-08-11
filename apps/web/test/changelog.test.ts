@@ -68,6 +68,23 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
+  it("keeps cleaner plan and model settings scoped to the visible outcome", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "cleaner-plan-and-model-settings",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      kind: "improvement",
+      priority: 1,
+      sourcePullRequests: [1621],
+      summary: expect.stringContaining("Starter usage and unavailable models"),
+      title: "Cleaner plan and model settings",
+    });
+    expect(item?.details).toBeUndefined();
+    expect(item?.tryIt).toBeUndefined();
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -320,6 +337,14 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("cleaner-workout-cards-in-messages")).toMatchObject({
+      sourcePullRequests: [1588],
+      summary: expect.stringContaining("nutrition goal direction"),
+      details: expect.stringContaining("without repeating target amounts"),
+    });
+    expect(
+      items.get("cleaner-workout-cards-in-messages")?.tryIt,
+    ).toBeUndefined();
     expect(items.get("lighter-accessible-homepage")).toMatchObject({
       sourcePullRequests: [1573],
       summary: expect.stringContaining("compact avatar images"),
@@ -336,6 +361,14 @@ describe("changelog registry", () => {
     expect(
       items.get("referral-notification-route-recovery")?.tryIt,
     ).toBeUndefined();
+    expect(items.get("blood-pressure-history-completion")).toMatchObject({
+      sourcePullRequests: [1523, 1625],
+      summary: expect.stringContaining("unfinished history import"),
+      details: expect.stringContaining("every remaining day finishes"),
+    });
+    expect(
+      items.get("blood-pressure-history-completion")?.tryIt,
+    ).toBeUndefined();
     expect(items.get("group-sleep-challenges-use-fresh-data")).toMatchObject({
       sourcePullRequests: [1565, 1593],
       summary: expect.stringContaining("explicit manual corrections"),
@@ -349,6 +382,14 @@ describe("changelog registry", () => {
       details: expect.stringContaining("part of the card image itself"),
     });
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
+    expect(items.get("environment-report-loading-preview")).toMatchObject({
+      sourcePullRequests: [1617],
+      summary: expect.stringContaining("report-shaped preview"),
+      tryIt: {
+        href: "/environment/print",
+        label: "Open your Environment report",
+      },
+    });
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -557,15 +598,19 @@ describe("changelog registry", () => {
         id: "2026-08-10",
         itemIds: [
           "non-expiring-starter-access",
+          "cleaner-plan-and-model-settings",
           "personal-patterns",
           "referral-notification-route-recovery",
+          "blood-pressure-history-completion",
           "reminders-keep-requested-timezone",
           "wearable-sync-recovers-model-free",
           "voice-memos-use-your-voice",
+          "cleaner-workout-cards-in-messages",
           "web-search-restored",
           "appointment-reminders-by-default",
           "workout-card-status-rendering",
           "lighter-accessible-homepage",
+          "environment-report-loading-preview",
         ],
       },
       {

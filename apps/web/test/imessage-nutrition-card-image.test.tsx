@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 
 import type {
+  ChallengeStandingsResponseCardV1,
   CompactTablePresentationCardV1,
   DailyNutritionResponseCardV1,
   DailyNutritionResponseCardV2,
@@ -157,6 +158,54 @@ const WORKOUT_CARD: Extract<
   },
 };
 
+const STANDINGS_CARD: ChallengeStandingsResponseCardV1 = {
+  kind: "challenge_standings",
+  version: 1,
+  format: "teams",
+  title: "Summer movement challenge",
+  subtitle: "Day 4 of 7",
+  objective: { kind: "target", targetPoints: 250 },
+  entries: [
+    {
+      label: "North team",
+      points: 210,
+      coverage: "complete",
+      detail: null,
+    },
+    {
+      label: "South team",
+      points: 180,
+      coverage: "partial",
+      detail: null,
+    },
+    {
+      label: "West team",
+      points: null,
+      coverage: "unscored",
+      detail: null,
+    },
+  ],
+  footer: null,
+};
+
+const COLLECTIVE_STANDINGS_CARD: ChallengeStandingsResponseCardV1 = {
+  kind: "challenge_standings",
+  version: 1,
+  format: "collective",
+  title: "Move together",
+  subtitle: "Weekly progress",
+  objective: { kind: "target", targetPoints: 1_000 },
+  collectivePoints: 640,
+  coverage: "partial",
+  coverageCounts: {
+    completeParticipants: 1,
+    partialParticipants: 1,
+    totalParticipants: 3,
+    unscoredParticipants: 1,
+  },
+  footer: null,
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -206,6 +255,8 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.match(serialized, /24/u);
   assert.match(serialized, /data-calorie-progress="0\.8364"/u);
   assert.match(serialized, /data-goal-status="under_target"/u);
+  assert.match(serialized, /data-calorie-goal-status="under_target"/u);
+  assert.match(serialized, />UNDER</u);
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /data-goal-status="unavailable"/u);
   assert.match(serialized, /color:#666163/u);
@@ -213,8 +264,38 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.doesNotMatch(serialized, /box-shadow/u);
   assert.doesNotMatch(
     serialized,
-    /Jun 18|PARTIAL TOTALS|2 of 3 meals|2,200|Under target|Goal unavailable|Complete total/u,
+    /Jun 18|PARTIAL TOTALS|2 of 3 meals|2,200|Goal unavailable|Complete total/u,
   );
+});
+
+test("nutrition card image renders every assessed goal direction without target amounts", async () => {
+  const { NutritionCardImage } = await import(
+    "@/src/components/imessage/nutrition-card-image"
+  );
+  const directionalCard: DailyNutritionResponseCardV2 = {
+    ...CARD,
+    goals: {
+      calories: { target: 3_000, status: "far_under_target" },
+      proteinGrams: { target: 130, status: "under_target" },
+      carbsGrams: { target: 210, status: "on_target" },
+      fatGrams: { target: 50, status: "over_target" },
+      fiberGrams: { target: 10, status: "far_over_target" },
+    },
+  };
+  const serialized = renderToStaticMarkup(
+    <NutritionCardImage card={directionalCard} />,
+  );
+
+  for (const label of [
+    "FAR UNDER",
+    "UNDER",
+    "ON TARGET",
+    "OVER",
+    "FAR OVER",
+  ]) {
+    assert.match(serialized, new RegExp(`>${label}<`, "u"));
+  }
+  assert.doesNotMatch(serialized, /3,000|130g|210g|50g|10g/u);
 });
 
 test("nutrition card image route and component retain truthful V1 compatibility", async () => {
@@ -307,6 +388,8 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.match(serialized, /Upper body/u);
   assert.match(serialized, /Wednesday/u);
   assert.match(serialized, />16</u);
+  assert.doesNotMatch(serialized, /border-radius:105px/u);
+  assert.doesNotMatch(serialized, /box-shadow/u);
 });
 
 test("response-card image route restores and renders the exact compact V4 workout snapshot", async () => {
@@ -328,14 +411,94 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.equal(init.height, 580);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /Push day/u);
+  assert.match(serialized, /IN PROGRESS/u);
   assert.match(serialized, /Bench press/u);
   assert.match(serialized, /Next: 55 lb × 8–10/u);
   assert.match(serialized, /data-workout-progress="0\.6667"/u);
   assert.match(serialized, /data-exercise-state="resolved"/u);
   assert.match(serialized, /data-exercise-state="in-progress"/u);
+  assert.doesNotMatch(serialized, /4 of 6 sets complete|TODAY/u);
   assert.match(serialized, /data-exercise-checkmark="true"/u);
   assert.doesNotMatch(serialized, /✓/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
+  assert.doesNotMatch(serialized, /border-radius:105px/u);
+  assert.doesNotMatch(serialized, /box-shadow/u);
+});
+
+test("response-card image route renders the exact V5 standings snapshot", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({ schemaVersion: 5, card: STANDINGS_CARD });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree, init] = getImageResponseCall();
+  assert.equal(init.width, 1_200);
+  assert.equal(init.height, 614);
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /imessage-native-challenge-standings-card/u);
+  assert.match(serialized, /Summer movement challenge/u);
+  assert.match(serialized, /North team/u);
+  assert.match(serialized, /210/u);
+  assert.match(serialized, /OF 250 PTS/u);
+  assert.match(serialized, /data-entry-progress="0\.8400"/u);
+  assert.match(serialized, /Ranks appear when every score is complete\./u);
+  const rootTag = serialized.match(
+    /<div data-design-contract="imessage-native-challenge-standings-card"[^>]*>/u,
+  );
+  assert.ok(rootTag);
+  assert.doesNotMatch(rootTag[0], /border-radius|overflow:hidden/u);
+  assert.match(serialized, /margin-left:155px/u);
+  assert.doesNotMatch(serialized, /box-shadow:/u);
+  assert.doesNotMatch(
+    serialized,
+    /VERIFIED STANDINGS|TEAM STANDINGS|GROUP GOAL|LEADERBOARD|verified minimum|waiting for data/u,
+  );
+});
+
+test("standings image keeps collective progress collective", async () => {
+  const {
+    ChallengeStandingsCardImage,
+    getChallengeStandingsCardImageSize,
+  } = await import(
+    "@/src/components/imessage/challenge-standings-card-image"
+  );
+  const serialized = renderToStaticMarkup(
+    <ChallengeStandingsCardImage card={COLLECTIVE_STANDINGS_CARD} />,
+  );
+
+  assert.match(serialized, /640\+/u);
+  assert.match(serialized, /\/ 1,000 pts/u);
+  assert.match(serialized, /data-collective-progress="0\.6400"/u);
+  assert.match(serialized, /More progress may be pending/u);
+  assert.match(serialized, /2\/3 SCORED/u);
+  assert.doesNotMatch(serialized, /North team|South team|West team/u);
+
+  const unscoredCard: ChallengeStandingsResponseCardV1 = {
+    ...COLLECTIVE_STANDINGS_CARD,
+    collectivePoints: null,
+    coverage: "unscored",
+    coverageCounts: {
+      completeParticipants: 0,
+      partialParticipants: 0,
+      totalParticipants: 3,
+      unscoredParticipants: 3,
+    },
+  };
+  const unscoredSerialized = renderToStaticMarkup(
+    <ChallengeStandingsCardImage card={unscoredCard} />,
+  );
+  assert.match(unscoredSerialized, /Waiting for shared data/u);
+  assert.match(unscoredSerialized, /0\/3 SCORED/u);
+  assert.doesNotMatch(unscoredSerialized, /data-collective-progress/u);
+
+  expect(getChallengeStandingsCardImageSize({
+    ...COLLECTIVE_STANDINGS_CARD,
+    title: "T".repeat(60),
+    subtitle: "S".repeat(120),
+  })).toEqual({ width: 1_200, height: 654 });
 });
 
 test("response-card image route rejects malformed, incomplete, and query-bearing URLs before asset reads", async () => {
@@ -348,6 +511,10 @@ test("response-card image route rejects malformed, incomplete, and query-bearing
       card: { ...TABLE_CARD, tracking: null },
     }),
     encodePayload({ schemaVersion: 2, card: CARD, extra: true }),
+    encodePayload({
+      schemaVersion: 5,
+      card: { ...STANDINGS_CARD, format: "leaderboard" },
+    }),
     `${"a".repeat(IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH + 1)}.png`,
   ];
 

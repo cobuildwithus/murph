@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, wearable recovery, referrals, reminders, cards, voices, web search, and a lighter homepage",
+      "Starter access, patterns, health history, wearable recovery, referrals, reminders, cards, voices, and search",
     summary:
-      "Starter usage waits until it is used, patterns compare actions with next-day sleep and recovery, wearable sync can recover safely, referral celebrations stay with the intended conversation, reminders keep local time, completed workout rows stay clear, voice memos keep the selected voice, managed web search reaches current information, and the public homepage starts with less to download.",
+      "Starter usage waits until used; patterns connect actions with next-day sleep; blood-pressure history and wearable recovery stay reliable; referrals stay in the intended conversation; reminders keep local time; workout rows and voices stay clear; managed search reaches current information; the homepage starts lighter; and private Environment reports show their shape while loading.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -85,6 +85,16 @@ const RAW_CHANGELOG_EDITIONS = [
           href: "/settings#subscription",
           label: "View Starter usage",
         },
+      },
+      {
+        id: "cleaner-plan-and-model-settings",
+        kind: "improvement",
+        priority: 1,
+        title: "Cleaner plan and model settings",
+        summary:
+          "Settings now presents Starter usage and unavailable models more concisely while keeping relevant plan and upgrade choices visible.",
+        relevanceTags: ["settings", "plans", "models"],
+        sourcePullRequests: [1621],
       },
       {
         id: "personal-patterns",
@@ -119,6 +129,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
         relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
         sourcePullRequests: [1592],
+      },
+      {
+        id: "blood-pressure-history-completion",
+        kind: "improvement",
+        priority: 4,
+        title: "Blood-pressure history waits for the whole sync",
+        summary:
+          "When Murph is recovering older blood-pressure readings, a temporary change in source access no longer lets an unfinished history import look complete.",
+        details:
+          "Murph keeps the same history window available to retry after access returns and marks it complete only after every remaining day finishes under the currently connected source.",
+        relevanceTags: ["blood-pressure", "wearables", "health-data", "reliability"],
+        sourcePullRequests: [1523, 1625],
       },
       {
         id: "reminders-keep-requested-timezone",
@@ -159,6 +181,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "A different named voice is used only when you explicitly ask to test it or request that voice for one memo. Saving a named voice and asking to hear it immediately still works as a one-time preview.",
         relevanceTags: ["voice", "messaging", "personalization", "reliability"],
         sourcePullRequests: [1587],
+      },
+      {
+        id: "cleaner-workout-cards-in-messages",
+        kind: "improvement",
+        priority: 4,
+        title: "Response cards stay compact in Messages",
+        summary:
+          "Workout detail and nutrition goal direction now stay inside their cards instead of repeating a long summary beneath the static image.",
+        details:
+          "Fallback cards have no duplicate badge or corner mask. Nutrition goals use short in-card direction labels without repeating target amounts, older sent workout cards remain readable, and generic tables keep their optional subtitle.",
+        relevanceTags: ["workouts", "nutrition", "imessage", "cards", "design"],
+        sourcePullRequests: [1588],
       },
       {
         id: "web-search-restored",
@@ -215,6 +249,22 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           href: "/",
           label: "Visit the homepage",
+        },
+      },
+      {
+        id: "environment-report-loading-preview",
+        kind: "improvement",
+        priority: 3,
+        title: "Environment reports show their shape while loading",
+        summary:
+          "The private Environment report now opens with a clear preparing state and a report-shaped preview instead of a mostly empty page.",
+        details:
+          "The preview mirrors the printable report and gives immediate feedback while the existing private Browser Vault opens. The finished report, empty state, and error recovery continue unchanged.",
+        relevanceTags: ["environment", "reports", "web", "privacy"],
+        sourcePullRequests: [1617],
+        tryIt: {
+          href: "/environment/print",
+          label: "Open your Environment report",
         },
       },
     ],
@@ -404,11 +454,11 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Nutrition cards fit Messages cleanly",
         summary:
-          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card.",
+          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card unless totals are partial.",
         details:
-          "Calories and nutrient totals stay visible in the card without a second Murph badge or a long repeat below it. Partial totals and assessed goals keep only their short status labels.",
+          "Calories, nutrient totals, and goal status stay inside the card without a second Murph badge or a long repeat below it. Provider chrome keeps only a short partial-data warning when needed.",
         relevanceTags: ["imessage", "cards", "nutrition", "design"],
-        sourcePullRequests: [1567],
+        sourcePullRequests: [1567, 1588],
       },
       {
         id: "typing-prewarms-private-chat",
@@ -3206,7 +3256,7 @@ const RAW_CHANGELOG_EDITIONS = [
         details:
           "A real zero still counts. Missing sharing permission, a stale sync, a disconnected source, and a source that needs attention stay distinct. When an exact required share has not been granted, Murph may offer one separate Like-or-heart permission card; the standings message itself never becomes a consent surface.",
         relevanceTags: ["groups", "challenges", "sharing", "wearables"],
-        sourcePullRequests: [769],
+        sourcePullRequests: [769, 1463],
         tryIt: {
           label: "Review missing standings data",
           prompt:

@@ -171,13 +171,14 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
 import { PersonalPatternsComponentStudy } from "./personal-patterns-study";
-import { LegacyTrialRetirementControl } from "@/src/components/hosted-ops/legacy-trial-retirement-control";
+import { DashboardSidebarStudy } from "./dashboard-sidebar-study";
 
 const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
   "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
@@ -637,6 +638,15 @@ export function ComponentsContent() {
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
+
+        <Separator />
+
+        <Section title="Dashboard primary navigation">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            Production dashboard destinations in their standard visual hierarchy.
+          </p>
+          <DashboardSidebarStudy />
+        </Section>
 
         <Separator />
 
@@ -1442,9 +1452,18 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-compact-table-card"
-          title="iMessage compact table card states"
+          title="iMessage workout and compact table card states"
         >
           <ImessageCompactTableCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="imessage-challenge-standings-card"
+          title="iMessage challenge standings card"
+        >
+          <ImessageChallengeStandingsCardStudy />
         </Section>
 
         <Separator />
@@ -2509,50 +2528,6 @@ export function ComponentsContent() {
             <ConclusionCard title="What didn't change" variant="neutral" items={[{ icon: "→", text: "Respiratory rate -2.6% — within normal variation." }]} />
             <ConclusionCard title="Key insights" variant="insight" items={[{ icon: "•", text: "Evening sessions drove sleep gains. Morning sessions showed no benefit." }, { icon: "•", text: "2–3x/week appears sufficient. Skipping one session had no negative impact." }]} />
             <ConclusionCard title="Recommendations" variant="recommendation" items={[{ icon: "→", text: "Continue sauna 2x/week as maintenance." }, { icon: "→", text: "Add cold exposure post-sauna for contrast protocol." }]} />
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section id="legacy-trial-retirement" title="Legacy trial retirement">
-          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-            The production Ops control shows aggregate Stripe state, requires
-            the exact dry-run count, and verifies convergence after apply.
-            These studies use synthetic counts and cannot call the Ops route.
-          </p>
-          <div
-            className="grid items-start gap-6"
-            data-design-component="legacy-trial-retirement-control"
-            id="legacy-trial-retirement-control-component"
-            inert
-          >
-            <LegacyTrialRetirementControl
-              headingId="legacy-trial-retirement-candidates-title"
-              initialReport={{
-                alreadyRetiredCount: 0,
-                candidateCount: 3,
-                missingProviderCount: 1,
-                mode: "dry-run",
-                retiredCount: 0,
-                stripeMode: "live",
-                subscriptionStatusCounts: {
-                  canceled: 1,
-                  trialing: 1,
-                },
-              }}
-            />
-            <LegacyTrialRetirementControl
-              headingId="legacy-trial-retirement-zero-title"
-              initialReport={{
-                alreadyRetiredCount: 0,
-                candidateCount: 0,
-                missingProviderCount: 0,
-                mode: "dry-run",
-                retiredCount: 0,
-                stripeMode: "live",
-                subscriptionStatusCounts: {},
-              }}
-            />
           </div>
         </Section>
 

@@ -46,10 +46,15 @@ import {
   hostedComputerOsControlRequestSchema,
 } from '@murphai/hosted-execution/computer-use'
 import { assistantVaultImageMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
-import { assistantResponseCardJsonSchema } from '@murphai/operator-config/assistant-response-cards'
+import {
+  assistantResponseCardJsonSchema,
+} from '@murphai/operator-config/assistant-response-cards'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
 } from '../assistant/group-shared-read-limits.js'
+import {
+  groupChallengeResponseCardToolInputJsonSchema,
+} from '../assistant/group-challenge-response-card-schema.js'
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../assistant/generated-delivery-files.js'
@@ -261,6 +266,14 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
     },
     required: ['card'],
   },
+} as const
+
+export const MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL = {
+  namespace: 'murph',
+  name: 'attach_response_card',
+  description:
+    'Attach one challenge_standings card for the current authenticated Linq group only when the current accepted room message or the saved instructions for this exact scheduled occurrence explicitly request a current shared-challenge snapshot. Read the existing canonical challenge page with vault-cli knowledge show and every required bounded read first. The page must already have pageType challenge and exactly one closed murph:group-challenge-definition:v1 section; never create or repair that definition during attachment. Copy the exact pageRevisionDigest from that knowledge show result, then pass it with the challenge slug and one normalized component observation for every page-owned participant whose participation state is in. The page revision digest is only a consistency precondition: the trusted host still validates the embedded definition digest; derives participant order, format, objective, teams, scorecard rules, rates, caps, units, component scopes, and rules revision from the current page; and rejects observations when any canonical page content changed after normalization. Room membership or a sharing grant never creates challenge buy-in. It requires one complete stable room-member and authorized-label roster, every page-owned participant to be present in that roster, exact observation coverage, and every definition scope to be backed by those reads. Additional current room members remain nonparticipants. It derives individual labels from the trusted read, runs the deterministic scorer, and compare-and-set persists the exact page-derived input and result on that same page before attaching. Any unavailable, empty, failed, capacity-omitted, roster-inconsistent, page-revision-mismatched, missing-or-extra-observation, unbacked-scope, generic-or-malformed-page, missing-definition, or conflicting-persistence path cannot attach and must finish with a truthful ordinary-text update. The tool owns points, target, order, coverage, counts, ranks, and ties. For individual or team snapshots, attach only when the entire canonical ranked result contains at most eight entries; never truncate the ranking or omit a waiting challenge participant. Collective cards have no row cap. Partial scores are verified lower bounds and unscored scores stay null. The card replaces the entire final response, does not send by itself, and cannot combine with response media.',
+  inputSchema: groupChallengeResponseCardToolInputJsonSchema,
 } as const
 
 export const MURPH_GENERATE_IMAGE_TOOL = {
@@ -1356,6 +1369,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
+  | typeof MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL
   | typeof MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
   | typeof MURPH_GROUP_SHARED_READ_TOOL
   | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
@@ -1387,6 +1401,7 @@ export interface MurphDynamicToolAvailability {
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   responseCardsAvailable?: boolean | null
+  groupChallengeResponseCardsAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
@@ -1459,6 +1474,14 @@ export function resolveMurphDynamicTools(
   const tools: MurphDynamicTool[] = MURPH_DYNAMIC_TOOLS.filter((tool) =>
     (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
   )
+  if (availability.groupChallengeResponseCardsAvailable === true) {
+    const responseCardToolIndex = tools.indexOf(MURPH_ATTACH_RESPONSE_CARD_TOOL)
+    if (responseCardToolIndex >= 0) {
+      tools[responseCardToolIndex] = MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL
+    } else {
+      tools.push(MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL)
+    }
+  }
   if (availability.progressUpdateMode === 'group') {
     const progressToolIndex = tools.indexOf(MURPH_SEND_PROGRESS_UPDATE_TOOL)
     if (progressToolIndex >= 0) {

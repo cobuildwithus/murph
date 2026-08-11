@@ -892,9 +892,13 @@ Hosted AI usage metering:
   attributed stable-link activations. Conversational referrals also use
   immediate post-commit reconciliation, and that same cron converges on one
   final referral grant and one atomic source-mailbox celebration fence.
-  Recovery also re-signals bounded oldest unconsumed celebration pointers after
-  a failed Temporal signal; Web does not read or rewrite their encrypted
-  payloads. If an authority-less legacy direct-Linq wake was already imported,
+  Recovery selects each lane containing a live pending celebration and
+  re-signals only its first live item above the canonical lane-consumption
+  cursor. Live-row filtering skips retention-old or expired prefixes. That head
+  may be an earlier non-referral predecessor, so a failed Temporal signal remains
+  recoverable in ordinary lane order while the existing no-progress backoff
+  coalesces repeat passes. Web does not read or rewrite encrypted payloads. If an
+  authority-less legacy direct-Linq wake was already imported,
   the local runtime reasserts its frozen target through Web's existing route
   owner before model work. An exact live match continues through the normal
   audience and provider-entry guards, a definitive stale match ends without a
@@ -1727,9 +1731,12 @@ Assertion-authenticated browser-to-agent bridge routes:
 
 Public provider-facing routes:
 
-- `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V4
-  nutrition, generic-table, or workout presentation for Linq's static Messages
-  fallback. It accepts no query string, identity, canonical reference,
+- `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V5
+  nutrition, generic-table, workout, or challenge-standings presentation for
+  Linq's static Messages fallback. Production challenge-standings producers
+  replace the challenge title and ranked labels with fixed ordinal presentation
+  before encoding, while exact names remain only in the native fragment and
+  semantic captions. The route accepts no query string, canonical reference,
   credential, tracking reference, or authority; it performs no database or
   remote read and returns private no-store/no-index headers. Deploy the
   compatible native reader first, this route second, and its runtime producer
@@ -1876,15 +1883,13 @@ Current hosted billing assumptions:
 - Delayed legacy Stripe trial objects remain eligible only for exact bounded
   reconciliation or cleanup. They cannot create, extend, or restore free
   access; starter capacity and paid invoices are the current authorities.
-- Drain production objects from the allowlisted `/ops/usage` control: run its
-  aggregate dry-run, confirm only the exact observed count, and require the
-  automatic verification to report zero. Any count change or provider state
-  that may represent paid service aborts preflight. The equivalent
-  `pnpm stripe:retire-legacy-pulse-trials --stripe-mode=<test|live>` command is
-  for test or an intentionally credentialed operator environment; Vercel keeps
-  the production Stripe credential runtime-only. Remove the compatibility
-  owner only after old trial creators are gone, the dry-run reports zero, and
-  the delayed-event horizon has passed.
+- The legacy provider-object drain is complete: an authenticated production
+  apply retired 69 exact candidates, then its automatic verification reported
+  zero remaining candidates and convergence. The one-time Ops control, batch
+  route and service, and CLI were removed. Keep the accepted
+  legacy Pulse Price and per-member cleanup/event guards through the maximum
+  delayed-event and manual-replay horizon; then remove that bounded
+  compatibility together in a separate contracting change.
 - `/ops/email` is the operator-only member email composer. It accepts up to 100
   explicit hosted member IDs plus one plain-text subject and body. Preview
   resolves verified email first and falls back to the stored Stripe checkout
