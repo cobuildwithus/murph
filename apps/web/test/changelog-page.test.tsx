@@ -60,11 +60,12 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Starter access, patterns, reliable referrals, reminders, cards, voices, and web search",
+      "Starter access, patterns, reliable referrals, reminders, cards, voices, web search, and a lighter homepage",
     );
     expect(markup).toContain("Response cards stay compact in Messages");
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).toContain("Completed workout rows keep their checkmark");
+    expect(markup).toContain("The homepage starts lighter");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("Voice memos keep your chosen voice");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");

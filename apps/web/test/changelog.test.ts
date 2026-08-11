@@ -328,6 +328,12 @@ describe("changelog registry", () => {
     expect(
       items.get("cleaner-workout-cards-in-messages")?.tryIt,
     ).toBeUndefined();
+    expect(items.get("lighter-accessible-homepage")).toMatchObject({
+      sourcePullRequests: [1573],
+      summary: expect.stringContaining("compact avatar images"),
+      details: expect.stringContaining("keeps keyboard focus"),
+      tryIt: { href: "/", label: "Visit the homepage" },
+    });
     expect(items.get("referral-notification-route-recovery")).toMatchObject({
       sourcePullRequests: [1592],
       summary: expect.stringContaining("intended direct conversation"),
@@ -567,6 +573,7 @@ describe("changelog registry", () => {
           "web-search-restored",
           "appointment-reminders-by-default",
           "workout-card-status-rendering",
+          "lighter-accessible-homepage",
         ],
       },
       {
