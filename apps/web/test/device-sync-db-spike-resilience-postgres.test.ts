@@ -58,6 +58,10 @@ describe.skipIf(!runPostgresProof)(
         poolMax: 1,
       });
       const store = new PrismaDeviceSyncControlPlaneStore({ prisma });
+      const boundedSnapshotSourceRead = vi.spyOn(
+        store,
+        "listBoundedConnectionSourcesForConnections",
+      );
       const memberId = `hbm_device_sync_spike_${suffix}`;
       const connectionId = `dsc_device_sync_spike_${suffix}`;
       const sourceId = `dcs_device_sync_spike_${suffix}`;
@@ -306,11 +310,22 @@ describe.skipIf(!runPostgresProof)(
           INCIDENT_WEBHOOK_RECEIPTS,
         );
         // Each source-attributed webhook deliberately rechecks live source
-        // admission under the lock; the snapshot side contributes one batched
-        // source read per snapshot, independent of connection cardinality.
+        // admission under the lock. Snapshot source projection uses one
+        // bounded raw set query per snapshot, independent of connection
+        // cardinality, so it does not add model-level findMany calls here.
         expect(operationCounts.get("DeviceConnectionSource.findMany") ?? 0).toBe(
-          INCIDENT_WEBHOOK_RECEIPTS + INCIDENT_SNAPSHOT_READS,
+          INCIDENT_WEBHOOK_RECEIPTS,
         );
+        expect(operationCounts.get("$queryRaw") ?? 0).toBeGreaterThanOrEqual(
+          INCIDENT_SNAPSHOT_READS,
+        );
+        expect(boundedSnapshotSourceRead).toHaveBeenCalledTimes(INCIDENT_SNAPSHOT_READS);
+        for (const [sourceInput] of boundedSnapshotSourceRead.mock.calls) {
+          expect(sourceInput).toMatchObject({
+            connectionIds: [connectionId],
+            limitPerConnection: 32,
+          });
+        }
         expect(operationCounts.get("HostedMember.findUnique") ?? 0).toBe(
           REPLAY_FOREGROUND_READS,
         );
@@ -333,6 +348,7 @@ describe.skipIf(!runPostgresProof)(
           deviceConnectionFindUnique: operationCounts.get("DeviceConnection.findUnique") ?? 0,
           deviceConnectionSourceFindMany:
             operationCounts.get("DeviceConnectionSource.findMany") ?? 0,
+          boundedSnapshotSourceReads: boundedSnapshotSourceRead.mock.calls.length,
           maxObservedActiveSessions,
           maxObservedSessions,
           peakReceiptsPerOriginalSecond: Math.max(...perSecondCounts),

@@ -7783,6 +7783,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     expect(fetchSnapshotRequests).toEqual([{
       includeCredentialMaterial: false,
+      limit: 32,
       provider: "whoop",
       signal: abortController.signal,
       sourceProviderSlug: "whoop_v2",

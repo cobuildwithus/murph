@@ -12,6 +12,7 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionDeviceSyncReconcileResponse,
+  type HostedExecutionDeviceSyncRuntimeSnapshotCursor,
 } from "@murphai/device-syncd/hosted-runtime";
 
 import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
@@ -89,6 +90,7 @@ export function createHostedWebDeviceSyncPort(input: {
     },
     async fetchSnapshot(runtimeInput: {
       connectionId?: string | null;
+      cursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
       includeCredentialMaterial?: boolean | null;
       limit?: number | null;
       provider?: string | null;
@@ -98,6 +100,7 @@ export function createHostedWebDeviceSyncPort(input: {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
           ...(runtimeInput.connectionId ? { connectionId: runtimeInput.connectionId } : {}),
+          ...(runtimeInput.cursor === undefined ? {} : { cursor: runtimeInput.cursor }),
           ...(runtimeInput.includeCredentialMaterial == null
             ? (
                 input.transport.mode === "direct"

@@ -920,6 +920,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
         {
           connectionId: null,
+          cursor: {
+            id: "conn_cursor",
+            updatedAt: "2026-04-06T23:58:00+00:00",
+          },
           limit: 4,
           provider: "oura",
         },
@@ -927,6 +931,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ),
     ).toEqual({
       connectionId: null,
+      cursor: {
+        id: "conn_cursor",
+        updatedAt: "2026-04-06T23:58:00.000Z",
+      },
       includeCredentialMaterial: false,
       limit: 4,
       provider: "oura",
@@ -987,6 +995,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           },
         ],
         generatedAt: "2026-04-07T00:00:00.000Z",
+        nextCursor: {
+          id: "conn_123",
+          updatedAt: "2026-04-06T23:59:59+00:00",
+        },
         userId: "user_123",
       }),
     ).toEqual({
@@ -1028,6 +1040,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         },
       ],
       generatedAt: "2026-04-07T00:00:00.000Z",
+      nextCursor: {
+        id: "conn_123",
+        updatedAt: "2026-04-06T23:59:59.000Z",
+      },
       userId: "user_123",
     });
   });
@@ -1049,6 +1065,25 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toThrowError(
       /Hosted device-sync runtime snapshot request includeCredentialMaterial must be a boolean/u,
     );
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
+        {
+          userId: "other-user",
+        },
+        "trusted-user",
+      ),
+    ).toThrowError(/userId must match the authenticated hosted execution user/u);
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
+        {
+          cursor: {
+            id: "conn_123",
+            updatedAt: "not-a-timestamp",
+          },
+        },
+        "trusted-user",
+      ),
+    ).toThrowError(/snapshot request cursor.updatedAt must be an ISO timestamp/u);
   });
 
   it("keeps only the supported internal projection paths", () => {
@@ -1057,6 +1092,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     );
     expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH).toBe(
       "/api/internal/device-sync/runtime/apply",
+    );
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT).toBe(32);
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT).toBe(
+      hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
     );
     expect("buildHostedExecutionUserDeviceSyncRuntimePath" in hostedRuntime).toBe(false);
   });

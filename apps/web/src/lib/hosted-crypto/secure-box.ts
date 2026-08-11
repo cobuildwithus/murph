@@ -322,7 +322,7 @@ export async function openHostedUserSecureBoxStrings(input: {
   );
 
   try {
-    return await Promise.all(parsedEntries.map(async (parsed) => {
+    const settled = await Promise.allSettled(parsedEntries.map(async (parsed) => {
       if (!parsed) {
         return null;
       }
@@ -362,6 +362,20 @@ export async function openHostedUserSecureBoxStrings(input: {
         rootKey.fill(0);
       }
     }));
+    const failed = settled.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failed) {
+      // Drain every started open before releasing root ownership or returning
+      // an authenticity failure to the caller.
+      throw failed.reason;
+    }
+    return settled.map((result) => {
+      if (result.status === "rejected") {
+        throw result.reason;
+      }
+      return result.value;
+    });
   } finally {
     for (const root of roots) {
       root.rootKey.fill(0);

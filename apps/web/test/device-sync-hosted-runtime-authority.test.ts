@@ -1,4 +1,5 @@
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -8,13 +9,23 @@ const mocks = vi.hoisted(() => ({
   }) =>
     buildPublicConnection({
       ...input.record,
-      externalAccountId: input.record.externalAccountId ?? input.fallback?.externalAccountId ?? null,
+      externalAccountId: input.record.externalAccountId
+        ?? input.fallback?.externalAccountId
+        ?? `opaque:${input.record.id}`,
     })),
   createHostedDeviceSyncControlPlane: vi.fn(),
   mapHostedConnectionRecord: vi.fn((record: ReturnType<typeof buildHostedRecord>) => ({
     ...record,
     externalAccountId: null,
+    updatedAt: toTestIsoTimestamp(record.updatedAt),
   })),
+  mapHostedRuntimeRedactedConnectionRecord: vi.fn(
+    (record: ReturnType<typeof buildHostedRecord>) => ({
+      ...record,
+      externalAccountId: null,
+      updatedAt: toTestIsoTimestamp(record.updatedAt),
+    }),
+  ),
   resolveDeviceProviderApplication: vi.fn(),
   writeHostedRuntimeLogs: vi.fn(),
 }));
@@ -28,8 +39,20 @@ vi.mock("@/src/lib/device-sync/internal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/prisma-store", () => ({
-  hostedConnectionRecordArgs: {},
+  hostedConnectionRecordArgs: {
+    select: {
+      accessTokenEncrypted: true,
+      externalAccountIdEncrypted: true,
+      refreshTokenEncrypted: true,
+    },
+  },
+  hostedRuntimeRedactedConnectionRecordArgs: {
+    select: {
+      id: true,
+    },
+  },
   mapHostedConnectionRecord: mocks.mapHostedConnectionRecord,
+  mapHostedRuntimeRedactedConnectionRecord: mocks.mapHostedRuntimeRedactedConnectionRecord,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/write", () => ({
@@ -47,13 +70,16 @@ vi.mock("@/src/lib/device-sync/provider-applications", () => ({
 function buildHostedRecord(
   overrides: Partial<{
     accessTokenExpiresAt: string | null;
+    accessTokenEncrypted: string | null;
     connectedAt: string;
     createdAt: string;
     credentialKind: "oauth_tokens" | "provider_config" | "none";
     credentialMetadata: Record<string, unknown>;
     displayName: string | null;
     externalAccountId: string | null;
+    externalAccountIdEncrypted: string | null;
     id: string;
+    keyVersion: string | null;
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
     lastSyncCompletedAt: string | null;
@@ -69,23 +95,28 @@ function buildHostedRecord(
     refreshLeaseExpiresAt: string | null;
     refreshLeaseOwner: string | null;
     refreshLeaseTokenVersion: number | null;
+    refreshTokenEncrypted: string | null;
     scopes: string[];
     setupExpiresAt: string | null;
     setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
     status: "active" | "reauthorization_required" | "disconnected";
-    updatedAt: string | undefined;
+    tokenVersion: number | null;
+    updatedAt: Date | string | undefined;
     userId: string;
   }> = {},
 ) {
   return {
     accessTokenExpiresAt: null,
+    accessTokenEncrypted: "encrypted-access-token",
     connectedAt: "2026-04-06T09:00:00.000Z",
     createdAt: "2026-04-06T09:00:00.000Z",
     credentialKind: "oauth_tokens" as const,
     credentialMetadata: {},
     displayName: "Hosted Device",
     externalAccountId: "acct_123",
+    externalAccountIdEncrypted: "encrypted-external-account-id",
     id: "conn_123",
+    keyVersion: "kv_stored",
     lastErrorCode: null,
     lastErrorMessage: null,
     lastSyncCompletedAt: null,
@@ -103,10 +134,12 @@ function buildHostedRecord(
     refreshLeaseExpiresAt: null,
     refreshLeaseOwner: null,
     refreshLeaseTokenVersion: null,
+    refreshTokenEncrypted: "encrypted-refresh-token",
     scopes: ["daily"],
     setupExpiresAt: null,
     setupPhase: null,
     status: "active" as const,
+    tokenVersion: 3,
     updatedAt: "2026-04-06T10:00:00.000Z",
     userId: "user_123",
     ...overrides,
@@ -134,8 +167,12 @@ function buildPublicConnection(record: ReturnType<typeof buildHostedRecord>) {
     setupExpiresAt: record.setupExpiresAt,
     setupPhase: record.setupPhase,
     status: record.status,
-    updatedAt: record.updatedAt,
+    updatedAt: toTestIsoTimestamp(record.updatedAt),
   };
+}
+
+function toTestIsoTimestamp(value: Date | string | undefined): string | undefined {
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 function buildStoredAccount(
@@ -268,6 +305,28 @@ function createAuthorityHarness(input: {
     ...source,
     sourceInstanceKey: source.sourceInstanceKey ?? source.sourceProviderSlug,
   }));
+  const readRuntimeConnectionSecretMaterial = vi.fn(async (secretInput: {
+    records: ReturnType<typeof buildHostedRecord>[];
+    tokenConnectionIds: ReadonlySet<string>;
+  }) => new Map(secretInput.records.map((record) => {
+    const storedAccount = record.id === currentRecord.id
+      ? currentStoredAccount
+      : buildStoredAccount(record);
+    const tokenBundle = secretInput.tokenConnectionIds.has(record.id)
+      && storedAccount?.credential.kind === "oauth_tokens"
+      ? {
+          accessToken: storedAccount.credential.tokens.accessToken,
+          accessTokenExpiresAt: storedAccount.credential.tokens.accessTokenExpiresAt,
+          keyVersion: storedAccount.keyVersion ?? "kv_stored",
+          refreshToken: storedAccount.credential.tokens.refreshToken,
+          tokenVersion: storedAccount.tokenVersion ?? record.tokenVersion ?? 1,
+        }
+      : null;
+    return [record.id, {
+      externalAccountId: storedAccount?.externalAccountId ?? record.externalAccountId ?? null,
+      tokenBundle,
+    }] as const;
+  })));
   const store = {
     getConnectionForUser: vi.fn(async () =>
       buildPublicConnection({
@@ -280,6 +339,16 @@ function createAuthorityHarness(input: {
       connectionSources.filter((source) => connectionIds.includes(source.connectionId))
     ),
     listRuntimeSnapshotConnectionSources: vi.fn(async () => connectionSources),
+    listBoundedConnectionSourcesForConnections: vi.fn(async (sourceInput: {
+      connectionIds: readonly string[];
+      sourceProviderSlugs?: readonly string[] | null;
+    }) => connectionSources.filter((source) =>
+      sourceInput.connectionIds.includes(source.connectionId)
+      && (
+        sourceInput.sourceProviderSlugs == null
+        || sourceInput.sourceProviderSlugs.includes(source.sourceProviderSlug)
+      )
+    )),
     materializeDurableConnectionRecord: vi.fn(async (record: ReturnType<typeof buildHostedRecord>) =>
       buildPublicConnection({
         ...record,
@@ -303,6 +372,7 @@ function createAuthorityHarness(input: {
       },
     },
     syncDurableConnectionState,
+    readRuntimeConnectionSecretMaterial,
     upsertConnectionSource,
     withConnectionMutationLock: vi.fn(async (
       _connectionId: string,
@@ -323,6 +393,7 @@ function createAuthorityHarness(input: {
       return currentStoredAccount;
     },
     persistStoredConnectionTokenBundle,
+    readRuntimeConnectionSecretMaterial,
     store,
     syncDurableConnectionState,
     upsertConnectionSource,
@@ -2651,7 +2722,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     })).rejects.toBe(storageError);
   });
 
-  it("reads a tokenless hosted snapshot from the durable external account binding", async () => {
+  it("reads 32 redacted hosted rows without selecting or opening device secrets", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
         externalAccountId: null,
@@ -2661,12 +2732,19 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     const { readHostedDeviceSyncRuntimeState } = await import(
       "@/src/lib/device-sync/hosted-runtime-authority"
     );
+    const records = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT },
+      (_, index) => buildHostedRecord({
+        accessTokenEncrypted: `encrypted-access-token-${index}`,
+        externalAccountId: null,
+        externalAccountIdEncrypted: `encrypted-external-account-id-${index}`,
+        id: `conn_${String(index + 1).padStart(2, "0")}`,
+        refreshTokenEncrypted: `encrypted-refresh-token-${index}`,
+        updatedAt: new Date(Date.parse("2026-04-06T12:00:00.000Z") - index * 1_000),
+      }),
+    );
 
-    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-    harness.store.materializeDurableConnectionRecord.mockResolvedValue({
-      ...buildPublicConnection(buildHostedRecord()),
-      externalAccountId: "acct_123",
-    });
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
 
     const response = await readHostedDeviceSyncRuntimeState({
       request: new Request("https://example.test/device-sync/runtime/snapshot", {
@@ -2678,29 +2756,40 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       trustedUserId: "user_123",
     });
 
-    expect(harness.store.materializeDurableConnectionRecord).toHaveBeenCalledWith(harness.record);
-    expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
-    expect(harness.store.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
-    expect(harness.store.listConnectionSourcesForConnections).toHaveBeenCalledWith(["conn_123"]);
-    expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
-    expect(mocks.buildHostedPublicDeviceSyncAccount).toHaveBeenCalledWith(
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        fallback: expect.objectContaining({
-          externalAccountId: "acct_123",
-        }),
+        select: { id: true },
       }),
     );
-    expect(response).toMatchObject({
-      connections: [
-        expect.objectContaining({
-          connection: expect.objectContaining({
-            externalAccountId: "acct_123",
-            id: "conn_123",
-          }),
-        }),
-      ],
-      userId: "user_123",
+    const selectedColumns = harness.store.prisma.deviceConnection.findMany.mock.calls[0]?.[0]
+      ?.select as Record<string, unknown>;
+    expect(selectedColumns).not.toHaveProperty("externalAccountIdEncrypted");
+    expect(selectedColumns).not.toHaveProperty("accessTokenEncrypted");
+    expect(selectedColumns).not.toHaveProperty("refreshTokenEncrypted");
+    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
+    expect(harness.store.materializeDurableConnectionRecord).not.toHaveBeenCalled();
+    expect(harness.store.materializeStoredConnectionAccount).not.toHaveBeenCalled();
+    expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
+    expect(harness.store.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
+      connectionIds: records.map((record) => record.id),
+      excludeDisconnected: false,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      sourceProviderSlugs: null,
     });
+    expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
+    expect(response.connections).toHaveLength(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+    );
+    expect(response.connections.every((entry) =>
+      entry.connection.externalAccountId === `opaque:${entry.connection.id}`
+    )).toBe(true);
+    expect(response.nextCursor).toBeNull();
+    expect(response.userId).toBe("user_123");
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain("encrypted-external-account-id");
+    expect(serialized).not.toContain("encrypted-access-token");
+    expect(serialized).not.toContain("encrypted-refresh-token");
   });
 
   it("uses one set-based source read and no connection re-reads for unscoped snapshots", async () => {
@@ -2727,10 +2816,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     }));
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
-    harness.store.materializeStoredConnectionAccount.mockImplementation(async (record) =>
-      buildStoredAccount(record)
-    );
-    harness.store.listConnectionSourcesForConnections.mockResolvedValue(sources);
+    harness.store.listBoundedConnectionSourcesForConnections.mockResolvedValue(sources);
 
     const response = await readHostedDeviceSyncRuntimeState({
       request: new Request("https://example.test/device-sync/runtime/snapshot", {
@@ -2743,17 +2829,20 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
 
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledTimes(1);
-    expect(harness.store.listConnectionSourcesForConnections).toHaveBeenCalledTimes(1);
-    expect(harness.store.listConnectionSourcesForConnections).toHaveBeenCalledWith([
-      "conn_a",
-      "conn_b",
-      "conn_c",
-    ]);
-    expect(harness.store.materializeStoredConnectionAccount).toHaveBeenCalledTimes(3);
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledTimes(1);
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
+      connectionIds: ["conn_a", "conn_b", "conn_c"],
+      excludeDisconnected: false,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      sourceProviderSlugs: null,
+    });
+    expect(harness.store.materializeStoredConnectionAccount).not.toHaveBeenCalled();
+    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
     expect(harness.store.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
     expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
     expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
     expect(harness.store.listRuntimeSnapshotConnectionSources).not.toHaveBeenCalled();
+    expect(harness.store.listConnectionSourcesForConnections).not.toHaveBeenCalled();
     expect(response.connections).toHaveLength(3);
     expect(response.connections.map((connection) => ({
       connectionId: connection.connection.id,
@@ -2765,6 +2854,90 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       { connectionId: "conn_b", sourceProviderSlugs: ["source_2"] },
       { connectionId: "conn_c", sourceProviderSlugs: ["source_3"] },
     ]);
+  });
+
+  it("uses a hard 32-row stable keyset page regardless of the caller limit", async () => {
+    const harness = createAuthorityHarness();
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    const baseTime = Date.parse("2026-04-06T12:00:00.000Z");
+    const records = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 1 },
+      (_, index) => buildHostedRecord({
+        id: `conn_${String(32 - index).padStart(3, "0")}`,
+        updatedAt: new Date(baseTime - Math.max(0, index - 1) * 1_000),
+      }),
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValueOnce(records);
+
+    const firstPage = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          limit: 10_000,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(firstPage.connections).toHaveLength(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+    );
+    expect(firstPage.connections.map((entry) => entry.connection.id)).toEqual(
+      records.slice(0, 32).map((record) => record.id),
+    );
+    expect(firstPage.nextCursor).toEqual({
+      id: records[31]!.id,
+      updatedAt: (records[31]!.updatedAt as Date).toISOString(),
+    });
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        take: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 1,
+        where: expect.objectContaining({
+          userId: "user_123",
+        }),
+      }),
+    );
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValueOnce([records[32]!]);
+    const secondPage = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          cursor: firstPage.nextCursor,
+          limit: 10_000,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(secondPage.connections.map((entry) => entry.connection.id)).toEqual([
+      records[32]!.id,
+    ]);
+    expect(secondPage.nextCursor).toBeNull();
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        take: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 1,
+        where: expect.objectContaining({
+          AND: [{
+            OR: [
+              { updatedAt: { lt: new Date(firstPage.nextCursor!.updatedAt) } },
+              {
+                id: { lt: firstPage.nextCursor!.id },
+                updatedAt: new Date(firstPage.nextCursor!.updatedAt),
+              },
+            ],
+          }],
+          userId: "user_123",
+        }),
+      }),
+    );
   });
 
   it("filters hosted snapshots by direct providers and aggregator-backed source aliases", async () => {
@@ -2790,7 +2963,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        take: 4,
+        take: 5,
         where: expect.objectContaining({
           OR: [
             { provider: { in: ["whoop", "whoop_v2", "whoop-v2"] } },
@@ -2856,11 +3029,13 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       trustedUserId: "user_123",
     });
 
-    expect(harness.store.listRuntimeSnapshotConnectionSources).toHaveBeenCalledWith({
-      connectionId: "conn_123",
-      limit: 4,
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
+      connectionIds: ["conn_123"],
+      excludeDisconnected: true,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
       sourceProviderSlugs: ["whoop", "whoop_v2", "whoop-v2"],
     });
+    expect(harness.store.listRuntimeSnapshotConnectionSources).not.toHaveBeenCalled();
     expect(harness.store.listConnectionSourcesForConnections).not.toHaveBeenCalled();
     expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
     expect(response.connections[0]?.sources).toEqual([
@@ -2924,6 +3099,13 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
     expect(JSON.stringify(tokenlessResponse)).not.toContain("stored-access-token");
     expect(JSON.stringify(tokenlessResponse)).not.toContain("stored-refresh-token");
+    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        select: { id: true },
+      }),
+    );
 
     const runtimeResponse = await readHostedDeviceSyncRuntimeState({
       request: new Request("https://example.test/device-sync/runtime/snapshot", {
@@ -2943,6 +3125,44 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         refreshToken: "stored-refresh-token",
       },
     });
+    expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        select: {
+          accessTokenEncrypted: true,
+          externalAccountIdEncrypted: true,
+          refreshTokenEncrypted: true,
+        },
+      }),
+    );
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledTimes(1);
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledWith({
+      records: [harness.record],
+      tokenConnectionIds: new Set(["conn_123"]),
+    });
+    expect(harness.store.materializeDurableConnectionRecord).not.toHaveBeenCalled();
+    expect(harness.store.materializeStoredConnectionAccount).not.toHaveBeenCalled();
+  });
+
+  it("propagates runtime device-secret outages instead of converting them to reauthorization", async () => {
+    const harness = createAuthorityHarness();
+    const secretError = new Error("kms unavailable");
+    harness.readRuntimeConnectionSecretMaterial.mockRejectedValue(secretError);
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    await expect(readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).rejects.toBe(secretError);
   });
 
   it("withholds runtime OAuth material while a refresh lease covers the current token", async () => {
@@ -3043,13 +3263,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-    harness.store.materializeDurableConnectionRecord.mockResolvedValue({
-      ...buildPublicConnection(buildHostedRecord({
-        provider: "junction",
-      })),
-      externalAccountId: "junction-user-123",
-    });
-
     const response = await readHostedDeviceSyncRuntimeState({
       request: new Request("https://example.test/device-sync/runtime/snapshot", {
         body: JSON.stringify({
@@ -3063,7 +3276,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(response.connections[0]).not.toHaveProperty("tokenBundle");
     expect(response.connections[0]).toMatchObject({
       connection: expect.objectContaining({
-        externalAccountId: "junction-user-123",
+        externalAccountId: "opaque:conn_123",
         provider: "junction",
         setupExpiresAt: "2026-04-06T09:30:00.000Z",
         setupPhase: "pending_link",

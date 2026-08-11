@@ -5544,6 +5544,49 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("forwards hosted device-sync snapshot cursors without owning pagination policy", async () => {
+    const cursor = {
+      id: "conn_032",
+      updatedAt: "2026-08-11T12:00:00.000Z",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      await expect(request.json()).resolves.toEqual({
+        cursor,
+        includeCredentialMaterial: true,
+        limit: 32,
+        userId: "member_123",
+      });
+      return new Response(JSON.stringify({
+        connections: [],
+        generatedAt: "2026-08-11T12:01:00.000Z",
+        nextCursor: null,
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.deviceSyncPort!.fetchSnapshot({
+      cursor,
+      includeCredentialMaterial: true,
+      limit: 32,
+    })).resolves.toMatchObject({ nextCursor: null });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("records hosted usage through the signed web callback seam", async () => {
     const usageRecord = createAssistantUsageRecord();
     const noticeDeliveryTarget = {

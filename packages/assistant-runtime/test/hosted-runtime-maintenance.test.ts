@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   createIntegratedVaultServices: vi.fn(),
   detectWearableStorageMigrationCandidates: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot: vi.fn(),
   initInboxRuntime: vi.fn(),
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
@@ -84,6 +85,8 @@ vi.mock("@murphai/core", () => ({
 }));
 
 vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot:
+    mocks.fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   promoteHostedCompletedDirtyPayloadAcks:
     mocks.promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState:
@@ -238,6 +241,13 @@ beforeEach(async () => {
   mocks.closeHostedRuntimeDeviceSyncService.mockImplementation((service: { close?: () => void }) => {
     service.close?.();
   });
+  mocks.fetchCompleteHostedDeviceSyncRuntimeSnapshot.mockImplementation(async (input: {
+    deviceSyncPort: ReturnType<typeof createMaintenanceDeviceSyncPortStub>;
+    signal: AbortSignal | null;
+  }) => input.deviceSyncPort.fetchSnapshot({
+    includeCredentialMaterial: true,
+    signal: input.signal,
+  }));
   mocks.initInboxRuntime.mockResolvedValue({
     configPath: ".runtime/operations/inbox/config.json",
     createdPaths: [],

@@ -36,6 +36,8 @@ import {
 
 /** The companion app's only device-sync provider. */
 export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
+/** Maximum member-owned connections one companion status read may inspect. */
+export const COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT = 32;
 /** Canonical connection-source slug for the companion's Apple Health SDK lane. */
 export const COMPANION_APPLE_HEALTH_SOURCE_PROVIDER = "apple_health_kit";
 export const COMPANION_HRV_SOURCE_PROVIDER = JUNCTION_COMPANION_HRV_SOURCE_PROVIDER;
@@ -566,21 +568,30 @@ export async function readCompanionDeviceSyncStatus(input: {
   const sourceProviderSlug = input.sourceProviderSlug
     ? normalizeJunctionProviderSlug(input.sourceProviderSlug)
     : null;
-  const connections = (await input.store.listConnectionsForUser(input.memberId)).filter(
-    (connection) =>
-      connection.provider === COMPANION_DEVICE_SYNC_PROVIDER
-      && (
-        sourceProviderSlug === null
-          ? connection.status !== "disconnected"
-          : connection.status === "active"
-      ),
-  );
+  const connections = await input.store.listMemberConnectionStatuses({
+    limit: COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
+    provider: COMPANION_DEVICE_SYNC_PROVIDER,
+    status: sourceProviderSlug === null ? "not_disconnected" : "active",
+    userId: input.memberId,
+  });
+  const projectedSources = await input.store.listBoundedConnectionSourcesForConnections({
+    connectionIds: connections.map((connection) => connection.id),
+    excludeDisconnected: false,
+    limitPerConnection: COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
+    sourceProviderSlugs: null,
+  });
+  const sourcesByConnectionId = new Map<string, typeof projectedSources>();
+  for (const source of projectedSources) {
+    const sources = sourcesByConnectionId.get(source.connectionId) ?? [];
+    sources.push(source);
+    sourcesByConnectionId.set(source.connectionId, sources);
+  }
 
   const resources: Record<string, CompanionDeviceSyncResourceStatus> = {};
   const sourceReceiptCutoffs = new Map<string, string | null>();
 
   for (const connection of connections) {
-    const sources = await input.store.listConnectionSources(connection.id);
+    const sources = sourcesByConnectionId.get(connection.id) ?? [];
 
     if (sourceProviderSlug !== null) {
       const matchingSources = sources.filter(

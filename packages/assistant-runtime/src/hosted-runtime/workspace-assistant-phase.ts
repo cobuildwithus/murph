@@ -94,6 +94,9 @@ import {
   listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/connect-config";
 import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+} from "@murphai/device-syncd/hosted-runtime";
+import {
   type AssistantCurrentDeliveryRoute,
   getAssistantAutomationRouteDeliverabilityIssue,
   normalizeAssistantRouteString,
@@ -8488,6 +8491,7 @@ function resolveHostedWorkspaceDeviceTool(input: {
         const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
         const snapshot = await deviceSyncPort.fetchSnapshot({
           includeCredentialMaterial: false,
+          limit: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
           ...(provider ? { provider } : {}),
           signal: context?.signal ?? null,
           ...(sourceProvider ? { sourceProviderSlug: sourceProvider } : {}),

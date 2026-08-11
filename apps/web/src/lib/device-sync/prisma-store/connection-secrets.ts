@@ -1,8 +1,10 @@
 import {
   openHostedUserSecureBoxString,
+  openHostedUserSecureBoxStrings,
   sealHostedUserSecureBoxString,
   type HostedSecureBoxPrismaClient,
 } from "../../hosted-crypto/secure-box";
+import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import { maybeIsoTimestamp, normalizeNullableString } from "../shared";
 import {
   normalizeHostedDeviceSyncCredentialKind,
@@ -34,6 +36,11 @@ export type HostedStoredConnectionTokenBundle = {
   refreshToken: string | null;
   tokenVersion: number;
 };
+
+export interface HostedRuntimeConnectionSecretMaterial {
+  externalAccountId: string | null;
+  tokenBundle: HostedStoredConnectionTokenBundle | null;
+}
 
 export async function encryptHostedConnectionSecret(input: {
   connectionId: string;
@@ -145,6 +152,156 @@ export async function readHostedStoredExternalAccountId(
   });
 }
 
+/**
+ * Opens one runtime page's device secrets as two lane-aware secure-box sets.
+ * Only connections whose token material can be emitted are admitted to the
+ * token set; redacted, terminal, leased, and application-blocked rows never
+ * have token ciphertext opened. The existing request-scoped root memo keeps
+ * the two lane opens on one root-metadata read without introducing durable or
+ * process-global cache state.
+ */
+export async function readHostedRuntimeConnectionSecretMaterial(input: {
+  prisma?: HostedSecureBoxPrismaClient;
+  records: readonly HostedConnectionRecord[];
+  testCodec?: HostedDeviceSyncSecretTestCodec | null;
+  tokenConnectionIds: ReadonlySet<string>;
+}): Promise<Map<string, HostedRuntimeConnectionSecretMaterial>> {
+  const testCodec = normalizeHostedDeviceSyncSecretTestCodec(input.testCodec);
+  const recordsById = new Map(input.records.map((record) => [record.id, record] as const));
+  for (const connectionId of input.tokenConnectionIds) {
+    if (!recordsById.has(connectionId)) {
+      throw new TypeError("Hosted device-sync runtime token projection referenced an unknown connection.");
+    }
+  }
+
+  const tokenEntries: Array<{
+    connectionId: string;
+    field: "accessToken" | "refreshToken";
+    value: string;
+  }> = [];
+  for (const record of input.records) {
+    if (record.status === "active" && !normalizeNullableString(record.externalAccountIdEncrypted)) {
+      throw new TypeError("Hosted active device-sync connection is missing its external account identity.");
+    }
+    if (!input.tokenConnectionIds.has(record.id)) {
+      continue;
+    }
+    if (normalizeHostedDeviceSyncCredentialKind(record.credentialKind) !== "oauth_tokens") {
+      throw new TypeError("Hosted device-sync runtime token projection requires OAuth credentials.");
+    }
+    requireHostedRuntimeTokenVersion(record.tokenVersion);
+    const accessTokenEncrypted = normalizeNullableString(record.accessTokenEncrypted);
+    if (!accessTokenEncrypted) {
+      throw new TypeError("Hosted device-sync runtime OAuth credential is missing its access token.");
+    }
+    tokenEntries.push({
+      connectionId: record.id,
+      field: "accessToken",
+      value: accessTokenEncrypted,
+    });
+    const refreshTokenEncrypted = normalizeNullableString(record.refreshTokenEncrypted);
+    if (refreshTokenEncrypted) {
+      tokenEntries.push({
+        connectionId: record.id,
+        field: "refreshToken",
+        value: refreshTokenEncrypted,
+      });
+    }
+  }
+
+  const read = async (): Promise<Map<string, HostedRuntimeConnectionSecretMaterial>> => {
+    const externalAccountIds = testCodec
+      ? input.records.map((record) => {
+          const encrypted = normalizeNullableString(record.externalAccountIdEncrypted);
+          return encrypted ? testCodec.decrypt(encrypted) : null;
+        })
+      : await openHostedUserSecureBoxStrings({
+          entries: input.records.map((record) => ({
+            aad: buildHostedDeviceSyncSecretAad({
+              connectionId: record.id,
+              field: "externalAccountId",
+              provider: record.provider,
+              purpose: "device-sync-external-account-id",
+              tokenVersion: null,
+            }),
+            scope: `device-sync-external-account-id:${record.id}`,
+            userId: record.userId,
+            value: record.externalAccountIdEncrypted,
+          })),
+          lane: "device-sync-external-account-id",
+          prisma: input.prisma,
+        });
+
+    const tokenPlaintexts = testCodec
+      ? tokenEntries.map((entry) => testCodec.decrypt(entry.value))
+      : await openHostedUserSecureBoxStrings({
+          entries: tokenEntries.map((entry) => {
+            const record = recordsById.get(entry.connectionId)!;
+            const tokenVersion = requireHostedRuntimeTokenVersion(record.tokenVersion);
+            const purpose = entry.field === "accessToken"
+              ? "device-sync-access-token"
+              : "device-sync-refresh-token";
+            return {
+              aad: buildHostedDeviceSyncSecretAad({
+                connectionId: record.id,
+                field: entry.field,
+                provider: record.provider,
+                purpose,
+                tokenVersion,
+              }),
+              scope: `device-sync-token:${record.id}:${entry.field}`,
+              userId: record.userId,
+              value: entry.value,
+            };
+          }),
+          lane: "device-sync-token",
+          prisma: input.prisma,
+        });
+
+    const tokensByConnectionId = new Map<
+      string,
+      { accessToken: string | null; refreshToken: string | null }
+    >();
+    tokenEntries.forEach((entry, index) => {
+      const plaintext = tokenPlaintexts[index];
+      if (plaintext === null) {
+        throw new TypeError("Hosted device-sync secure-box decryption returned an empty plaintext.");
+      }
+      const values = tokensByConnectionId.get(entry.connectionId) ?? {
+        accessToken: null,
+        refreshToken: null,
+      };
+      values[entry.field] = plaintext;
+      tokensByConnectionId.set(entry.connectionId, values);
+    });
+
+    const material = new Map<string, HostedRuntimeConnectionSecretMaterial>();
+    input.records.forEach((record, index) => {
+      const externalAccountId = externalAccountIds[index] ?? null;
+      if (record.status === "active" && !externalAccountId) {
+        throw new TypeError("Hosted active device-sync connection is missing its external account identity.");
+      }
+      const tokens = tokensByConnectionId.get(record.id);
+      material.set(record.id, {
+        externalAccountId,
+        tokenBundle: input.tokenConnectionIds.has(record.id)
+          ? {
+              accessToken: requireHostedRuntimeTokenPlaintext(tokens?.accessToken, "access token"),
+              accessTokenExpiresAt: maybeIsoTimestamp(record.accessTokenExpiresAt),
+              keyVersion: normalizeNullableString(record.keyVersion)
+                ?? HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
+              refreshToken: tokens?.refreshToken ?? null,
+              tokenVersion: requireHostedRuntimeTokenVersion(record.tokenVersion),
+            }
+          : null,
+      });
+    });
+    return material;
+  };
+
+  return testCodec ? read() : runWithHostedDomainRootUnwrapCache(read);
+}
+
 function normalizeHostedDeviceSyncSecretTestCodec(
   codec: HostedDeviceSyncSecretTestCodec | null | undefined,
 ): HostedDeviceSyncSecretTestCodec | null {
@@ -157,6 +314,23 @@ function normalizeHostedDeviceSyncSecretTestCodec(
   }
 
   return codec;
+}
+
+function requireHostedRuntimeTokenVersion(value: number | null): number {
+  if (!Number.isInteger(value) || (value ?? 0) <= 0) {
+    throw new TypeError("Hosted device-sync tokenVersion must be a positive integer.");
+  }
+  return value as number;
+}
+
+function requireHostedRuntimeTokenPlaintext(
+  value: string | null | undefined,
+  label: string,
+): string {
+  if (value === null || value === undefined || value.length === 0) {
+    throw new TypeError(`Hosted device-sync runtime OAuth credential is missing its ${label}.`);
+  }
+  return value;
 }
 
 async function decryptHostedConnectionSecret(input: {

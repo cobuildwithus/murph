@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   isDeviceSyncDisconnectInProgress,
@@ -11,6 +11,7 @@ import type {
 } from "@murphai/device-syncd/config";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeHostedDeviceSyncConnectionMetadata,
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
@@ -55,10 +56,14 @@ import {
 import { buildStoredTokenBundle } from "./agent-session-token-bundle";
 import {
   hostedConnectionRecordArgs,
+  hostedRuntimeRedactedConnectionRecordArgs,
   type HostedDeviceSyncDirtyConnectionRecord,
   type HostedDeviceConnectionSource,
   mapHostedConnectionRecord,
+  mapHostedRuntimeRedactedConnectionRecord,
   type HostedConnectionRecord,
+  type HostedRuntimeConnectionRecord,
+  type HostedRuntimeRedactedConnectionRecord,
   type HostedPrismaTransactionClient,
   type HostedStoredDeviceSyncAccount,
 } from "./prisma-store";
@@ -103,7 +108,6 @@ export async function readHostedDeviceSyncRuntimeState(input: {
   const providerKeys = resolveDeviceProviderMatchKeys(parsed.provider);
   const sourceProviderKeys = resolveDeviceProviderMatchKeys(parsed.sourceProviderSlug);
   const boundedSourceProviderKeys = sourceProviderKeys.length > 0 ? sourceProviderKeys : providerKeys;
-  const boundedSourceLimit = parsed.limit ?? null;
   const explicitBlankFilter = (
     parsed.provider !== undefined && parsed.provider !== null && providerKeys.length === 0
   ) || (
@@ -111,10 +115,32 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     && parsed.sourceProviderSlug !== null
     && sourceProviderKeys.length === 0
   );
-  const records = await controlPlane.store.prisma.deviceConnection.findMany({
+  const pageLimit = parsed.connectionId
+    ? 1
+    : Math.min(
+        parsed.limit ?? HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+        HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      );
+  const andFilters: Prisma.DeviceConnectionWhereInput[] = [];
+  if (explicitBlankFilter) {
+    andFilters.push({ id: { in: [] } });
+  }
+  if (parsed.cursor && !parsed.connectionId) {
+    const cursorUpdatedAt = new Date(parsed.cursor.updatedAt);
+    andFilters.push({
+      OR: [
+        { updatedAt: { lt: cursorUpdatedAt } },
+        {
+          id: { lt: parsed.cursor.id },
+          updatedAt: cursorUpdatedAt,
+        },
+      ],
+    });
+  }
+  const connectionQuery = {
     where: {
       userId: input.trustedUserId,
-      ...(explicitBlankFilter ? { AND: [{ id: { in: [] } }] } : {}),
+      ...(andFilters.length > 0 ? { AND: andFilters } : {}),
       ...(parsed.connectionId ? { id: parsed.connectionId } : {}),
       ...(providerKeys.length > 0
         ? {
@@ -147,9 +173,19 @@ export async function readHostedDeviceSyncRuntimeState(input: {
         : {}),
     },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    ...(parsed.limit ? { take: parsed.limit } : {}),
-    ...hostedConnectionRecordArgs,
-  });
+    take: pageLimit + 1,
+  } satisfies Prisma.DeviceConnectionFindManyArgs;
+  const collectedRecords: HostedRuntimeConnectionRecord[] = parsed.includeCredentialMaterial
+    ? await controlPlane.store.prisma.deviceConnection.findMany({
+        ...connectionQuery,
+        ...hostedConnectionRecordArgs,
+      })
+    : await controlPlane.store.prisma.deviceConnection.findMany({
+        ...connectionQuery,
+        ...hostedRuntimeRedactedConnectionRecordArgs,
+      });
+  const hasNextPage = !parsed.connectionId && collectedRecords.length > pageLimit;
+  const records = collectedRecords.slice(0, pageLimit);
 
   const providerApplicationRuntime = await resolveHostedRuntimeProviderApplications({
     includeCredentialMaterial: parsed.includeCredentialMaterial,
@@ -158,41 +194,55 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     userId: input.trustedUserId,
   });
 
-  const useBoundedSourceProjection = boundedSourceLimit !== null
-    && boundedSourceProviderKeys.length > 0;
-  const unboundedSources = useBoundedSourceProjection
-    ? []
-    : await controlPlane.store.listConnectionSourcesForConnections(
-        records.map((record) => record.id),
-      );
-  const unboundedSourcesByConnectionId = new Map<string, HostedDeviceConnectionSource[]>();
-  for (const source of unboundedSources) {
-    const sources = unboundedSourcesByConnectionId.get(source.connectionId) ?? [];
+  const sourceProjectionFiltered = boundedSourceProviderKeys.length > 0;
+  const projectedSources = await controlPlane.store
+    .listBoundedConnectionSourcesForConnections({
+      connectionIds: records.map((record) => record.id),
+      excludeDisconnected: sourceProjectionFiltered,
+      limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      sourceProviderSlugs: sourceProjectionFiltered ? boundedSourceProviderKeys : null,
+    });
+  const sourcesByConnectionId = new Map<string, HostedDeviceConnectionSource[]>();
+  for (const source of projectedSources) {
+    const sources = sourcesByConnectionId.get(source.connectionId) ?? [];
     sources.push(source);
-    unboundedSourcesByConnectionId.set(source.connectionId, sources);
+    sourcesByConnectionId.set(source.connectionId, sources);
   }
 
-  // Account materialization may decrypt credential material, so keep records
-  // sequential without re-reading the connection rows already selected above.
+  const tokenConnectionIds = new Set<string>();
+  if (parsed.includeCredentialMaterial) {
+    for (const record of records as HostedConnectionRecord[]) {
+      if (
+        record.credentialKind === "oauth_tokens"
+        && record.status === "active"
+        && !providerApplicationRuntime.blockedConnectionIds.has(record.id)
+        && !hasHostedRuntimeRefreshLeaseForTokenVersion(record, record.tokenVersion)
+      ) {
+        tokenConnectionIds.add(record.id);
+      }
+    }
+  }
+  const secretMaterial = parsed.includeCredentialMaterial
+    ? await controlPlane.store.readRuntimeConnectionSecretMaterial({
+        records: records as HostedConnectionRecord[],
+        tokenConnectionIds,
+      })
+    : new Map();
+
   const connections: HostedRuntimeConnectionSnapshot[] = [];
   for (const record of records) {
-    const storedAccount = await controlPlane.store.materializeStoredConnectionAccount(record);
-    const durableConnection = storedAccount
-      ? null
-      : await controlPlane.store.materializeDurableConnectionRecord(record);
-    const sources = useBoundedSourceProjection && boundedSourceLimit !== null
-      ? await controlPlane.store.listRuntimeSnapshotConnectionSources({
-          connectionId: record.id,
-          limit: boundedSourceLimit,
-          sourceProviderSlugs: boundedSourceProviderKeys,
-        })
-      : unboundedSourcesByConnectionId.get(record.id) ?? [];
-
-    connections.push(buildHostedRuntimeConnectionSnapshot(
+    const mappedRecord = parsed.includeCredentialMaterial
+      ? mapHostedConnectionRecord(record as HostedConnectionRecord)
+      : mapHostedRuntimeRedactedConnectionRecord(
+          record as HostedRuntimeRedactedConnectionRecord,
+        );
+    const material = secretMaterial.get(record.id) ?? null;
+    connections.push(buildHostedRuntimeProjectedConnectionSnapshot(
       record,
-      storedAccount,
-      storedAccount?.externalAccountId ?? durableConnection?.externalAccountId ?? null,
-      sources.map(toHostedRuntimeConnectionSourceSnapshot),
+      mappedRecord,
+      material?.externalAccountId ?? null,
+      material?.tokenBundle ?? null,
+      sourcesByConnectionId.get(record.id)?.map(toHostedRuntimeConnectionSourceSnapshot) ?? [],
       {
         forceReauthorizationRequired:
           providerApplicationRuntime.blockedConnectionIds.has(record.id),
@@ -207,6 +257,12 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     },
     connections: sortHostedRuntimeConnectionSnapshots(connections),
     generatedAt: new Date().toISOString(),
+    nextCursor: hasNextPage
+      ? {
+          id: records.at(-1)!.id,
+          updatedAt: records.at(-1)!.updatedAt.toISOString(),
+        }
+      : null,
     ...(Object.keys(providerApplicationRuntime.providerConfigs).length > 0
       ? { providerConfigs: providerApplicationRuntime.providerConfigs }
       : {}),
@@ -648,7 +704,7 @@ async function hasPendingHostedDeviceSyncDirtyWorkAfterStagedAcks(input: {
 }
 
 async function isHostedProviderApplicationBindingCurrent(input: {
-  record: HostedConnectionRecord;
+  record: HostedRuntimeConnectionRecord;
   tx: HostedPrismaTransactionClient | PrismaClient;
   userId: string;
 }): Promise<boolean> {
@@ -687,7 +743,7 @@ interface HostedRuntimeProviderApplicationResolution {
 async function resolveHostedRuntimeProviderApplications(input: {
   includeCredentialMaterial: boolean;
   prisma: PrismaClient;
-  records: readonly HostedConnectionRecord[];
+  records: readonly HostedRuntimeConnectionRecord[];
   userId: string;
 }): Promise<HostedRuntimeProviderApplicationResolution> {
   const blockedConnectionIds = new Set<string>();
@@ -819,16 +875,66 @@ function buildHostedRuntimeConnectionSnapshot(
         },
       });
   const storedTokenBundle = buildStoredTokenBundle(storedAccount);
+  return buildHostedRuntimeConnectionSnapshotFromMaterial(
+    record,
+    mappedRecord,
+    publicConnection,
+    storedTokenBundle,
+    sources,
+    options,
+  );
+}
+
+function buildHostedRuntimeProjectedConnectionSnapshot(
+  record: HostedRuntimeConnectionRecord,
+  mappedRecord: HostedStaticDeviceSyncConnectionRecord,
+  externalAccountId: string | null,
+  tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null,
+  sources: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[],
+  options: {
+    forceReauthorizationRequired?: boolean;
+    includeCredentialMaterial: boolean;
+  },
+): HostedRuntimeConnectionSnapshot {
+  mappedRecord.externalAccountId = externalAccountId;
+  return buildHostedRuntimeConnectionSnapshotFromMaterial(
+    record,
+    mappedRecord,
+    buildHostedPublicDeviceSyncAccount({ record: mappedRecord }),
+    tokenBundle,
+    sources,
+    options,
+  );
+}
+
+function buildHostedRuntimeConnectionSnapshotFromMaterial(
+  record: HostedRuntimeConnectionRecord,
+  mappedRecord: HostedStaticDeviceSyncConnectionRecord,
+  publicConnection: PublicDeviceSyncAccount,
+  storedTokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null,
+  sources: HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot[],
+  options: {
+    forceReauthorizationRequired?: boolean;
+    includeCredentialMaterial: boolean;
+  },
+): HostedRuntimeConnectionSnapshot {
   const withholdRuntimeTokenMaterial =
     options.forceReauthorizationRequired === true
-    || shouldWithholdHostedRuntimeTokenMaterial({
-      record,
-      tokenVersion: storedTokenBundle?.tokenVersion ?? null,
-    });
+    || (
+      mappedRecord.credentialKind === "oauth_tokens"
+      && (
+        !storedTokenBundle
+        || shouldWithholdHostedRuntimeTokenMaterial({
+          record,
+          tokenVersion: storedTokenBundle.tokenVersion,
+        })
+      )
+    );
   const credential = buildHostedRuntimeCredentialSnapshot({
     includeCredentialMaterial: options.includeCredentialMaterial && !withholdRuntimeTokenMaterial,
     record: mappedRecord,
-    storedAccount,
+    tokenBundle: storedTokenBundle,
+    tokenVersion: typeof record.tokenVersion === "number" ? record.tokenVersion : null,
     withholdTokenMaterial: options.includeCredentialMaterial && withholdRuntimeTokenMaterial,
   });
   return {
@@ -1213,30 +1319,29 @@ function sortHostedRuntimeConnectionSnapshots(
   return [...connections].sort((left, right) => {
     const leftUpdatedAt = left.connection.updatedAt ?? left.connection.createdAt;
     const rightUpdatedAt = right.connection.updatedAt ?? right.connection.createdAt;
-    return rightUpdatedAt.localeCompare(leftUpdatedAt) || left.connection.id.localeCompare(right.connection.id);
+    return rightUpdatedAt.localeCompare(leftUpdatedAt) || right.connection.id.localeCompare(left.connection.id);
   });
 }
 
 function buildHostedRuntimeCredentialSnapshot(input: {
   includeCredentialMaterial: boolean;
   record: HostedStaticDeviceSyncConnectionRecord;
-  storedAccount: HostedStoredDeviceSyncAccount | null;
+  tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
+  tokenVersion: number | null;
   withholdTokenMaterial?: boolean;
 }): HostedExecutionDeviceSyncRuntimeCredentialSnapshot {
-  const storedTokenBundle = buildStoredTokenBundle(input.storedAccount);
-
-  if (storedTokenBundle && input.withholdTokenMaterial === true) {
+  if (input.record.credentialKind === "oauth_tokens" && input.withholdTokenMaterial === true) {
     return {
       credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(input.record.credentialMetadata),
       kind: "oauth_tokens_redacted",
-      tokenVersion: storedTokenBundle.tokenVersion,
+      tokenVersion: input.tokenBundle?.tokenVersion ?? input.tokenVersion,
     };
   }
 
-  if (storedTokenBundle && input.includeCredentialMaterial) {
+  if (input.tokenBundle && input.includeCredentialMaterial) {
     return {
       kind: "oauth_tokens",
-      tokenBundle: storedTokenBundle,
+      tokenBundle: input.tokenBundle,
     };
   }
 
@@ -1244,7 +1349,7 @@ function buildHostedRuntimeCredentialSnapshot(input: {
     return {
       credentialMetadata: sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(input.record.credentialMetadata),
       kind: "oauth_tokens_redacted",
-      tokenVersion: storedTokenBundle?.tokenVersion ?? null,
+      tokenVersion: input.tokenBundle?.tokenVersion ?? input.tokenVersion,
     };
   }
 
@@ -1271,7 +1376,7 @@ function buildHostedRuntimeCredentialSnapshot(input: {
 }
 
 function shouldWithholdHostedRuntimeTokenMaterial(input: {
-  record: HostedConnectionRecord;
+  record: HostedRuntimeConnectionRecord;
   tokenVersion: number | null;
 }): boolean {
   if (input.tokenVersion === null || input.record.status !== "active") {
@@ -1708,7 +1813,7 @@ async function persistHostedRuntimeCredentialSnapshot(input: {
 }
 
 function hasHostedRuntimeRefreshLeaseForTokenVersion(
-  record: HostedConnectionRecord,
+  record: HostedRuntimeConnectionRecord,
   tokenVersion: number | null,
 ): boolean {
   return Boolean(typeof tokenVersion === "number"

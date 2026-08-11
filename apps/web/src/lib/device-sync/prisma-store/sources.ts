@@ -1,9 +1,10 @@
-import { PrismaClient, type Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
 } from "@murphai/device-syncd/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 
 import {
   generateHostedRandomPrefixedId,
@@ -90,6 +91,18 @@ export interface ListHostedRuntimeSnapshotConnectionSourcesInput {
   sourceProviderSlugs: readonly string[];
   tx?: HostedPrismaTransactionClient;
 }
+
+export interface ListHostedBoundedConnectionSourcesForConnectionsInput {
+  connectionIds: readonly string[];
+  excludeDisconnected?: boolean;
+  limitPerConnection?: number;
+  sourceProviderSlugs?: readonly string[] | null;
+  tx?: HostedPrismaTransactionClient;
+}
+
+type HostedBoundedConnectionSourceRecord = HostedConnectionSourceRecord & {
+  projectionRowNumber: bigint | number;
+};
 
 const SAFE_SOURCE_INSTANCE_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
 const SAFE_SOURCE_PROVIDER_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
@@ -328,6 +341,89 @@ export class PrismaHostedConnectionSourceStore {
       take: requireSourceProjectionLimit(input.limit),
       ...hostedConnectionSourceRecordArgs,
     });
+
+    return records.map(mapHostedConnectionSourceRecord);
+  }
+
+  async listBoundedConnectionSourcesForConnections(
+    input: ListHostedBoundedConnectionSourcesForConnectionsInput,
+  ): Promise<HostedDeviceConnectionSource[]> {
+    const prisma = input.tx ?? this.prisma;
+    const connectionIds = [...new Set(input.connectionIds.map(requireConnectionId))];
+    if (connectionIds.length === 0) {
+      return [];
+    }
+    const requestedLimit = input.limitPerConnection
+      ?? HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT;
+    const limitPerConnection = Math.min(
+      requireSourceProjectionLimit(requestedLimit),
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+    );
+    const sourceProviderSlugs = input.sourceProviderSlugs == null
+      ? null
+      : normalizeSourceProviderSlugList(input.sourceProviderSlugs);
+    if (sourceProviderSlugs !== null && sourceProviderSlugs.length === 0) {
+      return [];
+    }
+    const sourceFilter = sourceProviderSlugs === null
+      ? Prisma.empty
+      : Prisma.sql`AND source_provider_slug IN (${Prisma.join(sourceProviderSlugs)})`;
+    const statusFilter = input.excludeDisconnected === true
+      ? Prisma.sql`AND status <> 'disconnected'`
+      : Prisma.empty;
+    const records = await prisma.$queryRaw<HostedBoundedConnectionSourceRecord[]>(
+      Prisma.sql`
+        SELECT
+          id,
+          connection_id AS "connectionId",
+          source_instance_key AS "sourceInstanceKey",
+          source_provider_slug AS "sourceProviderSlug",
+          display_name AS "displayName",
+          status,
+          resource_availability_summary_json AS "resourceAvailabilitySummaryJson",
+          last_error_code AS "lastErrorCode",
+          last_error_message AS "lastErrorMessage",
+          first_seen_at AS "firstSeenAt",
+          last_seen_at AS "lastSeenAt",
+          last_data_at AS "lastDataAt",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          "projectionRowNumber"
+        FROM (
+          SELECT
+            source.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY connection_id
+              ORDER BY
+                last_seen_at DESC,
+                source_provider_slug ASC,
+                source_instance_key ASC,
+                id ASC
+            ) AS "projectionRowNumber"
+          FROM device_connection_source AS source
+          WHERE connection_id IN (${Prisma.join(connectionIds)})
+            ${sourceFilter}
+            ${statusFilter}
+        ) AS bounded_source
+        WHERE "projectionRowNumber" <= ${limitPerConnection + 1}
+        ORDER BY
+          connection_id ASC,
+          last_seen_at DESC,
+          source_provider_slug ASC,
+          source_instance_key ASC,
+          id ASC
+      `,
+    );
+
+    const saturatedConnection = records.find(
+      (record) => Number(record.projectionRowNumber) > limitPerConnection,
+    );
+    if (saturatedConnection) {
+      throw sourceContractError(
+        "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
+        `Hosted device connection source authority exceeds the ${limitPerConnection}-row per-connection snapshot bound.`,
+      );
+    }
 
     return records.map(mapHostedConnectionSourceRecord);
   }
