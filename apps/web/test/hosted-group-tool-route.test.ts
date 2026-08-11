@@ -275,6 +275,19 @@ describe("hosted group tool route", () => {
       mailboxItemId: "aask_req_current_sender",
       responseAction: "ask_current_sender",
     },
+    {
+      body: {
+        action: "message_current_sender",
+        origin: {
+          assistantInputId: `ain_${"d".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      expectedUserId: "member-sender",
+      mailboxItemId: "aask_req_private_sender",
+      responseAction: "message_current_sender",
+    },
   ])(
     "does not acknowledge an accepted $responseAction when its durable handoff rejects",
     async ({ body, expectedUserId, mailboxItemId, responseAction }) => {

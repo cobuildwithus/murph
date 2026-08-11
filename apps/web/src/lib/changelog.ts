@@ -69,7 +69,7 @@ const LEGACY_CHANGELOG_EDITIONS = [
     publishedOn: "2026-08-09",
     title: "Referrals, Max, and a more capable Murph",
     summary:
-      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, clearer connection paths, and stronger conversation recovery all landed together.",
+      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, private group follow-ups, clearer connection paths, and stronger conversation recovery all landed together.",
     items: [
       {
         id: "group-sleep-challenges-use-fresh-data",
@@ -77,11 +77,11 @@ const LEGACY_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Group sleep checks use fresh shared data",
         summary:
-          "Murph now checks the current shared sleep record before answering and counts reported Deep and REM sleep as soon as those values are shared.",
+          "Murph now checks the current shared sleep record before answering, counts reported Deep and REM sleep as soon as those values are shared, and includes explicit manual corrections.",
         details:
-          "Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
+          "The latest manual correction for a sleep date wins and is labeled Manual instead of a connected source. Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
         relevanceTags: ["groups", "sleep", "health-data", "connections"],
-        sourcePullRequests: [1565],
+        sourcePullRequests: [1565, 1593],
       },
       {
         id: "public-referral-home",
@@ -161,6 +161,18 @@ const LEGACY_CHANGELOG_EDITIONS = [
           prompt:
             "Start a live workout called Upper Body and help me log each set as I go.",
         },
+      },
+      {
+        id: "private-group-follow-up",
+        kind: "feature",
+        priority: 4,
+        title: "Continue a group question privately",
+        summary:
+          "Ask Murph in a group to continue with you privately, and your personal Murph can send the answer only to your verified direct chat on the same channel.",
+        details:
+          "Murph uses the exact group message author and checks the direct chat before personal work begins. If no eligible direct chat is available, Murph asks you to open one on that channel and retry.",
+        relevanceTags: ["groups", "messaging", "privacy", "assistant"],
+        sourcePullRequests: [1481],
       },
       {
         id: "clearer-health-source-handoffs",

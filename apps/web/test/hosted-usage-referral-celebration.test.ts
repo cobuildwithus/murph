@@ -16,7 +16,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-preferences", () => ({
 }));
 vi.mock(
   "@/src/lib/hosted-routing/assistant-notification-destination",
-  () => ({
+  async (importOriginal) => ({
+    ...await importOriginal<
+      typeof import("@/src/lib/hosted-routing/assistant-notification-destination")
+    >(),
     resolveHostedAssistantNotificationDestination:
       mocks.resolveHostedAssistantNotificationDestination,
   }),

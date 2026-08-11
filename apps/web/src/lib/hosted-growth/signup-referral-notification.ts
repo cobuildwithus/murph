@@ -11,6 +11,7 @@ import {
 } from "../hosted-onboarding/shared";
 import type { HostedWebhookWakeHandoff } from "../hosted-onboarding/webhook-service-types";
 import {
+  bindHostedAssistantNotificationDestination,
   resolveHostedAssistantNotificationDestination,
   type HostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
@@ -127,30 +128,10 @@ export function buildHostedSignupReferralRewardNoticeWake(input: {
   rewardLabel: string;
   rewardedAt: Date;
 }) {
-  const routeAuthority = input.destination.externalThreadRouteAuthority
-    ?? (
-      input.destination.conversationShape === "direct-member"
-        && input.destination.route.channel === "telegram"
-        && input.destination.route.threadIsDirect === true
-        ? {
-            channel: "telegram" as const,
-            containerMemberId: input.beneficiaryMemberId,
-            threadId: input.destination.route.delivery.target,
-          }
-        : null
-    );
-  const route =
-    input.destination.conversationShape === "direct-member"
-    && input.destination.route.channel === "linq"
-    && input.destination.route.delivery.kind === "thread"
-      ? {
-          ...input.destination.route,
-          delivery: {
-            ...input.destination.route.delivery,
-            kind: "explicit" as const,
-          },
-        }
-      : input.destination.route;
+  const boundDestination = bindHostedAssistantNotificationDestination({
+    destination: input.destination,
+    memberId: input.beneficiaryMemberId,
+  });
 
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: `assistant.notification.requested:${input.notificationKey}`,
@@ -159,8 +140,11 @@ export function buildHostedSignupReferralRewardNoticeWake(input: {
       deliveryDedupeToken: input.notificationKey,
       deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: input.notificationKey,
-      ...(routeAuthority
-        ? { externalThreadRouteAuthority: routeAuthority }
+      ...(boundDestination.externalThreadRouteAuthority
+        ? {
+            externalThreadRouteAuthority:
+              boundDestination.externalThreadRouteAuthority,
+          }
         : {}),
       instructions: [
         "Tell the member that someone completed Murph setup through their referral link.",
@@ -172,7 +156,7 @@ export function buildHostedSignupReferralRewardNoticeWake(input: {
         "Do not ask the member to complete another step.",
       ].join(" "),
       responsePolicy: { kind: "require_send" },
-      route,
+      route: boundDestination.route,
     },
     occurredAt: input.rewardedAt.toISOString(),
   });
