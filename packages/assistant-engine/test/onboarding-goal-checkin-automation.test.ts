@@ -3,6 +3,7 @@ import { dirname } from 'node:path'
 
 import {
   initializeVault,
+  loadVault,
   patchAutomation,
   showAutomation,
   upsertAutomation,
@@ -77,6 +78,11 @@ async function createVaultRoot(timezone = 'UTC'): Promise<string> {
   return context.vaultRoot
 }
 
+async function readVaultStableKey(vaultRoot: string): Promise<string> {
+  const vault = await loadVault({ vaultRoot })
+  return vault.metadata.vaultId
+}
+
 describe('post-onboarding support-gap automation', () => {
   it('builds one bounded member-owned check three local days after completion', () => {
     const seed = buildOnboardingGoalCheckinSeed({
@@ -85,11 +91,12 @@ describe('post-onboarding support-gap automation', () => {
         // 00:30 local on March 1, before the US daylight-saving transition.
         completedAt: '2026-03-01T05:30:00.000Z',
       }),
+      stableKey: 'vault-3',
       timeZone: 'America/New_York',
     })
 
     expect(seed).toMatchObject({
-      // March 4 is EST and March 8 is EDT.
+      // March 4 is EST and March 8 is EDT. vault-3 maps to the first slot.
       activeUntil: '2026-03-08T17:30:00.000Z',
       assistantTargetOverride: {
         model: 'gpt-5.6-sol',
@@ -121,15 +128,52 @@ describe('post-onboarding support-gap automation', () => {
     ).toBe('member')
   })
 
-  it('seeds answered onboarding only and rejects invalid timezones', () => {
+  it('stably spreads the 13:30 base across one local hour', () => {
+    const input = {
+      now: new Date('2026-06-02T12:00:00.000Z'),
+      onboardingState: completedOnboardingState(),
+      timeZone: 'UTC',
+    }
+    const first = buildOnboardingGoalCheckinSeed({
+      ...input,
+      stableKey: 'vault-3',
+    })
+    const last = buildOnboardingGoalCheckinSeed({
+      ...input,
+      stableKey: 'vault-37',
+    })
+
+    expect(first).toMatchObject({
+      activeUntil: '2026-06-08T13:30:00.000Z',
+      schedule: {
+        at: '2026-06-04T13:30:00.000Z',
+        kind: 'at',
+      },
+    })
+    expect(last).toMatchObject({
+      activeUntil: '2026-06-08T14:29:00.000Z',
+      schedule: {
+        at: '2026-06-04T14:29:00.000Z',
+        kind: 'at',
+      },
+    })
+    expect(buildOnboardingGoalCheckinSeed({
+      ...input,
+      stableKey: 'vault-37',
+    })).toEqual(last)
+  })
+
+  it('seeds answered onboarding only and rejects invalid schedule inputs', () => {
     expect(buildOnboardingGoalCheckinSeed({
       onboardingState: openOnboardingState(),
+      stableKey: 'vault-3',
       timeZone: 'UTC',
     })).toBeNull()
 
     for (const reason of ['user_declined', 'manual'] as const) {
       expect(buildOnboardingGoalCheckinSeed({
         onboardingState: completedOnboardingState({ reason }),
+        stableKey: 'vault-3',
         timeZone: 'UTC',
       })).toBeNull()
     }
@@ -137,6 +181,7 @@ describe('post-onboarding support-gap automation', () => {
     expect(buildOnboardingGoalCheckinSeed({
       now: new Date('2026-06-02T12:00:00.000Z'),
       onboardingState: completedOnboardingState(),
+      stableKey: 'vault-3',
       timeZone: 'UTC',
     })).toMatchObject({
       activeUntil: '2026-06-08T13:30:00.000Z',
@@ -149,14 +194,22 @@ describe('post-onboarding support-gap automation', () => {
     expect(() => buildOnboardingGoalCheckinSeed({
       now: new Date('2026-06-02T12:00:00.000Z'),
       onboardingState: completedOnboardingState(),
+      stableKey: 'vault-3',
       timeZone: 'not/a-timezone',
     })).toThrow('invalid vault timezone')
+    expect(() => buildOnboardingGoalCheckinSeed({
+      now: new Date('2026-06-02T12:00:00.000Z'),
+      onboardingState: completedOnboardingState(),
+      stableKey: '   ',
+      timeZone: 'UTC',
+    })).toThrow('invalid stable schedule key')
   })
 
   it('uses one bounded daytime catch-up and does not offer stale rollout outreach', () => {
     expect(buildOnboardingGoalCheckinSeed({
       now: new Date('2026-06-04T15:00:00.000Z'),
       onboardingState: completedOnboardingState(),
+      stableKey: 'vault-3',
       timeZone: 'UTC',
     })).toMatchObject({
       activeUntil: '2026-06-08T13:30:00.000Z',
@@ -169,23 +222,33 @@ describe('post-onboarding support-gap automation', () => {
     expect(buildOnboardingGoalCheckinSeed({
       now: new Date('2026-06-08T13:30:00.000Z'),
       onboardingState: completedOnboardingState(),
+      stableKey: 'vault-3',
       timeZone: 'UTC',
     })).toBeNull()
 
     expect(buildOnboardingGoalCheckinSeed({
       now: new Date('2026-07-01T12:00:00.000Z'),
       onboardingState: completedOnboardingState(),
+      stableKey: 'vault-3',
       timeZone: 'UTC',
     })).toBeNull()
   })
 
   it('installs the one-shot idempotently through the managed registry', async () => {
     const vaultRoot = await createVaultRoot('America/New_York')
+    const completedAt = '2026-03-01T05:30:00.000Z'
     await completeAssistantOnboarding({
-      completedAt: '2026-03-01T05:30:00.000Z',
+      completedAt,
       reason: 'user_answered',
       vault: vaultRoot,
     })
+    const expectedSeed = buildOnboardingGoalCheckinSeed({
+      now: new Date('2026-03-02T12:00:00.000Z'),
+      onboardingState: completedOnboardingState({ completedAt }),
+      stableKey: await readVaultStableKey(vaultRoot),
+      timeZone: 'America/New_York',
+    })
+    expect(expectedSeed).not.toBeNull()
 
     await expect(applyMurphManagedAutomations({
       defaultRoute,
@@ -201,12 +264,9 @@ describe('post-onboarding support-gap automation', () => {
       automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toMatchObject({
-      activeUntil: '2026-03-08T17:30:00.000Z',
+      activeUntil: expectedSeed?.activeUntil,
       route: defaultRoute,
-      schedule: {
-        at: '2026-03-04T18:30:00.000Z',
-        kind: 'at',
-      },
+      schedule: expectedSeed?.schedule,
       status: 'active',
       tags: expect.arrayContaining([
         'goal-support',
@@ -229,11 +289,19 @@ describe('post-onboarding support-gap automation', () => {
 
   it('keeps an installed catch-up and its original private route stable', async () => {
     const vaultRoot = await createVaultRoot()
+    const completedAt = '2026-06-01T18:15:00.000Z'
     await completeAssistantOnboarding({
-      completedAt: '2026-06-01T18:15:00.000Z',
+      completedAt,
       reason: 'user_answered',
       vault: vaultRoot,
     })
+    const expectedSeed = buildOnboardingGoalCheckinSeed({
+      now: new Date('2026-06-04T15:00:00.000Z'),
+      onboardingState: completedOnboardingState({ completedAt }),
+      stableKey: await readVaultStableKey(vaultRoot),
+      timeZone: 'UTC',
+    })
+    expect(expectedSeed).not.toBeNull()
 
     await expect(applyMurphManagedAutomations({
       defaultRoute,
@@ -249,10 +317,7 @@ describe('post-onboarding support-gap automation', () => {
       vaultRoot,
     })).resolves.toMatchObject({
       route: defaultRoute,
-      schedule: {
-        at: '2026-06-05T13:30:00.000Z',
-        kind: 'at',
-      },
+      schedule: expectedSeed?.schedule,
     })
 
     const changedDefaultRoute = {
@@ -273,20 +338,25 @@ describe('post-onboarding support-gap automation', () => {
       vaultRoot,
     })).resolves.toMatchObject({
       route: defaultRoute,
-      schedule: {
-        at: '2026-06-05T13:30:00.000Z',
-        kind: 'at',
-      },
+      schedule: expectedSeed?.schedule,
     })
   })
 
   it('retires a superseded active 21-day check instead of sending stale support', async () => {
     const vaultRoot = await createVaultRoot()
+    const completedAt = '2026-06-01T18:15:00.000Z'
     await completeAssistantOnboarding({
-      completedAt: '2026-06-01T18:15:00.000Z',
+      completedAt,
       reason: 'user_answered',
       vault: vaultRoot,
     })
+    const expectedSeed = buildOnboardingGoalCheckinSeed({
+      now: new Date('2026-06-02T12:00:00.000Z'),
+      onboardingState: completedOnboardingState({ completedAt }),
+      stableKey: await readVaultStableKey(vaultRoot),
+      timeZone: 'UTC',
+    })
+    expect(expectedSeed).not.toBeNull()
     await upsertAutomation({
       activeUntil: '2026-06-29T13:30:00.000Z',
       automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
@@ -326,11 +396,8 @@ describe('post-onboarding support-gap automation', () => {
       automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
       vaultRoot,
     })).resolves.toMatchObject({
-      activeUntil: '2026-06-08T13:30:00.000Z',
-      schedule: {
-        at: '2026-06-04T13:30:00.000Z',
-        kind: 'at',
-      },
+      activeUntil: expectedSeed?.activeUntil,
+      schedule: expectedSeed?.schedule,
       status: 'archived',
     })
   })
