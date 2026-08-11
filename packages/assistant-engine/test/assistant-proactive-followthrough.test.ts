@@ -1,5 +1,12 @@
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
+import {
+  ASSISTANT_SKILLS,
+  resolveAssistantSkillsRoot,
+} from '../src/assistant-skill-assets.js'
 import {
   buildAssistantExecutionBehaviorText,
 } from '../src/assistant/model-behavior.js'
@@ -7,8 +14,14 @@ import {
   buildOnboardingGoalCheckinSeed,
 } from '../src/assistant/onboarding-goal-checkin-automation.js'
 
+const behaviorFollowthroughSkillPath = path.join(
+  resolveAssistantSkillsRoot(),
+  'behavior-followthrough',
+  'SKILL.md',
+)
+
 describe('assistant proactive follow-through', () => {
-  it('proactively offers and activates goal support only in private conversations', () => {
+  it('keeps exact-package acceptance and narrow support boundaries in the owning skill', async () => {
     const direct = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
       progressUpdateMode: 'direct',
@@ -17,28 +30,23 @@ describe('assistant proactive follow-through', () => {
       profile: 'gpt5-agentic',
       progressUpdateMode: 'group',
     })
+    const skill = await readFile(behaviorFollowthroughSkillPath, 'utf8')
 
-    expect(direct).toContain('Direct proactive follow-through:')
-    expect(direct).toContain(
-      'adopt, continue, restart, extend, or modify a repeated health behavior',
-    )
-    expect(direct).toContain(
-      'current user-chosen goal, accepted plan, or repeatedly described friction',
-    )
-    expect(direct).toContain(
-      'proactively offer one best-fit finite reminder, check-in, or review package',
-    )
-    expect(direct).toContain('post-onboarding support-gap check')
-    expect(direct).toContain('Apply the accepted package now')
-    expect(direct).toContain(
-      'Do not call the plan set, started, or locked in',
-    )
-    expect(direct).toContain('stop asking about a topic')
-    expect(direct).toContain('preserve unrelated support')
-    expect(direct).toContain('exact durable support boundary')
-    expect(direct).toContain('existing canonical memory or preference surface')
-    expect(direct).not.toContain('weekly managed goal-support check')
+    expect(ASSISTANT_SKILLS.find(({ slug }) =>
+      slug === 'behavior-followthrough'
+    )).toBeDefined()
+    expect(direct).not.toContain('Direct proactive follow-through:')
     expect(group).not.toContain('Direct proactive follow-through:')
+    expect(skill).toContain('one exact finite support package')
+    expect(skill).toContain(
+      'A clear yes authorizes only the named plan and support writes',
+    )
+    expect(skill).toContain('without a second confirmation')
+    expect(skill).toContain('stop asking about a topic')
+    expect(skill).toContain('pause or archive the narrowest matching automation')
+    expect(skill).toContain('preserving unrelated support')
+    expect(skill).toContain('topic-specific no-proactive-support boundary')
+    expect(skill).toContain('canonical memory or preference surface')
   })
 
   it('keeps the first health read separate from one finite three-day support check', () => {
@@ -53,6 +61,7 @@ describe('assistant proactive follow-through', () => {
         status: 'completed',
         updatedAt: completedAt,
       },
+      stableKey: 'vault-3',
       timeZone: 'UTC',
     })
 
