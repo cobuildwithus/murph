@@ -65,9 +65,10 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Starter access, patterns, reminders, cards, voices, and web search",
+    title:
+      "Starter access, patterns, reliable referrals, reminders, cards, voices, and web search",
     summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, referral celebrations stay with their intended conversation, reminders keep the local time you asked for, completed workout rows stay clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -106,6 +107,18 @@ const RAW_CHANGELOG_EDITIONS = [
           href: "/patterns",
           label: "View your patterns",
         },
+      },
+      {
+        id: "referral-notification-route-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Referral celebrations stay in the right conversation",
+        summary:
+          "Referral reward celebrations now stay attached to their intended direct conversation, and an interrupted one can safely resume without leaving later work waiting behind it.",
+        details:
+          "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
+        relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
+        sourcePullRequests: [1592],
       },
       {
         id: "reminders-keep-requested-timezone",
@@ -183,7 +196,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-08-09",
     title: "Referrals, Max, and a more capable Murph",
     summary:
-      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, clearer connection paths, and stronger conversation recovery all landed together.",
+      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, private group follow-ups, clearer connection paths, and stronger conversation recovery all landed together.",
     items: [
       {
         id: "group-sleep-challenges-use-fresh-data",
@@ -275,6 +288,18 @@ const RAW_CHANGELOG_EDITIONS = [
           prompt:
             "Start a live workout called Upper Body and help me log each set as I go.",
         },
+      },
+      {
+        id: "private-group-follow-up",
+        kind: "feature",
+        priority: 4,
+        title: "Continue a group question privately",
+        summary:
+          "Ask Murph in a group to continue with you privately, and your personal Murph can send the answer only to your verified direct chat on the same channel.",
+        details:
+          "Murph uses the exact group message author and checks the direct chat before personal work begins. If no eligible direct chat is available, Murph asks you to open one on that channel and retry.",
+        relevanceTags: ["groups", "messaging", "privacy", "assistant"],
+        sourcePullRequests: [1481],
       },
       {
         id: "clearer-health-source-handoffs",

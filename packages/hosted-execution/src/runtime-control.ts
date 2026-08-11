@@ -1447,6 +1447,13 @@ export type HostedRuntimeGroupToolRequest =
       >;
     }
   | {
+      action: "message_current_sender";
+      origin: Extract<
+        HostedExecutionAssistantAskOrigin,
+        { kind: "accepted_input" }
+      >;
+    }
+  | {
       action: "ask_member";
       grantId: string;
       origin: HostedExecutionAssistantAskOrigin;
@@ -1568,12 +1575,20 @@ export type HostedRuntimeGroupMemberAskResult =
   | ({ status: "completed" } & HostedExecutionAssistantAskResult)
   | Extract<HostedRuntimeGroupAskResult, { status: "unavailable" }>;
 
+export type HostedRuntimeGroupCurrentSenderMessageResult =
+  | { status: "accepted" }
+  | { status: "unavailable"; unavailableReason: string };
+
 export type HostedRuntimeGroupToolResponse =
   | {
       action: "ask";
       result: HostedRuntimeGroupAskResult;
     }
   | { action: "ask_current_sender"; result: HostedRuntimeGroupMemberAskResult }
+  | {
+      action: "message_current_sender";
+      result: HostedRuntimeGroupCurrentSenderMessageResult;
+    }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
   | {
       action: "post_disclosure_request";

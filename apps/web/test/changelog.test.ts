@@ -320,6 +320,16 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("referral-notification-route-recovery")).toMatchObject({
+      sourcePullRequests: [1592],
+      summary: expect.stringContaining("intended direct conversation"),
+      details: expect.stringContaining(
+        "ends without sending so later notifications can continue",
+      ),
+    });
+    expect(
+      items.get("referral-notification-route-recovery")?.tryIt,
+    ).toBeUndefined();
     expect(items.get("group-sleep-challenges-use-fresh-data")).toMatchObject({
       sourcePullRequests: [1565, 1593],
       summary: expect.stringContaining("explicit manual corrections"),
@@ -353,6 +363,12 @@ describe("changelog registry", () => {
         "The group never reads Family status or creates billing and invite links",
       ),
     });
+    expect(items.get("private-group-follow-up")).toMatchObject({
+      sourcePullRequests: [1481],
+      summary: expect.stringContaining("only to your verified direct chat"),
+      details: expect.stringContaining("before personal work begins"),
+    });
+    expect(items.get("private-group-follow-up")?.tryIt).toBeUndefined();
     expect(items.get("clearer-health-source-handoffs")).toMatchObject({
       sourcePullRequests: [1432, 1447, 1506],
       details: expect.stringContaining("snapshots rather than live sync"),
@@ -536,6 +552,7 @@ describe("changelog registry", () => {
         itemIds: [
           "non-expiring-starter-access",
           "personal-patterns",
+          "referral-notification-route-recovery",
           "reminders-keep-requested-timezone",
           "voice-memos-use-your-voice",
           "web-search-restored",
@@ -552,6 +569,7 @@ describe("changelog registry", () => {
           "generated-contact-card-avatar",
           "family-setup-from-group",
           "live-workout-logging",
+          "private-group-follow-up",
           "clearer-health-source-handoffs",
           "body-composition-guidance",
           "group-replies-respect-the-room",
