@@ -60,6 +60,7 @@ import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
+import { OpsUsageStudy } from "./ops-usage-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
@@ -650,6 +651,12 @@ export function SectionsContent() {
 
       <StudySection title="Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals">
         <PersonalUsageCreditOwnerStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Ops usage dashboard">
+        <OpsUsageStudy />
       </StudySection>
 
       <Separator />
