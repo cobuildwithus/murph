@@ -78,8 +78,12 @@ bytes reach the private publisher or image provider.
   across group-tool, outbox, service, response-media, and both image-generation
   suites. Assistant Engine typecheck passes.
 - Runner CLI/entry bundle policy passes 50 tests and deploy-preflight coverage
-  passes 85 tests. Fresh full assembly passes with an 8,717,638-byte Vault CLI,
-  1,619,381-byte runner entry, 7,779,215-byte static closure, and 9,709,205-byte
-  total against the retained 9,711,424-byte ceiling.
-- `git diff --check` and the scoped identifier scan pass. Commit, push, PR-body
-  refresh, exact-head CI, and round 15 remain.
+  passes 85 tests. After a final conflict-free main merge, fresh full assembly
+  passes with an 8,717,119-byte Vault CLI, 1,619,381-byte runner entry,
+  7,778,630-byte static closure, and 9,711,325-byte total against the retained
+  9,711,424-byte ceiling.
+- The correction was committed and pushed at `70be0f52c220`. Current `main` then
+  merged without conflicts as `68d4603f004f`; the complete 303-test affected
+  set, Assistant Engine typecheck, and 50 runner-policy tests still pass on that
+  merged tree. `git diff --check` and the scoped identifier scan pass. Final
+  evidence commit/push, PR-body refresh, exact-head CI, and round 15 remain.
