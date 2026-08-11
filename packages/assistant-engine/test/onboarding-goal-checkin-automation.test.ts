@@ -372,7 +372,7 @@ describe('post-onboarding support-gap automation', () => {
     })).resolves.toMatchObject({ status })
   })
 
-  it('accepts only answered onboarding inside the bounded occurrence window', async () => {
+  it('accepts answered onboarding after the minimum floor and rejects ineligible completion', async () => {
     const eligibleVault = await createVaultRoot()
     await completeAssistantOnboarding({
       completedAt: '2026-06-01T00:00:00.000Z',
@@ -391,9 +391,9 @@ describe('post-onboarding support-gap automation', () => {
     })).resolves.toMatchObject({ kind: 'skip' })
     await expect(runOnboardingGoalCheckinAuthorityPrecondition({
       automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
-      occurrenceAt: '2026-06-09T00:00:00.001Z',
+      occurrenceAt: '2026-07-20T17:30:00.000Z',
       vault: eligibleVault,
-    })).resolves.toMatchObject({ kind: 'skip' })
+    })).resolves.toEqual({ kind: 'continue' })
 
     for (const reason of ['user_declined', 'manual'] as const) {
       const ineligibleVault = await createVaultRoot()
