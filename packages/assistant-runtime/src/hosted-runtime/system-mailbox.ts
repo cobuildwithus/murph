@@ -70,14 +70,16 @@ export type {
 
 export type HostedSystemMailboxCheckpointPreparation =
   | {
+      attemptCount: number;
       errorCode: string | null;
       errorMessage: string | null;
-      item: HostedSystemMailboxPendingItem;
       itemId: string;
       legacyUsageReferralAuthorityClassification:
         HostedLegacyUsageReferralAuthorityClassification | null;
       nextWakeAt: string;
+      routeAction: HostedSystemMailboxRouteAction;
       status: "retryable_failed";
+      wakeKind: HostedExecutionSystemWake["kind"];
     }
   | {
       item: HostedSystemMailboxPendingItem;
@@ -428,13 +430,15 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           })
         : null;
     return {
+      attemptCount: prepared.attemptCount,
       errorCode: normalized.code,
       errorMessage: normalized.message,
-      item: prepared,
       itemId: prepared.itemId,
       legacyUsageReferralAuthorityClassification,
       nextWakeAt,
+      routeAction: prepared.routeAction,
       status: "retryable_failed",
+      wakeKind: prepared.wake.kind,
     };
   }
 }

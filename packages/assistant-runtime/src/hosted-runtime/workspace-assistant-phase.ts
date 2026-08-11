@@ -5591,7 +5591,9 @@ async function runSystemMailboxMaintenancePhase(input: {
   }
   await writeHostedSystemMailboxRuntimeLog({
     assistantAskCompletionFirstAttemptDelayed,
-    attemptCount: systemMailboxPreparation.item.attemptCount,
+    attemptCount: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.attemptCount
+      : systemMailboxPreparation.item.attemptCount,
     errorCode: systemMailboxPreparation.status === "retryable_failed"
       ? systemMailboxPreparation.errorCode
       : null,
@@ -5606,9 +5608,13 @@ async function runSystemMailboxMaintenancePhase(input: {
     nextWakeAt,
     recorded: null,
     recordFailed: null,
-    routeAction: systemMailboxPreparation.item.routeAction,
+    routeAction: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.routeAction
+      : systemMailboxPreparation.item.routeAction,
     status: systemMailboxPreparation.status,
-    wakeKind: systemMailboxPreparation.item.wake.kind,
+    wakeKind: systemMailboxPreparation.status === "retryable_failed"
+      ? systemMailboxPreparation.wakeKind
+      : systemMailboxPreparation.item.wake.kind,
   });
 
   return {
