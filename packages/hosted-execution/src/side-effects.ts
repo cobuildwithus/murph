@@ -692,7 +692,17 @@ function parseHostedAssistantDeliveryPayload(
     record.threadIsDirect ?? null,
     `${label}.threadIsDirect`,
   );
-  if (card !== null && threadIsDirect !== true) {
+  const channel = requireNullableString(
+    record.channel ?? null,
+    `${label}.channel`,
+  );
+  if (card?.kind === "challenge_standings") {
+    if (channel !== "linq" || threadIsDirect !== false) {
+      throw new TypeError(
+        `${label}.card requires an authenticated Linq group conversation.`,
+      );
+    }
+  } else if (card !== null && threadIsDirect !== true) {
     throw new TypeError(`${label}.card requires a private direct conversation.`);
   }
 
@@ -710,7 +720,7 @@ function parseHostedAssistantDeliveryPayload(
       record.bindingDeliveryTarget ?? null,
       `${label}.bindingDeliveryTarget`,
     ),
-    channel: requireNullableString(record.channel ?? null, `${label}.channel`),
+    channel,
     ...(record.card === undefined ? {} : { card }),
     deliverySourceKey: requireNullableString(
       record.deliverySourceKey ?? null,

@@ -1665,7 +1665,7 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
-  test("presents Starter as non-expiring with direct paid plan choices", async () => {
+  test("presents Starter with direct paid plan choices", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -1676,8 +1676,10 @@ describe("HostedBillingSettings", () => {
       usageStatus: buildStarterStatus(),
     }));
 
-    assert.match(markup, /non-expiring starter usage is active/i);
-    assert.match(markup, /Starter · Does not expire/);
+    assert.match(markup, /aria-label="Starter AI usage"/);
+    assert.doesNotMatch(markup, /non-expiring starter usage is active/i);
+    assert.doesNotMatch(markup, /Does not expire/);
+    assert.doesNotMatch(markup, /Starter ·/);
     assert.match(markup, /Choose Pulse/);
     assert.match(markup, /Choose Edge/);
     assert.doesNotMatch(markup, /days? left|expires/i);
@@ -1700,7 +1702,7 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /used your starter usage/i);
     assert.match(markup, /choose a monthly plan/i);
-    assert.match(markup, /Does not expire/);
+    assert.doesNotMatch(markup, /Does not expire/);
     assert.doesNotMatch(markup, /resets? /i);
   });
 });

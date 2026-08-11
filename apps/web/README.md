@@ -892,9 +892,13 @@ Hosted AI usage metering:
   attributed stable-link activations. Conversational referrals also use
   immediate post-commit reconciliation, and that same cron converges on one
   final referral grant and one atomic source-mailbox celebration fence.
-  Recovery also re-signals bounded oldest unconsumed celebration pointers after
-  a failed Temporal signal; Web does not read or rewrite their encrypted
-  payloads. If an authority-less legacy direct-Linq wake was already imported,
+  Recovery selects each lane containing a live pending celebration and
+  re-signals only its first live item above the canonical lane-consumption
+  cursor. Live-row filtering skips retention-old or expired prefixes. That head
+  may be an earlier non-referral predecessor, so a failed Temporal signal remains
+  recoverable in ordinary lane order while the existing no-progress backoff
+  coalesces repeat passes. Web does not read or rewrite encrypted payloads. If an
+  authority-less legacy direct-Linq wake was already imported,
   the local runtime reasserts its frozen target through Web's existing route
   owner before model work. An exact live match continues through the normal
   audience and provider-entry guards, a definitive stale match ends without a
@@ -1727,9 +1731,12 @@ Assertion-authenticated browser-to-agent bridge routes:
 
 Public provider-facing routes:
 
-- `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V4
-  nutrition, generic-table, or workout presentation for Linq's static Messages
-  fallback. It accepts no query string, identity, canonical reference,
+- `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V5
+  nutrition, generic-table, workout, or challenge-standings presentation for
+  Linq's static Messages fallback. Production challenge-standings producers
+  replace the challenge title and ranked labels with fixed ordinal presentation
+  before encoding, while exact names remain only in the native fragment and
+  semantic captions. The route accepts no query string, canonical reference,
   credential, tracking reference, or authority; it performs no database or
   remote read and returns private no-store/no-index headers. Deploy the
   compatible native reader first, this route second, and its runtime producer

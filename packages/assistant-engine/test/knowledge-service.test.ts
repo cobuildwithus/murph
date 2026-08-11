@@ -229,6 +229,129 @@ describe('knowledge service helpers', () => {
     expect(savedLog).toContain('- slug: `hydration`')
   })
 
+  it('rejects a guarded upsert when the canonical page changed after its read', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-guarded-upsert-')
+    const original = buildKnowledgeMarkdown({
+      body: 'Original challenge state.',
+      compiledAt: '2026-08-09T10:00:00.000Z',
+      librarySlugs: [],
+      pageType: 'challenge',
+      relatedSlugs: [],
+      slug: 'weird-health-week',
+      sourcePaths: [],
+      status: 'active',
+      summary: 'Original challenge state.',
+      title: 'Weird Health Week',
+    })
+    await writeKnowledgePage(
+      vaultRoot,
+      'weird-health-week',
+      original,
+    )
+    const read = await getKnowledgePage({
+      slug: 'weird-health-week',
+      vault: vaultRoot,
+    })
+    await writeKnowledgePage(
+      vaultRoot,
+      'weird-health-week',
+      buildKnowledgeMarkdown({
+        body: 'A concurrent ruling won the page.',
+        compiledAt: '2026-08-09T10:01:00.000Z',
+        librarySlugs: [],
+        pageType: 'challenge',
+        relatedSlugs: [],
+        slug: 'weird-health-week',
+        sourcePaths: [],
+        status: 'active',
+        summary: 'A concurrent ruling won the page.',
+        title: 'Weird Health Week',
+      }),
+    )
+
+    await expect(upsertKnowledgePage(
+      {
+        body: 'A stale standings snapshot must not overwrite the ruling.',
+        expectedMarkdown: read.page.markdown,
+        slug: 'weird-health-week',
+        vault: vaultRoot,
+      },
+      {
+        readTextFile: async (filePath) => await readFile(filePath, 'utf8'),
+        saveText: async ({ relativePath, content }) => {
+          await writeVaultFile(vaultRoot, relativePath, content)
+        },
+      },
+    )).rejects.toMatchObject({
+      code: 'knowledge_page_conflict',
+    })
+    const current = await getKnowledgePage({
+      slug: 'weird-health-week',
+      vault: vaultRoot,
+    })
+    expect(current.page.body).toContain('A concurrent ruling won the page.')
+    expect(current.page.body).not.toContain('stale standings snapshot')
+  })
+
+  it('parses every returned page field from the same exact Markdown read', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-exact-read-')
+    const revisionA = buildKnowledgeMarkdown({
+      body: 'Revision A body.',
+      compiledAt: '2026-08-09T10:00:00.000Z',
+      librarySlugs: ['revision-a-library'],
+      pageType: 'challenge',
+      relatedSlugs: ['revision-a-related'],
+      slug: 'weird-health-week',
+      sourcePaths: ['journal/revision-a.md'],
+      status: 'active',
+      summary: 'Revision A summary.',
+      title: 'Revision A title',
+    })
+    const revisionB = buildKnowledgeMarkdown({
+      body: 'Revision B body.',
+      compiledAt: '2026-08-09T10:01:00.000Z',
+      librarySlugs: ['revision-b-library'],
+      pageType: 'challenge-final',
+      relatedSlugs: ['revision-b-related'],
+      slug: 'weird-health-week',
+      sourcePaths: ['journal/revision-b.md'],
+      status: 'settled',
+      summary: 'Revision B summary.',
+      title: 'Revision B title',
+    })
+    await writeKnowledgePage(vaultRoot, 'weird-health-week', revisionA)
+
+    let exactReadCount = 0
+    const read = await getKnowledgePage(
+      {
+        slug: 'weird-health-week',
+        vault: vaultRoot,
+      },
+      {
+        readTextFile: async (filePath) => {
+          exactReadCount += 1
+          await writeFile(filePath, revisionB, 'utf8')
+          return await readFile(filePath, 'utf8')
+        },
+      },
+    )
+
+    expect(exactReadCount).toBe(1)
+    expect(read.page).toMatchObject({
+      compiledAt: '2026-08-09T10:01:00.000Z',
+      librarySlugs: ['revision-b-library'],
+      pageType: 'challenge-final',
+      relatedSlugs: ['revision-b-related'],
+      sourcePaths: ['journal/revision-b.md'],
+      status: 'settled',
+      summary: 'Revision B summary.',
+      title: 'Revision B title',
+    })
+    expect(read.page.body).toContain('Revision B body.')
+    expect(read.page.body).not.toContain('Revision A body.')
+    expect(read.page.markdown).toBe(revisionB)
+  })
+
   it('appends dated sections to one knowledge page and rejects duplicate headings', async () => {
     const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-append-section-')
     await writeVaultFile(vaultRoot, 'journal/first.md', 'First evidence.\n')

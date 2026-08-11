@@ -49,8 +49,8 @@ export function GroupMemberPlanStudy() {
       id="group-member-plan-section"
     >
       <StudyState
-        label="Starter usage does not expire"
-        state="starter"
+        label="Active lifetime Starter usage"
+        state="active-lifetime-starter-usage"
       >
         <div inert>
           <HostedBillingSettings

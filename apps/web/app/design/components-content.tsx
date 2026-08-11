@@ -171,6 +171,7 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { DataExportControlStudy } from "./data-export-study";
@@ -1451,9 +1452,18 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-compact-table-card"
-          title="iMessage workout and compact table card states"
+          title="iMessage workout and compact table fallback states"
         >
           <ImessageCompactTableCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="imessage-challenge-standings-card"
+          title="iMessage challenge standings card"
+        >
+          <ImessageChallengeStandingsCardStudy />
         </Section>
 
         <Separator />
@@ -2274,14 +2284,14 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Personality Settings">
+        <Section title="Style Levels">
           <p className="text-sm text-muted-foreground">
             Private Humor, Push, and Detail controls. The mobile preview uses a
             full-height drawer with a safe-area footer; desktop uses a dialog.
           </p>
           <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-5">
             <Button onClick={() => setPersonalitySettingsOpen(true)}>
-              Preview personality settings
+              Preview style levels
             </Button>
           </div>
           <MurphPersonalitySettingsDialog
@@ -2523,7 +2533,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Health data consent actions">
+        <Section title="Health data consent settings row">
           <HealthDataConsentControlStudy />
         </Section>
 

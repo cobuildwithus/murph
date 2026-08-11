@@ -31,6 +31,7 @@ import {
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
+import { resolveAssistantGeneratedImageDelivery } from '../src/assistant/response-media.ts'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   hasAssistantSeenFirstContact,
@@ -142,6 +143,22 @@ const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
+}
+
+const CHALLENGE_STANDINGS_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'challenge_standings',
+  version: 1,
+  format: 'individual',
+  title: 'Weird Health Week',
+  subtitle: 'Day 4 of 7',
+  objective: { kind: 'ranking' },
+  entries: [{
+    label: 'Maya',
+    points: 120,
+    coverage: 'complete',
+    detail: null,
+  }],
+  footer: null,
 }
 
 const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
@@ -1234,6 +1251,85 @@ describe('assistant outbox runtime', () => {
     })
   })
 
+  it('persists and dispatches challenge standings cards for Linq groups only', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-challenge-card-',
+    )
+    const rendered = renderAssistantResponseCardText(
+      CHALLENGE_STANDINGS_RESPONSE_CARD,
+    )
+    const intent = await createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-group-challenge-card-token',
+      message: 'model-authored text must not become the durable card message',
+      sessionId: 'session-group-challenge-card',
+      threadId: 'thread-group-challenge-card',
+      threadIsDirect: false,
+      turnId: 'turn-group-challenge-card',
+      vault: vaultRoot,
+    })
+
+    expect(intent.card).toEqual(CHALLENGE_STANDINGS_RESPONSE_CARD)
+    expect(intent.message).toBe(rendered)
+    expect(intent.threadIsDirect).toBe(false)
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'linq-group-challenge-card-delivered',
+        target: 'thread-group-challenge-card',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+        message: rendered,
+        threadIsDirect: false,
+      }),
+      expect.any(Object),
+    )
+
+    await expect(createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'linq',
+      message: rendered,
+      sessionId: 'session-direct-challenge-card',
+      threadId: 'thread-direct-challenge-card',
+      threadIsDirect: true,
+      turnId: 'turn-direct-challenge-card',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
+    })
+
+    await expect(createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'telegram',
+      message: rendered,
+      sessionId: 'session-telegram-group-challenge-card',
+      threadId: 'thread-telegram-group-challenge-card',
+      threadIsDirect: false,
+      turnId: 'turn-telegram-group-challenge-card',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
+    })
+  })
+
   it('round-trips workout cards through local outbox save, list, and read owners', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-workout-card-',
@@ -2271,6 +2367,36 @@ describe('assistant outbox runtime', () => {
       updatedAt: '2026-03-01T00:05:00.000Z',
     })
 
+    const generatedRef = 'raw/captures/2026/04/generated/generated.webp'
+    const generatedDelivery = await createIntent(vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-04-18T00:00:00.000Z',
+      media: [{
+        alt: 'Visible generated image',
+        contentType: 'image/webp',
+        filename: 'generated.webp',
+        kind: 'vault_image',
+        ref: generatedRef,
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+        source: 'gpt-image-2',
+      }],
+      message: 'visible generated image',
+      sessionId: 'session-generated-delivery',
+      turnId: 'turn-generated-delivery',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...generatedDelivery,
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'generated-delivery-message',
+        sentAt: '2026-04-18T00:05:00.000Z',
+      }),
+      sentAt: '2026-04-18T00:05:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-04-18T00:05:00.000Z',
+    })
+
     const recentTerminalIntents = Array.from({ length: 101 }, (_, index) => {
       const createdAt = new Date(Date.UTC(2026, 3, 19, 0, index, 0)).toISOString()
       const message = `terminal-${index}`
@@ -2337,12 +2463,51 @@ describe('assistant outbox runtime', () => {
     ).resolves.toBe(2)
 
     const retained = await listAssistantOutboxIntentsLocal(vaultRoot)
-    expect(retained).toHaveLength(101)
+    expect(retained).toHaveLength(102)
     expect(retained.filter((intent) => intent.status === 'retryable')).toHaveLength(1)
     expect(
       retained.some((intent) => intent.message === 'old terminal intent'),
     ).toBe(false)
-    expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(100)
+    expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(101)
+    expect(retained.some((intent) =>
+      intent.intentId === generatedDelivery.intentId
+    )).toBe(true)
+    expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: {
+        contentType: 'image/webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+      },
+      generatedImageOriginKnown: true,
+      imageRef: generatedRef,
+      intents: retained,
+      sessionId: generatedDelivery.sessionId,
+      transcriptEntries: [],
+    })).toBe(true)
+
+    await expect(
+      pruneAssistantTerminalOutboxIntents({
+        now: new Date('2026-05-02T00:06:00.000Z'),
+        paths,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(1)
+    const retainedAfterAgeCutoff = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retainedAfterAgeCutoff.some((intent) =>
+      intent.intentId === generatedDelivery.intentId
+    )).toBe(false)
+    expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: {
+        contentType: 'image/webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+      },
+      generatedImageOriginKnown: true,
+      imageRef: generatedRef,
+      intents: retainedAfterAgeCutoff,
+      sessionId: generatedDelivery.sessionId,
+      transcriptEntries: [],
+    })).toBe(false)
   })
 
   it('retains group newsletter terminal occurrence evidence during outbox pruning', async () => {

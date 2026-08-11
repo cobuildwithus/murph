@@ -15,6 +15,7 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import type {
   AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -61,6 +62,13 @@ import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 import { resolveAssistantSession } from '../src/assistant/store.ts'
 import {
+  getKnowledgePage,
+  upsertKnowledgePage,
+} from '../src/knowledge/service.ts'
+import {
+  renderGroupChallengeDefinitionSection,
+} from '../src/assistant/group-challenge-response-card-schema.ts'
+import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
 import {
@@ -87,6 +95,114 @@ const SCRIPTED_MODEL = 'gpt-5.6-terra'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
+
+const GROUP_CHALLENGE_DEFINITION = {
+  format: {
+    kind: 'individual',
+    objective: { kind: 'ranking' },
+  },
+  participants: [
+    { participantId: 'participant_maya', state: 'in' },
+    { participantId: 'participant_jon', state: 'in' },
+  ],
+  rulesRevision: 1,
+  scorecard: {
+    components: [{
+      evaluationRule: 'Sum settled shared steps in the challenge window.',
+      id: 'steps',
+      label: 'Steps',
+      perQuantity: 100,
+      points: 3,
+      projectionScopeKeys: ['steps-days.v0'],
+      quantityUnit: 'steps',
+      settlementMode: 'window-total',
+    }],
+  },
+  version: 1,
+} as const
+
+const GROUP_CHALLENGE_AUTHORING_INPUT = {
+  challengeSlug: 'weird-health-week',
+  pageRevisionDigest: '0'.repeat(64),
+  participantObservations: [
+    {
+      components: [{
+        componentId: 'steps',
+        quantity: 4_000,
+        status: 'available',
+      }],
+      participantId: 'participant_maya',
+    },
+    {
+      components: [{ componentId: 'steps', status: 'pending' }],
+      participantId: 'participant_jon',
+    },
+  ],
+} as const
+
+const GROUP_CHALLENGE_DYNAMIC_TOOLS = [
+  MURPH_GROUP_SHARED_READ_TOOL,
+  ...resolveMurphDynamicTools({
+    groupChallengeResponseCardsAvailable: true,
+    responseCardsAvailable: false,
+  }).filter((tool) => tool.name === 'attach_response_card'),
+]
+
+function buildScriptedChallengeMember(input: {
+  displayName: string
+  participantId: string
+  value: number | null
+}) {
+  return {
+    currentTurnHandles: [],
+    displayName: input.displayName,
+    memberId: `member_${input.participantId}`,
+    participantId: input.participantId,
+    projections: [{
+      dataStatus: input.value === null ? 'missing' as const : 'available' as const,
+      grantStatus: 'granted' as const,
+      projectionScope: {
+        projectionKind: 'steps-days.v0' as const,
+      },
+      projectionScopeKey: 'steps-days.v0',
+      records: input.value === null
+        ? []
+        : [{
+            data: {
+              date: '2026-08-08',
+              metricKey: 'steps' as const,
+              unit: 'count',
+              value: input.value,
+            },
+            occurredAt: '2026-08-08T00:00:00.000Z',
+            recordKey: '2026-08-08',
+          }],
+    }],
+  }
+}
+
+async function prepareGroupChallengeVault(
+  workingDirectory: string,
+): Promise<string> {
+  const vaultRoot = path.join(workingDirectory, 'group-challenge-vault')
+  await createIntegratedVaultServices().core.init({
+    requestId: 'scripted-group-challenge-card',
+    timezone: 'UTC',
+    vault: vaultRoot,
+  })
+  await upsertKnowledgePage({
+    body: [
+      'The current room challenge rules and canon.',
+      '',
+      renderGroupChallengeDefinitionSection(GROUP_CHALLENGE_DEFINITION),
+    ].join('\n'),
+    pageType: 'challenge',
+    slug: 'weird-health-week',
+    title: 'Weird Health Week',
+    vault: vaultRoot,
+  })
+  return vaultRoot
+}
 
 interface ScriptedResponseRoute {
   completionLabel?: string
@@ -1407,8 +1523,9 @@ text(result.output);
         customToolCall: {
           input: `
 const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group");
 if (!tool) {
-  text(JSON.stringify({ found: false }));
+  text(JSON.stringify({ found: false, foundGroup: Boolean(groupTool) }));
 } else {
   const result = await tools.murph__automation({
     action: "save",
@@ -1416,7 +1533,7 @@ if (!tool) {
     schedule: { kind: "dailyLocal", localTime: "09:00" },
     title: "Morning reminder",
   });
-  text(JSON.stringify({ found: true, result }));
+  text(JSON.stringify({ found: true, foundGroup: Boolean(groupTool), result }));
 }
 `,
           name: 'exec',
@@ -1476,6 +1593,7 @@ if (!tool) {
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
     const automationOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(automationOutput).toContain('"foundGroup":true')
     expect(automationOutput).toContain('automation-native-deferred')
     expect(automationOutput).toContain('morning-reminder')
     expect(automationOutput).toContain('active')
@@ -4236,6 +4354,234 @@ text(result.output);
     })
   })
 
+  it('scores page-authorized group challenge observations through the code-mode App Server boundary', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const vaultRoot = await prepareGroupChallengeVault(
+      scenario.turnInput.workingDirectory,
+    )
+    const challengeAuthoringInput = {
+      ...GROUP_CHALLENGE_AUTHORING_INPUT,
+      pageRevisionDigest: (await getKnowledgePage({
+        slug: 'weird-health-week',
+        vault: vaultRoot,
+      })).page.pageRevisionDigest,
+    }
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: [
+            'const result = await tools.murph__group({',
+            '  action: "read_shared",',
+            '  projectionScopes: [{ projectionKind: "steps-days.v0" }],',
+            '});',
+            'text(JSON.stringify(result));',
+          ].join('\n'),
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: [
+            `const result = await tools.murph__attach_response_card(${JSON.stringify(challengeAuthoringInput)});`,
+            'text(result);',
+          ].join('\n'),
+          name: 'exec',
+        },
+      },
+      { text: 'CARD_ATTACHED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: GROUP_CHALLENGE_DYNAMIC_TOOLS,
+      groupConversation: true,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        groupSharedReader: {
+          request: async () => ({
+            members: [
+              buildScriptedChallengeMember({
+                displayName: 'Room only',
+                participantId: 'participant_room_only',
+                value: 8_000,
+              }),
+              buildScriptedChallengeMember({
+                displayName: 'Jon',
+                participantId: 'participant_jon',
+                value: null,
+              }),
+              buildScriptedChallengeMember({
+                displayName: 'Maya',
+                participantId: 'participant_maya',
+                value: 4_000,
+              }),
+            ],
+            requestedProjectionScopeKeys: ['steps-days.v0'],
+            status: 'ok' as const,
+          }),
+        },
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Read shared steps and attach the requested group challenge card.',
+      vaultRoot,
+    })
+
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('\\"status\\":\\"ok\\"')
+    expect(toolOutputs).toContain('response card attached')
+    expect(result.runtimeIssueInputs).toEqual([])
+    expect(result.responseCard).toEqual({
+      entries: [
+        {
+          coverage: 'complete',
+          detail: null,
+          label: 'Maya',
+          points: 120,
+        },
+        {
+          coverage: 'unscored',
+          detail: null,
+          label: 'Jon',
+          points: null,
+        },
+      ],
+      footer: null,
+      format: 'individual',
+      kind: 'challenge_standings',
+      objective: { kind: 'ranking' },
+      subtitle: null,
+      title: 'Weird Health Week',
+      version: 1,
+    })
+    const persisted = await getKnowledgePage({
+      slug: 'weird-health-week',
+      vault: vaultRoot,
+    })
+    expect(persisted.page.body).toContain(
+      'murph:challenge-standings-snapshot:v1:start',
+    )
+    expect(persisted.page.body).toContain('"participant_jon"')
+    expect(persisted.page.body).not.toContain('participant_room_only')
+  })
+
+  it('withholds a group challenge card after a capacity-partial shared read', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const vaultRoot = await prepareGroupChallengeVault(
+      scenario.turnInput.workingDirectory,
+    )
+    const dates = [
+      '2026-07-24',
+      '2026-07-23',
+      '2026-07-22',
+      '2026-07-21',
+      '2026-07-20',
+      '2026-07-19',
+      '2026-07-18',
+    ]
+    const workoutKinds = Array.from({ length: 13 }, (_unused, index) =>
+      `activity-${String(index).padStart(2, '0')}-${'x'.repeat(65)}`)
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: [
+            'const result = await tools.murph__group({',
+            '  action: "read_shared",',
+            '  projectionScopes: [{ projectionKind: "workouts.v0" }],',
+            '});',
+            'text(JSON.stringify(result));',
+          ].join('\n'),
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: [
+            `const result = await tools.murph__attach_response_card(${JSON.stringify(GROUP_CHALLENGE_AUTHORING_INPUT)});`,
+            'text(result);',
+          ].join('\n'),
+          name: 'exec',
+        },
+      },
+      { text: 'The shared read was incomplete, so I cannot post a standings card yet.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: GROUP_CHALLENGE_DYNAMIC_TOOLS,
+      groupConversation: true,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        groupSharedReader: {
+          request: async () => ({
+            members: Array.from({ length: 32 }, (_unused, index) => ({
+              currentTurnHandles: [],
+              displayName: `Member ${index}`,
+              memberId: `member_oversized_${index}`,
+              participantId: `participant_oversized_${index}`,
+              projections: [{
+                dataStatus: 'available' as const,
+                grantStatus: 'granted' as const,
+                projectionScope: {
+                  projectionKind: 'workouts.v0' as const,
+                },
+                projectionScopeKey: 'workouts.v0',
+                records: dates.map((date) => ({
+                  data: {
+                    calendarClosedThroughDate: '2026-07-24',
+                    date,
+                    timeSemantics:
+                      'canonical-event-zone-or-vault-zone.v0' as const,
+                    workouts: workoutKinds.map((kind, workoutIndex) => ({
+                      kind,
+                      minutes: 1_440 - workoutIndex,
+                      startLocalMs: 86_399_999 - workoutIndex,
+                    })),
+                  },
+                  occurredAt: `${date}T00:00:00.000Z`,
+                  recordKey: date,
+                })),
+              }],
+            })),
+            requestedProjectionScopeKeys: ['workouts.v0'],
+            status: 'ok' as const,
+          }),
+        },
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Read the shared records and attach the requested standings card.',
+      vaultRoot,
+    })
+
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('\\"status\\":\\"partial\\"')
+    expect(toolOutputs).toContain('\\"omittedParticipantIds\\"')
+    expect(toolOutputs).toContain(
+      'require one complete stable shared-read proof',
+    )
+    expect(result.responseCard).toBeNull()
+    expect(result.finalMessage).toBe(
+      'The shared read was incomplete, so I cannot post a standings card yet.',
+    )
+  })
+
   it('discovers deferred Murph schemas through native Codex tool_search', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -4243,6 +4589,12 @@ text(result.output);
     scenario.stub.captureProviderRequestDiagnostics()
     const automationRequests: unknown[] = []
     scenario.stub.queue(
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'Murph group set_chat_avatar current chat icon',
+        },
+      },
       {
         toolSearchCall: {
           limit: 8,
@@ -4297,7 +4649,7 @@ text(result.output);
         vaultFileSendAvailable: false,
       },
       model: 'gpt-5.4',
-      prompt: 'Save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
+      prompt: 'Discover the supported group-avatar path, save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
     })
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
@@ -4312,6 +4664,9 @@ text(result.output);
       },
     })
     expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"group"',
+    )
+    expect(JSON.stringify(summaries[2]?.toolSearchOutputTools)).toContain(
       '"name":"automation"',
     )
     expect(automationRequests).toEqual([{
@@ -4321,7 +4676,7 @@ text(result.output);
       title: 'Morning reminder',
     }])
     expect(result.finalMessage).toBe('NATIVE_TOOL_SEARCH_OK')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
   it('keeps narrow group reads eager beside deferred Terra tools', {
