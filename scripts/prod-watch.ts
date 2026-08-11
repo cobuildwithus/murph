@@ -143,6 +143,7 @@ const VERCEL_SCOPE = "cobuildwithus";
 const VERCEL_DETAIL_CHUNK_MS = 5 * 60_000;
 const VERCEL_MIN_DETAIL_CHUNK_MS = 15_000;
 const VERCEL_MAX_DETAIL_PARTITIONS = 128;
+const VERCEL_MAX_PARTITION_ROWS = 2_000;
 const VERCEL_MAX_DETAIL_ROWS = 20_000;
 const VERCEL_SAMPLE_MS = 10_000;
 const VERCEL_MIN_SAMPLE_MS = 100;
@@ -2636,7 +2637,7 @@ export async function collectStripeEvidence(input: {
   });
 }
 
-interface VercelApiAccess {
+export interface VercelApiAccess {
   token: string;
   teamId: string;
   projectId: string;
@@ -2715,7 +2716,9 @@ async function readVercelCliToken(): Promise<string> {
   throw Object.assign(new Error("vercel_auth_file_missing"), { code: "EAUTH" });
 }
 
-async function fetchVercelRows(
+type VercelRowOverflowCode = "EOVERFLOW_PARTITION_ROWS" | "EOVERFLOW_ROWS";
+
+export async function fetchVercelRows(
   access: VercelApiAccess,
   input: {
     start: Date;
@@ -2725,9 +2728,26 @@ async function fetchVercelRows(
     search?: string;
   },
   signal?: AbortSignal,
+  rowBudget = VERCEL_MAX_PARTITION_ROWS,
+  rowOverflowCode: VercelRowOverflowCode = "EOVERFLOW_PARTITION_ROWS",
 ): Promise<Array<Record<string, unknown>>> {
+  if (!Number.isSafeInteger(rowBudget)
+    || rowBudget < 0
+    || rowBudget > VERCEL_MAX_PARTITION_ROWS
+    || (rowOverflowCode !== "EOVERFLOW_PARTITION_ROWS" && rowOverflowCode !== "EOVERFLOW_ROWS")) {
+    throw new Error("vercel_row_budget_invalid");
+  }
+  const rowBudgetExceeded = (): NodeJS.ErrnoException => Object.assign(
+    new Error(rowOverflowCode === "EOVERFLOW_ROWS"
+      ? "vercel_detail_row_budget_exceeded"
+      : "vercel_partition_row_budget_exceeded"),
+    { code: rowOverflowCode },
+  );
   const rows: Array<Record<string, unknown>> = [];
   for (let page = 0; page < VERCEL_MAX_PAGES; page += 1) {
+    if (rows.length >= rowBudget) {
+      throw rowBudgetExceeded();
+    }
     const query = new URLSearchParams({
       projectId: access.projectId,
       ownerId: access.teamId,
@@ -2748,11 +2768,19 @@ async function fetchVercelRows(
       throw Object.assign(new Error("vercel_logs_response_invalid"), { code: "EBADMSG" });
     }
     const object = parsed as Record<string, unknown>;
-    if (!Array.isArray(object.rows) || object.rows.some((row) => typeof row !== "object" || row === null || Array.isArray(row))) {
+    if (!Array.isArray(object.rows)) {
+      throw Object.assign(new Error("vercel_logs_response_invalid"), { code: "EBADMSG" });
+    }
+    if (object.rows.length > rowBudget - rows.length) {
+      throw rowBudgetExceeded();
+    }
+    if (object.rows.some((row) => typeof row !== "object" || row === null || Array.isArray(row))) {
       throw Object.assign(new Error("vercel_logs_response_invalid"), { code: "EBADMSG" });
     }
     const pageRows = object.rows as Array<Record<string, unknown>>;
-    rows.push(...pageRows.map(normalizeVercelRow));
+    for (const row of pageRows) {
+      rows.push(normalizeVercelRow(row));
+    }
     if (!shouldContinueVercelPagination(pageRows.length, object.hasMoreRows)) {
       return rows;
     }
@@ -2760,7 +2788,7 @@ async function fetchVercelRows(
   throw Object.assign(new Error("vercel_window_truncated"), { code: "EOVERFLOW_PAGES" });
 }
 
-async function fetchVercelRowsByChunks(
+export async function fetchVercelRowsByChunks(
   access: VercelApiAccess,
   input: {
     start: Date;
@@ -2780,11 +2808,25 @@ async function fetchVercelRowsByChunks(
     if (partitionCount > VERCEL_MAX_DETAIL_PARTITIONS) {
       throw Object.assign(new Error("vercel_partition_budget_exceeded"), { code: "EOVERFLOW_PARTITIONS" });
     }
+    const remainingRowBudget = VERCEL_MAX_DETAIL_ROWS - rows.length;
+    if (remainingRowBudget <= 0) {
+      throw Object.assign(new Error("vercel_detail_row_budget_exceeded"), { code: "EOVERFLOW_ROWS" });
+    }
     let partitionRows: Array<Record<string, unknown>>;
     try {
-      partitionRows = await fetchVercelRows(access, { ...input, ...window }, signal);
+      const partitionRowBudget = Math.min(VERCEL_MAX_PARTITION_ROWS, remainingRowBudget);
+      partitionRows = await fetchVercelRows(
+        access,
+        { ...input, ...window },
+        signal,
+        partitionRowBudget,
+        partitionRowBudget < VERCEL_MAX_PARTITION_ROWS
+          ? "EOVERFLOW_ROWS"
+          : "EOVERFLOW_PARTITION_ROWS",
+      );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EOVERFLOW_PAGES") {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EOVERFLOW_PAGES" && code !== "EOVERFLOW_PARTITION_ROWS") {
         throw error;
       }
       const halves = bisectVercelWindow(window.start, window.end);
@@ -2797,12 +2839,14 @@ async function fetchVercelRowsByChunks(
     if (rows.length + partitionRows.length > VERCEL_MAX_DETAIL_ROWS) {
       throw Object.assign(new Error("vercel_detail_row_budget_exceeded"), { code: "EOVERFLOW_ROWS" });
     }
-    rows.push(...partitionRows);
+    for (const row of partitionRows) {
+      rows.push(row);
+    }
   }
   return rows;
 }
 
-async function fetchVercelRequestSample(
+export async function fetchVercelRequestSample(
   access: VercelApiAccess,
   end: Date,
   signal?: AbortSignal,
@@ -2816,7 +2860,8 @@ async function fetchVercelRequestSample(
       }, signal);
       return { rows, durationMs };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EOVERFLOW_PAGES") {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EOVERFLOW_PAGES" && code !== "EOVERFLOW_PARTITION_ROWS") {
         throw error;
       }
       const nextDuration = nextVercelSampleDuration(durationMs);
@@ -3184,6 +3229,9 @@ function classifyDeterministicProviderFailure(
   }
   if (code === "EOVERFLOW_PAGES") {
     return { source, class: "unavailable", code: "provider_window_truncated", retryable: true };
+  }
+  if (code === "EOVERFLOW_PARTITION_ROWS") {
+    return { source, class: "unavailable", code: "provider_row_budget_exceeded", retryable: true };
   }
   if (code === "EOVERFLOW_PARTITIONS") {
     return { source, class: "unavailable", code: "provider_partition_budget_exceeded", retryable: true };

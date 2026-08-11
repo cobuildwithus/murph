@@ -58,6 +58,9 @@ import {
   buildRemediationChildEnv,
   buildRemediationReviewRequest,
   fetchVercelJson,
+  fetchVercelRequestSample,
+  fetchVercelRows,
+  fetchVercelRowsByChunks,
   nextVercelSampleDuration,
   parseReviewGptTerminalBlock,
   renderLaunchdPlistTemplate,
@@ -259,6 +262,86 @@ describe("production-watch snapshot contract", () => {
     expect(cancelled).toBe(true);
     expect(generatedBytes).toBeLessThanOrEqual(responseLimitBytes + 2 * chunkBytes);
     expect(generatedBytes).toBeLessThan(totalChunks * chunkBytes);
+  });
+
+  it("rejects a Vercel page above the partition row ceiling before normalization", async () => {
+    let fetchCalls = 0;
+    await withMockedFetch(async () => {
+      fetchCalls += 1;
+      return vercelRowsResponse(2_001, false);
+    }, async () => {
+      await expect(fetchVercelRows(
+        testVercelAccess(),
+        testVercelWindow(),
+      )).rejects.toMatchObject({ code: "EOVERFLOW_PARTITION_ROWS" });
+    });
+    expect(fetchCalls).toBe(1);
+  });
+
+  it("enforces the Vercel partition row ceiling cumulatively across pages", async () => {
+    let fetchCalls = 0;
+    await withMockedFetch(async () => {
+      fetchCalls += 1;
+      return fetchCalls === 1
+        ? vercelRowsResponse(1_500, true)
+        : vercelRowsResponse(501, false);
+    }, async () => {
+      await expect(fetchVercelRows(
+        testVercelAccess(),
+        testVercelWindow(),
+      )).rejects.toMatchObject({ code: "EOVERFLOW_PARTITION_ROWS" });
+    });
+    expect(fetchCalls).toBe(2);
+  });
+
+  it("stops a Vercel detail query before fetching beyond its total row budget", async () => {
+    let fetchCalls = 0;
+    await withMockedFetch(async () => {
+      fetchCalls += 1;
+      return vercelRowsResponse(2_000, false);
+    }, async () => {
+      const start = new Date("2026-08-10T20:00:00.000Z");
+      await expect(fetchVercelRowsByChunks(testVercelAccess(), {
+        start,
+        end: new Date(start.getTime() + 55 * 60_000),
+      })).rejects.toMatchObject({ code: "EOVERFLOW_ROWS" });
+    });
+    expect(fetchCalls).toBe(10);
+  });
+
+  it("fails closed at minimum Vercel detail and sample windows on row overflow", async () => {
+    const observedSampleDurations: number[] = [];
+    let detailCalls = 0;
+    await withMockedFetch(async (input) => {
+      const url = new URL(String(input));
+      const start = Number(url.searchParams.get("startDate"));
+      const end = Number(url.searchParams.get("endDate"));
+      observedSampleDurations.push(end - start);
+      detailCalls += 1;
+      return vercelRowsResponse(2_001, false);
+    }, async () => {
+      const start = new Date("2026-08-10T20:00:00.000Z");
+      await expect(fetchVercelRowsByChunks(testVercelAccess(), {
+        start,
+        end: new Date(start.getTime() + 15_000),
+      })).rejects.toMatchObject({ code: "EOVERFLOW_PARTITION_ROWS" });
+    });
+    expect(detailCalls).toBe(1);
+
+    observedSampleDurations.length = 0;
+    await withMockedFetch(async (input) => {
+      const url = new URL(String(input));
+      const start = Number(url.searchParams.get("startDate"));
+      const end = Number(url.searchParams.get("endDate"));
+      observedSampleDurations.push(end - start);
+      return vercelRowsResponse(2_001, false);
+    }, async () => {
+      await expect(fetchVercelRequestSample(
+        testVercelAccess(),
+        new Date("2026-08-10T20:00:10.000Z"),
+      )).rejects.toMatchObject({ code: "EOVERFLOW_SAMPLE" });
+    });
+    expect(observedSampleDurations).toEqual([10_000, 5_000, 2_500, 1_250, 625, 312, 156, 100]);
   });
 
   it("keeps a healthy fixture bounded, aggregate-only, and quiet", () => {
@@ -3309,6 +3392,34 @@ describe("production-watch static safety contracts", () => {
 
 function buildFixtureSnapshot(name: "healthy" | "suspicious", now: Date): ProductionWatchSnapshot {
   return buildFromEvidence(readFixture(name), now);
+}
+
+async function withMockedFetch<T>(mockFetch: typeof fetch, run: () => Promise<T>): Promise<T> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = mockFetch;
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function vercelRowsResponse(rowCount: number, hasMoreRows: boolean): Response {
+  return new Response(JSON.stringify({
+    rows: Array.from({ length: rowCount }, () => ({})),
+    hasMoreRows,
+  }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+function testVercelAccess(): { token: string; teamId: string; projectId: string } {
+  return { token: "test-token", teamId: "test-team", projectId: "test-project" };
+}
+
+function testVercelWindow(): { start: Date; end: Date } {
+  return {
+    start: new Date("2026-08-10T20:00:00.000Z"),
+    end: new Date("2026-08-10T20:05:00.000Z"),
+  };
 }
 
 function buildCompleteSnapshot(now: Date): ProductionWatchSnapshot {
