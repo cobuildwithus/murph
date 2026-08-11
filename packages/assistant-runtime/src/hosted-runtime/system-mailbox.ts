@@ -351,12 +351,6 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
-    if (shouldPreemptHostedDeviceSyncSystemMailboxItem(input, prepared)) {
-      return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
-        prepared,
-        vaultRoot: input.vaultRoot,
-      });
-    }
     const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
     if (postCheckpointRecord) {
       const processedItem: HostedSystemMailboxPendingItem = {

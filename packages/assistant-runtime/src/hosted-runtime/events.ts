@@ -308,6 +308,7 @@ async function executeHostedSystemWake(input: {
         ...(input.shouldYieldDeviceSync
           ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
           : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
         timeoutMs: input.runtime.commitTimeoutMs,
         vaultRoot: input.vaultRoot,
         wake: input.wake,

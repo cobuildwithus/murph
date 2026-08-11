@@ -394,12 +394,6 @@ const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"]
 const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as const;
 const HOSTED_SYSTEM_MAILBOX_DEVICE_SYNC_ROUTE_ACTIONS = ["run-device-sync-wake"] as const;
 const HOSTED_SYSTEM_MAILBOX_DEVICE_SYNC_WAKE_KINDS = ["device-sync.wake"] as const;
-const HOSTED_SYSTEM_MAILBOX_MAINTENANCE_ROUTE_ACTIONS = [
-  "apply-runtime-control-request",
-] as const;
-const HOSTED_SYSTEM_MAILBOX_MAINTENANCE_WAKE_KINDS = [
-  "runtime.maintenance-requested",
-] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
 const HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES = 500;
@@ -933,6 +927,12 @@ function readHostedSystemMailboxCheckpointPreparationRecordItem(
 function resolveHostedSystemMailboxCheckpointPreparationWake(
   preparation: HostedSystemMailboxCheckpointPreparation | null,
 ): HostedRuntimeWakeCandidate | null {
+  if (preparation?.status === "processed") {
+    return createHostedRuntimeWakeCandidate(
+      preparation.metrics.nextWakeAt ?? null,
+      preparation.metrics.nextWakeReason ?? null,
+    );
+  }
   if (preparation?.status !== "retryable_failed") {
     return null;
   }
@@ -2240,17 +2240,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       if (devicePass.preempted) {
         return await returnSystemMailboxModeResult();
-      }
-
-      if (!devicePass.prepared) {
-        const maintenancePass = await runSystemMailboxLifecycleItem({
-          allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MAINTENANCE_ROUTE_ACTIONS,
-          allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MAINTENANCE_WAKE_KINDS,
-          stagePrefix: "system_mailbox.maintenance",
-        });
-        if (maintenancePass.preempted) {
-          return await returnSystemMailboxModeResult();
-        }
       }
 
       const projectedWake = await resolveCurrentSystemMailboxModeWake();

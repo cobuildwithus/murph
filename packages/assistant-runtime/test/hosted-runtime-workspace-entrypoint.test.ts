@@ -9446,6 +9446,95 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("system mailbox device recovery leaves operator maintenance receipts pending", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const maintenanceItem = createMailboxItem({
+      dedupeKey: "runtime.maintenance-requested:device-recovery-owner",
+      id: "mailbox_item_system_mailbox_operator_maintenance",
+      kind: "runtime.maintenance-requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedRuntimeControlSystemMailboxItem(maintenanceItem),
+        vaultRoot,
+        wake: buildHostedExecutionRuntimeControlWake({
+          eventId: maintenanceItem.dedupeKey,
+          kind: "runtime.maintenance-requested",
+          occurredAt: maintenanceItem.occurredAt,
+          userId: TEST_USER_ID,
+        }),
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-operator-maintenance-before.bundle.json",
+        vaultRoot,
+      });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_operator_maintenance",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-operator-maintenance.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported operator maintenance must not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox device recovery must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      assert.equal(state.pending.length, 1);
+      assert.equal(state.pending[0]?.itemId, maintenanceItem.id);
+      assert.equal(state.pending[0]?.status, "pending");
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("system mailbox mode imports and runs a new device-sync row in the same invocation", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -10111,7 +10200,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("fresh foreground input during system mailbox device-sync retains the item without a checkpoint", async () => {
+  test("fresh foreground input after device-sync apply checkpoints the bounded unit once", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -10126,7 +10215,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const deviceSyncPort = createSnapshotDeviceSyncPort({
       connectionId: "device_sync_connection_preempt_during",
       nextReconcileAt: "2026-04-27T00:05:00.000Z",
-      onFetchSnapshot: () => runtimeWakeSignal.notify(),
+      onApplyUpdates: () => runtimeWakeSignal.notify(),
     });
 
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -10158,7 +10247,13 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         {
           async createCheckpointSnapshot() {
-            throw new Error("Preempted in-flight device-sync must not checkpoint before fresh work.");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-device-preempt-during.bundle.json",
+                size: 512,
+              }),
+            };
           },
           async importItem() {
             throw new Error("Already-imported system mailbox work should not import a new row.");
@@ -10186,11 +10281,17 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(result.immediateRecheckRequested, true);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
-      assert.deepEqual(checkpointRequests, []);
+      assert.equal(deviceSyncPort.applyUpdatesCalls, 1);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, "2026-04-27T00:00:30.000Z");
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.nextWakeAt, checkpointRequests[0]?.nextWakeAt);
+      assert.equal(result.nextWakeReason, checkpointRequests[0]?.nextWakeReason);
       const state = await readHostedSystemMailboxState(vaultRoot);
-      assert.ok(state.pending.some((item) =>
-        item.itemId === deviceItem.id && item.status === "pending"
-      ));
+      assert.equal(state.pending.some((item) => item.itemId === deviceItem.id), false);
+      assert.equal(state.pending.length, 1);
+      assert.equal(state.pending[0]?.routeAction, "run-device-sync-wake");
+      assert.equal(state.pending[0]?.nextAttemptAt, result.nextWakeAt);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -32316,19 +32417,29 @@ function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig 
 function createSnapshotDeviceSyncPort(input: {
   connectionId: string;
   nextReconcileAt: string;
+  onApplyUpdates?: (() => Promise<void> | void) | null;
   onFetchSnapshot?: (() => Promise<void> | void) | null;
-}): HostedRuntimeDeviceSyncPort & { readonly fetchSnapshotCalls: number } {
+}): HostedRuntimeDeviceSyncPort & {
+  readonly applyUpdatesCalls: number;
+  readonly fetchSnapshotCalls: number;
+} {
+  let applyUpdatesCalls = 0;
   let fetchSnapshotCalls = 0;
   return {
     async ackDirtyStateProcessed() {
       throw new Error("Device sync dirty ack should not run in this e2e.");
     },
     async applyUpdates(request) {
+      applyUpdatesCalls += 1;
+      await input.onApplyUpdates?.();
       return {
         appliedAt: request.occurredAt ?? new Date().toISOString(),
         updates: [],
         userId: TEST_USER_ID,
       };
+    },
+    get applyUpdatesCalls() {
+      return applyUpdatesCalls;
     },
     async createConnectLink() {
       throw new Error("Device sync connect link should not run in this e2e.");
