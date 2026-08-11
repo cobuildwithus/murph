@@ -148,4 +148,4 @@ Completed focused proof:
   the live provider credential.
 - CLI: 86 focused automation and generated-contract tests pass.
 - Assistant Runtime: the scoped hosted-automation integration case passes, with
-  the remaining 279 cases intentionally excluded by the focused filter.
+  the remaining cases intentionally excluded by the focused filter.
