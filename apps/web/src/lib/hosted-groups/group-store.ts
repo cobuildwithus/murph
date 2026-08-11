@@ -1002,8 +1002,9 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
           }
 
           const grantScopeKey = grant.projectionScopeKey;
+          const hasReadableShare = readableGrantIds.has(grant.id);
           const records = projectionScopeKey === HOSTED_GROUP_SHARED_READ_DEVICE_SCOPE_KEY
-            ? readableGrantIds.has(grant.id)
+            ? hasReadableShare
               ? [buildHostedGroupSharedDeviceSyncRecord({
                   connections: connectionsByMember.get(memberId) ?? [],
                   now,
@@ -1018,9 +1019,11 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
               )
             : records ?? [];
           return {
-            dataStatus: normalizedRecords.length > 0
-              ? "available" as const
-              : "missing" as const,
+            dataStatus: hasReadableShare && records === null
+              ? "pending" as const
+              : normalizedRecords.length > 0
+                ? "available" as const
+                : "missing" as const,
             grantedAt: grant.grantedAt.toISOString(),
             grantStatus: "granted" as const,
             projectionScope,

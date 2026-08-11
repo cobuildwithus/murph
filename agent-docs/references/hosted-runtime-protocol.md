@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Decision
 
@@ -341,16 +341,20 @@ the durable row.
 projection scopes. The signed Web handler captures the current group roster and
 exact active grants, decrypts only the captured encrypted snapshots, and returns
 every current member with every requested scope. Each result is explicitly
-`not_granted`, `granted` plus `missing`, or `available`; a real zero remains
-available. Profile labels require their separate granted snapshot. Authority,
-decryption, parse, and bound failures return typed unavailability without shared
-records or identity-bearing infrastructure fields.
+`not_granted`, `granted` plus `pending`, `granted` plus `missing`, or
+`available`; a real zero remains available. `pending` is limited to an active
+readable grant whose first snapshot is still null. An encrypted empty snapshot
+is `missing`, as is a grant withheld by current access. Profile labels require
+their separate granted snapshot. Authority, decryption, parse, and bound
+failures return typed unavailability without shared records or identity-bearing
+infrastructure fields.
 
 The Web response is complete. For the model boundary, the assistant-engine
 adapter keys every retained projection by its exact scope and collapses the
-grant/data pair to `not_granted`, `missing`, or `available`. Non-workout record
-arrays remain intact; `workouts.v0` additionally hoists repeated day, kind,
-time-semantics, and completion-watermark fields. If whole member rows still
+grant/data pair to `not_granted`, `pending`, `missing`, or `available`.
+Non-workout record arrays remain intact; `workouts.v0` additionally hoists
+repeated day, kind, time-semantics, and completion-watermark fields. If whole
+member rows still
 exceed the model result limit, the adapter returns `status="partial"` with every
 omitted current membership named in `omittedParticipantIds`. It never truncates
 a member row, treats an omitted member as departed, or alters stored or
@@ -458,6 +462,17 @@ mutate a local share store. V2 archive restore excludes
 `vault/derived/vault-share/**` and `vault/vault-share/**`; legacy bundle
 materialization excludes the corresponding vault-relative subtrees. No
 foreground cleanup pass or revoke wake is part of the boundary.
+
+After a join or permission transaction creates a new projection grant, Web
+starts the existing payload-free `runtime_wake_requested` handoff immediately.
+That coalesced wake runs alongside join-confirmation recovery rather than after
+it, so either best-effort path can stall without starving the other. It adds no
+mailbox row or projection owner; a failed signal leaves the durable null
+snapshot visible as `pending` until a later runtime invocation materializes it.
+Deploy the Cloudflare runtime consumer with the additive `pending` parser and
+model status before Web begins emitting that value. Older Web remains compatible
+with the newer consumer because it emits only the prior status subset during
+that window.
 
 This protocol is a consumer-first hard cut:
 

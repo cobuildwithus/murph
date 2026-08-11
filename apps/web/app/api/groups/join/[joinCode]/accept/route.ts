@@ -19,7 +19,7 @@ import {
   requireHostedInviteForAuthentication,
 } from "@/src/lib/hosted-onboarding/invite-service";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
-import { signalHostedRuntimeMaintenanceRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
+import { signalHostedRuntimeWakeRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
@@ -87,6 +87,16 @@ export const POST = withJsonError(async (
   const { joinConfirmationSignal, ...responseResult } = result;
 
   const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
+  const projectionWake = result.grantedVaultShareProjectionKinds.length > 0
+    ? runHostedGroupJoinPostCommitBestEffort({
+        deadlineMs: postCommitDeadlineMs,
+        operation: (abortSignal) => signalHostedRuntimeWakeRuntime({
+          abortSignal,
+          userId: auth.member.id,
+        }),
+        signal: request.signal,
+      })
+    : null;
   if (joinConfirmationSignal) {
     await signalHostedGroupJoinConfirmationRuntimeBestEffort({
       ...joinConfirmationSignal,
@@ -102,14 +112,7 @@ export const POST = withJsonError(async (
     signal: request.signal,
     timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
   });
-
-  if (result.grantedVaultShareProjectionKinds.length > 0) {
-    await runHostedGroupJoinPostCommitBestEffort({
-      deadlineMs: postCommitDeadlineMs,
-      operation: () => signalHostedRuntimeMaintenanceRuntime({ userId: auth.member.id }),
-      signal: request.signal,
-    });
-  }
+  await projectionWake;
 
   return jsonOk({ ok: true, ...responseResult });
 });
@@ -130,7 +133,7 @@ function parseOptionalInviteCode(value: unknown): string | null {
 
 async function runHostedGroupJoinPostCommitBestEffort(input: {
   deadlineMs: number;
-  operation: () => Promise<unknown>;
+  operation: (signal: AbortSignal) => Promise<unknown>;
   signal?: AbortSignal;
 }): Promise<void> {
   try {

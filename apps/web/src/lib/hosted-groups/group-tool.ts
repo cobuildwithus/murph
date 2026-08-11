@@ -1727,6 +1727,21 @@ function renderHostedGroupJoinOfferScopeSentence(
       "by-source sleep includes every available source's value and name, plus when Murph recorded that source value",
     );
   }
+  const recentSleepLabels = [
+    ...(projectionScopes.some((scope) => scope.projectionKind === "sleep-times.v0")
+      ? ["sleep timing"]
+      : []),
+    ...(projectionScopes.some(
+      (scope) => scope.projectionKind === "sleep-duration-days.v0",
+    )
+      ? ["sleep duration"]
+      : []),
+  ];
+  if (recentSleepLabels.length > 0) {
+    disclosures.push(
+      `${formatHumanList(recentSleepLabels)} ${recentSleepLabels.length === 1 ? "covers" : "cover"} the last 7 days`,
+    );
+  }
   return disclosures.length > 0
     ? `${sentence} (${disclosures.join("; ")})`
     : sentence;

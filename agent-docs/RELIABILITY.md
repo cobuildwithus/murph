@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Current Guardrails
 
@@ -102,6 +102,12 @@ Last verified: 2026-08-10
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- A committed hosted-group projection grant uses that same payload-free
+  `runtime_wake_requested` signal immediately, in parallel with bounded
+  join-confirmation recovery. Either best-effort handoff can stall without
+  starving the other. Signal failure never rolls back consent; the durable null
+  snapshot remains an explicit `pending` shared-read state until a later member
+  runtime invocation materializes it.
 - Direct hosted Codex process projection includes the selected core provider
   and only that provider's signed egress credential. Changing providers
   therefore changes the warm-process launch identity; the replacement process
