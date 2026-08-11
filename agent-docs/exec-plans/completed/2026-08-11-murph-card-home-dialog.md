@@ -1,6 +1,6 @@
 # Homepage handoff for shared iMessage cards
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -56,9 +56,15 @@ Updated: 2026-08-11
 
 ## Verification
 
-- Focused Vitest dialog and telemetry regressions: 14 tests passed after preliminary-review remediation.
-- Scoped ESLint for the remediated component, unit tests, telemetry test, and Playwright journey: passed.
+- Focused Vitest coverage across the dialog, telemetry owner, changelog registry/page, and homepage: 62 tests passed after preliminary-review remediation and current-base reconciliation.
+- Scoped ESLint across every changed Web TypeScript/TSX source and test file: passed.
+- `pnpm --dir apps/web typecheck:prepared`: passed after repository-owned generation.
+- `pnpm test:frontend-design-proof`: 10 tests passed.
 - Production-faithful Playwright journey at 1440×1000 and 390×844: passed; verified accessible dialog naming, focus containment, exactly two visible actions with one dismiss button, Escape and explicit dismissal, fragment preservation, ordinary-hash silence, no horizontal overflow, and no synthetic fragment in rendered content or observed requests.
-- Preliminary `completion-specialists` ReviewGPT pass on pushed head `17b22ffb0c4e88dc163a17a2e5e34239a823f868`: complete with product-experience, frontend-proof, and coverage findings; the code and coverage findings are remediated locally, and refreshed production captures remain to be uploaded.
+- Preliminary `completion-specialists` ReviewGPT pass on pushed head `17b22ffb0c4e88dc163a17a2e5e34239a823f868`: complete with product-experience, frontend-proof, and coverage findings; the code and coverage findings are remediated, and refreshed production captures are uploaded.
 - Claude Code UI double-check: attempted with Fable and blocked by explicit usage-credit exhaustion, which the completion workflow treats as a non-blocking gap.
-- Full focused suite, typecheck, design-proof gate, refreshed screenshots, exact-head PR checks, and final parent review: pending.
+- Current `main` was merged once. All four bounded conflicts were inspected and resolved by preserving both the shared-card work and the newer base behavior, then the affected checks were rerun.
+- Refreshed production captures were inspected locally and from their public `designproof` variants at native 1440×1000 and 1170×2340 resolutions.
+- Frog inspection found the base-only pre-commit schema warning already tracked. A new public-safe entry records that the documented design-proof separator is forwarded as a screenshot path.
+- Exact-head GitHub Actions and the final parent review remain pending until the plan-closing commit is pushed.
+Completed: 2026-08-11
