@@ -38,9 +38,12 @@ import {
 import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
+  prewarmHostedLinqMessageEditPreparation,
+  readHostedLinqMessageEditPreparation,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
   shouldPrepareHostedLinqThreadContainerCrypto,
+  type HostedLinqMessageEditPreparation,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -70,8 +73,14 @@ import {
 import {
   runWithHostedDomainRootUnwrapCache,
 } from "../hosted-crypto/domain-root-unwrap-cache";
-import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
+import {
+  isHostedDomainRootPreparationRequiredError,
+  unwrapHostedDomainRootForWeb,
+} from "../hosted-crypto/domain-root-store";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
+import {
+  isHostedMailboxSourceConversationPreparationMismatchError,
+} from "../hosted-mailbox/store";
 import {
   runWithPrismaOperationTimings,
   type PrismaOperationTiming,
@@ -446,14 +455,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       );
       let editPlan: Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>;
       try {
-        editPlan = await runHostedOnboardingWebhookTransaction(
+        editPlan = await runHostedLinqMessageEditPreparedTransaction({
+          event: editedEvent,
           prisma,
-          (transaction) =>
-            planHostedLinqMessageEditedWebhook({
-              event: editedEvent,
-              prisma: transaction,
-            }),
-        );
+        });
       } catch (error) {
         finishHostedOnboardingTiming(planTiming, "failed", {
           errorName: deriveHostedOnboardingTimingErrorName(error),
@@ -2120,6 +2125,63 @@ const HOSTED_THREAD_ROUTING_PREPARATION_RETRY_CODES = new Set([
   ...HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES,
   "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
 ]);
+
+export async function runHostedLinqMessageEditPreparedTransaction(input: {
+  event: Parameters<typeof readHostedLinqMessageEditPreparation>[0]["event"];
+  prisma: PrismaClient;
+}): Promise<Awaited<ReturnType<typeof planHostedLinqMessageEditedWebhook>>> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const preparation: HostedLinqMessageEditPreparation =
+      await readHostedLinqMessageEditPreparation({
+        event: input.event,
+        prisma: input.prisma,
+      });
+    const preparationFailures: unknown[] = [];
+    try {
+      return await runHostedOnboardingWebhookTransaction(
+        input.prisma,
+        (transaction) =>
+          planHostedLinqMessageEditedWebhook({
+            event: input.event,
+            preparation,
+            prisma: transaction,
+          }),
+        async () => {
+          try {
+            await prewarmHostedLinqMessageEditPreparation({
+              preparation,
+              prisma: input.prisma,
+            });
+          } catch (error) {
+            preparationFailures.push(error);
+            throw error;
+          }
+        },
+      );
+    } catch (error) {
+      if (
+        preparationFailures.length > 0
+        && isHostedDomainRootPreparationRequiredError(error)
+      ) {
+        throw preparationFailures[0];
+      }
+      if (
+        attempt === 0
+        && isHostedMailboxSourceConversationPreparationMismatchError(error)
+      ) {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.webhook.linq-message-edit-preparation-retry",
+          {},
+        );
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error(
+    "Hosted Linq message edit preparation retry exhausted unexpectedly.",
+  );
+}
 
 async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
   plan: (input: {

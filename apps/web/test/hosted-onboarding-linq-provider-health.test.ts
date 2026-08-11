@@ -593,10 +593,10 @@ describe("Linq provider health projections", () => {
   });
 
   it("moves an existing logical chat row to the current privacy key", async () => {
-    const restore = configureContactPrivacyKeyringForTest("v1");
+    const restoreV1 = configureContactPrivacyKeyringForTest("v1");
     const legacyLookupKey = createHostedLinqChatLookupKey("chat-health");
-    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
-    clearHostedOnboardingEnvCache();
+    restoreV1();
+    const restoreV2 = configureContactPrivacyKeyringForTest("v2");
     const currentLookupKey = createHostedLinqChatLookupKey("chat-health");
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const createMany = vi.fn();
@@ -629,7 +629,7 @@ describe("Linq provider health projections", () => {
         }),
       }));
     } finally {
-      restore();
+      restoreV2();
     }
   });
 });
@@ -784,10 +784,11 @@ function jsonResponse(payload: unknown): Response {
 function configureContactPrivacyKeyringForTest(currentVersion: string): () => void {
   const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
   const previousVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
-  process.env.HOSTED_CONTACT_PRIVACY_KEYS = [
-    `v1:${Buffer.from("1".repeat(32), "utf8").toString("base64")}`,
-    `v2:${Buffer.from("2".repeat(32), "utf8").toString("base64")}`,
-  ].join(",");
+  const v1 = `v1:${Buffer.from("1".repeat(32), "utf8").toString("base64")}`;
+  const v2 = `v2:${Buffer.from("2".repeat(32), "utf8").toString("base64")}`;
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = currentVersion === "v1"
+    ? v1
+    : `${v1},${v2}`;
   process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = currentVersion;
   clearHostedOnboardingEnvCache();
 

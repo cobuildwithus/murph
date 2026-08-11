@@ -58,10 +58,26 @@ export class HostedCryptoDomainRootCandidateRequiredError extends Error {
   }
 }
 
+export class HostedDomainRootPreparationRequiredError extends Error {
+  readonly reference: HostedDomainRootReference;
+
+  constructor(input: { reference: HostedDomainRootReference }) {
+    super("Prepared hosted domain root is required before the transaction begins.");
+    this.name = "HostedDomainRootPreparationRequiredError";
+    this.reference = input.reference;
+  }
+}
+
 export function isHostedDomainRootEnvelopeUnavailableError(
   error: unknown,
 ): error is HostedDomainRootEnvelopeUnavailableError {
   return error instanceof HostedDomainRootEnvelopeUnavailableError;
+}
+
+export function isHostedDomainRootPreparationRequiredError(
+  error: unknown,
+): error is HostedDomainRootPreparationRequiredError {
+  return error instanceof HostedDomainRootPreparationRequiredError;
 }
 
 interface HostedUserCryptoEnvelopeRow {
@@ -386,7 +402,15 @@ export async function unwrapHostedDomainRootForWeb(input: {
         prisma: input.prisma,
         userId: input.userId,
       });
-      const rootKey = await unwrapEnvelopeForWeb({ envelope, signal: input.signal });
+      const concreteCacheKey = createHostedDomainRootReferenceKey({
+        domain: input.domain,
+        rootKeyId: envelope.rootKeyId,
+        userId: input.userId,
+      });
+      const concrete = getHostedDomainRootUnwrapCache()?.get(concreteCacheKey);
+      const rootKey = concrete
+        ? Uint8Array.from((await concrete).rootKey)
+        : await unwrapEnvelopeForWeb({ envelope, signal: input.signal });
       return { envelope, rootKey };
     },
     input.retainFailureInScopedCache,
@@ -567,6 +591,68 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
     }
     throw error;
   }
+}
+
+/**
+ * Copies only roots that were prepared in the active request scope. This is
+ * the transaction-safe counterpart to the metadata/KMS batch above: it does
+ * no database or provider work, drains every cached promise it observes, and
+ * returns caller-owned copies that must be wiped after use.
+ */
+export async function readPreparedHostedDomainRootsForWebByRootKeyIds(input: {
+  references: readonly HostedDomainRootReference[];
+}): Promise<UnwrappedHostedDomainRootReference[]> {
+  const referencesByKey = new Map<string, HostedDomainRootReference>();
+  for (const reference of input.references) {
+    if (!WEB_UNWRAP_DOMAINS.has(reference.domain)) {
+      throw new Error(`Web is not allowed to unwrap hosted ${reference.domain} domain roots.`);
+    }
+    referencesByKey.set(createHostedDomainRootReferenceKey(reference), reference);
+  }
+  const references = [...referencesByKey.values()];
+  if (references.length === 0) {
+    return [];
+  }
+
+  const cache = getHostedDomainRootUnwrapCache();
+  const settled = await Promise.allSettled(references.map(async (reference) => {
+    const pending = cache?.get(createHostedDomainRootReferenceKey(reference));
+    if (!pending) {
+      throw new HostedDomainRootPreparationRequiredError({ reference });
+    }
+    const unwrapped = await pending;
+    if (
+      unwrapped.envelope.domain !== reference.domain
+      || unwrapped.envelope.rootKeyId !== reference.rootKeyId
+      || unwrapped.envelope.userId !== reference.userId
+    ) {
+      throw new Error("Prepared hosted domain root does not match its requested reference.");
+    }
+    return {
+      ...reference,
+      envelope: unwrapped.envelope,
+      rootKey: Uint8Array.from(unwrapped.rootKey),
+    };
+  }));
+
+  const roots: UnwrappedHostedDomainRootReference[] = [];
+  let firstError: unknown;
+  let hasError = false;
+  for (const result of settled) {
+    if (result.status === "fulfilled") {
+      roots.push(result.value);
+    } else if (!hasError) {
+      firstError = result.reason;
+      hasError = true;
+    }
+  }
+  if (hasError) {
+    for (const root of roots) {
+      root.rootKey.fill(0);
+    }
+    throw firstError;
+  }
+  return roots;
 }
 
 function retainHostedDomainRootReferenceFailure(input: {

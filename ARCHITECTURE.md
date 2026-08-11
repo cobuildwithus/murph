@@ -2287,11 +2287,22 @@ message id. A verified `message.edited` webhook locks that source lineage,
 finds the already-accepted original, and revalidates its exact sender, chat,
 direction, direct home route or same group route, and container access before
 appending a structured correction through the ordinary mailbox and wake
-handoff. The lock is edit-only: ordinary accepted messages write the blind
-source index without an additional source-lock query. An edit that races an
-uncommitted original receives the existing bounded retryable missing-source
-outcome and resolves after provider retry; simultaneous edits serialize from
-lineage read through correction append. Optional group `senderMemberId`
+handoff. Before opening the planning transaction, Web reads the complete
+source lineage and any sidecar payloads in one bounded seven-row set query over
+only the current and one configured prior contact-privacy version. It prepares
+the exact ciphertext roots through the request-scoped deduplicated batch KMS
+owner, plus the active mailbox root only when another correction could be
+appended. Inside the transaction, Web reacquires the sorted source locks,
+repeats and exactly revalidates that snapshot, opens payloads only from the
+prepared request scope, repeats all direct or group authority checks, and
+appends atomically. A changed snapshot receives one fresh preparation retry;
+direct authority reads only the existing blind home-route columns rather than
+decrypting unrelated routing state. The lock is edit-only: ordinary accepted
+messages write the blind source index without an additional source-lock query.
+An edit that races an uncommitted original receives the existing bounded
+retryable missing-source outcome and resolves after provider retry;
+simultaneous edits serialize from lineage read through correction append.
+Optional group `senderMemberId`
 attribution and personal entitlement
 never grant or remove owner-backed room authority: an absent participant
 projection remains eligible, while an existing projection that positively

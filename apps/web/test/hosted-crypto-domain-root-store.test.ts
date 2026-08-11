@@ -31,6 +31,8 @@ import {
 } from "../src/lib/hosted-onboarding/member-private-codecs";
 import {
   openHostedUserSecureBoxStrings,
+  openHostedUserSecureBoxStringsWithPreparedRoots,
+  prewarmHostedUserSecureBoxStrings,
   sealHostedUserSecureBoxStrings,
   setHostedSecureBoxStringTestCodecForTests,
 } from "../src/lib/hosted-crypto/secure-box";
@@ -914,6 +916,79 @@ test("member email batches use one envelope query with bounded KMS unwraps", asy
   expect(openedPlaintexts).toHaveLength(memberIds.length);
   expect(openedPlaintexts.every((plaintext) =>
     new Uint8Array(plaintext).every((byte) => byte === 0)
+  )).toBe(true);
+});
+
+test("prepared max-cardinality secure-box batches do no metadata or KMS work while opening", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const memberIds = Array.from(
+    { length: 7 },
+    (_, index) => `member-prepared-batch-${index + 1}`,
+  );
+  const records = await createBatchPrivateFieldRecords({ memberIds, tx });
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const entries = records.identityRecords.map((record) => ({
+    aad: {
+      field: "hosted-member-identity.phone-number",
+      purpose: "hosted-member-private-field",
+      rowId: record.memberId,
+      table: "hosted_member",
+    },
+    scope: "hosted-member-private-field:hosted-member-identity.phone-number",
+    userId: record.memberId,
+    value: record.phoneNumberEncrypted,
+  }));
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const { unwrapHostedDomainRootForWeb } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await prewarmHostedUserSecureBoxStrings({
+      entries,
+      lane: "hosted-member-private-field",
+      prisma,
+    });
+
+    expect(envelopeFindMany).toHaveBeenCalledOnce();
+    expect(envelopeFindMany.mock.calls[0]?.[0]?.where?.OR).toHaveLength(7);
+    expect(decryptMetrics.calls).toHaveLength(7);
+    expect(decryptMetrics.maxConcurrent).toBeGreaterThan(1);
+    expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+
+    const metadataQueriesAfterPrepare = envelopeFindMany.mock.calls.length;
+    const kmsCallsAfterPrepare = decryptMetrics.calls.length;
+    await expect(openHostedUserSecureBoxStringsWithPreparedRoots({
+      entries,
+      lane: "hosted-member-private-field",
+    })).resolves.toEqual(
+      memberIds.map((_, index) =>
+        `+12125550${String(index + 1).padStart(3, "0")}`
+      ),
+    );
+    expect(envelopeFindMany).toHaveBeenCalledTimes(
+      metadataQueriesAfterPrepare,
+    );
+    expect(decryptMetrics.calls).toHaveLength(kmsCallsAfterPrepare);
+
+    const activeRoot = await unwrapHostedDomainRootForWeb({
+      domain: "control",
+      prisma,
+      userId: memberIds[0]!,
+    });
+    activeRoot.rootKey.fill(0);
+    expect(decryptMetrics.calls).toHaveLength(kmsCallsAfterPrepare);
+  });
+  await Promise.resolve();
+
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
   )).toBe(true);
 });
 

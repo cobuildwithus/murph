@@ -79,7 +79,7 @@ describe("hosted Linq observability stores", () => {
   it("keeps non-contact observability ids stable when the contact-privacy keyring rotates", () => {
     const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: OBSERVABILITY_TEST_KEYRING_ENTRIES,
+      entries: { v1: OBSERVABILITY_TEST_KEYRING_ENTRIES.v1 },
     });
     let providerEventId = "";
     let deliveryIdempotencyKey: string | null = null;
@@ -1106,12 +1106,16 @@ describe("hosted Linq observability stores", () => {
   });
 
   it("preserves the stored line lookup key for provider status after key rotation", async () => {
-    const restore = configureHostedContactPrivacyKeyringForTest({
+    const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
-      entries: OBSERVABILITY_TEST_KEYRING_ENTRIES,
+      entries: { v1: OBSERVABILITY_TEST_KEYRING_ENTRIES.v1 },
     });
     const legacyLineLookupKey = createHostedPhoneLookupKey("+15550000000");
-    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
+    restoreV1();
+    const restoreV2 = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: OBSERVABILITY_TEST_KEYRING_ENTRIES,
+    });
 
     if (!legacyLineLookupKey) {
       throw new Error("Expected legacy line lookup key.");
@@ -1161,7 +1165,7 @@ describe("hosted Linq observability stores", () => {
         }),
       );
     } finally {
-      restore();
+      restoreV2();
     }
   });
 

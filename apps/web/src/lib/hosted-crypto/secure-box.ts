@@ -10,6 +10,8 @@ import {
 } from "@murphai/runtime-state";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import type { HostedDomainRootReference } from "./domain-root-store";
+
 const WEB_SEAL_LANES = new Set<HostedCryptoLane>([
   "hosted-member-private-field",
   "hosted-inference-connection",
@@ -251,41 +253,149 @@ export async function openHostedUserSecureBoxString(input: {
   }
 }
 
+export interface HostedSecureBoxStringEntry {
+  aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
+  scope: string;
+  userId: string;
+  value: string | null | undefined;
+}
+
+type ParsedHostedSecureBoxStringEntry = {
+  entry: HostedSecureBoxStringEntry;
+  envelope: ReturnType<typeof parseSerializedHostedSecureBoxEnvelope>;
+} | null;
+
+export async function prewarmHostedUserSecureBoxStrings(input: {
+  entries: readonly HostedSecureBoxStringEntry[];
+  lane: HostedCryptoLane;
+  prisma?: HostedSecureBoxPrismaClient;
+  signal?: AbortSignal;
+}): Promise<void> {
+  if (!WEB_SEAL_LANES.has(input.lane)) {
+    throw new Error(`Web is not allowed to decrypt hosted ${input.lane} values.`);
+  }
+  if (getHostedSecureBoxStringTestCodecForTests()) {
+    return;
+  }
+
+  const { domain, parsedEntries } = parseHostedSecureBoxStringEntries(input);
+  const { unwrapHostedDomainRootsForWebByRootKeyIds } = await import(
+    "./domain-root-store"
+  );
+  const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
+    prisma: input.prisma,
+    references: buildHostedSecureBoxRootReferences({ domain, parsedEntries }),
+    retainFailureInScopedCache: true,
+    signal: input.signal,
+  });
+  for (const root of roots) {
+    root.rootKey.fill(0);
+  }
+}
+
 export async function openHostedUserSecureBoxStrings(input: {
-  entries: ReadonlyArray<{
-    aad: Omit<HostedSecureBoxAadFields, "domain" | "lane" | "scope" | "tenant" | "userId">;
-    scope: string;
-    userId: string;
-    value: string | null | undefined;
-  }>;
+  entries: readonly HostedSecureBoxStringEntry[];
   lane: HostedCryptoLane;
   prisma?: HostedSecureBoxPrismaClient;
   retainFailureInScopedCache?: boolean;
   signal?: AbortSignal;
 }): Promise<Array<string | null>> {
+  const testCodec = prepareHostedSecureBoxBatchOpen(input);
+  if (testCodec) {
+    return openHostedSecureBoxStringsWithTestCodec(input, testCodec);
+  }
+
+  const { domain, parsedEntries } = parseHostedSecureBoxStringEntries(input);
+  const { unwrapHostedDomainRootsForWebByRootKeyIds } = await import(
+    "./domain-root-store"
+  );
+  const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
+    prisma: input.prisma,
+    references: buildHostedSecureBoxRootReferences({ domain, parsedEntries }),
+    ...(input.retainFailureInScopedCache === undefined
+      ? {}
+      : {
+          retainFailureInScopedCache: input.retainFailureInScopedCache,
+        }),
+    signal: input.signal,
+  });
+  return openParsedHostedSecureBoxStrings({
+    domain,
+    lane: input.lane,
+    parsedEntries,
+    roots,
+  });
+}
+
+export async function openHostedUserSecureBoxStringsWithPreparedRoots(input: {
+  entries: readonly HostedSecureBoxStringEntry[];
+  lane: HostedCryptoLane;
+}): Promise<Array<string | null>> {
+  const testCodec = prepareHostedSecureBoxBatchOpen(input);
+  if (testCodec) {
+    return openHostedSecureBoxStringsWithTestCodec(input, testCodec);
+  }
+
+  const { domain, parsedEntries } = parseHostedSecureBoxStringEntries(input);
+  const { readPreparedHostedDomainRootsForWebByRootKeyIds } = await import(
+    "./domain-root-store"
+  );
+  const roots = await readPreparedHostedDomainRootsForWebByRootKeyIds({
+    references: buildHostedSecureBoxRootReferences({ domain, parsedEntries }),
+  });
+  return openParsedHostedSecureBoxStrings({
+    domain,
+    lane: input.lane,
+    parsedEntries,
+    roots,
+  });
+}
+
+function prepareHostedSecureBoxBatchOpen(input: {
+  lane: HostedCryptoLane;
+}): HostedSecureBoxStringTestCodec | null {
   if (!WEB_SEAL_LANES.has(input.lane)) {
     throw new Error(`Web is not allowed to decrypt hosted ${input.lane} values.`);
   }
-  const testCodec = getHostedSecureBoxStringTestCodecForTests();
-  if (testCodec) {
-    return input.entries.map((entry) =>
+  return getHostedSecureBoxStringTestCodecForTests();
+}
+
+function openHostedSecureBoxStringsWithTestCodec(
+  input: {
+    entries: readonly HostedSecureBoxStringEntry[];
+    lane: HostedCryptoLane;
+  },
+  testCodec: HostedSecureBoxStringTestCodec,
+): Array<string | null> {
+  return input.entries.map((entry) =>
+    entry.value === null
+    || entry.value === undefined
+    || entry.value.trim().length === 0
+      ? null
+      : testCodec.decrypt({
+          aad: entry.aad,
+          lane: input.lane,
+          scope: entry.scope,
+          userId: entry.userId,
+          value: entry.value,
+        })
+  );
+}
+
+function parseHostedSecureBoxStringEntries(input: {
+  entries: readonly HostedSecureBoxStringEntry[];
+  lane: HostedCryptoLane;
+}): {
+  domain: ReturnType<typeof getHostedCryptoDomainForLane>;
+  parsedEntries: ParsedHostedSecureBoxStringEntry[];
+} {
+  const domain = getHostedCryptoDomainForLane(input.lane);
+  const parsedEntries = input.entries.map((entry) => {
+    if (
       entry.value === null
       || entry.value === undefined
       || entry.value.trim().length === 0
-        ? null
-        : testCodec.decrypt({
-            aad: entry.aad,
-            lane: input.lane,
-            scope: entry.scope,
-            userId: entry.userId,
-            value: entry.value,
-          })
-    );
-  }
-
-  const domain = getHostedCryptoDomainForLane(input.lane);
-  const parsedEntries = input.entries.map((entry) => {
-    if (entry.value === null || entry.value === undefined || entry.value.trim().length === 0) {
+    ) {
       return null;
     }
     const envelope = parseSerializedHostedSecureBoxEnvelope(entry.value);
@@ -294,76 +404,87 @@ export async function openHostedUserSecureBoxStrings(input: {
     }
     return { entry, envelope };
   });
-  const { unwrapHostedDomainRootsForWebByRootKeyIds } = await import("./domain-root-store");
-  const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
-    prisma: input.prisma,
-    references: parsedEntries.flatMap((parsed) =>
-      parsed
-        ? [{
-            domain,
-            rootKeyId: parsed.envelope.rootKeyId,
-            userId: parsed.entry.userId,
-          }]
-        : []
-    ),
-    ...(input.retainFailureInScopedCache === undefined
-      ? {}
-      : {
-          retainFailureInScopedCache:
-            input.retainFailureInScopedCache,
-        }),
-    signal: input.signal,
-  });
+  return { domain, parsedEntries };
+}
+
+function buildHostedSecureBoxRootReferences(input: {
+  domain: ReturnType<typeof getHostedCryptoDomainForLane>;
+  parsedEntries: readonly ParsedHostedSecureBoxStringEntry[];
+}): HostedDomainRootReference[] {
+  return input.parsedEntries.flatMap((parsed) =>
+    parsed
+      ? [{
+          domain: input.domain,
+          rootKeyId: parsed.envelope.rootKeyId,
+          userId: parsed.entry.userId,
+        }]
+      : []
+  );
+}
+
+async function openParsedHostedSecureBoxStrings(input: {
+  domain: ReturnType<typeof getHostedCryptoDomainForLane>;
+  lane: HostedCryptoLane;
+  parsedEntries: readonly ParsedHostedSecureBoxStringEntry[];
+  roots: ReadonlyArray<{
+    domain: string;
+    rootKey: Uint8Array;
+    rootKeyId: string;
+    userId: string;
+  }>;
+}): Promise<Array<string | null>> {
   const rootsByKey = new Map(
-    roots.map((root) => [
+    input.roots.map((root) => [
       createHostedSecureBoxRootReferenceKey(root),
       root,
     ] as const),
   );
 
   try {
-    return await Promise.all(parsedEntries.map(async (parsed) => {
-      if (!parsed) {
-        return null;
-      }
-      const root = rootsByKey.get(createHostedSecureBoxRootReferenceKey({
-        domain,
-        rootKeyId: parsed.envelope.rootKeyId,
-        userId: parsed.entry.userId,
-      }));
-      if (!root) {
-        throw new Error("Hosted secure-box root was not returned by the batch unwrap.");
-      }
-      const rootKey = Uint8Array.from(root.rootKey);
-      try {
-        const aad = buildHostedSecureBoxAad({
-          ...parsed.entry.aad,
-          domain,
-          lane: input.lane,
-          scope: parsed.entry.scope,
-          tenant: "murph-hosted",
-          userId: parsed.entry.userId,
-        });
-        const plaintext = await openHostedSecureBox({
-          aad,
-          envelope: parsed.envelope,
-          expectedDomain: domain,
-          expectedLane: input.lane,
-          expectedRootKeyId: parsed.envelope.rootKeyId,
-          expectedScope: parsed.entry.scope,
-          rootKey,
-        });
-        try {
-          return new TextDecoder().decode(plaintext);
-        } finally {
-          plaintext.fill(0);
+    return await Promise.all(
+      input.parsedEntries.map(async (parsed) => {
+        if (!parsed) {
+          return null;
         }
-      } finally {
-        rootKey.fill(0);
-      }
-    }));
+        const root = rootsByKey.get(createHostedSecureBoxRootReferenceKey({
+          domain: input.domain,
+          rootKeyId: parsed.envelope.rootKeyId,
+          userId: parsed.entry.userId,
+        }));
+        if (!root) {
+          throw new Error("Hosted secure-box root was not returned by the batch unwrap.");
+        }
+        const rootKey = Uint8Array.from(root.rootKey);
+        try {
+          const aad = buildHostedSecureBoxAad({
+            ...parsed.entry.aad,
+            domain: input.domain,
+            lane: input.lane,
+            scope: parsed.entry.scope,
+            tenant: "murph-hosted",
+            userId: parsed.entry.userId,
+          });
+          const plaintext = await openHostedSecureBox({
+            aad,
+            envelope: parsed.envelope,
+            expectedDomain: input.domain,
+            expectedLane: input.lane,
+            expectedRootKeyId: parsed.envelope.rootKeyId,
+            expectedScope: parsed.entry.scope,
+            rootKey,
+          });
+          try {
+            return new TextDecoder().decode(plaintext);
+          } finally {
+            plaintext.fill(0);
+          }
+        } finally {
+          rootKey.fill(0);
+        }
+      }),
+    );
   } finally {
-    for (const root of roots) {
+    for (const root of input.roots) {
       root.rootKey.fill(0);
     }
   }
