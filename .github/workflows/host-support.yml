@@ -265,6 +265,9 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
+      - name: Verify pinned Codex upstream egress source
+        run: pnpm --dir apps/cloudflare verify:codex-upstream-source
+
       # Keep trusted-main app reuse on its own namespace so the two release
       # lanes never exchange incremental state and PRs cannot seed it.
       - name: Restore release app verification build info
