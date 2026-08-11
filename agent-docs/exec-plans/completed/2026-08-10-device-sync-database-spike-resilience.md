@@ -1,6 +1,6 @@
 # Device-sync database spike resilience
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -59,9 +59,9 @@ authority, durable-work semantics, or runtime ownership.
    preservation; apply it only after `git apply --check` succeeds.
 4. [x] Run focused tests, hosted-Web typecheck, diff checks, and the local
    incident replay against an isolated development database.
-5. [ ] Send the resulting exact diff and evidence through final ReviewGPT;
+5. [x] Send the resulting exact diff and evidence through final ReviewGPT;
    resolve every accepted finding.
-6. [ ] Close this plan and create a scoped commit/PR handoff.
+6. [x] Close this plan and create a scoped commit/PR handoff.
 
 ## Verification
 
@@ -73,19 +73,30 @@ authority, durable-work semantics, or runtime ownership.
 
 Completed local proof:
 
-- Four focused hosted-Web suites pass 210 tests covering webhook admission,
+- Four focused hosted-Web suites pass 211 tests covering webhook admission,
   runtime snapshot authority, connection storage, and connection-source
-  storage.
+  storage, including the stale-owner admission case returned by ReviewGPT as a
+  focused coverage patch.
 - Hosted-Web prepared typecheck passes after generating current Health Commons
   and Prisma outputs.
 - The real-PostgreSQL replay passes with 1,641 receipts, a 31-wide admission
   lane, 20 snapshots, and 40 foreground reads. The 15-connection application
   pool reached 15 sessions and 15 active sessions, briefly reported six queued
-  requests, and recovered after the 7.8-second compressed replay. Foreground
-  p95 was 72.65 ms in that local run.
+  requests, and recovered after the 8.6-second compressed replay. Foreground
+  p95 was 63.49 ms in the final exact-head local run.
 - The replay observed zero `DeviceConnection.findFirst` calls, 20 set-based
   connection reads, 3,282 owner/lifecycle `findUnique` reads, and 1,661 source
   reads: one preserved live source-admission check per webhook plus one batched
   source read per snapshot.
 - Every synthetic trace and signal completed, the advisory webhook timestamp
   advanced to the latest receipt, and the final dirty state acknowledged clean.
+- ReviewGPT's preliminary coverage pass ran for roughly 17 minutes against
+  commit `6ad6c487b2ef`, found one missing stale-owner admission test, and
+  returned a test-only patch. The patch was inspected, applied deliberately,
+  and its focused and aggregate suites passed.
+- ReviewGPT's final full-patch gate ran for roughly 34 minutes against exact
+  pushed head `4d8a7b48d7af`, returned `ROUND_OUTCOME: PASS`, and reported no
+  qualifying findings. Its only note was a PR-body line-count discrepancy,
+  which was corrected without changing the patch.
+- All GitHub checks passed on the reviewed head for PR #1603.
+Completed: 2026-08-10
