@@ -7449,8 +7449,12 @@ describe("Linq group chat auto-provision", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("reconciles a new group roster after the provisioning transaction commits", async () => {
+  it("revalidates a new group roster after the provisioning transaction commits", async () => {
     const prisma = createStatefulThreadRoutePrisma();
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const planningParticipantMemberId = "member_participant_123";
+    const boundaryParticipantMemberId = "member_participant_rebound_456";
+    let currentParticipantMemberId = planningParticipantMemberId;
     let transactionOpen = false;
     prisma.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => {
       transactionOpen = true;
@@ -7459,6 +7463,19 @@ describe("Linq group chat auto-provision", () => {
       } finally {
         transactionOpen = false;
       }
+    });
+    prisma.$executeRaw.mockImplementation(async (
+      query: Prisma.Sql | TemplateStringsArray,
+    ) => {
+      const sql = Array.isArray(query)
+        ? query.join("?")
+        : (query as Prisma.Sql).sql;
+      if (sql.includes(
+        "WITH input_participant(participant_member_id, handle_lookup_key)",
+      )) {
+        expect(transactionOpen).toBe(false);
+      }
+      return 0;
     });
     vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
     vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
@@ -7483,6 +7500,7 @@ describe("Linq group chat auto-provision", () => {
     }) => {
       const lookupKey = createHostedPhoneLookupKey("+15551112222");
       if (select.phoneLookupKey === true) {
+        expect(transactionOpen).toBe(false);
         expect(select).toEqual({ memberId: true, phoneLookupKey: true });
         return lookupKey && where.phoneLookupKey.in.includes(lookupKey)
           ? [{ memberId: "member_owner_123", phoneLookupKey: lookupKey }]
@@ -7504,6 +7522,7 @@ describe("Linq group chat auto-provision", () => {
           verifiedEmailVerifiedAt: { not: null };
         };
       }) => {
+        expect(transactionOpen).toBe(false);
         expect(select).toEqual({
           memberId: true,
           verifiedEmailLookupKey: true,
@@ -7512,7 +7531,7 @@ describe("Linq group chat auto-provision", () => {
         const lookupKey = createHostedEmailLookupKey("participant@example.com");
         return lookupKey && where.verifiedEmailLookupKey.in.includes(lookupKey)
           ? [{
-              memberId: "member_participant_123",
+              memberId: currentParticipantMemberId,
               verifiedEmailLookupKey: lookupKey,
             }]
           : [];
@@ -7548,6 +7567,9 @@ describe("Linq group chat auto-provision", () => {
 
     const response = await handleHostedOnboardingLinqWebhook({
       rawBody: "{}",
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
       signature: null,
       timestamp: null,
     });
@@ -7560,7 +7582,7 @@ describe("Linq group chat auto-provision", () => {
       ok: true,
       reason: "wake-appended-thread-route",
     });
-    expect(prismaModule.getPrisma).toHaveBeenCalledTimes(2);
+    expect(prismaModule.getPrisma).toHaveBeenCalledTimes(1);
     expect(linqClient.getHostedLinqChatHandles).not.toHaveBeenCalled();
     expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
       chatId: "chat_group_123",
@@ -7571,10 +7593,30 @@ describe("Linq group chat auto-provision", () => {
     ).toHaveBeenCalledWith(expect.objectContaining({
       participantMemberIds: [
         "member_owner_123",
-        "member_participant_123",
+        planningParticipantMemberId,
       ],
       senderMemberId: "member_owner_123",
     }));
+    expect(scheduledTasks.length).toBeGreaterThan(0);
+    expect(
+      usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).not.toHaveBeenCalled();
+    const planningRosterPhoneReads = prisma.hostedMemberIdentity.findMany.mock.calls
+      .filter(([query]) => query.select?.phoneLookupKey === true);
+    expect(planningRosterPhoneReads).toHaveLength(1);
+    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.$executeRaw.mock.calls.map(([query]) => query as Prisma.Sql)
+      .filter((query) => typeof query.sql === "string" && query.sql.includes(
+        "WITH input_participant(participant_member_id, handle_lookup_key)",
+      ))).toHaveLength(0);
+
+    currentParticipantMemberId = boundaryParticipantMemberId;
+    for (const task of scheduledTasks) {
+      await task();
+    }
+    expect(prismaModule.getPrisma).toHaveBeenCalledTimes(2);
+
     expect(
       usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit,
     ).toHaveBeenCalledTimes(2);
@@ -7592,9 +7634,9 @@ describe("Linq group chat auto-provision", () => {
     });
     const rosterPhoneReads = prisma.hostedMemberIdentity.findMany.mock.calls
       .filter(([query]) => query.select?.phoneLookupKey === true);
-    expect(rosterPhoneReads).toHaveLength(1);
-    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(2);
-    expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
+    expect(rosterPhoneReads).toHaveLength(2);
+    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(3);
+    expect(prisma.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(2);
     const participantReconciles = prisma.$executeRaw.mock.calls
       .map(([query]) => query as Prisma.Sql)
       .filter((query) => typeof query.sql === "string" && query.sql.includes(
@@ -7610,9 +7652,12 @@ describe("Linq group chat auto-provision", () => {
     expect(participantReconciles[0]?.values).toEqual(expect.arrayContaining([
       containerCreate.data.memberId,
       "member_owner_123",
-      "member_participant_123",
+      boundaryParticipantMemberId,
       true,
     ]));
+    expect(participantReconciles[0]?.values).not.toContain(
+      planningParticipantMemberId,
+    );
     expect(prisma.hostedThreadContainerParticipant.upsert).not.toHaveBeenCalled();
     const legacyRosterRemovalWrites =
       prisma.hostedThreadContainerParticipant.updateMany.mock.calls

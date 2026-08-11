@@ -21,6 +21,19 @@ const prisma = {
   hostedMemberIdentity,
 } as never;
 
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+};
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -109,13 +122,38 @@ describe("lookupHostedGroupParticipantMemberIdsByHandles", () => {
           value: handle,
         })[0],
     }));
-    hostedMemberIdentity.findMany.mockResolvedValue(phoneRecords);
-    hostedMemberEmailAuthorization.findMany.mockResolvedValue(emailRecords);
+    const phoneRead = createDeferred<typeof phoneRecords>();
+    const emailRead = createDeferred<typeof emailRecords>();
+    let activeReads = 0;
+    let peakReads = 0;
+    const trackRead = async <T>(deferred: Deferred<T>): Promise<T> => {
+      activeReads += 1;
+      peakReads = Math.max(peakReads, activeReads);
+      try {
+        return await deferred.promise;
+      } finally {
+        activeReads -= 1;
+      }
+    };
+    hostedMemberIdentity.findMany.mockImplementationOnce(
+      () => trackRead(phoneRead),
+    );
+    hostedMemberEmailAuthorization.findMany.mockImplementationOnce(
+      () => trackRead(emailRead),
+    );
 
-    const memberIdsByHandle = await lookupHostedGroupParticipantMemberIdsByHandles({
+    const lookup = lookupHostedGroupParticipantMemberIdsByHandles({
       handles: [...phoneHandles, ...emailHandles],
       prisma,
     });
+
+    expect(activeReads).toBe(2);
+    expect(peakReads).toBe(2);
+    phoneRead.resolve(phoneRecords);
+    emailRead.resolve(emailRecords);
+    const memberIdsByHandle = await lookup;
+    expect(activeReads).toBe(0);
+    expect(peakReads).toBe(2);
 
     expect(hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
     expect(hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);

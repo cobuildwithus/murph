@@ -239,22 +239,53 @@ describe("hosted onboarding member activation", () => {
   it("resolves a maximum activation set with two metadata reads and no unwrap", async () => {
     const prisma = makeTransactionHarness() as never;
     const memberIds = Array.from({ length: 32 }, (_, index) => `member_${index}`);
-    mocks.readHostedMailboxUserIdsByKind.mockResolvedValueOnce(new Set([
-      "member_1",
-      "member_3",
-    ]));
-    mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx.mockResolvedValueOnce(
-      new Set(["member_2"]),
+    const mailboxRead = createDeferred<ReadonlySet<string>>();
+    const cryptoRead = createDeferred<ReadonlySet<string>>();
+    let activeReads = 0;
+    let peakReads = 0;
+    const trackRead = async (
+      deferred: Deferred<ReadonlySet<string>>,
+    ): Promise<ReadonlySet<string>> => {
+      activeReads += 1;
+      peakReads = Math.max(peakReads, activeReads);
+      try {
+        return await deferred.promise;
+      } finally {
+        activeReads -= 1;
+      }
+    };
+    mocks.readHostedMailboxUserIdsByKind.mockImplementationOnce(
+      () => trackRead(mailboxRead),
+    );
+    mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx.mockImplementationOnce(
+      () => trackRead(cryptoRead),
     );
 
-    await expect(readHostedMemberActivationProofMemberIds({
+    const proof = readHostedMemberActivationProofMemberIds({
       memberIds,
       prisma,
-    })).resolves.toEqual(new Set([
+    });
+
+    expect(activeReads).toBe(1);
+    expect(peakReads).toBe(1);
+    expect(mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx)
+      .not.toHaveBeenCalled();
+    mailboxRead.resolve(new Set(["member_1", "member_3"]));
+    await vi.waitFor(() => {
+      expect(mocks.readUserIdsWithActiveHostedCryptoDomainRootsTx)
+        .toHaveBeenCalledTimes(1);
+    });
+    expect(activeReads).toBe(1);
+    expect(peakReads).toBe(1);
+    cryptoRead.resolve(new Set(["member_2"]));
+
+    await expect(proof).resolves.toEqual(new Set([
       "member_1",
       "member_2",
       "member_3",
     ]));
+    expect(activeReads).toBe(0);
+    expect(peakReads).toBe(1);
 
     expect(mocks.readHostedMailboxUserIdsByKind).toHaveBeenCalledExactlyOnceWith({
       kind: "member.activated",

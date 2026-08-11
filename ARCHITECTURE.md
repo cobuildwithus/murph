@@ -1824,9 +1824,9 @@ live activation projection adds at most two ID-only metadata reads (the
 activation mailbox fact and complete active crypto-domain envelopes) and zero
 private-field decrypt or KMS work. Live roster work therefore composes to at
 most two identity reads, two activation reads, and one lease statement;
-first-message roster planning reuses its handle-to-member result for
-request-local post-commit reconciliation and composes to at most two identity
-reads and one lease statement. On the signed live route,
+first-message roster planning reuses its provider handles but revalidates their
+current member bindings at the participant-lease authority boundary, composing
+to at most four identity reads and one lease statement. On the signed live route,
 complete-roster lease reconciliation is one parameterized PostgreSQL statement
 only after route revalidation and a completed current-provider roster read.
 Inside the existing

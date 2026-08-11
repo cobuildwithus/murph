@@ -87,7 +87,28 @@ Updated: 2026-08-11
   reconciliation proof; app-local prepared typecheck and scoped lint; direct
   cap-32 call-count replay; `git diff --check`; privacy/path review; exact-head
   required GitHub Actions.
-- Expected outcomes: at most two identity reads, at most two activation reads,
-  zero identity/activation KMS unwraps, one participant reconciliation
-  statement, no per-item database concurrency, and unchanged live authority and
+- Expected outcomes: at most two identity reads at each required identity and
+  lease-authority boundary, at most two activation reads, zero
+  identity/activation KMS unwraps, one participant reconciliation statement,
+  no per-item database concurrency, and unchanged live authority and
   partial-roster behavior.
+
+## Review findings
+
+- Preliminary completion specialists accepted the production architecture and
+  identified a coverage gap: call-count tests did not explicitly prove peak
+  identity/activation concurrency or post-transaction placement. Existing
+  focused tests now use deferred reads to prove identity peak two, activation
+  peak one with mailbox-before-crypto ordering, and identity/reconciliation
+  execution outside the route transaction.
+- Final ReviewGPT round 1 found that carrying pre-transaction member mappings
+  into the post-response participant-lease write removed required live identity
+  revalidation. The request now reuses only the provider handles; the lease
+  boundary performs one fresh fixed-size phone/email set resolution before its
+  single statement. A route-level regression changes a verified-email binding
+  between planning and the scheduled reconciliation and proves the statement
+  contains only the boundary-time member.
+- The PostgreSQL proof executes the exact production statement against a
+  transaction-local, production-shaped shadow of the participant table. It
+  proves PostgreSQL statement semantics after migrations, not foreign-key or
+  index integration against the durable table.
