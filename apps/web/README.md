@@ -1910,9 +1910,11 @@ Current hosted billing assumptions:
 - The legacy provider-object drain is complete: an authenticated production
   apply retired 69 exact candidates, then its automatic verification reported
   zero remaining candidates and convergence. The one-time Ops control, batch
-  route and service, and CLI were removed. Keep the accepted
-  legacy Pulse Price and per-member cleanup/event guards through the maximum
-  delayed-event and manual-replay horizon; then remove that bounded
+  route and service, CLI, and checkout-time per-member cleanup owner were
+  removed. Ordinary paid Checkout no longer retrieves or cancels a legacy
+  subscription. Keep the accepted legacy Pulse Price plus delayed-event,
+  Family-conversion, and account-deletion guards through the maximum
+  delayed-event and manual-replay horizon; then remove that remaining bounded
   compatibility together in a separate contracting change.
 - `/ops/email` is the operator-only member email composer. It accepts up to 100
   explicit hosted member IDs plus one plain-text subject and body. Preview
