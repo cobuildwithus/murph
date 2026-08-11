@@ -8,6 +8,7 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  isHostedRetiredMailboxKind,
   type HostedMailboxFetchCursorMode,
   type HostedMailboxItem,
   type HostedMailboxKind,
@@ -341,7 +342,7 @@ async function appendHostedMailboxItemWithAssistantInputLookupKeyTx(
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const lane = requireHostedMailboxLane(input.lane);
   const dedupeKey = requireNonEmptyString(input.dedupeKey, "Hosted mailbox dedupeKey");
-  const kind = requireHostedMailboxKind(input.kind);
+  const kind = requireHostedMailboxWritableKind(input.kind);
   const occurredAt = requireDate(input.occurredAt, "Hosted mailbox occurredAt");
   const expiresAt = input.expiresAt === undefined || input.expiresAt === null
     ? null
@@ -2868,6 +2869,16 @@ function requireHostedMailboxKind(value: string): HostedMailboxKind {
   throw new TypeError(
     `Hosted mailbox kind must be one of ${HOSTED_MAILBOX_KINDS.join(", ")}.`,
   );
+}
+
+function requireHostedMailboxWritableKind(value: string): HostedMailboxKind {
+  const kind = requireHostedMailboxKind(value);
+
+  if (isHostedRetiredMailboxKind(kind)) {
+    throw new TypeError("Hosted mailbox retired kinds are read-only.");
+  }
+
+  return kind;
 }
 
 function requireNonEmptyString(value: string, label: string): string {

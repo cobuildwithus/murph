@@ -667,6 +667,57 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('answered mailbox item ids exceed the 100 item limit')
   })
 
+  it('persists new group email proof only under the generic outbox field', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-email-proof-rollback-',
+    )
+    const groupEmailAuthorizationProof = 'a'.repeat(64)
+    const parentTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group_123',
+      subject: 'Group subject',
+      targetKind: 'group',
+    })
+    const targets = [
+      parentTarget,
+      serializeHostedEmailThreadTarget({
+        groupId: 'group_123',
+        recipientMemberId: 'member_123',
+        subject: 'Group subject',
+        targetKind: 'group',
+      }),
+    ]
+
+    for (const [index, explicitTarget] of targets.entries()) {
+      const intent = await createAssistantOutboxIntent({
+        channel: 'email',
+        deliveryIdempotencyKey: `group-email-effect:proof:${index}`,
+        explicitTarget,
+        groupEmailAuthorizationProof,
+        message: 'Group email body',
+        sessionId: `session_group_email_${index}`,
+        threadIsDirect: false,
+        turnId: `turn_group_email_${index}`,
+        vault: vaultRoot,
+      })
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const persisted = JSON.parse(await readFile(
+        resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
+        'utf8',
+      )) as Record<string, unknown>
+
+      expect(Object.keys(persisted).filter((key) =>
+        key.endsWith('AuthorizationProof')
+      )).toEqual(['groupEmailAuthorizationProof'])
+      expect(persisted.groupEmailAuthorizationProof).toBe(
+        groupEmailAuthorizationProof,
+      )
+      await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId))
+        .resolves.toMatchObject({
+          groupEmailAuthorizationProof,
+        })
+    }
+  })
+
   it('monotonically widens answered mailbox ids when a grouped reply is rebatched', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-grouped-answered-upgrade-',
@@ -2510,7 +2561,7 @@ describe('assistant outbox runtime', () => {
     })).toBe(false)
   })
 
-  it('retains group newsletter terminal occurrence evidence during outbox pruning', async () => {
+  it('retains legacy group newsletter terminal occurrence evidence during outbox pruning', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-outbox-newsletter-retention-',
     )

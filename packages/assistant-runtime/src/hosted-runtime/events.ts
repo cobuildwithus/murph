@@ -398,12 +398,6 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         "Retired hosted vault-share revoke wakes must never reach system wake execution.",
       );
-    case "group-newsletter.email-needed":
-      // Group newsletter email-needed wakes stage a private system note at
-      // mailbox import and never enter the system wake execution path.
-      throw new TypeError(
-        'Hosted group newsletter email-needed wakes are staged at mailbox import and must never reach system wake execution.',
-      );
     case "meal-photo.captured":
       // Meal photos become canonical meal records at mailbox import so their
       // staged object can be cleaned up only after the workspace checkpoint.

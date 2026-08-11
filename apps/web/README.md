@@ -1064,6 +1064,13 @@ Callback auth contract:
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` stays in the Cloudflare worker
   boundary; the isolated execution child talks back through the worker-owned
   `web-control.worker` proxy instead of receiving the signing key directly
+- after signature, key-id, timestamp/freshness, method/path/search/member, and
+  payload binding succeed, `apps/web` consumes the SHA-256 nonce with one
+  primary-Postgres insert; the `nonce_hash` primary-key conflict rejects a
+  replay, and callback admission never sweeps expired rows
+- the existing hourly hosted-retention cron removes only strictly expired nonce
+  rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
+  account deletion still independently deletes the member's nonce rows
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
@@ -1201,6 +1208,15 @@ The signed assertion must include hosted user claims plus:
 
 Each assertion nonce is consumed once so replayed assertions fail even if the
 user tuple is unchanged.
+The assertion uses integer-second `exp` claims and the shared 60-second skew
+policy, so it remains admissible through the millisecond before
+`(exp + 61) * 1000` and is first invalid exactly at that instant. New nonce
+rows persist that first-invalid horizon, while request admission performs one
+primary-key insert and treats only the exact nonce conflict as replay. The
+bounded hourly hosted-retention owner deletes only rows whose stored
+`expiresAt <= now - 61 seconds`; this retains legacy raw-`exp` rows through the
+full acceptance window and deliberately retains new-format rows for an
+additional 61 seconds.
 There is no unauthenticated development-user fallback; local development must
 exercise the same signed assertion contract.
 

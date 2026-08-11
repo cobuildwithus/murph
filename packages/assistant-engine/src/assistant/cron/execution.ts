@@ -12,7 +12,7 @@ import {
   isHostedRuntimeProcessEnv,
 } from '@murphai/hosted-execution/env'
 import type {
-  HostedRuntimeNewsletterScheduledAuthority,
+  HostedRuntimeGroupEmailScheduledAuthority,
   HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import type {
@@ -68,14 +68,11 @@ import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
 import {
-  resolveGroupNewsletterAutomationDelivery,
-} from '../group-newsletter-automation.js'
-import {
   buildAssistantLinqDeliveryPosturePrompt,
 } from '../linq-delivery-posture.js'
 import {
-  findAssistantNewsletterParentIntent,
-} from '../newsletter-outbox.js'
+  findAssistantGroupEmailParentIntent,
+} from '../group-email-outbox.js'
 import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
   runExperimentLifecycleOutcomePrecondition,
@@ -169,10 +166,6 @@ const ASSISTANT_CRON_MANAGED_AUTOMATION_RETIRED_ERROR =
   'Managed automation has been retired.'
 const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
   'Assistant cron yielded to fresh foreground input.'
-const ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR =
-  'Group health newsletter delivery did not complete.'
-const GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS =
-  2 * 60 * 60 * 1000
 const ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR =
   'Device activity occurrence skipped because its parent listener is no longer authorized.'
 const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
@@ -577,7 +570,7 @@ export async function executeClaimedAssistantCronJob(
   let reason = 'unhandled'
   let pendingDeliveryIntentId: string | null = null
   let notificationDecision: AssistantCronRunRecord['notificationDecision'] = null
-  let newsletterRecoveryAuthorized = false
+  let groupEmailRecoveryAuthorized = false
   let canonicalSourceDisposition: AssistantCronCanonicalSourceDisposition = 'current'
   let canonicalSourceSkipReason: string | null = null
   let managedOwnerAuthorization: AssistantCronManagedOwnerAuthorization = {
@@ -611,8 +604,8 @@ export async function executeClaimedAssistantCronJob(
         ) ??
         startedAt
       : claimedJob.state.nextRunAt ?? startedAt
-  const scheduledNewsletterAuthority =
-    resolveAssistantCronScheduledNewsletterAuthority({
+  const scheduledGroupEmailAuthority =
+    resolveAssistantCronScheduledGroupEmailAuthority({
       job: input.job,
       occurrenceAt,
       trigger: input.trigger,
@@ -660,12 +653,12 @@ export async function executeClaimedAssistantCronJob(
       }
       if (
         canonicalSourceSkipReason === null
-        && scheduledNewsletterAuthority
+        && scheduledGroupEmailAuthority
       ) {
-        newsletterRecoveryAuthorized = true
+        groupEmailRecoveryAuthorized = true
         pendingDeliveryIntentId = (
-          await findAssistantNewsletterParentIntent({
-            authority: scheduledNewsletterAuthority,
+          await findAssistantGroupEmailParentIntent({
+            authority: scheduledGroupEmailAuthority,
             vault: input.vault,
           })
         )?.intentId ?? null
@@ -847,7 +840,7 @@ export async function executeClaimedAssistantCronJob(
             deviceActivityAuthority.assistantTargetOverride,
           deliveryDispatchMode: input.deliveryDispatchMode,
           executionContext: input.executionContext,
-          scheduledAutomationAuthority: scheduledNewsletterAuthority,
+          scheduledAutomationAuthority: scheduledGroupEmailAuthority,
           scheduledInvocationAuthority,
           scheduledOccurrenceAt: occurrenceAt,
           serviceTier,
@@ -1034,7 +1027,7 @@ export async function executeClaimedAssistantCronJob(
             channel: claimedJob.target.channel,
             identityId: claimedJob.target.identityId,
             onTraceEvent: input.onTraceEvent,
-            onNewsletterPendingDeliveryIntentId: (intentId) => {
+            onGroupEmailPendingDeliveryIntentId: (intentId) => {
               pendingDeliveryIntentId = intentId
             },
             outboxAutomationAuthority:
@@ -1068,19 +1061,6 @@ export async function executeClaimedAssistantCronJob(
           notificationDecisionKind = result.decision?.kind ?? null
           notificationDeliveryOutcomeKind =
             result.deliveryOutcome?.kind ?? 'none'
-          const postTurnDeliveryFailure =
-            resolveAssistantCronPostTurnDeliveryFailure({
-              job: input.job,
-              occurrenceAt,
-              result,
-              trigger: input.trigger,
-            })
-          if (postTurnDeliveryFailure) {
-            throw new VaultCliError(
-              'ASSISTANT_CRON_NEWSLETTER_SEND_FAILED',
-              postTurnDeliveryFailure,
-            )
-          }
           const foregroundYieldedAfterNotification =
             !maintenanceJob &&
             (foregroundPreemption.wasForegroundYielded() ||
@@ -1091,10 +1071,16 @@ export async function executeClaimedAssistantCronJob(
               deliveryOutcome: result.deliveryOutcome ?? null,
               job: input.job,
             })
-          const newsletterPendingDeliveryIntentId =
-            resolveAssistantCronNewsletterPendingDeliveryIntentId(result)
-          if (newsletterPendingDeliveryIntentId) {
-            pendingDeliveryIntentId = newsletterPendingDeliveryIntentId
+          const groupEmailPendingDeliveryIntentId =
+            resolveAssistantCronGroupEmailPendingDeliveryIntentId(result)
+          if (assistantCronGroupEmailAttemptFailed(result)) {
+            throw new VaultCliError(
+              'ASSISTANT_GROUP_EMAIL_DELIVERY_FAILED',
+              'Group email delivery did not complete.',
+            )
+          }
+          if (groupEmailPendingDeliveryIntentId) {
+            pendingDeliveryIntentId = groupEmailPendingDeliveryIntentId
             outcome = 'delivery_pending'
             reason = 'delivery_pending'
           } else if (result.deliveryOutcome?.kind === 'queued') {
@@ -1127,13 +1113,13 @@ export async function executeClaimedAssistantCronJob(
   } catch (error) {
     if (
       pendingDeliveryIntentId === null
-      && newsletterRecoveryAuthorized
-      && scheduledNewsletterAuthority
+      && groupEmailRecoveryAuthorized
+      && scheduledGroupEmailAuthority
     ) {
       try {
         pendingDeliveryIntentId = (
-          await findAssistantNewsletterParentIntent({
-            authority: scheduledNewsletterAuthority,
+          await findAssistantGroupEmailParentIntent({
+            authority: scheduledGroupEmailAuthority,
             vault: input.vault,
           })
         )?.intentId ?? null
@@ -1863,30 +1849,21 @@ export function resolveAssistantCronScheduledInvocationAuthority(input: {
   }
 }
 
-function resolveAssistantCronScheduledNewsletterAuthority(input: {
+function resolveAssistantCronScheduledGroupEmailAuthority(input: {
   job: ResolvedAssistantCronJob
   occurrenceAt: string
   trigger: AssistantCronTrigger
-}): HostedRuntimeNewsletterScheduledAuthority | null {
+}): HostedRuntimeGroupEmailScheduledAuthority | null {
   if (
     input.trigger !== 'scheduled' ||
     input.job.kind !== 'canonical' ||
     input.job.source.kind !== 'automation' ||
     input.job.source.schedule.kind !== 'cron' ||
-    resolveGroupNewsletterAutomationDelivery(input.job.source) !== 'group_email'
-  ) {
-    return null
-  }
-
-  const updatedAtMs = Date.parse(input.job.source.updatedAt)
-  const occurrenceAtMs = Date.parse(input.occurrenceAt)
-  if (!Number.isFinite(updatedAtMs) || !Number.isFinite(occurrenceAtMs)) {
-    return null
-  }
-
-  if (
-    occurrenceAtMs <
-      updatedAtMs + GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS
+    input.job.source.route.threadIsDirect !== false ||
+    (
+      input.job.source.route.channel !== 'linq' &&
+      input.job.source.route.channel !== 'telegram'
+    )
   ) {
     return null
   }
@@ -1897,42 +1874,36 @@ function resolveAssistantCronScheduledNewsletterAuthority(input: {
   }
 }
 
-function resolveAssistantCronPostTurnDeliveryFailure(input: {
-  job: ResolvedAssistantCronJob
-  occurrenceAt: string
-  result: Awaited<ReturnType<typeof sendAssistantNotificationLocal>>
-  trigger: AssistantCronTrigger
-}): string | null {
-  if (!resolveAssistantCronScheduledNewsletterAuthority({
-    job: input.job,
-    occurrenceAt: input.occurrenceAt,
-    trigger: input.trigger,
-  })) {
-    return null
-  }
-
-  const newsletterSendResult =
-    input.result.postTurnDeliveryExpectations?.newsletterSendResult ?? null
-  return !newsletterSendResult
-    || newsletterSendResult.status === 'unavailable'
-    || (
-      newsletterSendResult.status === 'accepted'
-      && !resolveAssistantCronNewsletterPendingDeliveryIntentId(input.result)
-    )
-    ? ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR
-    : null
-}
-
-function resolveAssistantCronNewsletterPendingDeliveryIntentId(
+function resolveAssistantCronGroupEmailPendingDeliveryIntentId(
   result: Awaited<ReturnType<typeof sendAssistantNotificationLocal>>,
 ): string | null {
   const expectations = result.postTurnDeliveryExpectations
-  const intentId = expectations?.newsletterPendingDeliveryIntentId ?? null
-  return expectations?.newsletterSendResult?.status === 'accepted'
+  const intentId = expectations?.groupEmailPendingDeliveryIntentId ?? null
+  return expectations?.groupEmailSendResult?.status === 'accepted'
     && intentId
     && intentId.trim().length > 0
     ? intentId
     : null
+}
+
+function assistantCronGroupEmailAttemptFailed(
+  result: Awaited<ReturnType<typeof sendAssistantNotificationLocal>>,
+): boolean {
+  const sendResult = result.postTurnDeliveryExpectations?.groupEmailSendResult
+  if (!sendResult) {
+    return false
+  }
+  if (sendResult.status === 'unavailable') {
+    return true
+  }
+  if (
+    sendResult.status === 'partial_failure'
+    && sendResult.sentRecipientCount === 0
+  ) {
+    return true
+  }
+  return sendResult.status === 'accepted'
+    && resolveAssistantCronGroupEmailPendingDeliveryIntentId(result) === null
 }
 
 function resolveAssistantCronNotificationResponsePolicy(

@@ -653,7 +653,7 @@ describe("browser vault session route", () => {
     }
   });
 
-  it("forwards the authenticated member and replica ref to the hosted control client when the known ref is stale", async () => {
+  it("keeps explicit refresh ownership out of a fresh ready response", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
@@ -683,6 +683,7 @@ describe("browser vault session route", () => {
           ...createReplicaRef(),
           objectKey: "users/browser-vault-replicas/opaque/stale-replica.json",
         },
+        requestRefresh: true,
       }),
     );
 
@@ -691,6 +692,13 @@ describe("browser vault session route", () => {
       browserPublicKeyJwk: browser.publicKeyJwk,
       replicaRef: createReplicaRef(),
       userId: "member_123",
+    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      refreshPending: false,
+      state: "ready",
     });
   });
 
@@ -1117,11 +1125,12 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("serves the immediately previous replica generation as stale and schedules refresh", async () => {
+  it("serves a fresh pre-Training generation-5 replica as stale and schedules refresh", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef({
       generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
     });
+    expect(replicaRef.generation).toBe(5);
     const createBrowserVaultSession = vi.fn().mockResolvedValue({
       encryptedReplica: createReplicaEnvelope(),
       replicaAad: createReplicaAad(),
@@ -1345,6 +1354,60 @@ describe("browser vault session route", () => {
       replicaKeyEnvelope: null,
       replicaRef,
       state: "not_modified",
+    });
+  });
+
+  it("signals a requested refresh without duplicating its pending owner", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: replicaRef,
+        requestRefresh: true,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      replicaRef,
+      refreshPending: false,
+      state: "not_modified",
+    });
+  });
+
+  it("rejects a malformed explicit refresh flag", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        requestRefresh: "yes",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+      },
     });
   });
 

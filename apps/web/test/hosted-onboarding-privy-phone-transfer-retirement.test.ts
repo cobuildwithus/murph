@@ -3,12 +3,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   acquireHostedLinqParticipantPhoneLockTx: vi.fn(),
+  buildHostedPrivySessionState: vi.fn(),
+  deleteHostedPrivyPhoneTransferSourceAccountData: vi.fn(),
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
+  getPrisma: vi.fn(),
+  hostedPhoneLookupKeyMatchesValue: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedMemberIdentity: vi.fn(),
+  readHostedPrivyUserById: vi.fn(),
   readHostedPrivyUserByIdIfExists: vi.fn(),
+  reconcileHostedPrivyIdentityOnMemberTx: vi.fn(),
+  requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-privacy/account-data-service", () => ({
+  deleteHostedPrivyPhoneTransferSourceAccountData:
+    mocks.deleteHostedPrivyPhoneTransferSourceAccountData,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
@@ -18,6 +36,7 @@ vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
   createHostedPrivyUserLookupKeyReadCandidates: (value: string) => [
     `privy:${value}`,
   ],
+  hostedPhoneLookupKeyMatchesValue: mocks.hostedPhoneLookupKeyMatchesValue,
   readHostedPhoneHint: () => "*** 4567",
 }));
 
@@ -37,14 +56,44 @@ vi.mock("@/src/lib/hosted-onboarding/linq-participant-contact", () => ({
     mocks.acquireHostedLinqParticipantPhoneLockTx,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
+  enqueueHostedMemberChannelsUpdatedForActiveMemberTx:
+    mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
+  reconcileHostedPrivyIdentityOnMemberTx:
+    mocks.reconcileHostedPrivyIdentityOnMemberTx,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
+  readHostedPrivyUserById: mocks.readHostedPrivyUserById,
   readHostedPrivyUserByIdIfExists:
     mocks.readHostedPrivyUserByIdIfExists,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/privy-user", () => ({
+  buildHostedPrivySessionState: mocks.buildHostedPrivySessionState,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireFreshPrivyMemberAuthForHostedAppSession:
+    mocks.requireFreshPrivyMemberAuthForHostedAppSession,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS: { maxWait: 5_000 },
   lockHostedMemberRow: mocks.lockHostedMemberRow,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    publicBaseUrl: "https://join.example.test",
+  }),
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
 import {
@@ -387,6 +436,150 @@ describe("Privy phone-transfer source retirement", () => {
       expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
     },
   );
+
+  it("ignores an expired hosted callback nonce on an otherwise disposable source", async () => {
+    const fixture = makeFixture({ autoTrial: true });
+    stubHostedCallbackNonce(fixture, new Date(NOW.getTime() - 1));
+
+    await expect(prepare(fixture)).resolves.toEqual({
+      autoTrialBilling: {
+        stripeCustomerId: STRIPE_CUSTOMER_ID,
+        stripeSubscriptionId: STRIPE_SUBSCRIPTION_ID,
+      },
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+    expect(
+      fixture.prisma.hostedWebInternalRequestNonce.findFirst,
+    ).toHaveBeenCalledWith({
+      where: {
+        expiresAt: { gte: NOW },
+        userId: SOURCE_MEMBER_ID,
+      },
+      select: { nonceHash: true },
+    });
+  });
+
+  it.each([
+    ["at the exact freshness boundary", NOW],
+    ["after the freshness boundary", new Date(NOW.getTime() + 1)],
+  ])("keeps a hosted callback nonce %s as a source blocker", async (
+    _label,
+    expiresAt,
+  ) => {
+    const fixture = makeFixture({ autoTrial: true });
+    stubHostedCallbackNonce(fixture, expiresAt);
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("lets Settings phone sync retire a source with only an expired callback nonce", async () => {
+    const fixture = makeFixture({ autoTrial: true });
+    stubHostedCallbackNonce(fixture, new Date(0));
+    const prisma = Object.assign(fixture.prisma, {
+      $transaction: vi.fn(
+        async (callback: (tx: typeof fixture.prisma) => Promise<unknown>) =>
+          callback(fixture.prisma),
+      ),
+    });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.hostedPhoneLookupKeyMatchesValue.mockReturnValue(true);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { id: SOURCE_MEMBER_ID },
+      identity: { privyUserId: SOURCE_PRIVY_USER_ID },
+    });
+    mocks.readHostedMemberCoreState.mockImplementation(
+      async ({ memberId }: { memberId: string }) =>
+        memberId === TARGET_MEMBER_ID
+          ? fixture.targetMember
+          : fixture.sourceMember,
+    );
+    mocks.readHostedMemberIdentity.mockImplementation(
+      async ({ memberId }: { memberId: string }) =>
+        memberId === TARGET_MEMBER_ID
+          ? fixture.targetIdentity
+          : fixture.sourceIdentity,
+    );
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+      fixture.billingSnapshot,
+    );
+    mocks.readHostedPrivyUserById.mockResolvedValue({
+      id: TARGET_PRIVY_USER_ID,
+    });
+    mocks.buildHostedPrivySessionState.mockReturnValue({
+      identity: {
+        phone: {
+          number: PHONE_NUMBER,
+          verifiedAt: NOW.getTime(),
+        },
+        telegram: null,
+        userId: TARGET_PRIVY_USER_ID,
+      },
+      linkedAccounts: [],
+      verifiedPrivyUser: {
+        id: TARGET_PRIVY_USER_ID,
+      },
+    });
+    mocks.requireFreshPrivyMemberAuthForHostedAppSession.mockResolvedValue({
+      appSession: {
+        member: fixture.targetMember,
+        privyUserId: TARGET_PRIVY_USER_ID,
+        sessionId: "session_target",
+      },
+      freshPrivy: {
+        identity: {
+          phone: null,
+          telegram: null,
+          userId: TARGET_PRIVY_USER_ID,
+        },
+        linkedAccounts: [],
+        member: fixture.targetMember,
+      },
+    });
+    mocks.deleteHostedPrivyPhoneTransferSourceAccountData.mockResolvedValue({
+      channelSyncDispatch: null,
+      deletion: {
+        cleanupPending: false,
+      },
+    });
+    const route = await import("../app/api/settings/phone/sync/route");
+
+    const response = await route.POST(
+      new Request("https://join.example.test/api/settings/phone/sync", {
+        body: JSON.stringify({
+          kind: "exact",
+          phoneNumber: PHONE_NUMBER,
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      phoneNumber: PHONE_NUMBER,
+      status: "synced",
+    });
+    expect(JSON.stringify(body)).not.toContain(
+      "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    );
+    expect(JSON.stringify(body)).not.toContain("saved activity");
+    expect(
+      fixture.prisma.hostedWebInternalRequestNonce.findFirst,
+    ).toHaveBeenCalledWith({
+      where: {
+        expiresAt: { gte: expect.any(Date) },
+        userId: SOURCE_MEMBER_ID,
+      },
+      select: { nonceHash: true },
+    });
+  });
 
   it("retries an exact automatic-trial scaffold after cleanup cancellation", async () => {
     const fixture = makeFixture({ autoTrial: true });
@@ -740,6 +933,29 @@ describe("Privy phone-transfer source retirement", () => {
 });
 
 type Fixture = ReturnType<typeof makeFixture>;
+
+function stubHostedCallbackNonce(fixture: Fixture, expiresAt: Date): void {
+  fixture.prisma.hostedWebInternalRequestNonce.findFirst.mockImplementation(
+    async (input: {
+      where: {
+        expiresAt?: { gte?: Date };
+        userId: string;
+      };
+    }) => {
+      if (input.where.userId !== SOURCE_MEMBER_ID) {
+        return null;
+      }
+      const activeFrom = input.where.expiresAt?.gte;
+      if (
+        activeFrom
+        && expiresAt.getTime() < activeFrom.getTime()
+      ) {
+        return null;
+      }
+      return { nonceHash: "hosted-callback-nonce" };
+    },
+  );
+}
 
 function prepare(
   fixture: Fixture,

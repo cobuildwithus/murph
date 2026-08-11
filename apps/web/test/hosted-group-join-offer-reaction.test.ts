@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   appendHostedLinqGroupReactionMailboxTx: vi.fn(),
   enqueueHostedGroupJoinOutreachTx: vi.fn(),
   revokeHostedGroupJoinOutreachForRemovedReactionTx: vi.fn(),
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   logHostedOnboardingDiagnostic: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
@@ -30,11 +29,6 @@ const mocks = vi.hoisted(() => ({
   signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
   signalHostedLinqGroupReactionMailbox: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
-    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -173,9 +167,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       accountLookupKey: "hbidx:phone:v1:line",
       containerMemberId: "hbm_runtime",
     });
-    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
-      undefined,
-    );
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
     mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
@@ -245,8 +236,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
         ]),
       }),
     );
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
@@ -811,7 +800,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
   });
 
-  it("enqueues private missing-email nudge candidates after accepting an email-sharing offer", async () => {
+  it("accepts an email-sharing offer without a private mailbox lifecycle", async () => {
     mocks.acceptHostedGroupJoinOfferTx.mockResolvedValueOnce({
       alreadyMember: false,
       grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
@@ -835,12 +824,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       status: "accepted",
     });
 
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .toHaveBeenCalledWith({
-        groupId: "group_1",
-        memberId: "member_reactor",
-        prisma,
-      });
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
@@ -868,9 +851,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       reason: "accepted",
       status: "accepted",
     });
-
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       userId: "member_reactor",
@@ -1029,8 +1009,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   });
 
@@ -1056,8 +1034,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 
     expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
     expect(mocks.appendHostedLinqGroupReactionMailboxTx).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
   });
 });
