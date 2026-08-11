@@ -25,6 +25,33 @@ EOF
     ;;
 esac
 
+case "${1:-}" in
+  install|uninstall|run)
+    if [[ "${MURPH_FROG_AUTOFIX_NATIVE_LOCK_HELD:-}" != "1" ]]; then
+      support_root="$HOME/Library/Application Support/Murph/FrogAutofix"
+      if [[ -L "$support_root" ]]; then
+        echo "Frog autofix support root must not be a symbolic link." >&2
+        exit 2
+      fi
+      /bin/mkdir -p -m 700 "$support_root"
+      /bin/chmod 700 "$support_root"
+      native_gate="$support_root/run.native.lock"
+      umask 077
+      if [[ ! -e "$native_gate" ]]; then
+        : >> "$native_gate"
+      fi
+      if [[ -L "$native_gate" || ! -f "$native_gate" ]]; then
+        echo "Frog autofix native gate must be a regular file." >&2
+        exit 2
+      fi
+      /bin/chmod 600 "$native_gate"
+      exec /usr/bin/lockf -t 0 "$native_gate" \
+        /usr/bin/env MURPH_FROG_AUTOFIX_NATIVE_LOCK_HELD=1 \
+        "$repo_root/scripts/frog-autofix" "$@"
+    fi
+    ;;
+esac
+
 unset \
   DATABASE_URL \
   FROG_DATABASE_URL \

@@ -17,6 +17,35 @@ export interface FrogIssue {
   state: string;
 }
 
+export interface PullRequestAuthorityRecord {
+  author: { login: string } | null;
+  baseRefName: string;
+  headRefName: string;
+  headRepositoryOwner: { login: string } | null;
+  isCrossRepository: boolean;
+}
+
+export function parseAuthenticatedGitHubOperator(raw: string): string {
+  const login = raw.trim();
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/u.test(login)) {
+    throw new Error("GitHub returned an invalid authenticated operator");
+  }
+  return login;
+}
+
+export function isParentOwnedPullRequest(
+  record: PullRequestAuthorityRecord,
+  authenticatedOperator: string,
+  expectedBranch: string,
+): boolean {
+  const [repositoryOwner] = FROG_AUTOFIX_REPOSITORY.split("/");
+  return record.author?.login.toLowerCase() === authenticatedOperator.toLowerCase()
+    && record.baseRefName === "main"
+    && record.headRefName === expectedBranch
+    && record.headRepositoryOwner?.login.toLowerCase() === repositoryOwner?.toLowerCase()
+    && record.isCrossRepository === false;
+}
+
 export type FrogAutofixWorkerMode = "implement" | "resume";
 
 export interface BranchPullRequestState {

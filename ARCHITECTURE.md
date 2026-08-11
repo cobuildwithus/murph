@@ -9,8 +9,11 @@ product runtime, hosted automation, or Frog publication authority. One
 user-session LaunchAgent invokes the repository's primary checkout at load and
 every two hours. Each invocation handles at most one issue and uses GitHub as
 its durable queue and completion ledger; owner-only local state contains the
-process lock, home-relative checkout/Codex-home locators, bounded metadata, and
-transient parent review material removed when the invocation ends.
+stable native acquisition gate, process/worker owner record, home-relative
+checkout/Codex-home locators, bounded metadata, and transient parent review
+material removed when the invocation ends. Every installing, uninstalling, or
+repairing process enters the same macOS advisory gate before it may inspect or
+replace the recoverable JSON owner record.
 
 Admission requires an open `enhancement` issue authored by the exact Frog App
 and exactly one matching `issue:` binding already committed beneath
@@ -23,8 +26,11 @@ Recovery is a parent classification, not a prompt guess. A fresh deterministic
 branch has no commit, remote branch, or PR. Under the run lock, interrupted
 tracked, untracked, and ignored residue on only that state is reset and cleaned
 back to `origin/main`. Dirty work may resume without reset only when one open
-issue-closing PR, the remote branch, and the local committed head bind the same
-repair; the child finishes the interrupted edit and the parent reruns review.
+issue-closing PR authored by the currently authenticated `gh` operator, owned
+by this repository rather than a fork, the remote branch, and the local
+committed head bind the same repair; the child finishes the interrupted edit
+and the parent reruns review. The same PR predicate guards discovery, body
+hydration/editing, recovery, publication, finalization, and merged-state proof.
 A clean implementation commit or open PR may also resume without requesting a
 second implementation patch. Divergence, mismatched ownership, merged or
 closed-unmerged PR state, and other ambiguity fail closed. After an unrelated
@@ -57,6 +63,13 @@ trusted `main`. Either review returning findings, a final review requiring a
 scope retrospective, or a candidate changing those controls creates the same
 durable human-review handoff; the automation does not ask another child to
 remediate review prose. After both reviews pass, it waits for required CI.
+Definitive failed or cancelled required checks and a current-base conflict
+become that same review-findings handoff; pending, missing, or indeterminate
+checks remain retryable. A human-authored descendant of an already handed-off
+head carries the same disposition forward and re-stamps it at the new exact
+head without another model turn. An exact closed-unmerged handoff also remains
+queue-complete, while a merged PR never substitutes for a newly verified
+repair of a reopened issue.
 Immediately before merge it revalidates App author, label, one committed
 binding, PR head, checks, and current-base mergeability. A deterministic
 allowlist, using both sides of detected renames and copies, permits automatic
@@ -64,8 +77,8 @@ merge only for local agent/Codex workflow paths, with semantic exceptions
 limited to the Frog script entry in `package.json` and this section of
 `ARCHITECTURE.md`. Any possible product-runtime, deployment, or GitHub-workflow
 change stays as a reviewed ready PR with its issue open for a human merge
-decision. Exact-head handoff markers remove that issue from later automated
-scans so it cannot starve the queue. Only a newly verified parent merge may
+decision. Exact-head open or closed-unmerged handoff markers remove that issue
+from later automated scans so it cannot starve the queue. Only a newly verified parent merge may
 precede issue closure. The invocation has one eight-hour deadline; each model
 worker is bounded to two hours and every spawned command or worker has exact
 process-group ownership.

@@ -38,7 +38,7 @@ function assertRemoteIdentity(
 export function finalizeReadyRepair(
   identity: ReadyRepairIdentity,
   dependencies: ReadyRepairFinalizationDependencies,
-): "awaiting-human" | "merged" {
+): "awaiting-human-conflict" | "awaiting-human-product" | "merged" {
   assertRemoteIdentity(identity, dependencies.currentPullRequest());
   if (!dependencies.requiredChecksPass(identity)) {
     throw new Error("required pull request checks are not green");
@@ -49,19 +49,19 @@ export function finalizeReadyRepair(
     throw new Error("required pull request checks changed before merge");
   }
   if (!dependencies.mergeTreePasses(identity)) {
-    throw new Error("ready pull request does not merge cleanly into current main");
+    return "awaiting-human-conflict";
   }
 
   // The exact-head scope gate is intentionally last and fail-closed. Any path
   // outside the narrow local-agent allowlist requires a human merge decision.
-  if (!dependencies.autoMergeAllowed(identity)) return "awaiting-human";
+  if (!dependencies.autoMergeAllowed(identity)) return "awaiting-human-product";
 
   dependencies.refreshAndVerifyIssue();
   assertRemoteIdentity(identity, dependencies.currentPullRequest());
   if (!dependencies.requiredChecksPass(identity)) {
     throw new Error("required pull request checks changed before merge");
   }
-  if (!dependencies.autoMergeAllowed(identity)) return "awaiting-human";
+  if (!dependencies.autoMergeAllowed(identity)) return "awaiting-human-product";
   dependencies.merge(identity);
   if (!dependencies.pullRequestIsMerged()) {
     throw new Error("pull request did not reach merged state");

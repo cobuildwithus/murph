@@ -624,7 +624,10 @@ parent-owned ReviewGPT/patch boundaries, network-denied worker arguments,
 tracked/untracked/ignored interruption recovery, revoked-authority/head/check/
 conflict rejection, both sides of real Git renames/copies, product-runtime
 merge pausing, complete trusted prompt-preset coverage, final-retrospective
-handoff and queue advancement, and historical merged-PR reopen refusal. A macOS
+handoff and queue advancement, same-named fork/different-operator rejection,
+closed-unmerged and descendant-head handoff continuity, terminal versus
+transient required-check classification, conflict disposition, real native
+two-contender serialization, and historical merged-PR reopen refusal. A macOS
 permission smoke must also apply the exact native worker profile and prove an
 in-worktree read/write succeeds while an outside-root read and a network
 request fail:
@@ -641,7 +644,8 @@ After the owning PR merges, installation proof must run from the exact clean
 primary checkout: install with the intended Codex home, confirm `status`
 reports `loaded=yes` and `interval_seconds=7200`, inspect the generated plist,
 launcher, relative locators, lock, and bounded event log for owner-only modes
-and identifier/credential absence, then invoke one manual `run`. When no
+and identifier/credential absence. Confirm the stable native gate remains while
+the JSON owner record clears, then invoke one manual `run`. When no
 committed eligible binding exists, success is a no-worker event. When one does
 exist, the exact GitHub PR/check/merge/issue lifecycle is the required end-to-
 end proof; a locally successful child exit alone is not completion evidence.

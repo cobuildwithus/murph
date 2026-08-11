@@ -140,25 +140,32 @@ Last verified: 2026-08-11
 - One macOS user-session LaunchAgent owns the optional local schedule with
   `RunAtLoad` and a 7,200-second interval. There is no endless shell loop,
   hosted scheduler, GitHub Actions merge job, or second retry queue. Launchd
-  coalesces an interval while the exact job is still running, and the runner's
-  process-start-token lock also rejects overlapping manual runs without
-  signaling another process. Uninstall must acquire that same lock and refuses
-  to remove local state while the verified scheduler or detached worker is
-  still alive.
+  coalesces an interval while the exact job is still running. A stable native
+  `lockf` gate serializes install, uninstall, and repair entry before the
+  process-start-token JSON owner may be inspected or stale-reclaimed; the JSON
+  record then rejects a replacement while either its exact parent or detached
+  worker remains alive, without signaling another process. Uninstall enters
+  both gates, refuses to remove active state, and retains the native gate inode
+  so a concurrent contender can never switch to a replacement inode. Install
+  also acquires the JSON owner, so it cannot reconfigure launchd while an
+  orphaned verified worker still owns the prior run.
 - Each invocation fetches the default branch, advances only an exact clean
   primary checkout by fast-forward, revalidates repository and issue authority,
   and admits the oldest eligible issue. It processes one issue, uses a
   deterministic branch/worktree identity, and recovers from GitHub branch, PR,
   and issue state. An unrelated primary advance continues discovery in the same
   invocation; a change to an already-loaded launcher module exits once so the
-  next invocation loads it. An exact-head parent handoff on an open deterministic
-  PR marks that issue complete for automated queue selection, whether ReviewGPT
+  next invocation loads it. An exact-head parent handoff on an open or
+  closed-unmerged deterministic PR marks that issue complete for automated
+  queue selection, whether ReviewGPT
   found work for a human or the green repair may affect product runtime; later
   issues therefore continue while the handed-off issue stays open. It does not
   persist issue bodies or duplicate GitHub queue state locally. The owner lock
   records both the scheduler process identity and the exact detached worker
   process identity, so an orphaned still-live child also blocks a replacement
-  run after a launcher crash.
+  run after a launcher crash. PR queue and recovery records are counted only
+  after the shared current-operator, same-repository, non-fork, main-base, exact
+  deterministic-branch predicate removes foreign records.
 - Before the worker starts, the parent classifies exact clean state as fresh
   implementation or resumable implementation/open PR. Under the owner lock, a
   fresh branch with no commit, remote branch, PR, or divergence is the only
@@ -168,7 +175,8 @@ Last verified: 2026-08-11
   identify the same repair; the edit-only child finishes the interrupted diff
   and the parent reruns the review gates. Resumable runs cannot reacquire or
   reapply an implementation patch. A merged PR paired with an open or reopened
-  issue, multiple PRs, a closed-unmerged PR, branch divergence, mismatched
+  issue, multiple parent-owned PRs, a closed-unmerged PR without an exact
+  handoff, branch divergence, mismatched
   ownership, head, or closing relationship, and every other dirty state fail
   closed rather than guessing a continuation point or closing historical state.
 - The complete invocation, including parent Git, GitHub, ReviewGPT, and
@@ -178,16 +186,21 @@ Last verified: 2026-08-11
   and still owns, and retains cleanup/lock ownership until the group—not merely
   its leader—disappears. ReviewGPT and CI instructions impose their own
   three-hour waits; an individual Codex child is bounded to two hours. Timeout,
-  browser unavailability, missing patch, ambiguous worktree state, red CI,
-  blocked merge, and failed issue closure leave recoverable GitHub/worktree
-  state for a later pass.
+  browser unavailability, missing patch, ambiguous worktree state, pending or
+  indeterminate CI, and failed issue closure leave recoverable GitHub/worktree
+  state for a later pass. Definitive failed/cancelled required checks and a
+  current-base conflict instead publish the existing review-findings handoff so
+  the oldest issue cannot pin later work.
 - A successful child leaves only uncommitted code/docs/tests and a private PR
   draft. The parent applies implementation patches, closes plans, commits,
   pushes, publishes the immutable review baseline, runs the canonical
   preliminary and final ReviewGPT gates from a trusted parent checkout, and
   observes CI. A review finding or final retrospective requirement becomes the
   same durable draft human handoff rather than an autonomous remediation loop;
-  later queue discovery skips that exact-head handoff. Before merge it
+  later queue discovery skips that exact-head handoff. A human update whose new
+  head descends from the marked head carries the disposition forward at the
+  current head without rerunning a model; non-descendant replacement fails
+  closed. Before merge it
   revalidates live issue authority, PR head, required checks, current-base
   mergeability, and both old and new paths of any rename or copy. Proven local
   agent/Codex workflow changes may merge and close automatically; possible

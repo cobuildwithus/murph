@@ -26,6 +26,7 @@ import {
   isTrustedFrogIssue,
   localAgentOnlyChange,
   normalizeGitHubRepository,
+  parseAuthenticatedGitHubOperator,
   parseEventLog,
   renderInstalledLauncher,
   renderLaunchAgentPlist,
@@ -40,10 +41,14 @@ import {
   acquireRunLock,
   bodyHasExactReviewPass,
   bodyHandoff,
+  bodyHandoffRecord,
   bodyWithParentMetadata,
+  carriedForwardBodyHandoff,
   completedHandoffIssueNumbers,
   discoverEligibleIssues,
   primaryAdvanceRequiresRestart,
+  requiredCheckWatchHandoff,
+  requiredPullRequestCheckState,
   reusableRepairPhase,
   trustedReviewControlPaths,
 } from "./frog-autofix.ts";
@@ -73,6 +78,14 @@ const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const authenticatedOperator = "automation-operator";
+const pullRequestAuthority = (branch: string) => ({
+  author: { login: authenticatedOperator },
+  baseRefName: "main",
+  headRefName: branch,
+  headRepositoryOwner: { login: "cobuildwithus" },
+  isCrossRepository: false,
+});
 
 describe("Frog autofix guards", () => {
   it("normalizes only explicit GitHub repository remotes", () => {
@@ -84,6 +97,13 @@ describe("Frog autofix guards", () => {
       .toBeNull();
     expect(normalizeGitHubRepository("https://example.invalid/cobuildwithus/murph"))
       .toBeNull();
+  });
+
+  it("accepts only valid authenticated GitHub operator identities", () => {
+    expect(parseAuthenticatedGitHubOperator(` ${authenticatedOperator}\n`))
+      .toBe(authenticatedOperator);
+    expect(() => parseAuthenticatedGitHubOperator("operator/name")).toThrow();
+    expect(() => parseAuthenticatedGitHubOperator("")).toThrow();
   });
 
   it("selects only the oldest exact App-authored, labeled, singly bound issue", () => {
@@ -227,6 +247,7 @@ describe("Frog autofix guards", () => {
       { ...trustedIssue(8), labels: [] },
     ];
     const dependencies = {
+      authenticatedOperator: () => authenticatedOperator,
       assertRepository: () => undefined,
       bindingCount: (_root: string, issueNumber: number) => {
         bindingCalls.push(issueNumber);
@@ -235,7 +256,7 @@ describe("Frog autofix guards", () => {
       },
       fetchDefaultBranch: () => undefined,
       listOpenIssues: () => JSON.stringify(issues),
-      listOpenPullRequests: () => "[]",
+      listIssuePullRequests: () => "[]",
     };
 
     expect(discoverEligibleIssues("<ROOT>", dependencies).map((issue) => issue.number))
@@ -263,44 +284,75 @@ describe("Frog autofix guards", () => {
     const secondHead = "b".repeat(40);
     const openPullRequests = [
       {
+        ...pullRequestAuthority("agent/frog-autofix-9"),
         body: `Fixes #9\n\nFrog autofix handoff: review-findings at ${firstHead}\n`,
-        headRefName: "agent/frog-autofix-9",
         headRefOid: firstHead,
         isDraft: true,
+        number: 90,
         state: "OPEN",
       },
       {
+        ...pullRequestAuthority("agent/frog-autofix-10"),
         body: `Fixes #10\n\nFrog autofix handoff: product-runtime at ${secondHead}\n`,
-        headRefName: "agent/frog-autofix-10",
         headRefOid: secondHead,
         isDraft: false,
+        number: 100,
         state: "OPEN",
       },
       {
+        ...pullRequestAuthority("agent/frog-autofix-11"),
         body: `Fixes #11\n\nFrog autofix handoff: product-runtime at ${secondHead}\n`,
-        headRefName: "agent/frog-autofix-11",
         headRefOid: secondHead,
         isDraft: true,
+        number: 110,
+        state: "CLOSED",
+      },
+      {
+        ...pullRequestAuthority("agent/frog-autofix-12"),
+        body: `Fixes #12\n\nFrog autofix handoff: review-findings at ${firstHead}\n`,
+        headRefOid: secondHead,
+        isDraft: true,
+        number: 120,
         state: "OPEN",
       },
       {
-        body: `Fixes #12\n\nFrog autofix handoff: review-findings at ${firstHead}\n`,
-        headRefName: "agent/frog-autofix-12",
+        ...pullRequestAuthority("agent/frog-autofix-13"),
+        author: { login: "different-operator" },
+        body: `Fixes #13\n\nFrog autofix handoff: review-findings at ${secondHead}\n`,
         headRefOid: secondHead,
         isDraft: true,
+        number: 130,
+        state: "OPEN",
+      },
+      {
+        ...pullRequestAuthority("agent/frog-autofix-14"),
+        body: `Fixes #14\n\nFrog autofix handoff: review-findings at ${secondHead}\n`,
+        headRefOid: secondHead,
+        headRepositoryOwner: { login: "foreign-owner" },
+        isCrossRepository: true,
+        isDraft: true,
+        number: 140,
         state: "OPEN",
       },
     ];
-    expect([...completedHandoffIssueNumbers(JSON.stringify(openPullRequests))])
+    expect([...completedHandoffIssueNumbers(
+      JSON.stringify(openPullRequests),
+      authenticatedOperator,
+    )])
       .toEqual([9, 10, 11]);
 
     const issues = [trustedIssue(9), trustedIssue(10), trustedIssue(11), trustedIssue(12)];
     expect(discoverEligibleIssues("<ROOT>", {
+      authenticatedOperator: () => authenticatedOperator,
       assertRepository: () => undefined,
       bindingCount: () => 1,
       fetchDefaultBranch: () => undefined,
       listOpenIssues: () => JSON.stringify(issues),
-      listOpenPullRequests: () => JSON.stringify(openPullRequests),
+      listIssuePullRequests: (_root, issueNumber) => JSON.stringify(
+        openPullRequests.filter(
+          (record) => record.headRefName === `agent/frog-autofix-${issueNumber}`,
+        ),
+      ),
     }).map((issue) => issue.number)).toEqual([12]);
   });
 
@@ -319,6 +371,21 @@ describe("Frog autofix guards", () => {
     expect(bodyHasExactReviewPass(body, "specialist", head)).toBe(true);
     expect(bodyHasExactReviewPass(body, "final", head)).toBe(false);
     expect(bodyHandoff(body, head)).toBe("review-findings");
+    expect(bodyHandoffRecord(body)).toEqual({
+      head,
+      kind: "review-findings",
+    });
+    const amendedHead = "d".repeat(40);
+    expect(carriedForwardBodyHandoff(body, amendedHead, () => true))
+      .toBe("review-findings");
+    expect(() => carriedForwardBodyHandoff(body, amendedHead, () => false))
+      .toThrow("not an ancestor");
+    const restamped = bodyWithParentMetadata(body, {
+      firstHead: head,
+      handoff: bodyHandoffRecord(body)?.kind,
+      handoffHead: amendedHead,
+    });
+    expect(bodyHandoff(restamped, amendedHead)).toBe("review-findings");
     expect(body).not.toContain("0".repeat(40));
     expect(() => bodyHandoff(
       `${body}Frog autofix handoff: product-runtime at ${head}\n`,
@@ -349,6 +416,9 @@ describe("Frog autofix guards", () => {
     expect(wrapper).toContain("GH_TOKEN");
     expect(wrapper).toContain("GITHUB_TOKEN");
     expect(wrapper).toContain("verify-permissions");
+    expect(wrapper).toContain("/usr/bin/lockf -t 0");
+    expect(wrapper).toContain("MURPH_FROG_AUTOFIX_NATIVE_LOCK_HELD=1");
+    expect(wrapper).toContain('install|uninstall|run)');
     expect(wrapper).toContain('exec "$tsx_bin" scripts/frog-autofix.ts "$@"');
     const implementation = readFileSync(
       path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
@@ -359,9 +429,45 @@ describe("Frog autofix guards", () => {
     expect(implementation).toContain(
       "Frog autofix is currently running; uninstall after it finishes",
     );
+    expect(implementation).toContain(
+      "Frog autofix is currently running; install after it finishes",
+    );
+    expect(implementation).toContain(
+      "mutating Frog autofix commands require the native launcher gate",
+    );
+    expect(implementation).toContain("String(process.ppid)");
+    expect(implementation).toContain('["-t", "0", nativeGatePath, "/usr/bin/true"]');
     expect(implementation).not.toContain(
       "rmSync(supportRoot, { recursive: false })",
     );
+  });
+
+  it("admits only one real contender through the stable native acquisition gate", () => {
+    if (process.platform !== "darwin") return;
+    const root = mkdtempSync(path.join(tmpdir(), "frog-native-lock-"));
+    const gate = path.join(root, "run.native.lock");
+    try {
+      const result = spawnSync("/bin/bash", [
+        "-c",
+        [
+          '/usr/bin/lockf -t 0 "$1" /bin/sleep 1 &',
+          "first=$!",
+          '/usr/bin/lockf -t 0 "$1" /bin/sleep 1 &',
+          "second=$!",
+          "wait $first; first_status=$?",
+          "wait $second; second_status=$?",
+          'echo "$first_status $second_status"',
+        ].join("\n"),
+        "frog-native-lock-test",
+        gate,
+      ], { encoding: "utf8" });
+      expect(result.status).toBe(0);
+      const statuses = result.stdout.trim().split(" ").map(Number);
+      expect(statuses.filter((status) => status === 0)).toHaveLength(1);
+      expect(statuses.filter((status) => status !== 0)).toHaveLength(1);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 
   it("constructs the worker prompt from an issue number, not issue content", () => {
@@ -456,15 +562,16 @@ describe("Frog autofix guards", () => {
       const required: string[] = [];
       let recovered = false;
       const mode = resolveWorkerMode("<WORKTREE>", branch, 42, {
+        authenticatedOperator: () => authenticatedOperator,
         require: (command, args) => {
         const invocation = args.join(" ");
         required.push(`${command} ${invocation}`);
         if (command === "gh") {
           return JSON.stringify(options.pullRequest ? [{
-            baseRefName: "main",
+            ...pullRequestAuthority(branch),
             body: options.pullRequest.body,
-            headRefName: branch,
             headRefOid: options.localHead,
+            isDraft: true,
             number: 99,
             state: options.pullRequest.state,
           }] : []);
@@ -549,14 +656,15 @@ describe("Frog autofix guards", () => {
     const branch = "agent/frog-autofix-42";
     const mergedHead = "b".repeat(40);
     const record = {
-      baseRefName: "main",
+      ...pullRequestAuthority(branch),
       body: "Fixes #42",
-      headRefName: branch,
       headRefOid: mergedHead,
+      isDraft: false,
       number: 99,
       state: "MERGED",
     };
     const commands = (localHead: string, body = record.body) => ({
+      authenticatedOperator: () => authenticatedOperator,
       require: (command: string) => command === "gh"
         ? JSON.stringify([{ ...record, body }])
         : localHead,
@@ -581,6 +689,55 @@ describe("Frog autofix guards", () => {
       42,
       commands(mergedHead, "Related to #42"),
     )).toBe(false);
+
+    const foreign = {
+      ...record,
+      author: { login: "different-operator" },
+      number: 100,
+    };
+    expect(branchHasMergedPullRequest(
+      "<ROOT>",
+      branch,
+      42,
+      {
+        authenticatedOperator: () => authenticatedOperator,
+        require: (command: string) => command === "gh"
+          ? JSON.stringify([foreign, record])
+          : mergedHead,
+        run: () => ({ status: 0, stdout: "" }),
+      },
+    )).toBe(true);
+  });
+
+  it("classifies definitive, pending, and indeterminate required check states", () => {
+    const check = (bucket: string, state = "COMPLETED") => ({
+      bucket,
+      name: "Required proof",
+      state,
+      workflow: "CI",
+    });
+    expect(requiredPullRequestCheckState(JSON.stringify([check("pass")])))
+      .toBe("pass");
+    expect(requiredPullRequestCheckState(JSON.stringify([
+      check("pass"),
+      check("fail"),
+    ]))).toBe("failed");
+    expect(requiredPullRequestCheckState(JSON.stringify([check("cancel")])))
+      .toBe("failed");
+    expect(requiredPullRequestCheckState(JSON.stringify([
+      check("pass"),
+      check("pending", "IN_PROGRESS"),
+    ]))).toBe("pending");
+    expect(requiredPullRequestCheckState(JSON.stringify([check("skipping")])))
+      .toBe("indeterminate");
+    expect(requiredPullRequestCheckState("[]")).toBe("indeterminate");
+    expect(() => requiredPullRequestCheckState("not-json")).toThrow();
+    expect(requiredCheckWatchHandoff(1, "failed")).toBe("review-findings");
+    expect(requiredCheckWatchHandoff(0, "pass")).toBeNull();
+    expect(() => requiredCheckWatchHandoff(8, "pending"))
+      .toThrow("did not complete");
+    expect(() => requiredCheckWatchHandoff(1, "indeterminate"))
+      .toThrow("did not complete");
   });
 
   it("keeps merge and issue closure in a revalidated non-model parent", () => {
@@ -644,7 +801,7 @@ describe("Frog autofix guards", () => {
       issueNumber: 42,
       pullRequest: 99,
     };
-    for (const failure of ["authority", "head", "checks", "merge-tree"] as const) {
+    for (const failure of ["authority", "head", "checks"] as const) {
       let mergeCalls = 0;
       let verificationCalls = 0;
       const dependencies: ReadyRepairFinalizationDependencies = {
@@ -657,7 +814,7 @@ describe("Frog autofix guards", () => {
         merge: () => {
           mergeCalls += 1;
         },
-        mergeTreePasses: () => failure !== "merge-tree",
+        mergeTreePasses: () => true,
         pullRequestIsMerged: () => false,
         refreshAndVerifyIssue: () => {
           verificationCalls += 1;
@@ -669,6 +826,22 @@ describe("Frog autofix guards", () => {
       expect(mergeCalls).toBe(0);
       if (failure === "authority") expect(verificationCalls).toBe(1);
     }
+    expect(finalizeReadyRepair(identity, {
+      autoMergeAllowed: () => true,
+      closeIssue: () => undefined,
+      currentPullRequest: () => ({
+        head: identity.head,
+        pullRequest: identity.pullRequest,
+      }),
+      issueIsClosed: () => false,
+      merge: () => {
+        throw new Error("merge must not run");
+      },
+      mergeTreePasses: () => false,
+      pullRequestIsMerged: () => false,
+      refreshAndVerifyIssue: () => undefined,
+      requiredChecksPass: () => true,
+    })).toBe("awaiting-human-conflict");
   });
 
   it("stops before merge and issue closure for possible product-runtime changes", () => {
@@ -694,7 +867,7 @@ describe("Frog autofix guards", () => {
       refreshAndVerifyIssue: () => undefined,
       requiredChecksPass: () => true,
     });
-    expect(outcome).toBe("awaiting-human");
+    expect(outcome).toBe("awaiting-human-product");
     expect(mergeCalls).toBe(0);
     expect(closeCalls).toBe(0);
   });

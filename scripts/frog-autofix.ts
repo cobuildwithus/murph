@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -30,9 +31,11 @@ import {
   buildCodexWorkerArguments,
   codexWorkerPermissionArguments,
   eligibleFrogIssues,
+  isParentOwnedPullRequest,
   isTrustedFrogIssue,
   localAgentOnlyChange,
   normalizeGitHubRepository,
+  parseAuthenticatedGitHubOperator,
   parseEventLog,
   renderInstalledLauncher,
   renderLaunchAgentPlist,
@@ -45,6 +48,7 @@ import {
   type EventName,
   type EventRecord,
   type FrogIssue,
+  type PullRequestAuthorityRecord,
 } from "./frog-autofix-lib.ts";
 import {
   branchHasMergedPullRequest,
@@ -82,6 +86,8 @@ const launchAgentPath = path.join(
 );
 const eventLogPath = path.join(supportRoot, "events.jsonl");
 const lockPath = path.join(supportRoot, "run.lock");
+const nativeGatePath = path.join(supportRoot, "run.native.lock");
+const nativeGateEnvironment = "MURPH_FROG_AUTOFIX_NATIVE_LOCK_HELD";
 
 interface RunLockRecord {
   nonce: string;
@@ -226,6 +232,11 @@ const requireCommand = (
 };
 
 const recoveryCommands: RecoveryCommandAdapter = {
+  authenticatedOperator: (cwd) => requireCommand(
+    "gh",
+    ["api", "user", "--jq", ".login"],
+    cwd,
+  ),
   require: requireCommand,
   run: runCommand,
 };
@@ -289,14 +300,16 @@ function committedBindingCount(root: string, issueNumber: number): number {
 }
 
 export interface DiscoveryDependencies {
+  authenticatedOperator: (root: string) => string;
   assertRepository: (root: string) => void;
   bindingCount: (root: string, issueNumber: number) => number;
   fetchDefaultBranch: (root: string) => void;
   listOpenIssues: (root: string) => string;
-  listOpenPullRequests: (root: string) => string;
+  listIssuePullRequests: (root: string, issueNumber: number) => string;
 }
 
 const defaultDiscoveryDependencies: DiscoveryDependencies = {
+  authenticatedOperator: recoveryCommands.authenticatedOperator,
   assertRepository: assertRepositoryIdentity,
   bindingCount: committedBindingCount,
   fetchDefaultBranch: fetchMain,
@@ -316,7 +329,7 @@ const defaultDiscoveryDependencies: DiscoveryDependencies = {
     ],
     root,
   ),
-  listOpenPullRequests: (root) => requireCommand(
+  listIssuePullRequests: (root, issueNumber) => requireCommand(
     "gh",
     [
       "pr",
@@ -324,27 +337,33 @@ const defaultDiscoveryDependencies: DiscoveryDependencies = {
       "--repo",
       FROG_AUTOFIX_REPOSITORY,
       "--state",
-      "open",
+      "all",
+      "--head",
+      `${FROG_AUTOFIX_BRANCH_PREFIX}${issueNumber}`,
       "--limit",
-      "1000",
+      "100",
       "--json",
-      "body,headRefName,headRefOid,isDraft,state",
+      "author,baseRefName,body,headRefName,headRefOid,headRepositoryOwner,isCrossRepository,isDraft,number,state",
     ],
     root,
   ),
 };
 
-interface OpenHandoffPullRequest {
+interface HandoffPullRequest extends PullRequestAuthorityRecord {
   body: string;
-  headRefName: string;
   headRefOid: string;
   isDraft: boolean;
-  state: "OPEN";
+  number: number;
+  state: "CLOSED" | "MERGED" | "OPEN";
 }
 
-export function completedHandoffIssueNumbers(raw: string): Set<number> {
+export function completedHandoffIssueNumbers(
+  raw: string,
+  authenticatedOperator: string,
+): Set<number> {
+  const operator = parseAuthenticatedGitHubOperator(authenticatedOperator);
   const value: unknown = JSON.parse(raw);
-  if (!Array.isArray(value) || value.length >= 1_000) {
+  if (!Array.isArray(value) || value.length >= 100) {
     throw new Error("GitHub returned an invalid or unbounded open pull request list");
   }
   const completed = new Set<number>();
@@ -352,14 +371,24 @@ export function completedHandoffIssueNumbers(raw: string): Set<number> {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error("GitHub returned an invalid open pull request record");
     }
-    const record = entry as Partial<OpenHandoffPullRequest>;
+    const record = entry as Partial<HandoffPullRequest>;
     if (
-      record.state !== "OPEN"
+      !["CLOSED", "MERGED", "OPEN"].includes(record.state ?? "")
       || typeof record.body !== "string"
       || typeof record.headRefName !== "string"
       || typeof record.headRefOid !== "string"
       || !/^[0-9a-f]{40}$/u.test(record.headRefOid)
       || typeof record.isDraft !== "boolean"
+      || typeof record.isCrossRepository !== "boolean"
+      || !Number.isSafeInteger(record.number)
+      || Number(record.number) <= 0
+      || typeof record.baseRefName !== "string"
+      || (record.author !== null
+        && (typeof record.author !== "object"
+          || typeof record.author.login !== "string"))
+      || (record.headRepositoryOwner !== null
+        && (typeof record.headRepositoryOwner !== "object"
+          || typeof record.headRepositoryOwner.login !== "string"))
     ) {
       throw new Error("GitHub returned an invalid open pull request record");
     }
@@ -370,6 +399,12 @@ export function completedHandoffIssueNumbers(raw: string): Set<number> {
     if (!branchMatch) continue;
     const issueNumber = Number(branchMatch[1]);
     if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) continue;
+    if (!isParentOwnedPullRequest(
+      record as HandoffPullRequest,
+      operator,
+      `${FROG_AUTOFIX_BRANCH_PREFIX}${issueNumber}`,
+    )) continue;
+    if (record.state === "MERGED") continue;
     const relationship = new RegExp(
       `\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+`
         + `(?:${FROG_AUTOFIX_REPOSITORY.replace("/", "\\/")})?#${issueNumber}\\b`,
@@ -397,9 +432,6 @@ export function discoverEligibleIssues(
   if (issues.length >= 1_000) {
     throw new Error("open issue scan reached its bounded limit");
   }
-  const completedHandoffs = completedHandoffIssueNumbers(
-    dependencies.listOpenPullRequests(root),
-  );
   const trusted = issues.filter(isTrustedFrogIssue);
   const counts = new Map(
     trusted.map((issue) => [
@@ -407,9 +439,13 @@ export function discoverEligibleIssues(
       dependencies.bindingCount(root, issue.number),
     ]),
   );
-  return eligibleFrogIssues(issues, counts).filter(
-    (issue) => !completedHandoffs.has(issue.number),
-  );
+  const operator = dependencies.authenticatedOperator(root);
+  return eligibleFrogIssues(issues, counts).filter((issue) => (
+    !completedHandoffIssueNumbers(
+      dependencies.listIssuePullRequests(root, issue.number),
+      operator,
+    ).has(issue.number)
+  ));
 }
 
 function parsePrimaryWorktree(raw: string): string {
@@ -877,6 +913,18 @@ function runCodexPermissionSmoke(primary: string) {
 
 function install(codexHomeArgument: string | undefined) {
   if (platform() !== "darwin") throw new Error("install is supported only on macOS");
+  const lock = acquireRunLock(lockPath);
+  if (!lock) {
+    throw new Error("Frog autofix is currently running; install after it finishes");
+  }
+  try {
+    installWhileLocked(codexHomeArgument);
+  } finally {
+    lock.release();
+  }
+}
+
+function installWhileLocked(codexHomeArgument: string | undefined) {
   assertRepositoryIdentity(repoRoot);
   const primary = resolvePrimaryWorktree(repoRoot);
   if (realpathSync(repoRoot) !== primary) {
@@ -954,9 +1002,17 @@ function safeRemoveInstalledState() {
     rmdirSync(transientRoot);
   }
   if (existsSync(supportRoot)) {
-    const remaining = requireCommand("find", [supportRoot, "-mindepth", "1", "-print"], homedir());
-    if (remaining) throw new Error("local state contains unexpected entries");
-    rmdirSync(supportRoot);
+    const remaining = readdirSync(supportRoot);
+    if (
+      remaining.length !== 1
+      || remaining[0] !== path.basename(nativeGatePath)
+      || !existsSync(nativeGatePath)
+      || !lstatSync(nativeGatePath).isFile()
+      || lstatSync(nativeGatePath).isSymbolicLink()
+    ) {
+      throw new Error("local state contains unexpected entries");
+    }
+    chmodSync(nativeGatePath, 0o600);
   }
 }
 
@@ -1766,13 +1822,48 @@ export function bodyHandoff(
   body: string,
   head: string,
 ): "product-runtime" | "review-findings" | null {
+  const handoff = bodyHandoffRecord(body);
+  if (!handoff) return null;
+  if (handoff.head !== head) {
+    throw new Error("pull request has ambiguous Frog handoff metadata");
+  }
+  return handoff.kind;
+}
+
+export interface BodyHandoffRecord {
+  head: string;
+  kind: "product-runtime" | "review-findings";
+}
+
+export function bodyHandoffRecord(body: string): BodyHandoffRecord | null {
   const matches = body.match(/^Frog autofix handoff: (product-runtime|review-findings) at ([0-9a-f]{40})$/gmu)
     ?? [];
   if (matches.length === 0) return null;
-  if (matches.length !== 1 || !matches[0]?.endsWith(` at ${head}`)) {
+  if (matches.length !== 1) {
     throw new Error("pull request has ambiguous Frog handoff metadata");
   }
-  return matches[0].includes("product-runtime") ? "product-runtime" : "review-findings";
+  const match = /^Frog autofix handoff: (product-runtime|review-findings) at ([0-9a-f]{40})$/u
+    .exec(matches[0] ?? "");
+  if (!match?.[1] || !match[2]) {
+    throw new Error("pull request has ambiguous Frog handoff metadata");
+  }
+  return {
+    head: match[2],
+    kind: match[1] as BodyHandoffRecord["kind"],
+  };
+}
+
+export function carriedForwardBodyHandoff(
+  body: string,
+  currentHead: string,
+  isAncestor: (priorHead: string, currentHead: string) => boolean,
+): BodyHandoffRecord["kind"] | null {
+  const handoff = bodyHandoffRecord(body);
+  if (!handoff) return null;
+  if (handoff.head !== currentHead && !isAncestor(handoff.head, currentHead)) {
+    throw new Error("Frog handoff head is not an ancestor of the current head");
+  }
+  return handoff.kind;
 }
 
 function resolveFirstReviewedHead(
@@ -1879,8 +1970,60 @@ interface RequiredCheckRecord {
   workflow: string;
 }
 
-function requiredPullRequestChecksPass(root: string, pullRequest: number): boolean {
-  const raw = requireCommand(
+export type RequiredPullRequestCheckState =
+  | "failed"
+  | "indeterminate"
+  | "pass"
+  | "pending";
+
+export function requiredPullRequestCheckState(
+  raw: string,
+): RequiredPullRequestCheckState {
+  const value: unknown = JSON.parse(raw);
+  if (!Array.isArray(value)) {
+    throw new Error("GitHub returned an invalid required check list");
+  }
+  if (value.length === 0) return "indeterminate";
+  const buckets = value.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("GitHub returned an invalid required check record");
+    }
+    const check = entry as Partial<RequiredCheckRecord>;
+    if (
+      !["cancel", "fail", "pass", "pending", "skipping"].includes(check.bucket ?? "")
+      || typeof check.name !== "string"
+      || !check.name
+      || typeof check.state !== "string"
+      || !check.state
+      || typeof check.workflow !== "string"
+      || !check.workflow
+    ) {
+      throw new Error("GitHub returned an invalid required check record");
+    }
+    return check.bucket;
+  });
+  if (buckets.some((bucket) => bucket === "cancel" || bucket === "fail")) {
+    return "failed";
+  }
+  if (buckets.every((bucket) => bucket === "pass")) return "pass";
+  if (buckets.some((bucket) => bucket === "pending")) return "pending";
+  return "indeterminate";
+}
+
+export function requiredCheckWatchHandoff(
+  watchStatus: number,
+  checkState: RequiredPullRequestCheckState,
+): "review-findings" | null {
+  if (watchStatus === 0) return null;
+  if (checkState === "failed") return "review-findings";
+  throw new Error("required pull request checks did not complete");
+}
+
+function requiredPullRequestCheckStateFromGitHub(
+  root: string,
+  pullRequest: number,
+): RequiredPullRequestCheckState {
+  const result = runCommand(
     "gh",
     [
       "pr",
@@ -1894,19 +2037,14 @@ function requiredPullRequestChecksPass(root: string, pullRequest: number): boole
     ],
     root,
   );
-  const value: unknown = JSON.parse(raw);
-  if (!Array.isArray(value) || value.length === 0) return false;
-  return value.every((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-    const check = entry as Partial<RequiredCheckRecord>;
-    return check.bucket === "pass"
-      && typeof check.name === "string"
-      && Boolean(check.name)
-      && typeof check.state === "string"
-      && Boolean(check.state)
-      && typeof check.workflow === "string"
-      && Boolean(check.workflow);
-  });
+  if (![0, 1, 8].includes(result.status)) {
+    throw new Error(`gh failed with status ${result.status}`);
+  }
+  return requiredPullRequestCheckState(result.stdout);
+}
+
+function requiredPullRequestChecksPass(root: string, pullRequest: number): boolean {
+  return requiredPullRequestCheckStateFromGitHub(root, pullRequest) === "pass";
 }
 
 function exactHeadIsLocalAgentOnly(
@@ -1948,7 +2086,7 @@ function finalizeReviewedRepair(
   issueNumber: number,
   pullRequest: number,
   head: string,
-): "awaiting-human" | "merged" {
+): "awaiting-human-conflict" | "awaiting-human-product" | "merged" {
   return finalizeReadyRepair({ branch, issueNumber, pullRequest, head }, {
     autoMergeAllowed: (identity) => exactHeadIsLocalAgentOnly(
       primary,
@@ -2050,7 +2188,26 @@ async function reviewPublishAndFinalize(options: {
     && bodyHasExactReviewPass(existingBeforePublish.body, "final", head),
   );
   let handoff = existingBeforePublish
-    ? bodyHandoff(existingBeforePublish.body, head)
+    ? carriedForwardBodyHandoff(
+      existingBeforePublish.body,
+      head,
+      (priorHead, currentHead) => {
+        requireCommand(
+          "git",
+          ["cat-file", "-e", `${priorHead}^{commit}`],
+          options.worktree,
+        );
+        const ancestry = runCommand(
+          "git",
+          ["merge-base", "--is-ancestor", priorHead, currentHead],
+          options.worktree,
+        );
+        if (![0, 1].includes(ancestry.status)) {
+          throw new Error(`git failed with status ${ancestry.status}`);
+        }
+        return ancestry.status === 0;
+      },
+    )
     : null;
   body = bodyWithParentMetadata(body, {
     finalHead: finalPassed ? head : undefined,
@@ -2167,7 +2324,7 @@ async function reviewPublishAndFinalize(options: {
   } else if (draft !== "false") {
     throw new Error("GitHub returned an invalid pull request draft state");
   }
-  requireCommand(
+  const checkWatch = runCommand(
     "gh",
     [
       "pr",
@@ -2184,6 +2341,17 @@ async function reviewPublishAndFinalize(options: {
     {},
     3 * 60 * 60 * 1_000,
   );
+  if (checkWatch.status !== 0) {
+    const checkHandoff = requiredCheckWatchHandoff(
+      checkWatch.status,
+      requiredPullRequestCheckStateFromGitHub(options.primary, pullRequest),
+    );
+    if (checkHandoff) {
+      handoff = checkHandoff;
+      persistMetadata();
+      return "awaiting-human";
+    }
+  }
   const result = finalizeReviewedRepair(
     options.primary,
     options.branch,
@@ -2191,11 +2359,17 @@ async function reviewPublishAndFinalize(options: {
     pullRequest,
     head,
   );
-  if (result === "awaiting-human") {
+  if (result === "awaiting-human-conflict") {
+    handoff = "review-findings";
+    persistMetadata();
+    return "awaiting-human";
+  }
+  if (result === "awaiting-human-product") {
     handoff = "product-runtime";
     persistMetadata();
+    return "awaiting-human";
   }
-  return result;
+  return "merged";
 }
 
 function retireMergedWorktree(
@@ -2348,6 +2522,31 @@ async function runOnce() {
   }
 }
 
+function assertNativeAcquisitionGate() {
+  if (
+    platform() !== "darwin"
+    || process.env[nativeGateEnvironment] !== "1"
+    || requireCommand(
+      "/bin/ps",
+      ["-o", "comm=", "-p", String(process.ppid)],
+      homedir(),
+    ) !== "/usr/bin/lockf"
+    || !existsSync(nativeGatePath)
+    || !lstatSync(nativeGatePath).isFile()
+    || lstatSync(nativeGatePath).isSymbolicLink()
+  ) {
+    throw new Error("mutating Frog autofix commands require the native launcher gate");
+  }
+  const contender = runCommand(
+    "/usr/bin/lockf",
+    ["-t", "0", nativeGatePath, "/usr/bin/true"],
+    homedir(),
+  );
+  if (contender.status === 0) {
+    throw new Error("mutating Frog autofix commands require the native launcher gate");
+  }
+}
+
 function scan() {
   const eligible = discoverEligibleIssues(repoRoot);
   console.log(`eligible=${eligible.length}`);
@@ -2367,9 +2566,11 @@ async function main() {
   beginInvocation(command);
   switch (command) {
     case "install":
+      assertNativeAcquisitionGate();
       install(parseInstallCodexHome(args));
       return;
     case "uninstall":
+      assertNativeAcquisitionGate();
       if (args.length) throw new Error("uninstall accepts no arguments");
       uninstall();
       return;
@@ -2388,6 +2589,7 @@ async function main() {
       scan();
       return;
     case "run":
+      assertNativeAcquisitionGate();
       if (args.length) throw new Error("run accepts no arguments");
       await runOnce();
       return;

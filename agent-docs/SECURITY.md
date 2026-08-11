@@ -1042,6 +1042,13 @@ Last verified: 2026-08-11
   uses a different `[bot]` representation and is not the local admission field.
 - Parent-selected recovery mode is derived from exact clean branch ancestry,
   deterministic PR ownership, head identity, state, and closing relationship.
+  Every PR read with authority consequences must target `main`, use the exact
+  deterministic branch, be non-cross-repository, report this repository as its
+  head owner, and be authored by the live authenticated `gh` operator. That one
+  predicate is applied before discovery/recovery cardinality and before body
+  hydration, editing, publication, finalization, merged-state proof, or issue
+  closure. A fork or different operator may neither forge a PASS/handoff body
+  marker nor cause the parent to hydrate or edit that PR.
   Only a fresh branch can authorize the implementation ReviewGPT request;
   resume omits that command entirely. An interrupted dirty diff can resume only
   when the one open issue-closing PR, remote branch, and local committed head
@@ -1084,15 +1091,27 @@ Last verified: 2026-08-11
   skipped/missing gate reinterpretation. Merge-authority inventories include
   both source and destination paths for detected renames and copies. Exact-head
   review-finding and product-runtime handoff markers are parent-owned queue
-  completion state: later scans skip those still-open issues while humans own
-  the next decision.
+  completion state: later scans skip those still-open or exact
+  closed-unmerged issues while humans own the next decision. A descendant human
+  amendment preserves only the existing handoff kind and immutable first
+  review baseline, re-stamped at the descendant head; it cannot create review
+  evidence. Definitive failed/cancelled required checks and current-base
+  conflicts use the review-findings handoff. Pending, missing, skipped, or
+  malformed check state grants no handoff or merge authority and remains
+  retryable/fail-closed.
 - Durable local files use owner-only permissions and contain only home-relative
   locators, process identity, issue numbers, timestamps, event names, and exit
   status. Parent prompts, responses, command output, and downloaded patches stay
   in one owner-only transient directory and are removed at invocation end,
   after every exact owned process group disappears. Every external command gets
   its own exact supervised group and is bounded by the same absolute invocation
-  deadline.
+  deadline. The shell entrypoint serializes `install`, `uninstall`, and `run`
+  through one stable owner-only macOS `lockf` inode before the JSON parent/worker
+  owner is read or reclaimed. The TypeScript parent verifies both its `lockf`
+  parent and a failed same-inode contender, so an ambient environment marker
+  alone cannot bypass the gate. The gate inode intentionally survives
+  uninstall; the JSON record remains the auditable process identity and
+  orphan-worker proof inside that native critical section.
 
 ## Scheduled assistant action authority
 

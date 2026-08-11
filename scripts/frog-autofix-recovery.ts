@@ -1,8 +1,11 @@
 import {
   FROG_AUTOFIX_REPOSITORY,
   classifyWorkerMode,
+  isParentOwnedPullRequest,
+  parseAuthenticatedGitHubOperator,
   type BranchPullRequestState,
   type FrogAutofixWorkerMode,
+  type PullRequestAuthorityRecord,
 } from "./frog-autofix-lib.ts";
 
 interface CommandResult {
@@ -11,15 +14,15 @@ interface CommandResult {
 }
 
 export interface RecoveryCommandAdapter {
+  authenticatedOperator: (cwd: string) => string;
   require: (command: string, args: string[], cwd: string) => string;
   run: (command: string, args: string[], cwd: string) => CommandResult;
 }
 
-export interface BranchPullRequestRecord {
-  baseRefName: string;
+export interface BranchPullRequestRecord extends PullRequestAuthorityRecord {
   body: string;
-  headRefName: string;
   headRefOid: string;
+  isDraft: boolean;
   number: number;
   state: "CLOSED" | "MERGED" | "OPEN";
 }
@@ -51,6 +54,7 @@ function issueClosingKeywordPresent(body: string, issueNumber: number): boolean 
 function parseBranchPullRequests(
   raw: string,
   branch: string,
+  authenticatedOperator: string,
 ): BranchPullRequestRecord[] {
   const value: unknown = JSON.parse(raw);
   if (!Array.isArray(value) || value.length >= 100) {
@@ -70,11 +74,23 @@ function parseBranchPullRequests(
       || typeof record.headRefOid !== "string"
       || !/^[0-9a-f]{40}$/u.test(record.headRefOid)
       || typeof record.body !== "string"
+      || typeof record.isCrossRepository !== "boolean"
+      || typeof record.isDraft !== "boolean"
+      || (record.author !== null
+        && (typeof record.author !== "object"
+          || typeof record.author.login !== "string"))
+      || (record.headRepositoryOwner !== null
+        && (typeof record.headRepositoryOwner !== "object"
+          || typeof record.headRepositoryOwner.login !== "string"))
     ) {
       throw new Error("GitHub returned an invalid pull request record");
     }
     return record as BranchPullRequestRecord;
-  });
+  }).filter((record) => isParentOwnedPullRequest(
+    record,
+    authenticatedOperator,
+    branch,
+  ));
 }
 
 function branchPullRequests(
@@ -82,6 +98,9 @@ function branchPullRequests(
   branch: string,
   commands: RecoveryCommandAdapter,
 ): BranchPullRequestRecord[] {
+  const authenticatedOperator = parseAuthenticatedGitHubOperator(
+    commands.authenticatedOperator(root),
+  );
   return parseBranchPullRequests(
     commands.require(
       "gh",
@@ -97,11 +116,12 @@ function branchPullRequests(
         "--limit",
         "100",
         "--json",
-        "number,state,headRefName,baseRefName,headRefOid,body",
+        "author,baseRefName,body,headRefName,headRefOid,headRepositoryOwner,isCrossRepository,isDraft,number,state",
       ],
       root,
     ),
     branch,
+    authenticatedOperator,
   );
 }
 

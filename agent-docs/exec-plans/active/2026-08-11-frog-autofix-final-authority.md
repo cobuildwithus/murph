@@ -43,6 +43,13 @@ tooling automatically.
 8. [ ] Update owner docs, run local proof, close this plan in the scoped commit,
    push, and obtain a final ReviewGPT PASS plus exact-head green CI before merge
    and installation.
+9. [x] Require one authenticated-operator-owned, same-repository PR predicate
+   across discovery, recovery, publication, handoff, and finalization.
+10. [x] Serialize every mutating local invocation through one native advisory
+    gate before the existing JSON parent/worker owner is inspected or replaced.
+11. [x] Convert descendant human amendments, failed/cancelled required checks,
+    current-base conflicts, and closed-unmerged handoffs into the existing
+    durable human-owned disposition without masking transient states.
 
 ## Round-four scope retrospective
 
@@ -104,17 +111,40 @@ the repository workflow requires committing friction encountered while doing
 this task; their public issue/reconciliation effect must be explicit in the PR
 contract.
 
+### Round-five continuation decision
+
+Round five found three reachable paths in the same authority chain: foreign or
+different-operator PRs could forge review/handoff state, concurrent stale-lock
+reclamation was not atomic, and normal human amendments or terminal CI/merge
+states could lose the queue handoff. The proposed corrections remain inside
+existing owners. The PR predicate gains live authenticated-operator and
+same-repository fields; the existing run lock gains one native advisory
+serialization gate around every mutating invocation; and the existing PR-body
+handoff absorbs descendant amendments, definitive failed/cancelled checks,
+current-base conflicts, and closed-unmerged cancellation. A stable native gate
+inode is the atomic implementation of the existing JSON parent/worker owner,
+not a second durable task owner. These changes add no scheduler, retry queue,
+database, credential, or model turn. Reverting or omitting any of them leaves a
+demonstrated review bypass, concurrent writer, or permanently pinned oldest
+issue, while splitting them would separate callers from the one predicate and
+handoff they must share. Continue under the existing indivisible-authority
+decision, with real contention and foreign-PR regression proof required before
+another review.
+
 ## Verification
 
 - Native Codex permission smoke: passed workspace read/write, denied an
   outside-root canary read, and denied outbound network.
-- Focused Frog autofix suite: 31 tests passed.
-- Repo-tools suite: 35 files and 556 tests passed twice, including through the
+- Focused Frog autofix suite: 34 tests passed, including real two-process native
+  lock contention and foreign-PR/terminal-handoff regressions.
+- Repo-tools suite: 35 files and 559 tests passed directly and through the
   repo-internal diff lane.
 - Repo TypeScript tools, shell syntax, documentation drift, dependency policy,
   hosted architecture guards, and `git diff --check`: passed.
 - Final round four required the retrospective above and identified the prompt
-  authority and terminal-outcome gaps; the next exact-head round remains
+  authority and terminal-outcome gaps. Round five verified those corrections
+  and returned the PR-identity, atomic-lock, and terminal-handoff findings
+  captured in the continuation decision; another exact-head round remains
   required before merge.
 
 Status: active
