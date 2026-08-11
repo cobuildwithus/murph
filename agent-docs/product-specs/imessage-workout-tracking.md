@@ -7,7 +7,7 @@ A private member can run a strength workout from the Murph conversation:
 - see today's ordered exercises and completed/remaining set counts;
 - open an exercise to see each set's target and recorded result;
 - compose an explicit command to log, correct, or finish the workout;
-- continue using ordinary text for free-form gym updates.
+- receive a refreshed immutable workout card after every verified free-form gym mutation.
 
 The experience borrows the useful workout-tracker loop—plan, log sets, correct, finish—without introducing a second workout product or data store.
 
