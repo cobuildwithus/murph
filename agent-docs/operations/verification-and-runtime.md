@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-06
+Last verified: 2026-08-11
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -18,9 +18,19 @@ The delivery path decides who owns broad verification:
   broader reproduction is useful. Do not rerun an unrelated full local suite.
 - **Direct shared-default push:** after fetching and reconciling the exact
   candidate for `main` or another shared default branch, run
-  `pnpm verify:acceptance` before pushing. This rule overrides the PR-focused
-  and docs-only fast paths because there is no PR feedback loop before the
-  shared branch changes.
+  `pnpm verify:acceptance` once for that direct-push attempt. This rule overrides
+  the PR-focused and docs-only fast paths because there is no PR feedback loop
+  before the shared branch changes. If the remote advances while acceptance
+  runs, fetch it and allow the unchanged accepted patch one post-acceptance
+  normal rebase. Require a conflict-free rebase, prove the patch is unchanged,
+  inspect the intervening base diff for overlap or invalidated assumptions, and
+  rerun affected focused checks. Do not restart full acceptance solely because
+  the base moved. Push immediately after that proof. If the patch changes, the
+  rebase conflicts, the intervening diff invalidates acceptance, or the push is
+  rejected because the remote advances again, do not rebase or rerun acceptance
+  again: report `moving-base race` and stop or move the change to a PR. The
+  one-rebase budget remains consumed until push or handoff; a later agent turn
+  does not reset it.
 
 Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
@@ -29,10 +39,15 @@ unrelated check sufficient.
 For readiness, the exact PR head is the commit that contains the PR-authored
 change; it does not need to be repeatedly merged with a moving base. Keep green
 required CI on that head and prove current-base mergeability with
-`git merge-tree --write-tree`. If strict up-to-date checks apply, satisfy them
-only at the authorized merge boundary through the merge queue when available
-or one normal base update. Let the repository gate the resulting head; do not
-restart broad CI repeatedly during preparation just because the base advances.
+`git merge-tree --write-tree`. At the authorized merge boundary, wait only for
+routed review gates and required GitHub checks. If strict up-to-date checks
+apply, prefer the merge queue; otherwise allow at most one normal base update
+for the unchanged reviewed patch and let required CI gate that head. If the base
+advances again after it is green, never perform a second base update or restart
+CI. Re-run the current-base merge-tree and follow the terminal non-refresh merge
+or `moving-base race` stop rule in `pr-reviewgpt-loop.md`. A non-required check
+delays merge only when its failure is relevant to the changed surface or the
+user explicitly requested it.
 
 Verification evidence belongs to the exact file state it checked. After the
 last code, test, or config edit, rerun every focused command whose inputs or
