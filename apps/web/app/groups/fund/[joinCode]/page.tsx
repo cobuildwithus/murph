@@ -162,13 +162,18 @@ export default async function GroupFundingPage({
             prisma,
           })
         : Promise.resolve(null),
-      readHostedGroupFundingSupporters({
-        beneficiaryMemberId: target.runtimeMemberId,
-        prisma,
-      }).catch(() => ({
-        monthlySponsor: null,
-        oneTimeContributions: [],
-      })),
+      member
+        ? readHostedGroupFundingSupporters({
+            beneficiaryMemberId: target.runtimeMemberId,
+            prisma,
+          }).catch(() => ({
+            monthlySponsor: null,
+            oneTimeContributions: [],
+          }))
+        : Promise.resolve({
+            monthlySponsor: null,
+            oneTimeContributions: [],
+          }),
     ]);
   if (!usageStatus || (managementOnly && !sponsorshipManagement)) {
     return <GroupFundingUnavailable />;

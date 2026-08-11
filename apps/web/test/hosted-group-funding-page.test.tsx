@@ -500,6 +500,20 @@ describe("hosted group funding page", () => {
       .not.toHaveBeenCalled();
   });
 
+  it("keeps supporter recognition private until the viewer signs in", async () => {
+    mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+      authenticatedMember: null,
+    });
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.match(markup, /Sign in/u);
+    assert.doesNotMatch(markup, /Supporters|Monthly sponsor/u);
+    expect(mocks.readHostedGroupFundingSupporters).not.toHaveBeenCalled();
+  });
+
   it("keeps inactive sponsorship management unavailable to an authenticated non-payer", async () => {
     mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce(null);
     mocks.readHostedGroupUsageFundingManagementTargetByLocator.mockResolvedValueOnce({

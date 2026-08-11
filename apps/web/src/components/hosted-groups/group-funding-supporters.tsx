@@ -28,14 +28,12 @@ export function GroupFundingSupporters({
       <ul className="mt-3 divide-y divide-border">
         {supporters.monthlySponsor ? (
           <SupporterRow
-            id={supporters.monthlySponsor.id}
             kind="Monthly sponsor"
             name={supporters.monthlySponsor.name}
           />
         ) : null}
         {supporters.oneTimeContributions.map((contribution) => (
           <SupporterRow
-            id={contribution.id}
             key={contribution.id}
             kind="One-time contribution"
             name={contribution.name}
@@ -47,16 +45,14 @@ export function GroupFundingSupporters({
 }
 
 function SupporterRow({
-  id,
   kind,
   name,
 }: {
-  id: string;
   kind: string;
   name: string;
 }) {
   return (
-    <li className="py-3 first:pt-0 last:pb-0" key={id}>
+    <li className="py-3 first:pt-0 last:pb-0">
       <p className="break-words text-sm font-medium text-foreground">
         {name}
       </p>

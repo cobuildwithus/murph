@@ -63,6 +63,27 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-11",
+    publishedOn: "2026-08-11",
+    title: "Recognize the people who keep a group going",
+    summary:
+      "Group funding pages can now thank the current monthly sponsor and recent one-time supporters without exposing private payment details.",
+    items: [
+      {
+        id: "group-funding-supporters",
+        kind: "feature",
+        priority: 4,
+        title: "See who helps keep a group going",
+        summary:
+          "After sign-in, a group funding page now recognizes the current monthly sponsor and up to 20 recent one-time supporters by their chosen public name or as Anonymous.",
+        details:
+          "The list shows only the kind of support. Contribution amounts, monthly maximums, payer accounts, payment status, and automatic refills stay private, and signed-out visitors do not see the list.",
+        relevanceTags: ["groups", "funding", "supporters", "privacy"],
+        sourcePullRequests: [1420],
+      },
+    ],
+  },
+  {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:

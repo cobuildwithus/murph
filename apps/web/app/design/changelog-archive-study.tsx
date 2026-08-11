@@ -7,6 +7,7 @@ import {
   ChangelogEditionSection,
   type ResolvedChangelogTryIt,
 } from "../changelog/changelog-edition-section";
+import { GroupFundingSupporters } from "@/src/components/hosted-groups/group-funding-supporters";
 import { PhoneMock } from "../changelog/phone-mock";
 import {
   CalendarMock,
@@ -149,6 +150,7 @@ const DESIGN_VISUALS = {
 } as const;
 
 const LATEST_PRODUCTION_ITEM_IDS = new Set([
+  "group-funding-supporters",
   "appointment-reminders-by-default",
   "blood-pressure-history-completion",
   "web-search-restored",
@@ -183,6 +185,21 @@ const LATEST_PRODUCTION_TRY_IT_BY_ITEM_ID: ReadonlyMap<
 ]);
 
 const LATEST_PRODUCTION_VISUALS = {
+  "group-funding-supporters": (
+    <div className="w-full max-w-[320px] rounded-2xl border border-[#c4a882]/35 bg-[#fdfaf5] px-5 pb-6">
+      <GroupFundingSupporters
+        supporters={{
+          monthlySponsor: {
+            id: "hucp_design_changelog_monthly",
+            name: "The Group Historian",
+          },
+          oneTimeContributions: [
+            { id: "hucp_design_changelog_one_time", name: "Anonymous" },
+          ],
+        }}
+      />
+    </div>
+  ),
   "appointment-reminders-by-default": (
     <CalendarMock
       entries={[

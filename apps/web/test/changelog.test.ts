@@ -23,6 +23,22 @@ describe("changelog registry", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
+  it("recognizes group supporters without publishing payment details", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "group-funding-supporters",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-11",
+      kind: "feature",
+      sourcePullRequests: [1420],
+      summary: expect.stringContaining("chosen public name or as Anonymous"),
+    });
+    expect(item?.details).toContain("monthly maximums");
+    expect(item?.details).toContain("signed-out visitors do not see the list");
+    expect(item?.tryIt).toBeUndefined();
+  });
+
   it("keeps each try-it action bound to exactly one behavior", () => {
     const invalidItems = listPublishedChangelogItems().flatMap((item) => {
       const tryIt = item.tryIt;
@@ -587,13 +603,17 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through August 10 shipment set", () => {
+  it("publishes the complete July 20 through August 11 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 22).map((edition) => ({
+      listChangelogEditions().slice(0, 23).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-08-11",
+        itemIds: ["group-funding-supporters"],
+      },
       {
         id: "2026-08-10",
         itemIds: [
@@ -1094,8 +1114,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-10");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-04");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-11");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-05");
   });
 
   it("resolves only known canonical edition cursors", () => {

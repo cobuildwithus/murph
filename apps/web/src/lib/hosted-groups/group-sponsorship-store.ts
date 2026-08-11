@@ -663,6 +663,9 @@ async function readHostedGroupFundingPublicAliases(input: {
         purchaseId: { in: purchaseIds },
       },
     });
+    if (moments.length === 0) {
+      return new Map();
+    }
     const decryptedAliases = await openHostedUserSecureBoxStrings({
       entries: moments.map((moment) => ({
         aad: sponsorshipAad(moment.purchaseId, "public_alias_encrypted"),

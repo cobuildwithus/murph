@@ -60,6 +60,12 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
+      "Recognize the people who keep a group going",
+    );
+    expect(markup).toContain(
+      "See who helps keep a group going",
+    );
+    expect(markup).toContain(
       "Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
     );
     expect(markup).toContain("Blood-pressure history waits for the whole sync");
@@ -82,7 +88,7 @@ describe("ChangelogPage", () => {
     );
     expect(markup).toContain("More ways to connect, prepare, and finish");
     expect(markup).toContain("Ask about images and video on X");
-    expect(markup).toContain("More control over data, models, and connections");
+    expect(markup).not.toContain("More control over data, models, and connections");
     expect(markup).not.toContain(
       "Connected apps recover with a clearer next step",
     );
@@ -111,7 +117,7 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-08-03"');
+    expect(markup).toContain('href="/changelog?edition=2026-08-04"');
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-10#personal-patterns"',
     );
@@ -130,7 +136,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-05#official-local-alert-health-context"',
     );
-    expect(markup).toContain(
+    expect(markup).not.toContain(
       'href="/changelog?edition=2026-08-04#custom-inference-endpoint"',
     );
     expect(markup).not.toContain(
@@ -148,10 +154,6 @@ describe("ChangelogPage", () => {
 
     expect(markup).not.toContain("Open model settings");
     expect(markup).toContain("Ask about today&#x27;s conditions");
-    expect(markup).toContain("Open privacy settings");
-    expect(markup).toContain('href="/settings/data-privacy"');
-    expect(markup).toContain("Ask for today&#x27;s nutrition card");
-    expect(markup).toContain("Manage connections");
     expect(markup).not.toContain("Open Environment");
     expect(markup).not.toContain('href="/environment"');
     expect(markup).toContain("Explore referrals");
@@ -180,12 +182,6 @@ describe("ChangelogPage", () => {
           message: {
             body: "I feel more tired than usual and planned an outdoor workout today. Check whether an official local alert should change my plan.",
             subject: "Try it: Murph can account for official local alerts",
-          },
-        },
-        {
-          message: {
-            body: "Show me today's nutrition card.",
-            subject: "Try it: Ask for today's nutrition card",
           },
         },
       ]),
@@ -253,14 +249,11 @@ describe("ChangelogPage", () => {
 
     expect(markup).toContain('data-design-study="changelog-archive"');
     expect(markup).toContain('data-design-state="latest-production-edition"');
-    expect(markup).toContain("Managed OpenAI web search works again");
-    expect(markup).toContain("Blood-pressure history waits for the whole sync");
-    expect(markup).not.toContain("Ask Murph to search");
+    expect(markup).toContain("See who helps keep a group going");
+    expect(markup).toContain("The Group Historian");
+    expect(markup).toContain("Monthly sponsor");
     expect(markup).toContain("A week that closes its own loops");
     expect(markup).toContain("Follow-ups arrive where the work started");
-    expect(markup).toContain("Confirmed appointments come with a reminder");
-    expect(markup).toContain("Tell Murph about an appointment");
-    expect(markup).toContain("Confirmed appointment");
     expect(markup).toContain("Recovery explains what to do next");
     expect(markup).toContain("Contact details stay tied to the right line");
     expect(markup).toContain("Corrections stay attached to the conversation");
@@ -273,7 +266,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Compact response");
     expect(markup).toContain("70 mg/dL");
     expect(markup).toContain('href="#design-follow-up"');
-    expect(markup).toContain('href="#appointment-reminders-by-default"');
+    expect(markup).toContain('href="#group-funding-supporters"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");
   });
