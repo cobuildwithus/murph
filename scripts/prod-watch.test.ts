@@ -57,6 +57,7 @@ import {
   buildImmutableRemediationPushArgs,
   buildRemediationChildEnv,
   buildRemediationReviewRequest,
+  collectVercelRowsForEvidence,
   fetchVercelJson,
   fetchVercelRequestSample,
   fetchVercelRows,
@@ -212,11 +213,25 @@ describe("production-watch snapshot contract", () => {
       { start: new Date("2026-08-09T20:05:00.000Z"), end: new Date("2026-08-09T20:10:00.000Z") },
       { start: new Date("2026-08-09T20:10:00.000Z"), end },
     ]);
+    expect(splitVercelWindow(start, new Date(start.getTime() + 5 * 60_000 + 5_000))).toEqual([
+      { start, end: new Date(start.getTime() + 4 * 60_000 + 50_000) },
+      {
+        start: new Date(start.getTime() + 4 * 60_000 + 50_000),
+        end: new Date(start.getTime() + 5 * 60_000 + 5_000),
+      },
+    ]);
+    expect(() => splitVercelWindow(start, new Date(start.getTime() + 14_999)))
+      .toThrow("vercel_window_below_minimum");
     expect(() => splitVercelWindow(end, start)).toThrow("vercel_window_invalid");
     expect(bisectVercelWindow(start, new Date("2026-08-09T20:05:00.000Z"))).toEqual([
       { start, end: new Date("2026-08-09T20:02:30.000Z") },
       { start: new Date("2026-08-09T20:02:30.000Z"), end: new Date("2026-08-09T20:05:00.000Z") },
     ]);
+    expect(bisectVercelWindow(start, new Date("2026-08-09T20:00:30.000Z"))).toEqual([
+      { start, end: new Date("2026-08-09T20:00:15.000Z") },
+      { start: new Date("2026-08-09T20:00:15.000Z"), end: new Date("2026-08-09T20:00:30.000Z") },
+    ]);
+    expect(bisectVercelWindow(start, new Date("2026-08-09T20:00:29.999Z"))).toBeUndefined();
     expect(bisectVercelWindow(start, new Date("2026-08-09T20:00:15.000Z"))).toBeUndefined();
     expect(nextVercelSampleDuration(10_000)).toBe(5_000);
     expect(nextVercelSampleDuration(101)).toBe(100);
@@ -342,6 +357,73 @@ describe("production-watch snapshot contract", () => {
       )).rejects.toMatchObject({ code: "EOVERFLOW_SAMPLE" });
     });
     expect(observedSampleDurations).toEqual([10_000, 5_000, 2_500, 1_250, 625, 312, 156, 100]);
+  });
+
+  it("never bisects a production-shaped Vercel detail window below the 15-second floor", async () => {
+    const observedDurations: number[] = [];
+    await withMockedFetch(async (input) => {
+      const url = new URL(String(input));
+      const start = Number(url.searchParams.get("startDate"));
+      const end = Number(url.searchParams.get("endDate"));
+      observedDurations.push(end - start);
+      return vercelRowsResponse(2_001, false);
+    }, async () => {
+      const start = new Date("2026-08-10T20:00:00.000Z");
+      await expect(fetchVercelRowsByChunks(testVercelAccess(), {
+        start,
+        end: new Date(start.getTime() + 5 * 60_000),
+      })).rejects.toMatchObject({ code: "EOVERFLOW_PARTITION_ROWS" });
+    });
+    expect(observedDurations).toEqual([300_000, 150_000, 75_000, 37_500, 18_750]);
+    expect(Math.min(...observedDurations)).toBeGreaterThanOrEqual(15_000);
+  });
+
+  it("aborts and settles every sibling Vercel branch before returning a failure", async () => {
+    let fetchCalls = 0;
+    let activeRequests = 0;
+    let abortedRequests = 0;
+    await withMockedFetch(async (_input, init) => {
+      fetchCalls += 1;
+      if (fetchCalls === 1) {
+        return vercelRowsResponse(2_001, false);
+      }
+      activeRequests += 1;
+      return await new Promise<Response>((resolve, reject) => {
+        let settled = false;
+        const finish = (callback: () => void) => {
+          if (settled) return;
+          settled = true;
+          activeRequests -= 1;
+          callback();
+        };
+        const timeout = setTimeout(() => {
+          finish(() => resolve(vercelRowsResponse(0, false)));
+        }, 1_000);
+        const onAbort = () => {
+          clearTimeout(timeout);
+          abortedRequests += 1;
+          finish(() => reject(Object.assign(new Error("mock_request_aborted"), { name: "AbortError" })));
+        };
+        if (init?.signal?.aborted) {
+          onAbort();
+        } else {
+          init?.signal?.addEventListener("abort", onAbort, { once: true });
+        }
+      });
+    }, async () => {
+      const previousStart = new Date("2026-08-10T20:00:00.000Z");
+      await expect(collectVercelRowsForEvidence(testVercelAccess(), {
+        previousStart,
+        currentStart: new Date(previousStart.getTime() + 10_000),
+        end: new Date(previousStart.getTime() + 15_000),
+      })).rejects.toMatchObject({ code: "EOVERFLOW_PARTITION_ROWS" });
+      expect(fetchCalls).toBe(7);
+      expect(activeRequests).toBe(0);
+      expect(abortedRequests).toBe(6);
+      const callsAtReturn = fetchCalls;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(fetchCalls).toBe(callsAtReturn);
+    });
   });
 
   it("keeps a healthy fixture bounded, aggregate-only, and quiet", () => {

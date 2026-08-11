@@ -348,7 +348,7 @@ async function runScheduledCommand(argv: string[]): Promise<void> {
   const hardExitTimer = setTimeout(() => process.exit(124), parsed.runTimeoutMs + 5_000);
   abortTimer.unref();
   hardExitTimer.unref();
-  installSignalAbort(abortController);
+  const removeSignalAbort = installSignalAbort(abortController);
 
   try {
     const overlap = await readOverlapEvent();
@@ -388,6 +388,8 @@ async function runScheduledCommand(argv: string[]): Promise<void> {
       })}\n`);
     }
   } finally {
+    abortController.abort(new Error("run_scope_closed"));
+    removeSignalAbort();
     clearTimeout(abortTimer);
     clearTimeout(hardExitTimer);
     await runClaim.release?.();
@@ -2485,22 +2487,7 @@ export async function collectVercelEvidence(input: {
   signal?: AbortSignal;
 }): Promise<AdapterEvidence> {
   const access = await createVercelApiAccess(input.signal);
-  const detailQueries = [
-    { statusCode: "5xx" },
-    { level: "error,fatal" },
-    { level: "warning" },
-    { statusCode: "504" },
-    { search: "timeout" },
-  ];
-  const [detailPages, previousSample, currentSample] = await Promise.all([
-    Promise.all(detailQueries.map(async (query) => await fetchVercelRowsByChunks(access, {
-      start: input.previousStart,
-      end: input.end,
-      ...query,
-    }, input.signal))),
-    fetchVercelRequestSample(access, input.currentStart, input.signal),
-    fetchVercelRequestSample(access, input.end, input.signal),
-  ]);
+  const { detailPages, previousSample, currentSample } = await collectVercelRowsForEvidence(access, input);
   const records = deduplicateVercelRows(detailPages.flat());
   const currentSummary = summarizeVercelWindow(records, input.currentStart, input.end);
   const previousSummary = summarizeVercelWindow(records, input.previousStart, input.currentStart);
@@ -2550,6 +2537,102 @@ export async function collectVercelEvidence(input: {
     latency: [],
     fingerprints,
   });
+}
+
+export async function collectVercelRowsForEvidence(
+  access: VercelApiAccess,
+  input: {
+    previousStart: Date;
+    currentStart: Date;
+    end: Date;
+    signal?: AbortSignal;
+  },
+): Promise<{
+  detailPages: Array<Array<Record<string, unknown>>>;
+  previousSample: { rows: Array<Record<string, unknown>>; durationMs: number };
+  currentSample: { rows: Array<Record<string, unknown>>; durationMs: number };
+}> {
+  const branchController = new AbortController();
+  const forwardAbort = () => branchController.abort(input.signal?.reason);
+  if (input.signal?.aborted) {
+    forwardAbort();
+  } else {
+    input.signal?.addEventListener("abort", forwardAbort, { once: true });
+  }
+  if (branchController.signal.aborted) {
+    input.signal?.removeEventListener("abort", forwardAbort);
+    throw branchController.signal.reason
+      ?? Object.assign(new Error("vercel_collection_aborted"), { code: "ABORT_ERR" });
+  }
+
+  const detailQueries = [
+    { statusCode: "5xx" },
+    { level: "error,fatal" },
+    { level: "warning" },
+    { statusCode: "504" },
+    { search: "timeout" },
+  ];
+  let primaryFailure: unknown;
+  let hasPrimaryFailure = false;
+  const abortSiblingsOnFailure = async <T>(operation: () => Promise<T>): Promise<T> => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!hasPrimaryFailure) {
+        primaryFailure = error;
+        hasPrimaryFailure = true;
+        branchController.abort(error);
+      }
+      throw error;
+    }
+  };
+
+  try {
+    const detailPromises = detailQueries.map((query) => abortSiblingsOnFailure(
+      async () => await fetchVercelRowsByChunks(access, {
+        start: input.previousStart,
+        end: input.end,
+        ...query,
+      }, branchController.signal),
+    ));
+    const previousSamplePromise = abortSiblingsOnFailure(
+      async () => await fetchVercelRequestSample(access, input.currentStart, branchController.signal),
+    );
+    const currentSamplePromise = abortSiblingsOnFailure(
+      async () => await fetchVercelRequestSample(access, input.end, branchController.signal),
+    );
+    const [detailResults, sampleResults] = await Promise.all([
+      Promise.allSettled(detailPromises),
+      Promise.allSettled([previousSamplePromise, currentSamplePromise] as const),
+    ]);
+    if (hasPrimaryFailure) {
+      throw primaryFailure;
+    }
+    if (branchController.signal.aborted) {
+      throw branchController.signal.reason
+        ?? Object.assign(new Error("vercel_collection_aborted"), { code: "ABORT_ERR" });
+    }
+    const detailPages = detailResults.map((result) => {
+      if (result.status !== "fulfilled") {
+        throw result.reason;
+      }
+      return result.value;
+    });
+    const [previousResult, currentResult] = sampleResults;
+    if (previousResult.status !== "fulfilled") {
+      throw previousResult.reason;
+    }
+    if (currentResult.status !== "fulfilled") {
+      throw currentResult.reason;
+    }
+    return {
+      detailPages,
+      previousSample: previousResult.value,
+      currentSample: currentResult.value,
+    };
+  } finally {
+    input.signal?.removeEventListener("abort", forwardAbort);
+  }
 }
 
 export async function collectStripeEvidence(input: {
@@ -2884,12 +2967,22 @@ export function splitVercelWindow(start: Date, end: Date): Array<{ start: Date; 
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end) {
     throw new Error("vercel_window_invalid");
   }
+  if (end.getTime() - start.getTime() < VERCEL_MIN_DETAIL_CHUNK_MS) {
+    throw new Error("vercel_window_below_minimum");
+  }
   const windows: Array<{ start: Date; end: Date }> = [];
-  for (let cursor = start.getTime(); cursor < end.getTime(); cursor += VERCEL_DETAIL_CHUNK_MS) {
+  for (let cursor = start.getTime(); cursor < end.getTime();) {
+    const remainingMs = end.getTime() - cursor;
+    let durationMs = Math.min(VERCEL_DETAIL_CHUNK_MS, remainingMs);
+    const tailMs = remainingMs - durationMs;
+    if (tailMs > 0 && tailMs < VERCEL_MIN_DETAIL_CHUNK_MS) {
+      durationMs = remainingMs - VERCEL_MIN_DETAIL_CHUNK_MS;
+    }
     windows.push({
       start: new Date(cursor),
-      end: new Date(Math.min(cursor + VERCEL_DETAIL_CHUNK_MS, end.getTime())),
+      end: new Date(cursor + durationMs),
     });
+    cursor += durationMs;
   }
   return windows;
 }
@@ -2899,7 +2992,7 @@ export function bisectVercelWindow(
   end: Date,
 ): [{ start: Date; end: Date }, { start: Date; end: Date }] | undefined {
   const durationMs = end.getTime() - start.getTime();
-  if (durationMs <= VERCEL_MIN_DETAIL_CHUNK_MS) {
+  if (durationMs < 2 * VERCEL_MIN_DETAIL_CHUNK_MS) {
     return undefined;
   }
   const midpoint = new Date(start.getTime() + Math.floor(durationMs / 2));
@@ -2973,7 +3066,11 @@ async function readResponseTextWithinLimit(
 export async function fetchVercelJson(url: string, token: string, signal?: AbortSignal): Promise<unknown> {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
-  signal?.addEventListener("abort", onAbort, { once: true });
+  if (signal?.aborted) {
+    controller.abort(signal.reason);
+  } else {
+    signal?.addEventListener("abort", onAbort, { once: true });
+  }
   const timeout = setTimeout(() => controller.abort(), DEFAULT_ADAPTER_TIMEOUT_MS);
   timeout.unref();
   try {
@@ -4489,9 +4586,14 @@ function resolveRuntimeRoot(overrides: ProdWatchTestOverrides | undefined): stri
   return resolved;
 }
 
-function installSignalAbort(controller: AbortController): void {
+function installSignalAbort(controller: AbortController): () => void {
   const abort = () => controller.abort(new Error("termination_signal"));
   process.once("SIGINT", abort);
   process.once("SIGTERM", abort);
   process.once("SIGHUP", abort);
+  return () => {
+    process.off("SIGINT", abort);
+    process.off("SIGTERM", abort);
+    process.off("SIGHUP", abort);
+  };
 }
