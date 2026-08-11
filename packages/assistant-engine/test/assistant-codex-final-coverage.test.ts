@@ -1255,6 +1255,10 @@ describe('Codex model catalog', () => {
 
     expect(outcome.kind).toBe('succeeded')
     expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).toEqual(EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG)
+    expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
       dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
@@ -1366,6 +1370,10 @@ describe('Codex model catalog', () => {
     })
 
     expect(outcome.kind).toBe('succeeded')
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).toEqual(EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG)
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
@@ -1502,6 +1510,9 @@ describe('Codex model catalog', () => {
     )
     expect(providerInput?.codexConfigOverrides).not.toContain(
       'features.shell_tool=false',
+    )
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
     )
     expect(providerInput).toMatchObject({
       dynamicTools: [],

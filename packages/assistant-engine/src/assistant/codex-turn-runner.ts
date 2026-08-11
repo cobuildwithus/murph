@@ -591,7 +591,8 @@ async function executeAssistantCodexAttempt(input: {
           readOnlyAutomationTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
-        codexThreadConfig: nativeCapabilitiesRestrictedTurn
+        codexThreadConfig:
+          nativeCapabilitiesRestrictedTurn || restrictedOneShotTurn
           ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
           : null,
         conversationHistoryMessages:
