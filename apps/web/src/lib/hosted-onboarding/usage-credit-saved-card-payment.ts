@@ -11,7 +11,7 @@ import {
   hasHostedAccountGroupAccess,
   readHostedAccountGroupStripeBillingRef,
 } from "./family-plan";
-import { hasHostedMemberOwnActiveBilling } from "./entitlement";
+import { hasHostedMemberOwnPaidBilling } from "./entitlement";
 import { readHostedMemberBillingSnapshot } from "./hosted-member-store";
 import {
   createHostedStripeBillingEventLookupKey,
@@ -1169,7 +1169,10 @@ async function bindHostedUsageCreditDirectPaymentIntent(input: {
           });
           authorityStillCurrent = Boolean(
             member?.billingRef &&
-            hasHostedMemberOwnActiveBilling(member.core) &&
+            hasHostedMemberOwnPaidBilling({
+              ...member.core,
+              billingRef: member.billingRef,
+            }) &&
             member.core.billingStatus === subscription.billingStatus &&
             hostedUsageCreditBillingDateMatches(
               member.core.suspendedAt,

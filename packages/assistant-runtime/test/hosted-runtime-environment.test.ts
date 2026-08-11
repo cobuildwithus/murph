@@ -559,6 +559,47 @@ test("hosted runtime launch spec derives platform env from forwarded env only wh
   });
 });
 
+test("hosted runtime launch spec keeps the Android rollout gate platform-owned and exact", () => {
+  const platform = createHostedRuntimePlatformStub();
+  const enabled = normalizeHostedAssistantRuntimeConfig(
+    buildHostedRuntimeLaunchSpec({
+      forwardedEnv: {
+        MURPH_ANDROID_APP_ENABLED: "1",
+      },
+      platformEnv: {
+        MURPH_ANDROID_APP_ENABLED: "1",
+      },
+      userEnv: {
+        MURPH_ANDROID_APP_ENABLED: "0",
+      },
+    }).runtime,
+    platform,
+  );
+  const disabled = normalizeHostedAssistantRuntimeConfig(
+    buildHostedRuntimeLaunchSpec({
+      forwardedEnv: {
+        MURPH_ANDROID_APP_ENABLED: "1",
+      },
+      platformEnv: {
+        MURPH_ANDROID_APP_ENABLED: " 1 ",
+      },
+      userEnv: {
+        MURPH_ANDROID_APP_ENABLED: "1",
+      },
+    }).runtime,
+    platform,
+  );
+
+  assert.deepEqual(enabled.platformEnv, {
+    MURPH_ANDROID_APP_ENABLED: "1",
+  });
+  assert.equal(enabled.forwardedEnv.MURPH_ANDROID_APP_ENABLED, undefined);
+  assert.equal(enabled.userEnv.MURPH_ANDROID_APP_ENABLED, undefined);
+  assert.equal(disabled.platformEnv.MURPH_ANDROID_APP_ENABLED, undefined);
+  assert.equal(disabled.forwardedEnv.MURPH_ANDROID_APP_ENABLED, undefined);
+  assert.equal(disabled.userEnv.MURPH_ANDROID_APP_ENABLED, undefined);
+});
+
 test("hosted runtime launch spec rejects parserToolchain:null", () => {
   assert.throws(
     () =>

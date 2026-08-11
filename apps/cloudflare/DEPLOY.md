@@ -568,6 +568,30 @@ Set these in the selected GitHub environment as vars:
 - `HOSTED_R2_PRESIGN_ACCOUNT_ID`
 - `HOSTED_R2_PRESIGN_BUCKET_NAME`
 
+`MURPH_ANDROID_APP_ENABLED` is an optional, fail-closed rollout variable. Leave
+it unset until the public Android app and the compatible Web, Worker, and runner
+code are deployed. Private `cobuildwithus/murph-cloud` must map the raw value in
+`.github/workflows/deploy-cloudflare-hosted.yml`, on the existing
+`Prepare deploy artifacts` step's `env`, from
+`${{ vars.MURPH_ANDROID_APP_ENABLED }}` after the `deploy` job selects the
+`preview` or `production` GitHub Environment name from its workflow input. A
+job-level `env` mapping is invalid because selected Environment variables are
+available only after the job starts.
+`production` is the current protected environment, while the absent preview
+value stays fail-closed. Adding either Environment value is inert until this
+private mapping has landed.
+
+To activate, set the exact value `1` in both the matching Vercel Web environment
+and the selected Cloudflare `preview` or `production` GitHub Environment. Deploy
+Web, then deploy Cloudflare with `container_rollout=immediate`. Confirm that the
+generated Wrangler config and deployed Worker binding contain canonical `1`,
+the new runner fingerprint is active, and a direct-assistant turn includes the
+Android Play guidance before checking the Connect Devices card. Disable by
+clearing both values and redeploying both sides; confirm that the generated
+Wrangler config, deployed binding, assistant guidance, and card no longer expose
+the Android journey. A missing value—or any value other than exact `1`—keeps it
+hidden.
+
 `CF_PUBLIC_BASE_URL` is a required non-secret Worker variable as well as the standard deploy-and-smoke target. Private-media capability creation uses that exact deployment origin, and hosted Web validates capabilities against its matching `HOSTED_EXECUTION_CONTROL_URL` origin. Production preflight pins both sides to `https://murph-hosted.cobuildwithus.workers.dev`; preview uses its isolated staging Worker origin and must reject production-origin capabilities. Change the production pin and deploy invariant together before moving the production origin. Runner internal-host requests use Cloudflare Container outbound interception instead of a public Worker callback route.
 `HOSTED_R2_PRESIGN_ACCOUNT_ID` must match `CLOUDFLARE_ACCOUNT_ID`, and `HOSTED_R2_PRESIGN_BUCKET_NAME` must match `CF_BUNDLES_BUCKET`; direct-R2 workspace snapshots upload and restore through presigned URLs and are verified through the canonical Worker R2 binding. Deploy preflight requires the canonical runtime and preview buckets to be ENAM Standard. Local S3-compatible endpoint flags are hosted-local only and must not be set for deploys.
 
@@ -948,6 +972,7 @@ Opt-in runtime integrations:
 - `HOSTED_EMAIL_FROM_ADDRESS`
 - `HOSTED_EMAIL_LOCAL_PART`
 - `HOSTED_PHYSICAL_NOTES_ENABLED`
+- `MURPH_ANDROID_APP_ENABLED`
 - `LINQ_API_BASE_URL`
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
@@ -1313,6 +1338,37 @@ That command:
 The gradual container rollout keeps the production `RunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
+
+The non-expiring Starter plan-usage schema is a bidirectional hard cut between
+Web and the runner bundle. Suspend the production Render
+`murph-temporal-worker` background-worker service and confirm both declared
+instances have stopped. That does not block Web's direct latency path. Also
+remove `HOSTED_EXECUTION_CONTROL_URL` from Vercel Production and redeploy the
+exact commit behind the current production alias. Prove the alias SHA and that
+the deployment omits the variable; mailbox acceptance and Temporal signaling
+remain durable, while the existing optional control client starts no direct
+`ensure-processing` request. Wait the full ten-minute runtime request lifetime
+plus deployment drain margin, and require zero new Cloudflare
+`runtime-ensure-processing` accepts plus zero runtime-log rows with a non-null
+attempt id after the boundary.
+
+Only after that two-plane drain may the Starter migrations commit. Deploy Web
+plus Cloudflare from the same commit while the control URL remains absent and
+the Render worker stays suspended. Dispatch the protected production workflow
+with `container_rollout=immediate`; do not reopen after only one plane succeeds.
+Managed-container smoke must report the exact new runner-bundle fingerprint,
+and signed active and exhausted Starter plan-usage reads plus an eligible
+subscription quote must succeed. Restore the canonical production control URL,
+redeploy that exact Web commit, prove the production alias SHA, and only then
+resume the Render worker. Verify one already-accepted canary mailbox item
+processes exactly once.
+
+Before the Starter migration commits, the complete prior Web/runner pair
+remains a rollback target after the canonical control URL is restored. After it
+commits, the migrated ledger establishes a forward-only floor: leave the Web
+control URL absent, keep the Render worker suspended, and forward-fix or
+redeploy the exact current Web/runner pair. Neither prior plane is a resumable
+target against the migrated database.
 
 The accepted group-message participant rollout is Web-first. Deploy the Web
 release that accepts both new exact `groupRequester` / `participant` evidence

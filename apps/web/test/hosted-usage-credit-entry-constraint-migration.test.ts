@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+const starterConstraintMigrationId =
+  "20260807204000_non_expiring_starter_usage";
 const referralConstraintMigrationId =
   "20260728030000_hosted_usage_referral_credit_entry_constraints";
 const referralProjectionContractMigrationId =
@@ -49,14 +51,15 @@ describe("hosted usage-credit entry constraint migrations", () => {
     );
 
     expect(entryKinds).toEqual([
+      "starter_grant",
       "purchase_grant",
       "referral_grant",
       "usage_debit",
       "refund_adjustment",
       "dispute_adjustment",
     ]);
-    expect(amountConstraint.migrationId).toBe(referralConstraintMigrationId);
-    expect(sourceConstraint.migrationId).toBe(referralConstraintMigrationId);
+    expect(amountConstraint.migrationId).toBe(starterConstraintMigrationId);
+    expect(sourceConstraint.migrationId).toBe(starterConstraintMigrationId);
 
     for (const entryKind of entryKinds) {
       expect(amountConstraint.sql).toContain(`'${entryKind}'`);
@@ -80,7 +83,7 @@ describe("hosted usage-credit entry constraint migrations", () => {
       normalizeSql(`
         ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"
           CHECK (
-            ("kind" IN ('purchase_grant', 'referral_grant') AND "amount_usd_micros" > 0)
+            ("kind" IN ('starter_grant', 'purchase_grant', 'referral_grant') AND "amount_usd_micros" > 0)
             OR ("kind" = 'usage_debit' AND "amount_usd_micros" < 0)
             OR ("kind" IN ('refund_adjustment', 'dispute_adjustment') AND "amount_usd_micros" <> 0)
           ) NOT VALID,
@@ -90,6 +93,15 @@ describe("hosted usage-credit entry constraint migrations", () => {
       normalizeSql(`
         ADD CONSTRAINT "hosted_usage_credit_entry_source_shape_valid"
           CHECK (
+            (
+              "kind" = 'starter_grant'
+              AND "purchase_id" IS NULL
+              AND "referral_id" IS NULL
+              AND "parent_grant_entry_id" IS NULL
+              AND "source_usage_id" IS NULL
+              AND "source_reference_lookup_key" IS NOT NULL
+            )
+            OR
             (
               "kind" = 'purchase_grant'
               AND "purchase_id" IS NOT NULL
@@ -108,7 +120,10 @@ describe("hosted usage-credit entry constraint migrations", () => {
             OR
             (
               "kind" = 'usage_debit'
-              AND (("purchase_id" IS NOT NULL) <> ("referral_id" IS NOT NULL))
+              AND NOT (
+                "purchase_id" IS NOT NULL
+                AND "referral_id" IS NOT NULL
+              )
               AND "parent_grant_entry_id" IS NOT NULL
               AND "source_usage_id" IS NOT NULL
             )
@@ -222,5 +237,9 @@ function readPrismaEnumValues(source: string, enumName: string): string[] {
 }
 
 function normalizeSql(value: string): string {
-  return value.replace(/\s+/gu, " ").trim();
+  return value
+    .replace(/\s+/gu, " ")
+    .replace(/\(\s+/gu, "(")
+    .replace(/\s+\)/gu, ")")
+    .trim();
 }

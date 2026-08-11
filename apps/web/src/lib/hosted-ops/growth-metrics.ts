@@ -21,7 +21,6 @@ import { runWithHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/doma
 import { decodeHostedMailboxStoredPayload } from "@/src/lib/hosted-mailbox/store";
 import {
   HOSTED_FAMILY_PLAN_CODES,
-  HOSTED_PULSE_TRIAL_DAYS,
   getHostedBillingPlanDefinition,
   getHostedFamilyBillingOfferDefinition,
   isHostedPulseTrialBillingState,
@@ -40,9 +39,9 @@ import {
   type HostedLinqParticipantContactKind,
 } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
-  parseHostedPulseTrialStartSource,
-  type HostedPulseTrialStartSource,
-} from "@/src/lib/hosted-onboarding/pulse-trial-start-source";
+  parseHostedStarterUsageSourceReferenceLookupKey,
+  type HostedStarterUsageSource,
+} from "@/src/lib/hosted-onboarding/starter-usage";
 import {
   buildHostedGrowthMessageSeries,
   type HostedGrowthMessagePoint,
@@ -76,6 +75,7 @@ const WEEKLY_ROWS = 8;
 const SNAPSHOT_COMPARE_TARGET_DAYS = 7;
 const SNAPSHOT_COMPARE_MIN_DAYS = 6;
 const SNAPSHOT_COMPARE_MAX_DAYS = 8;
+export const HOSTED_GROWTH_CONVERSION_MATURITY_DAYS = 14;
 const TRIAL_ENDING_SOON_DAYS = 3;
 
 const CHURN_STATUS_KEYS = [
@@ -169,11 +169,12 @@ export interface HostedGrowthTrialStartRow {
 }
 
 export type HostedGrowthTrialStartSource =
-  | HostedPulseTrialStartSource
+  | HostedStarterUsageSource
   | "unknown";
 
 export interface HostedGrowthTrialStartSourceCounts {
   companion_onboarding: number;
+  legacy_trial_migration: number;
   linq_instant_start: number;
   unknown: number;
   web_onboarding: number;
@@ -190,7 +191,7 @@ interface HostedGrowthTrialStartAttributionRow {
   memberCreatedAt: Date;
   phoneHint: string | null;
   pulseTrialRedeemedAt: Date;
-  pulseTrialStartSource: HostedPulseTrialStartSource | null;
+  pulseTrialStartSource: HostedStarterUsageSource | null;
 }
 
 export interface HostedGrowthSnapshotRow {
@@ -555,6 +556,7 @@ export function buildHostedGrowthTrialStartAttribution(input: {
 }): HostedGrowthDashboard["trialStartAttribution"] {
   const counts: HostedGrowthTrialStartSourceCounts = {
     companion_onboarding: 0,
+    legacy_trial_migration: 0,
     linq_instant_start: 0,
     unknown: 0,
     web_onboarding: 0,
@@ -718,7 +720,7 @@ export function findComparableSnapshot(
 }
 
 export function getTrialMaturityCutoff(now: Date): Date {
-  return addUtcDays(now, -HOSTED_PULSE_TRIAL_DAYS);
+  return addUtcDays(now, -HOSTED_GROWTH_CONVERSION_MATURITY_DAYS);
 }
 
 interface HostedGrowthGroupMailboxRow {
@@ -1243,10 +1245,9 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
-    prisma.hostedMemberBillingRef.findMany({
+    prisma.hostedUsageCreditEntry.findMany({
       select: {
-        currentBillingPhase: true,
-        member: {
+        beneficiary: {
           select: {
             accountGroupMemberships: {
               select: {
@@ -1254,6 +1255,11 @@ export async function readHostedGrowthDashboard(
               },
               take: 1,
               where: activePaidFamilyMembershipWhere(),
+            },
+            billingRef: {
+              select: {
+                currentBillingPhase: true,
+              },
             },
             createdAt: true,
             identity: {
@@ -1264,14 +1270,15 @@ export async function readHostedGrowthDashboard(
             suspendedAt: true,
           },
         },
-        pulseTrialRedeemedAt: true,
-        pulseTrialStartSource: true,
+        effectiveAt: true,
+        sourceReferenceLookupKey: true,
       },
       where: {
-        pulseTrialRedeemedAt: {
+        effectiveAt: {
           gte: recentStart,
           lte: now,
         },
+        kind: "starter_grant",
       },
     }),
     // One snapshot read serves both the 30-day chart series and the
@@ -1305,35 +1312,39 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
-    prisma.hostedMemberBillingRef.count({
+    prisma.hostedUsageCreditEntry.count({
       where: {
-        pulseTrialRedeemedAt: {
+        effectiveAt: {
           lt: getTrialMaturityCutoff(now),
         },
+        kind: "starter_grant",
       },
     }),
-    prisma.hostedMemberBillingRef.count({
+    prisma.hostedUsageCreditEntry.count({
       where: {
-        member: {
-          OR: [
-            {
-              billingRef: {
-                is: {
-                  currentBillingPhase: "paid",
+        beneficiary: {
+          is: {
+            OR: [
+              {
+                billingRef: {
+                  is: {
+                    currentBillingPhase: "paid",
+                  },
                 },
               },
-            },
-            {
-              accountGroupMemberships: {
-                some: activePaidFamilyMembershipWhere(),
+              {
+                accountGroupMemberships: {
+                  some: activePaidFamilyMembershipWhere(),
+                },
               },
-            },
-          ],
-          suspendedAt: null,
+            ],
+            suspendedAt: null,
+          },
         },
-        pulseTrialRedeemedAt: {
+        effectiveAt: {
           lt: getTrialMaturityCutoff(now),
         },
+        kind: "starter_grant",
       },
     }),
     prisma.hostedGrowthAggregate.findUniqueOrThrow({
@@ -1480,28 +1491,24 @@ export async function readHostedGrowthDashboard(
     trailing7DayStart: activeUsersCurrentStart,
   });
   const trialStartRows = rawTrialStartRows.map((row): HostedGrowthTrialStartRow => ({
-    currentBillingPhase: row.currentBillingPhase,
+    currentBillingPhase: row.beneficiary.billingRef?.currentBillingPhase ?? null,
     member: {
-      suspendedAt: row.member.suspendedAt,
+      suspendedAt: row.beneficiary.suspendedAt,
     },
-    paidViaFamily: row.member.accountGroupMemberships.length > 0,
-    pulseTrialRedeemedAt: row.pulseTrialRedeemedAt,
+    paidViaFamily: row.beneficiary.accountGroupMemberships.length > 0,
+    pulseTrialRedeemedAt: row.effectiveAt,
   }));
   const trialStartAttribution = buildHostedGrowthTrialStartAttribution({
     endExclusive: addUtcDays(todayStart, 1),
-    rows: rawTrialStartRows.flatMap((row) => {
-      if (row.pulseTrialRedeemedAt === null) {
-        return [];
-      }
-      return [{
-        memberCreatedAt: row.member.createdAt,
-        phoneHint: row.member.identity?.maskedPhoneNumberHint ?? null,
-        pulseTrialRedeemedAt: row.pulseTrialRedeemedAt,
-        pulseTrialStartSource: parseHostedPulseTrialStartSource(
-          row.pulseTrialStartSource,
+    rows: rawTrialStartRows.map((row) => ({
+      memberCreatedAt: row.beneficiary.createdAt,
+      phoneHint: row.beneficiary.identity?.maskedPhoneNumberHint ?? null,
+      pulseTrialRedeemedAt: row.effectiveAt,
+      pulseTrialStartSource:
+        parseHostedStarterUsageSourceReferenceLookupKey(
+          row.sourceReferenceLookupKey,
         ),
-      }];
-    }),
+    })),
     startInclusive: dailyStart,
   });
 

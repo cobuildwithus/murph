@@ -313,6 +313,12 @@ describe("changelog registry", () => {
         "latest manual correction for a sleep date wins",
       ),
     });
+    expect(items.get("workout-card-status-rendering")).toMatchObject({
+      sourcePullRequests: [1599],
+      summary: expect.stringContaining("including their static previews"),
+      details: expect.stringContaining("part of the card image itself"),
+    });
+    expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -514,9 +520,12 @@ describe("changelog registry", () => {
       {
         id: "2026-08-10",
         itemIds: [
+          "non-expiring-starter-access",
           "personal-patterns",
           "reminders-keep-requested-timezone",
           "web-search-restored",
+          "appointment-reminders-by-default",
+          "workout-card-status-rendering",
         ],
       },
       {

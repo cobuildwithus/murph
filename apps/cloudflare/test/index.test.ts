@@ -364,6 +364,9 @@ describe("cloudflare worker routes", () => {
       "test-container-active-operation-drop",
       "test-read-active-runtime-fence",
       "test-start-stuck-invocation",
+      "test-temporal-mailbox-signal-fault-arm",
+      "test-temporal-mailbox-signal-fault-clear",
+      "test-temporal-mailbox-signal-fault-consume",
       "test-direct-r2-presigned-put",
       "test-direct-r2-locator-marker",
       "deploy-container-smoke",
@@ -1147,6 +1150,95 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
+  });
+
+  it("serves the user-bound Temporal mailbox fault lifecycle without OIDC in test mode", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+    const baseUrl =
+      "https://runner.example.test/__test/users/member_123/temporal-mailbox-signal-fault";
+    const requestHeaders = {
+      "content-type": "application/json; charset=utf-8",
+      [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+    };
+
+    const mismatchedResponse = await hostedLocalTestWorker.fetch(
+      new Request(`${baseUrl}/arm`, {
+        body: JSON.stringify({ mailboxItemId: "mailbox-item-1" }),
+        headers: {
+          ...requestHeaders,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_other",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    expect(mismatchedResponse.status).toBe(401);
+
+    const armResponse = await hostedLocalTestWorker.fetch(
+      new Request(`${baseUrl}/arm`, {
+        body: JSON.stringify({ mailboxItemId: "mailbox-item-1" }),
+        headers: requestHeaders,
+        method: "POST",
+      }),
+      env,
+    );
+    expect(armResponse.status).toBe(200);
+    await expect(armResponse.json()).resolves.toEqual({
+      armed: true,
+      deliveredToPendingConsumer: false,
+    });
+
+    const consumeResponse = await hostedLocalTestWorker.fetch(
+      new Request(`${baseUrl}/consume`, {
+        body: JSON.stringify({ mailboxItemId: "mailbox-item-1" }),
+        headers: requestHeaders,
+        method: "POST",
+      }),
+      env,
+    );
+    expect(consumeResponse.status).toBe(200);
+    await expect(consumeResponse.json()).resolves.toEqual({ consume: true });
+
+    const clearResponse = await hostedLocalTestWorker.fetch(
+      new Request(`${baseUrl}/clear`, {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    expect(clearResponse.status).toBe(200);
+    await expect(clearResponse.json()).resolves.toEqual({
+      cleared: true,
+      ok: true,
+    });
+  });
+
+  it("hides the Temporal mailbox fault control outside hosted-local test mode", async () => {
+    const response = await hostedLocalTestWorker.fetch(
+      new Request(
+        "https://runner.example.test/__test/users/member_123/temporal-mailbox-signal-fault/arm",
+        {
+          body: JSON.stringify({ mailboxItemId: "mailbox-item-1" }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+          },
+          method: "POST",
+        },
+      ),
+      createWorkerEnv(createUserRunnerStub(), {
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "production",
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Not found" });
   });
 
   it("keeps wrong methods on enabled hosted-local test routes hidden before auth", async () => {

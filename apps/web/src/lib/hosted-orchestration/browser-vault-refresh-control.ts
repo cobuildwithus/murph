@@ -2,28 +2,22 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-const BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS = 60_000;
+const BROWSER_VAULT_REFRESH_CONTROL_OCCURRED_AT = "1970-01-01T00:00:00.000Z";
 
 export const HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX =
   "runtime-control:browser-vault-refresh:";
 
 export function buildHostedBrowserVaultRefreshRuntimeControlEvent(input: {
-  nowMs?: number;
   userId: string;
   workspaceVersion: string;
 }): {
   eventId: string;
   occurredAt: string;
 } {
-  const nowMs = input.nowMs ?? Date.now();
-  const bucketMs = Math.floor(
-    nowMs / BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS,
-  ) * BROWSER_VAULT_REFRESH_CONTROL_DEDUPE_WINDOW_MS;
   const fingerprint = createHash("sha256")
     .update(JSON.stringify({
-      bucketMs,
       userId: input.userId,
-      version: 1,
+      version: 2,
       workspaceVersion: input.workspaceVersion,
     }))
     .digest("hex")
@@ -32,7 +26,7 @@ export function buildHostedBrowserVaultRefreshRuntimeControlEvent(input: {
   return {
     eventId:
       `${HOSTED_BROWSER_VAULT_REFRESH_RUNTIME_CONTROL_EVENT_ID_PREFIX}${fingerprint}`,
-    occurredAt: new Date(bucketMs).toISOString(),
+    occurredAt: BROWSER_VAULT_REFRESH_CONTROL_OCCURRED_AT,
   };
 }
 
@@ -43,7 +37,6 @@ export function isHostedBrowserVaultRefreshRuntimeControlEvent(input: {
   workspaceVersion: string;
 }): boolean {
   const expected = buildHostedBrowserVaultRefreshRuntimeControlEvent({
-    nowMs: input.occurredAt.getTime(),
     userId: input.userId,
     workspaceVersion: input.workspaceVersion,
   });
