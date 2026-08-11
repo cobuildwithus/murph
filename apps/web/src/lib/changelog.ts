@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, reliable referrals, reminders, cards, voices, and web search",
+      "Starter access, patterns, reliable timing, referrals, reminders, cards, voices, and web search",
     summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, referral celebrations stay with their intended conversation, reminders keep the local time you asked for, completed workout rows stay clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Starter usage no longer expires. Patterns compare repeated actions with next-day sleep and recovery. Murph keeps UTC and local times distinct, referral celebrations stay in their intended conversation, reminders keep the local time requested, workout rows keep clear status, voice memos keep the selected voice, and managed web search can reach current information again.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -188,6 +188,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "The status mark is part of the card image itself, so it stays visible anywhere the static preview is shown.",
         relevanceTags: ["workouts", "imessage", "cards", "reliability"],
         sourcePullRequests: [1599],
+      },
+      {
+        id: "local-and-utc-activity-timing",
+        kind: "improvement",
+        priority: 3,
+        title: "Murph keeps local and UTC times straight",
+        summary:
+          "When Murph compares a message with connected health activity, it now sees the local clock beside the exact UTC instant instead of having to relabel a raw timestamp.",
+        details:
+          "That makes timing explanations more reliable across daylight-saving changes. Wearable imports also separate provider-send, Murph-receipt, and successful-import timing when those clocks are available, without putting health values in operational logs.",
+        relevanceTags: ["assistant", "wearables", "timezones", "reliability"],
+        sourcePullRequests: [1626],
       },
     ],
   },

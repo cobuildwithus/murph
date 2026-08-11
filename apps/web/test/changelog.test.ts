@@ -343,6 +343,14 @@ describe("changelog registry", () => {
       details: expect.stringContaining("part of the card image itself"),
     });
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
+    expect(items.get("local-and-utc-activity-timing")).toMatchObject({
+      sourcePullRequests: [1626],
+      summary: expect.stringContaining("local clock beside the exact UTC instant"),
+      details: expect.stringContaining(
+        "without putting health values in operational logs",
+      ),
+    });
+    expect(items.get("local-and-utc-activity-timing")?.tryIt).toBeUndefined();
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -552,6 +560,7 @@ describe("changelog registry", () => {
           "web-search-restored",
           "appointment-reminders-by-default",
           "workout-card-status-rendering",
+          "local-and-utc-activity-timing",
         ],
       },
       {
