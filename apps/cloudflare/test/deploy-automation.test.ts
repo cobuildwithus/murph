@@ -17,6 +17,7 @@ import {
 } from "../scripts/deploy-automation.js";
 import { HOSTED_WORKER_OPTIONAL_SECRET_NAMES } from "../scripts/deploy-automation/worker-secret-names.ts";
 import { renderWorkerSecretsFile } from "../scripts/render-worker-secrets.ts";
+import { buildHostedRunnerContainerPlatformEnv } from "../src/runner-env.ts";
 import { parseJsoncObject } from "./helpers/jsonc.js";
 
 afterEach(() => {
@@ -666,6 +667,37 @@ describe("hosted deploy automation helpers", () => {
     });
 
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe("telegram,mapbox");
+  });
+
+  it("preserves exact Android gate semantics through generated Worker config", () => {
+    for (const [rawValue, expectedValue] of [
+      [undefined, undefined],
+      ["", undefined],
+      ["0", undefined],
+      ["true", undefined],
+      [" 1 ", undefined],
+      ["1 ", undefined],
+      ["\n1", undefined],
+      ["1", "1"],
+    ] as const) {
+      const environment = readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+        ...(rawValue === undefined
+          ? {}
+          : { MURPH_ANDROID_APP_ENABLED: rawValue }),
+      });
+      const config = buildHostedWranglerDeployConfig(environment) as {
+        vars: Record<string, string>;
+      };
+      const platformEnv = buildHostedRunnerContainerPlatformEnv(config.vars);
+
+      expect(environment.workerVars.MURPH_ANDROID_APP_ENABLED).toBe(expectedValue);
+      expect(config.vars.MURPH_ANDROID_APP_ENABLED).toBe(expectedValue);
+      expect(platformEnv.MURPH_ANDROID_APP_ENABLED).toBe(expectedValue);
+    }
   });
 
   it("defaults runner env profiles to the full hosted integration set", () => {
