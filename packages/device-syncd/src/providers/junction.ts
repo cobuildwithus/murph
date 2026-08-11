@@ -2443,7 +2443,8 @@ export function createJunctionDeviceSyncProvider(
     const resource = inferJunctionWebhookResource(eventType, data);
     const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
     const objectId = extractJunctionWebhookObjectId(data);
-    const occurredAt = extractJunctionWebhookOccurredAt(data) ?? context.now;
+    const eventOccurredAt = extractJunctionWebhookOccurredAt(data);
+    const occurredAt = eventOccurredAt ?? context.now;
     const window = buildJunctionWebhookWindow(data, occurredAt, context.now, resource);
     const webhookDataJsons = buildJunctionWebhookDataJobJsons({
       data,
@@ -2470,7 +2471,8 @@ export function createJunctionDeviceSyncProvider(
       externalAccountDiagnostic: buildJunctionWebhookExternalAccountDiagnostic(externalAccountSelection),
       eventType,
       traceId: verified.messageId,
-      occurredAt,
+      ...(eventOccurredAt ? { occurredAt: eventOccurredAt } : {}),
+      providerSentAt: verified.providerSentAt,
       resourceCategory: resource?.category ?? null,
       sourceProviderSlug,
       // A historical-pull completion is a data-less notification, so accepting
@@ -6739,7 +6741,7 @@ function verifyAndParseJunctionWebhookEnvelope(input: {
   secret: string;
   now: string;
   timestampToleranceMs: number;
-}): { messageId: string; payload: Record<string, unknown> } {
+}): { messageId: string; payload: Record<string, unknown>; providerSentAt: string } {
   const messageId = requireJunctionWebhookHeader(input.headers, "svix-id");
   const timestamp = requireJunctionWebhookHeader(input.headers, "svix-timestamp");
   const signatureHeader = requireJunctionWebhookHeader(input.headers, "svix-signature");
@@ -6775,6 +6777,7 @@ function verifyAndParseJunctionWebhookEnvelope(input: {
   return {
     messageId,
     payload,
+    providerSentAt: new Date(timestampMs).toISOString(),
   };
 }
 

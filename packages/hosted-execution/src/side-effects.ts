@@ -148,7 +148,7 @@ export interface HostedAssistantDeliveryPayload {
   media: readonly HostedAssistantDeliveryMedia[];
   message: string;
   nativeReplyRequested?: true;
-  newsletterAuthorizationProof?: string | null;
+  groupEmailAuthorizationProof?: string | null;
   subject: string | null;
   replyToMessageId: string | null;
   sessionId: string;
@@ -705,7 +705,11 @@ function parseHostedAssistantDeliveryPayload(
   } else if (card !== null && threadIsDirect !== true) {
     throw new TypeError(`${label}.card requires a private direct conversation.`);
   }
-
+  if (record.newsletterAuthorizationProof !== undefined) {
+    throw new TypeError(
+      `${label}.newsletterAuthorizationProof belongs to a retired runner wire contract.`,
+    );
+  }
   return {
     actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
     answeredMailboxItemIds: parseHostedAssistantDeliveryAnsweredMailboxItemIds(
@@ -747,12 +751,12 @@ function parseHostedAssistantDeliveryPayload(
             `${label}.nativeReplyRequested`,
           ),
         }),
-    ...(record.newsletterAuthorizationProof === undefined
+    ...(record.groupEmailAuthorizationProof === undefined
       ? {}
       : {
-          newsletterAuthorizationProof: requireNullableNewsletterAuthorizationProof(
-            record.newsletterAuthorizationProof,
-            `${label}.newsletterAuthorizationProof`,
+          groupEmailAuthorizationProof: requireNullableGroupEmailAuthorizationProof(
+            record.groupEmailAuthorizationProof,
+            `${label}.groupEmailAuthorizationProof`,
           ),
         }),
     subject: requireNullableString(record.subject ?? null, `${label}.subject`),
@@ -785,7 +789,7 @@ function parseHostedAssistantResponseCard(
   return parsed.data;
 }
 
-function requireNullableNewsletterAuthorizationProof(
+function requireNullableGroupEmailAuthorizationProof(
   value: unknown,
   label: string,
 ): string | null {

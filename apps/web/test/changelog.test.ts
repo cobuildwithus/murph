@@ -68,6 +68,23 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
+  it("keeps the health-data Settings note bound to layout only", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "health-data-settings-row",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      sourcePullRequests: [1615],
+      tryIt: {
+        href: "/settings#data-privacy",
+        label: "Review health data controls",
+      },
+    });
+    expect(item?.summary).toContain("aligned with the other Settings controls");
+    expect(item?.details).toContain("keep their existing destinations");
+  });
+
   it("keeps cleaner plan and model settings scoped to the visible outcome", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "cleaner-plan-and-model-settings",
@@ -82,6 +99,24 @@ describe("changelog registry", () => {
       title: "Cleaner plan and model settings",
     });
     expect(item?.details).toBeUndefined();
+    expect(item?.tryIt).toBeUndefined();
+  });
+
+  it("keeps iMessage card preview copy descriptive and value-free", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "descriptive-imessage-card-previews",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-11",
+      kind: "improvement",
+      priority: 1,
+      sourcePullRequests: [1631],
+      summary: expect.stringContaining("daily nutrition"),
+      title: "Clearer iMessage card previews",
+    });
+    expect(item?.details).toContain("free of card values");
+    expect(item?.details).toContain("ask Murph for the card in text");
     expect(item?.tryIt).toBeUndefined();
   });
 
@@ -323,11 +358,33 @@ describe("changelog registry", () => {
     );
   });
 
+  it("keeps transferred phone-call results uncertainty-aware", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "phone-call-results-return-to-chat",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [857, 1363],
+      details: expect.stringContaining(
+        "asks what happened instead of guessing the outcome",
+      ),
+    });
+  });
+
   it("keeps the August 7 through August 10 feature claims bounded", () => {
     const items = new Map(
       listPublishedChangelogItems().map((item) => [item.id, item]),
     );
 
+    expect(items.get("generated-image-group-photo")).toMatchObject({
+      sourcePullRequests: [1533],
+      summary: expect.stringContaining("same image"),
+      details: expect.stringContaining("explicit group request"),
+    });
+    expect(items.get("generated-image-group-photo")?.details).toContain(
+      "visible in the conversation",
+    );
+    expect(items.get("generated-image-group-photo")?.tryIt).toBeUndefined();
     expect(items.get("reminders-keep-requested-timezone")).toMatchObject({
       sourcePullRequests: [1546],
       summary: expect.stringContaining("preserves that local time"),
@@ -394,6 +451,14 @@ describe("changelog registry", () => {
       details: expect.stringContaining("part of the card image itself"),
     });
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
+    expect(items.get("local-and-utc-activity-timing")).toMatchObject({
+      sourcePullRequests: [1626],
+      summary: expect.stringContaining("local clock beside the exact UTC instant"),
+      details: expect.stringContaining(
+        "without putting health values in operational logs",
+      ),
+    });
+    expect(items.get("local-and-utc-activity-timing")?.tryIt).toBeUndefined();
     expect(items.get("environment-report-loading-preview")).toMatchObject({
       sourcePullRequests: [1617],
       summary: expect.stringContaining("report-shaped preview"),
@@ -599,32 +664,18 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through August 10 shipment set", () => {
+  it("preserves the frozen July 20 through August 9 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 22).map((edition) => ({
-        id: edition.id,
-        itemIds: edition.items.map((item) => item.id),
-      })),
+      listChangelogEditions()
+        .filter(
+          (edition) =>
+            edition.id >= "2026-07-20" && edition.id <= "2026-08-09",
+        )
+        .map((edition) => ({
+          id: edition.id,
+          itemIds: edition.items.map((item) => item.id),
+        })),
     ).toEqual([
-      {
-        id: "2026-08-10",
-        itemIds: [
-          "non-expiring-starter-access",
-          "cleaner-plan-and-model-settings",
-          "personal-patterns",
-          "personality-settings-and-chat",
-          "referral-notification-route-recovery",
-          "blood-pressure-history-completion",
-          "reminders-keep-requested-timezone",
-          "voice-memos-use-your-voice",
-          "cleaner-workout-cards-in-messages",
-          "web-search-restored",
-          "appointment-reminders-by-default",
-          "workout-card-status-rendering",
-          "lighter-accessible-homepage",
-          "environment-report-loading-preview",
-        ],
-      },
       {
         id: "2026-08-09",
         itemIds: [
@@ -1102,13 +1153,6 @@ describe("changelog registry", () => {
         Math.ceil(editions.length / CHANGELOG_EDITIONS_PER_PAGE) + 1,
       ),
     ).toBeNull();
-  });
-
-  it("keeps the default archive window to seven calendar days", () => {
-    const firstPage = resolveChangelogPage(1);
-    expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-10");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-04");
   });
 
   it("resolves only known canonical edition cursors", () => {

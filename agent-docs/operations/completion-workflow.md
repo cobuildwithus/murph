@@ -71,9 +71,9 @@ the separate final pushed-head ReviewGPT gate.
 Every PR must also make one explicit changelog decision before the review
 candidate is pushed. A member-visible feature or improvement, including a
 meaningful reliability, recovery, performance, accessibility, copy, or UX
-change, updates `apps/web/src/lib/changelog.ts` in the same PR using
-`$write-changelog`. Internal-only work records a concrete not-applicable reason
-in the PR body. Never publish private evidence, security-sensitive
+change, adds an isolated item under `apps/web/changelog/entries/` in the same PR
+using `$write-changelog`. Internal-only work records a concrete not-applicable
+reason in the PR body. Never publish private evidence, security-sensitive
 implementation detail, or an outcome the shipped code does not prove.
 
 Keep the current layer explicit: implementation, local completion, or PR/external
@@ -257,9 +257,13 @@ Required:
   body workflow checks the rendered section on every PR.
 - **Changelog.** Add one `## Changelog` section with exactly one disposition:
   `Changelog: updated` or `Changelog: not applicable`. For `updated`, change
-  `apps/web/src/lib/changelog.ts` in the same PR and add one `Items:` bullet
-  naming the edition date and stable item IDs. For `not applicable`, add one
-  concrete `Reason:` bullet explaining why no member-visible behavior changed.
+  one or more isolated entry fragments and/or edition metadata files in the
+  same PR and add one `Items:` bullet naming the edition date and affected
+  stable item IDs. A metadata-only edit names the existing items in that
+  edition. An intentional historical correction may instead edit the frozen
+  legacy registry and must name its affected existing items; normal new items
+  never use that path. For `not applicable`, add one concrete `Reason:` bullet
+  explaining why no member-visible behavior changed.
   Use `$write-changelog` to inventory source PRs, group related outcomes, add
   useful visuals, protect private or sensitive details, and update the focused
   archive proof. The pull-request body workflow validates this declaration on

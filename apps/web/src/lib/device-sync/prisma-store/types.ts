@@ -1,4 +1,7 @@
 import type { Prisma } from "@prisma/client";
+import type {
+  HostedDeviceSyncEventToProviderSendBucket,
+} from "@murphai/device-syncd/hosted-runtime";
 
 
 export type HostedPrismaTransactionClient = Prisma.TransactionClient;
@@ -46,6 +49,9 @@ export interface HostedSignalRecord {
 export interface HostedDeviceSyncDirtyResource {
   count: number;
   dirtyPayloadId?: string;
+  eventToProviderSendBucket?: HostedDeviceSyncEventToProviderSendBucket | null;
+  firstWebhookReceivedAt?: string | null;
+  providerSendToWebhookMs?: number | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
   resource: string | null;

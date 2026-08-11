@@ -319,11 +319,22 @@ export function sanitizeAssistantOutboxIntentForPersistence(
   card?: NonNullable<AssistantOutboxIntent['card']>
   operation?: NonNullable<AssistantOutboxIntent['operation']>
 } {
-  const { card, operation, ...baseIntent } = intent
+  const {
+    card,
+    groupEmailAuthorizationProof,
+    newsletterAuthorizationProof,
+    operation,
+    ...baseIntent
+  } = intent
+  const persistedGroupEmailAuthorizationProof =
+    groupEmailAuthorizationProof ?? newsletterAuthorizationProof ?? null
   return {
     ...baseIntent,
     schema: 'murph.assistant-outbox-intent.v1',
     lastError: sanitizeAssistantDeliveryErrorForPersistence(intent.lastError),
+    // Normalize a legacy proof on the next write. The old field remains a
+    // read-only migration surface in the persisted codec.
+    groupEmailAuthorizationProof: persistedGroupEmailAuthorizationProof,
     ...(card ? { card } : {}),
     ...(operation ? { operation } : {}),
   }

@@ -119,6 +119,9 @@ export async function executeGenerateImageTool(input: {
   ) => Promise<T>) | null
   providerRequestOrdinal: number
   requireHostedPrivateImageDelivery?: boolean | null
+  validateResolvedReferenceImages?: (
+    references: readonly ResolvedGenerateImageReference[],
+  ) => Promise<string | null>
   vaultRoot?: string | null
 }): Promise<GenerateImageToolResult> {
   const apiKey = normalizeNullableString(input.env.OPENAI_API_KEY)
@@ -216,6 +219,15 @@ export async function executeGenerateImageTool(input: {
           'image references could not be loaded',
           error,
         ),
+      }
+    }
+
+    const referenceValidationFailure =
+      await input.validateResolvedReferenceImages?.(referenceImages) ?? null
+    if (referenceValidationFailure) {
+      return {
+        rpcSuccess: false,
+        rpcText: referenceValidationFailure,
       }
     }
 

@@ -7,7 +7,7 @@ import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
-  HostedRuntimeNewsletterToolResponse,
+  HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import type { AutomationScheduleKind } from '@murphai/contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
@@ -207,15 +207,15 @@ export interface AssistantNotificationCommitContext {
 }
 
 export interface AssistantNotificationPostTurnDeliveryExpectations {
-  newsletterPendingDeliveryIntentId?: string | null
-  newsletterSendResult?: Extract<
-    HostedRuntimeNewsletterToolResponse,
-    { action: 'send' }
+  groupEmailPendingDeliveryIntentId?: string | null
+  groupEmailSendResult?: Extract<
+    HostedRuntimeGroupEmailEffectResponse,
+    { action: 'send_email' }
   >['result'] | null
 }
 
-type AssistantNotificationNewsletterSendResult = NonNullable<
-  AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult']
+type AssistantNotificationGroupEmailSendResult = NonNullable<
+  AssistantNotificationPostTurnDeliveryExpectations['groupEmailSendResult']
 >
 
 export interface AssistantNotificationInput
@@ -258,7 +258,7 @@ export interface AssistantNotificationInput
   deferCommitUntilDeliveryAccepted?: boolean | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   instructions: string
-  onNewsletterPendingDeliveryIntentId?: ((intentId: string) => void) | null
+  onGroupEmailPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
@@ -303,15 +303,10 @@ export async function sendAssistantNotificationLocal(
         input,
         maintenanceEvidence,
       )
-      let newsletterSendResult:
-        | AssistantNotificationPostTurnDeliveryExpectations['newsletterSendResult']
-        | null = input.scheduledAutomationAuthority
-          ? {
-              status: 'unavailable',
-              unavailableReason: 'newsletter_send_not_observed',
-            }
-          : null
-      let newsletterPendingDeliveryIntentId: string | null = null
+      let groupEmailSendResult:
+        | AssistantNotificationPostTurnDeliveryExpectations['groupEmailSendResult']
+        | null = null
+      let groupEmailPendingDeliveryIntentId: string | null = null
       const resolved =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? createAssistantMaintenanceNotificationResolvedSession({
@@ -332,15 +327,15 @@ export async function sendAssistantNotificationLocal(
       const withPostTurnDeliveryExpectations = (
         result: AssistantNotificationResult,
       ): AssistantNotificationResult =>
-        newsletterSendResult
+        groupEmailSendResult
           ? {
               ...result,
               postTurnDeliveryExpectations: {
                 ...(result.postTurnDeliveryExpectations ?? {}),
-                ...(newsletterPendingDeliveryIntentId
-                  ? { newsletterPendingDeliveryIntentId }
+                ...(groupEmailPendingDeliveryIntentId
+                  ? { groupEmailPendingDeliveryIntentId }
                   : {}),
-                newsletterSendResult,
+                groupEmailSendResult,
               },
             }
           : result
@@ -429,19 +424,19 @@ export async function sendAssistantNotificationLocal(
             executionContext: hostedExecutionContext,
             getConversationScope: () => conversationScope,
             messageInput,
-            newsletterOutbox: {
+            groupEmailOutbox: {
               turnId,
               vault: input.vault,
             },
-            recordNewsletterSendResult: (result) => {
-              newsletterSendResult = resolveAssistantNotificationNewsletterSendResult({
-                current: newsletterSendResult ?? null,
+            recordGroupEmailSendResult: (result) => {
+              groupEmailSendResult = resolveAssistantNotificationGroupEmailSendResult({
+                current: groupEmailSendResult ?? null,
                 next: result.result,
               })
             },
-            recordNewsletterPendingDeliveryIntentId: (intentId) => {
-              newsletterPendingDeliveryIntentId = intentId
-              input.onNewsletterPendingDeliveryIntentId?.(intentId)
+            recordGroupEmailPendingDeliveryIntentId: (intentId) => {
+              groupEmailPendingDeliveryIntentId = intentId
+              input.onGroupEmailPendingDeliveryIntentId?.(intentId)
             },
             route,
             session: resolved.session,
@@ -601,9 +596,14 @@ export async function sendAssistantNotificationLocal(
         }
         let decision: AssistantNotificationDecision
         try {
-          decision = parseAssistantNotificationDecision(
-            providerResult.providerAuthoredResponse ?? providerResult.response,
-          )
+          decision = providerResult.finalAction?.kind === 'none' && groupEmailSendResult
+            ? {
+                kind: 'skip',
+                privateSummary: 'Group email effect completed.',
+              }
+            : parseAssistantNotificationDecision(
+                providerResult.providerAuthoredResponse ?? providerResult.response,
+              )
           if (providerResult.responseCard && decision.kind !== 'send_message') {
             throw new VaultCliError(
               'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
@@ -1051,10 +1051,10 @@ async function sendAssistantExactTextNotificationLocal(input: {
   }
 }
 
-function resolveAssistantNotificationNewsletterSendResult(input: {
-  current: AssistantNotificationNewsletterSendResult | null
-  next: AssistantNotificationNewsletterSendResult
-}): AssistantNotificationNewsletterSendResult {
+function resolveAssistantNotificationGroupEmailSendResult(input: {
+  current: AssistantNotificationGroupEmailSendResult | null
+  next: AssistantNotificationGroupEmailSendResult
+}): AssistantNotificationGroupEmailSendResult {
   if (input.current && input.current.status !== 'unavailable') {
     return input.current
   }

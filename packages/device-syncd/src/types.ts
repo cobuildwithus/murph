@@ -489,6 +489,8 @@ export interface ProviderWebhookResult {
   eventType: string;
   traceId: string;
   occurredAt?: string;
+  /** Verified provider-envelope send time, when the webhook signature carries one. */
+  providerSentAt?: string;
   // Keep top-level parser data narrow; provider-owned jobs may carry sanitized payload hints.
   resourceCategory?: string | null;
   /** Source this provider event is attributable to, including lifecycle events. */
@@ -522,6 +524,8 @@ export interface DeviceSyncIngressWebhook {
   eventType: string;
   jobs: readonly DeviceSyncJobInput[];
   occurredAt?: string;
+  /** See `ProviderWebhookResult.providerSentAt`. */
+  providerSentAt?: string;
   // Accepted and unknown ingress hooks receive stripped summary plus provider-owned job hints.
   resourceCategory?: string | null;
   /** See `ProviderWebhookResult.sourceProviderSlug`. */

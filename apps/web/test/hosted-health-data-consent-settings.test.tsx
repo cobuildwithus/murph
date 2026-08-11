@@ -118,25 +118,30 @@ test("renders separate active and paused consent controls", async () => {
   cleanupRender = active.cleanup;
 
   expect(active.container.textContent).toContain("Health data use");
-  expect(active.container.textContent).toContain("Used to personalize Murph");
+  expect(active.container.textContent).not.toContain("Used to personalize Murph");
   expect(active.container.textContent).toContain("Withdraw consent");
   const sourceReviewLink = active.container.querySelector('a[href="/connect"]');
   expect(sourceReviewLink?.textContent).toContain("Manage sources");
+  expect(sourceReviewLink?.hasAttribute("aria-label")).toBe(false);
+  expect(sourceReviewLink?.parentElement?.getAttribute("aria-live")).toBe(
+    "polite",
+  );
   expect(sourceReviewLink?.className).toContain("min-h-10");
-  expect(sourceReviewLink?.parentElement?.className).toContain("flex");
-  expect(sourceReviewLink?.parentElement?.className).not.toContain("flex-col");
-  expect(active.container.firstElementChild?.className).toContain("items-start");
-  expect(active.container.firstElementChild?.className).not.toContain(
-    "sm:grid-cols-[minmax(0,1fr)_auto]",
+  expect(active.container.firstElementChild?.className).toContain("items-center");
+  expect(active.container.firstElementChild?.className).toContain(
+    "grid-cols-[auto_minmax(0,1fr)]",
+  );
+  expect(active.container.firstElementChild?.className).toContain(
+    "sm:grid-cols-[auto_minmax(0,1fr)_auto]",
   );
   const withdrawButton = findButton(active.container, "Withdraw consent");
-  expect(withdrawButton.parentElement).toBe(sourceReviewLink?.parentElement);
-  expect(withdrawButton.className).toContain("bg-transparent");
-  expect(withdrawButton.className).toContain("border-destructive/30");
-  expect(withdrawButton.className).toContain("hover:bg-destructive/[0.05]");
-  expect(withdrawButton.className).toContain("focus-visible:ring-ring/50");
-  expect(withdrawButton.className).toContain("h-7");
-  expect(withdrawButton.className).toContain("min-h-10");
+  expect(withdrawButton.parentElement).toBe(active.container.firstElementChild);
+  expect(withdrawButton.className).toContain("col-start-2");
+  expect(withdrawButton.className).toContain("sm:col-start-3");
+  expect(withdrawButton.className).toContain("bg-destructive/[0.05]");
+  expect(withdrawButton.className).toContain("hover:bg-destructive/[0.07]");
+  expect(withdrawButton.className).toContain("h-9");
+  expect(withdrawButton.className).not.toContain("bg-transparent");
 
   await cleanupRender();
   cleanupRender = null;
@@ -153,10 +158,10 @@ test("renders separate active and paused consent controls", async () => {
   expect(paused.container.textContent).toContain("Processing paused");
   expect(paused.container.textContent).toContain("Use Murph again");
   expect(paused.container.firstElementChild?.className).toContain(
-    "sm:grid-cols-[minmax(0,1fr)_auto]",
+    "sm:grid-cols-[auto_minmax(0,1fr)_auto]",
   );
   expect(findButton(paused.container, "Use Murph again").className).toContain(
-    "sm:col-span-2",
+    "sm:col-start-3",
   );
 });
 

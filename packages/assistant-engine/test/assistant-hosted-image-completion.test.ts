@@ -35,6 +35,15 @@ describe('hosted image completion', () => {
       originAssistantInputIdExact: true,
       sizeBytes: 123,
     })
+    expect(text).toContain(
+      'Continue the pending task with the exact saved image.',
+    )
+    expect(text).toContain(
+      'a later tool may consume the saved image directly',
+    )
+    expect(text).not.toContain('provider conversation')
+    expect(text).not.toContain('group-avatar')
+    expect(text).not.toContain('mutation authority')
     expect(parseAssistantHostedImageCompletionOriginText(text)).toEqual({
       originAssistantInputId: `ain_${'a'.repeat(32)}`,
       originAssistantInputIdExact: true,
@@ -109,7 +118,9 @@ describe('hosted image completion', () => {
     expect(text).toContain(
       'Do not call image-dependent downstream tools for this completion.',
     )
-    expect(text).not.toContain('Continue the pending task with the exact saved image.')
+    expect(text).not.toContain(
+      'Continue the pending task with the exact saved image.',
+    )
     expect(parseAssistantHostedImageCompletionText(text)).toBeNull()
     expect(parseAssistantHostedImageCompletionOriginText(text)).toEqual({
       originAssistantInputId: `ain_${'c'.repeat(32)}`,

@@ -565,7 +565,6 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.react_to_message"
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
-      && name !== "murph.newsletter"
       && name !== "murph.pending_vault_files"
       && name !== "murph.send_physical_note"
       && name !== "murph.send_vault_file"
@@ -630,7 +629,6 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         groupRoomModelAvailable: true,
         imessageContactAvailable: true,
         messageTargetingAvailable: true,
-        newsletterAvailable: true,
         pendingVaultFilesAvailable: true,
         physicalNotesAvailable: true,
         phoneCallsAvailable: true,
