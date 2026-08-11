@@ -10,7 +10,7 @@ const nonceInput = {
   method: "POST",
   path: "/api/device-sync/agents/pair",
   now: "2026-03-25T12:00:00.000Z",
-  signedExpiresAt: "2026-03-25T12:05:00.000Z",
+  expiresAt: "2026-03-25T12:05:00.000Z",
 };
 
 function sqlOf(call: readonly unknown[]): string {
@@ -59,7 +59,7 @@ describe("PrismaHostedBrowserAssertionNonceStore", () => {
       nonceInput.method,
       nonceInput.path,
       nonceInput.now,
-      nonceInput.signedExpiresAt,
+      nonceInput.expiresAt,
     ]);
     expect(transaction).not.toHaveBeenCalled();
   });

@@ -7,10 +7,9 @@ Last verified: 2026-08-11
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
-The lower-level hosted browser assertion first-invalid boundary, migration-first
-database normalization for old and current writers, single-use nonce persisted
-horizon, bounded cleanup safety, and opt-in PostgreSQL concurrency proof are
-jointly specified by `ARCHITECTURE.md`,
+The lower-level hosted browser assertion first-invalid boundary, single-use
+nonce persisted horizon, mixed-version cleanup safety, and opt-in PostgreSQL
+concurrency proof are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, and `agent-docs/references/testing-ci-map.md`.
 
 Member-owned device provider application ownership, exact OAuth and connection

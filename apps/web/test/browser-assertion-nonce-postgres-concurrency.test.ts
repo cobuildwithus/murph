@@ -119,11 +119,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const clients = [firstClient, secondClient, observer];
       let insertions: Promise<[boolean, boolean]> | null = null;
       const input = {
+        expiresAt: "9999-12-31T23:59:59.999Z",
         method: "POST",
         nonceHash,
         now: "2026-08-09T12:45:00.000Z",
         path: "/api/device-sync/agents/pair",
-        signedExpiresAt: "2099-12-31T23:59:59.999Z",
         userId: `member_browser_nonce_${fixtureId}`,
       };
 
@@ -155,78 +155,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     }, 15_000);
 
-    it("keeps an old writer's row past its raw expiry so a current replay still conflicts", async () => {
-      const fixtureId = randomUUID();
-      const nonceHash = `browser_nonce_mixed_version_${fixtureId}`;
-      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
-
-      try {
-        const clockRows = await observer.$queryRaw<Array<{ now: Date }>>`
-          SELECT date_trunc(
-            'milliseconds',
-            clock_timestamp() AT TIME ZONE 'UTC'
-          ) AS "now"
-        `;
-        const databaseNow = clockRows[0]?.now;
-        if (!databaseNow) {
-          throw new Error("Expected the PostgreSQL database clock.");
-        }
-
-        const signedExpiresAt = new Date(databaseNow.getTime() - 1_000);
-        const firstInvalidAt = new Date(signedExpiresAt.getTime() + 61_000);
-
-        // Simulate the still-running old Web writer, which submits raw exp.
-        await observer.deviceBrowserAssertionNonce.create({
-          data: {
-            createdAt: databaseNow,
-            expiresAt: signedExpiresAt,
-            method: "POST",
-            nonceHash,
-            path: "/api/device-sync/agents/pair",
-            userId: `member_browser_mixed_version_${fixtureId}`,
-          },
-        });
-
-        await expect(observer.deviceBrowserAssertionNonce.findUnique({
-          select: { expiresAt: true },
-          where: { nonceHash },
-        })).resolves.toEqual({ expiresAt: firstInvalidAt });
-
-        // Its foreground cleanup must not delete the trigger-normalized row in
-        // the overlap between signed exp and the verifier's first-invalid time.
-        await expect(observer.deviceBrowserAssertionNonce.deleteMany({
-          where: { expiresAt: { lte: databaseNow }, nonceHash },
-        })).resolves.toEqual({ count: 0 });
-
-        await expect(
-          new PrismaHostedBrowserAssertionNonceStore(observer)
-            .consumeBrowserAssertionNonce({
-              method: "POST",
-              nonceHash,
-              now: databaseNow.toISOString(),
-              path: "/api/device-sync/agents/pair",
-              signedExpiresAt: signedExpiresAt.toISOString(),
-              userId: `member_browser_mixed_version_${fixtureId}`,
-            }),
-        ).resolves.toBe(false);
-      } finally {
-        try {
-          await observer.deviceBrowserAssertionNonce.deleteMany({
-            where: { nonceHash },
-          });
-        } finally {
-          await observer.$disconnect();
-        }
-      }
-    }, 15_000);
-
     it("skips a locked expired row while an unrelated insert proceeds", async () => {
       const fixtureId = randomUUID();
       const lockedNonceHash = `browser_nonce_locked_${fixtureId}`;
       const freshNonceHash = `browser_nonce_fresh_${fixtureId}`;
       const lockedAt = new Date("2000-01-01T00:00:00.000Z");
       const cleanupAt = new Date("2000-01-02T00:00:00.000Z");
-      const freshExpiresAt = new Date("2099-12-31T23:59:59.999Z");
+      const freshExpiresAt = new Date("9999-12-31T23:59:59.999Z");
       const lockClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const retentionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const insertClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -273,11 +208,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           }),
           new PrismaHostedBrowserAssertionNonceStore(insertClient)
             .consumeBrowserAssertionNonce({
+              expiresAt: freshExpiresAt.toISOString(),
               method: "POST",
               nonceHash: freshNonceHash,
               now: cleanupAt.toISOString(),
               path: "/api/device-sync/agents/pair",
-              signedExpiresAt: freshExpiresAt.toISOString(),
               userId: `member_browser_fresh_${fixtureId}`,
             }),
         ]);
@@ -331,8 +266,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const fixtureId = randomUUID();
       const nonceHash = `browser_nonce_expiry_retention_${fixtureId}`;
       const expiredAt = new Date("2000-01-01T00:00:00.000Z");
-      const normalizedExpiredAt = new Date(expiredAt.getTime() + 61_000);
-      const cleanupAt = new Date("2000-01-01T00:03:00.000Z");
+      const cleanupAt = new Date("2000-01-01T00:02:00.000Z");
       const cleanupClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const admissionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -389,11 +323,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         admission = new PrismaHostedBrowserAssertionNonceStore(admissionClient)
           .consumeBrowserAssertionNonce({
+            expiresAt: expiredAt.toISOString(),
             method: "POST",
             nonceHash,
             now: expiredAt.toISOString(),
             path: "/api/device-sync/agents/pair",
-            signedExpiresAt: expiredAt.toISOString(),
             userId: `member_browser_expiry_retention_${fixtureId}`,
           });
         await waitUntilBackendIsBlockedBy({
@@ -412,7 +346,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
           where: { nonceHash },
         })).resolves.toEqual({
-          expiresAt: normalizedExpiredAt,
+          expiresAt: expiredAt,
           nonceHash,
         });
 

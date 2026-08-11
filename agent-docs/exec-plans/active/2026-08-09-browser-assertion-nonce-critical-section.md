@@ -18,8 +18,8 @@ nonce state.
   if a delayed insert resumes at or after expiry.
 - The hourly primary-database cleanup deletes expired browser assertion nonces
   in bounded, ordered, skip-locked batches without delaying unrelated inserts.
-- A migration-first database normalizer preserves every old and current
-  writer's nonce row through the verifier's first-invalid horizon.
+- Mixed-version cleanup preserves legacy raw-expiry rows through the verifier's
+  former acceptance horizon.
 - Focused unit and real-PostgreSQL concurrency coverage proves replay
   convergence, conservative cleanup, bounded work, and lock avoidance.
 - Focused verification, exact-head CI, the preliminary specialist pass, and the
@@ -29,23 +29,21 @@ nonce state.
 
 - In scope:
   - The hosted browser assertion nonce store.
-  - The nonce expiry-normalization migration and compatibility proof.
   - The existing hourly hosted-retention invocation and focused cleanup owner.
   - Direct unit, retention, route, and PostgreSQL contention coverage.
 - Out of scope:
+  - A deployment compatibility migration or second replay-state owner.
   - Other database locks, schema changes, pool-size changes, or a new scheduler.
 
 ## Constraints
 
 - Preserve fail-closed browser assertion authentication.
 - Use the nonce primary key as the only replay-convergence owner.
-- Keep old and current writers submitting the raw signed `exp`; the database
-  alone adds the shared 61-second offset so no writer can double-normalize it.
-- Preserve normalized rows until `now - 61 seconds` reaches their stored
-  first-invalid expiry.
+- Preserve legacy rows until `now - 61 seconds` reaches their stored raw expiry;
+  new rows may remain conservatively over-retained for the same allowance.
 - Keep cleanup serial and bounded to four batches of at most 5,000 rows.
 - Reuse the existing hourly retention route; add no queue, advisory lock, schema
-  independent lifecycle owner, or rollout pause.
+  migration, or independent lifecycle owner.
 
 ## Tasks
 
@@ -80,20 +78,19 @@ nonce state.
 - Compare the persisted first-invalid instant strictly greater than the
   millisecond-truncated database clock, because equality is already outside the
   browser assertion acceptance window.
-- Install the expiry normalizer before the replacement Web deployment and
-  backfill existing rows in the same migration transaction. Old inserts before
-  commit are backfilled; old and current inserts after commit pass through the
-  same trigger. This closes the old-cleaner overlap without a rollout pause,
-  second state owner, or weaker verifier boundary.
+- Keep mixed-version cleanup conservative instead of adding a migration or
+  weakening the first-invalid verifier boundary.
 - Reuse the existing hourly retention invocation and shared batch ceilings
   instead of adding another scheduler or increasing pool capacity.
 
 ## Final review
 
-- The first final ReviewGPT pass caught that an old Web cleaner could delete a
-  raw-expiry row during the new verifier's extra acceptance minute. The
-  migration-first normalizer and PostgreSQL old-writer/old-cleaner replay proof
-  close that mixed-version gap.
+- Final ReviewGPT rounds 1 and 2 exposed the same theoretical old-cleaner
+  rollout seam. The required retrospective found zero production browser nonce
+  rows and zero agent sessions, so the incompatible durable state does not
+  exist; the review-induced migration, trigger, and backfill were deleted.
+- The merge boundary must recheck those aggregate zero-state facts and stop for
+  a separately drained cutover if production use begins before promotion.
 - Corrected four durable documents that still described the deleted foreground
   cleanup transaction and added the new real-PostgreSQL proof to the canonical
   testing map.

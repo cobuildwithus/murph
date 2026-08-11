@@ -494,7 +494,7 @@ export class PrismaDeviceSyncControlPlaneStore
     method: string;
     path: string;
     now: string;
-    signedExpiresAt: string;
+    expiresAt: string;
   }): Promise<boolean> {
     return this.browserAssertionNonces.consumeBrowserAssertionNonce(input);
   }

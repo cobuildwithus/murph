@@ -39,7 +39,7 @@ export interface HostedBrowserAssertionNonceStore {
     method: string;
     path: string;
     now: string;
-    signedExpiresAt: string;
+    expiresAt: string;
   }): Promise<boolean>;
 }
 
@@ -164,7 +164,7 @@ async function readSignedHostedUser(
     method: claims.method,
     path: claims.path,
     now: nowIso,
-    signedExpiresAt: new Date(claims.exp * 1000).toISOString(),
+    expiresAt: new Date(hostedUserAssertionFirstInvalidAtMs(claims.exp)).toISOString(),
   });
 
   if (!consumed) {

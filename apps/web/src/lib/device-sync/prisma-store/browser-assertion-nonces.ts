@@ -13,10 +13,8 @@ export class PrismaHostedBrowserAssertionNonceStore {
     method: string;
     path: string;
     now: string;
-    signedExpiresAt: string;
+    expiresAt: string;
   }): Promise<boolean> {
-    // The migration-first insert trigger shifts the signed expiry to the
-    // verifier's first-invalid instant for both old and current Web writers.
     // Keep the volatile clock read in RETURNING so it runs only for an insert
     // that succeeds after any unique-conflict wait; a late row is a tombstone.
     const rows = await this.prisma.$queryRaw<Array<{ admitted: boolean }>>`
@@ -34,7 +32,7 @@ export class PrismaHostedBrowserAssertionNonceStore {
         ${input.method},
         ${input.path},
         ${input.now}::timestamptz AT TIME ZONE 'UTC',
-        ${input.signedExpiresAt}::timestamptz AT TIME ZONE 'UTC'
+        ${input.expiresAt}::timestamptz AT TIME ZONE 'UTC'
       )
       ON CONFLICT ("nonce_hash") DO NOTHING
       RETURNING
