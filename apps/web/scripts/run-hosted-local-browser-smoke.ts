@@ -3,6 +3,7 @@ import {
   type BrowserContext,
   type BrowserContextOptions,
   type Page,
+  type Response,
 } from "@playwright/test";
 
 const browserCases = [
@@ -85,15 +86,24 @@ async function proveConnectJourney(input: {
   const navigation = await input.page.goto("/connect", {
     waitUntil: "domcontentloaded",
   });
-  if (!navigation?.ok()) {
-    throw new Error(
-      `Hosted browser ${input.caseName} navigation returned HTTP ${navigation?.status() ?? "none"}.`,
-    );
-  }
+  assertSuccessfulNavigation(navigation, input.caseName, "initial");
   await assertConnectPage(input);
 
-  await input.page.reload({ waitUntil: "domcontentloaded" });
+  const reload = await input.page.reload({ waitUntil: "domcontentloaded" });
+  assertSuccessfulNavigation(reload, input.caseName, "reload");
   await assertConnectPage(input);
+}
+
+function assertSuccessfulNavigation(
+  response: Response | null,
+  caseName: string,
+  phase: "initial" | "reload",
+): void {
+  if (!response?.ok()) {
+    throw new Error(
+      `Hosted browser ${caseName} ${phase} navigation returned HTTP ${response?.status() ?? "none"}.`,
+    );
+  }
 }
 
 async function assertConnectPage(input: {
