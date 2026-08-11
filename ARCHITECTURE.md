@@ -1621,9 +1621,10 @@ private no-store/no-index headers, and rejects malformed input before reading
 render assets. The fallback body remains value-free and derives a stable preview
 label from the validated card kind so Messages can distinguish nutrition,
 workout, generic-summary, and challenge-standings cards without exposing card
-values or triggering Apple data-detector downgrade. No persisted card state,
-authenticated card API, cleanup owner, extension network read, or second queue
-exists.
+values or triggering Apple data-detector downgrade. Each label retains the
+member-directed request for the complete semantic text when the accepted card
+cannot render. No persisted card state, authenticated card API, cleanup owner,
+extension network read, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a

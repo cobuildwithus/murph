@@ -35,11 +35,16 @@ const TRACKED_TABLE: CompactTableResponseCardV1 = {
 describe('response-card static Linq layouts', () => {
   it('uses value-free fallback copy for generic and workout cards', () => {
     expect(buildLinqIMessageAppFallbackText(ONE_OFF_TABLE)).toBe(
-      'Your Murph summary',
+      'Your Murph summary. Ask Murph for this card in text',
     )
     expect(buildLinqIMessageAppFallbackText(TRACKED_TABLE)).toBe(
-      'Your workout',
+      'Your workout. Ask Murph for this card in text',
     )
+    for (const card of [ONE_OFF_TABLE, TRACKED_TABLE]) {
+      expect(buildLinqIMessageAppFallbackText(card)).not.toMatch(
+        /\d|today|day|time/iu,
+      )
+    }
   })
 
   it('preserves generic provider details without exposing tracking authority', () => {

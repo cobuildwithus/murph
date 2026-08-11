@@ -77,7 +77,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "iMessage conversation previews now say whether Murph sent daily nutrition, a workout, a general summary, or challenge standings.",
         details:
-          "The preview label stays free of card values in the conversation list, on the lock screen, and in notifications.",
+          "The preview label stays free of card values in the conversation list, on the lock screen, and in notifications, while keeping a short way to ask Murph for the card in text.",
         relevanceTags: [
           "imessage",
           "cards",

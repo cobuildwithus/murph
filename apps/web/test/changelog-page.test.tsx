@@ -59,6 +59,7 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("Clearer iMessage card previews");
     expect(markup).toContain(
       "Starter access, patterns, reliable referrals, reminders, cards, voices, search, lighter pages, and clearer reports",
     );
@@ -81,7 +82,9 @@ describe("ChangelogPage", () => {
     );
     expect(markup).toContain("More ways to connect, prepare, and finish");
     expect(markup).toContain("Ask about images and video on X");
-    expect(markup).toContain("More control over data, models, and connections");
+    expect(markup).not.toContain(
+      "More control over data, models, and connections",
+    );
     expect(markup).not.toContain(
       "Connected apps recover with a clearer next step",
     );
@@ -110,7 +113,10 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-08-03"');
+    expect(markup).toContain('href="/changelog?edition=2026-08-04"');
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-11#descriptive-imessage-card-previews"',
+    );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-10#personal-patterns"',
     );
@@ -129,7 +135,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-05#official-local-alert-health-context"',
     );
-    expect(markup).toContain(
+    expect(markup).not.toContain(
       'href="/changelog?edition=2026-08-04#custom-inference-endpoint"',
     );
     expect(markup).not.toContain(
@@ -141,24 +147,29 @@ describe("ChangelogPage", () => {
   });
 
   it("renders the new try-it controls with their exact prompts", async () => {
-    const markup = renderToStaticMarkup(
+    const latestMarkup = renderToStaticMarkup(
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
+    const previousMarkup = renderToStaticMarkup(
+      await ChangelogPage({
+        searchParams: Promise.resolve({ edition: "2026-08-04" }),
+      }),
+    );
 
-    expect(markup).not.toContain("Open model settings");
-    expect(markup).toContain("Ask about today&#x27;s conditions");
-    expect(markup).toContain("Open privacy settings");
-    expect(markup).toContain('href="/settings/data-privacy"');
-    expect(markup).toContain("Ask for today&#x27;s nutrition card");
-    expect(markup).toContain("Manage connections");
-    expect(markup).not.toContain("Open Environment");
-    expect(markup).not.toContain('href="/environment"');
-    expect(markup).toContain("Explore referrals");
-    expect(markup).toContain('href="/refer"');
-    expect(markup).toContain("Compare plans");
-    expect(markup).toContain('href="/settings#subscription"');
-    expect(markup).toContain("Browse connections");
-    expect(markup).toContain('href="/connect"');
+    expect(latestMarkup).not.toContain("Open model settings");
+    expect(latestMarkup).toContain("Ask about today&#x27;s conditions");
+    expect(previousMarkup).toContain("Open privacy settings");
+    expect(previousMarkup).toContain('href="/settings/data-privacy"');
+    expect(previousMarkup).toContain("Ask for today&#x27;s nutrition card");
+    expect(previousMarkup).toContain("Manage connections");
+    expect(latestMarkup).not.toContain("Open Environment");
+    expect(latestMarkup).not.toContain('href="/environment"');
+    expect(latestMarkup).toContain("Explore referrals");
+    expect(latestMarkup).toContain('href="/refer"');
+    expect(latestMarkup).toContain("Compare plans");
+    expect(latestMarkup).toContain('href="/settings#subscription"');
+    expect(latestMarkup).toContain("Browse connections");
+    expect(latestMarkup).toContain('href="/connect"');
     expect(
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
     ).toEqual(

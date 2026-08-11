@@ -45,7 +45,8 @@ plus derived progress for structured workouts; it does not repeat the image's
 sets below the balloon. Generic-table provider chrome retains its existing
 title, optional subtitle, rows, and footer. The complete semantic text renderer
 remains the workout recovery owner, and the value-free fallback identifies the
-message as the member's workout without exposing its values outside the card.
+message as the member's workout before telling them how to request that complete
+text without exposing its values outside the card.
 
 The image URL carries the exact same strict authority-free V3 or V4 presentation
 envelope as the native fragment in a bounded queryless path. V3 tracking remains

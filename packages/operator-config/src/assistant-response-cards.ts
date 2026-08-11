@@ -194,18 +194,25 @@ export function renderAssistantResponseCardTranscriptText(
 export function buildLinqIMessageAppFallbackText(
   card: AssistantResponseCard,
 ):
-  | 'Challenge standings'
-  | 'Your daily nutrition'
-  | 'Your Murph summary'
-  | 'Your workout' {
+  | 'Challenge standings. Ask Murph for this card in text'
+  | 'Your daily nutrition. Ask Murph for this card in text'
+  | 'Your Murph summary. Ask Murph for this card in text'
+  | 'Your workout. Ask Murph for this card in text' {
   const parsed = assistantResponseCardSchema.parse(card)
   switch (parsed.kind) {
     case 'daily_nutrition':
-      return 'Your daily nutrition'
-    case 'compact_table':
-      return parsed.tracking === null ? 'Your Murph summary' : 'Your workout'
+      return 'Your daily nutrition. Ask Murph for this card in text'
+    case 'compact_table': {
+      if (parsed.tracking === null) {
+        return 'Your Murph summary. Ask Murph for this card in text'
+      }
+      switch (parsed.tracking.kind) {
+        case 'workout':
+          return 'Your workout. Ask Murph for this card in text'
+      }
+    }
     case 'challenge_standings':
-      return 'Challenge standings'
+      return 'Challenge standings. Ask Murph for this card in text'
   }
 }
 

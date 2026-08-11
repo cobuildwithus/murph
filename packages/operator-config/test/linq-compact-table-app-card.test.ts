@@ -32,6 +32,13 @@ const CARD: CompactTableResponseCardV1 = {
   },
 }
 
+const GENERIC_CARD: CompactTableResponseCardV1 = {
+  ...CARD,
+  title: 'Weekly plan',
+  subtitle: null,
+  tracking: null,
+}
+
 describe('Linq compact-table app cards', () => {
   it('sends the largest admitted card once with a truthful static fallback', async () => {
     const requests: Array<{ body: unknown; url: string }> = []
@@ -69,7 +76,7 @@ describe('Linq compact-table app cards', () => {
         idempotency_key: 'compact-table-1',
         parts: [
           {
-            fallback_text: 'Your workout',
+            fallback_text: 'Your workout. Ask Murph for this card in text',
             interactive: true,
             layout: expectedLayout,
             type: 'imessage_app',
@@ -92,5 +99,42 @@ describe('Linq compact-table app cards', () => {
     expect(layout?.trailing_caption).toBe(
       'Assists and spotted reps remain on the exact set note.',
     )
+  })
+
+  it('sends a generic table with its exact descriptive recovery fallback', async () => {
+    const requests: unknown[] = []
+    const fetchImplementation: LinqFetch = async (_url, init) => {
+      requests.push(
+        typeof init.body === 'string' ? JSON.parse(init.body) : null,
+      )
+      return {
+        arrayBuffer: async () => new ArrayBuffer(0),
+        json: async () => ({ message: { id: 'msg_2' } }),
+        ok: true,
+        status: 200,
+        text: async () => '',
+      }
+    }
+
+    await sendLinqIMessageAppCard({
+      card: GENERIC_CARD,
+      chatId: 'chat_2',
+      idempotencyKey: 'generic-table-1',
+    }, {
+      env: {
+        LINQ_API_TOKEN: 'test-token',
+      },
+      fetchImplementation,
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      message: {
+        parts: [{
+          fallback_text:
+            'Your Murph summary. Ask Murph for this card in text',
+        }],
+      },
+    })
   })
 })
