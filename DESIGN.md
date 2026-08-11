@@ -221,6 +221,15 @@ tap-to-reveal target state. The provider caption retains only the date and meal
 count; visible totals and goals are not repeated beneath the image. V1 renders
 an unavailable fiber dash in the image without adding a fiber caption claim.
 
+### iMessage Challenge Standings Card Image
+Render the app-absent standings fallback as the static counterpart to the
+shipping SwiftUI balloon. Keep the cream field, title, rank or collective
+progress, and score hierarchy aligned with the native card. The bitmap remains
+badge-free because Messages owns the outer chrome; align the title to the
+card's content padding instead of reserving an icon gutter. Preserve
+scorer-owned order, scores, progress, and coverage while using the identity-free
+public presentation defined by the challenge standings delivery contract.
+
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
 current MRR, tracked fulfilled usage top-ups, paying-customer growth, active

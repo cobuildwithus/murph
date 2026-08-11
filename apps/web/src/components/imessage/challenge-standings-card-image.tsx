@@ -4,10 +4,7 @@ import type {
   RankedChallengeStandingsResponseCardV1,
 } from "@murphai/contracts";
 
-import {
-  IMESSAGE_CARD_COLOR,
-  ImessageCardBadge,
-} from "./card-image-chrome";
+import { IMESSAGE_CARD_COLOR } from "./card-image-chrome";
 
 export const IMESSAGE_CHALLENGE_STANDINGS_CARD_IMAGE_WIDTH = 1_200;
 
@@ -66,14 +63,12 @@ export function ChallengeStandingsCardImage({
         fontFamily: "DM Sans",
       }}
     >
-      <ImessageCardBadge top={30} left={30} />
       <div
         style={{
           display: "flex",
           minHeight: 105,
           flexDirection: "column",
           justifyContent: "center",
-          marginLeft: 155,
           gap: 8,
         }}
       >
