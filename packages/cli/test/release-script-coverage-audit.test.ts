@@ -929,7 +929,7 @@ describe('monorepo release flow coverage audit', () => {
     ]
 
     expect(rootPackageJson.scripts?.['review:gpt']).toBe(
-      'cobuild-review-gpt --config scripts/review-gpt.config.sh',
+      'bash scripts/review-gpt-pr-head-preflight.sh --run',
     )
     for (const scriptName of removedScripts) {
       expect(rootPackageJson.scripts?.[scriptName]).toBeUndefined()
