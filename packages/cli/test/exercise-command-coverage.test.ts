@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { Cli } from 'incur'
+import { exerciseRoutineResponseCardV1Schema } from '@murphai/contracts'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { registerExerciseCommands } from '../src/commands/exercise.js'
@@ -75,6 +76,63 @@ test('exercise list show and facets expose the public movement catalog', async (
   assert.ok(showData.sources.length > 0)
   assert.ok(showData.item.steps.length > 0)
   assert.ok(showData.item.tips.length > 0)
+
+  const secondImage = showData.item.images[1]
+  assert.ok(secondImage)
+  assert.equal(secondImage.step, 'Bottom position')
+  const routineCard = exerciseRoutineResponseCardV1Schema.parse({
+    exercises: [{
+      dose: '5 repetitions',
+      estimatedSeconds: 30,
+      images: [{
+        ...secondImage,
+        source: `exercise_catalog:${showData.item.id}:2`,
+      }],
+      instructions: ['Sit the hips back and keep the heels down.'],
+      name: 'Bodyweight squat',
+    }],
+    footer: null,
+    intensity: 'Easy',
+    kind: 'exercise_routine',
+    labels: {
+      dose: 'Dose',
+      exercise: 'Exercise',
+      time: 'Time',
+      visualGuide: 'Visual guide',
+    },
+    safety: 'Stop if pain increases.',
+    subtitle: null,
+    title: 'Squat practice',
+    totalSeconds: 30,
+    transitionSeconds: 0,
+    version: 1,
+  })
+  assert.equal(routineCard.exercises[0]?.images[0]?.source, 'exercise_catalog:EX001:2')
+  assert.equal(routineCard.exercises[0]?.images[0]?.step, 'Bottom position')
+
+  const longAltResult = await runInProcessJsonCli<{
+    item: {
+      id: string
+      images: Array<{ url: string; step: string; alt: string }>
+    }
+  }>(cli, ['exercise', 'show', 'EX664'])
+  assert.equal(longAltResult.envelope.ok, true)
+  const longAltData = requireData(longAltResult.envelope)
+  const longAltImage = longAltData.item.images[2]
+  assert.ok(longAltImage)
+  assert.equal(longAltImage.alt.length, 500)
+  const longAltRoutine = exerciseRoutineResponseCardV1Schema.parse({
+    ...routineCard,
+    exercises: [{
+      ...routineCard.exercises[0],
+      images: [{
+        ...longAltImage,
+        source: `exercise_catalog:${longAltData.item.id}:3`,
+      }],
+    }],
+  })
+  assert.equal(longAltRoutine.exercises[0]?.images[0]?.alt.length, 500)
+  assert.equal(longAltRoutine.exercises[0]?.images[0]?.source, 'exercise_catalog:EX664:3')
 
   const catCowResult = await runInProcessJsonCli<{
     item: {

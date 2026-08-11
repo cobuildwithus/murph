@@ -69,6 +69,14 @@ identity, credential, canonical reference, or write authority, reads no database
 or remote service, logs no card values, and returns private no-store/no-index
 headers. It adds no card API, persistence owner, cache, queue, or retry path.
 
+When the same shared-card fragment reaches the public homepage outside the
+Messages extension, Web recognizes only the exact non-empty `#murph-card=`
+prefix after hydration and opens the App Store handoff. It never decodes,
+displays, stores, logs, or transmits the fragment value. Dismissal leaves the
+shared URL unchanged, and every other homepage fragment stays quiet. The web
+fallback complements the canonical App Store identity in Linq's card payload;
+neither path changes the installed-extension route or application authority.
+
 ## Plan versus actual
 
 Targets and actual results must remain distinct:

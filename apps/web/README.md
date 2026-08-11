@@ -273,6 +273,14 @@ card without fallback text remains contentless there rather than receiving the
 active-member placeholder. This rule is app-card-specific; legacy media-only
 first contacts retain their existing behavior.
 
+The public homepage also owns the browser fallback for shared response-card
+URLs. After hydration, a non-empty `#murph-card=` fragment opens the iPhone App
+Store handoff; the client compares only the prefix and presence of a value and
+never decodes, displays, stores, logs, or transmits that value. Other homepage
+fragments render normally. The compact dialog complements the canonical App
+Store identity in Linq's card payload; neither path changes Messages-extension
+routing or application authorization.
+
 ## Legal and health-permission publication surfaces
 
 Hosted deployments should expose HTML legal pages in addition to downloadable

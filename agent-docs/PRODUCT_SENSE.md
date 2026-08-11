@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-08-05
+Last verified: 2026-08-11
 
 ## Current Posture
 
@@ -172,6 +172,35 @@ default destination for every goal or the definition of activation.
   when neither source is safe. Convenience text never authorizes membership,
   consent, routing, matching, delivery, or participant actions.
 
+## Channel-Native Presentation
+
+- Telegram and iMessage are product UI surfaces, not plain-text transports.
+  When an owned workflow supports a card, table, image sequence, or other
+  structured presentation, Murph should use it instead of rebuilding the same
+  answer as a long message.
+- Telegram Rich Messages support headings, paragraphs, lists, quotations,
+  bordered or striped tables, expandable details, collages, slideshows, and
+  embedded media. Murph authors semantic cards through its tools; the Telegram
+  renderer owns provider HTML or blocks. Do not ask the model to write Telegram
+  markup. See the official [Telegram Bot API Rich Messages documentation](https://core.telegram.org/bots/api#rich-messages).
+- iMessage presentation can use the Murph Messages extension's interactive
+  cards, provider-owned static card layouts, and ordered response media. The
+  current routine path uses response media rather than pretending Telegram's
+  table, details, or slideshow UI exists in Messages.
+- Share the product meaning across channels: exercise steps, nutrition facts,
+  progress, summaries, tables, and safety context should stay consistent.
+  Adapt the visible UI to each platform's current capabilities. Telegram and
+  iMessage do not need identical layouts, controls, or fallback behavior.
+- A useful presentation added to one channel is a prompt to review the other.
+  The review asks whether that platform already has a suitable component or
+  needs its own native design. It does not require automatic feature parity.
+- Agent guidance and tool availability must make current channel capabilities
+  clear. The agent should choose the strongest owned presentation available
+  for that case and use concise text when no suitable component exists.
+- Keep delivery ownership, retries, receipts, and provider-specific recovery
+  inside each channel's existing implementation. Cross-channel consistency is
+  a product and authoring rule, not a reason to add a shared delivery layer.
+
 ## First-Class Product Objects
 
 - canonical private member context, including provenance, freshness, and
@@ -184,7 +213,10 @@ default destination for every goal or the definition of activation.
 - private-direct nutrition and compact-table cards, plus authorized group
   challenge standings, whose installed-iPhone presentation is native and whose
   macOS or app-absent presentation remains a legible static image with truthful
-  partial-state and goal-direction context plus a safe text recovery path
+  partial-state and goal-direction context plus a safe text recovery path; when
+  a shared card URL reaches the public homepage, a focused App Store handoff
+  explains how to return to the card without decoding or displaying its opaque
+  fragment
 - explicitly shared group contexts with scope and consent
 - public Health Commons protocols and sources, with aggregate outcomes as a
   future contribution-backed layer
