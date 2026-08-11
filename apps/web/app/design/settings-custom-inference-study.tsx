@@ -46,6 +46,32 @@ export function SettingsCustomInferenceStudy() {
 
       <div
         className="flex flex-col gap-8"
+        data-design-variant="venice-terra-sol-locked"
+      >
+        <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+          Venice route · Terra selected · Sol locked
+        </p>
+        <section className="flex flex-col gap-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            AI model
+          </div>
+          <HostedAssistantModelSettings
+            canUpgradeToEdge
+            configurationAvailable
+            customInferenceAvailable
+            initialDormantSolPreference={false}
+            initialModel="gpt-5.6-terra"
+            initialProvider="venice"
+            solAvailable={false}
+            veniceAvailable
+          />
+        </section>
+      </div>
+
+      <Separator />
+
+      <div
+        className="flex flex-col gap-8"
         data-design-variant="custom-venice-enabled"
       >
         <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">

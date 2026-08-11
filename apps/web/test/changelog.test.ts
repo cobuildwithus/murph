@@ -68,6 +68,23 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
+  it("keeps cleaner plan and model settings scoped to the visible outcome", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "cleaner-plan-and-model-settings",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      kind: "improvement",
+      priority: 1,
+      sourcePullRequests: [1621],
+      summary: expect.stringContaining("Starter usage and unavailable models"),
+      title: "Cleaner plan and model settings",
+    });
+    expect(item?.details).toBeUndefined();
+    expect(item?.tryIt).toBeUndefined();
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -320,6 +337,18 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("personality-settings-and-chat")).toMatchObject({
+      sourcePullRequests: [1589],
+      summary: expect.stringContaining("main and optional supporting personality"),
+      details: expect.stringContaining("same saved personality"),
+      tryIt: {
+        href: "/settings",
+        label: "Edit Murph's personality",
+      },
+    });
+    expect(items.get("personality-settings-and-chat")?.details).toContain(
+      "changes only that room's Murph",
+    );
     expect(items.get("cleaner-workout-cards-in-messages")).toMatchObject({
       sourcePullRequests: [1588],
       summary: expect.stringContaining("nutrition goal direction"),
@@ -343,6 +372,14 @@ describe("changelog registry", () => {
     });
     expect(
       items.get("referral-notification-route-recovery")?.tryIt,
+    ).toBeUndefined();
+    expect(items.get("blood-pressure-history-completion")).toMatchObject({
+      sourcePullRequests: [1523, 1625],
+      summary: expect.stringContaining("unfinished history import"),
+      details: expect.stringContaining("every remaining day finishes"),
+    });
+    expect(
+      items.get("blood-pressure-history-completion")?.tryIt,
     ).toBeUndefined();
     expect(items.get("group-sleep-challenges-use-fresh-data")).toMatchObject({
       sourcePullRequests: [1565, 1593],
@@ -573,8 +610,11 @@ describe("changelog registry", () => {
         id: "2026-08-10",
         itemIds: [
           "non-expiring-starter-access",
+          "cleaner-plan-and-model-settings",
           "personal-patterns",
+          "personality-settings-and-chat",
           "referral-notification-route-recovery",
+          "blood-pressure-history-completion",
           "reminders-keep-requested-timezone",
           "voice-memos-use-your-voice",
           "cleaner-workout-cards-in-messages",

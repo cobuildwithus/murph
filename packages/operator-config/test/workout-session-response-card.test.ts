@@ -19,7 +19,7 @@ const ACTIVE_WORKOUT_CARD = {
   version: 1,
   title: 'Push day',
   subtitle: null,
-  footer: 'Tap an exercise to log or correct a set.',
+  footer: 'Reply with the exercise, set, and result to log or correct it.',
   tracking: {
     kind: 'workout',
     entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
@@ -126,7 +126,7 @@ describe('workout session response cards', () => {
             ],
           ],
         ],
-        f: 'Tap an exercise to log or correct a set.',
+        f: 'Reply with the exercise, set, and result to log or correct it.',
       },
     })
     expect(JSON.stringify(decodeAppCardUrl(url))).not.toContain('evt_')
@@ -175,7 +175,7 @@ describe('workout session response cards', () => {
       ...ACTIVE_WORKOUT_CARD,
       title: 'Lower body strength',
       footer: state === 'active'
-        ? 'Tap an exercise to log or correct a set.'
+        ? 'Reply with the exercise, set, and result to log or correct it.'
         : 'Workout completed.',
       workout: {
         version: 1,
@@ -204,7 +204,7 @@ describe('workout session response cards', () => {
       return encodeWorkoutSessionAppCardUrl(card)
     })
 
-    expect(urls.map((url) => url.length)).toEqual([1373, 1583, 1624])
+    expect(urls.map((url) => url.length)).toEqual([1403, 1612, 1624])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
   })
 
@@ -212,13 +212,17 @@ describe('workout session response cards', () => {
     const visible = renderAssistantResponseCardText(ACTIVE_WORKOUT_CARD)
     expect(visible).toContain('Active workout · 3/6 sets complete')
     expect(visible).toContain(
-      'Bench press: set 1: 185 lb × 8 · set 2: 185 lb × 7 · set 3: target 185 lb × 6–8',
+      'Bench press: set 1: completed; actual 185 lb × 8; target 185 lb × 8 · set 2: completed; actual 185 lb × 7; target 185 lb × 8 · set 3: pending; target 185 lb × 6–8',
     )
     expect(visible).not.toContain('evt_')
     expect(visible).not.toContain('snapshot')
+    expect(visible).not.toContain('Tap an exercise')
 
     const transcript = renderAssistantResponseCardTranscriptText(
       ACTIVE_WORKOUT_CARD,
+    )
+    expect(transcript).toContain(
+      'Bench press: set 1: completed; actual 185 lb × 8; target 185 lb × 8',
     )
     expect(transcript).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ; snapshot: 2026-08-09T19:45:00.000Z]',
@@ -238,6 +242,41 @@ describe('workout session response cards', () => {
       schemaVersion: 4,
       card: { u: '3/6 sets complete' },
     })
+  })
+
+  it('preserves a completed extra set without inventing a target', () => {
+    const completedExtraSetCard = {
+      ...ACTIVE_WORKOUT_CARD,
+      subtitle: '4 of 7 sets complete',
+      workout: {
+        ...ACTIVE_WORKOUT_CARD.workout,
+        exercises: [
+          {
+            ...ACTIVE_WORKOUT_CARD.workout.exercises[0],
+            sets: [
+              ...ACTIVE_WORKOUT_CARD.workout.exercises[0].sets,
+              {
+                status: 'completed',
+                target: null,
+                actual: '205 lb × 5',
+              },
+            ],
+          },
+          ACTIVE_WORKOUT_CARD.workout.exercises[1],
+        ],
+      },
+    } satisfies AssistantResponseCard
+    const semanticSet = 'set 4: completed; actual 205 lb × 5'
+
+    expect(renderAssistantResponseCardText(completedExtraSetCard)).toContain(
+      semanticSet,
+    )
+    expect(buildLinqIMessageAppLayout(completedExtraSetCard).subcaption).toBe(
+      '4/7 sets complete',
+    )
+    expect(renderAssistantResponseCardText(completedExtraSetCard)).not.toContain(
+      `${semanticSet}; target`,
+    )
   })
 
   it('builds a truthful Messages preview layout', () => {
@@ -399,10 +438,10 @@ describe('workout session response cards', () => {
       'Push day\nCompleted workout · 3/6 sets complete',
     )
     expect(visible).toContain(
-      'set 3: skipped (target 185 lb × 6–8)',
+      'set 3: skipped; target 185 lb × 6–8',
     )
     expect(visible).toContain(
-      'Incline dumbbell press: set 1: 55 lb × 10 · set 2: skipped (target 55 lb × 8–10) · set 3: skipped',
+      'Incline dumbbell press: set 1: completed; actual 55 lb × 10; target 55 lb × 10 · set 2: skipped; target 55 lb × 8–10 · set 3: skipped',
     )
     expect(buildLinqIMessageAppLayout(completedCard)).toEqual({
       caption: 'Push day',
