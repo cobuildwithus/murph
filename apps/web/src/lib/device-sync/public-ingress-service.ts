@@ -164,7 +164,11 @@ export class HostedDeviceSyncPublicIngressService {
           provider,
           now,
         }) => {
-          if (await this.hasWithdrawnHealthDataConsent(account.id)) {
+          const ownerId = await this.context.store.getConnectionOwnerId(account.id);
+          if (
+            ownerId
+            && await this.hasWithdrawnHealthDataConsentForMember(ownerId)
+          ) {
             const completed = await this.context.store.completeWebhookTrace(
               provider.provider,
               traceId,
@@ -185,6 +189,7 @@ export class HostedDeviceSyncPublicIngressService {
             account,
             claimToken,
             now,
+            ownerId,
             store: this.context.store,
             traceId,
             webhook,
@@ -493,10 +498,11 @@ export class HostedDeviceSyncPublicIngressService {
     const resolvedRawBody = rawBody ?? (await this.readWebhookRawBody());
     // One webhook request opens and seals several secure-box fields under the
     // member's device domain roots. Scope the unwrap memo to the request so
-    // each distinct root key costs at most one KMS round trip per request.
-    // Account lookup and dirty-payload preparation both complete before the
-    // admission transaction; concrete and @active root aliases remain distinct
-    // cache keys. Hosted-onboarding webhooks use the same seam.
+    // each distinct root key costs at most one KMS round trip per request
+    // instead of one per field: the concrete root is unwrapped by the account
+    // lookup before the admission transaction, while the @active root used for
+    // sealing payloads is a separate cache key whose first unwrap still runs
+    // inside the transaction. Hosted-onboarding webhooks use the same seam.
     return runWithHostedDomainRootUnwrapCache(() =>
       this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody),
     );
@@ -616,10 +622,12 @@ export class HostedDeviceSyncPublicIngressService {
 
   private async hasWithdrawnHealthDataConsent(connectionId: string): Promise<boolean> {
     const memberId = await this.context.store.getConnectionOwnerId(connectionId);
-    if (!memberId) {
-      return false;
-    }
+    return memberId
+      ? await this.hasWithdrawnHealthDataConsentForMember(memberId)
+      : false;
+  }
 
+  private async hasWithdrawnHealthDataConsentForMember(memberId: string): Promise<boolean> {
     return await readHostedHealthDataConsentState({
       memberId,
       prisma: this.context.store.prisma,
