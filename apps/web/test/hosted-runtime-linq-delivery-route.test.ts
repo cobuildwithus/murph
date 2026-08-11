@@ -462,6 +462,32 @@ describe("hosted runtime Linq delivery route", () => {
     );
   });
 
+  it("prefers the canonical sender number over a stale post-send line lookup key", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "assistant-outbox:intent_current_line",
+      lineLookupKey: "hbidx:phone:v1:stale-line",
+      providerMessageId: "linq_message_current_line",
+      providerThreadId: "linq_chat_current_line",
+      target: "linq_chat_current_line",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqChatId: "linq_chat_current_line",
+        phoneNumber: "+15550100099",
+        phoneNumberLookupKey: null,
+        threadIsDirect: true,
+      }),
+    );
+  });
+
   it("records outcomes even when an old runner sends stale route authority", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",

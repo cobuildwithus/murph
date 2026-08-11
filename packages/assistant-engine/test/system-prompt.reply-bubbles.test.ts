@@ -23,6 +23,18 @@ describe('assistant reply bubble prompt guidance', () => {
       )
 
       expect(layers.threadContextPrompt).toContain(TEXTING_RHYTHM_PROMPT)
+      expect(layers.threadContextPrompt).toContain(
+        "use the current channel's available presentation",
+      )
+      expect(layers.threadContextPrompt).toContain(
+        'Telegram and iMessage have different capabilities',
+      )
+      expect(layers.threadContextPrompt).toContain(
+        'bordered or striped tables, expandable details, slideshows, collages, and embedded media',
+      )
+      expect(layers.threadContextPrompt).toContain(
+        'Messages-extension cards, provider static card layouts, and ordered response media',
+      )
       expect(layers.prompt).toContain('murph.send_progress_update')
       expect(layers.prompt).toContain(
         'including every `---` bubble',

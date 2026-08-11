@@ -127,22 +127,29 @@ describe('assistant codex image helpers', () => {
     })
   })
 
-  it('keeps original detail only for one initial image on a supported managed target', () => {
-    const image = {
-      bytes: Buffer.from([0x01, 0x02, 0x03]),
-      detail: 'original' as const,
-      mimeType: 'image/webp',
-    }
+  it.each([
+    ['gpt-5.6-luna', 'openai'],
+    ['gpt-5.6-terra', 'hosted-openai'],
+    ['gpt-5.6-sol', 'hosted-chatgpt-openai'],
+  ] as const)(
+    'keeps original detail for %s on the %s route',
+    (model, modelProvider) => {
+      const image = {
+        bytes: Buffer.from([0x01, 0x02, 0x03]),
+        detail: 'original' as const,
+        mimeType: 'image/webp',
+      }
 
-    expect(
-      normalizeCodexAppServerImageDetails({
-        images: [image],
-        model: 'gpt-5.6-terra',
-        modelProvider: 'hosted-openai',
-        turnKind: 'initial',
-      }),
-    ).toEqual([image])
-  })
+      expect(
+        normalizeCodexAppServerImageDetails({
+          images: [image],
+          model,
+          modelProvider,
+          turnKind: 'initial',
+        }),
+      ).toEqual([image])
+    },
+  )
 
   it.each([
     {
@@ -165,8 +172,29 @@ describe('assistant codex image helpers', () => {
     {
       name: 'custom inference',
       images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
-      model: 'member-model',
+      model: 'gpt-5.6-terra',
       modelProvider: 'hosted-custom-inference',
+      turnKind: 'initial' as const,
+    },
+    {
+      name: 'unsupported OpenAI model',
+      images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
+      model: 'gpt-5.2',
+      modelProvider: 'openai',
+      turnKind: 'initial' as const,
+    },
+    {
+      name: 'unknown OpenAI model',
+      images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
+      model: 'member-model',
+      modelProvider: 'hosted-openai',
+      turnKind: 'initial' as const,
+    },
+    {
+      name: 'missing OpenAI model',
+      images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
+      model: undefined,
+      modelProvider: 'hosted-chatgpt-openai',
       turnKind: 'initial' as const,
     },
   ])('downgrades original detail for a $name input', ({
