@@ -519,6 +519,7 @@ async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<nu
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
   importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   lanes: readonly HostedMailboxLane[];
+  mailboxFetchSignal?: AbortSignal | null;
   prefetchLanes: readonly HostedMailboxLane[];
   runnerInput: HostedWorkspaceRunnerInput;
   requestId: string;
@@ -533,6 +534,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
         limitPerLane: input.runnerInput.limitPerLane,
         requestId: input.requestId,
         runnerInput: input.runnerInput,
+        signal: input.mailboxFetchSignal ?? null,
       });
   const runnerResult = await runHostedWorkspaceUntilIdleOrBudget({
     ...input.runnerInput,
@@ -545,6 +547,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
       : null,
     initialMailboxImportContext: input.importItemContext ?? null,
     initialMailboxImportLanes: input.lanes,
+    initialMailboxFetchSignal: input.mailboxFetchSignal ?? null,
     initialMailboxPrefetch: prefetch,
     requestId: input.requestId,
   });
@@ -567,6 +570,7 @@ async function createHostedForegroundMailboxPrefetch(input: {
   limitPerLane: number;
   requestId: string;
   runnerInput: HostedWorkspaceRunnerInput;
+  signal?: AbortSignal | null;
 }): Promise<HostedMailboxPrefixPrefetch> {
   const state = await readHostedMailboxImportState({
     vaultRoot: input.runnerInput.vaultRoot,
@@ -576,6 +580,7 @@ async function createHostedForegroundMailboxPrefetch(input: {
     limitPerLane: input.limitPerLane,
     mailboxPort: input.runnerInput.platform.mailboxPort,
     requestId: input.requestId,
+    signal: input.signal ?? null,
     state,
   });
 }
@@ -1795,57 +1800,63 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       options.runtimeWakeSignal ?? null,
       options.shutdownSignal ?? null,
     );
-    const systemMailboxInitialForegroundWakeObserved =
+    const returnSystemMailboxBeforeInitialImport =
       input.request.processingMode === "system_mailbox"
-      && initialPendingRuntimeWake !== null;
-    if (systemMailboxInitialForegroundWakeObserved) {
-      const projectedWake = await resolveHostedSystemMailboxProcessingModeWake({
-        mailboxImportRetryAt: null,
-        nowMs: Date.now(),
-        operatorHomeRoot: restored.operatorHomeRoot,
-        runtimeEnv: invocationRuntimeEnv,
-        vaultRoot: restored.vaultRoot,
-      });
-      const returnedWake = selectEarliestHostedRuntimeWake([
-        {
-          at: projectedWake.nextWakeAt,
-          reason: projectedWake.nextWakeReason,
-        },
-        {
-          at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
-          reason: activeWorkspace?.inboxMediaRetentionWakeAt
-            ? "inbox_media_retention"
-            : null,
-        },
-      ]);
-      const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
-        redactedStatus: activeWorkspace?.redactedStatus ?? null,
-        vaultRoot: restored.vaultRoot,
-      });
-      const invocationResult = {
-        immediateRecheckRequested: true as const,
-        nextWakeAt: returnedWake.nextWakeAt,
-        ...(returnedWake.nextWakeReason
-          ? { nextWakeReason: returnedWake.nextWakeReason }
-          : {}),
-        redactedStatus,
-        status: resolveHostedWorkspaceInvocationStatus({
-          mailboxBudgetExhausted: mailboxBudgetExhausted(),
-          nextWakeAt: returnedWake.nextWakeAt,
-        }),
-      };
-      emitPhaseLog({
-        details: {
-          immediateRecheckRequested: true,
-          invocationStatus: invocationResult.status,
-          nextWakeAtPresent: invocationResult.nextWakeAt !== null,
-        },
-        input,
-        requestId,
-        stage: "runtime.return",
-        status: "done",
-      });
-      return invocationResult;
+        ? async () => {
+            const projectedWake = await resolveHostedSystemMailboxProcessingModeWake({
+              mailboxImportRetryAt: null,
+              nowMs: Date.now(),
+              operatorHomeRoot: restored.operatorHomeRoot,
+              runtimeEnv: invocationRuntimeEnv,
+              vaultRoot: restored.vaultRoot,
+            });
+            const returnedWake = selectEarliestHostedRuntimeWake([
+              {
+                at: projectedWake.nextWakeAt,
+                reason: projectedWake.nextWakeReason,
+              },
+              {
+                at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
+                reason: activeWorkspace?.inboxMediaRetentionWakeAt
+                  ? "inbox_media_retention"
+                  : null,
+              },
+            ]);
+            const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+              redactedStatus: activeWorkspace?.redactedStatus ?? null,
+              vaultRoot: restored.vaultRoot,
+            });
+            const invocationResult = {
+              immediateRecheckRequested: true as const,
+              nextWakeAt: returnedWake.nextWakeAt,
+              ...(returnedWake.nextWakeReason
+                ? { nextWakeReason: returnedWake.nextWakeReason }
+                : {}),
+              redactedStatus,
+              status: resolveHostedWorkspaceInvocationStatus({
+                mailboxBudgetExhausted: mailboxBudgetExhausted(),
+                nextWakeAt: returnedWake.nextWakeAt,
+              }),
+            };
+            emitPhaseLog({
+              details: {
+                immediateRecheckRequested: true,
+                invocationStatus: invocationResult.status,
+                nextWakeAtPresent: invocationResult.nextWakeAt !== null,
+              },
+              input,
+              requestId,
+              stage: "runtime.return",
+              status: "done",
+            });
+            return invocationResult;
+          }
+        : null;
+    if (
+      returnSystemMailboxBeforeInitialImport
+      && initialPendingRuntimeWake !== null
+    ) {
+      return await returnSystemMailboxBeforeInitialImport();
     }
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
       mergeHostedRuntimeWakeLatencySeeds(
@@ -1866,15 +1877,67 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     // Mailbox import can mutate the restored vault through the inbox sidecar.
     // Keep the container's single-runner ownership until that work settles so
     // an aborted invocation cannot write into a newer restore at the same path.
-    const initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
-      importItemContext: initialMailboxImportContext,
-      lanes: initialMailboxImportLanes,
-      prefetchLanes: input.request.processingMode === "system_mailbox"
-        ? initialMailboxImportLanes
-        : HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
-      runnerInput: baseRunnerInput,
-      requestId,
-    });
+    let initialMailboxImportResult: HostedInitialMailboxImportResult;
+    if (returnSystemMailboxBeforeInitialImport === null) {
+      initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+        importItemContext: initialMailboxImportContext,
+        lanes: initialMailboxImportLanes,
+        prefetchLanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+        runnerInput: baseRunnerInput,
+        requestId,
+      });
+    } else {
+      const initialMailboxFetchWakeInterruption =
+        createHostedRuntimeCheckpointWakeInterruption({
+          enabled: true,
+          runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+        });
+      const restoreInitialMailboxFetchWake = (
+        notification: RuntimeWakeNotification | null,
+      ) => {
+        if (!notification || options.shutdownSignal?.aborted === true) {
+          return;
+        }
+        options.runtimeWakeSignal?.notify({
+          ...(notification.orchestration
+            ? { orchestration: notification.orchestration }
+            : {}),
+          notifiedAtEpochMs: notification.notifiedAtEpochMs,
+        });
+        if (
+          notification.latestNotifiedAtEpochMs !== undefined
+          && notification.latestNotifiedAtEpochMs !== notification.notifiedAtEpochMs
+        ) {
+          options.runtimeWakeSignal?.notify(notification.latestNotifiedAtEpochMs);
+        }
+      };
+      try {
+        initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
+          importItemContext: initialMailboxImportContext,
+          lanes: initialMailboxImportLanes,
+          mailboxFetchSignal: initialMailboxFetchWakeInterruption.signal,
+          prefetchLanes: initialMailboxImportLanes,
+          runnerInput: baseRunnerInput,
+          requestId,
+        });
+      } catch (error) {
+        await initialMailboxFetchWakeInterruption.dispose();
+        const notification = initialMailboxFetchWakeInterruption.takeNotification();
+        if (
+          notification
+          && options.shutdownSignal?.aborted !== true
+          && error instanceof HostedRuntimeCheckpointInterruptedByWakeError
+        ) {
+          return await returnSystemMailboxBeforeInitialImport();
+        }
+        restoreInitialMailboxFetchWake(notification);
+        throw error;
+      }
+      await initialMailboxFetchWakeInterruption.dispose();
+      restoreInitialMailboxFetchWake(
+        initialMailboxFetchWakeInterruption.takeNotification(),
+      );
+    }
     const initialMailboxImportDoneAtMonotonicMs =
       readAssistantProviderStartMonotonicTickMs();
     assertRuntimeNotAborted();
@@ -6424,7 +6487,8 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.mailboxPort
       ? {
           mailboxPort: {
-            fetch: (request) => platform.mailboxPort!.fetch(request),
+            fetch: (request, context) =>
+              platform.mailboxPort!.fetch(request, context),
             fetchPayload: (request) => platform.mailboxPort!.fetchPayload(request),
           },
         }

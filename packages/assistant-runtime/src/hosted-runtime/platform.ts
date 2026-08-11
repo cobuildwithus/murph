@@ -581,7 +581,10 @@ export interface HostedRuntimePhysicalNotePort {
 }
 
 export interface HostedRuntimeMailboxPort {
-  fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
+  fetch(
+    request: HostedMailboxFetchRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
   ): Promise<HostedMailboxPayloadFetchResponse>;

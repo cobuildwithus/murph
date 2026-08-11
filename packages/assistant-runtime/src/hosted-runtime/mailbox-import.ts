@@ -129,6 +129,7 @@ export interface HostedMailboxPrefixPrefetch {
   lanes: readonly HostedMailboxLane[];
   limitPerLane: number;
   response: Promise<HostedMailboxFetchResponse>;
+  signal?: AbortSignal | null;
 }
 
 export class HostedMailboxUserMismatchError extends Error {
@@ -151,6 +152,7 @@ export function prefetchHostedMailboxPrefix(input: {
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
   requestId: string;
+  signal?: AbortSignal | null;
   state: HostedMailboxImportState;
 }): HostedMailboxPrefixPrefetch {
   const lanes = input.lanes ?? HOSTED_MAILBOX_LANES;
@@ -166,9 +168,12 @@ export function prefetchHostedMailboxPrefix(input: {
     limitPerLane: input.limitPerLane,
     requestId: input.requestId,
   };
+  const signal = input.signal ?? null;
   let response: Promise<HostedMailboxFetchResponse>;
   try {
-    response = input.mailboxPort.fetch(request);
+    response = signal
+      ? input.mailboxPort.fetch(request, { signal })
+      : input.mailboxPort.fetch(request);
   } catch (error) {
     response = Promise.reject(error);
   }
@@ -179,12 +184,14 @@ export function prefetchHostedMailboxPrefix(input: {
     lanes,
     limitPerLane: input.limitPerLane,
     response,
+    ...(signal ? { signal } : {}),
   };
 }
 
 export async function fetchAndProcessHostedMailboxPrefix(input: {
   deferConversationUntil?: HostedMailboxConversationDeferral | null;
   expectedUserId: string;
+  fetchSignal?: AbortSignal | null;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
   lanes?: readonly HostedMailboxLane[];
   limitPerLane: number;
@@ -197,6 +204,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const now = input.now ?? (() => new Date().toISOString());
   const lanes = input.lanes ?? HOSTED_MAILBOX_LANES;
   const fetchedResponse = await fetchHostedMailboxPrefix({
+    fetchSignal: input.fetchSignal ?? input.prefetch?.signal ?? null,
     lanes,
     limitPerLane: input.limitPerLane,
     mailboxPort: input.mailboxPort,
@@ -652,6 +660,7 @@ function isLegacyVaultShareImportAction(
 }
 
 async function fetchHostedMailboxPrefix(input: {
+  fetchSignal?: AbortSignal | null;
   lanes: readonly HostedMailboxLane[];
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
@@ -667,7 +676,10 @@ async function fetchHostedMailboxPrefix(input: {
   })) {
     try {
       return await input.prefetch.response;
-    } catch {
+    } catch (error) {
+      if (input.prefetch.signal?.aborted) {
+        throw error;
+      }
       return await fetchHostedMailboxPrefixFromPort(input);
     }
   }
@@ -680,21 +692,26 @@ function hasHostedMailboxSidecarPayload(item: HostedMailboxItem): boolean {
 }
 
 async function fetchHostedMailboxPrefixFromPort(input: {
+  fetchSignal?: AbortSignal | null;
   lanes: readonly HostedMailboxLane[];
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
   requestId: string;
   state: HostedMailboxImportState;
 }): Promise<HostedMailboxFetchResponse> {
-  return await input.mailboxPort.fetch({
-    cursorMode: "imported_seq",
+  const request = {
+    cursorMode: "imported_seq" as const,
     lanes: input.lanes.map((lane) => ({
       importedSeq: input.state.watermarks[lane],
       lane,
     })),
     limitPerLane: input.limitPerLane,
     requestId: input.requestId,
-  });
+  };
+  const signal = input.fetchSignal ?? null;
+  return await (signal
+    ? input.mailboxPort.fetch(request, { signal })
+    : input.mailboxPort.fetch(request));
 }
 
 function canUseHostedMailboxPrefixPrefetch(input: {
