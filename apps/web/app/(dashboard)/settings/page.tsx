@@ -155,7 +155,8 @@ export default async function SettingsPage({
     await getHostedDashboardPageAuthSnapshot();
   if (!authenticated) {
     if (
-      !groupPaymentMethodSaved
+      familyInviteReturnPath === null
+      && !groupPaymentMethodSaved
       && planChangeReturn === null
       && usageTopUpPurchaseReturn === null
     ) {

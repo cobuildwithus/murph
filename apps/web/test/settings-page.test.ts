@@ -661,6 +661,47 @@ test("SettingsPage keeps a signed-out Core payment return recoverable", async ()
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
+test("SettingsPage keeps an exact signed-out Family invite return recoverable", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      familyInviteReturn: "/family/accept/current_username_invite",
+    }),
+  }));
+
+  assert.match(markup, /One more step/);
+  assert.match(markup, /Sign in to verify and finish your billing update\./);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+  expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+  expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["external", "https://example.test/family/accept/invite_123"],
+  ["malformed", "/family/accept/invite 123"],
+  ["repeated", ["/family/accept/invite_123", "/family/accept/invite_456"]],
+])("SettingsPage rejects a signed-out %s Family invite return", async (_label, familyInviteReturn) => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  await expect(SettingsPage({
+    searchParams: Promise.resolve({ familyInviteReturn }),
+  })).rejects.toThrow("NEXT_REDIRECT:/");
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
 test("SettingsPage keeps a signed-out usage-credit return recoverable", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
