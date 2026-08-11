@@ -120,7 +120,10 @@ import {
   foodLabelSearchResultSchema,
 } from './food-labels.js'
 import { registerResearchCommands } from './commands/research.js'
-import { researchScoutResultSchema } from './research-scout.js'
+import {
+  RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE,
+  researchScoutResultSchema,
+} from './research-scout.js'
 import { registerRouteCommands } from './commands/route.js'
 import {
   knowledgeChallengeScoreCommandDescription,
@@ -174,6 +177,7 @@ import {
   wearablesBodyStateListResultSchema,
   wearablesDayResultSchema,
   wearablesDriftResultSchema,
+  wearablesPersonalPatternsResultSchema,
   wearablesLatestResultSchema,
   wearablesMetricLatestResultSchema,
   wearablesMetricTrendResultSchema,
@@ -967,7 +971,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['research', 'payload-schema'],
         description:
-          'Emit the exact compact profile JSON body schema for research scout --input.',
+          'Emit the exact finite focused-scope JSON body schema for research scout --input.',
         hint:
           'Use this before research scout when constructing the stdin or @file JSON body.',
         output: payloadSchemaResultSchema,
@@ -975,9 +979,9 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['research', 'scout'],
         description:
-          'Search Exa for bounded recent health research candidates from a compact non-identifying profile without writing vault records.',
+          'Search Exa for bounded human-research candidates from one finite focused structured scope without writing vault records.',
         hint:
-          'Requires EXA_API_KEY. Pass a compact tag profile only; run research payload-schema --format json for the exact profile body. Returns the provider response without local candidate post-processing.',
+          `Requires EXA_API_KEY and {"mode":"focused"}. Use only exact server-owned public concepts: ${RESEARCH_SCOUT_FOCUSED_CONCEPT_GUIDANCE}. If the question cannot be represented exactly, make no Exa call. Managed broad discovery and automation use research scout-batch. Never include arbitrary values, names, organizations, private notes, or personal data. Trust only candidates whose resultIndex maps to a returned source with a title, web URL, and enough publication metadata for the claim; otherwise report no usable current source without fabricating or repeating the lookup blindly.`,
         output: researchScoutResultSchema,
       },
     ],
@@ -1053,6 +1057,10 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['measurement', 'list'],
         description: measurementCommandDescriptions.list,
+      },
+      {
+        path: ['measurement', 'entry', 'list'],
+        description: measurementCommandDescriptions.entryList,
       },
       {
         path: ['measurement', 'manifest'],
@@ -1531,6 +1539,11 @@ export const vaultCliCommandDescriptors = [
         description: 'Explain the biggest normalized wearable drift Murph sees across the current wearable surfaces.',
         output: wearablesDriftResultSchema,
       },
+      {
+        path: ['wearables', 'patterns'],
+        description: 'Compare repeated activity and intervention days with next-day sleep and recovery outcomes.',
+        output: wearablesPersonalPatternsResultSchema,
+      },
     ],
     directVaultServiceBindings: assumeDirectVaultServiceBindings({
       query: [
@@ -1545,6 +1558,7 @@ export const vaultCliCommandDescriptors = [
         'listWearableRecovery',
         'listWearableSources',
         'showWearableDrift',
+        'showPersonalPatterns',
       ],
     }),
     register({ cli, services }) {

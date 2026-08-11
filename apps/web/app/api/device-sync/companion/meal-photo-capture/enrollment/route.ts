@@ -1,4 +1,5 @@
 import {
+  activateMealPhotoCaptureEnrollmentForScopedToken,
   assertMealPhotoCaptureRequestHasNoBody,
   isMealPhotoCaptureScopedAuthorization,
   issueMealPhotoCaptureEnrollment,
@@ -79,5 +80,14 @@ export const DELETE = withJsonError(async (request: Request) => {
     memberId: auth.member.id,
     prisma,
     request: revocationRequest,
+  }));
+});
+
+export const PUT = withJsonError(async (request: Request) => {
+  const prisma = getPrisma();
+  await assertMealPhotoCaptureRequestHasNoBody(request);
+  return jsonOk(await activateMealPhotoCaptureEnrollmentForScopedToken({
+    prisma,
+    token: requireMealPhotoCaptureScopedToken(request),
   }));
 });

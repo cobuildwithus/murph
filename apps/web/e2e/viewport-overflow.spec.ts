@@ -146,6 +146,71 @@ for (const route of ROUTES) {
   }
 }
 
+test("homepage footer link columns stay separate at the sm breakpoint", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 640, height: 900 });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto("/", { waitUntil: "load" });
+  expect(response?.status(), "homepage should respond 200 at 640px").toBe(200);
+  await page.evaluate(async () => {
+    await document.fonts?.ready;
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
+  });
+
+  const footer = page.locator("#site-footer");
+  await expect(footer).toBeVisible();
+  const overlaps = await footer.evaluate((element, tolerance) => {
+    const readLinks = (ariaLabel: string) =>
+      Array.from(
+        element.querySelectorAll<HTMLAnchorElement>(
+          `nav[aria-label="${ariaLabel}"] a`,
+        ),
+      ).map((link) => {
+        const rect = link.getBoundingClientRect();
+        return {
+          bottom: rect.bottom,
+          label: link.textContent?.trim() ?? "",
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+        };
+      });
+
+    const productLinks = readLinks("Product links");
+    const legalLinks = readLinks("Legal links");
+    if (productLinks.length === 0 || legalLinks.length === 0) {
+      throw new Error("Homepage footer link columns are missing.");
+    }
+
+    return productLinks.flatMap((productLink) =>
+      legalLinks
+        .filter(
+          (legalLink) =>
+            productLink.left < legalLink.right - tolerance
+            && productLink.right > legalLink.left + tolerance
+            && productLink.top < legalLink.bottom - tolerance
+            && productLink.bottom > legalLink.top + tolerance,
+        )
+        .map((legalLink) => `${productLink.label} / ${legalLink.label}`),
+    );
+  }, OVERFLOW_TOLERANCE_PX);
+
+  expect(
+    overlaps,
+    `footer product and legal links overlap at 640px: ${overlaps.join(", ")}`,
+  ).toEqual([]);
+});
+
 test("health-data consent actions stay inline and contained", async ({ page }) => {
   test.setTimeout(300_000);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -508,16 +573,17 @@ for (const width of [768, 1280] as const) {
       study.locator('[data-design-state="exhausted-without-credit"] [inert]'),
     ).toHaveCount(1);
     await expect(
-      study.locator('[data-design-state="trial-conversion"] [inert]'),
+      study.locator('[data-design-state="starter-exhausted"] [inert]'),
     ).toHaveCount(1);
     await expect(activeState.locator("[inert]")).toHaveCount(1);
     await expect(activeState.getByText("Reward pending", { exact: true })).toBeVisible();
     await expect(historyPreview).toHaveCount(1);
     await expect(
       historyPreview.getByText(
-        "Earn usage by inviting friends or adding Murph to a groupchat",
+        "Your personal link is ready to share. Ask Murph if you want to explore a group referral option.",
       ),
     ).toBeVisible();
+    await expect(historyPreview.getByText("Copy link", { exact: true })).toBeVisible();
     await expect(historyPreview.getByText("Ask Murph", { exact: true })).toBeVisible();
     expect(
       await historyPreview.evaluate((element) =>
@@ -538,16 +604,16 @@ for (const width of [768, 1280] as const) {
       historyPreview.locator(
         'a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
       ),
-    ).toHaveCount(2);
+    ).toHaveCount(3);
 
     const currentReferrals = referralDetailsPreview.getByRole("list", {
       name: "Current usage referrals",
     });
     await expect(currentReferrals).toBeVisible();
     const referralDetailNames = [
-      "Details for Start an active group: In progress, Ends Aug 3 at 12:00 PM UTC",
-      "Details for Start an active group: Checking final activity, Closed Jul 27 at 12:00 PM UTC",
-      "Details for Start an active group: Reward pending, Qualified Jul 25",
+      "Details for Start a group conversation: In progress, Ends Aug 3 at 12:00 PM UTC",
+      "Details for Start a group conversation: Checking final activity, Closed Jul 27 at 12:00 PM UTC",
+      "Details for Start a group conversation: Reward pending, Qualified Jul 25",
     ];
     for (const name of referralDetailNames) {
       await expect(currentReferrals.getByRole("button", { name })).toHaveCount(1);
@@ -568,12 +634,16 @@ for (const width of [768, 1280] as const) {
     await page.keyboard.press("Enter");
     await expect(referralDetails).not.toHaveAttribute("open", "");
 
-    const trialConversion = study.locator(
-      '[data-design-state="trial-conversion"]',
+    const starterExhausted = study.locator(
+      '[data-design-state="starter-exhausted"]',
     );
-    await expect(trialConversion.getByText("Free trial", { exact: true })).toBeVisible();
     await expect(
-      trialConversion.locator("button").filter({ hasText: "Start Pulse plan" }),
+      starterExhausted.getByText("Starter usage exhausted", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      starterExhausted
+        .getByRole("button", { name: "Choose Pulse", exact: true })
+        .first(),
     ).toBeVisible();
 
     const layout = await page.evaluate(() => {

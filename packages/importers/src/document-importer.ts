@@ -1,5 +1,5 @@
 import type { EventSource } from "@murphai/contracts";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 import { assertCanonicalWritePort } from "./core-port.ts";
 import type { DocumentImportPayload } from "./core-port.ts";

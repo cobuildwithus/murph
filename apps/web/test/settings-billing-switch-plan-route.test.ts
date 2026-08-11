@@ -74,11 +74,38 @@ test("schedules an authenticated member to Group", async () => {
   });
 });
 
-test("rejects an unsupported scheduled target", async () => {
+test("schedules an authenticated member down to Edge", async () => {
+  mocks.scheduleHostedBillingPlanSwitch.mockResolvedValue({
+    effectiveAt: "2026-09-01T00:00:00.000Z",
+    scheduledBillingPlanCode: "launch_edge_monthly",
+    status: "scheduled",
+  });
+
   const response = await billingSwitchRoute.POST(
     new Request("https://example.test/api/settings/billing/switch-plan", {
       body: JSON.stringify({
         targetPlanCode: "launch_edge_monthly",
+      }),
+      headers: {
+        origin: "https://example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.scheduleHostedBillingPlanSwitch).toHaveBeenCalledWith({
+    memberId: "member_123",
+    prisma: { label: "test-prisma" },
+    targetPlanCode: "launch_edge_monthly",
+  });
+});
+
+test("rejects an unsupported scheduled target", async () => {
+  const response = await billingSwitchRoute.POST(
+    new Request("https://example.test/api/settings/billing/switch-plan", {
+      body: JSON.stringify({
+        targetPlanCode: "launch_max_monthly",
       }),
       headers: {
         origin: "https://example.test",

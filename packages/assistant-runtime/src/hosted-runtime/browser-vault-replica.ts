@@ -266,6 +266,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
     const replicaRef = await cancellation.race(
       port.write({
         replica,
+        replacedReplicaRef: input.workspace.browserVaultReplicaRef ?? null,
         signal: cancellation.signal,
       }),
     );

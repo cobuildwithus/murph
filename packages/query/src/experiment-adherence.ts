@@ -163,6 +163,11 @@ export interface AdherenceSessionCounts {
   skippedSessions: number;
 }
 
+export interface CalendarAdherenceSessionCounts extends AdherenceSessionCounts {
+  expectedSessionsByNow: number;
+  loggedEvidenceIds: string[];
+}
+
 export interface AdherenceConfidenceSessionCounts {
   sensedSessions: number;
   confirmedSessions: number;
@@ -624,6 +629,159 @@ export function countCompletedAdherenceSessions(input: {
   return counts;
 }
 
+export function countCalendarAdherenceSessions(input: {
+  asOf: Date | string;
+  cells: readonly ExperimentAdherenceCell[];
+  observations: readonly ExperimentAdherenceObservation[];
+  target: ExperimentAdherenceTarget;
+}): CalendarAdherenceSessionCounts {
+  const counts: CalendarAdherenceSessionCounts = {
+    ...emptyAdherenceSessionCounts(),
+    expectedSessionsByNow: 0,
+    loggedEvidenceIds: [],
+  };
+  const { target } = input;
+  if (!target.calendar || target.evidence.kind !== "linkedEventCount") {
+    return counts;
+  }
+
+  const asOf = resolveAsOf(input.asOf, target.calendar.timeZone);
+  const countedEvidenceIds = new Set<string>();
+  for (const cell of input.cells) {
+    if (cell.targetId !== target.targetId) {
+      continue;
+    }
+
+    const expectedCount = normalizeExpectedOccurrenceCount(cell.expectedCount);
+    if (expectedCount === 0) {
+      continue;
+    }
+
+    const matchingObservations = collectMatchingObservations(
+      target,
+      cell.localDate,
+      input.observations,
+    ).filter((observation) => !countedEvidenceIds.has(observation.evidenceId));
+    const positiveObservations = matchingObservations
+      .filter((observation) =>
+        observation.status !== "missed" && observation.status !== "skipped"
+      )
+      .sort(compareCalendarPositiveObservations);
+    const negativeObservations = matchingObservations.filter((observation) =>
+      observation.status === "missed" || observation.status === "skipped"
+    );
+
+    let remaining = expectedCount;
+    for (const observation of positiveObservations) {
+      if (remaining === 0) {
+        break;
+      }
+      if (countedEvidenceIds.has(observation.evidenceId)) {
+        continue;
+      }
+
+      countedEvidenceIds.add(observation.evidenceId);
+      counts.loggedEvidenceIds.push(observation.evidenceId);
+      if (observation.status === "partial") {
+        counts.partialSessions += 1;
+      } else {
+        counts.completedSessions += 1;
+      }
+      countAdherenceObservationConfidence(counts, observation);
+      remaining -= 1;
+    }
+
+    for (const observation of negativeObservations) {
+      if (remaining === 0) {
+        break;
+      }
+      if (countedEvidenceIds.has(observation.evidenceId)) {
+        continue;
+      }
+
+      countedEvidenceIds.add(observation.evidenceId);
+      // Adherence v1 deliberately treats an explicit skip as a miss.
+      counts.missedSessions += 1;
+      remaining -= 1;
+    }
+
+    const explicitOccurrences = expectedCount - remaining;
+    const expectation: AdherenceExpectation = {
+      expectedCount,
+      label: cell.label,
+      localDate: cell.localDate,
+      localTime: cell.localTime,
+      target,
+    };
+    if (asOfWithinGrace(asOf, expectation)) {
+      // Repeated daily targets usually have one aggregate due time. Until that
+      // grace window closes, only explicitly observed occurrences are due.
+      counts.expectedSessionsByNow += explicitOccurrences;
+      continue;
+    }
+
+    counts.expectedSessionsByNow += expectedCount;
+    if (remaining === 0) {
+      continue;
+    }
+
+    const missingPolicy =
+      target.evidence.missing === "assumed_after_grace" &&
+        target.evidence.eventKind !== "intervention_session"
+        ? "missed_after_grace"
+        : target.evidence.missing;
+    if (missingPolicy === "assumed_after_grace") {
+      counts.completedSessions += remaining;
+      counts.assumedSessions += remaining;
+    } else if (missingPolicy === "missed_after_grace") {
+      counts.missedSessions += remaining;
+    }
+  }
+
+  return counts;
+}
+
+function normalizeExpectedOccurrenceCount(
+  value: number | null | undefined,
+): number {
+  return Math.max(0, Math.trunc(value ?? 1));
+}
+
+function compareCalendarPositiveObservations(
+  left: ExperimentAdherenceObservation,
+  right: ExperimentAdherenceObservation,
+): number {
+  const leftPartial = left.status === "partial" ? 1 : 0;
+  const rightPartial = right.status === "partial" ? 1 : 0;
+  if (leftPartial !== rightPartial) {
+    return leftPartial - rightPartial;
+  }
+
+  const sourceDifference =
+    adherenceObservationConfidencePriority(left) -
+    adherenceObservationConfidencePriority(right);
+  return sourceDifference !== 0
+    ? sourceDifference
+    : left.evidenceId.localeCompare(right.evidenceId);
+}
+
+function adherenceObservationConfidencePriority(
+  observation: ExperimentAdherenceObservation,
+): number {
+  if (isSensedAdherenceObservation(observation)) {
+    return 0;
+  }
+
+  switch (normalizeObservationSource(observation.source)) {
+    case "manual":
+      return 1;
+    case "derived":
+      return 3;
+    default:
+      return 2;
+  }
+}
+
 export function countAdherenceConfidenceSessions(input: {
   cells?: readonly ExperimentAdherenceCell[] | null;
   observations: readonly ExperimentAdherenceObservation[];
@@ -639,7 +797,9 @@ export function countAdherenceConfidenceSessions(input: {
     return counts;
   }
 
-  const observationsById = new Map(input.observations.map((observation) => [observation.evidenceId, observation]));
+  const observationsById = new Map(
+    input.observations.map((observation) => [observation.evidenceId, observation]),
+  );
   for (const cell of cells) {
     if (cell.status === "assumed") {
       counts.assumedSessions += 1;
@@ -657,9 +817,17 @@ export function countAdherenceConfidenceSessions(input: {
       );
     if (observations.some((observation) => isSensedAdherenceObservation(observation))) {
       counts.sensedSessions += 1;
-    } else if (observations.some((observation) => normalizeObservationSource(observation.source) === "manual")) {
+    } else if (
+      observations.some(
+        (observation) => normalizeObservationSource(observation.source) === "manual",
+      )
+    ) {
       counts.confirmedSessions += 1;
-    } else if (observations.some((observation) => normalizeObservationSource(observation.source) === "derived")) {
+    } else if (
+      observations.some(
+        (observation) => normalizeObservationSource(observation.source) === "derived",
+      )
+    ) {
       counts.assumedSessions += 1;
     }
   }

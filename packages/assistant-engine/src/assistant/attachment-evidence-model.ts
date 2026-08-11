@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import type { ParserOutput } from '@murphai/parsers'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'

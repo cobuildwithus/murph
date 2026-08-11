@@ -62,6 +62,8 @@ const execFileAsync = promisify(execFile);
 const FINNISH_DRY_SAUNA_KEY =
   "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const HEALTH_COMMONS_RUNTIME_MODULE: string = "@murphai/health-commons/runtime";
+const DEVICE_SYNC_CONFIG_RUNTIME_MODULE: string = "@murphai/device-syncd/config";
+const JUNCTION_SDK_RUNTIME_PATH = "/app/node_modules/@junction-api/sdk";
 const CODEX_SHELL_ENV_PROBE_COMMAND_TIMEOUT_MS = 45_000;
 const CODEX_SHELL_ENV_PROBE_TIMEOUT_MS = 90_000;
 const PDF_SMOKE_EXPECTED_TEXT = "Murph hosted PDF smoke fixture";
@@ -137,6 +139,7 @@ async function runSmokeChecks(input: {
 
   await runTextCommand("murph", ["--help"]);
   await runTextCommand("vault-cli", ["--help"]);
+  await runDeviceSyncRuntimeSmoke();
   const codexPreflight = await runCodexPreflight();
   const assistantCliSurface = await runAssistantCliSurfaceContractSmoke();
   const hostedCodexConfig =
@@ -364,7 +367,6 @@ async function runPdfToolchainSmoke(input: {
 }): Promise<void> {
   await assertPathExists(input.pdfPath);
   await resolveCommandPath("file");
-  await resolveCommandPath("mutool");
   await resolveCommandPath("pdfinfo");
   await resolveCommandPath("pdftotext");
   await resolveCommandPath("pdftoppm");
@@ -389,11 +391,6 @@ async function runPdfToolchainSmoke(input: {
   const qpdfCheck = await runTextCommand("qpdf", ["--check", input.pdfPath]);
   if (!/no syntax or stream encoding errors found/imu.test(qpdfCheck)) {
     throw new Error("Hosted runner smoke qpdf check did not validate the PDF fixture.");
-  }
-
-  const mutoolInfo = await runTextCommand("mutool", ["info", input.pdfPath]);
-  if (!/^Pages:\s+1$/mu.test(mutoolInfo)) {
-    throw new Error("Hosted runner smoke mutool info did not report exactly one page.");
   }
 
   await ensureScratchDirectory(input.scratchRoot);
@@ -527,6 +524,31 @@ async function runHealthCommonsSmoke(): Promise<{
     runtimeProtocolHitKeys,
     runtimeSearchHitKeys,
   };
+}
+
+async function runDeviceSyncRuntimeSmoke(): Promise<void> {
+  const runtime = await import(DEVICE_SYNC_CONFIG_RUNTIME_MODULE) as {
+    configuredDeviceSyncProviderKeys?: readonly string[];
+  };
+
+  if (!runtime.configuredDeviceSyncProviderKeys?.includes("junction")) {
+    throw new Error(
+      "Hosted runner smoke could not load the Junction device-sync config graph.",
+    );
+  }
+
+  try {
+    await access(JUNCTION_SDK_RUNTIME_PATH);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+
+  throw new Error(
+    "Hosted runner smoke found the Junction SDK runtime after production pruning.",
+  );
 }
 
 async function runCodexPreflight(): Promise<{

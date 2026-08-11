@@ -13,6 +13,7 @@ import {
   buildCloudflareHostedControlMealPhotoStagePath,
   buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlRuntimeHealthDataConsentPath,
+  buildCloudflareHostedControlRuntimeShellPrewarmPath,
   buildCloudflareHostedControlTelegramUsageLimitNoticePath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
@@ -32,6 +33,9 @@ describe("cloudflare hosted control routes", () => {
     );
     expect(buildCloudflareHostedControlRuntimeHealthDataConsentPath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/runtime/health-data-consent",
+    );
+    expect(buildCloudflareHostedControlRuntimeShellPrewarmPath("user/a b")).toBe(
+      "/internal/users/user%2Fa%20b/runtime/shell-prewarm",
     );
     expect(buildCloudflareHostedControlTelegramUsageLimitNoticePath("user/a b")).toBe(
       "/internal/users/user%2Fa%20b/telegram/usage-limit-notice",
@@ -63,6 +67,7 @@ describe("cloudflare hosted control routes", () => {
       buildCloudflareHostedControlUserDataDeletionPath,
       buildCloudflareHostedControlRuntimeEnsureProcessingPath,
       buildCloudflareHostedControlRuntimeHealthDataConsentPath,
+      buildCloudflareHostedControlRuntimeShellPrewarmPath,
       buildCloudflareHostedControlTelegramUsageLimitNoticePath,
       buildCloudflareHostedControlUserStatusPath,
     ]) {
@@ -118,6 +123,12 @@ describe("cloudflare hosted control routes", () => {
     ).toEqual({ userId: encodedUserId });
     expect(
       matchCloudflareHostedControlUserRoutePath(
+        "runtimeShellPrewarm",
+        buildCloudflareHostedControlRuntimeShellPrewarmPath(userId),
+      ),
+    ).toEqual({ userId: encodedUserId });
+    expect(
+      matchCloudflareHostedControlUserRoutePath(
         "telegramUsageLimitNotice",
         buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId),
       ),
@@ -148,6 +159,7 @@ describe("cloudflare hosted control routes", () => {
       mealPhotoDelete: { method: "DELETE", suffix: "meal-photos/delete" },
       mealPhotoStage: { method: "POST", suffix: "meal-photos/stage" },
       runtimeEnsureProcessing: { method: "POST", suffix: "runtime/ensure-processing" },
+      runtimeShellPrewarm: { method: "POST", suffix: "runtime/shell-prewarm" },
       runtimeHealthDataConsentReconcile: {
         method: "POST",
         suffix: "runtime/health-data-consent",
@@ -213,6 +225,7 @@ describe("cloudflare hosted control routes", () => {
       "buildCloudflareHostedControlMealPhotoStagePath",
       "buildCloudflareHostedControlRuntimeEnsureProcessingPath",
       "buildCloudflareHostedControlRuntimeHealthDataConsentPath",
+      "buildCloudflareHostedControlRuntimeShellPrewarmPath",
       "buildCloudflareHostedControlTelegramUsageLimitNoticePath",
       "buildCloudflareHostedControlUserDataDeletionPath",
       "buildCloudflareHostedControlUserStatusPath",

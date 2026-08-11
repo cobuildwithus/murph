@@ -34,8 +34,7 @@ export async function runHostedRetentionCleanupWithRuntimeLogDatabase(
     }
 
     // Keep optional observability cleanup serial. It must not fan out across the
-    // small diagnostic pool, and the legacy primary-table retention remains live
-    // only for the bounded migration window.
+    // small diagnostic pool.
     const dedicatedRuntimeLogsDeleted = await deleteExpiredHostedRuntimeLogs({
       batchSize: HOSTED_RETENTION_BATCH_SIZE,
       maxBatches: HOSTED_RETENTION_MAX_BATCHES,
@@ -46,14 +45,12 @@ export async function runHostedRetentionCleanupWithRuntimeLogDatabase(
     });
     return {
       ...cleanup,
-      oldRuntimeLogsDeleted:
-        cleanup.oldRuntimeLogsDeleted + dedicatedRuntimeLogsDeleted,
+      oldRuntimeLogsDeleted: dedicatedRuntimeLogsDeleted,
     };
   } catch (error) {
-    // The primary retention sweep and account-deletion receipt drain have
-    // already completed. Optional diagnostic retention must not turn their
-    // successful work into a retrying cron failure. The next hourly run retries
-    // the isolated bounded delete.
+    // Account-deletion receipt drain has already completed. Optional diagnostic
+    // retention must not turn that work into a retrying cron failure. The next
+    // hourly run retries the isolated bounded delete.
     console.warn("Hosted runtime log database retention failed.", {
       ...formatHostedExecutionSafeLogErrorDetails(error, {
         code: "HOSTED_RUNTIME_LOG_RETENTION_FAILED",

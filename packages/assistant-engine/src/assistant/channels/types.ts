@@ -13,6 +13,7 @@ import {
   type AssistantChannelDeliveryTargetKind,
   type AssistantDeliverySource,
   type AssistantMessageReaction,
+  type AssistantProviderMessageEffect,
   type AssistantResponseMedia,
   type AssistantResponseMediaKind,
   type AssistantVaultImageResponseMedia,
@@ -62,6 +63,8 @@ export interface AssistantEmailDeliverySummary {
 }
 
 export interface LinqRuntimeDependencies {
+  appCardCapabilityFetchImplementation?: LinqFetch
+  appCardTextFallbackFetchImplementation?: LinqFetch
   env?: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
   publicFetchImplementation?: LinqFetch
@@ -72,6 +75,10 @@ export interface LinqRuntimeDependencies {
     media: AssistantVaultFileResponseMedia,
   ) => Promise<Uint8Array>
   maxSessionMs?: number
+  onAppCardFallbackError?: (input: {
+    error: unknown
+    reason: 'app_card_rejected' | 'capability_check_failed'
+  }) => void
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string
   }) => Promise<void>
@@ -178,6 +185,7 @@ export interface AssistantChannelDependencies {
     | {
         idempotencyKey?: string | null
         providerMessageId?: string | null
+        providerMessageEffects?: AssistantProviderMessageEffect[] | null
         providerMessageIds?: string[] | null
         providerThreadId?: string | null
         target?: string | null
@@ -332,6 +340,7 @@ export interface AssistantChannelAdapterSpec {
   }) => Promise<
     | {
         providerMessageId?: string | null
+        providerMessageEffects?: AssistantProviderMessageEffect[] | null
         providerMessageIds?: string[] | null
         providerThreadId?: string | null
         target?: string | null

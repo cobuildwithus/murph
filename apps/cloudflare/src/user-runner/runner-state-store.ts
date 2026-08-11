@@ -180,6 +180,37 @@ export class RunnerStateStore {
     }
   }
 
+  async reserveRunnerContainerStopTargetForShellPrewarm(input: {
+    runnerContainerName: string;
+    userId: string;
+  }): Promise<boolean> {
+    await this.bindUser(input.userId);
+    const meta = this.requireMetaRowSync();
+    if (meta.active_attempt_id) {
+      return false;
+    }
+
+    const requestedRunnerContainerName = requireRunnerContainerName(
+      input.runnerContainerName,
+    );
+    const existingRunnerContainerName = normalizeRunnerContainerNameOrNull(
+      meta.active_runner_container_name,
+    );
+    if (
+      existingRunnerContainerName
+      && existingRunnerContainerName !== requestedRunnerContainerName
+    ) {
+      return false;
+    }
+    if (existingRunnerContainerName === requestedRunnerContainerName) {
+      return true;
+    }
+
+    meta.active_runner_container_name = requestedRunnerContainerName;
+    this.writeMetaRowSync(meta);
+    return true;
+  }
+
   async beginWriteFence(input: {
     processingMode?: RunnerRuntimeProcessingMode | null;
     runnerContainerName: string;

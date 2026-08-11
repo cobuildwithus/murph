@@ -6,7 +6,8 @@ import {
 } from "../src/parsers/runtime-control.js";
 
 const MESSAGE_REF = `ain_${"a".repeat(32)}`;
-const SIGNUP_URL = "https://www.withmurph.ai/join/invite";
+const SIGNUP_URL =
+  "https://www.withmurph.ai/r/murph_signup_referral_v1.signed-token";
 
 describe("signup referral group-tool parsing", () => {
   it("accepts direct and provider-authenticated group requests", () => {

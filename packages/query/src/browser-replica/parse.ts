@@ -10,6 +10,7 @@ import {
   type BrowserVaultEntityLink,
   type BrowserVaultLabResultReferenceRange,
   type BrowserVaultLabResultRow,
+  type BrowserVaultLabSpecimenKind,
   type BrowserVaultMetricGoalProgressRow,
   type BrowserVaultMetricRow,
   type BrowserVaultMetricSelectionRow,
@@ -21,6 +22,13 @@ import {
   type BrowserVaultTimelineRow,
 } from "./shared.ts";
 import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA } from "./lab-results.ts";
+import {
+  type PersonalPatternCell,
+  type PersonalPatternFactor,
+  type PersonalPatternOutcome,
+  type PersonalPatternReport,
+  type PersonalPatternStage,
+} from "../personal-patterns.ts";
 
 export function parseBrowserVaultReplica(value: unknown, label = "Browser vault replica"): BrowserVaultReplica {
   const record = requireRecord(value, label);
@@ -28,6 +36,7 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
   if (schema !== BROWSER_VAULT_REPLICA_SCHEMA) {
     throw new TypeError(`${label}.schema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
   }
+  const generatedAt = requireIsoDateTime(record.generatedAt, `${label}.generatedAt`);
 
   return {
     assistantSummary: parseAssistantSummary(record.assistantSummary, `${label}.assistantSummary`),
@@ -37,7 +46,7 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
       : requireArray(record.experimentOutcomes, `${label}.experimentOutcomes`).map((entry) =>
           experimentOutcomeSchema.parse(entry)
         ),
-    generatedAt: requireIsoDateTime(record.generatedAt, `${label}.generatedAt`),
+    generatedAt,
     ...(record.generation === undefined
       ? {}
       : { generation: requirePositiveSafeInteger(record.generation, `${label}.generation`) }),
@@ -47,6 +56,14 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     metricGoalProgressRows: requireArray(record.metricGoalProgressRows, `${label}.metricGoalProgressRows`).map((entry, index) => parseMetricGoalProgressRow(entry, `${label}.metricGoalProgressRows[${index}]`)),
     metricRows: requireArray(record.metricRows, `${label}.metricRows`).map((entry, index) => parseMetricRow(entry, `${label}.metricRows[${index}]`)),
     metricSelectionRows: requireArray(record.metricSelectionRows, `${label}.metricSelectionRows`).map((entry, index) => parseMetricSelectionRow(entry, `${label}.metricSelectionRows[${index}]`)),
+    ...(record.personalPatterns === undefined
+      ? {}
+      : {
+          personalPatterns: parsePersonalPatternReport(
+            record.personalPatterns,
+            `${label}.personalPatterns`,
+          ),
+        }),
     policy: parsePolicy(record.policy, `${label}.policy`),
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: requireArray(record.searchRows, `${label}.searchRows`).map((entry, index) => parseSearchRow(entry, `${label}.searchRows[${index}]`)),
@@ -55,6 +72,87 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     timelineRows: requireArray(record.timelineRows, `${label}.timelineRows`).map((entry, index) => parseTimelineRow(entry, `${label}.timelineRows[${index}]`)),
     weeklySampleSummaries: requireArray(record.weeklySampleSummaries, `${label}.weeklySampleSummaries`).map((entry, index) => parseWeeklySampleSummary(entry, `${label}.weeklySampleSummaries[${index}]`)),
   };
+}
+
+function parsePersonalPatternReport(value: unknown, label: string): PersonalPatternReport {
+  const record = requireRecord(value, label);
+  const lagDays = requireNonNegativeInteger(record.lagDays, `${label}.lagDays`);
+  if (lagDays !== 1) throw new TypeError(`${label}.lagDays must be 1.`);
+  return {
+    asOfDate: requireString(record.asOfDate, `${label}.asOfDate`),
+    cells: requireArray(record.cells, `${label}.cells`).map((entry, index) =>
+      parsePersonalPatternCell(entry, `${label}.cells[${index}]`)
+    ),
+    factors: requireArray(record.factors, `${label}.factors`).map((entry, index) =>
+      parsePersonalPatternFactor(entry, `${label}.factors[${index}]`)
+    ),
+    lagDays,
+    notes: requireStringArray(record.notes, `${label}.notes`),
+    outcomes: requireArray(record.outcomes, `${label}.outcomes`).map((entry, index) =>
+      parsePersonalPatternOutcome(entry, `${label}.outcomes[${index}]`)
+    ),
+    repeatableCellCount: requireNonNegativeInteger(record.repeatableCellCount, `${label}.repeatableCellCount`),
+    testedCellCount: requireNonNegativeInteger(record.testedCellCount, `${label}.testedCellCount`),
+    windowDays: requireNonNegativeInteger(record.windowDays, `${label}.windowDays`),
+  };
+}
+
+function parsePersonalPatternFactor(value: unknown, label: string): PersonalPatternFactor {
+  const record = requireRecord(value, label);
+  const kind = requireString(record.kind, `${label}.kind`);
+  if (kind !== "activity" && kind !== "intervention" && kind !== "mixed") {
+    throw new TypeError(`${label}.kind must be activity, intervention, or mixed.`);
+  }
+  return {
+    id: requireString(record.id, `${label}.id`),
+    kind,
+    label: requireString(record.label, `${label}.label`),
+    observedDays: requireNonNegativeInteger(record.observedDays, `${label}.observedDays`),
+  };
+}
+
+function parsePersonalPatternOutcome(value: unknown, label: string): PersonalPatternOutcome {
+  const record = requireRecord(value, label);
+  return {
+    id: requireString(record.id, `${label}.id`),
+    label: requireString(record.label, `${label}.label`),
+    unit: requireString(record.unit, `${label}.unit`),
+  };
+}
+
+function parsePersonalPatternCell(value: unknown, label: string): PersonalPatternCell {
+  const record = requireRecord(value, label);
+  const direction = requireString(record.direction, `${label}.direction`);
+  if (direction !== "higher" && direction !== "lower" && direction !== "flat") {
+    throw new TypeError(`${label}.direction must be higher, lower, or flat.`);
+  }
+  return {
+    comparisonDays: requireNonNegativeInteger(record.comparisonDays, `${label}.comparisonDays`),
+    comparisonMean: readNullableFiniteNumber(record.comparisonMean),
+    delta: readNullableFiniteNumber(record.delta),
+    deltaPercent: readNullableFiniteNumber(record.deltaPercent),
+    direction,
+    exposedDays: requireNonNegativeInteger(record.exposedDays, `${label}.exposedDays`),
+    exposedMean: readNullableFiniteNumber(record.exposedMean),
+    factorId: requireString(record.factorId, `${label}.factorId`),
+    firstExposedDate: readNullableString(record.firstExposedDate),
+    lastExposedDate: readNullableString(record.lastExposedDate),
+    outcomeId: requireString(record.outcomeId, `${label}.outcomeId`),
+    repeatedDirection: requireBoolean(record.repeatedDirection, `${label}.repeatedDirection`),
+    stage: requirePersonalPatternStage(record.stage, `${label}.stage`),
+  };
+}
+
+function requirePersonalPatternStage(value: unknown, label: string): PersonalPatternStage {
+  const stage = requireString(value, label);
+  if (
+    stage === "insufficient"
+    || stage === "no_clear_pattern"
+    || stage === "new_clue"
+    || stage === "seen_again"
+    || stage === "worth_testing"
+  ) return stage;
+  throw new TypeError(`${label} must be a Personal Patterns evidence stage.`);
 }
 
 function parsePolicy(value: unknown, label: string): BrowserVaultReplicaPolicy {
@@ -148,10 +246,13 @@ function parseLabResultRow(value: unknown, label: string): BrowserVaultLabResult
   };
 }
 
-function readNullableLabSpecimenKind(value: unknown, label: string): "plasma" | "serum" | null {
+function readNullableLabSpecimenKind(
+  value: unknown,
+  label: string,
+): BrowserVaultLabSpecimenKind | null {
   if (value === null || value === undefined) return null;
-  if (value === "plasma" || value === "serum") return value;
-  throw new TypeError(`${label} must be plasma, serum, or null.`);
+  if (value === "plasma" || value === "serum" || value === "whole_blood") return value;
+  throw new TypeError(`${label} must be plasma, serum, whole_blood, or null.`);
 }
 
 function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
@@ -315,6 +416,10 @@ function requireStringArray(value: unknown, label: string): string[] {
 }
 function requireFiniteNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) throw new TypeError(`${label} must be a finite number.`);
+  return value;
+}
+function requireBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") throw new TypeError(`${label} must be a boolean.`);
   return value;
 }
 function readNullableFiniteNumber(value: unknown): number | null {

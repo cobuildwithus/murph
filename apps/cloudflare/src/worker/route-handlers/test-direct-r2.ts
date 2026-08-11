@@ -31,6 +31,9 @@ import {
   resolveDeployContainerSmokeObjectName,
 } from "./deploy-smoke.ts";
 import {
+  hostedWorkspaceSnapshotObjectKey,
+} from "../../storage-paths.ts";
+import {
   parseTestPositiveIntegerValue,
 } from "./test-runner.ts";
 
@@ -48,7 +51,71 @@ export const testDirectR2Routes: readonly DeclarativeRoute<WorkerRouteContext>[]
     name: "test-direct-r2-presigned-put",
     wrongMethodResponse: "not-found",
   },
+  {
+    authorization: "vercel-oidc",
+    beforeMethod(context) {
+      return requireHostedWorkerTestEnvironment(context);
+    },
+    async handle(context, params) {
+      return handleTestDirectR2LocatorMarkerRoute(context, params.userId);
+    },
+    match: matchHostedLocalTestUserRoute("/__test/users/", "/direct-r2-locator-marker"),
+    methods: ["POST"],
+    name: "test-direct-r2-locator-marker",
+    wrongMethodResponse: "not-found",
+  },
 ];
+
+export async function handleTestDirectR2LocatorMarkerRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  if (!isHostedWorkerTestEnvironment(context.env)) {
+    return notFound();
+  }
+
+  const userId = decodeRouteParam(encodedUserId);
+  const boundUserResponse = requireHostedExecutionBoundUserResponse(
+    context.request,
+    userId,
+    "Hosted execution bound user does not match the direct R2 locator marker user.",
+    "test-direct-r2-locator-marker-bound-user-mismatch",
+    "test-direct-r2-locator-marker",
+  );
+  if (boundUserResponse) {
+    return boundUserResponse;
+  }
+
+  const body = await readTestDirectR2Body(context.request);
+  if (body instanceof Response) {
+    return body;
+  }
+  const snapshotId = normalizeNonEmptyString(body.snapshotId);
+  const objectKey = normalizeNonEmptyString(body.objectKey);
+  if (!snapshotId || !objectKey) {
+    return json({ error: "snapshotId and objectKey are required." }, 400);
+  }
+
+  let expectedObjectKey: string;
+  try {
+    expectedObjectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId,
+    });
+  } catch {
+    return json({ error: "snapshotId is invalid." }, 400);
+  }
+  if (objectKey !== expectedObjectKey) {
+    return json({ error: "objectKey does not match the bound snapshot." }, 400);
+  }
+
+  // Hosted-local direct uploads live in MinIO while Wrangler's R2 bindings
+  // emulate the production object-existence lookup. A zero-byte marker makes
+  // that lookup truthful without copying the encrypted snapshot into a second
+  // local object store; the returned presigned URL still reads from MinIO.
+  await context.env.BUNDLES.put(objectKey, new Uint8Array());
+  return json({ ok: true });
+}
 
 export async function handleTestDirectR2PresignedPutRoute(
   context: WorkerRouteContext,
@@ -70,16 +137,9 @@ export async function handleTestDirectR2PresignedPutRoute(
     return boundUserResponse;
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await readOptionalJsonObject(context.request, {
-      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-    });
-  } catch (error) {
-    if (error instanceof RangeError) {
-      return jsonError("Request body too large.", 413);
-    }
-    throw error;
+  const body = await readTestDirectR2Body(context.request);
+  if (body instanceof Response) {
+    return body;
   }
 
   const presignedPutUrl = normalizeNonEmptyString(body.presignedPutUrl);
@@ -109,4 +169,19 @@ export async function handleTestDirectR2PresignedPutRoute(
     runnerContainer: result,
     service: "cloudflare-hosted-runner",
   });
+}
+
+async function readTestDirectR2Body(
+  request: Request,
+): Promise<Record<string, unknown> | Response> {
+  try {
+    return await readOptionalJsonObject(request, {
+      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+    });
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return jsonError("Request body too large.", 413);
+    }
+    throw error;
+  }
 }

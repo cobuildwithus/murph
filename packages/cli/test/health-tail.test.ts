@@ -573,6 +573,204 @@ test("goal import-json preserves omitted fields on patch updates", async () => {
   }
 });
 
+test("goal import-json preserves the nutrition proposal window, sibling targets, and paused replacement", async () => {
+  const cli = createVaultCli();
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const createPayloadPath = path.join(vaultRoot, "nutrition-goal-create.json");
+  const editPayloadPath = path.join(vaultRoot, "nutrition-goal-edit.json");
+  const removePayloadPath = path.join(vaultRoot, "nutrition-goal-remove.json");
+  const restorePayloadPath = path.join(vaultRoot, "nutrition-goal-restore.json");
+  const proposalStartAt = "2026-08-09";
+  const target = (
+    targetId: string,
+    metricKey: string,
+    unit: string,
+    value: number,
+  ) => ({
+    targetId,
+    kind: "metric",
+    metricKey,
+    comparator: "between",
+    value,
+    highValue: value,
+    unit,
+    evaluation: { kind: "selected-value" },
+  });
+  const originalTargets = [
+    target("murph-default-dietary-calories", "dietary-calories", "kcal", 2_400),
+    target("murph-default-protein-grams", "protein-grams", "g", 150),
+    target("murph-default-carbs-grams", "carbs-grams", "g", 270),
+    target("murph-default-fat-grams", "fat-grams", "g", 80),
+    target("murph-default-fiber-grams", "fiber-grams", "g", 35),
+  ];
+
+  try {
+    await runInProcessJsonCli(cli, ["init", "--vault", vaultRoot]);
+    await writeFile(
+      createPayloadPath,
+      JSON.stringify({
+        title: "Daily nutrition targets",
+        slug: "murph-daily-nutrition-starting-targets",
+        status: "paused",
+        horizon: "ongoing",
+        domains: ["nutrition"],
+        window: { startAt: proposalStartAt },
+        metricTargets: originalTargets,
+      }),
+      "utf8",
+    );
+    const { envelope: created } = await runInProcessJsonCli<{
+      goalId: string;
+    }>(cli, [
+      "goal",
+      "import-json",
+      "--input",
+      `@${createPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const goalId = requireData(created).goalId;
+    const editedTargets = originalTargets.map((entry) =>
+      entry.metricKey === "protein-grams"
+        ? { ...entry, value: 155, highValue: 155 }
+        : entry,
+    );
+
+    await writeFile(
+      editPayloadPath,
+      JSON.stringify({ goalId, status: "paused", metricTargets: editedTargets }),
+      "utf8",
+    );
+    const { envelope: edited } = await runInProcessJsonCli(cli, [
+      "goal",
+      "import-json",
+      "--input",
+      `@${editPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const { envelope: shownAfterEdit } = await runInProcessJsonCli<{
+      entity: {
+        data: {
+          status: string;
+          windowStartAt: string | null;
+          metricTargets: typeof editedTargets;
+        };
+      };
+    }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
+
+    assert.equal(edited.ok, true);
+    assert.equal(requireData(shownAfterEdit).entity.data.status, "paused");
+    assert.equal(
+      requireData(shownAfterEdit).entity.data.windowStartAt,
+      proposalStartAt,
+    );
+    assert.deepEqual(
+      requireData(shownAfterEdit).entity.data.metricTargets,
+      editedTargets,
+    );
+
+    const { envelope: activated } = await runInProcessJsonCli(cli, [
+      "goal",
+      "save",
+      "Daily nutrition targets",
+      "--id",
+      goalId,
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(activated.ok, true);
+    const { envelope: shownAfterActivation } = await runInProcessJsonCli<{
+      entity: {
+        data: {
+          status: string;
+          windowStartAt: string | null;
+          metricTargets: typeof editedTargets;
+        };
+      };
+    }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
+    assert.equal(requireData(shownAfterActivation).entity.data.status, "active");
+    assert.equal(
+      requireData(shownAfterActivation).entity.data.windowStartAt,
+      proposalStartAt,
+    );
+
+    const retainedTargets = editedTargets.filter(
+      (entry) => entry.metricKey !== "protein-grams",
+    );
+    await writeFile(
+      removePayloadPath,
+      JSON.stringify({ goalId, metricTargets: retainedTargets }),
+      "utf8",
+    );
+    const { envelope: removed } = await runInProcessJsonCli(cli, [
+      "goal",
+      "import-json",
+      "--input",
+      `@${removePayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const { envelope: shownAfterRemoval } = await runInProcessJsonCli<{
+      entity: { data: { status: string; metricTargets: typeof retainedTargets } };
+    }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
+
+    assert.equal(removed.ok, true);
+    assert.equal(requireData(shownAfterRemoval).entity.data.status, "active");
+    assert.deepEqual(
+      requireData(shownAfterRemoval).entity.data.metricTargets,
+      retainedTargets,
+    );
+
+    const restoredTargets = editedTargets.map((entry) =>
+      entry.metricKey === "protein-grams"
+        ? { ...entry, value: 160, highValue: 160 }
+        : entry,
+    );
+    await writeFile(
+      restorePayloadPath,
+      JSON.stringify({
+        goalId,
+        status: "paused",
+        metricTargets: restoredTargets,
+      }),
+      "utf8",
+    );
+    const { envelope: restored } = await runInProcessJsonCli(cli, [
+      "goal",
+      "import-json",
+      "--input",
+      `@${restorePayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const { envelope: shownAfterRestore } = await runInProcessJsonCli<{
+      entity: {
+        data: {
+          status: string;
+          windowStartAt: string | null;
+          metricTargets: typeof restoredTargets;
+        };
+      };
+    }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
+
+    assert.equal(restored.ok, true);
+    assert.equal(requireData(shownAfterRestore).entity.data.status, "paused");
+    assert.equal(
+      requireData(shownAfterRestore).entity.data.windowStartAt,
+      proposalStartAt,
+    );
+    assert.deepEqual(
+      requireData(shownAfterRestore).entity.data.metricTargets,
+      restoredTargets,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("goal import-json validates payloads through the shared goal schema", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal-invalid.json");

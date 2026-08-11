@@ -72,6 +72,12 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("checkpoint-baseline")[0]?.file).toBe(
       "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
     );
+    expect(resolveHostedLocalE2eScenarios("cold-start-benchmark")[0]).toEqual({
+      file: "apps/cloudflare/test/hosted-local-cold-start-benchmark-e2e.test.ts",
+      manualOnly: true,
+      name: "cold-start-benchmark",
+      testControls: true,
+    });
     expect(resolveHostedLocalE2eScenarios("telegram")[0]?.name).toBe(
       "telegram-first-contact",
     );
@@ -156,6 +162,8 @@ describe("hosted-local harness", () => {
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name)).toContain(
       "timezone-injection",
     );
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name))
+      .not.toContain("cold-start-benchmark");
     expect(resolveHostedLocalE2eScenarios([
       "linq-delivery",
       "temporal-orchestration",

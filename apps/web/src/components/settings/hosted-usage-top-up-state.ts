@@ -25,6 +25,7 @@ interface HostedUsageTopUpPoll {
 
 interface HostedUsageTopUpSelectionScreen {
   attempt: HostedUsageTopUpSelectionAttempt;
+  capacityConflict: boolean;
   kind: "selection";
   selectedOfferCode: string | null;
   unresolvedRequestKey: string | null;
@@ -59,6 +60,7 @@ type HostedUsageTopUpAction =
   | { type: "open"; reset: boolean }
   | { type: "offer_selected"; offerCode: string }
   | { type: "amount_change_requested" }
+  | { type: "capacity_conflict" }
   | {
       type: "selection_checkout_started";
       offerCode: string;
@@ -125,6 +127,7 @@ type HostedUsageTopUpAction =
 
 function createHostedUsageTopUpState(input: {
   activePurchase: HostedUsageTopUpActivePurchase | null;
+  initialCapacityConflict: boolean;
   initialOpen: boolean;
   purchaseReturn: HostedUsageTopUpReturn | null;
 }): HostedUsageTopUpState {
@@ -134,7 +137,7 @@ function createHostedUsageTopUpState(input: {
   if (!purchaseId) {
     return {
       open: input.initialOpen,
-      screen: createSelectionScreen(),
+      screen: createSelectionScreen(null, input.initialCapacityConflict),
     };
   }
   const status = input.purchaseReturn
@@ -184,7 +187,7 @@ function hostedUsageTopUpReducer(
       };
     case "offer_selected":
       return updateSelectionScreen(state, (screen) =>
-        screen.attempt.kind === "idle"
+        screen.attempt.kind === "idle" && !screen.capacityConflict
           ? { ...screen, selectedOfferCode: action.offerCode }
           : screen,
       );
@@ -192,6 +195,8 @@ function hostedUsageTopUpReducer(
       return updateSelectionScreen(state, () =>
         createSelectionScreen(),
       );
+    case "capacity_conflict":
+      return { ...state, screen: createSelectionScreen(null, true) };
     case "selection_checkout_started":
       return updateSelectionScreen(state, (screen) => ({
         ...screen,
@@ -456,9 +461,11 @@ function screenFromResponse(
 
 function createSelectionScreen(
   unresolvedRequestKey: string | null = null,
+  capacityConflict = false,
 ): HostedUsageTopUpSelectionScreen {
   return {
     attempt: { kind: "idle" },
+    capacityConflict,
     kind: "selection",
     selectedOfferCode: null,
     unresolvedRequestKey,

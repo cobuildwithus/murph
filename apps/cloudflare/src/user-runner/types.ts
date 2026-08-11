@@ -61,5 +61,6 @@ export interface RunnerStateRecord {
   lastErrorAt: string | null;
   lastErrorCode: string | null;
   lastInvocationAt: string | null;
+  pendingRunnerContainerName: string | null;
   userId: string;
 }

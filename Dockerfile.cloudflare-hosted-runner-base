@@ -1,6 +1,6 @@
 ARG NODE_VERSION=24.14.1
 ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c
-ARG CODEX_CLI_VERSION=0.145.0
+ARG CODEX_CLI_VERSION=0.147.0
 ARG TYPST_VERSION=0.15.0
 ARG TYPST_SHA256=59b207df01be2dab9f13e80f73d04d7ff8273ffd46b3dd1b9eef5c60f3eeabea
 
@@ -48,7 +48,6 @@ RUN apt-get update \
     file \
     ffmpeg \
     jq \
-    mupdf-tools \
     poppler-utils \
     python-is-python3 \
     python3 \

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   isHostedThreadContainerMember: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
+  readHostedMemberStripeBillingRef: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -26,6 +27,10 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS: {},
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   isHostedThreadContainerMember: mocks.isHostedThreadContainerMember,
 }));
@@ -39,6 +44,12 @@ describe("hosted runtime Family plan tool", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({
       $transaction: vi.fn((callback) => callback({ label: "tx" })),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: "active",
+          suspendedAt: null,
+        }),
+      },
     });
     mocks.ensureHostedAccountGroupForOwnerTx.mockResolvedValue({
       billingStatus: "not_started",
@@ -65,6 +76,7 @@ describe("hosted runtime Family plan tool", () => {
       replyText: "Done. I prepared a Murph Family invite for Adam.",
     });
     mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(null);
     mocks.isHostedThreadContainerMember.mockResolvedValue(false);
   });
 
@@ -124,8 +136,6 @@ describe("hosted runtime Family plan tool", () => {
           edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
           pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
         },
-        preparedInvite: null,
-        preparedInviteReplyText: null,
         seats: {
           active: 1,
           billed: 2,
@@ -157,70 +167,43 @@ describe("hosted runtime Family plan tool", () => {
     expect(mocks.issueHostedFamilyInviteFromOwnerTx).not.toHaveBeenCalled();
   });
 
-  it("does not prepare an invite while starting checkout before billing is active", async () => {
-    mocks.readHostedFamilyOwnerSnapshotForMember
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        billingActive: false,
-        billingStatus: "not_started",
-        plans: {
-          edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
-          pulse: { active: 1, billed: 0, invited: 0, remaining: 0, used: 1 },
-        },
-        seats: {
-          active: 1,
-          billed: 0,
-          invited: 0,
-          max: 6,
-          min: 2,
-          remaining: 0,
-          used: 1,
-        },
-      });
+  it("returns authoritative active-trial conversion terms and forwards fresh consent", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      stripeCustomerId: "cus_trial",
+      stripeSubscriptionId: "sub_trial",
+    });
 
     await expect(handleHostedRuntimeFamilyPlanTool({
       memberId: "member_owner",
-      request: {
-        action: "start_checkout",
-        invite: {
-          targetLabel: "Adam",
-          targetPhoneNumber: null,
-          targetTelegramUsername: "adam_username",
+      request: { action: "read_status" },
+    })).resolves.toMatchObject({
+      action: "read_status",
+      result: {
+        activeTrialConversion: {
+          includedPulseSeats: 2,
+          monthlyAmountUsdCents: 1_400,
+          perSeatMonthlyAmountUsdCents: 700,
+          trialEndsImmediately: true,
         },
       },
-    })).resolves.toEqual({
-      action: "start_checkout",
-      result: {
-        alreadyActive: false,
-        billingActive: false,
-        billingStatus: "not_started",
-        checkoutUrl: "https://checkout.stripe.test/family",
-        owner: true,
-        plans: {
-          edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
-          pulse: { active: 1, billed: 0, invited: 0, remaining: 0, used: 1 },
-        },
-        preparedInvite: null,
-        preparedInviteReplyText: null,
-        seats: {
-          active: 1,
-          billed: 0,
-          invited: 0,
-          max: 6,
-          min: 2,
-          remaining: 0,
-          used: 1,
-        },
-        unavailableReason: null,
+    });
+
+    await handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner",
+      request: {
+        action: "start_checkout",
+        confirmedTrialConversion: true,
       },
     });
 
     expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+      confirmedTrialConversion: true,
       groupId: "hbag_family",
       ownerMemberId: "member_owner",
       prisma: expect.any(Object),
     });
-    expect(mocks.issueHostedFamilyInviteFromOwnerTx).not.toHaveBeenCalled();
   });
 
   it("does not create checkout when the owner already has active Family billing", async () => {
@@ -248,108 +231,12 @@ describe("hosted runtime Family plan tool", () => {
       result: {
         alreadyActive: true,
         checkoutUrl: null,
-        preparedInvite: null,
       },
     });
 
     expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
     expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
-  });
-
-  it("creates an invite from start_checkout when Family billing is already active", async () => {
-    mocks.readHostedFamilyOwnerSnapshotForMember
-      .mockResolvedValueOnce({
-        billingActive: true,
-        billingStatus: "active",
-        seats: {
-          active: 2,
-          billed: 4,
-          invited: 0,
-          max: 6,
-          min: 2,
-          remaining: 2,
-          used: 2,
-        },
-      })
-      .mockResolvedValueOnce({
-        billingActive: true,
-        billingStatus: "active",
-        invites: [
-          {
-            acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
-            expiresAt: new Date("2026-06-25T00:00:00.000Z"),
-            id: "hbagi_adam",
-            planCode: "pulse",
-            status: "pending",
-            targetLabel: "Adam",
-            targetPhoneHint: null,
-            telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-          },
-        ],
-        seats: {
-          active: 2,
-          billed: 4,
-          invited: 1,
-          max: 6,
-          min: 2,
-          remaining: 1,
-          used: 3,
-        },
-      });
-
-    await expect(handleHostedRuntimeFamilyPlanTool({
-      memberId: "member_owner",
-      request: {
-        action: "start_checkout",
-        invite: {
-          targetLabel: "Adam",
-          targetPhoneNumber: null,
-          targetTelegramUsername: "adam_username",
-        },
-      },
-    })).resolves.toEqual({
-      action: "start_checkout",
-      result: {
-        alreadyActive: true,
-        billingActive: true,
-        billingStatus: "active",
-        checkoutUrl: null,
-        owner: true,
-        preparedInvite: {
-          acceptUrl: "https://local.withmurph.ai/family/accept/family_token",
-          expiresAt: "2026-06-25T00:00:00.000Z",
-          planCode: "pulse",
-          status: "pending",
-          targetLabel: "Adam",
-          targetPhoneHint: null,
-          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-        },
-        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
-        seats: {
-          active: 2,
-          billed: 4,
-          invited: 1,
-          max: 6,
-          min: 2,
-          remaining: 1,
-          used: 3,
-        },
-        unavailableReason: null,
-      },
-    });
-
-    expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
-    expect(mocks.issueHostedFamilyInviteFromOwnerTx).toHaveBeenCalledWith({
-      ownerMemberId: "member_owner",
-      planCode: "pulse",
-      targetEmail: null,
-      targetLabel: "Adam",
-      targetPhoneNumber: null,
-      targetTelegramUsername: "adam_username",
-      tx: {
-        label: "tx",
-      },
-    });
+    expect(mocks.issueHostedFamilyInviteFromOwnerTx).not.toHaveBeenCalled();
   });
 
   it("creates an email-bound invite from structured runtime input", async () => {
@@ -430,7 +317,6 @@ describe("hosted runtime Family plan tool", () => {
       result: {
         checkoutUrl: null,
         owner: false,
-        preparedInvite: null,
         unavailableReason: "already_sponsored",
       },
     });
@@ -469,7 +355,6 @@ describe("hosted runtime Family plan tool", () => {
         billingStatus: "not_started",
         checkoutUrl: null,
         owner: false,
-        preparedInvite: null,
         unavailableReason: "already_sponsored",
       },
     });

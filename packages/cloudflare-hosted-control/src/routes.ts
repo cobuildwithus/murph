@@ -44,6 +44,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "runtime/ensure-processing",
   },
+  runtimeShellPrewarm: {
+    method: "POST",
+    suffix: "runtime/shell-prewarm",
+  },
   runtimeHealthDataConsentReconcile: {
     method: "POST",
     suffix: "runtime/health-data-consent",
@@ -82,6 +86,10 @@ export function buildCloudflareHostedControlInferenceVerificationPath(
 
 export function buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId: string): string {
   return buildCloudflareHostedControlUserRoutePath("runtimeEnsureProcessing", userId);
+}
+
+export function buildCloudflareHostedControlRuntimeShellPrewarmPath(userId: string): string {
+  return buildCloudflareHostedControlUserRoutePath("runtimeShellPrewarm", userId);
 }
 
 export function buildCloudflareHostedControlRuntimeHealthDataConsentPath(

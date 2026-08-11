@@ -273,6 +273,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     ]);
     await sanitizeRestoredHostedCodexResumeState({
       assistantStateRoot: restored.assistantStateRoot,
+      nativeMemoryRetention: "read-artifacts",
       operatorHomeRoot: restored.operatorHomeRoot,
     });
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
@@ -410,6 +411,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     }
     await sanitizeRestoredHostedCodexResumeState({
       assistantStateRoot: restored.assistantStateRoot,
+      nativeMemoryRetention: "none",
       operatorHomeRoot: restored.operatorHomeRoot,
     });
   }
@@ -505,6 +507,7 @@ async function tryRestoreHostedWorkspaceFromCleanCheckpointMarker(input: {
     await assertHostedWorkspaceWarmCleanRoots(input.restored);
     await sanitizeRestoredHostedCodexResumeState({
       assistantStateRoot: input.restored.assistantStateRoot,
+      nativeMemoryRetention: "read-artifacts",
       operatorHomeRoot: input.restored.operatorHomeRoot,
     });
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
@@ -734,6 +737,7 @@ async function assertHostedWorkspaceWarmCleanFile(filePath: string): Promise<voi
 
 async function sanitizeRestoredHostedCodexResumeState(input: {
   assistantStateRoot: string;
+  nativeMemoryRetention: "none" | "read-artifacts";
   operatorHomeRoot: string;
 }): Promise<void> {
   const sessionsRoot = path.join(input.assistantStateRoot, "sessions");
@@ -769,6 +773,7 @@ async function sanitizeRestoredHostedCodexResumeState(input: {
   await visit(sessionsRoot);
   await pruneHostedCodexHomeToSessionReferencedRollouts({
     assistantStateRoot: input.assistantStateRoot,
+    nativeMemoryRetention: input.nativeMemoryRetention,
     operatorHomeRoot: input.operatorHomeRoot,
   });
 }
@@ -1469,6 +1474,7 @@ async function restoreHostedWorkspaceRuntimeBundle(input: {
     }
     await sanitizeRestoredHostedCodexResumeState({
       assistantStateRoot: input.restored.assistantStateRoot,
+      nativeMemoryRetention: "none",
       operatorHomeRoot: input.restored.operatorHomeRoot,
     });
   } catch (error) {

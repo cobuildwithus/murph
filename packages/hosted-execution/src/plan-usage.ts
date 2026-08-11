@@ -1,17 +1,18 @@
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_PLAN_USAGE_ACCESS_KINDS = [
   "family_sponsored",
   "paid",
-  "trial",
+  "starter",
 ] as const;
 
 export const HOSTED_PLAN_USAGE_PLAN_NAMES = [
   "Edge",
   "Group",
   "Family",
+  "Max",
   "Pulse",
-  "Pulse Trial",
+  "Starter",
 ] as const;
 
 // Member-facing name for the internal launch_group_monthly billing SKU.
@@ -22,12 +23,12 @@ export const HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES = [
   "launch_group_monthly",
   "launch_monthly",
   "launch_edge_monthly",
+  "launch_max_monthly",
 ] as const;
 
 export const HOSTED_PLAN_USAGE_UNAVAILABLE_REASONS = [
   "group_not_supported",
   "hosted_access_inactive",
-  "trial_conversion_pending",
 ] as const;
 
 export const HOSTED_ADD_USAGE_SETTINGS_URL =
@@ -74,7 +75,7 @@ const hostedPlanUsageSubscriptionActionQuoteSchema = z
     targetPlanCode: z.enum([
       ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
     ]),
-    timing: z.enum(["at_trial_end", "immediate", "now", "period_end"]),
+    timing: z.enum(["immediate", "now", "period_end"]),
   })
   .strict();
 
@@ -83,7 +84,7 @@ const hostedPlanUsageAvailablePlanSchema = z
     code: z.enum([
       ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
     ]),
-    displayName: z.enum(["Group", "Pulse", "Edge"]),
+    displayName: z.enum(["Group", "Pulse", "Edge", "Max"]),
     monthlyPriceUsdCents: z.number().int().positive(),
     selectable: z.literal(true),
   })
@@ -94,7 +95,7 @@ const hostedPlanUsageScheduledPlanSchema = z
     code: z.enum([
       ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
     ]),
-    displayName: z.enum(["Group", "Pulse", "Edge"]),
+    displayName: z.enum(["Group", "Pulse", "Edge", "Max"]),
     effectiveAt: z.string().datetime({ offset: true }).nullable(),
   })
   .strict();
@@ -113,7 +114,7 @@ const hostedPlanUsageAvailableSchema = z
     forecast: hostedPlanUsageForecastSchema.nullable(),
     generatedAt: hostedPlanUsageGeneratedAtSchema,
     periodEnd: z.string().datetime({ offset: true }),
-    periodKind: z.enum(["monthly", "trial"]),
+    periodKind: z.enum(["lifetime", "monthly"]),
     periodStart: z.string().datetime({ offset: true }),
     planCode: z.enum([
       ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,

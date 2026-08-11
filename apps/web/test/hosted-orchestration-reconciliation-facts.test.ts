@@ -30,7 +30,6 @@ const mocks = vi.hoisted(() => ({
   resolveHostedRuntimeAiUsageGate: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToLinqChat: vi.fn(),
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread: vi.fn(),
-  sendHostedTrialConversionNoticeToLinqChat: vi.fn(),
   tryMarkHostedMailboxConversationAiUsageDenied: vi.fn(),
 }));
 
@@ -57,7 +56,6 @@ vi.mock("@/src/lib/hosted-execution/usage-limit-notice", () => ({
     mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread:
     mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
-  sendHostedTrialConversionNoticeToLinqChat: mocks.sendHostedTrialConversionNoticeToLinqChat,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-limit-notice-message", () => ({
@@ -687,7 +685,7 @@ describe("hosted orchestration reconciliation facts", () => {
       revision: 3,
       supportsImages: false,
       verificationProfile:
-        "murph-codex-0.145.0-portable-responses-v1",
+        "murph-codex-0.147.0-portable-responses-v1",
     });
 
     const response = await reconciliationRoute.GET(
@@ -706,78 +704,14 @@ describe("hosted orchestration reconciliation facts", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("sends the current-chat Linq trial conversion notice when pending conversation work is runtime-denied", async () => {
-    const deniedDecision = buildTrialConversionPendingUsageGateDecision();
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      redactedStatusJson: {
-        conversationImportedSeq: "2",
-        systemImportedSeq: "0",
-      },
-    }));
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "3",
-      },
-      {
-        lane: "system",
-        maxSeq: "0",
-      },
-    ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: deniedDecision,
-      status: "denied",
-    });
-    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
-      buildPendingConversationItem(),
-    );
-    const routeAuthority = {
-      accountLookupKey: "hbidx:phone:v1:line_runtime_denied",
-      channel: "linq" as const,
-      containerMemberId: MEMBER_ID,
-      threadId: "chat_runtime_denied",
-    };
-    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake({
-      routeAuthority,
-    }));
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
-    });
-    expect(mocks.sendHostedTrialConversionNoticeToLinqChat).toHaveBeenCalledWith({
-      chatId: "chat_runtime_denied",
-      memberId: MEMBER_ID,
-      message: deniedDecision.userNotice.message,
-      occurredAt: FIXED_NOW,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      replyToMessageId: "msg_runtime_denied",
-      routeAuthority,
-      sourceEventId: "linq_event_runtime_denied",
-    });
-    expect(
-      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
-    ).toHaveBeenCalledWith({
-      afterConversationLaneSeq: 2n,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      throughConversationLaneSeq: 3n,
-      userId: MEMBER_ID,
-    });
-  });
-
   it("retries the current capacity-epoch Linq usage-limit notice from the denied gate", async () => {
     const deniedDecision = buildUsageLimitExceededGateDecision();
-    mocks.projectHostedAiUsageLimitNoticeForDelivery.mockImplementation(
-      async (input: { message: string }) =>
-        `${input.message}\n\nAdd usage: ` +
-        "https://www.withmurph.ai/settings?addUsage=true#subscription",
-    );
+    const linkedNotice =
+      `${deniedDecision.userNotice.message}\n\nAdd usage: ` +
+      "https://www.withmurph.ai/settings?addUsage=true#subscription";
+    mocks.projectHostedAiUsageLimitNoticeForDelivery
+      .mockRejectedValueOnce(new Error("mandatory recovery URL unavailable"))
+      .mockResolvedValueOnce(linkedNotice);
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
         conversationImportedSeq: "2",
@@ -804,9 +738,9 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake({
       routeAuthority,
     }));
-    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat
-      .mockRejectedValueOnce(new Error("provider unavailable"))
-      .mockResolvedValueOnce({ status: "sent" });
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue({
+      status: "sent",
+    });
 
     const firstResponse = await reconciliationRoute.GET(
       requestForFacts(),
@@ -829,27 +763,27 @@ describe("hosted orchestration reconciliation facts", () => {
       mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mock
         .invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
-    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledTimes(2);
-    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenLastCalledWith({
-      chatId: "chat_runtime_denied",
-      claimToken: {
-        periodStart: deniedDecision.periodStart.toISOString(),
-        planResetAt: null,
-        sentAt: FIXED_NOW,
-        usageCreditLedgerVersion: "3",
-      },
-      memberId: MEMBER_ID,
-      message:
-        `${deniedDecision.userNotice.message}\n\nAdd usage: ` +
-        "https://www.withmurph.ai/settings?addUsage=true#subscription",
-      noticeCode: deniedDecision.userNotice.code,
-      occurredAt: FIXED_NOW,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      replyToMessageId: "msg_runtime_denied",
-      routeAuthority,
-      sourceEventId: "linq_event_runtime_denied",
-    });
-    expect(mocks.projectHostedAiUsageLimitNoticeForDelivery).toHaveBeenCalledWith({
+    expect(mocks.projectHostedAiUsageLimitNoticeForDelivery).toHaveBeenCalledTimes(2);
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenCalledExactlyOnceWith({
+        chatId: "chat_runtime_denied",
+        claimToken: {
+          periodStart: deniedDecision.periodStart.toISOString(),
+          planResetAt: null,
+          sentAt: FIXED_NOW,
+          usageCreditLedgerVersion: "3",
+        },
+        memberId: MEMBER_ID,
+        message: linkedNotice,
+        noticeCode: deniedDecision.userNotice.code,
+        occurredAt: FIXED_NOW,
+        prisma: expect.objectContaining({ kind: "prisma" }),
+        replyToMessageId: "msg_runtime_denied",
+        routeAuthority,
+        sourceEventId: "linq_event_runtime_denied",
+      });
+    expect(mocks.projectHostedAiUsageLimitNoticeForDelivery)
+      .toHaveBeenLastCalledWith({
       memberId: MEMBER_ID,
       message: deniedDecision.userNotice.message,
       noticeCode: deniedDecision.userNotice.code,
@@ -940,7 +874,7 @@ describe("hosted orchestration reconciliation facts", () => {
   });
 
   it("selects the latest pending conversation row for the current Linq notice", async () => {
-    const deniedDecision = buildTrialConversionPendingUsageGateDecision();
+    const deniedDecision = buildUsageLimitExceededGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
         conversationImportedSeq: "2",
@@ -973,6 +907,9 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(
       buildLinqConversationWake({ routeAuthority }),
     );
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue({
+      status: "sent",
+    });
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -982,27 +919,18 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
+      retryAt: deniedDecision.retryAfter.toISOString(),
     });
     expect(mocks.readHostedMailboxLatestPendingConversationItem).toHaveBeenNthCalledWith(1, {
       afterSeq: "2",
       prisma: expect.objectContaining({ kind: "prisma" }),
       userId: MEMBER_ID,
     });
-    expect(mocks.sendHostedTrialConversionNoticeToLinqChat).toHaveBeenCalledWith({
-      chatId: "chat_runtime_denied",
-      memberId: MEMBER_ID,
-      message: deniedDecision.userNotice.message,
-      occurredAt: FIXED_NOW,
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      replyToMessageId: "msg_runtime_denied",
-      routeAuthority,
-      sourceEventId: "linq_event_runtime_denied",
-    });
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).toHaveBeenCalledTimes(1);
   });
 
   it("ignores a pending notice row that does not advance past the replay floor", async () => {
-    const deniedDecision = buildTrialConversionPendingUsageGateDecision();
+    const deniedDecision = buildUsageLimitExceededGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
         conversationImportedSeq: "2",
@@ -1035,7 +963,7 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
+      retryAt: deniedDecision.retryAfter.toISOString(),
     });
     expect(mocks.readHostedMailboxLatestPendingConversationItem).toHaveBeenCalledWith({
       afterSeq: "2",
@@ -1043,92 +971,7 @@ describe("hosted orchestration reconciliation facts", () => {
       userId: MEMBER_ID,
     });
     expect(mocks.decodeHostedMailboxStoredPayload).not.toHaveBeenCalled();
-    expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
-  });
-
-  it("does not send a Telegram notice for trial conversion denials", async () => {
-    const deniedDecision = buildTrialConversionPendingUsageGateDecision();
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      redactedStatusJson: {
-        conversationImportedSeq: "2",
-        systemImportedSeq: "0",
-      },
-    }));
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "3",
-      },
-      {
-        lane: "system",
-        maxSeq: "0",
-      },
-    ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: deniedDecision,
-      status: "denied",
-    });
-    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
-      buildPendingConversationItem(),
-    );
-    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildTelegramConversationWake());
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
-    });
-    expect(mocks.readHostedMailboxLatestPendingConversationItem).toHaveBeenCalledWith({
-      afterSeq: "2",
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      userId: MEMBER_ID,
-    });
-    expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
-  });
-
-  it("does not send a current-chat trial conversion notice for email runtime denial", async () => {
-    const deniedDecision = buildTrialConversionPendingUsageGateDecision();
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      redactedStatusJson: {
-        conversationImportedSeq: "2",
-        systemImportedSeq: "0",
-      },
-    }));
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "3",
-      },
-      {
-        lane: "system",
-        maxSeq: "0",
-      },
-    ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: deniedDecision,
-      status: "denied",
-    });
-    mocks.readHostedMailboxLatestPendingConversationItem.mockResolvedValue(
-      buildPendingConversationItem(),
-    );
-    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildEmailConversationWake());
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
-    });
-    expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
+    expect(mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat).not.toHaveBeenCalled();
   });
 
   it("does not gate replay-only conversation lag above local import but at or below consumed", async () => {
@@ -1170,8 +1013,8 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
   });
 
-  it("selects trial conversion notice conversations above the consumed replay floor", async () => {
-    const deniedDecision = buildTrialConversionPendingUsageGateDecision();
+  it("selects usage-limit notice conversations above the consumed replay floor", async () => {
+    const deniedDecision = buildUsageLimitExceededGateDecision();
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
         conversationImportedSeq: "0",
@@ -1204,6 +1047,9 @@ describe("hosted orchestration reconciliation facts", () => {
       }),
     );
     mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake());
+    mocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mockResolvedValue({
+      status: "sent",
+    });
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -1213,56 +1059,13 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
+      retryAt: deniedDecision.retryAfter.toISOString(),
     });
     expect(mocks.readHostedMailboxLatestPendingConversationItem).toHaveBeenCalledWith({
       afterSeq: "250",
       prisma: expect.objectContaining({ kind: "prisma" }),
       userId: MEMBER_ID,
     });
-  });
-
-  it("does not send a current-chat Linq trial conversion notice for read-only status checks", async () => {
-    const deniedDecision = buildTrialConversionPendingUsageGateDecision();
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      redactedStatusJson: {
-        conversationImportedSeq: "2",
-        systemImportedSeq: "0",
-      },
-    }));
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "3",
-      },
-      {
-        lane: "system",
-        maxSeq: "0",
-      },
-    ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: deniedDecision,
-      status: "denied",
-    });
-
-    const {
-      readHostedRuntimeReconciliationFacts,
-    } = await import("../src/lib/hosted-orchestration/runtime-reconciliation-facts");
-    const facts = await readHostedRuntimeReconciliationFacts({
-      decisionSource: "status",
-      usageGateMode: "read_only",
-      userId: MEMBER_ID,
-    });
-
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_denied",
-      retryAt: "2026-05-20T12:15:00.000Z",
-    });
-    expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
-    expect(mocks.sendHostedTrialConversionNoticeToLinqChat).not.toHaveBeenCalled();
-    expect(
-      mocks.tryMarkHostedMailboxConversationAiUsageDenied,
-    ).not.toHaveBeenCalled();
   });
 
   it("does not retry usage-limit delivery for read-only status checks", async () => {
@@ -1699,25 +1502,6 @@ function buildHostedAccessInactiveUsageGateDecision() {
     retryAfter: new Date("2026-07-01T00:00:00.000Z"),
     spentUsdMicros: 0n,
     userNotice: null,
-  };
-}
-
-function buildTrialConversionPendingUsageGateDecision() {
-  return {
-    allowed: false,
-    billingPlanCode: "launch_monthly",
-    limitUsdMicros: 4_500_000n,
-    memberId: MEMBER_ID,
-    periodEnd: new Date("2026-05-20T12:15:00.000Z"),
-    periodStart: new Date("2026-05-20T12:00:00.000Z"),
-    reason: "trial_expired_pending_billing",
-    remainingUsdMicros: 0n,
-    retryAfter: new Date("2026-05-20T12:15:00.000Z"),
-    spentUsdMicros: 4_500_000n,
-    userNotice: {
-      code: "trial_conversion_pending",
-      message: "Your Murph trial needs billing before I can keep going.",
-    },
   };
 }
 

@@ -21,7 +21,7 @@ export type JsonFetch<TResponse extends JsonFetchResponse> = (
   },
 ) => Promise<TResponse>
 
-export async function fetchJsonResponse<TResponse extends JsonFetchResponse>(input: {
+type FetchJsonResponseInput<TResponse extends JsonFetchResponse> = {
   body?: string
   createTransportError: (input: {
     error: unknown
@@ -33,25 +33,62 @@ export async function fetchJsonResponse<TResponse extends JsonFetchResponse>(inp
   signal?: AbortSignal
   timeoutMs: number
   url: string
-}): Promise<TResponse> {
+}
+
+export async function fetchJsonResponse<
+  TResponse extends JsonFetchResponse,
+  TResult,
+>(input: FetchJsonResponseInput<TResponse> & {
+  consumeResponse: (response: TResponse) => Promise<TResult> | TResult
+}): Promise<TResult>
+export async function fetchJsonResponse<TResponse extends JsonFetchResponse>(
+  input: FetchJsonResponseInput<TResponse>,
+): Promise<TResponse>
+export async function fetchJsonResponse<
+  TResponse extends JsonFetchResponse,
+  TResult,
+>(input: FetchJsonResponseInput<TResponse> & {
+  consumeResponse?: (response: TResponse) => Promise<TResult> | TResult
+}): Promise<TResult | TResponse> {
   const timeout = createTimeoutAbortController(input.signal, input.timeoutMs)
 
   try {
-    return await input.fetchImplementation(input.url, {
-      method: input.method,
-      headers: input.headers,
-      body: input.body,
-      signal: timeout.signal,
-    })
-  } catch (error) {
-    if (input.signal?.aborted) {
-      throw error
+    let response: TResponse
+    try {
+      response = await input.fetchImplementation(input.url, {
+        method: input.method,
+        headers: input.headers,
+        body: input.body,
+        signal: timeout.signal,
+      })
+    } catch (error) {
+      if (input.signal?.aborted) {
+        throw error
+      }
+
+      throw input.createTransportError({
+        error,
+        timedOut: timeout.timedOut(),
+      })
     }
 
-    throw input.createTransportError({
-      error,
-      timedOut: timeout.timedOut(),
-    })
+    if (!input.consumeResponse) {
+      return response
+    }
+
+    try {
+      return await input.consumeResponse(response)
+    } catch (error) {
+      if (input.signal?.aborted) {
+        input.signal.throwIfAborted()
+        throw error
+      }
+      if (!timeout.timedOut()) {
+        throw error
+      }
+
+      throw input.createTransportError({ error, timedOut: true })
+    }
   } finally {
     timeout.cleanup()
   }

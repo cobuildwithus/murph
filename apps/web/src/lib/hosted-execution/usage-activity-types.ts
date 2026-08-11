@@ -28,4 +28,6 @@ export interface HostedAiUsageActivitySnapshot {
   credits: readonly HostedAiUsageCreditActivityRow[];
   missions: readonly HostedAiUsageMissionActivityRow[];
   missionsEnabled: boolean;
+  /** Browser-local invalidation only; absent only in inert design fixtures. */
+  referralIdentityKey?: string;
 }

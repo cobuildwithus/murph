@@ -13,7 +13,7 @@ import {
   type JsonValue,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import type { JsonObject } from './health-cli-method-types.js'
 
 const experimentCheckInCadenceSchema = z.enum(['none', 'daily', 'every_3_days', 'weekly'])

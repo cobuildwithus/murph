@@ -11,11 +11,12 @@ if [[ -r "$review_gpt_local_config" ]]; then
 fi
 
 review_gpt_invalid_browser_lane() {
-  echo "Error: unsupported ReviewGPT browser lane '$1'. Use random, eragon, phlebas, hercules, or mountain." >&2
+  echo "Error: unsupported ReviewGPT browser lane '$1'. Use main, random, eragon, phlebas, hercules, or mountain." >&2
 }
 
 review_gpt_browser_lane_display_name() {
   case "$1" in
+    main) printf '%s\n' "Main" ;;
     eragon) printf '%s\n' "Eragon" ;;
     phlebas) printf '%s\n' "Phlebas" ;;
     hercules) printf '%s\n' "Hercules" ;;
@@ -29,6 +30,7 @@ review_gpt_browser_lane_display_name() {
 
 review_gpt_browser_lane_port() {
   case "$1" in
+    main) printf '%s\n' "9452" ;;
     eragon) printf '%s\n' "9448" ;;
     phlebas) printf '%s\n' "9442" ;;
     hercules) printf '%s\n' "9444" ;;
@@ -42,6 +44,12 @@ review_gpt_browser_lane_port() {
 
 review_gpt_browser_lane_data_dir() {
   local review_gpt_lane_display
+
+  if [[ "$1" == "main" ]]; then
+    printf '%s\n' "$HOME/Library/Application Support/BraveSoftware/Brave-Browser"
+    return 0
+  fi
+
   review_gpt_lane_display="$(review_gpt_browser_lane_display_name "$1")" || return 1
   printf '%s\n' "$HOME/Library/Application Support/MurphReviewGPT/$review_gpt_lane_display"
 }
@@ -72,7 +80,7 @@ review_gpt_browser_lane_is_usable() {
   [[ ! -e "$review_gpt_lane_lock" && ! -L "$review_gpt_lane_lock" ]]
 }
 
-review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-random}}}"
+review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-main}}}"
 review_gpt_requested_browser_lane="$(printf '%s' "$review_gpt_requested_browser_lane" | tr '[:upper:]' '[:lower:]')"
 review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4}}"
 
@@ -82,6 +90,9 @@ if [[ ! "$review_gpt_browser_lane_count" =~ ^[1-4]$ ]]; then
 fi
 
 case "$review_gpt_requested_browser_lane" in
+  main)
+    review_gpt_selected_browser_lane="main"
+    ;;
   "" | auto | random)
     review_gpt_all_browser_lanes=(eragon phlebas hercules mountain)
     review_gpt_browser_lanes=("${review_gpt_all_browser_lanes[@]:0:review_gpt_browser_lane_count}")
@@ -118,7 +129,12 @@ review_gpt_selected_browser_display="$(review_gpt_browser_lane_display_name "$re
 review_gpt_selected_browser_port="$(review_gpt_browser_lane_port "$review_gpt_selected_browser_lane")" || {
   return 1 2>/dev/null || exit 1
 }
-review_gpt_selected_browser_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/$review_gpt_selected_browser_lane/$review_gpt_selected_browser_display.app"
+review_gpt_installed_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+if [[ "$review_gpt_selected_browser_lane" == "main" ]]; then
+  review_gpt_selected_browser_app="/Applications/Brave Browser.app"
+else
+  review_gpt_selected_browser_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/$review_gpt_selected_browser_lane/$review_gpt_selected_browser_display.app"
+fi
 
 if [[ ! -d "$review_gpt_selected_browser_app" ]] && command -v mdfind >/dev/null 2>&1; then
   review_gpt_found_browser_app="$(
@@ -130,10 +146,15 @@ if [[ ! -d "$review_gpt_selected_browser_app" ]] && command -v mdfind >/dev/null
 fi
 
 review_gpt_selected_browser_binary="$review_gpt_selected_browser_app/Contents/MacOS/Brave Browser"
-if [[ -x "$review_gpt_selected_browser_binary" ]]; then
+if [[ -x "$review_gpt_installed_browser_binary" ]]; then
+  # The lane's user-data directory and CDP port provide isolation. Prefer the
+  # installed browser so ignored copied app bundles cannot pin an old Brave
+  # release or its launch behavior indefinitely.
+  browser_binary_path="${browser_binary_path:-$review_gpt_installed_browser_binary}"
+elif [[ -x "$review_gpt_selected_browser_binary" ]]; then
   browser_binary_path="${browser_binary_path:-$review_gpt_selected_browser_binary}"
 else
-  browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
+  browser_binary_path="${browser_binary_path:-$review_gpt_installed_browser_binary}"
 fi
 managed_browser_user_data_dir="${managed_browser_user_data_dir:-$(review_gpt_browser_lane_data_dir "$review_gpt_selected_browser_lane")}"
 managed_browser_profile="${managed_browser_profile:-Default}"
@@ -160,6 +181,7 @@ package_script="scripts/package-audit-context-full.sh"
 app_connector="current"
 model="gpt-5.6-sol"
 thinking="current"
+response_timeout_ms="${response_timeout_ms:-$((180 * 60 * 1000))}"
 
 review_gpt_review_phase="${REVIEW_GPT_REVIEW_PHASE:-final}"
 review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"

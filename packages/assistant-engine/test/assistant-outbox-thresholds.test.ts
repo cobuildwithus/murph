@@ -1,4 +1,4 @@
-import { rm, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -944,6 +944,58 @@ describe('assistant outbox thresholds', () => {
     expect(rename).toHaveBeenCalledOnce()
   })
 
+  it('reads inventory files with fixed bounded concurrency and reports scan size', async () => {
+    const { outbox: seedOutbox } = await loadOutboxModule()
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-thresholds-inventory-concurrency-',
+    )
+    for (let index = 0; index < 10; index += 1) {
+      await createIntent(seedOutbox, vaultRoot, {
+        createdAt: `2026-04-08T15:00:${String(index).padStart(2, '0')}.000Z`,
+        message: `inventory message ${index}`,
+        sessionId: `session-inventory-${index}`,
+        turnId: `turn-inventory-${index}`,
+      })
+    }
+
+    let activeReads = 0
+    let maxActiveReads = 0
+    let trackedBytes = 0
+    const delayedReadFile = async (
+      filePath: string,
+      encoding: 'utf8',
+    ): Promise<string> => {
+      activeReads += 1
+      maxActiveReads = Math.max(maxActiveReads, activeReads)
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        const raw = await readFile(filePath, encoding)
+        trackedBytes += Buffer.byteLength(raw, 'utf8')
+        return raw
+      } finally {
+        activeReads -= 1
+      }
+    }
+    const { outbox } = await loadOutboxModule({ readFile: delayedReadFile })
+    let scanMetrics: { bytesRead: number; filesRead: number } | null = null
+
+    const intents = await outbox.listAssistantOutboxIntentsLocal(
+      vaultRoot,
+      (metrics) => {
+        scanMetrics = metrics
+      },
+    )
+
+    expect(intents.map((intent) => intent.message)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `inventory message ${index}`),
+    )
+    expect(maxActiveReads).toBe(4)
+    expect(scanMetrics).toEqual({
+      bytesRead: trackedBytes,
+      filesRead: 10,
+    })
+  })
+
   it('treats explicit delivery-may-have-succeeded errors as ambiguous retries', async () => {
     const deliverAssistantMessageOverBinding = vi.fn(async () => {
       throw Object.assign(new Error('socket closed after send'), {
@@ -1012,6 +1064,7 @@ describe('assistant outbox thresholds', () => {
 
 async function loadOutboxModule(options: {
   deliverAssistantMessageOverBinding?: (...args: never[]) => Promise<unknown>
+  readFile?: (filePath: string, encoding: 'utf8') => Promise<string>
   rename?: (...args: never[]) => Promise<unknown>
   saveAssistantSession?: (...args: never[]) => Promise<unknown>
 } = {}) {
@@ -1021,14 +1074,15 @@ async function loadOutboxModule(options: {
       options.deliverAssistantMessageOverBinding ?? vi.fn(),
   }))
 
-  if (options.rename) {
+  if (options.readFile || options.rename) {
     vi.doMock('node:fs/promises', async () => {
       const actual = await vi.importActual<typeof import('node:fs/promises')>(
         'node:fs/promises',
       )
       return {
         ...actual,
-        rename: options.rename,
+        ...(options.readFile ? { readFile: options.readFile } : {}),
+        ...(options.rename ? { rename: options.rename } : {}),
       }
     })
   }

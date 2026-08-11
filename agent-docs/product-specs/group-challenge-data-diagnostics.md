@@ -133,12 +133,25 @@ Deep sleep and REM sleep are each one user-facing permission. New access offers
 always use the source-aware `deep-sleep-sources-days.v1` and
 `rem-sleep-sources-days.v1` scopes, which disclose the canonical value plus one
 bounded entry for every public sleep source that has that metric on the date,
-up to four sources. Each entry carries the canonical public source key and
-label, its value and unit, its nullable canonical source-record time, and
-whether it supplied the canonical selected value. The record also carries `projectedAt`
-and a literal `sourcesDisagree` flag. Source-aware records fail closed instead of
-truncating when the source bound is exceeded or the selected source cannot be
-proved. The legacy provider-neutral `deep-sleep-days.v0` and
+up to four wearable sources plus the optional reserved `Manual` correction
+source. Each entry carries the canonical public source key and label, its value
+and unit, its nullable canonical source-record time, and whether it supplied the
+canonical selected value. The record also carries `projectedAt` and a literal
+`sourcesDisagree` flag. Source-aware records fail closed instead of truncating
+when either source bound is exceeded or the selected source cannot be proved. A
+canonical manually entered sleep-stage event is projected onto its
+member-local day and disclosed as the explicit `manual` / `Manual` source; it is
+never attributed to a connected wearable or aggregator, and it is authoritative
+for that day while wearable values remain visible as disagreeing sources. When
+multiple live manual facts target the same stage and member-local day, canonical
+recording order decides the correction before value or unit normalization: the
+newest recorded raw fact wins after the shared metric date, source, and
+observation-time rules. An invalid newest fact omits only its affected day
+instead of silently reviving an older value or erasing other valid shared days.
+A canonically deleted fact no longer
+participates, so the next newest live manual fact wins; wearable selection
+resumes only when no live manual fact remains. The legacy
+provider-neutral `deep-sleep-days.v0` and
 `rem-sleep-days.v0` scopes remain read-only compatibility contracts for
 existing policies and grants, disclosing one canonical daily value only. A new
 join view or access offer derives the matching legacy policy request as v1, so
@@ -210,9 +223,18 @@ migration.
 The current `read_shared` result gates every diagnosis. Murph applies this order
 to each `in` participant and stops at the first match:
 
+When a participant explicitly asks whether a shared metric is visible now,
+yet, or after a source change, the model that owns the group-shared answer
+performs one new `read_shared` call for the exact relevant scope before
+answering. This applies both to an ordinary group turn and to the detached
+joined-group model serving a private group consultation; the private root only
+admits the existing `ask` and never gains the shared reader. A prior tool
+result, conversation claim, or connection timestamp is not current shared-data
+evidence.
+
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
-| Current challenge-metric data eligible under the scope's producer-owned completion marker | Include the participant in settled ranked standings. For deep/REM sleep, including the source-aware v1 scopes, `data.provisional: true` remains pending. A v1 top-level value is the canonical scoring selection; source entries remain explanatory evidence. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence. |
+| Current challenge-metric data eligible under the scope's producer-owned completion marker | Include the participant in settled ranked standings. Reported Deep/REM sleep is scoreable immediately; the member-local future-date guard still excludes future rows, but the current local date alone does not make a reported stage value provisional. A v1 top-level value is the canonical scoring selection; source entries remain explanatory evidence. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence. |
 | Current challenge-metric data exists but is not yet eligible under that completion marker | Keep the participant pending and unranked. This is not missing data or a zero. | Do not diagnose, offer permission, or advance completion from the reader's clock. |
 | No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
 | Metric scope granted, but no `device-sync-status.v0` grant | The current shared read lacks a usable metric; its cause is unverified. Connection status was not shared, but that does not explain the absence. | Include only the diagnostic scope in one proactive offer after the current read when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
@@ -301,6 +323,10 @@ The derivation rules are:
 - `sources` contains at most eight unique public source labels, such as Apple
   Health or WHOOP, each at most 80 characters. It does not expose an internal
   provider key.
+- When historical and current connections resolve to the same public label,
+  Web keeps the complete observation from the latest connection `connectedAt`
+  and source `lastSeenAt` generation. It never combines status or timestamps
+  from different connection or source generations.
 - `status` is one of `connected`, `needs-attention`, `needs-reconnect`,
   `disconnected`, or `setting-up`.
 - `statusObservedAt` says when the owner observed the projected coarse status.

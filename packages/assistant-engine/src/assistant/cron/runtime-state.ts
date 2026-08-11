@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import { quarantineAssistantStateFile } from '../quarantine.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import {

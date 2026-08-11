@@ -29,16 +29,16 @@ describe("hosted runtime log database retention", () => {
     vi.clearAllMocks();
     mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
     mocks.runHostedRetentionCleanup.mockResolvedValue({
-      oldRuntimeLogsDeleted: 3,
+      oldRuntimeLogsDeleted: 0,
     });
     mocks.deleteExpiredHostedRuntimeLogs.mockResolvedValue(5);
   });
 
-  it("runs isolated retention after primary cleanup and combines counts", async () => {
+  it("reports the dedicated retention count", async () => {
     const events: string[] = [];
     mocks.runHostedRetentionCleanup.mockImplementationOnce(async () => {
-      events.push("primary");
-      return { oldRuntimeLogsDeleted: 3 };
+      events.push("base");
+      return { oldRuntimeLogsDeleted: 0 };
     });
     mocks.deleteExpiredHostedRuntimeLogs.mockImplementationOnce(async () => {
       events.push("isolated");
@@ -48,10 +48,10 @@ describe("hosted runtime log database retention", () => {
     await expect(runHostedRetentionCleanupWithRuntimeLogDatabase({
       now: new Date("2026-07-29T00:00:00.000Z"),
     })).resolves.toMatchObject({
-      oldRuntimeLogsDeleted: 8,
+      oldRuntimeLogsDeleted: 5,
     });
 
-    expect(events).toEqual(["primary", "isolated"]);
+    expect(events).toEqual(["base", "isolated"]);
     expect(mocks.deleteExpiredHostedRuntimeLogs).toHaveBeenCalledWith({
       batchSize: 5_000,
       maxBatches: 4,
@@ -60,14 +60,14 @@ describe("hosted runtime log database retention", () => {
     });
   });
 
-  it("preserves completed primary cleanup when isolated retention fails", async () => {
+  it("preserves completed base cleanup when dedicated retention fails", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.deleteExpiredHostedRuntimeLogs.mockRejectedValueOnce(
       new Error("isolated database unavailable"),
     );
 
     await expect(runHostedRetentionCleanupWithRuntimeLogDatabase()).resolves.toMatchObject({
-      oldRuntimeLogsDeleted: 3,
+      oldRuntimeLogsDeleted: 0,
     });
     expect(consoleWarn).toHaveBeenCalledWith(
       "Hosted runtime log database retention failed.",
@@ -82,7 +82,7 @@ describe("hosted runtime log database retention", () => {
     mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValueOnce(false);
 
     await expect(runHostedRetentionCleanupWithRuntimeLogDatabase()).resolves.toMatchObject({
-      oldRuntimeLogsDeleted: 3,
+      oldRuntimeLogsDeleted: 0,
     });
     expect(mocks.deleteExpiredHostedRuntimeLogs).not.toHaveBeenCalled();
   });

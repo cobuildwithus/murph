@@ -33,11 +33,13 @@ import { Skeleton } from "@/src/components/ui/skeleton";
 import { Spinner } from "@/src/components/ui/spinner";
 import {
   clearClinicalRecordsConnectIntentFromBrowser,
+  stageClinicalRecordsConnectIntentInBrowser,
   takeClinicalRecordsConnectIntentFromBrowser,
 } from "@/src/lib/clinical-records/browser-connect-intent";
 import {
   CLINICAL_RECORD_CONNECT_START_PATH,
   parseClinicalProviderSearchResponse,
+  parseClinicalRecordConnectIntentResponse,
   parseClinicalRecordConnectStartResponse,
   type ClinicalProviderFacilityContract,
   type ClinicalProviderSearchResultContract,
@@ -45,12 +47,21 @@ import {
 import { cn } from "@/src/lib/utils";
 
 const PROVIDER_SEARCH_PATH = "/api/clinical-records/providers/search";
+const CONNECT_INTENT_PATH = "/api/clinical-records/connect-intents";
 
-export function RecordsConnectClient({ authenticated }: { authenticated: boolean }) {
+export function RecordsConnectClient({
+  authenticated,
+  launchConnectIntent = false,
+}: {
+  authenticated: boolean;
+  launchConnectIntent?: boolean;
+}) {
   const [intentClaim, setIntentClaim] = useState<string | null | undefined>(undefined);
+  const [launchFailed, setLaunchFailed] = useState(false);
   const [consentRequired, setConsentRequired] = useState<boolean | null>(null);
   const authOpenedRef = useRef(false);
   const capturedIntentRef = useRef<string | null | undefined>(undefined);
+  const launchPromiseRef = useRef<Promise<string> | null>(null);
   const { openAuthDialog } = useAuth();
 
   useLayoutEffect(() => {
@@ -74,7 +85,7 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
   useEffect(() => {
     if (
       authenticated
-      || !intentClaim
+      || (!intentClaim && !launchConnectIntent)
       || authOpenedRef.current
     ) {
       return;
@@ -82,13 +93,73 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
 
     authOpenedRef.current = true;
     openAuthDialog();
-  }, [authenticated, intentClaim, openAuthDialog]);
+  }, [authenticated, intentClaim, launchConnectIntent, openAuthDialog]);
 
-  if (intentClaim === undefined) {
-    return <ConnectPageSkeleton />;
+  useEffect(() => {
+    if (
+      !launchConnectIntent
+      || !authenticated
+      || intentClaim !== null
+      || launchFailed
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const launchPromise = launchPromiseRef.current ?? requestHostedOnboardingJson<unknown>({
+      method: "POST",
+      payload: {},
+      url: CONNECT_INTENT_PATH,
+    }).then((response) => parseClinicalRecordConnectIntentResponse(response).claim);
+    launchPromiseRef.current = launchPromise;
+    void launchPromise
+      .then((claim) => {
+        if (cancelled) return;
+        stageClinicalRecordsConnectIntentInBrowser(claim);
+        setLaunchFailed(false);
+        setIntentClaim(claim);
+      })
+      .catch(() => {
+        if (launchPromiseRef.current === launchPromise) {
+          launchPromiseRef.current = null;
+        }
+        if (!cancelled) {
+          setLaunchFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, intentClaim, launchConnectIntent, launchFailed]);
+
+  if (
+    intentClaim === undefined
+    || (
+      launchConnectIntent
+      && authenticated
+      && intentClaim === null
+      && !launchFailed
+    )
+  ) {
+    return <RecordsConnectLauncherState state="loading" />;
   }
 
   if (!intentClaim) {
+    if (launchConnectIntent && authenticated && launchFailed) {
+      return (
+        <RecordsConnectLauncherState
+          onRetry={() => setLaunchFailed(false)}
+          state="launch-failed"
+        />
+      );
+    }
+    if (launchConnectIntent && !authenticated) {
+      return (
+        <RecordsConnectLauncherState
+          onSignIn={openAuthDialog}
+          state="authentication-required"
+        />
+      );
+    }
     return <UnavailableIntentState />;
   }
 
@@ -570,6 +641,22 @@ function ProviderResult({
   );
 }
 
+export function RecordsConnectLauncherState({
+  onRetry,
+  onSignIn,
+  state,
+}: {
+  onRetry?: () => void;
+  onSignIn?: () => void;
+  state: "authentication-required" | "launch-failed" | "loading";
+}) {
+  if (state === "loading") return <ConnectPageSkeleton />;
+  if (state === "launch-failed") {
+    return <LaunchFailedState onRetry={onRetry ?? (() => undefined)} />;
+  }
+  return <AuthRequiredState onSignIn={onSignIn ?? (() => undefined)} />;
+}
+
 function ConnectPageSkeleton() {
   return (
     <div aria-busy="true" aria-label="Preparing records connection" className="max-w-5xl space-y-8" role="status">
@@ -599,6 +686,31 @@ function AuthRequiredState({ onSignIn }: { onSignIn: () => void }) {
       </p>
       <Button className="mt-6 w-full sm:w-auto" onClick={onSignIn} size="lg" type="button">
         Log in or sign up
+      </Button>
+    </section>
+  );
+}
+
+function LaunchFailedState({ onRetry }: { onRetry: () => void }) {
+  return (
+    <section
+      aria-atomic="true"
+      aria-live="polite"
+      className="max-w-2xl rounded-xl border border-border bg-card p-6 sm:p-8"
+      role="status"
+    >
+      <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <RefreshCwIcon aria-hidden="true" className="size-5" />
+      </span>
+      <h2 className="mt-5 text-balance font-serif text-2xl font-medium text-foreground">
+        Couldn&apos;t start Clinical Records
+      </h2>
+      <p className="mt-2 max-w-xl text-pretty text-sm leading-6 text-muted-foreground">
+        The secure connection could not be prepared. Your link is still valid, so you can try again now.
+      </p>
+      <Button className="mt-6 w-full sm:w-auto" onClick={onRetry} size="lg" type="button">
+        <RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
+        Try again
       </Button>
     </section>
   );

@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -43,7 +43,6 @@ const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
   'cognitive-focus',
   'hrv-resting-heart-rate',
   'aerobic-fitness',
-  'recovery-modalities',
   'daily-activity',
   'mobility-posture',
   'cardiometabolic-health',
@@ -51,8 +50,14 @@ const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
   'body-composition',
   'cycle-hormonal-health',
   'gut-digestion',
-  'general-eye-health',
 ] as const
+
+const MURPH_ONBOARDING_REFERENCE_FILES = [
+  'aspiration-foundation-delegation.md',
+  'persistence-recovery-follow-up.md',
+  'return-launch-completion.md',
+] as const
+const MURPH_ONBOARDING_ROOT_MAX_BYTES = 12 * 1024
 
 const managedGroupSkillsArePublicFallbacks = readFileSync(
   path.join(resolveAssistantSkillsRoot(), 'group-chat', 'SKILL.md'),
@@ -230,10 +235,7 @@ describe('assistant skill assets', () => {
       expect(raw).not.toMatch(/^\+\d+\s*$/mu)
     }
 
-    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(true)
-    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
-    )
+    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(false)
   })
 
   it('keeps private activity interpretation in its owner', async () => {
@@ -280,322 +282,12 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('routes red light dose ownership to the dedicated red-light skill', async () => {
-    const recoverySkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'recovery-modalities',
-    )
-    expect(recoverySkill).toBeTruthy()
-    if (!recoverySkill) {
-      return
-    }
-
-    expect(recoverySkill.triggerHint).toContain('Use red-light-therapy')
-    expect(recoverySkill.triggerHint).not.toContain('device dosing')
-
-    const recoveryText = await readSkillFile(recoverySkill)
-    expect(recoveryText).toContain('Use red-light-therapy for red/NIR photobiomodulation dose')
-    expect(recoveryText).toContain('does not own PBM device-dose math')
-    expect(recoveryText).not.toContain('device-seeds.json')
-  })
-
-  it('keeps red light therapy registered with device seed data', async () => {
-    const redLightSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'red-light-therapy',
-    )
-    expect(redLightSkill).toBeTruthy()
-    if (!redLightSkill) {
-      return
-    }
-
-    expect(redLightSkill.triggerHint).toContain('red light therapy')
-    expect(redLightSkill.triggerHint).toContain('device irradiance')
-    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
-    )
-
-    const redLightText = await readSkillFile(redLightSkill)
-    expect(redLightText).toContain('device-seeds.json')
-    expect(redLightText).toContain('activeModeLabel')
-    expect(redLightText).toContain('manufacturer-claim duration estimate')
-
-    const deviceSeedsRaw = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        'red-light-therapy',
-        'device-seeds.json',
-      ),
-      'utf8',
-    )
-    const deviceSeeds: unknown = JSON.parse(deviceSeedsRaw)
-    expectRecord(deviceSeeds, 'red-light device seeds')
-    expect(deviceSeeds.schemaVersion).toBe(
-      'murph.assistant.skill.red-light-device-seeds.v1',
-    )
-    const devices = deviceSeeds.devices
-    expect(Array.isArray(devices)).toBe(true)
-    if (!Array.isArray(devices)) {
-      return
-    }
-    expect(devices.length).toBeGreaterThan(0)
-  })
-
-  it('routes general eye health with evidence and contact-lens safety boundaries', async () => {
-    const eyeSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'general-eye-health',
-    )
-    expect(eyeSkill).toBeTruthy()
-    if (!eyeSkill) {
-      return
-    }
-
-    expect(eyeSkill.triggerHint).toContain('digital eye strain')
-    expect(eyeSkill.triggerHint).toContain('contact-lens comfort and safety')
-    expect(buildAssistantSkillFileRef('general-eye-health')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/general-eye-health/SKILL.md',
-    )
-
-    const eyeSkillText = await readSkillFile(eyeSkill)
-    expect(eyeSkillText).toContain('references/triage-and-contact-lenses.md')
-    expect(eyeSkillText).toContain('references/evidence-register.md')
-    expect(eyeSkillText).toContain(
-      'For eye-exam timing, read both: the Decision Order owns the outcome and timing, while the evidence register supplies evidence only.',
-    )
-    expect(eyeSkillText).toContain('correction information, not an eye-health score')
-    expect(eyeSkillText).toContain('optional memory cue, not a proven treatment dose')
-    expect(eyeSkillText).toContain('Do not recommend blue-light-filtering glasses')
-    expect(eyeSkillText).toContain(
-      'Apply Prerequisite First Aid and then the Decision Order in `references/triage-and-contact-lenses.md` before selecting a care destination or any further action.',
-    )
-    expect(eyeSkillText).toContain(
-      'Only when the Decision Order assigns `Brief self-care trial is reasonable`:',
-    )
-    expect(eyeSkillText).toContain('`Arrange a prompt eye exam`')
-    expect(eyeSkillText).toContain('`Arrange a routine eye exam`')
-    expect(eyeSkillText).toContain('`Prevention action only`')
-    expect(eyeSkillText).not.toContain('safety pass is negative')
-    expect(eyeSkillText).not.toContain('A contact-lens wearer with pain')
-    expect(eyeSkillText).not.toContain('gradual, mild, in both eyes')
-    expect(eyeSkillText).not.toContain('still hurts after removal')
-    expect(eyeSkillText).not.toContain('pain that persists or worsens after removal')
-    expect(eyeSkillText).not.toContain('usually in both eyes')
-    expect(eyeSkillText).toContain('Stop the trial')
-    expect(eyeSkillText).not.toContain('Stop the experiment')
-
-    const [triageText, evidenceText] = await Promise.all([
-      readFile(
-        path.join(
-          resolveAssistantSkillsRoot(),
-          'general-eye-health',
-          'references',
-          'triage-and-contact-lenses.md',
-        ),
-        'utf8',
-      ),
-      readFile(
-        path.join(
-          resolveAssistantSkillsRoot(),
-          'general-eye-health',
-          'references',
-          'evidence-register.md',
-        ),
-        'utf8',
-      ),
-    ])
-    expect(triageText).toContain('### Emergency now')
-    expect(triageText).toContain('### Prompt same-day eye care')
-    const emergencyRule = triageText.slice(
-      triageText.indexOf('### Emergency now'),
-      triageText.indexOf('### Prompt same-day eye care'),
-    )
-    expect(emergencyRule).toContain(
-      'Sudden severe or intense eye pain, even before another feature is known, including with a red eye, blurred vision, halos, nausea, or vomiting.',
-    )
-    const sameDayRule = triageText.slice(
-      triageText.indexOf('### Prompt same-day eye care'),
-      triageText.indexOf('### Arrange a prompt eye exam'),
-    )
-    expect(sameDayRule).toContain(
-      'A significant direct blow or blunt impact to the eye, even when initial pain and vision seem normal',
-    )
-    expect(triageText).toContain('## Prerequisite First Aid')
-    expect(triageText.indexOf('## Prerequisite First Aid')).toBeLessThan(
-      triageText.indexOf('## Decision Order'),
-    )
-    expect(triageText).toContain(
-      'Evaluate these outcomes from top to bottom, select exactly one, and stop at the first match.',
-    )
-    expect(triageText).toContain('### Arrange a prompt eye exam')
-    expect(triageText).toContain('### Brief self-care trial is reasonable')
-    expect(triageText).toContain('### Prevention action only')
-    expect(triageText).toContain('### Arrange a routine eye exam')
-    expect(triageText).toContain('### Ask one decision-changing question')
-    expect(triageText).toContain(
-      'If no earlier outcome matches, self-care is reasonable',
-    )
-    const prerequisiteFirstAid = triageText.slice(
-      triageText.indexOf('## Prerequisite First Aid'),
-      triageText.indexOf('## Decision Order'),
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'apply the first applicable rule below from top to bottom',
-    )
-    expect(prerequisiteFirstAid.indexOf('For a suspected penetrating')).toBeLessThan(
-      prerequisiteFirstAid.indexOf(
-        'For a corrosive, industrial, or unknown chemical exposure',
-      ),
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'For a corrosive, industrial, or unknown chemical exposure, start copious gentle irrigation',
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'Remove contacts only if easy and without pausing or delaying irrigation.',
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'Do not manipulate or remove a contact lens.',
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'any new vision change, marked tearing, discharge, irritation, or a foreign-body sensation, remove the lens or lenses immediately',
-    )
-    expect(prerequisiteFirstAid).toContain(
-      'Otherwise, if water contacts lenses, remove them as soon as possible.',
-    )
-    expect(triageText).toContain(
-      'Otherwise, for a known mild irritant or loose superficial particle, rinse gently with clean lukewarm water.',
-    )
-    expect(triageText).toContain(
-      'known mild irritant or loose superficial particle that fully resolves after thorough rinsing',
-    )
-    const promptExamRule = triageText.slice(
-      triageText.indexOf('### Arrange a prompt eye exam'),
-      triageText.indexOf('### Brief self-care trial is reasonable'),
-    )
-    expect(promptExamRule).toContain('Arrange the next available eye-care visit')
-    expect(promptExamRule).toContain(
-      'when a headache is persistent, recurring, worsening, function-limiting, or present away from near work',
-    )
-    expect(promptExamRule).toContain(
-      'unless every condition in `Brief self-care trial is reasonable` is known to be met',
-    )
-    expect(promptExamRule).toContain(
-      'missing eligibility facts do not default to self-care',
-    )
-    expect(promptExamRule).not.toContain(
-      'Use a lower threshold for prompt clinician input',
-    )
-    expect(promptExamRule).not.toContain(' or medical eye visit')
-    expect(triageText).toContain(
-      'This may include a mild headache confined to near work that improves with rest.',
-    )
-    const preventionActionRule = triageText.slice(
-      triageText.indexOf('### Prevention action only'),
-      triageText.indexOf('### Arrange a routine eye exam'),
-    )
-    expect(preventionActionRule).toContain(
-      'Do not invent a need for an eye exam.',
-    )
-    const routineExamRule = triageText.slice(
-      triageText.indexOf('### Arrange a routine eye exam'),
-      triageText.indexOf('### Ask one decision-changing question'),
-    )
-    expect(routineExamRule).toContain(
-      'known age, eye or medical risk, last-exam timing, or an established clinician schedule',
-    )
-    expect(routineExamRule).toContain(
-      'Do not ask another question when the known inputs already determine the routine guidance.',
-    )
-    expect(routineExamRule).toContain(
-      'If one missing input would change the timing, use `Ask one decision-changing question` instead.',
-    )
-    expect(routineExamRule).toContain(
-      'recommend the next available visit of the resolved type',
-    )
-    expect(routineExamRule).not.toContain('next available routine eye exam')
-    const examTypeResolver = triageText.slice(
-      triageText.indexOf('## Exam Type Resolver'),
-      triageText.indexOf('## Contact-Lens Action Rules'),
-    )
-    expect(examTypeResolver).toContain(
-      'resolve one booking type before handing off to computer-use',
-    )
-    expect(examTypeResolver).toContain(
-      'Follow a known clinician-specified exam or visit type.',
-    )
-    expect(examTypeResolver).toContain(
-      'For active symptom evaluation or known eye or medical risk that requires risk-based screening or clinician-directed follow-up, use a medical eye visit.',
-    )
-    expect(examTypeResolver).toContain(
-      'For asymptomatic general vision or prevention without that risk or direction, use a routine comprehensive eye or vision exam.',
-    )
-    expect(examTypeResolver).toContain(
-      'For an active-symptom medical eye visit, mention current contact-lens wear in the booking reason but do not append a separate fit-review type.',
-    )
-    expect(examTypeResolver).toContain(
-      'current contact-lens wear resolves to a routine comprehensive eye or vision exam with contact-lens evaluation as the single requested service.',
-    )
-    expect(examTypeResolver).not.toContain('Add a contact-lens-fit review')
-    expect(examTypeResolver).not.toContain('fit or prescription is due')
-    expect(examTypeResolver).toContain(
-      'A past contact prescription by itself does not justify a contact-lens fitting for someone who no longer wears contacts.',
-    )
-    expect(examTypeResolver).toContain(
-      'Do not select dilation or another procedure unless it is already directed.',
-    )
-    expect(triageText).toContain('new flashes of light')
-    expect(triageText).toContain('a sudden increase in or many new floaters')
-    const triageContactLensSameDayRule = triageText
-      .split('\n')
-      .find((line) => line.includes('A contact-lens wearer has pain;'))
-    expect(triageContactLensSameDayRule).toContain(
-      'has pain; redness; light sensitivity; any new vision change;',
-    )
-    expect(triageContactLensSameDayRule).not.toContain('marked redness')
-    expect(triageText).toContain(
-      'A contact-lens wearer with redness or a new vision change is not eligible for this pathway',
-    )
-    expect(triageText).toContain(
-      'When a contact-lens wearer is assigned `Prompt same-day eye care`, the matching prerequisite removes the lenses;',
-    )
-    expect(triageText).toContain(
-      'When the Decision Order assigns `Brief self-care trial is reasonable` for mild contact-lens dryness, do not wear the lenses again that day.',
-    )
-    expect(triageText).toContain(
-      'if symptoms return, stop lens wear and apply the Decision Order again.',
-    )
-    expect(triageText).not.toContain(
-      'if symptoms return, stop lens wear and arrange a contact-lens-fit exam',
-    )
-    expect(triageText).not.toContain(
-      'For mild end-of-day dryness that fully resolves after removal',
-    )
-    expect(triageText).not.toContain(
-      'or symptoms that persist after removal, do not reinsert',
-    )
-    expect(triageText).not.toContain('attend at least yearly contact-lens exams')
-    expect(triageText).toContain(
-      'mild, gradual, bilateral tired, dry, burning, gritty, or intermittently blurry symptoms',
-    )
-    expect(triageText).toContain(
-      'improve with complete blinking, rest, or lens removal',
-    )
-    expect(triageText).not.toContain('pain that persists or worsens after removal')
-    expect(triageText).toContain('mild, gradual, bilateral')
-    expect(triageText).not.toContain('usually bilateral')
-    expect(triageText).toContain(
-      'new flashes, a sudden increase in or many new floaters',
-    )
-    expect(triageText).toContain(
-      'Stable, longstanding occasional floaters do not meet this rule by themselves.',
-    )
-    expect(triageText).toContain(
-      'https://www.cdc.gov/contact-lenses/causes/index.html',
-    )
-    expect(evidenceText).toContain('The exact `20-20-20` formula has limited evidence')
-    expect(evidenceText).toContain(
-      'Do not assign exam timing or type outside that outcome.',
-    )
-    expect(evidenceText).toContain(
-      'https://www.cochrane.org/evidence/CD013244_blue-light-filtering-spectacle-lenses-visual-performance-macular-back-part-eye-protection-and',
-    )
+  it('keeps eye-health and recovery-modality knowledge out of topic skills', () => {
+    const registeredSlugs: readonly string[] = ASSISTANT_SKILLS.map((skill) => skill.slug)
+    expect(registeredSlugs).not.toContain('general-eye-health')
+    expect(registeredSlugs).not.toContain('recovery-modalities')
+    expect(existsSync(path.join(resolveAssistantSkillsRoot(), 'general-eye-health'))).toBe(false)
+    expect(existsSync(path.join(resolveAssistantSkillsRoot(), 'recovery-modalities'))).toBe(false)
 
     const systemPrompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
@@ -615,13 +307,10 @@ describe('assistant skill assets', () => {
       turnTrigger: null,
     })
     expect(systemPrompt).toContain(
-      'Eye health: general-eye-health for screen-linked discomfort, contact-lens safety, refractive questions, prevention, and symptom triage.',
+      'Eye-health evidence, symptom urgency, contact-lens safety, and refractive guidance come from the required Health Commons lookup.',
     )
     expect(systemPrompt).toContain(
-      'Route any active eye pain, redness, light sensitivity, discharge, vision change, flashes, floaters, injury, or chemical exposure to general-eye-health first',
-    )
-    expect(systemPrompt).toContain(
-      'Load secondary skills only after establishing the care level and immediate action.',
+      'Recovery-modality evidence and safety come from the required Health Commons lookup.',
     )
   })
 
@@ -679,21 +368,29 @@ describe('assistant skill assets', () => {
     }
 
     expect(nutritionSkill.triggerHint).toContain(
-      'meal structure and protein',
+      'meal structure, named diets and dietary patterns, protein',
     )
     expect(nutritionSkill.triggerHint).toContain(
       'real-life food-system execution',
     )
     expect(nutritionSkill.triggerHint).toContain(
-      'body-composition for fat loss/muscle gain/recomposition',
+      'body-composition for intentional body change',
     )
     expect(nutritionSkill.triggerHint).toContain(
-      'gut-digestion for digestive symptom strategy',
+      'gut-digestion for digestive symptom strategy or elimination/reintroduction',
+    )
+    expect(nutritionSkill.triggerHint).toContain(
+      'clinical owners for therapeutic diets or medically complex cases',
     )
     expect(nutritionSkill.triggerHint).not.toContain('GI comfort')
     expect(nutritionSkill.triggerHint).not.toContain(
       'body composition, training fuel',
     )
+    const registeredSkillSlugs: ReadonlySet<string> = new Set(
+      ASSISTANT_SKILLS.map((skill) => skill.slug),
+    )
+    expect(registeredSkillSlugs.has('diet-patterns')).toBe(false)
+    expect(registeredSkillSlugs.has('named-diets')).toBe(false)
 
     const nutritionText = await readSkillFile(nutritionSkill)
     expect(nutritionText).toContain(
@@ -702,6 +399,22 @@ describe('assistant skill assets', () => {
     expect(nutritionText).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/gut-digestion/SKILL.md',
     )
+    expect(nutritionText).toContain('## Named Diets And Dietary Patterns')
+    expect(nutritionText).toContain(
+      'Child references are progressive disclosure, not separately registered skills.',
+    )
+    for (const reference of [
+      'intermittent-fasting.md',
+      'low-carbohydrate.md',
+      'ketogenic.md',
+      'mediterranean.md',
+      'carnivore-animal-based.md',
+      'vegan-plant-based.md',
+      'vegetarian-spectrum.md',
+      'dash.md',
+    ]) {
+      expect(nutritionText).toContain(`references/named-diets/${reference}`)
+    }
     expect(nutritionText).not.toContain('### Body composition')
     expect(nutritionText).not.toContain('### GI comfort and performance')
   })
@@ -1028,7 +741,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group shared --scope')
     expect(raw).not.toContain('vault-cli group weekly --')
     expect(raw).toMatch(/If `read_current` returns `status="none"`, do not create a hosted group as a\s+side effect of challenge kickoff/u)
-    expect(raw).toMatch(/Call `murph\.group\s+action="offer_access"` exactly once from that scoring read\s+with only the exact scoring scope it proved `not_granted`/u)
+    expect(raw).toMatch(/Call `murph\.group\s+action="offer_access"` exactly once from the most recent\s+scoring read with only the exact eligible offer scope that same read proved\s+`not_granted`/u)
     expect(raw).toMatch(/record the offer as\s+handled only when the tool reports `status="ok"`/u)
     expect(raw).toMatch(/grant without `grantedAt`, a grant before `offeredAt`, a grant more\s+than 24 hours later, silence, an unresolved identity, unavailable recency\s+evidence, or an offer followed by materially changed challenge terms does not\s+establish buy-in/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
@@ -1118,6 +831,12 @@ describe('assistant skill assets', () => {
     expect(actPrimitive).not.toMatch(/one small browser step|one small inspection/iu)
     expect(browserControlLoop).toMatch(/decision-bounded macro-step/iu)
     expect(browserControlLoop).not.toMatch(/Take one bounded action at a time/iu)
+    expect(browserControlLoop).not.toContain(
+      'Be sparing with progress messages during a browser run',
+    )
+    expect(browserControlLoop).not.toContain(
+      'at most one when the browser work starts',
+    )
     expect(raw).toMatch(
       /return the\s+resulting state from the same `computer_act` call/iu,
     )
@@ -1388,134 +1107,6 @@ describe('assistant skill assets', () => {
     )
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
-  })
-
-  it('keeps red light therapy registered with dose math and device seeds', async () => {
-    const redLightSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'red-light-therapy',
-    )
-    expect(redLightSkill).toBeTruthy()
-    if (!redLightSkill) {
-      return
-    }
-
-    const skillText = await readSkillFile(redLightSkill)
-    expect(redLightSkill.triggerHint).toContain('device irradiance')
-    expect(skillText).toContain('seconds = target dose J/cm2 * 1000 / irradiance mW/cm2')
-    expect(skillText).toContain('manufacturer-claim duration estimate')
-    expect(skillText).toContain('matches the user\'s distance or contact setting')
-    expect(skillText).toContain('activeModeLabel')
-    expect(skillText).toContain('vault-cli commons protocol explore "red light therapy" --format json')
-    expect(skillText).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md')
-
-    const raw = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        redLightSkill.slug,
-        'device-seeds.json',
-      ),
-      'utf8',
-    )
-    const parsed: unknown = JSON.parse(raw)
-    expectRecord(parsed, 'red light device seed root')
-
-    expect(parsed.schemaVersion).toBe(
-      'murph.assistant.skill.red-light-device-seeds.v1',
-    )
-    expect(Array.isArray(parsed.sourcePolicy)).toBe(true)
-    expect(JSON.stringify(parsed.sourcePolicy)).toContain(
-      'manufacturer-claim examples',
-    )
-    expect(JSON.stringify(parsed.sourcePolicy)).toContain(
-      'Do not extrapolate',
-    )
-
-    const devices = parsed.devices
-    expect(Array.isArray(devices)).toBe(true)
-    if (!Array.isArray(devices)) {
-      return
-    }
-    expect(devices.length).toBeGreaterThanOrEqual(8)
-
-    const aliases = new Set<string>()
-    const models = new Set<string>()
-
-    for (const [deviceIndex, deviceValue] of devices.entries()) {
-      expectRecord(deviceValue, `device ${deviceIndex}`)
-      expect(typeof deviceValue.brand).toBe('string')
-      expect(typeof deviceValue.model).toBe('string')
-      expect(typeof deviceValue.deviceClass).toBe('string')
-      models.add(String(deviceValue.model))
-
-      const deviceClass = deviceValue.deviceClass
-      expect(['panel', 'contact_wrap', 'contact_mat']).toContain(deviceClass)
-
-      expect(Array.isArray(deviceValue.aliases)).toBe(true)
-      if (Array.isArray(deviceValue.aliases)) {
-        for (const alias of deviceValue.aliases) {
-          expect(typeof alias).toBe('string')
-          expect(aliases.has(String(alias))).toBe(false)
-          aliases.add(String(alias))
-        }
-      }
-
-      expect(Array.isArray(deviceValue.wavelengthsNm)).toBe(true)
-      if (Array.isArray(deviceValue.wavelengthsNm)) {
-        for (const wavelength of deviceValue.wavelengthsNm) {
-          expect(typeof wavelength).toBe('number')
-          expect(wavelength).toBeGreaterThan(0)
-        }
-      }
-
-      expect(Array.isArray(deviceValue.irradianceReadings)).toBe(true)
-      if (!Array.isArray(deviceValue.irradianceReadings)) {
-        continue
-      }
-
-      for (const [
-        readingIndex,
-        readingValue,
-      ] of deviceValue.irradianceReadings.entries()) {
-        expectRecord(
-          readingValue,
-          `device ${deviceIndex} reading ${readingIndex}`,
-        )
-        expect(readingValue.sourceType).toBe('manufacturer_claim')
-        expect(String(readingValue.sourceUrl)).toMatch(
-          /^https:\/\/www\.bestqool\.com\/products\//u,
-        )
-        expect(typeof readingValue.activeModeLabel).toBe('string')
-        expect(String(readingValue.activeModeLabel).trim().length)
-          .toBeGreaterThan(0)
-        expect(typeof readingValue.distanceCm).toBe('number')
-        expect(typeof readingValue.distanceLabel).toBe('string')
-        expect(typeof readingValue.irradianceMwPerCm2).toBe('number')
-        expect(Number(readingValue.irradianceMwPerCm2)).toBeGreaterThan(0)
-        expect(typeof readingValue.measurementContext).toBe('string')
-
-        if (deviceClass === 'panel') {
-          expect(Number(readingValue.distanceCm)).toBeGreaterThan(0)
-        } else {
-          expect(readingValue.distanceCm).toBe(0)
-          expect(String(readingValue.distanceLabel)).toContain('surface')
-        }
-      }
-    }
-
-    expect(models).toEqual(
-      new Set([
-        'BQ40',
-        'BQ60',
-        'BQ60Pro',
-        'BQ150',
-        'Pro100',
-        'Pro200',
-        'Pro300',
-        'Redot S',
-        'Redot M',
-        'Redot L',
-      ]),
-    )
   })
 
   it('keeps behavior follow-through policy in the skill file with only compact bridges elsewhere', async () => {
@@ -1940,7 +1531,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps aspiration-anchored, foundation-complete Murph onboarding details in the skill file', async () => {
+  it('ships Murph onboarding as a compact progressive-disclosure skill with single-owned rules', async () => {
     const murphOnboardingSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'murph-onboarding',
     )
@@ -1949,7 +1540,165 @@ describe('assistant skill assets', () => {
       return
     }
 
-    const raw = await readSkillFile(murphOnboardingSkill)
+    const skillDirectory = path.join(
+      resolveAssistantSkillsRoot(),
+      murphOnboardingSkill.slug,
+    )
+    const root = await readSkillFile(murphOnboardingSkill)
+    const referenceDirectory = path.join(skillDirectory, 'references')
+    const referenceInventory = (await readdir(referenceDirectory)).sort()
+
+    expect(Buffer.byteLength(root, 'utf8')).toBeLessThanOrEqual(
+      MURPH_ONBOARDING_ROOT_MAX_BYTES,
+    )
+    expect(referenceInventory).toEqual(
+      [...MURPH_ONBOARDING_REFERENCE_FILES].sort(),
+    )
+
+    const references = new Map<string, string>()
+    for (const referenceFile of MURPH_ONBOARDING_REFERENCE_FILES) {
+      expect(root).toContain(`references/${referenceFile}`)
+      references.set(
+        referenceFile,
+        await readFile(path.join(referenceDirectory, referenceFile), 'utf8'),
+      )
+    }
+
+    expect(root).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
+    expect(root).toContain(
+      'vault-cli assistant onboarding resume-context --format json',
+    )
+    expect(root).toContain('## The immediate need wins')
+    expect(root).toContain('## Relationship promise')
+    expect(root).toContain('### 2. Minimal identity')
+    expect(root).toContain('Do not preload the stage references.')
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'persistence reference before handling any foundation answer that adds or confirms canonical context, including an explicit none or negative fact;',
+    )
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'A vague opener—including bare “Let’s continue” without a visible onboarding referent—and generic saved records—even a goal plus aspiration readiness and all six areas—do not establish onboarding stage.',
+    )
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'This skill may create only the scheduled early-stall check-in defined in `references/persistence-recovery-follow-up.md` and the post-completion first-personal-read one-shot defined in `references/return-launch-completion.md`.',
+    )
+    for (const movedSection of [
+      '## Delegating onboarding work',
+      '### 3. Find one or two aspiration anchors',
+      '#### Arm the early-stall check-in',
+      '### 6. Return to an open thread and choose together',
+      '## Context persistence',
+      '## Completion',
+      '### Finite three-day recovery',
+      '## Reply and follow-up rules',
+    ]) {
+      expect(root).not.toContain(movedSection)
+    }
+    expect(references.get('aspiration-foundation-delegation.md')).toContain(
+      '### 5. Resolve the foundation checkpoints',
+    )
+    expect(references.get('persistence-recovery-follow-up.md')).toContain(
+      '### Finite three-day recovery',
+    )
+    expect(references.get('return-launch-completion.md')).toContain(
+      '## Completion',
+    )
+
+    const ownedRules = [
+      {
+        owner: 'SKILL.md',
+        rule: 'Everything you share stays private to you, and the more I learn, the better my help fits.',
+      },
+      {
+        owner: 'SKILL.md',
+        rule: 'Do not append an onboarding question to a reply about a meal photo, symptom, urgent concern, failed task, or other health-data request that should stand alone.',
+      },
+      {
+        owner: 'aspiration-foundation-delegation.md',
+        rule: 'When all three families are present, start all three before the visible reply.',
+      },
+      {
+        owner: 'aspiration-foundation-delegation.md',
+        rule: 'A foundation answer is still context, not permission to solve a parked thread.',
+      },
+      {
+        owner: 'persistence-recovery-follow-up.md',
+        rule: 'Saving the same slug twice converges on one automation, so a duplicate save is harmless, but never save it on a later turn.',
+      },
+      {
+        owner: 'persistence-recovery-follow-up.md',
+        rule: 'Do not create a fake health record or an opaque onboarding step marker merely to track coverage.',
+      },
+      {
+        owner: 'persistence-recovery-follow-up.md',
+        rule: 'Send or skip consumes only the current local day\'s opportunity.',
+      },
+      {
+        owner: 'return-launch-completion.md',
+        rule: 'Before asking baseline, obstacle, prior-attempt, or support questions, ask which thread—if any—the user actually wants to work on now.',
+      },
+      {
+        owner: 'return-launch-completion.md',
+        rule: 'An experiment, plan, support loop, wearable connection, lab upload, group, or specific positive health fact is not required.',
+      },
+    ] as const
+    const files = new Map<string, string>([['SKILL.md', root], ...references])
+    const compactFiles = new Map(
+      [...files].map(([file, contents]) => [
+        file,
+        contents.replace(/\s+/gu, ' '),
+      ]),
+    )
+    const wholeSkill = [...compactFiles.values()].join('\n')
+
+    for (const { owner, rule } of ownedRules) {
+      expect(
+        compactFiles.get(owner),
+        `${rule} must remain owned by ${owner}`,
+      ).toContain(rule)
+      expect(
+        wholeSkill.split(rule).length - 1,
+        `${rule} must have exactly one owner`,
+      ).toBe(1)
+    }
+  })
+
+  it('keeps aspiration-anchored, foundation-complete Murph onboarding details in the skill asset', async () => {
+    const murphOnboardingSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'murph-onboarding',
+    )
+    expect(murphOnboardingSkill).toBeTruthy()
+    if (!murphOnboardingSkill) {
+      return
+    }
+
+    const root = await readSkillFile(murphOnboardingSkill)
+    const referenceDirectory = path.join(
+      resolveAssistantSkillsRoot(),
+      murphOnboardingSkill.slug,
+      'references',
+    )
+    const referenceEntries = await Promise.all(
+      MURPH_ONBOARDING_REFERENCE_FILES.map((referenceFile) =>
+        readFile(path.join(referenceDirectory, referenceFile), 'utf8').then(
+          (contents) => [referenceFile, contents] as const,
+        ),
+      ),
+    )
+    const references = new Map(referenceEntries)
+    const aspirationReference = references.get(
+      'aspiration-foundation-delegation.md',
+    )
+    const persistenceReference = references.get(
+      'persistence-recovery-follow-up.md',
+    )
+    const returnReference = references.get('return-launch-completion.md')
+    expect(aspirationReference).toBeTruthy()
+    expect(persistenceReference).toBeTruthy()
+    expect(returnReference).toBeTruthy()
+    if (!aspirationReference || !persistenceReference || !returnReference) {
+      return
+    }
+    const raw = [root, ...references.values()].join('\n\n')
     const compact = raw.replace(/\s+/gu, ' ')
 
     expect(murphOnboardingSkill.triggerHint).toContain(
@@ -1992,9 +1741,21 @@ describe('assistant skill assets', () => {
       'Make one targeted owning read only when the checkpoint needed now is omitted, truncated, or errored in the snapshot.',
     )
     expect(raw).toContain('vault-cli memory show --format json')
+    expect(compact).toContain(
+      'Save optional demographic context to the existing best-fit Identity or Context memory.',
+    )
     expect(compact).toContain('vault-cli blood-test list --format json')
     expect(compact).toContain(
       'Missing evidence is unresolved unless the visible conversation shows that the user said it was not relevant or explicitly skipped it.',
+    )
+    expect(root).toContain(
+      'Before the first aspiration read, visible conversation must show that the\nrelationship promise was delivered and bundled minimal identity was answered\nor skipped.',
+    )
+    expect(root).toContain(
+      'Once later-stage progression is established, missing early relationship or\nidentity wording in bounded history does not prove omission.',
+    )
+    expect(root).toContain(
+      'Preserve progress\nunless the current message or visible conversation affirmatively says a root\nprerequisite never happened;',
     )
     expect(raw).toContain('## The immediate need wins')
     expect(compact).toContain(
@@ -2144,7 +1905,7 @@ How old are you and what's your gender?
       'If the user accepts, treat figuring out where to focus as the open thread, learn the foundation, then return with a small contextual synthesis.',
     )
     expect(compact).toContain(
-      'If they decline, do not press or make the foundation mandatory merely because they named no problem; follow the skip and overall-decline rules below.',
+      'If they decline, do not press or make the foundation mandatory merely because they named no problem; follow the skip and overall-decline rules in `persistence-recovery-follow-up.md` and `return-launch-completion.md`.',
     )
     expect(raw).toContain('### 4. Reflect, save, and park the threads')
     expect(compact).toContain(
@@ -2160,7 +1921,7 @@ How old are you and what's your gender?
       'Keep Apple Health out of this provider-example clause; it is offered only through the separate native-app relay after a clear “none,” never as a `murph.device` provider.',
     )
     expect(compact).toContain(
-      'Before the visible reply, also save the confirmed definition of progress and reason it matters through the Context-memory rule below',
+      'Before the visible reply, also save the confirmed definition of progress and reason it matters through the Context-memory rule in `persistence-recovery-follow-up.md`',
     )
     expect(compact).toContain(
       'When the reason is known, keep it clearly subordinate to the threads rather than turning it into another thread.',
@@ -2212,6 +1973,9 @@ How old are you and what's your gender?
     expect(raw).not.toContain('Explain that this prevents duplicate or conflicting suggestions.')
     expect(raw).toContain('4. **Supplements.**')
     expect(raw).toContain('5. **Medical and safety context.**')
+    expect(compact).toContain(
+      'Prescription or OTC medications, diagnosed conditions, injury history, allergies or intolerances, and pregnancy or nursing.',
+    )
     expect(raw).toContain('6. **Recent blood tests or lab panels.**')
     expect(compact).toContain(
       'You can type it out instead — either works just as well.',
@@ -2418,32 +2182,49 @@ How old are you and what's your gender?
     expect(compact).toContain(
       'Do not add automatic launch media or make media an onboarding completion requirement.',
     )
-    const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
-    const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')
-    const foundationIndex = raw.indexOf('### 5. Resolve the foundation checkpoints')
-    const returnIndex = raw.indexOf('### 6. Return to an open thread and choose together')
-    const completionIndex = raw.indexOf('## Completion')
-    const replyRulesIndex = raw.indexOf('## Reply and follow-up rules')
+    const aspirationIndex = aspirationReference.indexOf(
+      '### 3. Find one or two aspiration anchors',
+    )
+    const parkIndex = aspirationReference.indexOf(
+      '### 4. Reflect, save, and park the threads',
+    )
+    const foundationIndex = aspirationReference.indexOf(
+      '### 5. Resolve the foundation checkpoints',
+    )
+    const returnIndex = returnReference.indexOf(
+      '### 6. Return to an open thread and choose together',
+    )
+    const completionIndex = returnReference.indexOf('## Completion')
+    const replyRulesIndex = persistenceReference.indexOf(
+      '## Reply and follow-up rules',
+    )
     expect(aspirationIndex).toBeGreaterThan(-1)
     expect(parkIndex).toBeGreaterThan(aspirationIndex)
     expect(foundationIndex).toBeGreaterThan(parkIndex)
-    expect(returnIndex).toBeGreaterThan(foundationIndex)
+    expect(returnIndex).toBeGreaterThan(-1)
     expect(completionIndex).toBeGreaterThan(returnIndex)
-    expect(replyRulesIndex).toBeGreaterThan(completionIndex)
+    expect(replyRulesIndex).toBeGreaterThan(-1)
 
-    const aspirationSection = raw.slice(aspirationIndex, parkIndex)
-    const workedReplyStart = raw.indexOf('a\ncomplete reply can be:')
+    const aspirationSection = aspirationReference.slice(
+      aspirationIndex,
+      parkIndex,
+    )
+    const workedReplyStart = aspirationReference.indexOf(
+      'a\ncomplete reply can be:',
+    )
     expect(workedReplyStart).toBeGreaterThan(parkIndex)
-    const workedReplySection = raw.slice(
+    const workedReplySection = aspirationReference.slice(
       workedReplyStart,
-      raw.indexOf('Treat this as a worked example, not fixed copy.'),
+      aspirationReference.indexOf(
+        'Treat this as a worked example, not fixed copy.',
+      ),
     )
-    const returnSection = raw.slice(returnIndex, completionIndex)
-    const capabilityTourSection = raw.slice(
-      raw.indexOf('If they pick the\ntour'),
-      raw.indexOf('Return to the one or two open threads.'),
+    const returnSection = returnReference.slice(returnIndex, completionIndex)
+    const capabilityTourSection = returnReference.slice(
+      returnReference.indexOf('If they pick the\ntour'),
+      returnReference.indexOf('Return to the one or two open threads.'),
     )
-    const completionSection = raw.slice(completionIndex, replyRulesIndex)
+    const completionSection = returnReference.slice(completionIndex)
     expect(capabilityTourSection.match(/^- /gmu)).toHaveLength(6)
     expect(
       [...aspirationSection.matchAll(/^\d+\. (.+\?)$/gmu)]
@@ -2471,17 +2252,20 @@ How old are you and what's your gender?
     )
     expect(completionSection.match(/^\d+\. /gmu)).toHaveLength(8)
 
-    const immediateNeedSection = raw
+    const immediateNeedSection = root
       .slice(
-        raw.indexOf('## The immediate need wins'),
-        raw.indexOf('## Delegating onboarding work'),
+        root.indexOf('## The immediate need wins'),
+        root.indexOf('## Relationship promise'),
       )
       .replace(/\s+/gu, ' ')
-    const parkSection = raw
+    const parkSection = aspirationReference
       .slice(parkIndex, foundationIndex)
       .replace(/\s+/gu, ' ')
-    const persistenceSection = raw
-      .slice(raw.indexOf('## Context persistence'), completionIndex)
+    const persistenceSection = persistenceReference
+      .slice(
+        persistenceReference.indexOf('## Context persistence'),
+        persistenceReference.indexOf('### Finite three-day recovery'),
+      )
       .replace(/\s+/gu, ' ')
     const compactCompletionSection = completionSection.replace(/\s+/gu, ' ')
     const onboardingDecisionScenarios = [
@@ -2499,7 +2283,7 @@ How old are you and what's your gender?
       },
       {
         contract:
-          'If they ask to pause, leave onboarding open and let the finite managed next-day recovery occurrence decide whether continuation is timely.',
+          'If they ask to pause, leave onboarding open and let the finite managed next-day recovery occurrence in `persistence-recovery-follow-up.md` decide whether continuation is timely.',
         section: parkSection,
         userMessage: 'Pause for now',
       },
@@ -2590,7 +2374,7 @@ How old are you and what's your gender?
       'For each change thread, Murph asked once for each missing progress signal and reason; both are known from the user\'s own words or explicitly unknown or declined.',
     )
     expect(compact).toContain(
-      'Before claiming the thread is saved, Murph durably associated both fields with the named goal or goals and read back the Goal and Context owners under the persistence rule above.',
+      'Before claiming the thread is saved, Murph durably associated both fields with the named goal or goals and read back the Goal and Context owners under the persistence rule in `persistence-recovery-follow-up.md`.',
     )
     expect(compact).not.toContain(
       'Murph asked once for a missing reason a desired change matters',
@@ -2618,7 +2402,7 @@ How old are you and what's your gender?
     )
     expect(raw).toContain('--reason user_declined')
     expect(compact).toContain(
-      'Except for the bundled minimal-identity prompt and the foundation brain-dump memo above, ask at most one question per reply.',
+      'Except for the bundled minimal-identity prompt in `../SKILL.md` and the foundation brain-dump memo in `aspiration-foundation-delegation.md`, ask at most one question per reply.',
     )
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',

@@ -24,12 +24,13 @@ export const POST = withJsonError(async (request: Request) => {
   if (
     targetPlanCode !== "launch_monthly"
     && targetPlanCode !== "launch_edge_monthly"
+    && targetPlanCode !== "launch_max_monthly"
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_BILLING_PLAN_UPGRADE_TARGET_INVALID",
       httpStatus: 400,
       message:
-        "targetPlanCode must be launch_monthly or launch_edge_monthly.",
+        "targetPlanCode must be launch_monthly, launch_edge_monthly, or launch_max_monthly.",
     });
   }
   if (

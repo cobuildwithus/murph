@@ -103,11 +103,17 @@ assert.deepEqual(packageJson.exports?.["./schemas"], {
   import: "./dist/schemas.js",
   default: "./dist/schemas.js",
 });
+assert.deepEqual(packageJson.exports?.["./zod-runtime"], {
+  types: "./dist/zod-runtime.d.ts",
+  import: "./dist/zod-runtime.js",
+  default: "./dist/zod-runtime.js",
+});
 
 await assertPathExists(path.join(distDir, "index.js"));
 await assertPathExists(path.join(distDir, "index.d.ts"));
 await assertPathExists(path.join(distDir, "schemas.js"));
 await assertPathExists(path.join(distDir, "zod.js"));
+await assertPathExists(path.join(distDir, "zod-runtime.js"));
 await assertPathExists(path.join(distDir, "scripts", "generate-json-schema.js"));
 await assertPathExists(path.join(distDir, "scripts", "verify.js"));
 await assertPathMissing(path.join(distDir, "src"));

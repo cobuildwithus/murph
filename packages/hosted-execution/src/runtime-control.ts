@@ -58,6 +58,92 @@ export const HOSTED_MAILBOX_LANES = [
 
 export type HostedMailboxLane = (typeof HOSTED_MAILBOX_LANES)[number];
 
+export const HOSTED_RUNTIME_FAILURE_PHASE_NAMES = [
+  "browser_vault.refresh",
+  "codex.prepare",
+  "foreground.pass",
+  "mailbox.import.initial",
+  "runtime",
+  "runtime.return",
+  "workspace.checkpoint.durable_effect",
+  "workspace.checkpoint.idle_compact",
+  "workspace.checkpoint.idle_shutdown",
+  "workspace.read",
+  "workspace.restore",
+] as const;
+
+export type HostedRuntimeFailurePhaseName =
+  (typeof HOSTED_RUNTIME_FAILURE_PHASE_NAMES)[number];
+export type HostedRuntimeFailurePhaseCode =
+  `runtime_phase:${HostedRuntimeFailurePhaseName}`;
+
+const HOSTED_RUNTIME_FAILURE_PHASE_CODES = new Set<string>(
+  HOSTED_RUNTIME_FAILURE_PHASE_NAMES.map(
+    (phase): HostedRuntimeFailurePhaseCode => `runtime_phase:${phase}`,
+  ),
+);
+
+const HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY =
+  "hostedRuntimeFailurePhaseCode";
+
+export const HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY =
+  "runtimeFailurePhaseCode";
+
+export function buildHostedRuntimeFailurePhaseCode(
+  phase: HostedRuntimeFailurePhaseName,
+): HostedRuntimeFailurePhaseCode {
+  return `runtime_phase:${phase}`;
+}
+
+export function isHostedRuntimeFailurePhaseCode(
+  value: unknown,
+): value is HostedRuntimeFailurePhaseCode {
+  return typeof value === "string"
+    && HOSTED_RUNTIME_FAILURE_PHASE_CODES.has(value);
+}
+
+export function attachHostedRuntimeFailurePhaseCode(
+  error: unknown,
+  phase: HostedRuntimeFailurePhaseName,
+): unknown {
+  if (!(error instanceof Error) || readHostedRuntimeFailurePhaseCode(error)) {
+    return error;
+  }
+
+  try {
+    Object.defineProperty(error, HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY, {
+      configurable: false,
+      enumerable: false,
+      value: buildHostedRuntimeFailurePhaseCode(phase),
+      writable: false,
+    });
+  } catch {
+    // Diagnostics are fail-open: frozen or hostile errors retain their
+    // original behavior when the optional phase cannot be attached.
+  }
+  return error;
+}
+
+export function readHostedRuntimeFailurePhaseCode(
+  error: unknown,
+): HostedRuntimeFailurePhaseCode | null {
+  try {
+    if (!error || typeof error !== "object") {
+      return null;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(
+      error,
+      HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY,
+    );
+    return descriptor && "value" in descriptor
+      && isHostedRuntimeFailurePhaseCode(descriptor.value)
+      ? descriptor.value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export const HOSTED_MAILBOX_KINDS = [
   "conversation.message",
   "member.activated",
@@ -831,7 +917,7 @@ export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
 export type HostedProductFeedbackKind =
   (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];
 
-export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 500;
+export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 2_000;
 
 const HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN = "[redacted]";
 
@@ -985,7 +1071,7 @@ export interface HostedRuntimeGroupDisclosureGrantListEntry
   groupLabel: string | null;
 }
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE =
-  "Like or heart this message to share {{share_scope}} with this group. To choose different permissions, use {{join_url}}.";
+  "Sounds good. Like or heart this message to share {{share_scope}} with the group, or use {{join_url}} to customize what you share.";
 
 export interface HostedRuntimeGroupMemberSummary {
   disclosureGrants?: HostedRuntimeGroupDisclosureGrantSummary[];
@@ -1012,7 +1098,8 @@ export interface HostedRuntimeGroupUsageStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
-  sponsorshipStatus: "not_sponsored" | "sponsored";
+  /** Required on the current shape; absent only on legacy response branches. */
+  includedUsageUsedPercent?: number;
 }
 
 export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [
@@ -1098,10 +1185,8 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
   displayName?: string | null;
-  // Legacy wire compatibility only. Current Web ignores this field and owns
-  // the canonical copy. The runtime supplies one fixed value so older Web can
-  // substitute already-known scopes; model input can never set it. Remove the
-  // field after the consumer-first Web rollout sets the Cloudflare rollback floor.
+  // Legacy wire compatibility only. Web owns the canonical consent sentence
+  // because an affirmative reaction grants the frozen server-side snapshot.
   messageTemplate?: string | null;
   // Compatibility for old fixed-kind callers. Selector-only projections must
   // use projectionScopes.
@@ -1254,6 +1339,7 @@ export const HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS = 200
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_SCOPE_KEY_MAX_CODE_POINTS = 256;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS = 500;
 export const HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS = 48;
+export const HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS = 200;
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
@@ -1361,6 +1447,13 @@ export type HostedRuntimeGroupToolRequest =
       >;
     }
   | {
+      action: "message_current_sender";
+      origin: Extract<
+        HostedExecutionAssistantAskOrigin,
+        { kind: "accepted_input" }
+      >;
+    }
+  | {
       action: "ask_member";
       grantId: string;
       origin: HostedExecutionAssistantAskOrigin;
@@ -1446,7 +1539,25 @@ export type HostedRuntimeGroupToolRequest =
       groupChatIconUrl: string;
       linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
     }
-  | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | {
+      action: "share_contact_card";
+      contactCardImageUrl?: never;
+      contactCardShareKey?: never;
+      directLinqChatId?: never;
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+    }
+  | {
+      action: "share_contact_card";
+      contactCardImageUrl: string;
+      contactCardShareKey: string;
+      /**
+       * Trusted-host chat id for a personalized card in a direct conversation.
+       * The trusted turn-context wrapper injects it before transport; Web then
+       * revalidates that exact direct chat against the member's route owner.
+       */
+      directLinqChatId?: string;
+      linqThread?: never;
+    }
   | {
       action: "revoke_own_email_share";
       participant?: HostedExecutionAcceptedGroupMessageParticipant | null;
@@ -1464,12 +1575,20 @@ export type HostedRuntimeGroupMemberAskResult =
   | ({ status: "completed" } & HostedExecutionAssistantAskResult)
   | Extract<HostedRuntimeGroupAskResult, { status: "unavailable" }>;
 
+export type HostedRuntimeGroupCurrentSenderMessageResult =
+  | { status: "accepted" }
+  | { status: "unavailable"; unavailableReason: string };
+
 export type HostedRuntimeGroupToolResponse =
   | {
       action: "ask";
       result: HostedRuntimeGroupAskResult;
     }
   | { action: "ask_current_sender"; result: HostedRuntimeGroupMemberAskResult }
+  | {
+      action: "message_current_sender";
+      result: HostedRuntimeGroupCurrentSenderMessageResult;
+    }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
   | {
       action: "post_disclosure_request";
@@ -1667,6 +1786,9 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "sent" }
         | { status: "already_shared" }
+        // Personalized cards only: the provider may have accepted this exact
+        // request and the send owner could not establish which.
+        | { status: "unconfirmed" }
         | { status: "unavailable"; unavailableReason: string };
     }
   | {
@@ -1788,8 +1910,11 @@ export type HostedRuntimeFamilyPlanToolAction =
 export const HOSTED_PLAN_CODES = ["pulse", "edge"] as const;
 export type HostedPlanCode = (typeof HOSTED_PLAN_CODES)[number];
 
+export const HOSTED_FAMILY_PLAN_CODES = ["pulse", "edge", "max"] as const;
+export type HostedFamilyPlanCode = (typeof HOSTED_FAMILY_PLAN_CODES)[number];
+
 export interface HostedRuntimeFamilyPlanCreateInviteRequest {
-  planCode?: HostedPlanCode;
+  planCode?: HostedFamilyPlanCode;
   targetEmail?: string | null;
   targetLabel?: string | null;
   targetPhoneNumber?: string | null;
@@ -1806,8 +1931,15 @@ export type HostedRuntimeFamilyPlanToolRequest =
     }
   | {
       action: "start_checkout";
-      invite?: HostedRuntimeFamilyPlanCreateInviteRequest | null;
+      confirmedTrialConversion?: true;
     };
+
+export interface HostedRuntimeFamilyPlanActiveTrialConversion {
+  includedPulseSeats: number;
+  monthlyAmountUsdCents: number;
+  perSeatMonthlyAmountUsdCents: number;
+  trialEndsImmediately: true;
+}
 
 export interface HostedRuntimeFamilyPlanToolSeatStatus {
   active: number;
@@ -1822,7 +1954,7 @@ export interface HostedRuntimeFamilyPlanToolSeatStatus {
 export interface HostedRuntimeFamilyPlanToolMember {
   isOwner: boolean;
   label: string | null;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   role: string;
   status: string;
 }
@@ -1830,7 +1962,7 @@ export interface HostedRuntimeFamilyPlanToolMember {
 export interface HostedRuntimeFamilyPlanToolInvite {
   acceptUrl: string | null;
   expiresAt: string;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   status: string;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -1846,11 +1978,12 @@ export interface HostedRuntimeFamilyPlanToolPlanStatus {
 }
 
 export type HostedRuntimeFamilyPlanToolPlans = Record<
-  HostedPlanCode,
+  HostedFamilyPlanCode,
   HostedRuntimeFamilyPlanToolPlanStatus
 >;
 
 export interface HostedRuntimeFamilyPlanToolStatusResponse {
+  activeTrialConversion: HostedRuntimeFamilyPlanActiveTrialConversion | null;
   billingActive: boolean;
   billingStatus: string;
   members: HostedRuntimeFamilyPlanToolMember[];
@@ -1873,8 +2006,6 @@ export interface HostedRuntimeFamilyPlanToolStartCheckoutResponse {
   billingStatus: string;
   checkoutUrl: string | null;
   owner: boolean;
-  preparedInvite: HostedRuntimeFamilyPlanToolInvite | null;
-  preparedInviteReplyText: string | null;
   plans: HostedRuntimeFamilyPlanToolPlans;
   seats: HostedRuntimeFamilyPlanToolSeatStatus;
   unavailableReason: "already_sponsored" | null;
@@ -2057,9 +2188,10 @@ export type HostedRuntimeLatencyTraceMilestone =
 
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
-  // Control-plane orchestration stamps before the runner-container DO starts
-  // dispatch. These are epoch-ms values from different hosts, so they are for
-  // coarse span splitting only, not strict clock-order assertions.
+  // Control-plane orchestration diagnostics before the runner-container DO
+  // starts dispatch. Timestamps come from different hosts and are for coarse
+  // span splitting only. The two bounded ids correlate one Web direct ensure
+  // with the runtime invocation it launched.
   orchestration?: {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
@@ -2067,11 +2199,21 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     tokenAcquiredAtEpochMs?: number;
     directEnsureRequestStartedAtEpochMs?: number;
     directEnsureResponseReceivedAtEpochMs?: number;
+    directEnsureOrchestrationAttemptId?: string;
     runtimeControlAuthStartedAtEpochMs?: number;
     runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
+    runtimeInvocationOrchestrationAttemptId?: string;
     triggeredByWebDirect?: boolean;
+    userRunnerRpcStartedAtEpochMs?: number;
+    runtimeConsentLockAcquiredAtEpochMs?: number;
+    healthDataAdmissionReadStartedAtEpochMs?: number;
+    healthDataAdmissionReadFinishedAtEpochMs?: number;
     userRunnerEnsureStartedAtEpochMs?: number;
+    runnerStateBindStartedAtEpochMs?: number;
+    runnerStateBindFinishedAtEpochMs?: number;
+    runnerStateReadStartedAtEpochMs?: number;
+    runnerStateReadFinishedAtEpochMs?: number;
     activeFenceObservedAtEpochMs?: number;
     activeFenceTargetWasPriorVersion?: boolean;
     activeWakeStartedAtEpochMs?: number;
@@ -2088,6 +2230,19 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     freshStartContainerReadyAtEpochMs?: number;
     freshStartInvocationPreparedAtEpochMs?: number;
     freshStartInvocationAcceptedAtEpochMs?: number;
+    shellPrewarmFirstHintAtEpochMs?: number;
+    shellPrewarmFinishedAtEpochMs?: number;
+    shellPrewarmOperationElapsedMs?: number;
+    shellPrewarmHintCount?: number;
+    shellPrewarmOutcome?:
+      | "cold_start_observed"
+      | "failed"
+      | "start_issued_warm"
+      | "superseded";
+    shellPrewarmSource?:
+      | "linq-instant-start"
+      | "linq-typing-started"
+      | "unknown";
     workspaceReadElapsedMs?: number;
     runtimeStoreEnsureElapsedMs?: number;
     runtimeInvocationPreparationElapsedMs?: number;
@@ -2109,6 +2264,11 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     scratchPrepareMs?: number;
     presignGetMs?: number;
     objectFetchMs?: number;
+    // Last successful GET attempt, from request start until Fetch resolves headers.
+    objectFetchResponseHeadersMs?: number;
+    // Last successful GET attempt, from validated headers until stream EOF. This
+    // includes consumer backpressure from streamed hash/decrypt work.
+    objectFetchBodyReadMs?: number;
     decryptMs?: number;
     archiveExtractMs?: number;
     durableRootReplaceMs?: number;
@@ -2116,6 +2276,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     extractMs?: number;
     encryptedBytes?: number;
     plainBytes?: number;
+    replaySafeReadMaxAttempt?: number;
   };
   boot?: {
     nodeStartupMs?: number;
@@ -2140,13 +2301,33 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   // Runtime-owned work between mailbox staging and the assistant engine's
   // local Codex turn/start write. These metadata-only diagnostics are attached
   // to that existing milestone rather than emitted synchronously.
+  // Only mailboxImportDoneToAssistantPhaseMs,
+  // workspaceAssistantPreAutomationMs, and
+  // automationLaneToAssistantServiceMs participate in the canonical additive
+  // provider-start path. The other leaves are nested diagnostics.
   preProvider?: {
+    mailboxImportDoneToAssistantPhaseMs?: number;
     workspaceAssistantPreAutomationMs?: number;
+    automationLaneToAssistantServiceMs?: number;
+    // These adjacent nested leaves exactly partition
+    // automationLaneToAssistantServiceMs when all are present.
+    automationReadinessMs?: number;
+    automationInputSelectionMs?: number;
+    automationPassSetupMs?: number;
+    automationCandidateScanMs?: number;
+    automationGroupAndOperationScopeMs?: number;
+    automationTerminalEvidenceMs?: number;
+    automationSessionPreflightMs?: number;
+    automationCrossSessionContextMs?: number;
+    automationPromptPreparationMs?: number;
+    automationServiceHandoffMs?: number;
     executionTargetHydrateMs?: number;
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
     automationBootstrapMs?: number;
+    outboxScanBytesRead?: number;
     outboxScanElapsedMs?: number;
+    outboxScanFilesRead?: number;
     outboxScanPerformed?: boolean;
     receiptScanBytesRead?: number;
     receiptScanElapsedMs?: number;
@@ -2168,18 +2349,124 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     runtimeLeaseGeneration?: string;
   };
   provider?: {
+    // Together with the three canonical preProvider leaves, these six leaves
+    // are adjacent and additive. Session, prompt, admission, and App Server
+    // lifecycle leaves below are nested diagnostics and must not be added.
+    assistantServicePreLockMs?: number;
     codexAppServerInitializeMs?: number;
     codexAppServerPreProviderMs?: number;
     codexAppServerSpawnReadyMs?: number;
     codexAppServerThreadResumeMs?: number;
     codexAppServerThreadStartMs?: number;
     codexAppServerWarmReuseMs?: number;
+    codexProcessPreparationMs?: number;
     turnLockWaitMs?: number;
     sessionResolveMs?: number;
     promptBuildMs?: number;
     admissionMs?: number;
     preProviderSetupMs?: number;
+    providerPlanAndGateMs?: number;
     linqEgressGuardMs?: number;
+  };
+}
+
+export const HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS = [
+  "automationReadinessMs",
+  "automationInputSelectionMs",
+  "automationPassSetupMs",
+  "automationCandidateScanMs",
+  "automationGroupAndOperationScopeMs",
+  "automationTerminalEvidenceMs",
+  "automationSessionPreflightMs",
+  "automationCrossSessionContextMs",
+  "automationPromptPreparationMs",
+  "automationServiceHandoffMs",
+] as const;
+
+type HostedRuntimeAutomationLaneTimingSubdivision = Required<Pick<
+  NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+  (typeof HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS)[number]
+>>;
+
+export type HostedRuntimeAutomationLaneTimingSubdivisionInspection =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | {
+      kind: "complete";
+      subdivision: HostedRuntimeAutomationLaneTimingSubdivision;
+    };
+
+export function inspectHostedRuntimeAutomationLaneTimingSubdivision(
+  preProvider: NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+): HostedRuntimeAutomationLaneTimingSubdivisionInspection {
+  const {
+    automationCandidateScanMs,
+    automationCrossSessionContextMs,
+    automationGroupAndOperationScopeMs,
+    automationInputSelectionMs,
+    automationPassSetupMs,
+    automationPromptPreparationMs,
+    automationReadinessMs,
+    automationServiceHandoffMs,
+    automationSessionPreflightMs,
+    automationTerminalEvidenceMs,
+  } = preProvider;
+  if (
+    automationCandidateScanMs === undefined
+    && automationCrossSessionContextMs === undefined
+    && automationGroupAndOperationScopeMs === undefined
+    && automationInputSelectionMs === undefined
+    && automationPassSetupMs === undefined
+    && automationPromptPreparationMs === undefined
+    && automationReadinessMs === undefined
+    && automationServiceHandoffMs === undefined
+    && automationSessionPreflightMs === undefined
+    && automationTerminalEvidenceMs === undefined
+  ) {
+    return { kind: "absent" };
+  }
+  if (
+    automationCandidateScanMs === undefined
+    || automationCrossSessionContextMs === undefined
+    || automationGroupAndOperationScopeMs === undefined
+    || automationInputSelectionMs === undefined
+    || automationPassSetupMs === undefined
+    || automationPromptPreparationMs === undefined
+    || automationReadinessMs === undefined
+    || automationServiceHandoffMs === undefined
+    || automationSessionPreflightMs === undefined
+    || automationTerminalEvidenceMs === undefined
+  ) {
+    return { kind: "invalid" };
+  }
+
+  const subdivision = {
+    automationReadinessMs,
+    automationInputSelectionMs,
+    automationPassSetupMs,
+    automationCandidateScanMs,
+    automationGroupAndOperationScopeMs,
+    automationTerminalEvidenceMs,
+    automationSessionPreflightMs,
+    automationCrossSessionContextMs,
+    automationPromptPreparationMs,
+    automationServiceHandoffMs,
+  };
+  const values = Object.values(subdivision);
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    return { kind: "invalid" };
+  }
+  const sum = values.reduce<number>((total, value) => total + value, 0);
+  if (
+    !Number.isSafeInteger(sum)
+    || !Number.isSafeInteger(preProvider.automationLaneToAssistantServiceMs)
+    || preProvider.automationLaneToAssistantServiceMs !== sum
+  ) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "complete",
+    subdivision,
   };
 }
 
@@ -2214,11 +2501,21 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "tokenAcquiredAtEpochMs",
     "directEnsureRequestStartedAtEpochMs",
     "directEnsureResponseReceivedAtEpochMs",
+    "directEnsureOrchestrationAttemptId",
     "runtimeControlAuthStartedAtEpochMs",
     "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
+    "runtimeInvocationOrchestrationAttemptId",
     "triggeredByWebDirect",
+    "userRunnerRpcStartedAtEpochMs",
+    "runtimeConsentLockAcquiredAtEpochMs",
+    "healthDataAdmissionReadStartedAtEpochMs",
+    "healthDataAdmissionReadFinishedAtEpochMs",
     "userRunnerEnsureStartedAtEpochMs",
+    "runnerStateBindStartedAtEpochMs",
+    "runnerStateBindFinishedAtEpochMs",
+    "runnerStateReadStartedAtEpochMs",
+    "runnerStateReadFinishedAtEpochMs",
     "activeFenceObservedAtEpochMs",
     "activeFenceTargetWasPriorVersion",
     "activeWakeStartedAtEpochMs",
@@ -2235,6 +2532,12 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "freshStartContainerReadyAtEpochMs",
     "freshStartInvocationPreparedAtEpochMs",
     "freshStartInvocationAcceptedAtEpochMs",
+    "shellPrewarmFirstHintAtEpochMs",
+    "shellPrewarmFinishedAtEpochMs",
+    "shellPrewarmOperationElapsedMs",
+    "shellPrewarmHintCount",
+    "shellPrewarmOutcome",
+    "shellPrewarmSource",
     "workspaceReadElapsedMs",
     "runtimeStoreEnsureElapsedMs",
     "runtimeInvocationPreparationElapsedMs",
@@ -2249,6 +2552,8 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "scratchPrepareMs",
     "presignGetMs",
     "objectFetchMs",
+    "objectFetchResponseHeadersMs",
+    "objectFetchBodyReadMs",
     "decryptMs",
     "archiveExtractMs",
     "durableRootReplaceMs",
@@ -2256,6 +2561,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "extractMs",
     "encryptedBytes",
     "plainBytes",
+    "replaySafeReadMaxAttempt",
   ],
   boot: ["nodeStartupMs", "restoreWasCold"],
   wake: [
@@ -2275,12 +2581,26 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "stagedAtEpochMs",
   ],
   preProvider: [
+    "mailboxImportDoneToAssistantPhaseMs",
     "workspaceAssistantPreAutomationMs",
+    "automationLaneToAssistantServiceMs",
+    "automationReadinessMs",
+    "automationInputSelectionMs",
+    "automationPassSetupMs",
+    "automationCandidateScanMs",
+    "automationGroupAndOperationScopeMs",
+    "automationTerminalEvidenceMs",
+    "automationSessionPreflightMs",
+    "automationCrossSessionContextMs",
+    "automationPromptPreparationMs",
+    "automationServiceHandoffMs",
     "executionTargetHydrateMs",
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
     "automationBootstrapMs",
+    "outboxScanBytesRead",
     "outboxScanElapsedMs",
+    "outboxScanFilesRead",
     "outboxScanPerformed",
     "receiptScanBytesRead",
     "receiptScanElapsedMs",
@@ -2299,17 +2619,20 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "runtimeLeaseGeneration",
   ],
   provider: [
+    "assistantServicePreLockMs",
     "codexAppServerInitializeMs",
     "codexAppServerPreProviderMs",
     "codexAppServerSpawnReadyMs",
     "codexAppServerThreadResumeMs",
     "codexAppServerThreadStartMs",
     "codexAppServerWarmReuseMs",
+    "codexProcessPreparationMs",
     "turnLockWaitMs",
     "sessionResolveMs",
     "promptBuildMs",
     "admissionMs",
     "preProviderSetupMs",
+    "providerPlanAndGateMs",
     "linqEgressGuardMs",
   ],
 } as const;
@@ -2326,6 +2649,89 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "preProvider.outboxScanPerformed",
     "preProvider.receiptScanPerformed",
   ] as const;
+
+const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
+  Readonly<Record<string, readonly string[]>> = {
+    "orchestration.shellPrewarmOutcome": [
+      "cold_start_observed",
+      "failed",
+      "start_issued_warm",
+      "superseded",
+    ],
+    "orchestration.shellPrewarmSource": [
+      "linq-instant-start",
+      "linq-typing-started",
+      "unknown",
+    ],
+  };
+
+export type HostedRuntimeLatencyPhaseBreakdownLeafRule =
+  | { kind: "boolean" }
+  | { kind: "enum_string"; values: readonly string[] }
+  | { kind: "lease_generation" }
+  | { kind: "orchestration_attempt_id" }
+  | { kind: "safe_integer" };
+
+export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES: Readonly<
+  Record<
+    HostedRuntimeLatencyPhaseBreakdownPhase,
+    Readonly<Record<string, HostedRuntimeLatencyPhaseBreakdownLeafRule>>
+  >
+> = {
+  assistant: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("assistant"),
+  boot: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("boot"),
+  dispatch: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("dispatch"),
+  import: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("import"),
+  orchestration: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("orchestration"),
+  preProvider: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("preProvider"),
+  provider: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("provider"),
+  restore: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("restore"),
+  wake: buildHostedRuntimeLatencyPhaseBreakdownLeafRules("wake"),
+};
+
+function buildHostedRuntimeLatencyPhaseBreakdownLeafRules(
+  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
+): Readonly<Record<string, HostedRuntimeLatencyPhaseBreakdownLeafRule>> {
+  return Object.fromEntries(
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS[phase].map(
+      (leafKey): [string, HostedRuntimeLatencyPhaseBreakdownLeafRule] => [
+        leafKey,
+        readHostedRuntimeLatencyPhaseBreakdownLeafRule(phase, leafKey),
+      ],
+    ),
+  );
+}
+
+function readHostedRuntimeLatencyPhaseBreakdownLeafRule(
+  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
+  leafKey: string,
+): HostedRuntimeLatencyPhaseBreakdownLeafRule {
+  if (
+    phase === "orchestration"
+    && (
+      leafKey === "directEnsureOrchestrationAttemptId"
+      || leafKey === "runtimeInvocationOrchestrationAttemptId"
+    )
+  ) {
+    return { kind: "orchestration_attempt_id" };
+  }
+  const allowedStringValues =
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES[`${phase}.${leafKey}`];
+  if (allowedStringValues) {
+    return { kind: "enum_string", values: allowedStringValues };
+  }
+  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
+    return { kind: "lease_generation" };
+  }
+  if (
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS.some(
+      (key) => key === `${phase}.${leafKey}`,
+    )
+  ) {
+    return { kind: "boolean" };
+  }
+  return { kind: "safe_integer" };
+}
 
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
@@ -2364,10 +2770,6 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS: Record<
   assistant: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.assistant),
   provider: new Set(HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS.provider),
 };
-
-const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET = new Set<string>(
-  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
-);
 
 export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
   value: unknown,
@@ -2569,16 +2971,30 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   leafKey: string,
   value: unknown,
 ): value is HostedRuntimeLatencyPhaseBreakdownJsonLeaf {
-  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
-    return typeof value === "string"
-      && value.length <= 20
-      && /^(?:0|[1-9]\d*)$/u.test(value);
+  const rule = HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES[phase][leafKey];
+  switch (rule?.kind) {
+    case "boolean":
+      return typeof value === "boolean";
+    case "enum_string":
+      return typeof value === "string" && rule.values.includes(value);
+    case "lease_generation":
+      return typeof value === "string"
+        && value.length <= 20
+        && /^(?:0|[1-9]\d*)$/u.test(value);
+    case "orchestration_attempt_id":
+      return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+    case "safe_integer":
+      return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
+    default:
+      return false;
   }
-  if (HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEY_SET.has(`${phase}.${leafKey}`)) {
-    return typeof value === "boolean";
-  }
+}
 
-  return isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value);
+export function isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+  value: unknown,
+): value is string {
+  return typeof value === "string"
+    && /^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
 }
 
 function isSafeHostedRuntimeLatencyPhaseBreakdownNumber(value: unknown): value is number {
@@ -2818,6 +3234,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "mailbox.retryable_payload_missing",
   "outbox.ambiguous",
   "outbox.delivery_finished",
+  "outbox.linq_app_card_fallback_error",
   "outbox.receipt_checkpointed",
   "runner.accepted_attempt_failed",
   "runner.error",
@@ -2914,13 +3331,6 @@ export interface HostedRunnerStatusResponse {
   mailboxLag: HostedMailboxLaneLag[];
   nextAlarmAt?: string | null;
   recentLogs?: HostedRuntimeLogEntry[];
-  r2Cutover?: {
-    coexisting: boolean;
-    pausedCanaryConfigured?: boolean;
-    phase: "destination_active" | "source_active";
-    protocolVersion: string;
-    writeAdmission?: "open" | "paused";
-  };
   userId: string;
   workspace: HostedWorkspaceState | null;
 }

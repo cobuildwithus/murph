@@ -29,6 +29,7 @@ export const HOSTED_CRYPTO_LANES = [
   "clinical-records-patient-id",
   "clinical-records-token",
   "device-sync-token",
+  "device-sync-provider-application",
   "device-sync-external-account-id",
   "device-sync-payload",
   "mailbox-payload",
@@ -56,6 +57,7 @@ export const HOSTED_CRYPTO_LANE_DOMAINS: Record<
   "clinical-records-token": "device",
   "device-sync-external-account-id": "device",
   "device-sync-payload": "device",
+  "device-sync-provider-application": "device",
   "device-sync-token": "device",
   "email-raw": "ingress",
   "hosted-member-private-field": "control",
@@ -667,6 +669,12 @@ export async function verifyHostedDomainRootEnvelopeSignatureWithPublicKey(input
       buildHostedDomainRootEnvelopeSigningPayload(getHostedDomainRootEnvelopeBody(input.envelope)),
     ),
   );
+}
+
+export async function assertHostedAuthorityVerifyPublicKeyPem(
+  publicKeyPem: string,
+): Promise<void> {
+  await importP256PublicKeyFromPem(publicKeyPem);
 }
 
 async function deriveHostedSecureBoxKey(input: {

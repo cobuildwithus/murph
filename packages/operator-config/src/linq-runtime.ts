@@ -6,7 +6,6 @@ import {
 } from '@murphai/contracts'
 import type {
   AttachmentCreateParams,
-  AttachmentCreateResponse,
   ChatCreateParams,
   ChatCreateResponse,
   ChatSendVoicememoParams,
@@ -60,10 +59,12 @@ import {
 } from './assistant-response-cards.js'
 import type {
   AssistantMessageReaction,
+  AssistantProviderMessageEffect,
 } from './assistant-cli-contracts.js'
 
 const DEFAULT_LINQ_API_BASE_URL = 'https://api.linqapp.com/api/partner/v3'
 const LINQ_HTTP_TIMEOUT_MS = 30_000
+const LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS = 2_500
 const LINQ_HTTP_MAX_ATTEMPTS = 3
 const LINQ_HTTP_RETRY_DELAYS_MS = Object.freeze([1_000, 3_000])
 const LINQ_CHAT_NOT_FOUND_CODES = new Set(['CHAT_NOT_FOUND', 'chat_not_found'])
@@ -201,9 +202,8 @@ type LinqIMessageAppCardRequest = {
         name: 'Murph'
         team_id: 'G9DJH2XUMK'
         bundle_id: 'ai.withmurph.app.messages'
-        app_store_id: 6786145859
       }
-      interactive: false
+      interactive: true
       url: string
       fallback_text: typeof LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT
       layout: LinqIMessageAppLayout
@@ -283,10 +283,12 @@ export interface ProbeLinqApiResult {
 export interface CreateLinqChatResult {
   chatId: string | null
   messageId: string | null
+  providerMessageEffects?: AssistantProviderMessageEffect[]
   providerMessageIds?: string[]
 }
 
 export type LinqMessageSendResponse = MessageSendResponse & {
+  providerMessageEffects?: AssistantProviderMessageEffect[]
   providerMessageIds?: string[]
 }
 
@@ -396,7 +398,15 @@ export function isDefinitiveLinqIMessageAppCardRejection(
     && error.context?.path === '/chats/[chat]/messages'
     && error.context?.failureStage === 'http'
     && error.context?.retryable === false
-    && (status === 400 || status === 415 || status === 422)
+    && (
+      status === 400
+      || status === 415
+      || status === 422
+      || (
+        status === 404
+        && error.context?.linqFailureKind === 'chat_not_found'
+      )
+    )
 }
 
 export async function sendLinqChatMessage(
@@ -480,6 +490,10 @@ export async function sendLinqChatMessage(
     primaryMessageId,
     linkResponse.message?.id,
   )
+  const providerMessageEffects = [
+    ...(primaryResponse.providerMessageEffects ?? []),
+    ...(linkResponse.providerMessageEffects ?? []),
+  ]
   if (providerMessageIds.length !== 2) {
     throw createLinqRichLinkPartialDeliveryFailure({
       error: new Error(
@@ -494,6 +508,7 @@ export async function sendLinqChatMessage(
   }
   return {
     ...linkResponse,
+    ...(providerMessageEffects.length > 0 ? { providerMessageEffects } : {}),
     providerMessageIds,
   }
 }
@@ -525,13 +540,21 @@ async function sendLinqChatMessageParts(
     replyToMessageId,
   })
 
-  return sendLinqChatMessageBody({
+  const response = await sendLinqChatMessageBody({
     body,
     chatId,
     idempotencyKey,
     replyToMessageId:
       input.nativeReplyRequested === true ? replyToMessageId : null,
   }, dependencies)
+  const providerMessageEffects = buildLinqProviderMessageEffects({
+    body,
+    providerMessageId: response.message?.id,
+  })
+  return {
+    ...response,
+    ...(providerMessageEffects.length > 0 ? { providerMessageEffects } : {}),
+  }
 }
 
 async function sendLinqChatRichLink(
@@ -554,16 +577,25 @@ async function sendLinqChatRichLink(
     ? normalizeRequiredString(input.replyToMessageId, 'native reply target message id')
     : null
 
-  return sendLinqChatMessageBody({
-    body: buildLinqRichLinkMessageBody({
-      idempotencyKey,
-      linkUrl: input.linkUrl,
-      replyToMessageId,
-    }),
+  const body = buildLinqRichLinkMessageBody({
+    idempotencyKey,
+    linkUrl: input.linkUrl,
+    replyToMessageId,
+  })
+  const response = await sendLinqChatMessageBody({
+    body,
     chatId,
     idempotencyKey,
     replyToMessageId,
   }, dependencies)
+  const providerMessageEffects = buildLinqProviderMessageEffects({
+    body,
+    providerMessageId: response.message?.id,
+  })
+  return {
+    ...response,
+    ...(providerMessageEffects.length > 0 ? { providerMessageEffects } : {}),
+  }
 }
 
 async function sendLinqChatRichLinkWithTextFallback(
@@ -652,6 +684,7 @@ export async function checkLinqIMessageCapability(
     ...(from ? { from } : {}),
   }
   const response = await requestLinqJson<unknown>({
+    allowRateLimitRetries: false,
     details: {
       operation: 'check_imessage_capability',
       provider: 'linq',
@@ -662,6 +695,7 @@ export async function checkLinqIMessageCapability(
     path: '/capability/check_imessage',
     body,
     signal: dependencies.signal,
+    singleAttemptTimeoutMs: LINQ_IMESSAGE_CAPABILITY_TIMEOUT_MS,
   })
   return readRecord(response)?.available === true
 }
@@ -689,13 +723,14 @@ export async function sendLinqIMessageAppCard(
       idempotency_key: idempotencyKey,
       parts: [{
         type: 'imessage_app',
+        // `app_store_id` is intentionally absent. Linq otherwise substitutes
+        // square artwork in app-absent static Messages cards.
         app: {
           name: 'Murph',
           team_id: 'G9DJH2XUMK',
           bundle_id: 'ai.withmurph.app.messages',
-          app_store_id: 6786145859,
         },
-        interactive: false,
+        interactive: true,
         url: buildLinqIMessageAppCardUrl(input.card),
         fallback_text: LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
         layout: buildLinqIMessageAppLayout(input.card),
@@ -738,7 +773,7 @@ async function createLinqAttachmentUpload(
     filename,
     size_bytes: sizeBytes,
   }
-  const response = await requestLinqJson<AttachmentCreateResponse>({
+  return requestLinq<CreateLinqAttachmentUploadResult>({
     allowRateLimitRetries: false,
     details: {
       operation: 'create_attachment_upload',
@@ -751,10 +786,21 @@ async function createLinqAttachmentUpload(
     method: 'POST',
     path: '/attachments',
     body,
+    parseResponse: async (response) => {
+      let payload: unknown
+      try {
+        payload = await response.json()
+      } catch {
+        throw createLinqAttachmentReservationResponseError({
+          message: 'Linq attachment upload response was not valid JSON.',
+          responseBodyKind: 'invalid_json',
+          status: response.status,
+        })
+      }
+      return parseLinqAttachmentUploadResponse(payload, response.status)
+    },
     signal: dependencies.signal,
   })
-
-  return parseLinqAttachmentUploadResponse(response)
 }
 
 async function uploadLinqAttachmentBytes(
@@ -787,57 +833,101 @@ async function uploadLinqAttachmentBytes(
     )
   }
 
+  const details: LinqSafeRequestDetails = {
+    operation: 'create_attachment_upload',
+    provider: 'linq',
+    requestAttachmentBytes: bytes.byteLength,
+    requestAttachmentHeaderCount: Object.keys(headers).length,
+  }
+  const body = new Blob([copyUint8ArrayToArrayBuffer(bytes)], {
+    type: headers['content-type'] ?? 'application/octet-stream',
+  })
   const timeout = createTimeoutAbortController(
     dependencies.signal,
     LINQ_HTTP_TIMEOUT_MS,
   )
-  let response: LinqFetchResponse
+  let lastRetryableFailure: VaultCliError | null = null
+
   try {
-    response = await fetchImplementation(uploadUrl, {
-      body: new Blob([copyUint8ArrayToArrayBuffer(bytes)], {
-        type: headers['content-type'] ?? 'application/octet-stream',
-      }),
-      headers,
-      method: 'PUT',
-      redirect: 'error',
+    await requestJsonWithRetry<void, LinqFetchResponse>({
+      createHttpError: async (response) => {
+        const failure = await createLinqHttpError(
+          response,
+          details,
+          'PUT',
+          '[presigned-upload]',
+          false,
+          true,
+        )
+        if (isRetryableLinqRequestError(failure)) {
+          lastRetryableFailure = failure
+        }
+        return failure
+      },
+      fetchResponse: async () => {
+        if (timeout.signal.aborted) {
+          if (dependencies.signal?.aborted) {
+            dependencies.signal.throwIfAborted()
+          }
+          if (lastRetryableFailure) {
+            throw lastRetryableFailure
+          }
+          timeout.signal.throwIfAborted()
+        }
+        try {
+          return await fetchImplementation(uploadUrl, {
+            body,
+            headers,
+            method: 'PUT',
+            redirect: 'error',
+            signal: timeout.signal,
+          })
+        } catch (error) {
+          if (dependencies.signal?.aborted) {
+            throw error
+          }
+          const failure = createLinqRequestError({
+            details,
+            error,
+            method: 'PUT',
+            path: '[presigned-upload]',
+            requestOrigin: readRequestOrigin(uploadUrl),
+            retryable: true,
+            timedOut: timeout.timedOut(),
+            timeoutMs: LINQ_HTTP_TIMEOUT_MS,
+          })
+          lastRetryableFailure = failure
+          throw failure
+        }
+      },
+      isRetryableError: isRetryableLinqRequestError,
+      maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
+      parseResponse: () => undefined,
       signal: timeout.signal,
+      waitForRetryDelay: async (attempt, signal, responseHeaders) => {
+        try {
+          await waitForLinqRetryDelay(attempt, signal, responseHeaders)
+        } catch (error) {
+          if (dependencies.signal?.aborted) {
+            throw error
+          }
+          if (timeout.timedOut() && lastRetryableFailure) {
+            throw lastRetryableFailure
+          }
+          throw error
+        }
+      },
     })
   } catch (error) {
-    if (dependencies.signal?.aborted) {
+    if (!isRetryableLinqRequestError(error)) {
       throw error
     }
-    throw createLinqRequestError({
-      details: {
-        operation: 'create_attachment_upload',
-        provider: 'linq',
-        requestAttachmentBytes: bytes.byteLength,
-        requestAttachmentHeaderCount: Object.keys(headers).length,
-      },
-      error,
-      method: 'PUT',
-      path: '[presigned-upload]',
-      requestOrigin: readRequestOrigin(uploadUrl),
+    throw new VaultCliError(error.code, error.message, {
+      ...error.context,
       retryable: false,
-      timedOut: timeout.timedOut(),
     })
   } finally {
     timeout.cleanup()
-  }
-
-  if (!response.ok) {
-    throw await createLinqHttpError(
-      response,
-      {
-        operation: 'create_attachment_upload',
-        provider: 'linq',
-        requestAttachmentBytes: bytes.byteLength,
-        requestAttachmentHeaderCount: Object.keys(headers).length,
-      },
-      'PUT',
-      '[presigned-upload]',
-      false,
-      false,
-    )
   }
 }
 
@@ -1147,6 +1237,10 @@ export async function createLinqChat(
     primaryMessageId,
     linkMessageId,
   )
+  const providerMessageEffects = [
+    ...(result.providerMessageEffects ?? []),
+    ...(linkResponse.providerMessageEffects ?? []),
+  ]
   if (providerMessageIds.length !== 2) {
     throw createLinqRichLinkPartialDeliveryFailure({
       error: new Error(
@@ -1162,6 +1256,7 @@ export async function createLinqChat(
   return {
     ...result,
     messageId: linkMessageId,
+    ...(providerMessageEffects.length > 0 ? { providerMessageEffects } : {}),
     providerMessageIds,
   }
 }
@@ -1183,13 +1278,14 @@ async function createLinqChatWithPrimaryMessage(
   const from = normalizeRequiredString(input.from, 'from')
   const recipients = normalizeLinqStringList(input.to, 'recipient')
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
+  const messageBody = buildLinqMessageBody({
+    idempotencyKey: input.idempotencyKey,
+    media: input.media ?? [],
+    message: input.message,
+  })
   const body: ChatCreateParams = {
     from,
-    message: buildLinqMessageBody({
-      idempotencyKey: input.idempotencyKey,
-      media: input.media ?? [],
-      message: input.message,
-    }).message,
+    message: messageBody.message,
     to: recipients,
   }
   const response = await requestLinqJson<ChatCreateResponse>({
@@ -1207,9 +1303,15 @@ async function createLinqChatWithPrimaryMessage(
     signal: dependencies.signal,
   })
 
+  const messageId = normalizeNullableString(response.chat?.message?.id ?? null)
+  const providerMessageEffects = buildLinqProviderMessageEffects({
+    body: messageBody,
+    providerMessageId: messageId,
+  })
   return {
     chatId: normalizeNullableString(response.chat?.id ?? null),
-    messageId: normalizeNullableString(response.chat?.message?.id ?? null),
+    messageId,
+    ...(providerMessageEffects.length > 0 ? { providerMessageEffects } : {}),
   }
 }
 
@@ -1274,6 +1376,29 @@ function collectLinqProviderMessageIds(
   return output
 }
 
+function buildLinqProviderMessageEffects(input: {
+  body: MessageSendParams
+  providerMessageId: unknown
+}): AssistantProviderMessageEffect[] {
+  const providerMessageId = normalizeNullableString(
+    typeof input.providerMessageId === 'string'
+      ? input.providerMessageId
+      : null,
+  )
+  if (!providerMessageId) {
+    return []
+  }
+
+  const textParts = (input.body.message.parts ?? []).filter(
+    (part): part is TextPart => part.type === 'text',
+  )
+  const text = textParts.length === 1 ? textParts[0]!.value : null
+  return [{
+    message: typeof text === 'string' && text.length > 0 ? text : null,
+    providerMessageId,
+  }]
+}
+
 function createLinqRichLinkPartialDeliveryFailure(input: {
   error: unknown
   idempotencyKey: string | null
@@ -1330,13 +1455,11 @@ export async function createLinqWebhookSubscription(
     : null
   const subscribedEvents = normalizeLinqWebhookEventTypeList(input.subscribedEvents)
   const body: WebhookSubscriptionCreateParams = {
-    ...(phoneNumbers
-      ? {
-          phone_numbers: phoneNumbers,
-        }
-      : {}),
     subscribed_events: subscribedEvents,
     target_url: normalizeRequiredString(input.targetUrl, 'target url'),
+  }
+  if (phoneNumbers) {
+    body.phone_numbers = phoneNumbers
   }
   const response = await requestLinqJson<WebhookSubscriptionCreateResponse>({
     details: {
@@ -1374,6 +1497,7 @@ async function requestLinqJson<T>(input: {
   path: string
   body?: LinqJsonRequestBody
   signal?: AbortSignal
+  singleAttemptTimeoutMs?: number
 }): Promise<T> {
   return requestLinq<T>({
     ...input,
@@ -1410,6 +1534,7 @@ async function requestLinq<T>(input: {
   body?: LinqJsonRequestBody
   parseResponse(response: LinqFetchResponse): Promise<T>
   signal?: AbortSignal
+  singleAttemptTimeoutMs?: number
 }): Promise<T> {
   const request = resolveLinqRequest(input)
   const diagnosticPath = sanitizeLinqPathForDiagnostics(input.path)
@@ -1417,6 +1542,26 @@ async function requestLinq<T>(input: {
     ...input.details,
     ...buildLinqRequestBodyDiagnostics(input.body, request.body),
     path: diagnosticPath,
+  }
+  const fetchInput = {
+    allowDeleteRetries: input.allowDeleteRetries === true,
+    allowRateLimitRetries: input.allowRateLimitRetries !== false,
+    body: request.body,
+    details,
+    fetchImplementation: request.fetchImplementation,
+    headers: request.headers,
+    method: input.method,
+    path: diagnosticPath,
+    signal: input.signal,
+    url: request.url,
+  }
+
+  if (input.singleAttemptTimeoutMs !== undefined) {
+    return fetchCompleteLinqAttempt({
+      ...fetchInput,
+      parseResponse: input.parseResponse,
+      timeoutMs: input.singleAttemptTimeoutMs,
+    })
   }
 
   return requestJsonWithRetry<T, LinqFetchResponse>({
@@ -1429,19 +1574,10 @@ async function requestLinq<T>(input: {
         input.allowDeleteRetries === true,
         input.allowRateLimitRetries !== false,
       ),
-    fetchResponse: () =>
-      fetchLinqResponse({
-        allowDeleteRetries: input.allowDeleteRetries === true,
-        allowRateLimitRetries: input.allowRateLimitRetries !== false,
-        body: request.body,
-        details,
-        fetchImplementation: request.fetchImplementation,
-        headers: request.headers,
-        method: input.method,
-        path: diagnosticPath,
-        signal: input.signal,
-        url: request.url,
-      }),
+    fetchResponse: () => fetchLinqResponse({
+      ...fetchInput,
+      timeoutMs: LINQ_HTTP_TIMEOUT_MS,
+    }),
     isRetryableError: isRetryableLinqRequestError,
     maxAttempts: LINQ_HTTP_MAX_ATTEMPTS,
     parseResponse: input.parseResponse,
@@ -1511,7 +1647,7 @@ function createLinqConfigurationError(
   })
 }
 
-async function fetchLinqResponse(input: {
+type LinqFetchInput = {
   allowDeleteRetries: boolean
   allowRateLimitRetries: boolean
   details: LinqSafeRequestDetails
@@ -1522,30 +1658,74 @@ async function fetchLinqResponse(input: {
   headers: Record<string, string>
   body?: string
   signal?: AbortSignal
-}): Promise<LinqFetchResponse> {
+  timeoutMs: number
+}
+
+async function fetchLinqResponse(input: LinqFetchInput): Promise<LinqFetchResponse> {
   return fetchJsonResponse({
     body: input.body,
     createTransportError: ({ error, timedOut }) =>
-      createLinqRequestError({
-        details: input.details,
-        error,
-        requestOrigin: readRequestOrigin(input.url),
-        method: input.method,
-        path: input.path,
-        timedOut,
-        retryable: shouldRetryLinqTransportFailure(
-          input.method,
-          input.allowDeleteRetries,
-          input.details.hasIdempotencyKey === true,
-        ),
-      }),
+      createLinqTransportError(input, error, timedOut),
     fetchImplementation: input.fetchImplementation,
     headers: input.headers,
     method: input.method,
     signal: input.signal,
-    timeoutMs: LINQ_HTTP_TIMEOUT_MS,
+    timeoutMs: input.timeoutMs,
     url: input.url,
   })
+}
+
+async function fetchCompleteLinqAttempt<T>(
+  input: LinqFetchInput & {
+    parseResponse(response: LinqFetchResponse): Promise<T>
+  },
+): Promise<T> {
+  return fetchJsonResponse({
+    body: input.body,
+    consumeResponse: async (response) => {
+      if (!response.ok) {
+        throw await createLinqHttpError(
+          response,
+          input.details,
+          input.method,
+          input.path,
+          input.allowDeleteRetries,
+          input.allowRateLimitRetries,
+        )
+      }
+      return input.parseResponse(response)
+    },
+    createTransportError: ({ error, timedOut }) =>
+      createLinqTransportError(input, error, timedOut),
+    fetchImplementation: input.fetchImplementation,
+    headers: input.headers,
+    method: input.method,
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+    url: input.url,
+  })
+}
+
+function createLinqTransportError(
+  input: LinqFetchInput,
+  error: unknown,
+  timedOut: boolean,
+): Error {
+  return readPreProviderLinqRequestError(error)
+    ?? createLinqRequestError({
+      details: input.details,
+      error,
+      requestOrigin: readRequestOrigin(input.url),
+      method: input.method,
+      path: input.path,
+      timedOut,
+      timeoutMs: input.timeoutMs,
+      retryable: shouldRetryLinqTransportFailure(
+        input.method,
+        input.allowDeleteRetries,
+        input.details.hasIdempotencyKey === true,
+      ),
+    })
 }
 
 async function createLinqHttpError(
@@ -1677,14 +1857,20 @@ function createLinqRequestError(input: {
   method: LinqHttpMethod
   path: string
   timedOut: boolean
+  timeoutMs: number
   retryable: boolean
 }): VaultCliError {
   const transportErrorDiagnostics = buildLinqTransportErrorDiagnostics(input.error)
+  const attachmentReservationMayHaveSucceeded =
+    readRecord(input.error)?.linqAttachmentReservationMayHaveSucceeded === true
+  const retryable = attachmentReservationMayHaveSucceeded
+    ? false
+    : input.retryable
   const baseMessage = input.timedOut
-    ? `Linq request ${input.method} ${input.path} timed out after ${LINQ_HTTP_TIMEOUT_MS}ms.`
+    ? `Linq request ${input.method} ${input.path} timed out after ${input.timeoutMs}ms.`
     : `Linq request ${input.method} ${input.path} failed before a response was returned.`
 
-  return new VaultCliError(
+  const error = new VaultCliError(
     'LINQ_API_REQUEST_FAILED',
     baseMessage,
     {
@@ -1694,11 +1880,25 @@ function createLinqRequestError(input: {
       method: input.method,
       path: input.path,
       ...(input.requestOrigin ? { requestOrigin: input.requestOrigin } : {}),
-      retryable: input.retryable,
-      timeoutMs: LINQ_HTTP_TIMEOUT_MS,
+      retryable,
+      timeoutMs: input.timeoutMs,
       timedOut: input.timedOut,
     },
   )
+
+  return attachmentReservationMayHaveSucceeded
+    ? Object.assign(error, {
+        linqAttachmentReservationMayHaveSucceeded: true as const,
+      })
+    : error
+}
+
+function readPreProviderLinqRequestError(error: unknown): Error | null {
+  return error instanceof Error
+    && 'deliveryMayHaveSucceeded' in error
+    && error.deliveryMayHaveSucceeded === false
+    ? error
+    : null
 }
 
 function buildLinqTransportErrorDiagnostics(
@@ -1783,6 +1983,7 @@ function shouldRetryLinqHttpStatus(
   return (
     (
       method === 'GET' ||
+      method === 'PUT' ||
       (method === 'POST' && hasIdempotencyKey) ||
       (method === 'DELETE' && allowDeleteRetries)
     ) &&
@@ -1791,7 +1992,8 @@ function shouldRetryLinqHttpStatus(
 }
 
 function parseLinqAttachmentUploadResponse(
-  value: AttachmentCreateResponse,
+  value: unknown,
+  status: number,
 ): CreateLinqAttachmentUploadResult {
   const record = readRecord(value)
   const attachmentId = normalizeNullableString(readStringField(record, 'attachment_id'))
@@ -1799,36 +2001,48 @@ function parseLinqAttachmentUploadResponse(
   const expiresAt = normalizeNullableString(readStringField(record, 'expires_at'))
   const downloadUrl = normalizeNullableString(readStringField(record, 'download_url'))
   const httpMethod = normalizeNullableString(readStringField(record, 'http_method'))
-  const requiredHeaders = readStringRecord(record?.required_headers)
+  const rawRequiredHeaders = readStringRecord(record?.required_headers)
 
-  if (!attachmentId || !rawUploadUrl || !expiresAt || !requiredHeaders) {
-    throw new VaultCliError(
-      'LINQ_API_REQUEST_FAILED',
-      'Linq attachment upload response was missing required fields.',
-      {
-        failureStage: 'http',
-        operation: 'create_attachment_upload',
-        provider: 'linq',
-        responseBodyKind: record ? 'json_object' : 'unknown',
-        responseBodyKeys: record ? Object.keys(record).sort() : [],
-        retryable: false,
-      },
-    )
+  if (!attachmentId || !rawUploadUrl || !expiresAt || !rawRequiredHeaders) {
+    throw createLinqAttachmentReservationResponseError({
+      message: 'Linq attachment upload response was missing required fields.',
+      payload: value,
+      status,
+    })
   }
   if (httpMethod && httpMethod.toUpperCase() !== 'PUT') {
-    throw new VaultCliError(
-      'LINQ_API_REQUEST_FAILED',
-      'Linq attachment upload response returned an unsupported upload method.',
-      {
-        failureStage: 'http',
-        operation: 'create_attachment_upload',
-        provider: 'linq',
-        retryable: false,
-      },
-    )
+    throw createLinqAttachmentReservationResponseError({
+      message: 'Linq attachment upload response returned an unsupported upload method.',
+      payload: value,
+      status,
+    })
   }
 
-  const uploadUrl = normalizeLinqAttachmentUploadUrl(rawUploadUrl)
+  let requiredHeaders: Record<string, string>
+  try {
+    requiredHeaders = normalizeLinqRequiredHeaders(rawRequiredHeaders)
+  } catch (error) {
+    throw createLinqAttachmentReservationResponseError({
+      message: error instanceof VaultCliError
+        ? error.message
+        : 'Linq attachment upload response returned invalid upload headers.',
+      payload: value,
+      status,
+    })
+  }
+
+  let uploadUrl: string
+  try {
+    uploadUrl = normalizeLinqAttachmentUploadUrl(rawUploadUrl)
+  } catch (error) {
+    throw createLinqAttachmentReservationResponseError({
+      message: error instanceof VaultCliError
+        ? error.message
+        : 'Linq attachment upload response returned an invalid upload URL.',
+      payload: value,
+      status,
+    })
+  }
 
   return {
     attachmentId,
@@ -1837,6 +2051,36 @@ function parseLinqAttachmentUploadResponse(
     requiredHeaders,
     uploadUrl,
   }
+}
+
+function createLinqAttachmentReservationResponseError(input: {
+  message: string
+  payload?: unknown
+  responseBodyKind?: string
+  status: number
+}): VaultCliError & {
+  deliveryMayHaveSucceeded: true
+  retryable: false
+} {
+  return Object.assign(new VaultCliError(
+    'LINQ_API_REQUEST_FAILED',
+    input.message,
+    {
+      ...(input.responseBodyKind
+        ? { responseBodyKind: input.responseBodyKind }
+        : buildLinqErrorResponseDiagnostics(input.payload, null)),
+      failureStage: 'http',
+      method: 'POST',
+      operation: 'create_attachment_upload',
+      path: '/attachments',
+      provider: 'linq',
+      retryable: false,
+      status: input.status,
+    },
+  ), {
+    deliveryMayHaveSucceeded: true as const,
+    retryable: false as const,
+  })
 }
 
 function normalizeLinqAttachmentUploadUrl(value: string): string {
@@ -1968,6 +2212,7 @@ function shouldRetryLinqTransportFailure(
   hasIdempotencyKey = false,
 ): boolean {
   return method === 'GET' ||
+    method === 'PUT' ||
     (method === 'POST' && hasIdempotencyKey) ||
     (method === 'DELETE' && allowDeleteRetries)
 }
@@ -2106,26 +2351,19 @@ function buildLinqRichLinkMessageBody(input: {
 }): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
   const replyToMessageId = normalizeNullableString(input.replyToMessageId)
-  return {
-    message: {
-      parts: [{
-        type: 'link',
-        value: normalizeRequiredString(input.linkUrl, 'rich link url'),
-      }],
-      ...(idempotencyKey
-        ? {
-            idempotency_key: idempotencyKey,
-          }
-        : {}),
-      ...(replyToMessageId
-        ? {
-            reply_to: {
-              message_id: replyToMessageId,
-            },
-          }
-        : {}),
-    },
+  const message: MessageSendParams['message'] = {
+    parts: [{
+      type: 'link',
+      value: normalizeRequiredString(input.linkUrl, 'rich link url'),
+    }],
   }
+  if (idempotencyKey) {
+    message.idempotency_key = idempotencyKey
+  }
+  if (replyToMessageId) {
+    message.reply_to = { message_id: replyToMessageId }
+  }
+  return { message }
 }
 
 function buildLinqRichLinkIdempotencyKey(value: string | null | undefined): string | null {
@@ -2157,13 +2395,11 @@ function buildLinqMessageBody(input: {
   if (normalizedMessage !== null) {
     const renderedText = renderMarkdownMessageText(normalizedMessage)
     textPart = {
-      ...(renderedText.decorations.length > 0
-        ? {
-            text_decorations: renderedText.decorations,
-          }
-        : {}),
       type: 'text',
       value: renderedText.text,
+    }
+    if (renderedText.decorations.length > 0) {
+      textPart.text_decorations = renderedText.decorations
     }
   }
   const parts: MessageContent['parts'] = textPart ? [textPart, ...media] : media
@@ -2177,23 +2413,16 @@ function buildLinqMessageBody(input: {
     throw new VaultCliError('LINQ_INVALID_INPUT', `Linq message must contain at most ${LINQ_MAX_MESSAGE_PARTS} parts.`)
   }
 
-  return {
-    message: {
-      parts,
-      ...(idempotencyKey
-        ? {
-            idempotency_key: idempotencyKey,
-          }
-        : {}),
-      ...(replyToMessageId
-        ? {
-            reply_to: {
-              message_id: replyToMessageId,
-            },
-          }
-        : {}),
-    },
+  const message: MessageSendParams['message'] = {
+    parts,
   }
+  if (idempotencyKey) {
+    message.idempotency_key = idempotencyKey
+  }
+  if (replyToMessageId) {
+    message.reply_to = { message_id: replyToMessageId }
+  }
+  return { message }
 }
 
 function normalizeLinqMediaList(

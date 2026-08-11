@@ -73,7 +73,7 @@ describe("reserveLocalTemporalTcpPort", () => {
 
 describe("startAssistantProviderStubServer", () => {
   it("streams Responses API fixtures for real Codex app-server recorder mode", async () => {
-    const requests: Array<{ body: string; method: string; url: string }> = [];
+    const requests: HostedLocalAssistantProviderStubRequest[] = [];
     const server = await startAssistantProviderStubServer({
       onRequest: (request) => {
         requests.push(request);
@@ -105,10 +105,60 @@ describe("startAssistantProviderStubServer", () => {
       expect(body).toContain("response.completed");
       expect(body).toContain("streamed recorder reply");
       expect(requests).toHaveLength(1);
+      expect(Number.isSafeInteger(requests[0]?.observedAtEpochMs)).toBe(true);
       expect(JSON.parse(requests[0]!.body)).toMatchObject({
         stream: true,
       });
     } finally {
+      await stopHttpStubServer(server);
+    }
+  });
+
+  it("starts held Responses API streams before releasing their content", async () => {
+    let release = (): void => {};
+    let markStarted = (): void => {};
+    const releasePromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const server = await startAssistantProviderStubServer({
+      responseState: {
+        queuedResponses: [{
+          beforeResponse: () => releasePromise,
+          onResponseStarted: markStarted,
+          text: "held streamed reply",
+        }],
+      },
+    });
+
+    try {
+      const responsePromise = fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: [],
+            model: "gpt-5.6-terra",
+            stream: true,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+
+      await started;
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+      release();
+      const body = await response.text();
+      expect(body).toContain("response.created");
+      expect(body).toContain("response.completed");
+      expect(body).toContain("held streamed reply");
+    } finally {
+      release();
       await stopHttpStubServer(server);
     }
   });
@@ -199,6 +249,8 @@ describe("startAssistantProviderStubServer", () => {
       expect(body).toContain("response.completed");
       expect(body).toContain('"type":"custom_tool_call"');
       expect(body).toContain('"name":"exec"');
+      expect(body).toContain("yield_time_ms");
+      expect(body).toContain("30000");
       expect(body).toContain("tools.murph__automation");
       expect(body).toContain("Morning reminder");
     } finally {
@@ -514,6 +566,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
       && name !== "murph.newsletter"
+      && name !== "murph.pending_vault_files"
       && name !== "murph.send_physical_note"
       && name !== "murph.send_vault_file"
       && name !== "murph.ask_grok"
@@ -545,6 +598,23 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames, "code-mode"),
     ]);
+    // Codex 0.147 wraps the code-mode exec tool in the default functions
+    // namespace inside additional_tools.
+    expectAdvertisedMurphDynamicTools([
+      buildResponsesRequest(baseToolNames, "code-mode-namespaced"),
+    ]);
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.pending_vault_files"])],
+      {
+        pendingVaultFilesAvailable: true,
+      },
+    );
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.send_vault_file"])],
+      {
+        vaultFileSendAvailable: true,
+      },
+    );
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(baseToolNamesWithoutProgress)],
       {
@@ -561,6 +631,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         imessageContactAvailable: true,
         messageTargetingAvailable: true,
         newsletterAvailable: true,
+        pendingVaultFilesAvailable: true,
         physicalNotesAvailable: true,
         phoneCallsAvailable: true,
         progressUpdatesAvailable: true,
@@ -675,6 +746,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
 describe("hosted local e2e scenario registration", () => {
   it("keeps heavy hosted-local scenarios manual-only while preserving the direct-R2 invariant in all", () => {
     const allScenarios = resolveHostedLocalE2eScenarios("all");
+    const coldStartBenchmark = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "cold-start-benchmark");
     const containerContinuity = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "container-continuity");
     const codexContainerContinuity = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "codex-container-continuity");
     const directR2PresignedPut = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "direct-r2-presigned-put");
@@ -686,6 +758,11 @@ describe("hosted local e2e scenario registration", () => {
       file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
       manualOnly: true,
       name: "container-continuity",
+    });
+    expect(coldStartBenchmark).toMatchObject({
+      file: "apps/cloudflare/test/hosted-local-cold-start-benchmark-e2e.test.ts",
+      manualOnly: true,
+      name: "cold-start-benchmark",
     });
     expect(codexContainerContinuity).toMatchObject({
       file: "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
@@ -712,6 +789,7 @@ describe("hosted local e2e scenario registration", () => {
       name: "vault-persistence",
     });
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("container-continuity");
+    expect(allScenarios.map((scenario) => scenario.name)).not.toContain("cold-start-benchmark");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("codex-container-continuity");
     expect(allScenarios.map((scenario) => scenario.name)).toContain("direct-r2-presigned-put");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("linq-lost-active-operation");
@@ -721,6 +799,11 @@ describe("hosted local e2e scenario registration", () => {
       file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
       manualOnly: true,
       name: "container-continuity",
+    })]);
+    expect(resolveHostedLocalE2eScenarios("cold-start-benchmark")).toEqual([expect.objectContaining({
+      file: "apps/cloudflare/test/hosted-local-cold-start-benchmark-e2e.test.ts",
+      manualOnly: true,
+      name: "cold-start-benchmark",
     })]);
     expect(resolveHostedLocalE2eScenarios("codex-container-continuity")).toEqual([expect.objectContaining({
       file: "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
@@ -751,7 +834,11 @@ describe("hosted local e2e scenario registration", () => {
 
 function buildResponsesRequest(
   namespacedToolNames: readonly string[],
-  toolLocation: "additional-tools" | "code-mode" | "top-level" = "top-level",
+  toolLocation:
+    | "additional-tools"
+    | "code-mode"
+    | "code-mode-namespaced"
+    | "top-level" = "top-level",
 ): HostedLocalAssistantProviderStubRequest {
   const tools = [
     {
@@ -762,6 +849,17 @@ function buildResponsesRequest(
       type: "namespace",
     },
   ];
+  const codeModeExecTool = {
+    description: namespacedToolNames
+      .filter((name) =>
+        name !== "murph.automation" && name !== "murph.group"
+      )
+      .map((name) => name.replace(/^murph\./u, "murph__"))
+      .concat("ALL_TOOLS")
+      .join("\n"),
+    name: "exec",
+    type: "custom",
+  };
 
   return {
     body: JSON.stringify(
@@ -777,17 +875,23 @@ function buildResponsesRequest(
           }
         : toolLocation === "code-mode"
         ? {
-            tools: [{
-              description: namespacedToolNames
-                .filter((name) =>
-                  name !== "murph.automation" && name !== "murph.group"
-                )
-                .map((name) => name.replace(/^murph\./u, "murph__"))
-                .concat("ALL_TOOLS")
-                .join("\n"),
-              name: "exec",
-              type: "custom",
-            }],
+            tools: [codeModeExecTool],
+          }
+        : toolLocation === "code-mode-namespaced"
+        ? {
+            input: [
+              {
+                role: "developer",
+                tools: [
+                  {
+                    name: "functions",
+                    tools: [codeModeExecTool],
+                    type: "namespace",
+                  },
+                ],
+                type: "additional_tools",
+              },
+            ],
           }
         : { tools },
     ),

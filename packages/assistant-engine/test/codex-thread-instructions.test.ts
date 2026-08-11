@@ -47,6 +47,12 @@ describe('Codex thread instructions', () => {
       'Continue from runtime summaries without restarting completed work',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Use final for the complete answer',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      'Use commentary for brief progress',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Answer, explanation, review, diagnosis, plan, or content requests—including "build me a plan"—do not by themselves authorize implementation or changes to saved state or external systems',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
@@ -129,6 +135,41 @@ describe('Codex thread instructions', () => {
       ].join('\n\n'),
     )
     expect(appServerInput.prompt).not.toContain('Stable Murph instructions.')
+  })
+
+  it('forwards trusted generated-song policy to the app-server turn', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
+      finalMessage: 'done',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'done',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'thread-song-policy',
+      stderr: '',
+      stdout: '',
+      threadId: 'thread-song-policy',
+      turnId: 'turn-song-policy',
+    })
+    const generateSongPolicy = {
+      maxAttempts: 1,
+      requiredDurationSeconds: 15,
+    } as const
+
+    await executeCodexAssistantTurnAttemptUnchecked({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      dynamicTools: [],
+      env: {},
+      generateSongPolicy,
+      userPrompt: 'Create the bounded song.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
+      .toMatchObject({ generateSongPolicy })
   })
 
   it('keeps constrained profile inputs at the app-server seam', async () => {

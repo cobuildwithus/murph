@@ -73,6 +73,63 @@ type HostedLinqContactCardLineRow = {
   providerServiceStatus: string | null;
 };
 
+export type PreparedHostedLinqLinePhone = {
+  currentLookupKey: string;
+  lookupKeyReadCandidates: readonly string[];
+  normalizedPhoneNumber: string;
+  phoneNumberEncrypted: string;
+  phoneNumberHint: string;
+};
+
+/**
+ * Freezes every privacy-derived value before a multi-line transaction begins.
+ * The sorted result also gives both bulk writers one deterministic row order.
+ */
+export function prepareHostedLinqLinePhones(input: {
+  maxLines: number;
+  phoneNumbers: readonly string[];
+}): PreparedHostedLinqLinePhone[] {
+  const preparedByCurrentLookupKey = new Map<string, PreparedHostedLinqLinePhone>();
+
+  for (const phoneNumber of input.phoneNumbers) {
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    const currentLookupKey = createHostedPhoneLookupKey(normalizedPhoneNumber);
+    const lookupKeyReadCandidates =
+      createHostedPhoneLookupKeyReadCandidates(normalizedPhoneNumber);
+    const phoneNumberEncrypted =
+      encryptHostedLinqLinePhoneNumber(normalizedPhoneNumber);
+    const phoneNumberHint = readHostedPhoneHint(normalizedPhoneNumber);
+
+    if (
+      !normalizedPhoneNumber
+      || !currentLookupKey
+      || lookupKeyReadCandidates.length === 0
+      || !phoneNumberEncrypted
+      || !phoneNumberHint
+    ) {
+      throw new TypeError("Hosted Linq line synchronization requires a valid phone number.");
+    }
+
+    preparedByCurrentLookupKey.set(currentLookupKey, {
+      currentLookupKey,
+      lookupKeyReadCandidates,
+      normalizedPhoneNumber,
+      phoneNumberEncrypted,
+      phoneNumberHint,
+    });
+  }
+
+  if (preparedByCurrentLookupKey.size > input.maxLines) {
+    throw new RangeError(
+      `Hosted Linq line synchronization requires at most ${input.maxLines} unique phone number(s).`,
+    );
+  }
+
+  return [...preparedByCurrentLookupKey.values()].sort((left, right) =>
+    left.currentLookupKey.localeCompare(right.currentLookupKey)
+  );
+}
+
 export async function upsertHostedLinqLineForPhoneTx(input: {
   /** @deprecated Additive-rollout compatibility; assignment does not read it. */
   activeMemberLimit?: number | null;
@@ -250,24 +307,6 @@ function chooseHostedLinqLineWriteLookupKey(
   return lookupKeyReadCandidates.find((candidate) => existingLookupKeys.has(candidate)) ?? null;
 }
 
-/**
- * Serializes every multi-phone line writer (provider inventory application
- * and configured-line synchronization) on one inventory-wide advisory lock.
- * Without a shared first lock, two writers touching the same phones in
- * opposite orders can invert their per-phone lock acquisition and deadlock.
- * Transaction-scoped: callers must already be inside a transaction.
- */
-export async function acquireHostedLinqInventoryApplyLockTx(input: {
-  prisma: HostedLinqLineClient;
-}): Promise<void> {
-  await input.prisma.$executeRaw`
-    SELECT pg_advisory_xact_lock(
-      hashtext('hosted_linq_phone_number_inventory'),
-      hashtext('snapshot')
-    )
-  `;
-}
-
 export async function syncHostedLinqConfiguredLinesTx(input: {
   /**
    * Additive-rollout compatibility for previous application builds only.
@@ -280,16 +319,119 @@ export async function syncHostedLinqConfiguredLinesTx(input: {
   prisma: HostedLinqLineClient;
 }): Promise<void> {
   const observedAt = input.observedAt ?? new Date();
-  await acquireHostedLinqInventoryApplyLockTx({ prisma: input.prisma });
-  for (const phoneNumber of input.phoneNumbers) {
-    await upsertHostedLinqLineForPhoneTx({
-      activeMemberLimit: input.activeMemberLimit,
-      observedAt,
-      phoneNumber,
-      prisma: input.prisma,
-      source: "configured",
-    });
+  const lines = prepareHostedLinqLinePhones({
+    maxLines: HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
+    phoneNumbers: input.phoneNumbers,
+  });
+  if (lines.length === 0) {
+    return;
   }
+
+  const apply = (prisma: HostedLinqLineClient) =>
+    prisma.$queryRaw<Array<{ syncedCount: bigint }>>(
+      buildHostedLinqConfiguredLineSnapshotQuery({
+        activeMemberLimit: input.activeMemberLimit,
+        lines,
+        observedAt,
+      }),
+    );
+
+  if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
+    const prisma = input.prisma;
+    await prisma.$transaction((tx) => apply(tx));
+    return;
+  }
+
+  await apply(input.prisma);
+}
+
+function buildHostedLinqConfiguredLineSnapshotQuery(input: {
+  activeMemberLimit: number | null;
+  lines: readonly PreparedHostedLinqLinePhone[];
+  observedAt: Date;
+}): Prisma.Sql {
+  const observedAt = Prisma.sql`${input.observedAt}::timestamp`;
+  const values = Prisma.join(input.lines.map((line) => Prisma.sql`(
+    ${line.currentLookupKey}::text,
+    ARRAY[${Prisma.join(line.lookupKeyReadCandidates)}]::text[],
+    ${line.phoneNumberEncrypted}::text,
+    ${line.phoneNumberHint}::text
+  )`));
+
+  return Prisma.sql`
+    WITH input_line (
+      current_lookup_key,
+      lookup_key_candidates,
+      phone_number_encrypted,
+      phone_number_hint
+    ) AS (
+      VALUES ${values}
+    ),
+    resolved_line AS MATERIALIZED (
+      SELECT
+        input.current_lookup_key,
+        COALESCE(existing.phone_number_lookup_key, input.current_lookup_key)
+          AS target_lookup_key,
+        input.phone_number_encrypted,
+        input.phone_number_hint
+      FROM input_line AS input
+      LEFT JOIN LATERAL (
+        SELECT line.phone_number_lookup_key
+        FROM unnest(input.lookup_key_candidates) WITH ORDINALITY
+          AS candidate(lookup_key, candidate_ordinal)
+        INNER JOIN hosted_linq_line AS line
+          ON line.phone_number_lookup_key = candidate.lookup_key
+        ORDER BY
+          (line.phone_number_lookup_key = input.current_lookup_key) DESC,
+          candidate.candidate_ordinal
+        LIMIT 1
+      ) AS existing ON TRUE
+    ),
+    upserted_line AS (
+      INSERT INTO hosted_linq_line (
+        phone_number_lookup_key,
+        phone_number_encrypted,
+        phone_number_hint,
+        source,
+        configured_at,
+        health_status,
+        egress_policy,
+        active_member_limit,
+        assignment_weight,
+        created_at,
+        updated_at
+      )
+      SELECT
+        resolved.target_lookup_key,
+        resolved.phone_number_encrypted,
+        resolved.phone_number_hint,
+        'configured',
+        ${observedAt},
+        'unknown',
+        'enabled',
+        ${input.activeMemberLimit},
+        100,
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      FROM resolved_line AS resolved
+      ORDER BY resolved.current_lookup_key
+      ON CONFLICT (phone_number_lookup_key) DO UPDATE SET
+        phone_number_encrypted = EXCLUDED.phone_number_encrypted,
+        phone_number_hint = EXCLUDED.phone_number_hint,
+        source = 'configured',
+        configured_at = EXCLUDED.configured_at,
+        active_member_limit = CASE
+          WHEN hosted_linq_line.active_member_limit IS NULL
+            AND EXCLUDED.active_member_limit IS NOT NULL
+            THEN EXCLUDED.active_member_limit
+          ELSE hosted_linq_line.active_member_limit
+        END,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING phone_number_lookup_key
+    )
+    SELECT count(*)::bigint AS "syncedCount"
+    FROM upserted_line
+  `;
 }
 
 export async function listHostedLinqAssignableHomeLines(input: {
@@ -778,41 +920,15 @@ export function buildHostedLinqInventoryFreshnessCutoff(observedAt: Date): Date 
   return new Date(observedAt.getTime() - HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS);
 }
 
-/**
- * One consistent contact-card candidacy snapshot. Reads the configured-line
- * total and the eligible candidates under the same inventory-wide advisory
- * lock the snapshot applier uses, so a revoking health-cron run overlapping
- * the hourly contact-card cron can never be observed half-applied.
- */
 export async function readHostedLinqContactCardCandidacySnapshot(input: {
   limit?: number;
   observedAt?: Date;
   prisma: PrismaClient | Prisma.TransactionClient;
-  /**
-   * `wait` (default) is for background reconciliation, which must observe a
-   * fully applied snapshot. `skip` is for member-facing reads that must never
-   * queue behind an inventory writer: it returns null instead of waiting, so
-   * the caller can serve the primary card and omit the optional backup.
-   */
-  lockMode?: "skip" | "wait";
 }): Promise<{
   configuredLineCount: number;
   lines: HostedLinqContactCardLine[];
-} | null> {
+}> {
   const read = async (tx: HostedLinqLineClient) => {
-    if (input.lockMode === "skip") {
-      const acquired = await tx.$queryRaw<Array<{ locked: boolean }>>`
-        SELECT pg_try_advisory_xact_lock(
-          hashtext('hosted_linq_phone_number_inventory'),
-          hashtext('snapshot')
-        ) AS locked
-      `;
-      if (acquired[0]?.locked !== true) {
-        return null;
-      }
-    } else {
-      await acquireHostedLinqInventoryApplyLockTx({ prisma: tx });
-    }
     const configuredLineCount = await tx.hostedLinqLine.count({
       where: {
         configuredAt: { not: null },
@@ -829,7 +945,10 @@ export async function readHostedLinqContactCardCandidacySnapshot(input: {
 
   if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
     const prisma = input.prisma;
-    return prisma.$transaction((tx) => read(tx));
+    return prisma.$transaction(
+      (tx) => read(tx),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
   return read(input.prisma);
@@ -949,6 +1068,8 @@ export async function projectHostedLinqLineForProviderEventTx(input: {
   }
 
   switch (input.event.eventType) {
+    case "chat.group_icon_updated":
+    case "chat.group_icon_update_failed":
     case "message.edited":
       return false;
     case "message.received":

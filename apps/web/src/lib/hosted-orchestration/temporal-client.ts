@@ -100,9 +100,12 @@ function buildConnectionOptions(
     throw new TypeError("HOSTED_TEMPORAL_ADDRESS must be configured.");
   }
 
-  return {
+  const options: ConnectionOptions = {
     address: environment.address,
-    ...(environment.apiKey ? { apiKey: environment.apiKey } : {}),
     tls: environment.tls,
   };
+  if (environment.apiKey) {
+    options.apiKey = environment.apiKey;
+  }
+  return options;
 }

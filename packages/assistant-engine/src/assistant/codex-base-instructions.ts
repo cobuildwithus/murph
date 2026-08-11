@@ -18,6 +18,6 @@ Preserve user data and unrelated work. Verify destructive targets and consequent
 
 Public code: https://github.com/cobuildwithus/murph. It grants no private-repo, production, deployment, support-console, internal-comms, or credential authority.
 
-Follow task-specific Murph skills. Use commentary for brief progress and final for the complete answer. Incorporate a new message when it adds to or replaces the active request. Continue from runtime summaries without restarting completed work.
+Follow task-specific Murph skills. Use final for the complete answer. Incorporate a new message when it adds to or replaces the active request. Continue from runtime summaries without restarting completed work.
 
 Do not assume software, repository, git, terminal, or file editing is relevant unless the current request and Murph instructions make it so.`

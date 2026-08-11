@@ -32,6 +32,10 @@ import {
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
+import {
+  parseHostedPulseTrialStartSource,
+  type HostedPulseTrialStartSource,
+} from "./pulse-trial-start-source";
 
 export interface HostedMemberStripeBillingRefSnapshot {
   checkoutAttemptId?: string | null;
@@ -48,6 +52,7 @@ export interface HostedMemberStripeBillingRefSnapshot {
   memberId: string;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
+  pulseTrialStartSource?: HostedPulseTrialStartSource | null;
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: string | null;
   stripeCheckoutSessionId?: string | null;
@@ -93,6 +98,7 @@ export interface HostedMemberStripeBillingRefWriteInput {
   memberId: string;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
+  pulseTrialStartSource?: HostedPulseTrialStartSource | null;
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: string | null;
   stripeEventCreatedAt?: Date | null;
@@ -138,7 +144,7 @@ export type HostedMemberStripeCheckoutAcceptance =
       kind: "accepted" | "already_accepted";
     }
   | {
-      kind: "cleanup_superseded";
+      kind: "cleanup_superseded" | "cleanup_terminal";
     };
 
 export type HostedMemberStripeCheckoutAttemptRevalidation =
@@ -601,6 +607,53 @@ export async function clearHostedMemberStripeCheckoutAttemptTx(input: {
   return updated.count === 1;
 }
 
+export async function clearHostedMemberLegacyTrialBillingUnderLockTx(input: {
+  billingStatusAfterClear?: HostedBillingStatus;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedMemberBillingRef.updateMany({
+    data: {
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutIntentHash: null,
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      currentPeriodEnd: null,
+      currentPeriodStart: null,
+      currentTrialEndsAt: null,
+      currentTrialStartedAt: null,
+      pulseTrialPolicyVersion: null,
+      pulseTrialRedeemedAt: null,
+      pulseTrialStartSource: null,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey: null,
+      stripeSubscriptionIdEncrypted: null,
+      stripeSubscriptionLookupKey: null,
+      stripeSubscriptionScheduleIdEncrypted: null,
+      stripeSubscriptionScheduleLookupKey: null,
+      usagePlanTransitionAt: null,
+      usagePlanTransitionFromCode: null,
+      usagePlanTransitionKind: null,
+      usagePlanTransitionToCode: null,
+    },
+    where: { memberId: input.memberId },
+  });
+  await input.tx.hostedMemberSubscriptionCheckout.deleteMany({
+    where: { memberId: input.memberId },
+  });
+  await input.tx.hostedMember.update({
+    data: {
+      billingStatus:
+        input.billingStatusAfterClear ?? HostedBillingStatus.active,
+    },
+    where: { id: input.memberId },
+  });
+}
+
 export async function clearHostedMemberStripeCheckoutAttemptForSessionTx(input: {
   memberId: string;
   sessionId: string;
@@ -630,13 +683,15 @@ export async function clearHostedMemberStripeCheckoutAttemptForSessionTx(input: 
 }
 
 /**
- * Binds exactly one completed direct Checkout. Standard Checkout preserves an
+ * Owns exactly one completed direct Checkout. Standard Checkout preserves an
  * existing billing identity. Pulse Trial may replace an identity only after
  * its caller classifies that identity as stale while holding the same member
- * lock.
+ * lock. A terminal provider candidate is never bound, but the same owner must
+ * distinguish an already-accepted replay from an unaccepted cleanup target.
  */
 export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
   allowBillingIdentityReplacement?: boolean;
+  billingIdentityDisposition: "bind" | "terminal";
   checkoutAttemptId: string | null;
   checkoutIntentHash: string | null;
   checkoutSessionId: string;
@@ -724,6 +779,9 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
         currentRecord.stripeSubscriptionLookupKey,
       ),
     );
+  if (alreadyAccepted && input.billingIdentityDisposition === "terminal") {
+    return { kind: "already_accepted" };
+  }
   if (!alreadyAccepted && !completionMatchesAttempt && !acceptsLegacyCompletion) {
     return { kind: "cleanup_superseded" };
   }
@@ -734,6 +792,9 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
     stripeSubscriptionId: input.preparedCompletion.stripeSubscriptionId,
     tx: input.tx,
   });
+  if (input.billingIdentityDisposition === "terminal") {
+    return { kind: "cleanup_terminal" };
+  }
   const lastStripeEventCreatedAt =
     currentRecord?.lastStripeEventCreatedAt
     && currentRecord.lastStripeEventCreatedAt > input.eventCreatedAt
@@ -773,46 +834,6 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
   return {
     kind: alreadyAccepted ? "already_accepted" : "accepted",
   };
-}
-
-export async function writeAcceptedHostedMemberPulseTrialBillingTx(input: {
-  currentCheckoutOffer: string;
-  currentPeriodEnd: Date | null;
-  currentPeriodStart: Date | null;
-  currentTrialEndsAt: Date;
-  currentTrialStartedAt: Date;
-  memberId: string;
-  preparedCompletion: PreparedHostedMemberStripeCheckoutCompletion;
-  pulseTrialPolicyVersion: string;
-  tx: Prisma.TransactionClient;
-}): Promise<boolean> {
-  if (input.preparedCompletion.memberId !== input.memberId) {
-    throw new TypeError("Prepared Stripe Checkout completion has a different owner.");
-  }
-
-  const updated = await input.tx.hostedMemberBillingRef.updateMany({
-    data: {
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: input.currentCheckoutOffer,
-      currentPeriodEnd: input.currentPeriodEnd,
-      currentPeriodStart: input.currentPeriodStart,
-      currentTrialEndsAt: input.currentTrialEndsAt,
-      currentTrialStartedAt: input.currentTrialStartedAt,
-      pulseTrialPolicyVersion: input.pulseTrialPolicyVersion,
-      pulseTrialRedeemedAt: input.currentTrialStartedAt,
-    },
-    where: {
-      memberId: input.memberId,
-      pulseTrialRedeemedAt: null,
-      stripeCustomerLookupKey:
-        input.preparedCompletion.stripeCustomerLookupKey,
-      stripeSubscriptionLookupKey:
-        input.preparedCompletion.stripeSubscriptionLookupKey,
-    },
-  });
-
-  return updated.count === 1;
 }
 
 export async function prepareHostedMemberStripeCheckoutCompletion(input: {
@@ -1140,6 +1161,13 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
     ...(billingRef.pulseTrialRedeemedAt !== undefined
       ? { pulseTrialRedeemedAt: billingRef.pulseTrialRedeemedAt }
       : {}),
+    ...(billingRef.pulseTrialStartSource !== undefined
+      ? {
+          pulseTrialStartSource: parseHostedPulseTrialStartSource(
+            billingRef.pulseTrialStartSource,
+          ),
+        }
+      : {}),
     ...(billingRef.scheduledBillingEffectiveAt
       ? { scheduledBillingEffectiveAt: billingRef.scheduledBillingEffectiveAt }
       : {}),
@@ -1225,6 +1253,7 @@ async function buildHostedMemberBillingRefCreateData(
     currentTrialStartedAt: input.currentTrialStartedAt ?? null,
     pulseTrialPolicyVersion: input.pulseTrialPolicyVersion ?? null,
     pulseTrialRedeemedAt: input.pulseTrialRedeemedAt ?? null,
+    pulseTrialStartSource: input.pulseTrialStartSource ?? null,
     scheduledBillingEffectiveAt: input.scheduledBillingEffectiveAt ?? null,
     scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
     stripeCustomerLookupKey: createHostedStripeCustomerLookupKey(input.stripeCustomerId ?? null),
@@ -1287,6 +1316,9 @@ async function buildHostedMemberBillingRefUpdateData(
   }
   if (input.pulseTrialPolicyVersion !== undefined) {
     data.pulseTrialPolicyVersion = input.pulseTrialPolicyVersion;
+  }
+  if (input.pulseTrialStartSource !== undefined) {
+    data.pulseTrialStartSource = input.pulseTrialStartSource;
   }
   if (input.scheduledBillingPlanCode !== undefined) {
     data.scheduledBillingPlanCode = input.scheduledBillingPlanCode;

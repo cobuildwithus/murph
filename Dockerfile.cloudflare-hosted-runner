@@ -1,14 +1,25 @@
-ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.145.0
+ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.147.0
 
-FROM ${HOSTED_RUNNER_BASE_IMAGE}
+FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions
 
 USER root
 
 ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle
 
+COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/
+
+RUN chmod -R a-w /app \
+  && chmod -R a+rX /app
+
+FROM ${HOSTED_RUNNER_BASE_IMAGE}
+
+USER root
+
 ENV MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON="/usr/local/share/murph/codex-model-catalog.openai-flex.json"
 
 RUN mkdir -p /usr/local/share/murph \
+  && chmod a-w /app \
+  && chmod a+rX /app \
   && codex debug models --bundled \
     | jq 'def add_flex: (.service_tiers) |= ((. // []) | if any(.[]?; .id == "flex") then . else . + [{"id":"flex","name":"Flex","description":"Lower-cost flexible processing"}] end); (.models[] | select(.slug == "gpt-5.6-sol" or .slug == "gpt-5.6-terra" or .slug == "gpt-5.6-luna")) |= add_flex' \
     > /tmp/murph-codex-model-catalog.openai-flex.json \
@@ -16,10 +27,7 @@ RUN mkdir -p /usr/local/share/murph \
   && install -m 0444 /tmp/murph-codex-model-catalog.openai-flex.json "${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}" \
   && rm -f /tmp/murph-codex-model-catalog.openai-flex.json
 
-COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/
-
-RUN chmod -R a-w /app \
-  && chmod -R a+rX /app
+COPY --from=runner-app-permissions --chown=root:root /app/ /app/
 
 USER runner
 

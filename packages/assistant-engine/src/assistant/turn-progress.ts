@@ -138,7 +138,8 @@ export function createAssistantProductFeedbackRecorder(input: {
       ) {
         return { recorded: false }
       }
-      const acceptedInputIds = input.getAcceptedInputIds?.() ?? initialAcceptedInputIds
+      const acceptedInputIds = input.getAcceptedInputIds?.()
+        ?? initialAcceptedInputIds
       const candidate = {
         ...normalized,
         idempotencyKey: buildAssistantProductFeedbackIdempotencyKey({
@@ -311,10 +312,10 @@ export function buildAssistantProductFeedbackIdempotencyKey(input: {
   acceptedInputIds: readonly string[]
   feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
 }): string {
-  const effectAnchorInputId = input.acceptedInputIds.at(-1)
+  const latestAcceptedInputId = input.acceptedInputIds.at(-1)
   return createHash('sha256')
     .update(JSON.stringify({
-      acceptedInputIds: effectAnchorInputId ? [effectAnchorInputId] : [],
+      acceptedInputIds: latestAcceptedInputId ? [latestAcceptedInputId] : [],
       kind: input.feedback.kind,
       relatedChangelogItemIds: [...new Set(input.feedback.relatedChangelogItemIds)].sort(),
     }))

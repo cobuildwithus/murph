@@ -33,11 +33,11 @@ export function TitleSlide({ goTo }: { goTo: (index: number) => void }) {
         <div className="animate-fade-up">
           <Eyebrow dark>Murph · Pitch Deck</Eyebrow>
           <h1 className="mt-6 max-w-[15ch] font-serif text-[clamp(2.3rem,5.4vw,4.2rem)] font-semibold leading-[1.03] tracking-[-0.04em] text-[#f5f0e8]">
-            The personal health assistant that remembers.
+            The social layer for health experiments.
           </h1>
           <p className="mt-7 max-w-[50ch] text-[15px] leading-[1.65] text-[#e9e2d4]/65">
-            Start with one real health need. Murph helps now, remembers only
-            the context that matters, and gets more personal over time.
+            Your personal health assistant. Text Murph to try health protocols with friends or public
+            groups and see what actually makes you healthier.
           </p>
           <button
             type="button"
@@ -50,26 +50,20 @@ export function TitleSlide({ goTo }: { goTo: (index: number) => void }) {
         </div>
         <ChatMock
           sentBubble="blue"
-          members={2}
+          members={6}
           messages={[
+            { kind: "you", text: "lowest step count this month buys dinner" },
+            { kind: "friend", name: "Priya", text: "oh it is ON" },
             {
-              kind: "you",
-              text: "I want to get stronger, but I never stick to a plan",
+              kind: "murph",
+              text: "Challenge created. 6 people joined. Connect Apple Health, Oura, or Whoop to start.",
             },
             {
               kind: "murph",
-              text: "Let’s make it fit your life. How many days can you realistically train?",
-            },
-            {
-              kind: "you",
-              text: "three, usually after work",
-            },
-            {
-              kind: "murph",
-              text: "Got it. I’ll remember that and build around it. Want a simple first week?",
+              text: "Leaderboard updates every morning. First one posts tomorrow at 8am.",
             },
           ]}
-          title="Murph"
+          title="Step Squad"
         />
       </div>
     </Slide>
@@ -82,29 +76,29 @@ export function ProblemSlide() {
     <Slide index={1} tone="cream" label="The problem">
       <Eyebrow>The Problem</Eyebrow>
       <SlideHeading wide>
-        Health is fragmented.
+        People want to get healthier together.
         <br />
-        Follow-through is personal.
+        There’s no way to try, track, and learn.
       </SlideHeading>
       <p className="mt-5 max-w-[60ch] text-base leading-[1.7] text-[#635a48]">
-        Questions, records, wearable signals, goals, routines, appointments,
-        and advice live in different places. The member has to reconstruct
-        the story and carry the plan alone.
+        A group chat or cohort can come up with a health challenge in
+        five seconds: walk more, sleep better, drink less, try creatine,
+        improve recovery.
       </p>
 
-      {/* One intention is easy to state; useful follow-through spans seven jobs */}
+      {/* One message is easy to send; running the challenge is seven jobs */}
       <div className="mt-10 grid items-stretch gap-4 lg:grid-cols-2">
         {/* One message — easy to suggest */}
         <div className="flex flex-col rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6]/90 p-6">
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-            One intention
+            One message
           </p>
           <div className="mt-4">
             <span className="inline-block max-w-[300px] rounded-2xl rounded-bl-md bg-[#ece3d2] px-4 py-2.5 text-[14px] leading-[1.45] text-[#2d3436]">
-              I want to get my sleep back on track
+              let&rsquo;s do a 30-day step challenge
             </span>
             <div className="mt-3 flex flex-wrap gap-1.5">
-              {["less scrolling", "earlier bed", "more energy"].map((reaction) => (
+              {["i'm in", "down", "let's do it"].map((reaction) => (
                 <span
                   key={reaction}
                   className="rounded-full bg-[#5a6e32]/10 px-3 py-1 text-[12px] text-[#5a6e32]"
@@ -115,24 +109,24 @@ export function ProblemSlide() {
             </div>
           </div>
           <p className="mt-auto pt-8 font-mono text-[11px] uppercase tracking-[0.12em] text-[#736a58]">
-            Easy to say
+            Easy to suggest
           </p>
         </div>
 
-        {/* Seven jobs needed to turn intent into help */}
+        {/* Seven jobs — hard to run */}
         <div className="flex flex-col rounded-2xl border border-[#c4a882]/30 bg-[#ebe4d4] p-6">
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
             Seven jobs
           </p>
           <ul className="mt-4 flex flex-col gap-2">
             {[
-              "Understand the routine",
-              "Read the available data",
-              "Choose one useful action",
-              "Fit it to real constraints",
-              "Remember what matters",
-              "Check in at the right time",
-              "Review what changed",
+              "Set the rules",
+              "Pick the metric",
+              "Connect everyone's devices",
+              "Handle mixed wearables",
+              "Remind the group",
+              "Keep score",
+              "Figure out what changed",
             ].map((job, index) => (
               <li key={job} className="flex items-center gap-2.5">
                 <span
@@ -158,7 +152,7 @@ export function ProblemSlide() {
       </div>
 
       <p className="mt-7 max-w-[44ch] font-serif text-[clamp(1.3rem,2.4vw,1.8rem)] italic leading-[1.3] text-[#2d3436]">
-        The data exists. The context and follow-through do not.
+        Ideas are instant. Getting healthy is hard work.
       </p>
     </Slide>
   );
@@ -170,16 +164,16 @@ export function InsightSlide() {
     <Slide index={2} tone="dark" label="The insight">
       <Eyebrow dark>The Insight</Eyebrow>
       <SlideHeading dark>
-        The next health app is not another dashboard. It&apos;s a relationship that remembers.
+        The next health app is not another dashboard. It&apos;s a social loop.
       </SlideHeading>
       <p className="mt-5 max-w-[56ch] text-base leading-[1.7] text-[#e9e2d4]/70">
-        Health apps measure well. General models reason well. Both still miss
-        the member&apos;s whole picture across time.
+        Health apps are great at measurement. They are still weak at
+        motivation.
       </p>
       <p className="mt-3 max-w-[56ch] text-base leading-[1.7] text-[#e9e2d4]/70">
-        Murph helps in the messaging apps people already use, remembers
-        relevant context with member control, and uses it to make the next
-        answer or action more personal.
+        Murph turns health data into a social loop: a challenge, shared
+        progress, and a reason to show up tomorrow — right in the
+        messaging apps you already use.
       </p>
 
       {/* The contrast: inert dashboard vs motivating challenge */}
@@ -230,26 +224,26 @@ export function InsightSlide() {
           </p>
         </div>
 
-        {/* Right: remembered context changes the next recommendation */}
+        {/* Right — the challenge: a progress board, not just a ranking */}
         <div className="rounded-2xl border border-[#7a8c6e]/40 bg-[#7a8c6e]/[0.1] p-6">
           <div className="flex items-center justify-between gap-3">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#9fb389]">
-              Your health thread
+              30-day sleep challenge
             </p>
             <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#e9e2d4]/55">
-              Week 3
+              Day 12 of 30
             </span>
           </div>
 
           {/* Group progress — everyone is moving, not just the winner */}
           <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.12em] text-[#e9e2d4]/45">
-            Useful context
+            Group progress
           </p>
           <div className="mt-2 grid grid-cols-3 gap-1.5">
             {[
-              { label: "connected sources", value: "3" },
-              { label: "known constraints", value: "4" },
-              { label: "current priority", value: "1" },
+              { label: "people active", value: "21" },
+              { label: "improved", value: "17 of 21" },
+              { label: "avg improvement", value: "+6%" },
             ].map((stat) => (
               <div
                 key={stat.label}
@@ -265,15 +259,15 @@ export function InsightSlide() {
             ))}
           </div>
 
-          {/* A few pieces of context that change the help */}
+          {/* Progress board — checking in and improving, not ranked */}
           <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.12em] text-[#e9e2d4]/45">
-            What Murph remembers
+            Progress board
           </p>
           <div className="mt-2 flex flex-col gap-1.5">
             {[
-              { name: "Training window", delta: "After work", down: false, you: false },
-              { name: "Past blocker", delta: "Travel", down: false, you: true },
-              { name: "Check-in style", delta: "Quiet", down: false, you: false },
+              { name: "Priya", delta: "+12%", down: false, you: false },
+              { name: "You", delta: "+8%", down: false, you: true },
+              { name: "Sam", delta: "−2%", down: true, you: false },
             ].map((row) => (
               <div
                 key={row.name}
@@ -303,15 +297,15 @@ export function InsightSlide() {
 
           <p className="mt-4 flex items-center gap-2 text-[12px] text-[#e9e2d4]/75">
             <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#9fb389]">
-              Next
+              Stake
             </span>
-            Build a realistic first week
+            Last place buys dinner
           </p>
         </div>
       </div>
 
       <p className="mt-8 font-serif text-[clamp(1.3rem,2.4vw,1.8rem)] italic leading-[1.3] text-[#f5f0e8]">
-        Dashboards show data. Context changes the help.
+        Charts measure health. Challenges build habits.
       </p>
     </Slide>
   );
@@ -325,16 +319,17 @@ export function WhyNowSlide() {
       <SlideHeading>
         Wearables measure.
         <br />
-        Models reason.
+        AI understands.
         <br />
-        Murph remembers.
+        Friends motivate.
         <br />
-        The help gets personal.
+        Murph builds the habit.
       </SlideHeading>
       <p className="mt-5 max-w-[62ch] text-base leading-[1.7] text-[#635a48]">
-        Millions of people have health data, and capable models can already
-        interpret it. The missing layer is durable, member-controlled context
-        plus the ability to help act and follow through.
+        Millions of people now have health data, and they are already
+        asking AI what it means. But measurement and advice do not change
+        behavior on their own. Murph adds the missing loop: friends,
+        challenges, reminders, leaderboards, and outcomes.
       </p>
       <div className="mt-10 grid gap-4 sm:grid-cols-3">
         <StatCard
@@ -348,15 +343,15 @@ export function WhyNowSlide() {
           value="1 in 3"
         />
         <StatCard
-          label="Strava users show health already has a social surface"
+          label="Strava users proving fitness is social"
           source="Strava"
           value="180M+"
         />
       </div>
       <p className="mt-8 max-w-[64ch] text-[15px] leading-[1.6] text-[#736a58]">
-        The wedge is one high-intent health thread.{" "}
+        The data exists. The social surface exists.{" "}
         <span className="font-medium text-[#2d3436]">
-          Remembered context can expand that thread into a broader relationship.
+          AI is finally good enough to run the rest.
         </span>
       </p>
     </Slide>
@@ -365,119 +360,244 @@ export function WhyNowSlide() {
 
 /* ━━━ 04 · PRODUCT ━━━ */
 
-// The private first-thread wedge, shown end to end. Each step is a button on
-// the slide; clicking one reveals a small mock of that step.
+// The four steps of the challenge loop. Each is a button on the slide;
+// clicking one reveals a small mock of what that step looks like.
 const PRODUCT_STEPS = [
   {
-    title: "Text one real need",
-    detail: "Start with a question, decision, task, data point, or goal.",
-    panelLabel: "One high-intent health thread",
+    title: "Start or join a challenge",
+    detail: "Create one with friends or join a cohort.",
+    panelLabel: "It starts with one message in the group chat",
     panel: (
       <div className="flex max-w-[440px] flex-col gap-1.5">
         <span className="self-end rounded-2xl rounded-br-md bg-[#2d3436] px-3.5 py-2 text-[13px] leading-[1.4] text-[#f5f0e8]">
-          I want to get stronger, but I never stick to a plan
+          lowest step count this month buys dinner
+        </span>
+        <span className="self-start rounded-2xl rounded-bl-md bg-[#fffcf6] px-3.5 py-2 text-[13px] leading-[1.4] text-[#635a48]">
+          oh it&rsquo;s ON
         </span>
         <span className="self-start rounded-2xl rounded-bl-md bg-[#e4e8df] px-3.5 py-2 text-[13px] leading-[1.4] text-[#3d5028]">
-          How many days can you realistically train each week?
-        </span>
-        <span className="self-end rounded-2xl rounded-br-md bg-[#2d3436] px-3.5 py-2 text-[13px] leading-[1.4] text-[#f5f0e8]">
-          Three, usually after work
+          Challenge created. 6 friends joined.
         </span>
       </div>
     ),
   },
   {
-    title: "Use the lightest tool",
-    detail: "Answer, interpret, plan, act, support, or run an experiment.",
-    panelLabel: "The product adapts to the need",
+    title: "Build your baseline",
+    detail: "Connect your wearable; Murph learns your starting point.",
+    panelLabel: "Six friends, six devices, one challenge",
     panel: (
-      <div className="grid max-w-[560px] grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="grid max-w-[560px] gap-x-12 sm:grid-cols-2">
         {[
-          { label: "Answer", selected: false },
-          { label: "Interpret", selected: false },
-          { label: "Simple plan", selected: true },
-          { label: "Take action", selected: false },
-          { label: "Add support", selected: false },
-          { label: "Experiment", selected: false },
-        ].map((tool) => (
+          { name: "Priya", device: "Oura" },
+          { name: "Marco", device: "Whoop" },
+          { name: "Dana", device: "Apple Watch" },
+          { name: "Sam", device: "Garmin" },
+          { name: "Will", device: "Fitbit" },
+          { name: "Alex", device: "Manual" },
+        ].map((member) => (
           <div
-            key={tool.label}
-            className={`rounded-lg border px-3 py-3 ${
-              tool.selected
-                ? "border-[#5a6e32]/40 bg-[#5a6e32]/10"
-                : "border-[#c4a882]/25 bg-[#fffcf6]/70"
-            }`}
+            key={member.name}
+            className="flex items-center gap-2.5 border-b border-[#c4a882]/20 py-2"
           >
-            <p className="text-[13px] font-medium text-[#2d3436]">
-              {tool.label}
-            </p>
-            <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
-              {tool.selected ? "Useful now" : "Available"}
-            </p>
+            <span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full bg-[#7a8c6e]"
+            />
+            <span className="flex-1 text-[13px] font-medium text-[#2d3436]">
+              {member.name}
+            </span>
+            <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
+              {member.device}
+            </span>
           </div>
         ))}
       </div>
     ),
   },
   {
-    title: "Keep useful context",
-    detail: "Attribute it, let the member inspect and correct it.",
-    panelLabel: "Context stays legible and member-controlled",
+    title: "Murph runs it",
+    detail: "Rules, reminders, check-ins, and leaderboards.",
+    panelLabel: "A live leaderboard the whole way through",
     panel: (
       <div className="max-w-[460px]">
-        <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.1em]">
+          <span className="text-[#5a6e32]">Baseline 7d ✓</span>
+          <span className="text-[#c4a882]">·</span>
+          <span className="font-semibold text-[#2d3436]">Active, day 12</span>
+          <span className="text-[#c4a882]">·</span>
+          <span className="text-[#736a58]/55">Analysis</span>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#d4c4a8]/45">
+          <div className="h-full w-[58%] rounded-full bg-[#5a6e32]" />
+        </div>
+        <div className="mt-4 flex flex-col gap-1.5">
           {[
-            { label: "Training window", value: "After work" },
-            { label: "Realistic cadence", value: "3 days" },
-            { label: "Past blocker", value: "Travel" },
-          ].map((row) => (
+            { rank: "1", name: "Priya", delta: "+14%" },
+            { rank: "2", name: "You", delta: "+9%" },
+            { rank: "3", name: "Marco", delta: "+6%" },
+          ].map((row, index) => (
             <div
-              key={row.label}
-              className="flex items-center gap-3 rounded-lg bg-[#fffcf6]/70 px-3 py-2.5"
+              key={row.name}
+              className={`flex items-center gap-3 rounded-lg px-3 py-2 ${
+                index === 0 ? "bg-[#5a6e32]/[0.1]" : "bg-[#fffcf6]/70"
+              }`}
             >
-              <span className="flex-1 text-[13px] text-[#635a48]">
-                {row.label}
+              <span className="font-serif text-[15px] font-semibold tabular-nums text-[#2d3436]">
+                {row.rank}
               </span>
-              <span className="text-[13px] font-medium text-[#2d3436]">
-                {row.value}
+              <span className="flex-1 text-[13px] font-medium text-[#2d3436]">
+                {row.name}
+              </span>
+              <span className="font-serif text-[15px] font-semibold tabular-nums text-[#5a6e32]">
+                {row.delta}
               </span>
             </div>
           ))}
         </div>
-        <p className="mt-3 font-mono text-[9px] uppercase tracking-[0.1em] text-[#5a6e32]">
-          Source: member messages &middot; inspect &middot; correct &middot; decline
-        </p>
       </div>
     ),
   },
   {
-    title: "Make later help smarter",
-    detail: "Retrieve prior context only when it can improve the next step.",
-    panelLabel: "Illustrative later thread",
+    title: "Results update your vault",
+    detail: "Each person sees what changed, and the protocol gets smarter.",
+    panelLabel: "Priya's results · 30-day sleep challenge",
     panel: (
-      <div className="grid max-w-[760px] gap-5 lg:grid-cols-[minmax(0,0.72fr)_28px_minmax(0,1fr)] lg:items-center">
-        <div className="rounded-lg border border-[#c4a882]/20 bg-[#fffcf6]/80 px-4 py-4">
-          <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58]">
-            Remembered from the first thread
-          </p>
-          <p className="mt-2 font-serif text-[1.25rem] font-semibold leading-tight text-[#2d3436]">
-            Three sessions, after work
-          </p>
-          <p className="mt-1 text-[12px] leading-[1.5] text-[#736a58]">
-            Travel made consistency harder.
-          </p>
+      <div className="grid max-w-[880px] gap-5 lg:grid-cols-[minmax(0,1fr)_28px_minmax(0,0.82fr)] lg:items-center">
+        {/* This challenge — Priya's results */}
+        <div>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: "Sleep score", value: "86", unit: "", change: "+14%" },
+              { label: "Deep sleep", value: "1h42m", unit: "", change: "+18%" },
+              { label: "Resting HR", value: "58", unit: "bpm", change: "−4%" },
+            ].map((metric) => (
+              <div
+                key={metric.label}
+                className="rounded-lg border border-[#c4a882]/20 bg-[#fffcf6]/80 px-3 py-3"
+              >
+                <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58]">
+                  {metric.label}
+                </p>
+                <p className="mt-1.5 font-serif text-[1.2rem] font-semibold leading-none tracking-[-0.02em] text-[#2d3436]">
+                  {metric.value}
+                  {metric.unit ? (
+                    <span className="ml-0.5 text-[0.7rem] font-normal text-[#736a58]">
+                      {metric.unit}
+                    </span>
+                  ) : null}
+                </p>
+                <p className="mt-1.5 text-[11px] font-medium text-[#5a6e32]">
+                  {metric.change}
+                </p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 rounded-lg border border-[#c4a882]/20 bg-[#fffcf6]/80 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58]">
+                Sleep score · 30d
+              </span>
+              <div className="flex items-center gap-3 text-[10px]">
+                <span className="flex items-center gap-1 text-[#736a58]/60">
+                  <span className="inline-block h-px w-2.5 border-t border-dashed border-[#c4a882]" />
+                  Baseline
+                </span>
+                <span className="flex items-center gap-1 text-[#736a58]">
+                  <span className="inline-block h-0.5 w-2.5 rounded-full bg-[#5a6e32]" />
+                  Active
+                </span>
+              </div>
+            </div>
+            <svg
+              viewBox="0 0 300 40"
+              fill="none"
+              className="mt-2 w-full"
+              aria-hidden="true"
+            >
+              <path
+                d="M8 28 L30 26 L50 28 L70 25 L90 26"
+                stroke="#d4c4a8"
+                strokeWidth="1.25"
+                strokeDasharray="3 2"
+                strokeLinecap="round"
+              />
+              <path
+                d="M95 26 L115 22 L140 19 L165 15 L190 16 L215 12 L240 11 L265 8 L290 5"
+                stroke="#5a6e32"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+              />
+              <circle cx="290" cy="5" r="2.25" fill="#5a6e32" />
+            </svg>
+          </div>
         </div>
 
         <FlowConnector />
 
-        <div className="rounded-lg border border-[#5a6e32]/30 bg-[#5a6e32]/[0.08] px-4 py-4">
-          <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#5a6e32]">
-            A later travel week
+        {/* ...joins Priya's compounding health vault */}
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
+            Priya&rsquo;s health vault
           </p>
-          <p className="mt-2 text-[13px] leading-[1.55] text-[#2d3436]">
-            You said travel broke the last plan. Keep the same three-session
-            rhythm, but switch to two short hotel workouts and one weekend
-            session?
+          <div className="mt-3.5 flex flex-col">
+            {[
+              {
+                name: "Sleep challenge",
+                when: "Now",
+                result: "+14% sleep score",
+                current: true,
+              },
+              { name: "Creatine experiment", when: "Apr", result: "+6% HRV" },
+              {
+                name: "Blood results uploaded",
+                when: "Mar",
+                result: "14 biomarkers added",
+              },
+              { name: "Step bet", when: "Feb", result: "12k daily average" },
+            ].map((entry, index, list) => (
+              <div key={entry.name} className="flex gap-3">
+                <div className="flex flex-col items-center">
+                  <span
+                    aria-hidden="true"
+                    className={`size-[11px] shrink-0 rounded-full ${
+                      entry.current
+                        ? "bg-[#5a6e32]"
+                        : "border-[1.5px] border-[#c4a882]"
+                    }`}
+                  />
+                  {index < list.length - 1 ? (
+                    <span
+                      aria-hidden="true"
+                      className="mt-1 w-px flex-1 bg-[#c4a882]/45"
+                    />
+                  ) : null}
+                </div>
+                <div className="flex-1 pb-4">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span
+                      className={`text-[13px] font-medium ${
+                        entry.current ? "text-[#2d3436]" : "text-[#635a48]"
+                      }`}
+                    >
+                      {entry.name}
+                    </span>
+                    <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
+                      {entry.when}
+                    </span>
+                  </div>
+                  <p
+                    className={`mt-0.5 text-[12px] ${
+                      entry.current ? "text-[#5a6e32]" : "text-[#8a7f6a]"
+                    }`}
+                  >
+                    {entry.result}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="pl-[23px] text-[12px] text-[#736a58]">
+            + 4 earlier challenges
           </p>
         </div>
       </div>
@@ -489,16 +609,17 @@ export function ProductSlide() {
   const [open, setOpen] = useState<number | null>(0);
   return (
     <Slide index={4} tone="sand" label="The product">
-      <Eyebrow>The Wedge</Eyebrow>
+      <Eyebrow>The Product</Eyebrow>
       <SlideHeading>
-        One useful health thread is the wedge into a broader relationship.
+        A personal health AI inside iMessage. Experiments on you, challenges with your friends.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
-        Direct signup starts privately and stays broad. The focused first
-        thread is an onboarding method, not a product boundary: help now,
-        retain only useful context, and make later help more personal.
+        Add Murph to a group chat or join a cohort. Each person connects
+        the wearable they already use. Murph builds a private baseline,
+        runs the shared challenge, keeps score, and saves the result back
+        to each person&rsquo;s health vault.
       </p>
-      {/* The loop: one private thread, from need to reusable context */}
+      {/* The loop: one challenge, from kickoff to outcome */}
       <div className="mt-12 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
         {PRODUCT_STEPS.map((step, index) => {
           const active = open === index;
@@ -563,14 +684,14 @@ export function ProductSlide() {
 // Panel one — the protocol being run, as label/value spec rows.
 const PROTOCOL_SPEC = [
   { label: "Cadence", value: "3× / week" },
-  { label: "Length", value: "28 days" },
+  { label: "Length", value: "21 days" },
   { label: "Session", value: "15–20 min" },
-  { label: "Baseline", value: "14 days" },
+  { label: "Baseline", value: "7 days" },
 ] as const;
 
-// Panel three: a recent Finnish-sauna run measured against its locked
-// baseline. Every delta is an improvement, so all read sage.
-const SAUNA_RESULTS = [
+// Panel three — Will's real Finnish-sauna run, measured against his
+// locked baseline. Every delta is an improvement, so all read sage.
+const WILL_RESULTS = [
   {
     label: "Resting heart rate",
     value: "45.8",
@@ -597,15 +718,15 @@ const SAUNA_RESULTS = [
 export function ExperimentSlide() {
   return (
     <Slide index={5} tone="dark" label="Example experiment">
-      <Eyebrow dark>When Uncertainty Is The Problem</Eyebrow>
+      <Eyebrow dark>Example Experiment</Eyebrow>
       <SlideHeading dark wide>
-        Murph can turn one protocol into
-        <br />a bounded personal experiment.
+        Murph turns one protocol into
+        <br />compounding health outcomes.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#e9e2d4]/70">
-        Experiments are useful when uncertainty is the problem. Murph can
-        lock a baseline, track the protocol, measure the change, and save the
-        result without making an experiment the required starting point.
+        A challenge is what gets someone started. From there, Murph locks
+        a baseline, tracks every session, measures the change, and saves
+        the result to their health vault.
       </p>
 
       {/* The run, end to end: protocol → adherence → measured result */}
@@ -651,12 +772,12 @@ export function ExperimentSlide() {
           <div className="mt-4 flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.1em]">
             <span className="text-[#9fb389]">Baseline ✓</span>
             <span className="text-[#e9e2d4]/25">·</span>
-            <span className="font-semibold text-[#f5f0e8]">Active, day 9 of 14</span>
+            <span className="font-semibold text-[#f5f0e8]">Active, day 16</span>
             <span className="text-[#e9e2d4]/25">·</span>
             <span className="text-[#e9e2d4]/35">Analysis</span>
           </div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#f5f0e8]/10">
-            <div className="h-full w-[82%] rounded-full bg-[#9fb389]" />
+            <div className="h-full w-[76%] rounded-full bg-[#9fb389]" />
           </div>
 
           {/* Adherence — one segment per scheduled session */}
@@ -665,16 +786,16 @@ export function ExperimentSlide() {
               Adherence
             </span>
             <span className="text-[12px] text-[#e9e2d4]/70">
-              4 of 6 sessions
+              6 of 9 sessions
             </span>
           </div>
           <div className="mt-2 flex gap-1.5">
-            {Array.from({ length: 6 }, (_, index) => (
+            {Array.from({ length: 9 }, (_, index) => (
               <span
                 key={index}
                 aria-hidden="true"
                 className={`h-2 flex-1 rounded-full ${
-                  index < 4 ? "bg-[#9fb389]" : "bg-[#f5f0e8]/12"
+                  index < 6 ? "bg-[#9fb389]" : "bg-[#f5f0e8]/12"
                 }`}
               />
             ))}
@@ -683,18 +804,18 @@ export function ExperimentSlide() {
 
         <FlowConnector />
 
-        {/* 3: recent measured results, saved to the member's vault */}
+        {/* 3 — Will's real measured results, saved to his vault */}
         <div className="flex flex-col rounded-xl border border-[#7a8c6e]/45 bg-[#7a8c6e]/[0.1] p-5">
           <div className="flex items-baseline justify-between gap-3">
             <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9fb389]">
-              Recent member results*
+              Will&rsquo;s actual results*
             </p>
             <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#e9e2d4]/45">
               vs baseline
             </span>
           </div>
           <div className="mt-4 flex flex-col gap-2">
-            {SAUNA_RESULTS.map((result) => (
+            {WILL_RESULTS.map((result) => (
               <div
                 key={result.label}
                 className="rounded-lg bg-[#f5f0e8]/[0.05] px-3.5 py-3"
@@ -727,55 +848,94 @@ export function ExperimentSlide() {
       </div>
 
       <p className="mt-4 text-[12px] leading-[1.5] text-[#e9e2d4]/45">
-        * Actual results from a recent sauna experiment
+        * Actual results from Will&rsquo;s recent sauna experiment
       </p>
 
-      <p className="mt-8 font-serif text-[clamp(1.3rem,2.4vw,1.8rem)] italic leading-[1.3] text-[#f5f0e8]">
-        An experiment ends. The useful context remains.
-      </p>
+      <div className="mt-6 rounded-xl border border-[#f5f0e8]/12 bg-[#f5f0e8]/[0.04] p-4 sm:flex sm:items-center sm:gap-8 sm:p-5">
+        <div className="sm:max-w-[30ch]">
+          <p className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#9fb389]">
+            Where results pool
+          </p>
+          <p className="mt-2 text-[15px] leading-[1.6] text-[#f5f0e8]">
+            Every completed run saves a before/after. Pooled across thousands
+            of members, protocols become answerable questions.
+          </p>
+        </div>
+        <div className="mt-4 flex-1 rounded-lg border border-[#f5f0e8]/10 bg-black/25 p-4 sm:mt-0">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-[#e9e2d4]/60">
+              Sauna 15&ndash;20 min &middot; Men under 30
+            </span>
+            <span className="rounded-full bg-[#9fb389]/15 px-2 py-0.5 font-mono text-[10px] font-medium text-[#9fb389]">
+              1,000+ contributed runs
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {[
+              { metric: "Resting HR", value: "−2.1 bpm" },
+              { metric: "HRV RMSSD", value: "+6.4 ms" },
+              { metric: "Deep sleep", value: "+11 min" },
+            ].map((stat) => (
+              <div key={stat.metric}>
+                <p className="font-mono text-[9px] uppercase tracking-[0.08em] text-[#e9e2d4]/40">
+                  {stat.metric}
+                </p>
+                <p className="mt-1 font-serif text-[1.15rem] font-semibold leading-none text-[#f5f0e8]">
+                  {stat.value}
+                  <span className="ml-1.5 font-sans text-[10px] font-normal text-[#e9e2d4]/45">
+                    median
+                  </span>
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[10px] leading-[1.4] text-[#e9e2d4]/40">
+            Illustrative at scale &mdash; every completed challenge adds a run.
+          </p>
+        </div>
+      </div>
     </Slide>
   );
 }
 
-/* ━━━ 06 · HOW VALUE COMPOUNDS ━━━ */
+/* ━━━ 06 · HOW IT SPREADS ━━━ */
 
-// The two value loops shown on this slide. Each renders as a numbered
-// card; the final `repeat` step loops back to the first.
+// The two growth loops shown on the spread slide. Each renders as a
+// numbered card; the final `repeat` step loops back to the first.
 const SPREAD_LOOPS = [
   {
-    label: "Retention hypothesis",
+    label: "Private group loop",
     steps: [
-      "One useful thread reveals relevant context",
-      "Murph remembers it with member control",
-      "Later help uses it when it matters",
+      "One person starts a challenge",
+      "They invite friends",
+      "The group gets results",
     ],
-    repeat: "If later help is better, members should keep returning",
+    repeat: "Someone starts the next challenge",
   },
   {
-    label: "Invitation hypothesis",
+    label: "Cohort loop",
     steps: [
-      "A member chooses friend or group support",
-      "Murph runs one scoped challenge",
-      "Results return to each private vault",
+      "A protocol page attracts users",
+      "People join the cohort",
+      "Outcomes improve the protocol page",
     ],
-    repeat: "If support helps, members may invite people they trust",
+    repeat: "Better evidence attracts more users",
   },
 ] as const;
 
 export function SpreadSlide() {
   return (
-    <Slide index={6} tone="cream" label="Growth path">
-      <Eyebrow>Growth Path To Prove</Eyebrow>
+    <Slide index={6} tone="cream" label="How it spreads">
+      <Eyebrow>How It Spreads</Eyebrow>
       <SlideHeading>
-        Retention starts with better help. Distribution may start with trust.
+        Murph spreads through private groups and public cohorts.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
-        The private context loop is the core growth thesis. Optional friend
-        support and public protocols may create trusted invitations. Neither
-        retention nor a repeatable acquisition loop has been proven yet.
+        Murph doesn&rsquo;t only spread through friend invites. It also
+        compounds through protocol pages that become public destinations.
       </p>
 
-      {/* The private context loop and an optional social-support loop */}
+      {/* Two growth loops: friend invites, and protocol-page cohorts */}
       <div className="mt-10 grid gap-4 lg:grid-cols-2">
         {SPREAD_LOOPS.map((loop) => (
           <div
@@ -809,11 +969,11 @@ export function SpreadSlide() {
         ))}
       </div>
 
-      {/* Health Commons remains a useful protocol surface, not a traction claim */}
+      {/* The cohort loop's artifact: a protocol page that is a destination */}
       <div className="mt-4 flex flex-wrap items-center gap-x-8 gap-y-4 rounded-xl border border-[#5a6e32]/30 bg-[#5a6e32]/[0.06] p-5">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
-            Protocol page &middot; Health Commons
+            Protocol page &middot; public cohort
           </p>
           <p className="mt-1.5 font-serif text-[1.3rem] font-semibold leading-tight text-[#2d3436]">
             30-day sleep challenge
@@ -821,8 +981,8 @@ export function SpreadSlide() {
         </div>
         <div className="flex gap-8">
           {[
-            { value: "Rev. 3", label: "protocol version" },
-            { value: "30 days", label: "suggested run" },
+            { value: "1,284", label: "runs logged" },
+            { value: "+6.8%", label: "avg improvement" },
           ].map((stat) => (
             <div key={stat.label}>
               <p className="font-serif text-[1.5rem] font-semibold leading-none tracking-[-0.02em] text-[#2d3436]">
@@ -835,10 +995,10 @@ export function SpreadSlide() {
           ))}
         </div>
         <span className="rounded-md bg-[#5a6e32]/12 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[#5a6e32]">
-          Aggregate outcomes require explicit contribution
+          Best for late-night screen users
         </span>
         <span className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-[#5a6e32] px-4 py-2.5 text-[13px] font-medium text-white">
-          Review protocol
+          Join next cohort
           <span aria-hidden="true">&rarr;</span>
         </span>
       </div>
@@ -854,28 +1014,27 @@ export function ValidationSlide() {
       <SlideHeading>
         The product is live.
         <br />
-        The new positioning still needs proof.
+        MRR grew 103% in the last 30 days.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
-        We first sold Murph around personal experiments, then shipped private
-        assistance, data connections, plans, actions, outcomes, and group
-        support. Founder-connected usage proves the product works end to end;
-        it does not yet prove pull, retention, or the longitudinal-context
-        strategy.
+        We shipped the personal experiment loop first. The wedge became
+        obvious &mdash; people don&rsquo;t want to optimize alone, they want
+        to run health challenges with friends. Group challenges shipped in
+        July. Revenue has compounded every week since.
       </p>
       <div className="mt-9 grid gap-3 sm:grid-cols-3">
         {[
           {
-            value: "8 paid, founder-connected",
-            note: "Private beta since May 4, with zero organic signups. Payment is real; pull is not proven",
+            value: "18% w/w MRR growth",
+            note: "Compounded over the last 30 days, with revenue up every week.",
           },
           {
-            value: "24 msgs / week / user*",
-            note: "Earlier snapshot across 7 weekly active users, not a current growth or retention rate",
+            value: "+82% paying customers",
+            note: "In 30 days, with zero paid acquisition.",
           },
           {
-            value: "1 group challenge tested",
-            note: "A shipped capability, not evidence that groups define the product",
+            value: "10 msgs / day / active user",
+            note: "3,003 messages exchanged last week — 73 per weekly active user.",
           },
         ].map((card) => (
           <div
@@ -899,25 +1058,21 @@ export function ValidationSlide() {
             "Managing pain",
             "Researching supplements",
           ]}
-          label="What members already ask Murph"
-          title="Broad private usage"
+          label="What our users are doing"
+          title="Solo usage, every week"
         />
         <PivotCard
           highlight
           items={[
-            "One sleep challenge among three family members",
-            "Multiple messages per member, every day",
-            "Laughs, reactions, and friendly competition",
+            "12 group chats active last week, up from one in June",
+            "The most active group sent 255 messages to Murph last week",
+            "Laughs, reactions, trash talk at the referee",
             "Voice memos back and forth with Murph",
           ]}
-          label="One capability tested"
-          title="Optional social support"
+          label="What's running"
+          title="Group challenges"
         />
       </div>
-      <p className="mt-6 text-[15px] font-medium leading-[1.6] text-[#5a6e32]">
-        * Earlier beta snapshot. Next: prove first-thread clarity and the first
-        moment when remembered context improves the help.
-      </p>
     </Slide>
   );
 }
@@ -928,15 +1083,17 @@ export function CompetitionSlide() {
     <Slide index={8} tone="cream" label="Competition">
       <Eyebrow>Competition</Eyebrow>
       <SlideHeading wide>
-        General models supply reasoning.
+        Devices track individuals.
         <br />
-        Murph builds the health continuity.
+        ChatGPT answers prompts.
+        <br />
+        Murph coordinates healthy habits.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
-        Devices see slices of the person. General AI can reason, but usually
-        lacks durable canonical health context. Murph&apos;s product is the
-        attributable, member-controlled continuity across authorized data,
-        goals, constraints, actions, and outcomes.
+        Oura and Whoop see one device. ChatGPT sees one prompt. Murph connects wearables, labs, protocols,
+        and outcomes into a private health vault &mdash; then uses that
+        context to run challenges with friends, cohorts, and people like
+        you.
       </p>
       <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:items-start lg:gap-10">
         <MurphLoop />
@@ -949,33 +1106,31 @@ export function CompetitionSlide() {
 /* ━━━ 09 · MOAT ━━━ */
 export function MoatSlide() {
   return (
-    <Slide index={9} tone="dark" label="Moat thesis">
-      <Eyebrow dark>Moat Thesis</Eyebrow>
+    <Slide index={9} tone="dark" label="The moat">
+      <Eyebrow dark>The Moat</Eyebrow>
       <SlideHeading dark>
-        The durable asset is useful context, not a model wrapper.
+        Every challenge teaches Murph what works.
       </SlideHeading>
       <p className="mt-5 max-w-[58ch] text-base leading-[1.7] text-[#e9e2d4]/70">
-        If Murph repeatedly turns interactions and sources into attributable,
-        correction-ready context, then retrieves it when it changes a later
-        answer or action, value should compound. That advantage is the thesis;
-        retention evidence still has to prove it.
+        Every challenge becomes a shareable health outcome. Every outcome makes
+        each protocol smarter.
       </p>
 
-      {/* One health thread becomes reusable context for later help */}
+      {/* The challenge → the outcome record → the protocol page */}
       <div className="mt-9 grid gap-3 lg:grid-cols-[minmax(0,1fr)_24px_minmax(0,1fr)_24px_minmax(0,1.05fr)] lg:items-stretch">
-        {/* 1: a useful health interaction with mixed-source input */}
+        {/* 1 — messy mixed-device input */}
         <div className="flex flex-col rounded-xl border border-[#f5f0e8]/12 bg-[#f5f0e8]/[0.04] p-5">
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#e9e2d4]/55">
-            Illustrative health thread
+            The challenge
           </p>
           <p className="mt-4 font-serif text-[1.3rem] font-semibold leading-tight text-[#f5f0e8]">
-            Improve sleep consistency
+            30-day sleep challenge
           </p>
           <p className="mt-1 text-[12px] text-[#e9e2d4]/60">
-            One member, six relevant sources
+            6 friends, 5 different wearables
           </p>
           <div className="mt-4 flex flex-wrap gap-1.5">
-            {["Oura", "Calendar", "Journal", "Labs", "Workouts", "Messages"].map(
+            {["Oura", "Whoop", "Apple Watch", "Garmin", "Fitbit", "Manual"].map(
               (device) => (
                 <span
                   key={device}
@@ -987,22 +1142,22 @@ export function MoatSlide() {
             )}
           </div>
           <p className="mt-auto pt-5 text-[11px] leading-[1.4] text-[#e9e2d4]/45">
-            Messy real-world context
+            Messy real-world data
           </p>
         </div>
 
         <FlowConnector />
 
-        {/* 2: one attributed, correction-ready result */}
+        {/* 2 — one clean structured result */}
         <div className="flex flex-col rounded-xl border border-[#f5f0e8]/12 bg-[#f5f0e8]/[0.04] p-5">
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#e9e2d4]/55">
-            Illustrative context
+            Outcome record #482
           </p>
           <p className="mt-4 font-serif text-[2rem] font-semibold leading-none tracking-[-0.02em] text-[#f5f0e8]">
-            Sleep score +7%
+            4 of 6 improved
           </p>
           <p className="mt-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-[#9fb389]">
-            27 of 30 nights completed
+            +7% average sleep score
           </p>
           <div className="mt-4 flex flex-col gap-1.5 text-[12px]">
             <div className="flex justify-between gap-3">
@@ -1015,55 +1170,55 @@ export function MoatSlide() {
             </div>
           </div>
           <p className="mt-auto pt-5 text-[11px] leading-[1.4] text-[#e9e2d4]/45">
-            Private, attributable evidence
+            Clean, comparable evidence
           </p>
         </div>
 
         <FlowConnector />
 
-        {/* 3: prior context retrieved during a later decision */}
+        {/* 3 — the protocol page that compounds with every run */}
         <div className="flex flex-col rounded-xl border border-[#7a8c6e]/45 bg-[#7a8c6e]/[0.1] p-5">
           <div className="flex items-center justify-between">
             <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#9fb389]">
-              Later help
+              The protocol page
             </p>
             <span className="rounded-full border border-[#9fb389]/30 bg-[#9fb389]/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#9fb389]">
-              Personal
+              Live
             </span>
           </div>
           <p className="mt-4 font-serif text-[1.3rem] font-semibold leading-tight text-[#f5f0e8]">
-            The next sleep decision
+            Sleep Challenge Protocol
           </p>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span className="font-serif text-[2rem] font-semibold leading-none tracking-[-0.02em] text-[#f5f0e8]">
-              Prior
+              1,284
             </span>
             <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#9fb389]">
-              result retrieved
+              runs logged
             </span>
           </div>
           <div className="mt-4 flex flex-col gap-1.5 text-[12px]">
             <div className="flex justify-between gap-3">
-              <span className="text-[#e9e2d4]/50">What helped</span>
-              <span className="text-[#f5f0e8]">Earlier wind-down</span>
+              <span className="text-[#e9e2d4]/50">Avg improvement</span>
+              <span className="text-[#f5f0e8]">+6.8%</span>
             </div>
             <div className="flex justify-between gap-3">
-              <span className="text-[#e9e2d4]/50">Known constraint</span>
-              <span className="text-[#f5f0e8]">Late work nights</span>
+              <span className="text-[#e9e2d4]/50">Best for</span>
+              <span className="text-[#f5f0e8]">Late-night screen users</span>
             </div>
           </div>
           <p className="mt-auto pt-5 text-[11px] leading-[1.4] text-[#9fb389]">
-            Context reused when it matters
+            Smarter with every run
           </p>
         </div>
       </div>
 
-      {/* The loop: present value produces context for better later help */}
+      {/* The loop — the protocol feeds the next challenge */}
       <div className="mt-7 flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#e9e2d4]/70">
         <span aria-hidden="true" className="text-[14px] text-[#9fb389]">
           ↺
         </span>
-        {["Thread", "Context", "Later help", "Better fit"].map(
+        {["Challenge", "Record", "Protocol", "Next challenge"].map(
           (step, index, steps) => (
             <span key={step} className="flex items-center gap-2">
               <span>{step}</span>
@@ -1082,20 +1237,22 @@ export function MoatSlide() {
 
 /* ━━━ 10 · BUSINESS MODEL ━━━ */
 
-// The few business-model questions that matter before expansion.
-const BUSINESS_MODEL_QUESTIONS = [
-  "Which plan retains?",
-  "Which usage drives cost?",
-  "Who pays for groups?",
-  "What expands willingness to pay?",
+// Sponsor cohort examples, shown as chips on the sponsor card.
+const SPONSOR_EXAMPLES = [
+  "XYZ Prebiotic Cohort",
+  "30-Day Recovery Challenge",
+  "Step Count Challenge",
+  "Sleep Consistency Cohort",
 ] as const;
 
-// Evidence gates that come before adding more pricing complexity.
-const NEXT_BUSINESS_PROOFS = [
-  "First useful value",
-  "Context reused later",
-  "Organic acquisition",
-  "Retention by plan",
+// The full-width usage rail beneath the two buyer cards. Each item is
+// an overage Murph charges for on top of included usage.
+const USAGE_OVERAGES = [
+  "Extra challenge runs",
+  "Large groups",
+  "Advanced analysis",
+  "Sponsor-grade verification",
+  "Outcome reports",
 ] as const;
 
 export function BusinessModelSlide() {
@@ -1103,17 +1260,18 @@ export function BusinessModelSlide() {
     <Slide index={10} tone="cream" label="Business model">
       <Eyebrow>Business Model</Eyebrow>
       <SlideHeading wide>
-        Members pay today.
+        Members subscribe.
         <br />
-        The scalable model is still being learned.
+        Sponsors fund cohorts.
+        <br />
+        Usage protects margins.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
-        Eight founder-connected people pay for Pulse or Edge. That proves
-        checkout, not pricing power, retention, or a repeatable buyer. Keep
-        the model simple until those signals are real.
+        Plus and Edge include normal cohort usage. Heavy users, large groups,
+        advanced analyses, and sponsor-grade reporting pay for more.
       </p>
 
-      {/* Current plans and the questions that matter before expansion */}
+      {/* Two buyers — members and sponsors */}
       <div className="mt-10 grid items-stretch gap-4 lg:grid-cols-2">
         {/* Member plans */}
         <div className="flex flex-col rounded-xl border border-[#c4a882]/25 bg-[#fffcf6]/90 p-6">
@@ -1122,7 +1280,7 @@ export function BusinessModelSlide() {
           </p>
           <div className="mt-4 flex flex-col">
             {[
-              { tier: "Pulse", price: "$8 / mo" },
+              { tier: "Plus", price: "$8 / mo" },
               { tier: "Edge", price: "$20 / mo" },
             ].map((row, index, rows) => (
               <div
@@ -1143,49 +1301,48 @@ export function BusinessModelSlide() {
             ))}
           </div>
           <p className="mt-auto pt-5 text-[14px] leading-[1.55] text-[#635a48]">
-            Includes the private assistant, health vault, connected context,
-            plans, experiments, and optional group support.
+            Includes cohorts, challenges, health vaults, baselines, and AI
+            insights.
           </p>
         </div>
 
-        {/* Open business-model questions */}
+        {/* Sponsored cohorts */}
         <div className="flex flex-col rounded-xl border border-[#c4a882]/25 bg-[#fffcf6]/90 p-6">
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
-            Open questions
+            Sponsored cohorts
           </p>
           <p className="mt-3 font-serif text-[1.3rem] font-semibold leading-tight text-[#2d3436]">
-            Expansion follows evidence
+            Brands, employers, insurers
           </p>
           <p className="mt-2.5 text-[14px] leading-[1.55] text-[#635a48]">
-            Group payers, usage-based tiers, and other expansion paths remain
-            hypotheses. The next step is learning which direct member value
-            retains and supports healthy economics.
+            Sponsors fund product, habit, and rewards-based cohorts. Murph runs
+            and verifies them.
           </p>
           <div className="mt-auto flex flex-wrap gap-1.5 pt-5">
-            {BUSINESS_MODEL_QUESTIONS.map((question) => (
+            {SPONSOR_EXAMPLES.map((example) => (
               <span
-                key={question}
+                key={example}
                 className="rounded-md border border-[#c4a882]/30 bg-[#f5f0e8]/60 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[#736a58]"
               >
-                {question}
+                {example}
               </span>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Evidence gates before pricing expansion */}
+      {/* One pricing guardrail — applies to both buyers */}
       <div className="mt-4 rounded-xl border border-[#5a6e32]/30 bg-[#5a6e32]/[0.06] p-6">
         <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#5a6e32]">
-            Before expansion
+            Included usage + overages
           </p>
           <p className="text-[13px] leading-[1.55] text-[#3d5028]">
-            Prove direct member pull and retention.
+            Applies to both member plans and sponsor campaigns.
           </p>
         </div>
         <div className="mt-4 flex flex-wrap gap-1.5">
-          {NEXT_BUSINESS_PROOFS.map((item) => (
+          {USAGE_OVERAGES.map((item) => (
             <span
               key={item}
               className="rounded-md bg-[#5a6e32]/12 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[#5a6e32]"
@@ -1247,11 +1404,12 @@ export function TeamSlide() {
     <Slide index={11} tone="dark" label="Team and roadmap">
       <Eyebrow dark>Team &amp; Roadmap</Eyebrow>
       <SlideHeading dark>
-        Founders who have scaled consumer products and shipped together since 2021.
+        Built by founders who ship social coordination products.
       </SlideHeading>
       <p className="mt-5 max-w-[60ch] text-base leading-[1.7] text-[#e9e2d4]/70">
-        The founding team has worked together since 2021, building products
-        that help people act, coordinate, and follow through.
+        Will and Wojciech have worked together since 2021, building
+        community coordination products that make people show up and
+        participate.
       </p>
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
         {FOUNDERS.map((founder) => (
@@ -1297,10 +1455,10 @@ export function TeamSlide() {
             </p>
             <ul className="mt-3 grid gap-2 sm:grid-cols-2">
               {[
-                "Prove new members understand Murph as a broad private health assistant",
-                "Measure first useful value and the first later reuse of remembered context",
-                "Improve authorized data connections, context retrieval, and member controls",
-                "Test when private accountability, friend support, or an experiment is the right primitive",
+                "Run 25 group challenges across iMessage, WhatsApp, and Telegram, starting from the six live now",
+                "Measure how many groups finish and how many start a second challenge",
+                "Launch templates for steps, sleep, alcohol, workouts, and recovery",
+                "Ship shareable results and the first structured group experiment dataset",
               ].map((item) => (
                 <li
                   key={item}
@@ -1325,15 +1483,10 @@ export function AskSlide() {
       <div className="mx-auto max-w-[760px] text-center">
         <Eyebrow dark>The Ask</Eyebrow>
         <h2 className="mx-auto mt-6 max-w-[20ch] font-serif text-[clamp(2.2rem,4.6vw,3.6rem)] font-semibold leading-[1.08] tracking-[-0.035em] text-[#f5f0e8]">
-          We&rsquo;re raising a pre-seed to prove pull, retention, and the context advantage.
+          We&rsquo;re raising a pre-seed to make health improvement effortless.
         </h2>
-        <p className="mx-auto mt-5 max-w-[62ch] text-[15px] leading-[1.65] text-[#e9e2d4]/65">
-          This round funds the next proof: acquire beyond the founder network,
-          improve context retrieval and controls, and measure whether better
-          later help retains.
-        </p>
       </div>
-      {/* The trajectory: shipped product, evidence gates, and the vision */}
+      {/* The trajectory: today's wedge, the network it builds, the vision */}
       <div className="mt-10 overflow-hidden rounded-2xl border border-[#f5f0e8]/15">
         <div className="grid divide-y divide-[#f5f0e8]/10 sm:grid-cols-2 sm:divide-x lg:grid-cols-4 lg:divide-y-0">
           <div className="bg-[#f5f0e8]/[0.04] p-6">
@@ -1341,26 +1494,25 @@ export function AskSlide() {
               Today
             </p>
             <p className="mt-3 text-[14px] leading-[1.6] text-[#e9e2d4]/80">
-              A broad private health assistant with eight paid,
-              founder-connected members.
+              Private group-chat challenges. The first is live now.
             </p>
           </div>
           <div className="bg-[#f5f0e8]/[0.04] p-6">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#e9e2d4]/50">
-              Demand
+              Next
             </p>
             <p className="mt-3 text-[14px] leading-[1.6] text-[#e9e2d4]/80">
-              Acquire direct signups beyond the network and deliver one useful
-              first thread.
+              Public cohorts around protocols: sleep, steps, alcohol,
+              recovery, supplements.
             </p>
           </div>
           <div className="bg-[#f5f0e8]/[0.04] p-6">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#e9e2d4]/50">
-              Retention
+              At scale
             </p>
             <p className="mt-3 text-[14px] leading-[1.6] text-[#e9e2d4]/80">
-              Show that remembered context improves later help enough to keep
-              the relationship.
+              Matched benchmarks and shared evidence: what works, for
+              whom, on which biomarkers, and under what conditions.
             </p>
           </div>
           <div className="bg-[#7a8c6e]/[0.16] p-6">
@@ -1368,7 +1520,7 @@ export function AskSlide() {
               End state
             </p>
             <p className="mt-3 font-serif text-[1.4rem] font-semibold leading-[1.2] text-[#f5f0e8]">
-              Member-controlled health intelligence that knows the whole picture.
+              Where the world runs its health experiments.
             </p>
           </div>
         </div>

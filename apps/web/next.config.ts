@@ -13,6 +13,7 @@ import {
 } from "./kernel-live-view-origin";
 import {
   isHostedWebDevFileSystemCacheEnabled,
+  isHostedWebSmokeArtifactMode,
   resolveHostedWebDistDir,
 } from "./next-artifacts";
 
@@ -60,6 +61,18 @@ const TELEGRAM_REQUIRED_FRAME_SOURCES = [
   "https://oauth.telegram.org",
 ] as const;
 const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
+// Brand assets that OG and share-card route handlers read from disk at render
+// time through app/font-files.ts. They must be traced into each of those
+// serverless functions or every non-prerendered render 500s with ENOENT.
+// scripts/check-og-asset-traces.ts fails the build when a trace goes missing.
+const OG_SHARE_ASSET_TRACE_INCLUDES = [
+  "app/fonts/*.ttf",
+  "public/logo.svg",
+];
+// The footer availability indicator reads the incident.io status-page summary
+// from the browser, so the status-page origin must be reachable client-side.
+const STATUS_PAGE_CONNECT_SOURCES = ["https://status.withmurph.ai"] as const;
+const HOSTED_WEB_SMOKE_SERVER_EXTERNAL_PACKAGES = ["@temporalio/client"];
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -147,6 +160,7 @@ export function buildHostedWebContentSecurityPolicy(
     ...PRIVY_REQUIRED_CONNECT_SOURCES,
     ...privyOrigins,
     ...KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
+    ...STATUS_PAGE_CONNECT_SOURCES,
     ...(isDevelopment ? ["ws:", "wss:"] : []),
   ]);
   const scriptSources = uniqueSources([
@@ -277,21 +291,24 @@ export function configureHostedWebWorkflowLocalDataDir(
   );
 }
 
-export function buildHostedWebNextConfig(phase: string): NextConfig {
+export function buildHostedWebNextConfig(
+  phase: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): NextConfig {
   return {
     // The repository already owns agent guidance at its root. Avoid generating
     // nested AGENTS.md and CLAUDE.md files whenever an agent starts Next dev.
     agentRules: false,
     allowedDevOrigins: ["local.withmurph.ai"],
-    distDir: resolveHostedWebDistDir(phase, process.env),
-    env: buildHostedWebClientEnv(process.env),
+    distDir: resolveHostedWebDistDir(phase, environment),
+    env: buildHostedWebClientEnv(environment),
     experimental: {
       cpus: HOSTED_WEB_PRODUCTION_BUILD_CPUS,
       // Next 16.3 enables persistent production-build caching by default.
       // Keep builds independent until that new state owner is evaluated
       // separately.
       turbopackFileSystemCacheForBuild: false,
-      turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
+      turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(environment),
       // Source-map emission is the largest proven build-memory cost.
       turbopackSourceMaps: false,
     },
@@ -324,8 +341,23 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
       ],
+      // Keys are picomatch globs matched with `contains: true` against the
+      // route path (route groups stripped), so "/opengraph-image" covers every
+      // `opengraph-image` metadata route: the static marketing images and the
+      // dynamic invite/group/biomarker/experiment unfurls that are never
+      // prerendered. The two share-card route handlers are keyed explicitly.
+      "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
+      "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
+      "/experiments/[experimentId]/card": OG_SHARE_ASSET_TRACE_INCLUDES,
+      "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
+    // Hosted-local smoke processes preload a fault injector that patches the
+    // installed Temporal client. Keep that package external in smoke artifacts
+    // so the application and preload share one constructor and prototype.
+    ...(isHostedWebSmokeArtifactMode(environment)
+      ? { serverExternalPackages: HOSTED_WEB_SMOKE_SERVER_EXTERNAL_PACKAGES }
+      : {}),
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),
     typescript: {
@@ -334,7 +366,7 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     headers: async () => [
       {
         source: HOSTED_WEB_HEADER_SOURCE,
-        headers: buildHostedWebSecurityHeaders(process.env),
+        headers: buildHostedWebSecurityHeaders(environment),
       },
       {
         source: MURPH_SAFE_HEADER_SOURCE,

@@ -54,6 +54,19 @@ export type HostedLocalTestRunnerOutboundHandler = (
 ) => Promise<Response>;
 
 export class RunnerContainer extends BaseRunnerContainer {
+  private loseCompletedInvocationResultForTest = false;
+
+  override async invoke(
+    payload: Parameters<BaseRunnerContainer["invoke"]>[0],
+  ) {
+    const result = await super.invoke(payload);
+    if (!this.loseCompletedInvocationResultForTest) {
+      return result;
+    }
+    this.loseCompletedInvocationResultForTest = false;
+    return await new Promise<never>(() => {});
+  }
+
   async armGeneratedImageProviderBarrierForTest(
     _input: { userId: string },
   ): Promise<{ ok: true }> {
@@ -164,10 +177,16 @@ export class RunnerContainer extends BaseRunnerContainer {
     return { ok: true };
   }
 
-  async dropActiveOperationForTest(_input: { userId: string }): Promise<{ ok: true }> {
+  async dropActiveOperationForTest(input: {
+    loseCompletedInvocationResult?: boolean;
+    userId: string;
+  }): Promise<{ ok: true }> {
     Object.assign(this, {
       workspaceInvocationOperations: [],
     });
+    if (input.loseCompletedInvocationResult === true) {
+      this.loseCompletedInvocationResultForTest = true;
+    }
     return { ok: true };
   }
 }

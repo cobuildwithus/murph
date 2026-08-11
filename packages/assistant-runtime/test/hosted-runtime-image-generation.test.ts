@@ -42,6 +42,7 @@ describe("hosted image generation", () => {
     }));
 
     assert.equal(controller.launcher.launch({
+      continuationSessionId: "asst_origin_1",
       operationId: "image_session_1",
       originAssistantInputId: "input_session_1",
       originAssistantInputIdExact: false,
@@ -49,6 +50,7 @@ describe("hosted image generation", () => {
       run,
     }), "started");
     assert.equal(controller.launcher.launch({
+      continuationSessionId: "asst_origin_1",
       operationId: "image_session_1_followup",
       originAssistantInputId: "input_session_1_followup",
       originAssistantInputIdExact: false,
@@ -56,6 +58,7 @@ describe("hosted image generation", () => {
       run,
     }), "already-pending");
     assert.equal(controller.launcher.launch({
+      continuationSessionId: "asst_origin_2",
       operationId: "image_session_2",
       originAssistantInputId: "input_session_2",
       originAssistantInputIdExact: false,
@@ -67,6 +70,60 @@ describe("hosted image generation", () => {
     assert.equal(run.mock.calls.length, 2);
     assert.equal(controller.launcher.readStatus?.("session_1"), "pending");
     assert.equal(controller.launcher.readStatus?.("session_2"), "pending");
+    await controller.close();
+  });
+
+  test("rejects a launch without an exact continuation session", async () => {
+    const onStarted = vi.fn();
+    const notifyReady = vi.fn();
+    const controller = createHostedImageGenerationController({
+      notifyReady,
+      onStarted,
+      vaultRoot: "/unused",
+      withCanonicalWritePersistence: async (run) => await run(),
+    });
+    const run = vi.fn(async () => ({
+      media: null,
+      runtimeIssue: null,
+      savedImageRef: null,
+    }));
+
+    for (const continuationSessionId of [undefined, null, "   "]) {
+      assert.throws(
+        () =>
+          controller.launcher.launch({
+            continuationSessionId,
+            operationId: "image_unbound",
+            originAssistantInputId: "input_unbound",
+            originAssistantInputIdExact: false,
+            scopeId: "session_unbound",
+            run,
+          }),
+        /continuation session id/u,
+      );
+    }
+
+    // Nothing may be recorded for a rejected launch: no run, no start signal,
+    // no pending scope, and no operation id that would later suppress a
+    // correctly bound retry as "already-started".
+    assert.equal(run.mock.calls.length, 0);
+    assert.equal(onStarted.mock.calls.length, 0);
+    assert.equal(notifyReady.mock.calls.length, 0);
+    assert.equal(controller.launcher.readStatus?.("session_unbound"), null);
+    assert.equal(controller.hasWork(), false);
+    assert.equal(controller.hasCompleted(), false);
+    assert.deepEqual(await controller.stageCompleted(), []);
+
+    assert.equal(controller.launcher.launch({
+      continuationSessionId: "asst_origin_1",
+      operationId: "image_unbound",
+      originAssistantInputId: "input_unbound",
+      originAssistantInputIdExact: false,
+      scopeId: "session_unbound",
+      run,
+    }), "started");
+    assert.equal(onStarted.mock.calls.length, 1);
+    assert.equal(controller.launcher.readStatus?.("session_unbound"), "pending");
     await controller.close();
   });
 
@@ -166,6 +223,10 @@ describe("hosted image generation", () => {
     };
 
     assert.equal(controller.launcher.launch({
+      // The pending scope and the continuation session are separate concerns:
+      // `scopeId` coordinates duplicate prevention, `continuationSessionId`
+      // names the durable session the completion must resume.
+      continuationSessionId: "asst_origin_1",
       operationId: "image_operation_1",
       originAssistantInputId: origin.inputId,
       originAssistantInputIdExact: true,
@@ -193,6 +254,7 @@ describe("hosted image generation", () => {
       savedImageRef: null,
     }));
     assert.equal(controller.launcher.launch({
+      continuationSessionId: "asst_origin_1",
       operationId: "image_operation_1",
       originAssistantInputId: origin.inputId,
       originAssistantInputIdExact: true,
@@ -202,6 +264,7 @@ describe("hosted image generation", () => {
     assert.equal(duplicateRun.mock.calls.length, 0);
     assert.equal(onStarted.mock.calls.length, 1);
     assert.equal(controller.launcher.launch({
+      continuationSessionId: "asst_origin_1",
       operationId: "image_operation_2",
       originAssistantInputId: origin.inputId,
       originAssistantInputIdExact: true,
@@ -229,12 +292,15 @@ describe("hosted image generation", () => {
     });
     assert.equal(controller.hasCompleted(), true);
     assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
-    assert.equal(await controller.stageCompleted(), 1);
+    const stagedCompletionInputIds = await controller.stageCompleted();
+    assert.equal(stagedCompletionInputIds.length, 1);
     assert.equal(enqueueAttempt, 2);
     assert.equal(controller.hasCompleted(), false);
     const completionInputId = await findCompletionInputId(vaultRoot);
+    assert.deepEqual(stagedCompletionInputIds, [completionInputId]);
     assert.equal(controller.launcher.readStatus?.("session_1"), "queued");
     assert.equal(controller.launcher.launch({
+      continuationSessionId: "asst_origin_1",
       operationId: "image_operation_2",
       originAssistantInputId: origin.inputId,
       originAssistantInputIdExact: true,
@@ -278,6 +344,7 @@ describe("hosted image generation", () => {
     assert.deepEqual(completion.conversation, {
       ...origin.conversation,
       actorId: null,
+      sessionId: "asst_origin_1",
     });
     assert.deepEqual(completion.replyTarget, origin.replyTarget);
     assert.equal(completion.sourceRef.kind, "hosted-mailbox");
@@ -310,9 +377,10 @@ describe("hosted image generation", () => {
       savedImageRef: privateMedia.ref,
       status: "ready",
     });
-    assert.equal(await controller.stageCompleted(), 0);
+    assert.deepEqual(await controller.stageCompleted(), []);
 
     assert.equal(controller.launcher.launch({
+      continuationSessionId: "asst_origin_1",
       operationId: "image_operation_2",
       originAssistantInputId: origin.inputId,
       originAssistantInputIdExact: true,
@@ -338,7 +406,8 @@ describe("hosted image generation", () => {
     await vi.waitFor(() => {
       assert.equal(controller.hasCompleted(), true);
     });
-    assert.equal(await controller.stageCompleted(), 1);
+    const stagedFailureInputIds = await controller.stageCompleted();
+    assert.equal(stagedFailureInputIds.length, 1);
     assert.equal(recordRuntimeIssue.mock.calls.length, 1);
     assert.equal(
       recordRuntimeIssue.mock.calls[0]?.[0]?.errorCode,
@@ -351,11 +420,17 @@ describe("hosted image generation", () => {
       (inputId) => inputId !== completionInputId,
     );
     assert.ok(failureInputId);
+    assert.deepEqual(stagedFailureInputIds, [failureInputId]);
     const failureCompletion = await readAssistantInputEvent({
       inputId: failureInputId,
       vault: vaultRoot,
     });
     assert.ok(failureCompletion);
+    assert.deepEqual(failureCompletion.conversation, {
+      ...origin.conversation,
+      actorId: null,
+      sessionId: "asst_origin_1",
+    });
     const failureText = failureCompletion.content.text ?? "";
     const failureDiagnosticLine = failureText.split("\n").find((line) =>
       line.startsWith(
@@ -403,6 +478,7 @@ describe("hosted image generation", () => {
     });
 
     assert.equal(controller.launcher.launch({
+      continuationSessionId: "asst_origin_shutdown",
       operationId: "image_operation_shutdown",
       originAssistantInputId: origin.inputId,
       originAssistantInputIdExact: true,
@@ -419,13 +495,20 @@ describe("hosted image generation", () => {
 
     shutdown.abort();
     assert.equal(controller.hasCompleted(), true);
-    assert.equal(await controller.stageCompleted(), 1);
+    const stagedCompletionInputIds = await controller.stageCompleted();
+    assert.equal(stagedCompletionInputIds.length, 1);
     const completionInputId = await findCompletionInputId(vaultRoot);
+    assert.deepEqual(stagedCompletionInputIds, [completionInputId]);
     const completion = await readAssistantInputEvent({
       inputId: completionInputId,
       vault: vaultRoot,
     });
     assert.ok(completion);
+    assert.deepEqual(completion.conversation, {
+      ...origin.conversation,
+      actorId: null,
+      sessionId: "asst_origin_shutdown",
+    });
     assert.match(
       completion.content.text ?? "",
       /"originAssistantInputIdExact":true/u,
@@ -436,7 +519,7 @@ describe("hosted image generation", () => {
     await vi.waitFor(() => {
       assert.equal(controller.hasWork(), false);
     });
-    assert.equal(await controller.stageCompleted(), 0);
+    assert.deepEqual(await controller.stageCompleted(), []);
     assert.deepEqual(
       await readHostedPendingAssistantInputIds({ vaultRoot }),
       [completionInputId],

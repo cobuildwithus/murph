@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import type {
+  HostedRuntimeLatencyPhaseBreakdown,
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -19,9 +20,6 @@ import {
 import type {
   DurableObjectStateLike,
 } from "../user-runner.ts";
-import {
-  resolveHostedR2CutoverContext,
-} from "../r2-cutover.ts";
 import {
   asWorkerStringEnvironment,
 } from "../worker-contracts.ts";
@@ -56,6 +54,13 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.reconcileRuntimeHealthDataConsentForUser(userId);
   }
 
+  async prewarmRuntimeShellForUser(
+    userId: string,
+    source?: Parameters<HostedUserRunner["prewarmRuntimeShellForUser"]>[1],
+  ): ReturnType<HostedUserRunner["prewarmRuntimeShellForUser"]> {
+    return this.runner.prewarmRuntimeShellForUser(userId, source);
+  }
+
   async publishHostedPrivateMedia(
     input: Parameters<HostedUserRunner["publishHostedPrivateMedia"]>[0],
   ): ReturnType<HostedUserRunner["publishHostedPrivateMedia"]> {
@@ -69,10 +74,17 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   async ensureRuntimeProcessingForUser(
     input: HostedRuntimeEnsureProcessingRequest & {
       commandTimeoutMs?: number;
+      orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
       userId: string;
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
-    return this.runner.ensureRuntimeProcessingForUser(input);
+    return this.runner.ensureRuntimeProcessingForUser({
+      ...input,
+      orchestration: {
+        ...(input.orchestration ?? {}),
+        userRunnerRpcStartedAtEpochMs: Date.now(),
+      },
+    });
   }
 
   async validateRuntimeWriteFence(input: {
@@ -81,6 +93,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     userId: string;
   }): Promise<boolean> {
     return this.runner.validateRuntimeWriteFence(input);
+  }
+
+  async recordRuntimeCompletionFromContainer(
+    input: Parameters<HostedUserRunner["recordRuntimeCompletionFromContainer"]>[0],
+  ): ReturnType<HostedUserRunner["recordRuntimeCompletionFromContainer"]> {
+    return this.runner.recordRuntimeCompletionFromContainer(input);
   }
 
   async validateRuntimeProviderEgressToken(input: {
@@ -102,6 +120,18 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     input: Parameters<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]> {
     return this.runner.createHostedWorkspaceSnapshotUploadSession(input);
+  }
+
+  async heartbeatHostedWorkspaceSnapshotUploadSession(
+    input: Parameters<HostedUserRunner["heartbeatHostedWorkspaceSnapshotUploadSession"]>[0],
+  ): ReturnType<HostedUserRunner["heartbeatHostedWorkspaceSnapshotUploadSession"]> {
+    return this.runner.heartbeatHostedWorkspaceSnapshotUploadSession(input);
+  }
+
+  async completeHostedWorkspaceSnapshotUploadSession(
+    input: Parameters<HostedUserRunner["completeHostedWorkspaceSnapshotUploadSession"]>[0],
+  ): ReturnType<HostedUserRunner["completeHostedWorkspaceSnapshotUploadSession"]> {
+    return this.runner.completeHostedWorkspaceSnapshotUploadSession(input);
   }
 
   async rememberHostedWorkspaceSnapshotReplacedRef(
@@ -134,6 +164,12 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.recordHostedWorkspaceSnapshotOrphanCandidate(input);
   }
 
+  async recordHostedBrowserVaultReplicaOrphanCandidate(
+    input: Parameters<HostedUserRunner["recordHostedBrowserVaultReplicaOrphanCandidate"]>[0],
+  ): ReturnType<HostedUserRunner["recordHostedBrowserVaultReplicaOrphanCandidate"]> {
+    return this.runner.recordHostedBrowserVaultReplicaOrphanCandidate(input);
+  }
+
   async fetch(): Promise<Response> {
     return notFound();
   }
@@ -147,13 +183,12 @@ function createHostedUserRunner(
   state: DurableObjectStateLike,
   env: WorkerEnvironmentSource,
 ): HostedUserRunner {
-  const r2CutoverContext = resolveHostedR2CutoverContext(env);
   return new HostedUserRunner(
     state,
     readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
-    r2CutoverContext.bucket,
+    env.BUNDLES,
     env,
     env.RUNNER_CONTAINER,
-    r2CutoverContext,
+    env.HOSTED_RUNTIME_RETRY_ANALYTICS ?? null,
   );
 }

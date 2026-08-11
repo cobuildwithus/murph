@@ -8,7 +8,6 @@ import {
   executeMurphDynamicToolRequest,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_DYNAMIC_TOOLS,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
   type MurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
@@ -18,6 +17,9 @@ import type {
 import type {
   AssistantProgressDelivery,
 } from "../src/assistant/turn-progress.ts";
+import {
+  readTestMurphDynamicToolRequest,
+} from "./support/codex-app-server.ts";
 
 describe("murph computer dynamic tools", () => {
   it("advertises raw Playwright act and generic pause primitives", () => {
@@ -97,15 +99,22 @@ describe("murph computer dynamic tools", () => {
     expect(actDescription.length).toBeLessThanOrEqual(320);
     expect(actDescription).toMatch(/macro-step/iu);
     expect(actDescription).toContain("current authorized run");
-    expect(actDescription).toContain("no missing or sensitive user input or final confirmation");
-    expect(actDescription).toContain("unknown outcome");
-    expect(actDescription).toContain("call computer_open before retrying or acting again");
+    expect(actDescription).toContain("No missing or sensitive input or final confirmation");
+    expect(actDescription).toContain("Before browser call two this turn");
+    expect(actDescription).toContain(
+      "call send_progress_update if available and not yet sent",
+    );
+    expect(actDescription).toContain("outcome uncertain");
+    expect(actDescription).toContain("call computer_open before retry/next action");
 
     expect(openDescription.length).toBeLessThanOrEqual(250);
-    expect(openDescription).toContain("current authorized Kernel browser run");
-    expect(openDescription).toContain("return runId, URL, title, and visible text");
-    expect(openDescription).toContain("after user handoff or any unknown browser outcome");
-    expect(openDescription).toContain("does not prove a prior effect failed");
+    expect(openDescription).toContain("authorized browser");
+    expect(openDescription).toContain("Returns runId, URL, title, text");
+    expect(openDescription).toContain("Before multi-step browsing each turn");
+    expect(openDescription).toContain("call send_progress_update if available");
+    expect(openDescription).toContain("prior-turn progress does not count");
+    expect(openDescription).toContain("reopen after handoff/uncertainty");
+    expect(openDescription).toContain("prior outcome stays unknown");
 
     expect(osControlDescription.length).toBeLessThanOrEqual(310);
     expect(osControlDescription).toContain("only when Playwright cannot operate");
@@ -136,6 +145,13 @@ describe("murph computer dynamic tools", () => {
       "computer_pause_for_user",
       "computer_finish_run",
     ]);
+
+    const unavailableProgressToolNames = resolveMurphDynamicTools({
+      computerToolsAvailable: true,
+      progressUpdatesAvailable: false,
+    }).map((tool) => tool.name);
+    expect(unavailableProgressToolNames).not.toContain("send_progress_update");
+    expect(unavailableProgressToolNames).toContain("computer_open");
   });
 
   it("keeps open profile keys off the model surface while sending fresh opens", async () => {
@@ -162,7 +178,7 @@ describe("murph computer dynamic tools", () => {
       });
     });
 
-    const request = readMurphDynamicToolRequest(dynamicToolCall({
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         startUrl: null,
       },
@@ -218,7 +234,7 @@ describe("murph computer dynamic tools", () => {
       });
     });
 
-    const request = readMurphDynamicToolRequest(dynamicToolCall({
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         startUrl: "https://shop.example.test/checkout",
       },
@@ -262,7 +278,7 @@ describe("murph computer dynamic tools", () => {
     },
   ])("rejects stale open profile field %# before execution", async (argumentsValue) => {
     const fetchImpl = vi.fn(async (): Promise<Response> => jsonResponse({}));
-    const request = readMurphDynamicToolRequest(dynamicToolCall({
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue,
       tool: "computer_open",
     }));
@@ -543,7 +559,7 @@ describe("murph computer dynamic tools", () => {
   });
 
   it("does not parse old structured click actions", () => {
-    const request = readMurphDynamicToolRequest(dynamicToolCall({
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         action: "click",
         runId: "run_123",
@@ -561,7 +577,7 @@ describe("murph computer dynamic tools", () => {
 
   it("rejects action timeout values outside the shared runtime contract", () => {
     for (const timeoutMs of [999, 1000.5]) {
-      const request = readMurphDynamicToolRequest(dynamicToolCall({
+      const request = readTestMurphDynamicToolRequest(dynamicToolCall({
         argumentsValue: {
           code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
           runId: "run_123",
@@ -578,7 +594,7 @@ describe("murph computer dynamic tools", () => {
   });
 
   it("parses raw Playwright actions", () => {
-    const request = readMurphDynamicToolRequest(dynamicToolCall({
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         code: "await page.goto('https://shop.example.test/checkout'); return { ok: true };",
         runId: "run_123",
@@ -601,7 +617,7 @@ describe("murph computer dynamic tools", () => {
   });
 
   it("does not parse the removed eval tool", () => {
-    const request = readMurphDynamicToolRequest(dynamicToolCall({
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         code: "return await context.cookies()",
         runId: "run_123",
@@ -736,7 +752,7 @@ describe("murph computer dynamic tools", () => {
   });
 
   it("parses the generic pause-for-user checkpoint tool", () => {
-    const request = readMurphDynamicToolRequest(dynamicToolCall({
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         handoffPurpose: "manual_browser_help",
         reason: "final_confirmation",
@@ -757,7 +773,7 @@ describe("murph computer dynamic tools", () => {
       kind: "computer-pause-for-user",
     });
 
-    const legacyMessageRequest = readMurphDynamicToolRequest(dynamicToolCall({
+    const legacyMessageRequest = readTestMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         handoffPurpose: "manual_browser_help",
         message: "Should I book this appointment?",

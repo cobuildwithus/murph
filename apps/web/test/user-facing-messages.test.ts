@@ -18,24 +18,19 @@ const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
 const THREAD_PAUSE_STATED =
   /paused|out\b|quiet|gone|nothing left|done|no more|zero|dark|silence|tapped|unsupervised|ran? out|time's up/iu;
 
-/** Every group funding ask must point at the room, never at one named payer. */
-const GROUP_FUNDING_ANYONE_PHRASE =
-  /anyone|anybody|any one|any of you|one of you|someone|somebody|whoever|whichever|which of you|one person/iu;
-
 const TEST_TEMPLATE_KEYS = [
   "assistant.signup_welcome",
   "assistant.family_welcome",
   "linq.invite_signup",
   "linq.daily_quota",
   "linq.home_redirect",
-  "linq.ai_usage.trial_conversion_pending",
-  "linq.ai_usage.trial_limit_reached",
+  "linq.ai_usage.starter_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.group_upgrade_pulse",
+  "linq.ai_usage.max_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
-  "linq.ai_usage.thread_limit_funding",
 ] as const satisfies readonly UserFacingMessageTemplateKey[];
 
 const TEST_CONTEXT_BY_KEY = {
@@ -50,10 +45,7 @@ const TEST_CONTEXT_BY_KEY = {
   "linq.home_redirect": {
     homeRecipientPhone: "+15555550123",
   },
-  "linq.ai_usage.trial_conversion_pending": {
-    homeUrl: "https://withmurph.ai/home",
-  },
-  "linq.ai_usage.trial_limit_reached": {
+  "linq.ai_usage.starter_limit_reached": {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.edge_limit_reached": {
@@ -65,6 +57,9 @@ const TEST_CONTEXT_BY_KEY = {
   "linq.ai_usage.group_upgrade_pulse": {
     homeUrl: "https://withmurph.ai/home",
   },
+  "linq.ai_usage.max_limit_reached": {
+    homeUrl: "https://withmurph.ai/home",
+  },
   "linq.ai_usage.billing_inactive": {
     homeUrl: "https://withmurph.ai/home",
   },
@@ -72,9 +67,6 @@ const TEST_CONTEXT_BY_KEY = {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.thread_limit_reached": {},
-  "linq.ai_usage.thread_limit_funding": {
-    fundingUrl: "https://www.withmurph.ai/groups/fund/test-code",
-  },
 } satisfies {
   [K in UserFacingMessageTemplateKey]: UserFacingMessageContextByKey[K];
 };
@@ -132,13 +124,8 @@ describe("user-facing message variants", () => {
     expectEveryVariantContains("linq.invite_signup", "https://withmurph.ai/join/test-code");
     expectEveryVariantContains("linq.daily_quota", "12");
     expectEveryVariantContains("linq.home_redirect", "+15555550123");
-    expectEveryVariantContains("linq.ai_usage.trial_conversion_pending", "https://withmurph.ai/home");
-    expectEveryVariantContains("linq.ai_usage.trial_limit_reached", "https://withmurph.ai/home");
+    expectEveryVariantContains("linq.ai_usage.starter_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.family_limit_reached", "https://withmurph.ai/home");
-    expectEveryVariantContains(
-      "linq.ai_usage.thread_limit_funding",
-      "https://www.withmurph.ai/groups/fund/test-code",
-    );
   });
 
   it("tells the member to resend every unprocessed wrong-line message", () => {
@@ -171,28 +158,18 @@ describe("user-facing message variants", () => {
     }
   });
 
-  it("asks the room to fund the group only from the delivery-time action copy", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_funding")) {
-      expect(text).toMatch(GROUP_FUNDING_ANYONE_PHRASE);
-      expect(text).toMatch(/https:\/\/www\.withmurph\.ai\/groups\/fund\/test-code$/u);
-      expect(text).not.toMatch(/trial|upgrade|Edge|Pulse|\$|paid|owner|admin/iu);
-    }
-  });
 
-  it("keeps notice templates neutral about unprojected billing actions", () => {
-    for (const key of [
-      "linq.ai_usage.trial_conversion_pending",
-      "linq.ai_usage.family_limit_reached",
-    ] as const) {
-      for (const text of collectRenderedTexts(key)) {
-        expect(text).not.toMatch(/add usage|top[ -]?up|checkout|subscribe/iu);
-      }
+
+  it("keeps resetting Family allowance copy neutral about purchases", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {
+      expect(text).not.toMatch(/add usage|top[ -]?up|checkout|subscribe/iu);
     }
   });
 
   it("keeps direct paid limit templates neutral until delivery-time projection", () => {
     for (const key of [
       "linq.ai_usage.edge_limit_reached",
+      "linq.ai_usage.max_limit_reached",
       "linq.ai_usage.pulse_upgrade_edge",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {
@@ -215,9 +192,9 @@ describe("user-facing message variants", () => {
     }
   });
 
-  it("explains how each blocked non-top-up allowance can resume", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.trial_limit_reached")) {
-      expect(text).toMatch(/Murph is paused until .+ plan/iu);
+  it("explains how each blocked allowance can resume", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.starter_limit_reached")) {
+      expect(text).toMatch(/starter|free usage|account/iu);
       expect(text).toMatch(/plan/iu);
       expect(text).not.toMatch(/add usage|top[ -]?up/iu);
     }
@@ -236,10 +213,11 @@ describe("user-facing message variants", () => {
 
   it("does not describe blocked usage as advisory", () => {
     for (const key of [
-      "linq.ai_usage.trial_limit_reached",
+      "linq.ai_usage.starter_limit_reached",
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
       "linq.ai_usage.group_upgrade_pulse",
+      "linq.ai_usage.max_limit_reached",
       "linq.ai_usage.pulse_upgrade_edge",
       "linq.ai_usage.thread_limit_reached",
     ] as const) {
@@ -264,10 +242,11 @@ describe("user-facing message variants", () => {
 
   it("communicates every included-usage limit as a percentage without currency progress", () => {
     for (const key of [
-      "linq.ai_usage.trial_limit_reached",
+      "linq.ai_usage.starter_limit_reached",
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
       "linq.ai_usage.group_upgrade_pulse",
+      "linq.ai_usage.max_limit_reached",
       "linq.ai_usage.pulse_upgrade_edge",
     ] as const) {
       for (const text of collectRenderedTexts(key)) {

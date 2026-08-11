@@ -116,21 +116,54 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Homepage personas");
   expect(sectionsMarkup).toContain("Homepage footer");
   expect(sectionsMarkup).toContain('data-design-section="homepage-footer"');
-  expect(sectionsMarkup).toContain("Changelog archive edition");
+  expect(sectionsMarkup).toContain("Changelog archive with explanatory visuals");
   expect(sectionsMarkup).toContain('data-design-study="changelog-archive"');
   expect(sectionsMarkup).toContain("A week that closes its own loops");
   expect(sectionsMarkup.match(/Illustrative examples\./g)).toHaveLength(2);
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Group sponsorship and mobile one-time contribution",
+    "Group sponsorship purchase, signed-out management, cancellation, and completion",
   );
   expect(sectionsMarkup).toContain(
-    "Overall AI usage, purchase reset, Family owner action, credits, and referrals",
+    "Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status",
   );
+  expect(sectionsMarkup).toContain(
+    'data-design-variant="venice-terra-sol-locked"',
+  );
+  expect(sectionsMarkup).toContain(
+    "Settings inference routing, locked models, and endpoint",
+  );
+  expect(sectionsMarkup).toContain("High usage · Edge required");
+  expect(sectionsMarkup).toContain(">Upgrade to Edge</button>");
+  expect(sectionsMarkup).not.toContain("Sol requires an active Edge plan.");
+  expect(sectionsMarkup).toContain(
+    'data-design-state="active-lifetime-starter-usage"',
+  );
+  expect(sectionsMarkup).toContain('aria-label="Starter AI usage"');
+  expect(sectionsMarkup).not.toContain(
+    "Your non-expiring starter usage is active. Choose a monthly plan whenever you want recurring included usage.",
+  );
+  expect(sectionsMarkup).not.toContain("Starter · Does not expire");
+  expect(sectionsMarkup).toContain(
+    "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
+  );
+  expect(sectionsMarkup).toContain(
+    "Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states",
+  );
+  expect(sectionsMarkup).toMatch(
+    /<[^>]*(?=[^>]*\bdata-design-contract="origin-only-referral-claim")(?=[^>]*\bdata-design-section="signup-referral-flow")[^>]*>/,
+  );
+  expect(sectionsMarkup).toContain("Settings · Messaging");
+  expect(sectionsMarkup).toContain("Recipient landing states");
+  expect(sectionsMarkup).toContain("Meet Murph");
+  expect(sectionsMarkup).toContain("Try again soon");
+  expect(sectionsMarkup).toContain("This link isn’t available");
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
-  expect(sectionsMarkup).toContain("Boundary result detail");
+  expect(sectionsMarkup).toContain(
+    "Biomarker boundary result · published comparator provenance",
+  );
   expect(sectionsMarkup).toContain('data-design-study="biomarker-preparing"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-index"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-detail"');
@@ -146,7 +179,13 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-state="monthly-active"');
   expect(sectionsMarkup).toContain('data-design-state="monthly-paused"');
   expect(sectionsMarkup).toContain('data-design-state="monthly-recovery"');
+  expect(sectionsMarkup).toContain('data-design-state="monthly-management-sign-in"');
+  expect(sectionsMarkup).toContain('data-design-state="monthly-canceled"');
   expect(sectionsMarkup).toContain('data-design-state="sponsored-one-time-recovery"');
+  expect(sectionsMarkup).toContain('data-design-state="family-billing-recovery"');
+  expect(sectionsMarkup).toContain("Your Family plan needs billing attention");
+  expect(sectionsMarkup).toContain("Monthly sponsorship canceled");
+  expect(sectionsMarkup).toContain("Sign in to continue");
   expect(sectionsMarkup).toContain("Monthly sponsorship is the primary flow");
   expect(sectionsMarkup).toContain("One-time contribution");
   expect(sectionsMarkup).toContain("personal-usage-credit-owner");
@@ -168,6 +207,18 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).not.toContain("$8.42");
   expect(sectionsMarkup).not.toContain("remaining usage credit");
   expect(sectionsMarkup).not.toContain("usage credit remaining");
+  const starterFamilyChoiceStart = sectionsMarkup.indexOf(
+    'data-design-state="starter-family-choice"',
+  );
+  const activeCoreUsageStart = sectionsMarkup.indexOf(
+    'data-design-state="active-core-usage"',
+    starterFamilyChoiceStart,
+  );
+  expect(starterFamilyChoiceStart).toBeGreaterThan(-1);
+  expect(activeCoreUsageStart).toBeGreaterThan(starterFamilyChoiceStart);
+  expect(
+    sectionsMarkup.slice(starterFamilyChoiceStart, activeCoreUsageStart),
+  ).toContain('inert=""');
   expect(sectionsMarkup).toContain("inert=\"\"");
   expect(sectionsMarkup).toContain("max-w-7xl");
 
@@ -180,11 +231,19 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).toContain("Preview WHOOP completion");
   expect(componentsMarkup).toContain("Preview capacity fallback");
   expect(componentsMarkup).toContain("Preview capacity fallback without contact route");
+  expect(componentsMarkup).toContain("Preview capacity response");
+  expect(componentsMarkup).toContain(
+    'data-design-state="usage-top-up-capacity-conflict"',
+  );
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-preparing"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-index"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-boundary-result"');
   expect(componentsMarkup).toContain('data-design-component="group-usage-funding"');
+  expect(componentsMarkup).toContain(
+    'data-design-component="signup-referral-link-states"',
+  );
+  expect(componentsMarkup).toContain("Clipboard write failed");
   expect(componentsMarkup).toContain(
     'data-design-component="group-sponsorship-management"',
   );
@@ -449,7 +508,7 @@ test("boundary result study keeps comparator data out of the numeric chart", () 
   expect(markup).toContain("&lt;10");
   expect(markup).not.toContain("Why there is no line chart");
   expect(markup).not.toContain("invented midpoint");
-  expect(markup).toContain("Source range not listed");
+  expect(markup).toContain("Published comparator — not the reporting lab&#x27;s range");
   expect(markup).not.toContain('role="img"');
 });
 

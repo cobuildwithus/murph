@@ -36,6 +36,11 @@
       "import": "./dist/schemas.js",
       "default": "./dist/schemas.js"
     },
+    "./zod-runtime": {
+      "types": "./dist/zod-runtime.d.ts",
+      "import": "./dist/zod-runtime.js",
+      "default": "./dist/zod-runtime.js"
+    },
     "./generated/*": "./generated/*"
   },
   "scripts": {

@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import {
+  buildExaResearchScoutBatchLaneRequest,
   buildExaResearchScoutRequest,
   clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_METHOD,
@@ -79,6 +80,10 @@ export {
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
+import {
+  readAllowedHostedLinqOperation,
+  type HostedLinqProviderOperation,
+} from "./runner-egress-linq-policy.ts";
 import {
   isHostedProviderEgressCredential,
   verifyHostedProviderEgressCredential,
@@ -203,6 +208,10 @@ const OPENAI_EGRESS_POLICY = [
   {
     method: "POST",
     pathname: "/v1/responses/compact",
+  },
+  {
+    method: "POST",
+    pathname: "/v1/alpha/search",
   },
   {
     method: "POST",
@@ -3671,12 +3680,19 @@ function readHostedExaResearchScoutRequestBody(
 function buildHostedExaResearchScoutCanonicalRequest(
   input: ExaResearchScoutParsedRequest,
 ): ExaResearchScoutRequestBody {
-  return buildExaResearchScoutRequest({
-    maxCandidates: input.numResults,
-    profile: input.profile,
-    since: input.since,
-    until: input.until,
-  });
+  return "mode" in input.profile
+    ? buildExaResearchScoutRequest({
+        maxCandidates: input.numResults,
+        profile: input.profile,
+        since: input.since,
+        until: input.until,
+      })
+    : buildExaResearchScoutBatchLaneRequest({
+        maxCandidates: input.numResults,
+        profile: input.profile,
+        since: input.since,
+        until: input.until,
+      });
 }
 
 async function maybeHandleMapboxRequest(input: {
@@ -3761,14 +3777,25 @@ async function maybeHandleLinqRequest(input: {
     return null;
   }
 
-  const providerOperation = readAllowedLinqOperation(
+  const providerOperation = readAllowedHostedLinqOperation(
     input.request.method,
     pathMatch.pathnameSuffix,
   );
   if (!providerOperation) {
+    emitHostedLinqProviderPolicyRejection({
+      request: input.request,
+      reason: "operation_not_allowed",
+      userId: input.userId,
+    });
     return disallowedProviderEgress();
   }
   if (!hasBearerCredentialSentinel(input.request.headers)) {
+    emitHostedLinqProviderPolicyRejection({
+      providerOperation,
+      request: input.request,
+      reason: "credential_sentinel_missing",
+      userId: input.userId,
+    });
     return disallowedProviderEgress();
   }
 
@@ -3972,57 +3999,31 @@ function hasHeaderCredentialSentinel(headers: Headers, name: string): boolean {
   return headers.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 }
 
-type HostedLinqProviderOperation =
-  | "attachment_create"
-  | "attachment_read"
-  | "chat_create"
-  | "message_delete"
-  | "message_send"
-  | "phone_numbers_list"
-  | "reaction_create"
-  | "read_receipt_send"
-  | "typing_start"
-  | "typing_stop"
-  | "voice_memo_send";
-
-function readAllowedLinqOperation(
-  method: string,
-  pathnameSuffix: string,
-): HostedLinqProviderOperation | null {
-  if (method === "GET" && pathnameSuffix === "/phone_numbers") {
-    return "phone_numbers_list";
-  }
-  if (method === "GET" && /^\/attachments\/[^/]+$/u.test(pathnameSuffix)) {
-    return "attachment_read";
-  }
-  if (method === "POST" && pathnameSuffix === "/attachments") {
-    return "attachment_create";
-  }
-  if (method === "POST" && pathnameSuffix === "/chats") {
-    return "chat_create";
-  }
-  if (method === "POST" && /^\/messages\/[^/]+\/reactions$/u.test(pathnameSuffix)) {
-    return "reaction_create";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/voicememo$/u.test(pathnameSuffix)) {
-    return "voice_memo_send";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/messages$/u.test(pathnameSuffix)) {
-    return "message_send";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/typing$/u.test(pathnameSuffix)) {
-    return "typing_start";
-  }
-  if (method === "POST" && /^\/chats\/[^/]+\/read$/u.test(pathnameSuffix)) {
-    return "read_receipt_send";
-  }
-  if (method === "DELETE" && /^\/chats\/[^/]+\/typing$/u.test(pathnameSuffix)) {
-    return "typing_stop";
-  }
-  if (method === "DELETE" && /^\/messages\/[^/]+$/u.test(pathnameSuffix)) {
-    return "message_delete";
-  }
-  return null;
+function emitHostedLinqProviderPolicyRejection(input: {
+  providerOperation?: HostedLinqProviderOperation;
+  request: Request;
+  reason: "credential_sentinel_missing" | "operation_not_allowed";
+  userId: string | null;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      method: readHostedRunnerDiagnosticMethod(input.request.method),
+      providerEgressPolicyRejectReason: input.reason,
+      providerKind: "linq",
+      providerRequestAuthorized: false,
+      ...(input.providerOperation
+        ? { providerOperation: input.providerOperation }
+        : {}),
+      runtimeAuthorityHeadersPresent: hostedRuntimeAuthorityHeadersPresent(
+        input.request.headers,
+      ),
+      userIdPresent: input.userId !== null,
+    },
+    level: "warn",
+    message: "Hosted runner Linq provider egress rejected by policy.",
+    phase: "wake.running",
+  });
 }
 
 function readTelegramSentinelOperation(pathname: string): string | null {

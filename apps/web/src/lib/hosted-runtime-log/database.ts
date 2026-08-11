@@ -17,34 +17,12 @@ const globalForHostedRuntimeLogDatabase = globalThis as typeof globalThis & {
 
 let hostedRuntimeLogPool = globalForHostedRuntimeLogDatabase.__murphHostedRuntimeLogPool;
 
-export const HOSTED_RUNTIME_LOG_STORAGE_MODE_REQUIRED_MESSAGE =
-  "HOSTED_RUNTIME_LOG_STORAGE must be explicitly set to primary or dedicated in production.";
-export const HOSTED_RUNTIME_LOG_STORAGE_MODE_INVALID_MESSAGE =
-  "HOSTED_RUNTIME_LOG_STORAGE must be either primary or dedicated.";
 export const HOSTED_RUNTIME_LOG_DATABASE_URL_REQUIRED_MESSAGE =
-  "HOSTED_RUNTIME_LOG_DATABASE_URL is required in production and whenever dedicated runtime-log storage is selected.";
+  "HOSTED_RUNTIME_LOG_DATABASE_URL is required in production.";
 export const HOSTED_RUNTIME_LOG_DATABASE_MUST_NOT_ALIAS_PRIMARY_MESSAGE =
   "HOSTED_RUNTIME_LOG_DATABASE_URL must not name the primary logical database; the migration preflight separately verifies physical cluster isolation.";
 export const HOSTED_RUNTIME_LOG_DATABASE_ENDPOINTS_MUST_MATCH_MESSAGE =
   "HOSTED_RUNTIME_LOG_DATABASE_URL and HOSTED_RUNTIME_LOG_DIRECT_DATABASE_URL must name the same database.";
-
-export type HostedRuntimeLogStorageMode = "primary" | "dedicated";
-
-export function readHostedRuntimeLogStorageMode(
-  environment: NodeJS.ProcessEnv = process.env,
-): HostedRuntimeLogStorageMode {
-  const configured = nonEmpty(environment.HOSTED_RUNTIME_LOG_STORAGE);
-  if (configured === "primary" || configured === "dedicated") {
-    return configured;
-  }
-  if (configured !== null) {
-    throw new TypeError(HOSTED_RUNTIME_LOG_STORAGE_MODE_INVALID_MESSAGE);
-  }
-  if (isHostedRuntimeLogProductionEnvironment(environment)) {
-    throw new TypeError(HOSTED_RUNTIME_LOG_STORAGE_MODE_REQUIRED_MESSAGE);
-  }
-  return "primary";
-}
 
 export function readHostedRuntimeLogDatabaseUrl(
   environment: NodeJS.ProcessEnv = process.env,
@@ -55,22 +33,6 @@ export function readHostedRuntimeLogDatabaseUrl(
   }
 
   return normalizeHostedRuntimeLogConnectionString(configured);
-}
-
-/**
- * The rollout mode controls only new writes. Once the isolated database is
- * provisioned, compatibility reads, retention, and account deletion keep using
- * it even when writes temporarily return to primary during rollback.
- */
-export function shouldWriteHostedRuntimeLogsToDedicatedDatabase(
-  environment: NodeJS.ProcessEnv = process.env,
-): boolean {
-  const dedicated = readHostedRuntimeLogStorageMode(environment) === "dedicated";
-  const configured = isHostedRuntimeLogDatabaseConfigured(environment);
-  if (dedicated && !configured) {
-    throw new TypeError(HOSTED_RUNTIME_LOG_DATABASE_URL_REQUIRED_MESSAGE);
-  }
-  return dedicated;
 }
 
 export function isHostedRuntimeLogDatabaseConfigured(
@@ -197,7 +159,6 @@ function readPostgresDatabaseName(value: string): string | null {
     return null;
   }
 }
-
 
 function databaseIdentity(value: string): string {
   const normalized = normalizeHostedRuntimeLogConnectionString(value);

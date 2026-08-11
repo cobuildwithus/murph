@@ -82,6 +82,19 @@ const DATABASE_POOL_FAILURE_BY_NETWORK_CODE = new Map<
   ["ETIMEDOUT", "connection_timeout"],
 ]);
 
+// The pg driver surfaces server SQLSTATE values on the same `code` field as
+// network errno values.
+const DATABASE_POOL_FAILURE_BY_SQLSTATE = new Map<
+  string,
+  DatabasePoolFailureCategory
+>([
+  ["53300", "connection_limit"],
+]);
+
+const PGBOUNCER_MAX_CLIENT_CONN_SQLSTATE = "08P01";
+const PGBOUNCER_MAX_CLIENT_CONN_MESSAGE =
+  "no more connections allowed (max_client_conn)";
+
 installHostedWebWarningFilters();
 
 export interface CreatePrismaClientInput {
@@ -401,6 +414,7 @@ function resolveDatabasePoolFailureCategory(
     const codeCategory = code
       ? DATABASE_POOL_FAILURE_BY_PRISMA_CODE.get(code)
         ?? DATABASE_POOL_FAILURE_BY_NETWORK_CODE.get(code)
+        ?? DATABASE_POOL_FAILURE_BY_SQLSTATE.get(code)
       : null;
     if (codeCategory) {
       return codeCategory;
@@ -416,6 +430,12 @@ function resolveDatabasePoolFailureCategory(
 
     const message = readUnknownStringProperty(current, "message")
       ?? readUnknownStringProperty(current, "originalMessage");
+    if (
+      code === PGBOUNCER_MAX_CLIENT_CONN_SQLSTATE
+      && message === PGBOUNCER_MAX_CLIENT_CONN_MESSAGE
+    ) {
+      return "connection_limit";
+    }
     if (message?.includes("timeout exceeded when trying to connect")) {
       return "pool_checkout_timeout";
     }
@@ -426,6 +446,15 @@ function resolveDatabasePoolFailureCategory(
     }
     if (message?.includes("Connection terminated due to connection timeout")) {
       return "connection_timeout";
+    }
+    // Postgres words a SQLSTATE 53300 rejection differently depending on which
+    // limit refused the connection, and some wrappers keep only the message.
+    if (
+      message?.includes("remaining connection slots are reserved")
+      || message?.includes("too many connections for role")
+      || message?.includes("sorry, too many clients already")
+    ) {
+      return "connection_limit";
     }
 
     current = readUnknownProperty(current, "cause");

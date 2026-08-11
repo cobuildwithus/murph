@@ -27,6 +27,16 @@ type HostedBrowserVaultReplicaBucketLike = EncryptedR2BucketLike & {
   delete?(key: string): Promise<void>;
 };
 
+export const HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA =
+  "murph.hosted-browser-vault-replica-orphan-candidate.v1";
+
+export interface HostedBrowserVaultReplicaOrphanCandidate {
+  createdAt: string;
+  objectKey: string;
+  schema: typeof HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA;
+  userId: string;
+}
+
 export interface BrowserVaultReplicaAadFields {
   dataKeyId?: string;
   dataKeyRootKeyId?: string;
@@ -44,6 +54,7 @@ export interface HostedBrowserVaultReplicaStore {
   deriveBrowserVaultReplicaKey(ref: HostedBrowserVaultReplicaRef): Promise<Uint8Array>;
   readBrowserVaultReplicaEnvelope(ref: HostedBrowserVaultReplicaRef): Promise<HostedCipherEnvelope | null>;
   writeBrowserVaultReplica(input: {
+    beforeWrite?(ref: HostedBrowserVaultReplicaRef): Promise<void>;
     replica: unknown;
     userId: string;
   }): Promise<HostedBrowserVaultReplicaRef>;
@@ -130,7 +141,7 @@ export function createHostedBrowserVaultReplicaStore(input: {
       );
     },
 
-    async writeBrowserVaultReplica({ replica, userId }) {
+    async writeBrowserVaultReplica({ beforeWrite, replica, userId }) {
       const parsed = parseBrowserVaultReplicaStorageInput(replica);
 
       const encodedReplica = encodeHostedBrowserVaultReplicaJson({ replica });
@@ -170,6 +181,8 @@ export function createHostedBrowserVaultReplicaStore(input: {
 
       const aadFields = createBrowserVaultReplicaAadFields({ ref: persistedRef, userId });
 
+      await beforeWrite?.(persistedRef);
+
       await writeEncryptedR2Payload({
         aad: buildRuntimeHostedStorageAad({
           dataKeyId: aadFields.dataKeyId,
@@ -192,6 +205,22 @@ export function createHostedBrowserVaultReplicaStore(input: {
 
       return persistedRef;
     },
+  };
+}
+
+export function parseHostedBrowserVaultReplicaOrphanCandidate(
+  value: unknown,
+  label = "Hosted browser vault replica orphan candidate",
+): HostedBrowserVaultReplicaOrphanCandidate {
+  const record = requireRecord(value, label);
+  if (record.schema !== HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA) {
+    throw new TypeError(`${label} schema is invalid.`);
+  }
+  return {
+    createdAt: requireIsoTimestampString(record.createdAt, `${label} createdAt`),
+    objectKey: requireString(record.objectKey, `${label} objectKey`),
+    schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+    userId: requireString(record.userId, `${label} userId`),
   };
 }
 

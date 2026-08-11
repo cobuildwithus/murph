@@ -8,22 +8,20 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  type HostedMailboxFetchCursorMode,
+  type HostedMailboxItem,
+  type HostedMailboxKind,
+  type HostedMailboxLane,
+  type HostedMailboxLaneConsumed,
+  type HostedMailboxLaneHighWater,
+  type HostedMailboxPayload,
+  type HostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   createHostedMailboxAssistantInputId,
   readHostedConversationAssistantIdentifierSecret,
 } from "@murphai/hosted-execution/assistant-identifiers";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedMailboxFetchCursorMode,
-  HostedMailboxItem,
-  HostedMailboxKind,
-  HostedMailboxLane,
-  HostedMailboxLaneConsumed,
-  HostedMailboxLaneHighWater,
-  HostedMailboxPayload,
-  HostedMailboxPayloadFetchResponse,
-} from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedExecutionConversationMessageWake,
   HostedExecutionEnvironmentVoiceCapturedWake,
@@ -1855,6 +1853,7 @@ export async function findHostedMailboxItemByDedupeKeyTx(input: {
 
 export interface HostedMailboxConversationInputAuthority {
   causalSeq: string;
+  occurredAt: string;
 }
 
 export type HostedMailboxSubscriptionActionClaimResult =
@@ -1991,6 +1990,7 @@ export async function readHostedMailboxConversationInputAuthorityByAssistantInpu
   const rows = await input.prisma.hostedMailboxItem.findMany({
     select: {
       causalSeq: true,
+      occurredAt: true,
     },
     take: 2,
     where: {
@@ -2008,24 +2008,20 @@ export async function readHostedMailboxConversationInputAuthorityByAssistantInpu
   });
 
   const causalSeq = rows[0]?.causalSeq;
-  if (rows.length !== 1 || causalSeq === undefined || causalSeq === null) {
+  const occurredAt = rows[0]?.occurredAt;
+  if (
+    rows.length !== 1
+    || causalSeq === undefined
+    || causalSeq === null
+    || occurredAt === undefined
+  ) {
     return null;
   }
 
   return {
     causalSeq: causalSeq.toString(),
+    occurredAt: occurredAt.toISOString(),
   };
-}
-
-export async function readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx(input: {
-  assistantInputId: string;
-  memberId: string;
-  prisma: HostedMailboxStoreClient;
-}): Promise<string | null> {
-  const authority =
-    await readHostedMailboxConversationInputAuthorityByAssistantInputIdTx(input);
-
-  return authority?.causalSeq ?? null;
 }
 
 export async function readHostedMailboxConversationWakeByAssistantInputId(input: {

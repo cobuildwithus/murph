@@ -1,6 +1,10 @@
 import {
   HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+  HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
+} from "@murphai/runtime-state";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -22,9 +26,7 @@ const HOSTED_STATE_ISOLATION_ROLLOUT_ERROR =
 function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefined> = {}): EnvSource {
   return {
     CF_BUNDLES_BUCKET: "bundles",
-    CF_BUNDLES_ENAM_BUCKET: "bundles-enam",
     CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
-    CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview-enam",
     CF_PUBLIC_BASE_URL: HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
     CF_WORKER_NAME: "hosted-runner",
     CLOUDFLARE_ACCOUNT_ID: "r2-account",
@@ -53,8 +55,6 @@ function createRequiredWorkerDeployEnv(overrides: Record<string, string | undefi
     HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
     HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account",
     HOSTED_R2_PRESIGN_BUCKET_NAME: "bundles",
-    HOSTED_R2_CUTOVER_PHASE: "source_active",
-    HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam",
     HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
     HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
     HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -77,9 +77,7 @@ function createRequiredPreviewWorkerDeployEnv(
 ): EnvSource {
   return createRequiredWorkerDeployEnv({
     CF_BUNDLES_BUCKET: "hosted-bundles-staging",
-    CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-staging-enam",
     CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-staging",
-    CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-staging-enam",
     CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
     CF_WORKER_NAME: "hosted-runner-staging",
     HOSTED_CRYPTO_ENV: "preview",
@@ -87,7 +85,6 @@ function createRequiredPreviewWorkerDeployEnv(
     HOSTED_EXECUTION_DEPLOY_CONTEXT: "preview",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "preview",
     HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles-staging",
-    HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-staging-enam",
     HOSTED_WEB_BASE_URL: "https://web-staging.example.test",
     HOSTED_WEB_PRODUCTION_BASE_URL: "https://app.example.test",
     ...overrides,
@@ -97,7 +94,7 @@ function createRequiredPreviewWorkerDeployEnv(
 async function readValidR2BucketInfo(bucketName: string) {
   return {
     defaultStorageClass: "Standard",
-    location: bucketName.includes("enam") ? "ENAM" : "OC",
+    location: "ENAM",
     name: bucketName,
   };
 }
@@ -107,9 +104,7 @@ describe("deploy preflight helpers", () => {
     expect(listMissingHostedDeployEnvironment({}, { deployWorker: false })).toEqual([
       "CF_WORKER_NAME",
       "CF_BUNDLES_BUCKET",
-      "CF_BUNDLES_ENAM_BUCKET",
       "CF_BUNDLES_PREVIEW_BUCKET",
-      "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
     ]);
   });
 
@@ -119,8 +114,6 @@ describe("deploy preflight helpers", () => {
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
       CF_WORKER_NAME: "hosted-runner",
     }, { deployWorker: true })).toEqual([
-      "CF_BUNDLES_ENAM_BUCKET",
-      "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
       "CF_PUBLIC_BASE_URL",
       "HOSTED_EXECUTION_DEPLOY_CONTEXT",
       "HOSTED_WEB_BASE_URL",
@@ -130,10 +123,8 @@ describe("deploy preflight helpers", () => {
       "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
       "HOSTED_CRYPTO_ENV",
-      "HOSTED_R2_CUTOVER_PHASE",
       "HOSTED_R2_PRESIGN_ACCOUNT_ID",
       "HOSTED_R2_PRESIGN_BUCKET_NAME",
-      "HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK",
       "HOSTED_LOG_FINGERPRINT_SECRET",
       "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET",
@@ -149,9 +140,7 @@ describe("deploy preflight helpers", () => {
   it("does not require worker-only secrets for config-only runs", () => {
     expect(listMissingHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
-      CF_BUNDLES_ENAM_BUCKET: "bundles-enam",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
-      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview-enam",
       CF_WORKER_NAME: "hosted-runner",
     }, { deployWorker: false })).toEqual([]);
   });
@@ -159,9 +148,7 @@ describe("deploy preflight helpers", () => {
   it("allows config-only runs without CF_PUBLIC_BASE_URL", () => {
     expect(() => assertHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
-      CF_BUNDLES_ENAM_BUCKET: "bundles-enam",
       CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview",
-      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview-enam",
       CF_WORKER_NAME: "hosted-runner",
     }, { deployWorker: false })).not.toThrow();
   });
@@ -169,9 +156,7 @@ describe("deploy preflight helpers", () => {
   it("treats whitespace-only values as missing", () => {
     expect(() => assertHostedDeployEnvironment({
       CF_BUNDLES_BUCKET: "bundles",
-      CF_BUNDLES_ENAM_BUCKET: "   ",
       CF_BUNDLES_PREVIEW_BUCKET: "   ",
-      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview-enam",
       CF_PUBLIC_BASE_URL: "   ",
       CF_WORKER_NAME: "hosted-runner",
       HOSTED_EXECUTION_DEPLOY_CONTEXT: "   ",
@@ -179,7 +164,7 @@ describe("deploy preflight helpers", () => {
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: "   ",
       HOSTED_WEB_BASE_URL: "   ",
     }, { deployWorker: true })).toThrowError(
-      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_ENAM_BUCKET CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_CUTOVER_PHASE HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK MURPH_DATA_API_KEY OPENAI_API_KEY",
+      "Missing required GitHub environment variables for deploy workflow: CF_BUNDLES_PREVIEW_BUCKET CF_PUBLIC_BASE_URL HOSTED_EXECUTION_DEPLOY_CONTEXT HOSTED_WEB_BASE_URL HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID HOSTED_CRYPTO_ENV HOSTED_R2_PRESIGN_ACCOUNT_ID HOSTED_R2_PRESIGN_BUCKET_NAME HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK HOSTED_LOG_FINGERPRINT_SECRET HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET HOSTED_R2_PRESIGN_ACCESS_KEY_ID HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK MURPH_DATA_API_KEY OPENAI_API_KEY",
     );
   });
 
@@ -333,24 +318,265 @@ describe("deploy preflight helpers", () => {
     ]));
   });
 
+  it("accepts non-active hosted crypto standby keyrings", () => {
+    expect(() => assertHostedDeployEnvironment(
+      createRequiredWorkerDeployEnv({
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2": {
+            publicKeyPem:
+              "-----BEGIN PUBLIC KEY-----\nstandby\n-----END PUBLIC KEY-----",
+            status: "verify_only",
+          },
+        }),
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v2": {
+              privateJwk: {
+                crv: "P-256",
+                d: "standby-private-coordinate",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "decrypt_only",
+            },
+          }),
+      }),
+      { deployWorker: true },
+    )).not.toThrow();
+  });
+
+  it.each([
+    [
+      "malformed authority JSON",
+      {
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON:
+          '{"private-keyring-canary"',
+      },
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "an invalid authority status",
+      {
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          "authority-standby": {
+            publicKeyPem: "private-keyring-canary",
+            status: "verify-only",
+          },
+        }),
+      },
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "an additional active authority",
+      {
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          "authority-standby": {
+            publicKeyPem: "private-keyring-canary",
+            status: "active",
+          },
+        }),
+      },
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "an active authority entry shadowed by the required key",
+      {
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1": {
+            publicKeyPem: "private-keyring-canary",
+            status: "active",
+          },
+        }),
+      },
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "a verify-only authority entry shadowed by the required key",
+      {
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1": {
+            publicKeyPem: "private-keyring-canary",
+            status: "verify_only",
+          },
+        }),
+      },
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "authority entries with duplicate normalized identifiers",
+      {
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          "authority-standby": {
+            publicKeyPem: "private-keyring-canary",
+            status: "verify_only",
+          },
+          " authority-standby ": {
+            publicKeyPem: "disabled",
+            status: "disabled",
+          },
+        }),
+      },
+      HOSTED_AUTHORITY_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "a private JWK without d",
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v2": {
+              privateJwk: {
+                crv: "P-256",
+                kty: "EC",
+                x: "private-keyring-canary",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "decrypt_only",
+            },
+          }),
+      },
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "a non-Cloudflare private recipient",
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v2": {
+              privateJwk: {
+                crv: "P-256",
+                d: "private-keyring-canary",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "recovery-offline",
+              status: "decrypt_only",
+            },
+          }),
+      },
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "an additional active private recipient",
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v2": {
+              privateJwk: {
+                crv: "P-256",
+                d: "private-keyring-canary",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "active",
+            },
+          }),
+      },
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "an active private entry shadowed by the required key",
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v1": {
+              privateJwk: {
+                crv: "P-256",
+                d: "private-keyring-canary",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "active",
+            },
+          }),
+      },
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "a decrypt-only private entry shadowed by the required key",
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v1": {
+              privateJwk: {
+                crv: "P-256",
+                d: "private-keyring-canary",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "decrypt_only",
+            },
+          }),
+      },
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
+    ],
+    [
+      "private entries with duplicate normalized identifiers",
+      {
+        HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON:
+          JSON.stringify({
+            "cloudflare-automation:v2": {
+              privateJwk: {
+                crv: "P-256",
+                d: "private-keyring-canary",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "decrypt_only",
+            },
+            " cloudflare-automation:v2 ": {
+              privateJwk: {
+                crv: "P-256",
+                d: "private-keyring-canary",
+                kty: "EC",
+                x: "standby-public-x",
+                y: "standby-public-y",
+              },
+              recipient: "cloudflare-automation-secret",
+              status: "disabled",
+            },
+          }),
+      },
+      HOSTED_CLOUDFLARE_PRIVATE_STANDBY_KEYRING_ERROR,
+    ],
+  ] as const)("rejects %s without disclosing keyring values", (
+    _name,
+    overrides,
+    expectedError,
+  ) => {
+    const errors = listHostedDeployEnvironmentInvariantErrors(
+      createRequiredWorkerDeployEnv(overrides),
+      { deployWorker: true },
+    );
+
+    expect(errors).toContain(expectedError);
+    expect(errors.join(" ")).not.toContain("private-keyring-canary");
+  });
+
   it("rejects preview deploys with unscoped Worker or R2 resource names", () => {
     expect(listHostedDeployEnvironmentInvariantErrors(
       createRequiredPreviewWorkerDeployEnv({
         CF_BUNDLES_BUCKET: "hosted-bundles",
-        CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-enam",
         CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles",
-        CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-enam",
         CF_WORKER_NAME: "hosted-runner",
         HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
-        HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-enam",
       }),
       { deployWorker: true },
     )).toEqual(expect.arrayContaining([
       "CF_WORKER_NAME must contain a preview or staging name segment for preview deploys.",
       "CF_BUNDLES_BUCKET must contain a preview or staging name segment for preview deploys.",
-      "CF_BUNDLES_ENAM_BUCKET must contain a preview or staging name segment for preview deploys.",
       "CF_BUNDLES_PREVIEW_BUCKET must contain a preview or staging name segment for preview deploys.",
-      "CF_BUNDLES_ENAM_PREVIEW_BUCKET must contain a preview or staging name segment for preview deploys.",
     ]));
   });
 
@@ -431,84 +657,6 @@ describe("deploy preflight helpers", () => {
       HOSTED_R2_PRESIGN_BUCKET_NAME: "other-bundles",
     }), { deployWorker: true })).toContain(
       "HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET.",
-    );
-  });
-
-  it("requires the direct-R2 ENAM presign bucket to match the ENAM binding bucket", () => {
-    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "other-bundles-enam",
-    }), { deployWorker: true })).toContain(
-      "HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME must match CF_BUNDLES_ENAM_BUCKET.",
-    );
-  });
-
-  it("requires fixed-role R2 bucket names to stay distinct", () => {
-    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
-      CF_BUNDLES_ENAM_BUCKET: "bundles",
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles",
-    }), { deployWorker: true })).toContain(
-      "CF_BUNDLES_BUCKET and CF_BUNDLES_ENAM_BUCKET must be distinct.",
-    );
-
-    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
-      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview",
-    }), { deployWorker: true })).toContain(
-      "CF_BUNDLES_PREVIEW_BUCKET and CF_BUNDLES_ENAM_PREVIEW_BUCKET must be distinct.",
-    );
-  });
-
-  it("requires a supported fixed-role R2 cutover phase", () => {
-    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
-      HOSTED_R2_CUTOVER_PHASE: "dual_write",
-    }), { deployWorker: true })).toContain(
-      "HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.",
-    );
-  });
-
-  it("requires a supported R2 write-admission state", () => {
-    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
-      HOSTED_R2_WRITE_ADMISSION: "draining",
-    }), { deployWorker: true })).toContain(
-      "HOSTED_R2_WRITE_ADMISSION must be open or paused.",
-    );
-  });
-
-  it("allows destination promotion while runtime write admission remains open", () => {
-    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
-      HOSTED_R2_CUTOVER_PHASE: "destination_active",
-      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: undefined,
-      HOSTED_R2_WRITE_ADMISSION: "open",
-    }), { deployWorker: true })).toEqual([]);
-  });
-
-  it("restricts the temporary paused canary digest to destination-active paused deploys", () => {
-    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
-      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "not-a-digest",
-      HOSTED_R2_WRITE_ADMISSION: "paused",
-    }), { deployWorker: true })).toContain(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
-    );
-
-    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
-      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
-      HOSTED_R2_WRITE_ADMISSION: "open",
-    }), { deployWorker: true })).toContain(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
-    );
-
-    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
-      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
-      HOSTED_R2_WRITE_ADMISSION: "paused",
-    }), { deployWorker: true })).toContain(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
-    );
-
-    expect(listHostedDeployEnvironmentInvariantErrors(createRequiredWorkerDeployEnv({
-      HOSTED_R2_CUTOVER_PHASE: "destination_active",
-      HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256: "a".repeat(64),
-      HOSTED_R2_WRITE_ADMISSION: "paused",
-    }), { deployWorker: true })).not.toContain(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
     );
   });
 
@@ -963,29 +1111,24 @@ describe("deploy preflight helpers", () => {
     )).resolves.toBeUndefined();
   });
 
-  it("rejects fully transposed fixed-role R2 bucket variables before deployment", async () => {
-    const source = createRequiredWorkerDeployEnv({
-      CF_BUNDLES_BUCKET: "bundles-enam",
-      CF_BUNDLES_ENAM_BUCKET: "bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "bundles-preview-enam",
-      CF_BUNDLES_ENAM_PREVIEW_BUCKET: "bundles-preview",
-      HOSTED_R2_PRESIGN_BUCKET_NAME: "bundles-enam",
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles",
-    });
-
+  it("rejects a configured R2 bucket outside ENAM before deployment", async () => {
     await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
-      source,
+      createRequiredWorkerDeployEnv(),
       { deployWorker: true },
       {
-        readR2BucketInfo: readValidR2BucketInfo,
+        readR2BucketInfo: async (bucketName) => ({
+          defaultStorageClass: "Standard",
+          location: "OC",
+          name: bucketName,
+        }),
         resolveHostnameAddresses: async () => ["8.8.8.8"],
       },
     )).resolves.toContain(
-      "R2 fixed-role bucket metadata validation failed: Runtime R2 fixed source bucket must report OC.",
+      "R2 bucket metadata validation failed: Runtime R2 bucket must report ENAM.",
     );
   });
 
-  it("fails closed when fixed-role R2 bucket metadata cannot be read", async () => {
+  it("fails closed when R2 bucket metadata cannot be read", async () => {
     await expect(listHostedDeployEnvironmentInvariantErrorsAsync(
       createRequiredWorkerDeployEnv(),
       { deployWorker: true },
@@ -996,7 +1139,7 @@ describe("deploy preflight helpers", () => {
         resolveHostnameAddresses: async () => ["8.8.8.8"],
       },
     )).resolves.toContain(
-      "R2 fixed-role bucket metadata validation failed: bucket metadata unavailable",
+      "R2 bucket metadata validation failed: bucket metadata unavailable",
     );
   });
 

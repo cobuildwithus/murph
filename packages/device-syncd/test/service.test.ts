@@ -13,6 +13,7 @@ import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murph
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
+import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import {
@@ -59,6 +60,7 @@ import type {
   DeviceWebhookHandler,
   ProviderAuthTokens,
   ProviderConnectionResult,
+  ProviderJobConnectionSource,
   StoredDeviceSyncAccount,
 } from "../src/types.ts";
 
@@ -913,6 +915,8 @@ test("local Junction workers exclude a disconnected source from production-norma
       sourceInstanceKey: "fitbit",
       sourceProviderSlug: "fitbit",
       status: "disconnected",
+      lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+      lastErrorMessage: "Source disconnected by member.",
       lastSeenAt: "2026-07-28T10:00:00.000Z",
     });
     const job = store.enqueueJob({
@@ -967,6 +971,326 @@ test("local Junction workers exclude a disconnected source from production-norma
   }
 });
 
+test("persisted provider-projected disconnects can recover an evidence-bearing pressure job", async () => {
+  let now = new Date("2026-09-01T10:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-pressure-recovery");
+  const providerState = {
+    status: "disconnected",
+  };
+  const importedSnapshots: unknown[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importedSnapshots.push(input.snapshot);
+        const result = await prepareDeviceProviderSnapshotImport(input);
+        return { events: result.events ?? [] };
+      },
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: ["activity"],
+        timeseriesResources: ["blood_pressure"],
+        fetchImpl: async (input) => {
+          const url = new URL(readUrl(input));
+          if (url.pathname === "/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [{
+                id: "provider-omron-1",
+                slug: "omron",
+                name: "Omron",
+                status: providerState.status,
+                resource_availability: { blood_pressure: true },
+              }],
+            });
+          }
+          if (url.pathname === "/v2/timeseries/junction-user-1/blood_pressure/grouped") {
+            return createJsonResponse({
+              groups: {
+                omron: [{
+                  data: [{
+                    id: "bp-after-provider-recovery",
+                    timestamp: "2026-05-12T08:30:00.000Z",
+                    systolic: 121,
+                    diastolic: 79,
+                  }],
+                }],
+              },
+            });
+          }
+          throw new Error(`Unexpected Junction request during pressure recovery test: ${url.toString()}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-05-14T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "omron",
+      sourceProviderSlug: "omron",
+      status: "connected",
+      lastSeenAt: now.toISOString(),
+    });
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        emptyBackfillAttempts: 4,
+        historicalBackfill: true,
+        historicalRecordsSeen: true,
+        historicalWindowStart: "2026-05-12T00:00:00.000Z",
+        resource: "blood_pressure",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "omron",
+        windowStart: "2026-05-12T00:00:00.000Z",
+        windowEnd: "2026-05-14T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      dedupeKey: `hosted-device-sync:${"e".repeat(64)}`,
+    });
+
+    await service.runWorkerOnce();
+    const unavailableSource = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "omron",
+    })[0];
+    assert.equal(unavailableSource?.status, "disconnected");
+    assert.equal(unavailableSource?.lastErrorCode, null);
+    assert.equal(importedSnapshots.length, 0);
+
+    providerState.status = "connected";
+    now = new Date("2026-09-02T10:00:00.000Z");
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await service.runWorkerOnce();
+      now = new Date(now.getTime() + 24 * 60 * 60_000);
+    }
+
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: account.id,
+        sourceProviderSlug: "omron",
+      })[0]?.status,
+      "connected",
+    );
+    assert.equal(importedSnapshots.length > 0, true);
+    assert.equal(
+      store.getAccountById(account.id)?.metadata.junctionBloodPressureHistoryBackfillCoverage,
+      "v1|omron",
+    );
+  } finally {
+    close();
+  }
+});
+
+test("hosted listed-only recovery publishes connected before pressure egress resumes", async () => {
+  let now = new Date("2026-09-01T10:00:00.000Z");
+  const vaultRoot = await makeTempDirectory(
+    "murph-device-syncd-hosted-junction-pressure-recovery",
+  );
+  const providerState = {
+    status: "disconnected",
+  };
+  const importedSnapshots: unknown[] = [];
+  let hostedSources: ProviderJobConnectionSource[] = [{
+    displayName: "Omron",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    resourceAvailabilitySummary: { blood_pressure: true },
+    sourceInstanceKey: "omron",
+    sourceProviderSlug: "omron",
+    status: "connected",
+  }];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importedSnapshots.push(input.snapshot);
+        const result = await prepareDeviceProviderSnapshotImport(input);
+        return { events: result.events ?? [] };
+      },
+    },
+    listConnectionSourcesForJob: ({ sourceProviderSlug, status }) =>
+      hostedSources.filter((source) =>
+        (sourceProviderSlug == null || source.sourceProviderSlug === sourceProviderSlug)
+        && (status == null || source.status === status)
+      ),
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: ["activity"],
+        timeseriesResources: ["blood_pressure"],
+        fetchImpl: async (input) => {
+          const url = new URL(readUrl(input));
+          if (url.pathname === "/v2/user/providers/junction-user-hosted-recovery") {
+            return createJsonResponse({
+              providers: [{
+                id: "provider-omron-1",
+                slug: "omron",
+                name: "Omron",
+                status: providerState.status,
+                resource_availability: { blood_pressure: true },
+              }],
+            });
+          }
+          if (
+            url.pathname
+              === "/v2/timeseries/junction-user-hosted-recovery/blood_pressure/grouped"
+          ) {
+            return createJsonResponse({
+              groups: {
+                omron: [{
+                  data: [{
+                    id: "bp-after-hosted-provider-recovery",
+                    timestamp: "2026-05-12T08:30:00.000Z",
+                    systolic: 121,
+                    diastolic: 79,
+                  }],
+                }],
+              },
+            });
+          }
+          throw new Error(
+            `Unexpected Junction request during hosted pressure recovery test: ${url.toString()}`,
+          );
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-hosted-recovery",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-05-14T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "omron",
+      sourceProviderSlug: "omron",
+      displayName: "Omron",
+      status: "connected",
+      resourceAvailabilitySummary: { blood_pressure: true },
+      lastSeenAt: now.toISOString(),
+    });
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        emptyBackfillAttempts: 4,
+        historicalBackfill: true,
+        historicalRecordsSeen: true,
+        historicalWindowStart: "2026-05-12T00:00:00.000Z",
+        resource: "blood_pressure",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "omron",
+        windowStart: "2026-05-12T00:00:00.000Z",
+        windowEnd: "2026-05-14T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      dedupeKey: `hosted-device-sync:${"f".repeat(64)}`,
+    });
+
+    const publishLocalSourceToHostedAuthority = () => {
+      const source = store.listConnectionSources({
+        connectionId: account.id,
+        sourceProviderSlug: "omron",
+      })[0];
+      assert.ok(source);
+      hostedSources = [{
+        displayName: source.displayName,
+        lastErrorCode: source.lastErrorCode,
+        lastErrorMessage: source.lastErrorMessage,
+        resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+        sourceInstanceKey: source.sourceInstanceKey,
+        sourceProviderSlug: source.sourceProviderSlug,
+        status: source.status,
+      }];
+    };
+
+    await service.runWorkerOnce();
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: account.id,
+        sourceProviderSlug: "omron",
+      })[0]?.status,
+      "disconnected",
+    );
+    assert.equal(importedSnapshots.length, 0);
+    publishLocalSourceToHostedAuthority();
+
+    providerState.status = "connected";
+    now = new Date("2026-09-02T10:00:00.000Z");
+    await service.runWorkerOnce();
+    assert.equal(
+      store.listConnectionSources({
+        connectionId: account.id,
+        sourceProviderSlug: "omron",
+      })[0]?.status,
+      "connected",
+    );
+    assert.equal(importedSnapshots.length, 0);
+    publishLocalSourceToHostedAuthority();
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      now = new Date(now.getTime() + 24 * 60 * 60_000);
+      await service.runWorkerOnce();
+    }
+
+    assert.equal(importedSnapshots.length > 0, true);
+    assert.equal(
+      store.getAccountById(account.id)?.metadata.junctionBloodPressureHistoryBackfillCoverage,
+      "v1|omron",
+    );
+  } finally {
+    close();
+  }
+});
+
 test("device sync service reports canonical counts separately from durable delivery acceptance", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-import-receipt");
   const importReceipts: unknown[] = [];
@@ -1008,10 +1332,12 @@ test("device sync service reports canonical counts separately from durable deliv
     assert.deepEqual(importReceipts, [
       {
         canonicalEventCount: 2,
+        canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
       },
       {
         canonicalEventCount: 0,
+        canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
       },
     ]);

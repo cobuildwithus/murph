@@ -1,8 +1,12 @@
 import { createHmac } from "node:crypto";
 import { rm } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { initializeVault, upsertScheduledLog } from "@murphai/core";
+import {
+  findEventByExternalRef,
+  initializeVault,
+  upsertScheduledLog,
+} from "@murphai/core";
 import {
   parseAssistantSessionRecord,
   type AssistantSession,
@@ -13,6 +17,15 @@ import {
   normalizeCanonicalScheduledLogCronRecord,
   runScheduledLogCronJob,
 } from "../src/assistant/cron/scheduled-log.js";
+import {
+  createAssistantCronCanonicalRuntimeRecord,
+  writeAssistantCronCanonicalRuntimeStore,
+} from "../src/assistant/cron/runtime-state.js";
+import {
+  getAssistantCronJob,
+  processDueAssistantCronJobsLocal,
+} from "../src/assistant-cron.js";
+import { resolveAssistantStatePaths } from "../src/assistant/store/paths.js";
 import {
   HOSTED_AI_USAGE_REPORTING_SECRET_ENV,
   createAssistantUsageAttribution,
@@ -85,6 +98,31 @@ function buildScheduledLogRecord(input: {
     relativePath: "bank/scheduled-logs/daily-mobility.md",
     markdown: "scheduled log markdown",
   };
+}
+
+async function writeScheduledLogRetryRuntime(input: {
+  activatedAt: string;
+  jobId: string;
+  occurrenceAt: string;
+  retryAfterAt: string;
+  runningAt?: string;
+  updatedAt: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const record = createAssistantCronCanonicalRuntimeRecord({
+    activatedAt: input.activatedAt,
+    jobId: input.jobId,
+    now: input.activatedAt,
+  });
+  record.updatedAt = input.updatedAt;
+  record.state.lastRunAt = input.occurrenceAt;
+  record.state.pendingOccurrenceAt = input.occurrenceAt;
+  record.state.retryAfterAt = input.retryAfterAt;
+  record.state.runningAt = input.runningAt ?? null;
+  await writeAssistantCronCanonicalRuntimeStore(
+    resolveAssistantStatePaths(input.vaultRoot),
+    { version: 1, jobs: [record] },
+  );
 }
 
 describe("assistant usage attribution", () => {
@@ -352,6 +390,212 @@ describe("assistant scheduled-log cron helpers", () => {
       expect(message).toContain('Auto-logged scheduled log "Morning check-in"');
       expect(message).toContain("measurement");
     } finally {
+      await rm(parentRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("drops a retired scheduled-log retry after its schedule changes", async () => {
+    vi.useFakeTimers();
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "murph-assistant-scheduled-log-retry-schedule-edit-",
+    );
+    const scheduledLogId = "slog_01JX8VCQY2M5ZBV64ZP4N1DRBD";
+    const retiredOccurrenceAt = "2026-04-22T08:00:00.000Z";
+
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      await upsertScheduledLog({
+        action: {
+          kind: "measurement.add",
+          measurements: [{ metric: "body-weight", unit: "lb", value: 180.8 }],
+        },
+        body: "Write the scheduled measurement event.",
+        now: new Date("2026-04-22T07:00:00.000Z"),
+        schedule: { kind: "dailyLocal", localTime: "08:00" },
+        scheduledLogId,
+        slug: "daily-measurement-retry-edit",
+        status: "active",
+        title: "Daily measurement",
+        vaultRoot,
+      });
+      await writeScheduledLogRetryRuntime({
+        activatedAt: "2026-04-22T07:00:00.000Z",
+        jobId: scheduledLogId,
+        occurrenceAt: retiredOccurrenceAt,
+        retryAfterAt: "2026-04-22T08:10:00.000Z",
+        updatedAt: "2026-04-22T08:00:01.000Z",
+        vaultRoot,
+      });
+      await upsertScheduledLog({
+        action: {
+          kind: "measurement.add",
+          measurements: [{ metric: "body-weight", unit: "lb", value: 180.8 }],
+        },
+        body: "Write the scheduled measurement event.",
+        now: new Date("2026-04-22T08:05:00.000Z"),
+        schedule: { kind: "dailyLocal", localTime: "09:00" },
+        scheduledLogId,
+        slug: "daily-measurement-retry-edit",
+        status: "active",
+        title: "Daily measurement",
+        vaultRoot,
+      });
+
+      vi.setSystemTime(new Date("2026-04-22T08:10:30.000Z"));
+      await expect(processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      })).resolves.toEqual({ failed: 0, processed: 0, succeeded: 0 });
+      await expect(getAssistantCronJob(vaultRoot, scheduledLogId)).resolves
+        .toMatchObject({ state: { nextRunAt: "2026-04-22T09:00:00.000Z" } });
+      await expect(findEventByExternalRef({
+        resourceId: `${scheduledLogId}:${retiredOccurrenceAt}`,
+        resourceType: "occurrence",
+        system: "murph-scheduled-log",
+        vaultRoot,
+      })).resolves.toBeNull();
+
+      vi.setSystemTime(new Date("2026-04-22T09:00:00.000Z"));
+      await expect(processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 1 });
+      await expect(findEventByExternalRef({
+        resourceId: `${scheduledLogId}:2026-04-22T09:00:00.000Z`,
+        resourceType: "occurrence",
+        system: "murph-scheduled-log",
+        vaultRoot,
+      })).resolves.toMatchObject({ occurredAt: "2026-04-22T09:00:00.000Z" });
+    } finally {
+      vi.useRealTimers();
+      await rm(parentRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a scheduled-log retry across a same-schedule edit", async () => {
+    vi.useFakeTimers();
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "murph-assistant-scheduled-log-retry-content-edit-",
+    );
+    const scheduledLogId = "slog_01JX8VCQY2M5ZBV64ZP4N1DRBE";
+    const occurrenceAt = "2026-04-22T08:00:00.000Z";
+
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      await upsertScheduledLog({
+        action: {
+          kind: "measurement.add",
+          measurements: [{ metric: "body-weight", unit: "lb", value: 180.8 }],
+        },
+        body: "Write the scheduled measurement event.",
+        now: new Date("2026-04-22T07:00:00.000Z"),
+        schedule: { kind: "dailyLocal", localTime: "08:00" },
+        scheduledLogId,
+        slug: "daily-measurement-retry-content",
+        status: "active",
+        summary: "Original summary.",
+        title: "Daily measurement",
+        vaultRoot,
+      });
+      await writeScheduledLogRetryRuntime({
+        activatedAt: "2026-04-22T07:00:00.000Z",
+        jobId: scheduledLogId,
+        occurrenceAt,
+        retryAfterAt: "2026-04-22T08:10:00.000Z",
+        updatedAt: "2026-04-22T08:00:01.000Z",
+        vaultRoot,
+      });
+      await upsertScheduledLog({
+        action: {
+          kind: "measurement.add",
+          measurements: [{ metric: "body-weight", unit: "lb", value: 180.8 }],
+        },
+        body: "Write the scheduled measurement event.",
+        now: new Date("2026-04-22T08:05:00.000Z"),
+        schedule: { kind: "dailyLocal", localTime: "08:00" },
+        scheduledLogId,
+        slug: "daily-measurement-retry-content",
+        status: "active",
+        summary: "Updated summary.",
+        title: "Daily measurement",
+        vaultRoot,
+      });
+
+      vi.setSystemTime(new Date("2026-04-22T08:10:30.000Z"));
+      await expect(processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 1 });
+      await expect(findEventByExternalRef({
+        resourceId: `${scheduledLogId}:${occurrenceAt}`,
+        resourceType: "occurrence",
+        system: "murph-scheduled-log",
+        vaultRoot,
+      })).resolves.toMatchObject({ occurredAt: occurrenceAt });
+    } finally {
+      vi.useRealTimers();
+      await rm(parentRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a running scheduled-log occurrence across a schedule edit", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-22T08:05:00.000Z"));
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      "murph-assistant-scheduled-log-running-schedule-edit-",
+    );
+    const scheduledLogId = "slog_01JX8VCQY2M5ZBV64ZP4N1DRBF";
+    const runningOccurrenceAt = "2026-04-22T08:00:00.000Z";
+
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      await upsertScheduledLog({
+        action: {
+          kind: "measurement.add",
+          measurements: [{ metric: "body-weight", unit: "lb", value: 180.8 }],
+        },
+        body: "Write the scheduled measurement event.",
+        now: new Date("2026-04-22T07:00:00.000Z"),
+        schedule: { kind: "dailyLocal", localTime: "08:00" },
+        scheduledLogId,
+        slug: "daily-measurement-running-edit",
+        status: "active",
+        title: "Daily measurement",
+        vaultRoot,
+      });
+      await writeScheduledLogRetryRuntime({
+        activatedAt: "2026-04-22T07:00:00.000Z",
+        jobId: scheduledLogId,
+        occurrenceAt: runningOccurrenceAt,
+        retryAfterAt: runningOccurrenceAt,
+        runningAt: "2026-04-22T08:00:01.000Z",
+        updatedAt: "2026-04-22T08:00:01.000Z",
+        vaultRoot,
+      });
+      await upsertScheduledLog({
+        action: {
+          kind: "measurement.add",
+          measurements: [{ metric: "body-weight", unit: "lb", value: 180.8 }],
+        },
+        body: "Write the scheduled measurement event.",
+        now: new Date("2026-04-22T08:05:00.000Z"),
+        schedule: { kind: "dailyLocal", localTime: "09:00" },
+        scheduledLogId,
+        slug: "daily-measurement-running-edit",
+        status: "active",
+        title: "Daily measurement",
+        vaultRoot,
+      });
+
+      await expect(getAssistantCronJob(vaultRoot, scheduledLogId)).resolves
+        .toMatchObject({
+          state: {
+            nextRunAt: runningOccurrenceAt,
+            runningAt: "2026-04-22T08:00:01.000Z",
+          },
+        });
+    } finally {
+      vi.useRealTimers();
       await rm(parentRoot, { recursive: true, force: true });
     }
   });

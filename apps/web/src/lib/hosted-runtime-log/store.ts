@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import {
   parseHostedRuntimeLogRequest,
@@ -21,6 +21,12 @@ import {
   isHostedRuntimeLogDatabaseConfigured,
 } from "./database";
 import { getPrisma } from "../prisma";
+import {
+  hostedRuntimeLogLockKey,
+  hostedRuntimeLogSubjectKey,
+} from "./subject-key";
+
+export { hostedRuntimeLogLockKey, hostedRuntimeLogSubjectKey } from "./subject-key";
 
 const HOSTED_RUNTIME_LOG_TABLE = "hosted_runtime_log";
 const HOSTED_RUNTIME_LOG_FIELD_COUNT = 17;
@@ -166,29 +172,6 @@ export async function listHostedRuntimeLogs(input: {
   return result.rows.map((row) => projectHostedRuntimeLogRow(row, userId));
 }
 
-export function mergeHostedRuntimeLogRecords<RecordType extends {
-  at: string;
-  id: string;
-}>(
-  sources: readonly (readonly RecordType[])[],
-  limit: number,
-): RecordType[] {
-  const normalizedLimit = normalizeHostedRuntimeLogLimit(limit);
-  const byId = new Map<string, RecordType>();
-  for (const source of sources) {
-    for (const record of source) {
-      byId.set(record.id, record);
-    }
-  }
-
-  return [...byId.values()]
-    .sort((left, right) => {
-      const timeDifference = Date.parse(right.at) - Date.parse(left.at);
-      return timeDifference !== 0 ? timeDifference : right.id.localeCompare(left.id);
-    })
-    .slice(0, normalizedLimit);
-}
-
 export async function listHostedRuntimeTurnTimingLogs(input: {
   attemptIds: readonly string[];
   database?: HostedRuntimeLogSqlDatabase;
@@ -226,30 +209,6 @@ export async function listHostedRuntimeTurnTimingLogs(input: {
     id: requireOpaqueString(row.id, "Hosted runtime timing log id"),
     redactedJson: normalizeHostedRuntimeRedactedJson(row.redactedJson),
   }));
-}
-
-export function mergeHostedRuntimeTurnTimingLogs(
-  sources: readonly (readonly HostedRuntimeTurnTimingLogRow[])[],
-  limit: number,
-): { rows: HostedRuntimeTurnTimingLogRow[]; truncated: boolean } {
-  const normalizedLimit = normalizePositiveInteger(
-    limit,
-    "Hosted runtime timing log merge limit",
-  );
-  const byId = new Map<string, HostedRuntimeTurnTimingLogRow>();
-  for (const source of sources) {
-    for (const row of source) {
-      byId.set(row.id, row);
-    }
-  }
-  const ordered = [...byId.values()].sort((left, right) => {
-    const timeDifference = Date.parse(right.at) - Date.parse(left.at);
-    return timeDifference !== 0 ? timeDifference : right.id.localeCompare(left.id);
-  });
-  return {
-    rows: ordered.slice(0, normalizedLimit),
-    truncated: ordered.length > normalizedLimit,
-  };
 }
 
 /**
@@ -516,24 +475,6 @@ function projectHostedRuntimeLogRow(
     userId,
     workspaceVersion: parsed.workspaceVersion ?? null,
   };
-}
-
-export function hostedRuntimeLogSubjectKey(userId: string): string {
-  return createHash("sha256")
-    .update(`murph:hosted-runtime-log-subject:${requireHostedRuntimeLogUserId(userId)}`)
-    .digest("hex");
-}
-
-export function hostedRuntimeLogLockKey(subjectKey: string): string {
-  const boundedSubjectKey = requireOpaqueString(
-    subjectKey,
-    "Hosted runtime log subject key",
-  );
-  if (!/^[0-9a-f]{64}$/u.test(boundedSubjectKey)) {
-    throw new TypeError("Hosted runtime log subject key must be a SHA-256 hex digest.");
-  }
-  return BigInt.asIntN(64, BigInt(`0x${boundedSubjectKey.slice(0, 16)}`))
-    .toString();
 }
 
 async function withHostedRuntimeLogTransaction<Result>(

@@ -91,28 +91,33 @@ describe("hosted preference handoff sweeper", () => {
 
   it("bounds a hung handoff so the recovery sweep can finish", async () => {
     const requestHandoff = vi.fn(() => new Promise<never>(() => {}));
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(0);
 
-    const result = await runHostedPreferenceHandoffSweeper({
-      handoffTimeoutMs: 1,
-      hasActiveAccess: vi.fn(async () => true),
-      logger: buildLogger(),
-      requestHandoff,
-      store: buildStore([{
+    try {
+      const result = await runHostedPreferenceHandoffSweeper({
+        handoffTimeoutMs: 1,
+        hasActiveAccess: vi.fn(async () => true),
+        logger: buildLogger(),
+        requestHandoff,
+        store: buildStore([{
+          mailboxItemId: "mailbox_preference_hung",
+          userId: "member_preference_hung",
+        }]),
+      });
+
+      expect(result).toMatchObject({
+        handoffAccepted: 0,
+        handoffAttempted: 1,
+        handoffFailed: 1,
+      });
+      expect(requestHandoff).toHaveBeenCalledWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: "member_preference_hung",
         mailboxItemId: "mailbox_preference_hung",
-        userId: "member_preference_hung",
-      }]),
-    });
-
-    expect(result).toMatchObject({
-      handoffAccepted: 0,
-      handoffAttempted: 1,
-      handoffFailed: 1,
-    });
-    expect(requestHandoff).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-      expectedUserId: "member_preference_hung",
-      mailboxItemId: "mailbox_preference_hung",
-    });
+      });
+    } finally {
+      dateNow.mockRestore();
+    }
   });
 
   it("skips inactive owners and keeps each sweep bounded", async () => {
@@ -258,6 +263,40 @@ describe("hosted preference handoff sweeper", () => {
     });
   });
 
+  it("selects pending browser-vault refresh wakes in the shared mailbox sweep", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([{
+      mailboxItemId: "mailbox_browser_refresh",
+      userId: "member_browser_refresh",
+    }]);
+    const requestHandoff = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: "hosted-user-runtime:synthetic",
+    }));
+
+    await runHostedPreferenceHandoffSweeper({
+      hasActiveAccess: vi.fn(async () => true),
+      logger: buildLogger(),
+      requestHandoff,
+    });
+
+    const query = mocks.queryRaw.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+    } | undefined;
+    const sql = query?.strings?.join("?") ?? "";
+    expect(sql).toContain('"pending_browser_vault_refresh_users"');
+    expect(sql).toContain(
+      '"item"."kind" = \'runtime.browser-vault-refresh-requested\'',
+    );
+    expect(sql).toContain(
+      '"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)',
+    );
+    expect(requestHandoff).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_browser_refresh",
+      mailboxItemId: "mailbox_browser_refresh",
+    });
+  });
+
   it("retries an exact current Clinical Records wake after a hung shared handoff", async () => {
     const store = buildStore([{
       mailboxItemId: "mailbox_clinical_hung_retry",
@@ -273,27 +312,32 @@ describe("hosted preference handoff sweeper", () => {
             workflowId: "hosted-user-runtime:synthetic",
           });
     });
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(0);
 
-    await expect(runHostedPreferenceHandoffSweeper({
-      handoffTimeoutMs: 1,
-      hasActiveAccess: vi.fn(async () => true),
-      logger: buildLogger(),
-      requestHandoff,
-      store,
-    })).resolves.toMatchObject({
-      handoffAccepted: 0,
-      handoffFailed: 1,
-    });
-    await expect(runHostedPreferenceHandoffSweeper({
-      handoffTimeoutMs: 1,
-      hasActiveAccess: vi.fn(async () => true),
-      logger: buildLogger(),
-      requestHandoff,
-      store,
-    })).resolves.toMatchObject({
-      handoffAccepted: 1,
-      handoffFailed: 0,
-    });
+    try {
+      await expect(runHostedPreferenceHandoffSweeper({
+        handoffTimeoutMs: 1,
+        hasActiveAccess: vi.fn(async () => true),
+        logger: buildLogger(),
+        requestHandoff,
+        store,
+      })).resolves.toMatchObject({
+        handoffAccepted: 0,
+        handoffFailed: 1,
+      });
+      await expect(runHostedPreferenceHandoffSweeper({
+        handoffTimeoutMs: 1,
+        hasActiveAccess: vi.fn(async () => true),
+        logger: buildLogger(),
+        requestHandoff,
+        store,
+      })).resolves.toMatchObject({
+        handoffAccepted: 1,
+        handoffFailed: 0,
+      });
+    } finally {
+      dateNow.mockRestore();
+    }
 
     expect(requestHandoff).toHaveBeenCalledTimes(2);
     expect(requestHandoff).toHaveBeenNthCalledWith(1, {

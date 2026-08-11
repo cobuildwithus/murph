@@ -36,7 +36,9 @@ import type {
 import {
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
-import { resolveHostedR2CutoverContext } from "../src/r2-cutover.ts";
+import {
+  HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+} from "../src/browser-vault-store.ts";
 import {
   hostedArtifactUserPrefix,
   hostedBrowserVaultReplicaUserPrefix,
@@ -55,6 +57,7 @@ import type {
   DurableObjectStorageLike,
 } from "../src/user-runner/types.ts";
 import {
+  browserVaultReplicaOrphanCandidateStorageKey,
   workspaceSnapshotUploadSessionCurrentStorageKey,
   workspaceSnapshotOrphanCandidateStorageKey,
   workspaceSnapshotOrphanCandidateStoragePrefix,
@@ -127,11 +130,14 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureReadyForProcessing = vi.fn();
+    const writeDataPoint = vi.fn();
     const { runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       readHealthDataConsentState: () => "revoked",
+      runtimeRetryAnalytics: { writeDataPoint },
     });
     await runner.bindUser(TEST_USER_ID);
+    mocks.emitHostedExecutionStructuredLog.mockClear();
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "revoked-consent-attempt",
@@ -141,7 +147,495 @@ describe("HostedUserRunner execution coordination", () => {
       retryAt: "2026-04-27T00:01:00.000Z",
     });
     expect(ensureReadyForProcessing).not.toHaveBeenCalled();
+    expect(writeDataPoint).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+  });
+
+  it("does not address the runner container when shell prewarm observes revoked consent", async () => {
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "revoked",
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
+          shellPrewarmSource: "unknown",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+      }),
+    );
+  });
+
+  it("carries the bounded shell-prewarm source through the existing container RPC", async () => {
+    const prewarmShell = vi.fn(async () => ({
+      action: "start_issued" as const,
+      kind: "started" as const,
+    }));
+    const { runner } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+    });
+
+    await runner.prewarmRuntimeShellForUser(
+      TEST_USER_ID,
+      "linq-typing-started",
+    );
+
+    expect(prewarmShell).toHaveBeenCalledWith({
+      source: "linq-typing-started",
+      timeoutMs: 20_000,
+      userId: TEST_USER_ID,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "scheduled",
+          shellPrewarmSource: "linq-typing-started",
+        },
+      }),
+    );
+  });
+
+  it("abandons a slow shell hint admission before authoritative processing begins", async () => {
+    vi.useFakeTimers();
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const authoritativeAdmissionStarted = createDeferred<void>();
+    const releaseAuthoritativeAdmission = createDeferred<"granted">();
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
+          });
+        }
+        expect(timeoutMs).toBe(30_000);
+        authoritativeAdmissionStarted.resolve(undefined);
+        return releaseAuthoritativeAdmission.promise;
+      },
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-slow-hint-admission",
+      userId: TEST_USER_ID,
+    });
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(admissionReads).toBe(1);
+    expect(runnerContainerNames).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(prewarm).resolves.toBeUndefined();
+    await authoritativeAdmissionStarted.promise;
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
+          shellPrewarmSource: "unknown",
+        },
+        level: "warn",
+      }),
+    );
+
+    releaseAuthoritativeAdmission.resolve("granted");
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+  });
+
+  it("drops repeated shell hints instead of queuing them ahead of authoritative processing", async () => {
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const releaseFirstAdmission = createDeferred<"granted">();
+    const authoritativeAdmissionStarted = createDeferred<void>();
+    const releaseAuthoritativeAdmission = createDeferred<"granted">();
+    const prewarmShell = vi.fn(async () => ({
+      action: "start_issued" as const,
+      kind: "started" as const,
+    }));
+    const { runner } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return releaseFirstAdmission.promise;
+        }
+        expect(timeoutMs).toBe(30_000);
+        authoritativeAdmissionStarted.resolve(undefined);
+        return releaseAuthoritativeAdmission.promise;
+      },
+    });
+
+    const firstPrewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    let settledDuplicateCount = 0;
+    const duplicatePrewarms = Array.from({ length: 4 }, () =>
+      runner.prewarmRuntimeShellForUser(TEST_USER_ID).finally(() => {
+        settledDuplicateCount += 1;
+      })
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(settledDuplicateCount).toBe(4);
+    expect(admissionReads).toBe(1);
+
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-repeated-hints",
+      userId: TEST_USER_ID,
+    });
+    releaseFirstAdmission.resolve("granted");
+    await expect(firstPrewarm).resolves.toBeUndefined();
+    await authoritativeAdmissionStarted.promise;
+
+    expect(admissionReads).toBe(2);
+    expect(prewarmShell).toHaveBeenCalledOnce();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "scheduled",
+          shellPrewarmSource: "unknown",
+        },
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls.filter(
+      ([entry]) =>
+        entry.details?.shellPrewarmAdmissionOutcome === "skipped_consent_busy",
+    )).toHaveLength(4);
+    await expect(Promise.all(duplicatePrewarms)).resolves.toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+
+    await expect(runner.prewarmRuntimeShellForUser(TEST_USER_ID))
+      .resolves.toBeUndefined();
+    expect(admissionReads).toBe(2);
+    expect(prewarmShell).toHaveBeenCalledOnce();
+
+    releaseAuthoritativeAdmission.resolve("granted");
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+  });
+
+  it("releases consent withdrawal after the bounded shell hint admission budget", async () => {
+    vi.useFakeTimers();
+    let admissionReads = 0;
+    const firstAdmissionStarted = createDeferred<void>();
+    const withdrawalAdmissionStarted = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => undefined);
+    const prewarmShell = vi.fn();
+    const { runner } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: ({ timeoutMs }) => {
+        admissionReads += 1;
+        if (admissionReads === 1) {
+          expect(timeoutMs).toBe(250);
+          firstAdmissionStarted.resolve(undefined);
+          return new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("hint admission timed out")), timeoutMs);
+          });
+        }
+        expect(timeoutMs).toBe(30_000);
+        withdrawalAdmissionStarted.resolve(undefined);
+        return "revoked";
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await firstAdmissionStarted.promise;
+    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(
+      TEST_USER_ID,
+    );
+
+    await vi.advanceTimersByTimeAsync(249);
+    expect(admissionReads).toBe(1);
+    expect(destroyInstance).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(prewarm).resolves.toBeUndefined();
+    await withdrawalAdmissionStarted.promise;
+    await expect(withdrawal).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(destroyInstance).toHaveBeenCalledOnce();
+  });
+
+  it("lets a new Worker withdraw the exact prior-version shell while prewarm is pending", async () => {
+    let consentState: "granted" | "revoked" = "granted";
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const prewarmStarted = createDeferred<void>();
+    const releasePrewarm = createDeferred<void>();
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    const events: string[] = [];
+    const prewarmShell = vi.fn(async () => {
+      events.push("prewarm");
+      prewarmStarted.resolve(undefined);
+      await releasePrewarm.promise;
+      return { action: "start_issued" as const, kind: "started" as const };
+    });
+    const destroyInstance = vi.fn(async () => {
+      events.push("destroy");
+      destroyStarted.resolve(undefined);
+      releasePrewarm.resolve(undefined);
+      await releaseDestroy.promise;
+    });
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: () => consentState,
+      runnerRuntimeEnvSource,
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await prewarmStarted.promise;
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    consentState = "revoked";
+    const withdrawal = runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID);
+    await destroyStarted.promise;
+    let withdrawalSettled = false;
+    void withdrawal.finally(() => {
+      withdrawalSettled = true;
+    });
+    await Promise.resolve();
+    expect(withdrawalSettled).toBe(false);
+    expect(runnerContainerNames).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
+      priorRunnerContainerName,
+    );
+
+    releaseDestroy.resolve(undefined);
+    await expect(prewarm).resolves.toBeUndefined();
+    await expect(withdrawal).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+      runnerContainerDestroyOk: true,
+    });
+    expect(events).toEqual(["prewarm", "destroy"]);
+    expect(readActiveRunnerContainerNameForTest(sql)).toBeNull();
+  });
+
+  it("lets authoritative readiness overtake a pending shell prewarm", async () => {
+    const prewarmStarted = createDeferred<void>();
+    const releasePrewarm = createDeferred<void>();
+    const readinessStarted = createDeferred<void>();
+    const events: string[] = [];
+    const prewarmShell = vi.fn(async () => {
+      events.push("prewarm");
+      prewarmStarted.resolve(undefined);
+      await releasePrewarm.promise;
+      return { action: "start_issued" as const, kind: "started" as const };
+    });
+    const ensureReadyForProcessing = vi.fn(async () => {
+      events.push("ensure-ready");
+      readinessStarted.resolve(undefined);
+      releasePrewarm.resolve(undefined);
+      return { action: "started" as const, kind: "ready" as const };
+    });
+    const { runner } = createRunnerHarness({
+      ensureReadyForProcessing,
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+    });
+
+    const prewarm = runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    await prewarmStarted.promise;
+    const ensure = runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "authoritative-after-prewarm",
+      userId: TEST_USER_ID,
+    });
+    await readinessStarted.promise;
+
+    await expect(prewarm).resolves.toBeUndefined();
+    await expect(ensure).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+    expect(events).toEqual(["prewarm", "ensure-ready"]);
+  });
+
+  it("destroys a prior-version pending prewarm before binding a current fence", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
+    const priorDestroyInstance = vi.fn(async () => undefined);
+    let priorRunnerContainerAccessCount = 0;
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      prewarmShell: vi.fn(async () => ({
+        action: "start_issued" as const,
+        kind: "started" as const,
+      })),
+      readHealthDataConsentState: () => "granted",
+      runnerContainerStubForName(name, defaultStub) {
+        if (name !== priorRunnerContainerName) {
+          return defaultStub;
+        }
+        priorRunnerContainerAccessCount += 1;
+        return priorRunnerContainerAccessCount === 1
+          ? defaultStub
+          : { ...defaultStub, destroyInstance: priorDestroyInstance };
+      },
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "current-after-prior-prewarm",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(runnerContainerNames.slice(0, 2)).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(runnerContainerNames).toContain(currentRunnerContainerName);
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
+  });
+
+  it("does not replace a pending prior-version stop target with another hint", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const prewarmShell = vi.fn(async () => ({
+      action: "start_issued" as const,
+      kind: "started" as const,
+    }));
+    const { runner, sql } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(prewarmShell).toHaveBeenCalledOnce();
+    expect(readActiveRunnerContainerNameForTest(sql)).toBe(
+      priorRunnerContainerName,
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_runtime_busy",
+          shellPrewarmSource: "unknown",
+        },
+      }),
+    );
+  });
+
+  it("does not recreate a shell after completed consent withdrawal", async () => {
+    const prewarmShell = vi.fn();
+    const destroyInstance = vi.fn(async () => undefined);
+    const { runner } = createRunnerHarness({
+      destroyInstance,
+      prewarmShell,
+      readHealthDataConsentState: () => "revoked",
+    });
+
+    await expect(
+      runner.reconcileRuntimeHealthDataConsentForUser(TEST_USER_ID),
+    ).resolves.toMatchObject({
+      consentState: "revoked",
+      processingAllowed: false,
+    });
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+
+    expect(destroyInstance).toHaveBeenCalledOnce();
+    expect(prewarmShell).not.toHaveBeenCalled();
+  });
+
+  it("captures existing control-plane boundaries without writing retry analytics for an accepted start", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const fixedNowMs = Date.parse(FIXED_NOW);
+    const writeDataPoint = vi.fn();
+    const { invoke, runner } = createRunnerHarness({
+      readHealthDataConsentState: () => {
+        vi.setSystemTime(fixedNowMs + 10);
+        return "granted";
+      },
+      runtimeRetryAnalytics: { writeDataPoint },
+    });
+    await runner.bindUser(TEST_USER_ID);
+    runner.installRuntimeProcessingStateTimingHooksForTest({
+      afterBindUser: () => vi.setSystemTime(fixedNowMs + 20),
+      afterReadState: () => vi.setSystemTime(fixedNowMs + 30),
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestration: {
+        cloudflareRouteReceivedAtEpochMs: fixedNowMs - 2,
+        triggeredByWebDirect: true,
+        userRunnerRpcStartedAtEpochMs: fixedNowMs - 1,
+      },
+      orchestrationAttemptId:
+        "web-ingress-11111111-1111-4111-8111-111111111111",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      cloudflareRouteReceivedAtEpochMs: fixedNowMs - 2,
+      userRunnerRpcStartedAtEpochMs: fixedNowMs - 1,
+      runtimeConsentLockAcquiredAtEpochMs: fixedNowMs,
+      healthDataAdmissionReadStartedAtEpochMs: fixedNowMs,
+      healthDataAdmissionReadFinishedAtEpochMs: fixedNowMs + 10,
+      userRunnerEnsureStartedAtEpochMs: fixedNowMs + 10,
+      runnerStateBindStartedAtEpochMs: fixedNowMs + 10,
+      runnerStateBindFinishedAtEpochMs: fixedNowMs + 20,
+      runnerStateReadStartedAtEpochMs: fixedNowMs + 20,
+      runnerStateReadFinishedAtEpochMs: fixedNowMs + 30,
+      runtimeInvocationOrchestrationAttemptId:
+        "web-ingress-11111111-1111-4111-8111-111111111111",
+      triggeredByWebDirect: true,
+    });
+    expect(writeDataPoint).not.toHaveBeenCalled();
   });
 
   it("serializes withdrawal behind an admitted ensure and stops the stale start before acknowledging", async () => {
@@ -677,6 +1171,99 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it("records an exact container completion before the detached caller resumes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-container-completion-receipt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const invokeInput = invoke.mock.calls[0]?.[0];
+    if (!invokeInput) {
+      throw new Error("Expected a hosted runtime invocation.");
+    }
+    const result: HostedWorkspaceInvocationResult = {
+      nextWakeAt: null,
+      status: "idle",
+    };
+
+    await expect(runner.recordRuntimeCompletionFromContainer({
+      attemptId: invokeInput.job.request.attemptId,
+      generation: invokeInput.job.request.leaseGeneration,
+      result,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({ completed: true });
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(1);
+
+    invocationResult.resolve(result);
+    await vi.waitFor(() =>
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Hosted runner runtime execution adapter completed.",
+        }),
+      )
+    );
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("rejects a stale container completion without clearing the active fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-stale-container-completion-receipt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const invokeInput = invoke.mock.calls[0]?.[0];
+    if (!invokeInput) {
+      throw new Error("Expected a hosted runtime invocation.");
+    }
+    const activeAttemptId = readRunnerMeta(sql).active_attempt_id;
+
+    await expect(runner.recordRuntimeCompletionFromContainer({
+      attemptId: invokeInput.job.request.attemptId,
+      generation: "999",
+      result: { nextWakeAt: null, status: "idle" },
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({ completed: false });
+    expect(readRunnerMeta(sql).active_attempt_id).toBe(activeAttemptId);
+    expect(
+      mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+        (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
+      ),
+    ).toHaveLength(0);
+
+    invocationResult.resolve({ nextWakeAt: null, status: "idle" });
+  });
+
   it("does not send owner release after a stale completion loses the exact fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -803,6 +1390,38 @@ describe("HostedUserRunner execution coordination", () => {
     expect(job?.runtime?.platformEnv?.HOSTED_LOG_FINGERPRINT_SECRET).toBeUndefined();
     expect(job?.runtime?.userEnv?.HOSTED_LOG_FINGERPRINT_SECRET).toBeUndefined();
     expect(JSON.stringify(job)).not.toContain(logFingerprintSecret);
+  });
+
+  it("places the exact Android rollout gate in the trusted invocation platform env", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({ importedSeq: "1", lag: "0", maxSeq: "1" })],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        MURPH_ANDROID_APP_ENABLED: "1",
+      },
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const job = invoke.mock.calls[0]?.[0].job;
+    expect(job?.runtime?.platformEnv?.MURPH_ANDROID_APP_ENABLED).toBe("1");
+    expect(job?.runtime?.forwardedEnv?.MURPH_ANDROID_APP_ENABLED).toBeUndefined();
+    expect(job?.runtime?.userEnv?.MURPH_ANDROID_APP_ENABLED).toBeUndefined();
   });
 
   it("accepts runtime processing start before the invocation reaches idle", async () => {
@@ -1144,7 +1763,17 @@ describe("HostedUserRunner execution coordination", () => {
     let preparationStartedAtEpochMs: number | null = null;
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
-    >(async () => ({ kind: "ready" }));
+    >(async () => ({
+      kind: "ready",
+      shellPrewarmObservation: {
+        firstHintAtEpochMs: 1_777_000_000_010,
+        finishedAtEpochMs: 1_777_000_000_030,
+        hintCount: 2,
+        operationElapsedMs: 20,
+        outcome: "cold_start_observed",
+        source: "linq-typing-started",
+      },
+    }));
     const { invoke, runner } = createRunnerHarness({
       ensureReadyForProcessing,
       onCryptoContextRead: () => {
@@ -1219,6 +1848,12 @@ describe("HostedUserRunner execution coordination", () => {
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
       runtimeInvocationPreparationElapsedMs: 1_250,
       runtimeStoreEnsureElapsedMs: 250,
+      shellPrewarmFirstHintAtEpochMs: 1_777_000_000_010,
+      shellPrewarmFinishedAtEpochMs: 1_777_000_000_030,
+      shellPrewarmHintCount: 2,
+      shellPrewarmOperationElapsedMs: 20,
+      shellPrewarmOutcome: "cold_start_observed",
+      shellPrewarmSource: "linq-typing-started",
       workspaceReadElapsedMs: 1_000,
     });
     expect(invocationOrchestration?.freshStartContainerReadyAtEpochMs)
@@ -1287,54 +1922,6 @@ describe("HostedUserRunner execution coordination", () => {
       }),
     );
   });
-
-  it.each(["source_active", "destination_active"] as const)(
-    "dispatches %s cutover restores through the role-aware fenced control plane",
-    async (cutoverPhase) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date(FIXED_NOW));
-      const snapshotId = `snapshot_${cutoverPhase}`;
-      const snapshotRef = await createWorkspaceSnapshotV2RefWithRuntimeRootForTest({
-        objectKey: await hostedWorkspaceSnapshotObjectKey({
-          snapshotId,
-          userId: TEST_USER_ID,
-        }),
-        snapshotId,
-      });
-      const { invoke, runner } = createRunnerHarness({
-        runnerRuntimeEnvSource: {
-          ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
-          HOSTED_R2_CUTOVER_PHASE: cutoverPhase,
-          HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "test-access-key",
-          HOSTED_R2_PRESIGN_ACCOUNT_ID: "account123",
-          HOSTED_R2_PRESIGN_BUCKET_NAME: "murph-test",
-          HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "murph-test-enam",
-          HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "test-secret-key",
-        },
-        workspace: createWorkspaceState({
-          snapshotRef,
-          version: "5",
-        }),
-      });
-      await runner.bindUser(TEST_USER_ID);
-
-      await expect(runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "test-orchestration-attempt",
-        userId: TEST_USER_ID,
-      })).resolves.toMatchObject({
-        action: "started",
-        kind: "runtime_processing_accepted",
-      });
-
-      await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
-      expect(invoke.mock.calls[0]?.[0].job).not.toHaveProperty("preparedSnapshotRestore");
-      expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: "Hosted workspace snapshot restore preparation unavailable.",
-        }),
-      );
-    },
-  );
 
   it("reuses cached runner stores when applying a caller command budget", async () => {
     vi.useFakeTimers();
@@ -2115,9 +2702,13 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const neverReady = new Promise<never>(() => undefined);
+    let readinessStartedAt: number | null = null;
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
-    >(async () => await neverReady);
+    >(async () => {
+      readinessStartedAt = Date.now();
+      return await neverReady;
+    });
     const { invoke, runner, sql } = createRunnerHarness({
       ensureReadyForProcessing,
       workspace: createWorkspaceState({ version: "5" }),
@@ -2133,11 +2724,14 @@ describe("HostedUserRunner execution coordination", () => {
       timeoutMs: 8_000,
       userId: TEST_USER_ID,
     }));
+    if (readinessStartedAt === null) {
+      throw new Error("Expected startup readiness to begin.");
+    }
 
     await vi.advanceTimersByTimeAsync(8_000);
     await expect(response).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:18.050Z",
+      retryAt: new Date(readinessStartedAt + 18_000).toISOString(),
     });
 
     expect(invoke).not.toHaveBeenCalled();
@@ -2304,7 +2898,14 @@ describe("HostedUserRunner execution coordination", () => {
           activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
           activeFenceTargetWasPriorVersion: false,
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
+          healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+          healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         },
         processingMode: "default",
         userId: TEST_USER_ID,
@@ -2355,7 +2956,14 @@ describe("HostedUserRunner execution coordination", () => {
         activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
         activeFenceTargetWasPriorVersion: false,
         activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runtimeConsentLockAcquiredAtEpochMs: Date.parse(FIXED_NOW),
+        healthDataAdmissionReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+        healthDataAdmissionReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+        runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
       },
       processingMode: "default",
       userId: TEST_USER_ID,
@@ -2578,6 +3186,24 @@ describe("HostedUserRunner execution coordination", () => {
     });
     activeAttemptId = token.attemptId;
     activeGeneration = String(token.generation);
+    const snapshotId =
+      `snapshot_preempt_${activeProcessingMode}_${processingMode ?? "default"}`;
+    const snapshotObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}${snapshotId}.snapshot.enc`;
+    await expect(runner.createHostedWorkspaceSnapshotUploadSession({
+      ...createWorkspaceSnapshotUploadSessionForTest({
+        objectKey: snapshotObjectKey,
+        snapshotId,
+      }),
+      attemptId: token.attemptId,
+      expectedWorkspaceVersion: "7",
+      leaseGeneration: String(token.generation),
+      workspaceVersion: "7",
+    })).resolves.toMatchObject({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      snapshotId,
+    });
 
     const ensureRuntimeProcessing = runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId:
@@ -3420,6 +4046,297 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it("preserves an inactive fence while its shutdown checkpoint handoff is fresh", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "4" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_1",
+      generation: 9,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_shutdown_handoff.snapshot.enc`,
+        snapshotId: "snapshot_shutdown_handoff",
+      }),
+    );
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-checkpoint-handoff",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:01.000Z",
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_generation: token.generation,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          runtimeProcessingRetryReason: "checkpoint_handoff_pending",
+        }),
+        message: "Hosted runner runtime processing could not be accepted yet.",
+      }),
+    );
+  });
+
+  it("preserves a long-running checkpoint while its exact owner keeps heartbeating", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "4" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_1",
+      generation: 9,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+    const session = createWorkspaceSnapshotUploadSessionForTest({
+      objectKey:
+        `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_long_handoff.snapshot.enc`,
+      snapshotId: "snapshot_long_handoff",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(session);
+    vi.setSystemTime(new Date("2026-04-27T00:00:29.000Z"));
+    await expect(runner.heartbeatHostedWorkspaceSnapshotUploadSession({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      snapshotId: session.snapshotId,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-long-checkpoint-handoff",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:30.000Z",
+    });
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_generation: token.generation,
+    });
+  });
+
+  it("does not delay replacement after the exact checkpoint handoff completes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "4" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_1",
+      generation: 9,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+    const session = createWorkspaceSnapshotUploadSessionForTest({
+      objectKey:
+        `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_completed_handoff.snapshot.enc`,
+      snapshotId: "snapshot_completed_handoff",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(session);
+    await expect(runner.completeHostedWorkspaceSnapshotUploadSession({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      snapshotId: session.snapshotId,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-completed-checkpoint-handoff",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    invocationResult.resolve({ nextWakeAt: null, status: "idle" });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({ active_attempt_id: null })
+    );
+  });
+
+  it("replaces an inactive fence after its checkpoint heartbeat becomes stale", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "4" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_1",
+      generation: 9,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_stuck_handoff.snapshot.enc`,
+        snapshotId: "snapshot_stuck_handoff",
+      }),
+    );
+    vi.setSystemTime(new Date("2026-04-27T00:00:10.001Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-stuck-checkpoint-handoff",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.not.stringMatching(token.attemptId),
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+      })
+    );
+  });
+
+  it("does not delay replacement for another attempt's snapshot session", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "4" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_1",
+      generation: 9,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+    await runner.createHostedWorkspaceSnapshotUploadSession(
+      createWorkspaceSnapshotUploadSessionForTest({
+        objectKey:
+          `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_previous_attempt.snapshot.enc`,
+        snapshotId: "snapshot_previous_attempt",
+      }),
+    );
+    const token = writeRuntimeFenceForTest(sql, {
+      attemptId: "attempt_2",
+      generation: 10,
+      runnerContainerName: `${TEST_USER_ID}--v-prior`,
+      startedAt: "2026-04-26T23:00:00.000Z",
+      workspaceVersion: "4",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-mismatched-checkpoint-handoff",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+      })
+    );
+  });
+
   it("replaces a recent legacy-container fence when the versioned target reports no active child", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -3537,7 +4454,9 @@ describe("HostedUserRunner execution coordination", () => {
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-replace",
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-22222222-2222-4222-8222-222222222222",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "replaced",
@@ -3548,6 +4467,11 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      runtimeInvocationOrchestrationAttemptId:
+        "web-ingress-22222222-2222-4222-8222-222222222222",
+      triggeredByWebDirect: true,
+    });
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,
@@ -4464,6 +5388,10 @@ describe("HostedUserRunner execution coordination", () => {
           activeFenceTargetWasPriorVersion: false,
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateBindFinishedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadStartedAtEpochMs: Date.parse(FIXED_NOW),
+          runnerStateReadFinishedAtEpochMs: Date.parse(FIXED_NOW),
         },
         processingMode: "default",
         userId: TEST_USER_ID,
@@ -4609,6 +5537,83 @@ describe("HostedUserRunner execution coordination", () => {
     },
   );
 
+  it("deletes the exact prior-version target reserved by shell prewarm", async () => {
+    const runnerRuntimeEnvSource: Record<string, unknown> = {
+      ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+      CF_VERSION_METADATA: { id: "prior" },
+    };
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
+    const priorDestroyInstance = vi.fn(async () => undefined);
+    const currentDestroyInstance = vi.fn(async () => undefined);
+    let priorRunnerContainerAccessCount = 0;
+    const { runner, runnerContainerNames } = createRunnerHarness({
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      prewarmShell: vi.fn(async () => ({
+        action: "start_issued" as const,
+        kind: "started" as const,
+      })),
+      runnerContainerStubForName(name, defaultStub) {
+        if (name === priorRunnerContainerName) {
+          priorRunnerContainerAccessCount += 1;
+          if (priorRunnerContainerAccessCount === 1) {
+            return defaultStub;
+          }
+        }
+        return {
+          ...defaultStub,
+          destroyInstance: name === priorRunnerContainerName
+            ? priorDestroyInstance
+            : currentDestroyInstance,
+        };
+      },
+      runnerRuntimeEnvSource,
+    });
+
+    await runner.prewarmRuntimeShellForUser(TEST_USER_ID);
+    runnerRuntimeEnvSource.CF_VERSION_METADATA = { id: "current" };
+    await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
+      ok: true,
+      userId: TEST_USER_ID,
+    });
+
+    expect(runnerContainerNames).toEqual([
+      priorRunnerContainerName,
+      priorRunnerContainerName,
+    ]);
+    expect(priorDestroyInstance).toHaveBeenCalledOnce();
+    expect(currentDestroyInstance).not.toHaveBeenCalled();
+  });
+
+  it("drops shell prewarm while account deletion owns the consent lock", async () => {
+    const destroyStarted = createDeferred<void>();
+    const releaseDestroy = createDeferred<void>();
+    const destroyInstance = vi.fn(async () => {
+      destroyStarted.resolve(undefined);
+      await releaseDestroy.promise;
+    });
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      bucket: new ListableMemoryEncryptedR2Bucket(),
+      destroyInstance,
+      healthDataProcessingAllowed: false,
+      prewarmShell,
+      readHealthDataConsentState: () => "missing",
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    const deletion = runner.deleteHostedUserData(TEST_USER_ID);
+    await destroyStarted.promise;
+    await expect(runner.prewarmRuntimeShellForUser(TEST_USER_ID))
+      .resolves.toBeUndefined();
+
+    releaseDestroy.resolve(undefined);
+    await expect(deletion).resolves.toMatchObject({ ok: true });
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toHaveLength(1);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+  });
+
   it("deletes runner state and clears alarms for hosted user deletion", async () => {
     const destroyInstance = vi.fn(async () => {});
     const bucket = new ListableMemoryEncryptedR2Bucket();
@@ -4721,43 +5726,6 @@ describe("HostedUserRunner execution coordination", () => {
     ]) {
       expect(bucket.objects.has(key)).toBe(false);
     }
-    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
-  });
-
-  it("reports the destination-active bridge and deletes both fixed-role buckets", async () => {
-    const sourceBucket = new ListableMemoryEncryptedR2Bucket();
-    const destinationBucket = new ListableMemoryEncryptedR2Bucket();
-    const bundlePrefix = await hostedBundleUserPrefix({ userId: TEST_USER_ID });
-    const sourceKey = `${bundlePrefix}source.bundle.json`;
-    const destinationKey = `${bundlePrefix}destination.bundle.json`;
-    await sourceBucket.put(sourceKey, "source-data");
-    await destinationBucket.put(destinationKey, "destination-data");
-    const { runner, sql } = createRunnerHarness({
-      bucket: sourceBucket,
-      destinationBucket,
-      r2CutoverPhase: "destination_active",
-    });
-    await runner.bindUser(TEST_USER_ID);
-
-    await expect(runner.runnerStatus()).resolves.toMatchObject({
-      r2Cutover: {
-        coexisting: true,
-        phase: "destination_active",
-        protocolVersion: "r2-oc-enam-v2",
-      },
-    });
-    await expect(runner.deleteHostedUserData(TEST_USER_ID)).resolves.toMatchObject({
-      ok: true,
-      r2: {
-        deletedObjectCount: 2,
-        skippedUserScopedPrefixes: false,
-        supported: true,
-      },
-      userId: TEST_USER_ID,
-    });
-
-    expect(sourceBucket.objects.has(sourceKey)).toBe(false);
-    expect(destinationBucket.objects.has(destinationKey)).toBe(false);
     expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
   });
 
@@ -4982,7 +5950,10 @@ describe("HostedUserRunner execution coordination", () => {
       snapshotId: "snapshot_stale_create",
     });
     await expect(runner.createHostedWorkspaceSnapshotUploadSession(staleSession))
-      .resolves.toEqual(staleSession);
+      .resolves.toEqual({
+        ...staleSession,
+        checkpointHandoffHeartbeatAt: FIXED_NOW,
+      });
 
     sql.exec(
       `UPDATE runner_meta
@@ -5006,14 +5977,20 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceVersion: "5",
     };
     await expect(runner.createHostedWorkspaceSnapshotUploadSession(activeSession))
-      .resolves.toEqual(activeSession);
+      .resolves.toEqual({
+        ...activeSession,
+        checkpointHandoffHeartbeatAt: FIXED_NOW,
+      });
 
     await expect(runner.createHostedWorkspaceSnapshotUploadSession(staleSession))
       .resolves.toBeNull();
     await expect(runner.readHostedWorkspaceSnapshotUploadSession({
       snapshotId: activeSession.snapshotId,
       userId: TEST_USER_ID,
-    })).resolves.toEqual(activeSession);
+    })).resolves.toEqual({
+      ...activeSession,
+      checkpointHandoffHeartbeatAt: FIXED_NOW,
+    });
     expect(storageValues.get(
       workspaceSnapshotOrphanCandidateStorageKey(activeSession.snapshotId),
     )).toBeUndefined();
@@ -5089,7 +6066,10 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.readHostedWorkspaceSnapshotUploadSession({
       snapshotId: activeSession.snapshotId,
       userId: TEST_USER_ID,
-    })).resolves.toEqual(activeSession);
+    })).resolves.toEqual({
+      ...activeSession,
+      checkpointHandoffHeartbeatAt: FIXED_NOW,
+    });
     expect(storageValues.get(
       workspaceSnapshotOrphanCandidateStorageKey(replacedSnapshotRef.snapshotId),
     )).toMatchObject({
@@ -5266,6 +6246,183 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceSnapshotOrphanCandidateStorageKey("snapshot_alarm_orphan"),
     )).toBeUndefined();
     expect(alarms.at(-1)).toBe("deleted");
+  });
+
+  it("cleans stale browser vault replicas alongside snapshots after confirming current Web refs", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userPrefix = await hostedBrowserVaultReplicaUserPrefix({ userId: TEST_USER_ID });
+    const staleObjectKey = `${userPrefix}${"a".repeat(48)}.json`;
+    const currentObjectKey = `${userPrefix}${"b".repeat(48)}.json`;
+    const staleSnapshotObjectKey =
+      `${await hostedWorkspaceSnapshotUserPrefix({ userId: TEST_USER_ID })}snapshot_with_replica.snapshot.enc`;
+    await bucket.put(staleObjectKey, "stale-encrypted-replica");
+    await bucket.put(currentObjectKey, "current-encrypted-replica");
+    await bucket.put(staleSnapshotObjectKey, "stale-encrypted-snapshot");
+    const { alarms, runner, storageValues } = createRunnerHarness({
+      bucket,
+      workspace: createWorkspaceState({
+        browserVaultReplicaRef: createBrowserVaultReplicaRef({
+          objectKey: currentObjectKey,
+        }),
+      }),
+    });
+
+    for (const objectKey of [staleObjectKey, currentObjectKey]) {
+      await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+        createdAt: FIXED_NOW,
+        objectKey,
+        schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+        userId: TEST_USER_ID,
+      });
+    }
+    await runner.recordHostedWorkspaceSnapshotOrphanCandidate({
+      createdAt: FIXED_NOW,
+      objectKey: staleSnapshotObjectKey,
+      schema: HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
+      snapshotId: "snapshot_with_replica",
+      userId: TEST_USER_ID,
+    });
+    expect(alarms).toContain("2026-04-27T01:05:00.000Z");
+
+    vi.setSystemTime(new Date("2026-04-27T01:04:59.999Z"));
+    await runner.alarm();
+    expect(bucket.objects.has(staleObjectKey)).toBe(true);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(bucket.objects.has(staleSnapshotObjectKey)).toBe(true);
+
+    vi.setSystemTime(new Date("2026-04-27T01:05:00.000Z"));
+    await runner.alarm();
+
+    expect(bucket.deleted).toContain(staleObjectKey);
+    expect(bucket.deleted).toContain(staleSnapshotObjectKey);
+    expect(bucket.objects.has(staleObjectKey)).toBe(false);
+    expect(bucket.objects.has(currentObjectKey)).toBe(true);
+    expect(bucket.objects.has(staleSnapshotObjectKey)).toBe(false);
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(staleObjectKey),
+    )).toBeUndefined();
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(currentObjectKey),
+    )).toBeUndefined();
+    expect(alarms.at(-1)).toBe("deleted");
+  });
+
+  it("rejects browser vault replica cleanup obligations outside the bound user namespace", async () => {
+    const { runner } = createRunnerHarness();
+
+    await expect(runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+      createdAt: FIXED_NOW,
+      objectKey: "users/hsn_foreign/browser-vault-replicas/replica.json",
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: TEST_USER_ID,
+    })).rejects.toThrow(
+      "Hosted browser vault replica orphan candidate is outside the bound user namespace.",
+    );
+  });
+
+  it("does not erase a newer cleanup obligation registered while Web currentness is checked", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const userPrefix = await hostedBrowserVaultReplicaUserPrefix({ userId: TEST_USER_ID });
+    const previousObjectKey = `${userPrefix}${"d".repeat(48)}.json`;
+    const nextObjectKey = `${userPrefix}${"e".repeat(48)}.json`;
+    await bucket.put(previousObjectKey, "previous-encrypted-replica");
+    await bucket.put(nextObjectKey, "next-encrypted-replica");
+    const workspace = createWorkspaceState({
+      browserVaultReplicaRef: createBrowserVaultReplicaRef({
+        objectKey: previousObjectKey,
+      }),
+    });
+    let runner!: HostedUserRunner;
+    let registeredDuringRead = false;
+    const harness = createRunnerHarness({
+      bucket,
+      onWorkspaceRead: async () => {
+        if (registeredDuringRead) {
+          return;
+        }
+        registeredDuringRead = true;
+        await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+          createdAt: FIXED_NOW,
+          objectKey: previousObjectKey,
+          schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+          userId: TEST_USER_ID,
+        });
+      },
+      workspace,
+    });
+    runner = harness.runner;
+    await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+      createdAt: "2026-04-26T00:00:00.000Z",
+      objectKey: previousObjectKey,
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: TEST_USER_ID,
+    });
+
+    await runner.alarm();
+
+    expect(bucket.objects.has(previousObjectKey)).toBe(true);
+    expect(harness.storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(previousObjectKey),
+    )).toMatchObject({
+      createdAt: FIXED_NOW,
+      objectKey: previousObjectKey,
+    });
+
+    workspace.browserVaultReplicaRef = createBrowserVaultReplicaRef({
+      objectKey: nextObjectKey,
+    });
+    vi.setSystemTime(new Date("2026-04-27T01:05:00.000Z"));
+    await runner.alarm();
+
+    expect(bucket.objects.has(previousObjectKey)).toBe(false);
+    expect(bucket.objects.has(nextObjectKey)).toBe(true);
+    expect(harness.storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(previousObjectKey),
+    )).toBeUndefined();
+  });
+
+  it("keeps browser vault replica orphan cleanup retryable when R2 deletion fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const userPrefix = await hostedBrowserVaultReplicaUserPrefix({ userId: TEST_USER_ID });
+    const staleObjectKey = `${userPrefix}${"c".repeat(48)}.json`;
+    class BrowserVaultReplicaDeleteFailureBucket extends MemoryEncryptedR2Bucket {
+      failDelete = true;
+
+      override async delete(key: string | string[]): Promise<void> {
+        const keys = Array.isArray(key) ? key : [key];
+        if (this.failDelete && keys.includes(staleObjectKey)) {
+          throw new Error("browser vault replica delete failed");
+        }
+        await super.delete(key);
+      }
+    }
+    const bucket = new BrowserVaultReplicaDeleteFailureBucket();
+    await bucket.put(staleObjectKey, "stale-encrypted-replica");
+    const { runner, storageValues } = createRunnerHarness({ bucket });
+    await runner.recordHostedBrowserVaultReplicaOrphanCandidate({
+      createdAt: "2026-04-26T00:00:00.000Z",
+      objectKey: staleObjectKey,
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: TEST_USER_ID,
+    });
+
+    await expect(runner.alarm()).rejects.toThrow("browser vault replica delete failed");
+    expect(bucket.objects.has(staleObjectKey)).toBe(true);
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(staleObjectKey),
+    )).toBeDefined();
+
+    bucket.failDelete = false;
+    await runner.alarm();
+    expect(bucket.objects.has(staleObjectKey)).toBe(false);
+    expect(storageValues.get(
+      browserVaultReplicaOrphanCandidateStorageKey(staleObjectKey),
+    )).toBeUndefined();
   });
 
   it("does not scan orphan candidates when deleting an upload session", async () => {
@@ -5571,7 +6728,6 @@ function createRunnerHarness(input: {
   alarmDeleteError?: Error;
   abortWorkspaceInvocation?: HostedExecutionContainerStubLike["abortWorkspaceInvocation"];
   bucket?: MemoryEncryptedR2Bucket;
-  destinationBucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
   runnerContainerStubForName?: (
     name: string,
@@ -5582,22 +6738,28 @@ function createRunnerHarness(input: {
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onCryptoContextRead?: () => Promise<void> | void;
-  readHealthDataConsentState?: () =>
+  readHealthDataConsentState?: (input: { timeoutMs: number }) =>
     | "granted"
     | "missing"
     | "revoked"
     | Promise<"granted" | "missing" | "revoked">;
+  healthDataProcessingAllowed?: boolean | (() => boolean);
   onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
   onStatusRead?: () => Promise<void> | void;
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   platformAiUsageAllowed?: boolean | (() => boolean);
+  prewarmShell?: HostedExecutionContainerStubLike["prewarmShell"];
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
   ownerReleaseResponse?: () => Promise<Response> | Response;
   runtimeLogResponse?: () => Promise<Response> | Response;
-  r2CutoverPhase?: "destination_active" | "source_active";
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
+  runtimeRetryAnalytics?: { writeDataPoint(dataPoint: {
+    blobs?: string[];
+    doubles?: number[];
+    indexes?: string[];
+  }): void };
   wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
   workspace?: HostedWorkspaceState | null;
 } = {}) {
@@ -5645,6 +6807,37 @@ function createRunnerHarness(input: {
         }
       : {}),
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
+    ...(input.prewarmShell
+      ? {
+          beginShellPrewarm: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["beginShellPrewarm"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              prewarmInput,
+            ) {
+              expect(this).toBe(stub);
+              const operation = input.prewarmShell?.call(this, prewarmInput);
+              void operation?.catch(() => undefined);
+              return { accepted: true };
+            },
+          ),
+          prewarmShell: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["prewarmShell"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              prewarmInput,
+            ) {
+              expect(this).toBe(stub);
+              return await input.prewarmShell?.call(this, prewarmInput) ?? {
+                action: "start_issued",
+                kind: "started",
+              };
+            },
+          ),
+        }
+      : {}),
     ...(input.ensureProcessing
       ? {
           ensureProcessing: createDirectOnlyRpcMethod<
@@ -5716,6 +6909,7 @@ function createRunnerHarness(input: {
   };
 
   installWebControlResponses(input.workspace ?? createWorkspaceState(), {
+    healthDataProcessingAllowed: input.healthDataProcessingAllowed,
     readMailboxLag: () => input.mailboxLag ?? [createMailboxLag()],
     onCryptoContextRead: input.onCryptoContextRead,
     readHealthDataConsentState: input.readHealthDataConsentState,
@@ -5727,15 +6921,7 @@ function createRunnerHarness(input: {
     ownerReleaseResponse: input.ownerReleaseResponse,
   });
 
-  const sourceBucket = input.bucket ?? new MemoryEncryptedR2Bucket();
-  const r2CutoverContext = input.destinationBucket
-    ? resolveHostedR2CutoverContext({
-        BUNDLES: sourceBucket,
-        BUNDLES_ENAM: input.destinationBucket,
-        HOSTED_R2_CUTOVER_PHASE:
-          input.r2CutoverPhase ?? "destination_active",
-      })
-    : null;
+  const bucket = input.bucket ?? new MemoryEncryptedR2Bucket();
   const runner = new HostedUserRunnerWithTestControls(
     durable.state,
     readHostedExecutionEnvironment(createHostedExecutionTestEnv({
@@ -5743,12 +6929,12 @@ function createRunnerHarness(input: {
       HOSTED_EXECUTION_RETRY_DELAY_MS: "5000",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "35000",
     })),
-    r2CutoverContext?.bucket ?? sourceBucket,
+    bucket,
     input.runnerRuntimeEnvSource ?? TEST_RUNNER_RUNTIME_ENV_SOURCE,
     input.runnerContainerNamespace === undefined
       ? namespace
       : input.runnerContainerNamespace,
-    r2CutoverContext,
+    input.runtimeRetryAnalytics ?? null,
   );
 
   return {
@@ -5923,8 +7109,9 @@ function createDurableObjectState(input: {
 function installWebControlResponses(
   workspace: HostedWorkspaceState | null,
   hooks: {
+    healthDataProcessingAllowed?: boolean | (() => boolean);
     onCryptoContextRead?: () => Promise<void> | void;
-    readHealthDataConsentState?: () =>
+    readHealthDataConsentState?: (input: { timeoutMs: number }) =>
       | "granted"
       | "missing"
       | "revoked"
@@ -5961,10 +7148,16 @@ function installWebControlResponses(
       }
 
       if (input.path === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH) {
-        const consentState = await hooks.readHealthDataConsentState?.() ?? "granted";
+        const consentState = await hooks.readHealthDataConsentState?.({
+          timeoutMs: input.timeoutMs,
+        }) ?? "granted";
+        const processingAllowed =
+          typeof hooks.healthDataProcessingAllowed === "function"
+            ? hooks.healthDataProcessingAllowed()
+            : hooks.healthDataProcessingAllowed ?? consentState !== "revoked";
         return jsonResponse({
           consentState,
-          processingAllowed: consentState !== "revoked",
+          processingAllowed,
           userId: input.boundUserId,
         });
       }
@@ -6031,6 +7224,7 @@ function createWorkspaceState(
 
 function createBrowserVaultReplicaRef(input: {
   generatedAt?: string;
+  objectKey?: string;
   sourceBundleHash?: string;
 } = {}): NonNullable<HostedWorkspaceState["browserVaultReplicaRef"]> {
   const sourceBundleHash = input.sourceBundleHash ?? "a".repeat(64);
@@ -6039,7 +7233,7 @@ function createBrowserVaultReplicaRef(input: {
     dataVersion: "d".repeat(64),
     generatedAt: input.generatedAt ?? FIXED_NOW,
     keyId: "browser-vault-replica:d",
-    objectKey: "users/browser-vault-replicas/opaque/replica.json",
+    objectKey: input.objectKey ?? "users/browser-vault-replicas/opaque/replica.json",
     replicaSchema: "murph.browser-vault-replica",
     runtimeRootKeyId: "udrk:runtime:test-root",
     schema: "murph.hosted-browser-vault-replica-ref.v1",

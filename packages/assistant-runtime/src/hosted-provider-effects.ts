@@ -42,11 +42,17 @@ import type {
 } from "./hosted-runtime/platform.ts";
 
 export interface HostedProviderEffectDependencies {
+  appCardCapabilityFetchImplementation?: typeof fetch;
+  appCardTextFallbackFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   loadVaultImage?: (media: AssistantVaultImageResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch | null;
   publicFetchImplementation?: typeof fetch | null;
+  onAppCardFallbackError?: (input: {
+    error: unknown;
+    reason: "app_card_rejected" | "capability_check_failed";
+  }) => void;
   onProviderDispatchEntered?: (() => void) | null;
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string;
@@ -56,11 +62,17 @@ export interface HostedProviderEffectDependencies {
 }
 
 interface HostedProviderEffectContext {
+  appCardCapabilityFetchImplementation?: typeof fetch;
+  appCardTextFallbackFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
   loadVaultImage?: (media: AssistantVaultImageResponseMedia) => Promise<Uint8Array>;
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch;
   publicFetchImplementation?: typeof fetch;
+  onAppCardFallbackError?: (input: {
+    error: unknown;
+    reason: "app_card_rejected" | "capability_check_failed";
+  }) => void;
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string;
   }) => Promise<void>;
@@ -153,6 +165,13 @@ export async function sendHostedProviderLinqMessage(
   if (persistAppCardTextFallback) {
     context.persistAppCardTextFallback = async (input) => {
       await persistAppCardTextFallback(input);
+      if (
+        context.appCardTextFallbackFetchImplementation
+        && input.idempotencyKey !== effectiveRequest.idempotencyKey
+      ) {
+        context.fetchImplementation =
+          context.appCardTextFallbackFetchImplementation;
+      }
       effectiveRequest = {
         ...effectiveRequest,
         card: null,
@@ -327,6 +346,18 @@ async function sendHostedProviderLinqMessageDirect(
       ? {}
       : { card: request.card, threadIsDirect: request.threadIsDirect ?? null }),
   }, {
+    ...(context.appCardCapabilityFetchImplementation
+      ? {
+          appCardCapabilityFetchImplementation:
+            context.appCardCapabilityFetchImplementation,
+        }
+      : {}),
+    ...(context.appCardTextFallbackFetchImplementation
+      ? {
+          appCardTextFallbackFetchImplementation:
+            context.appCardTextFallbackFetchImplementation,
+        }
+      : {}),
     env: context.env,
     fetchImplementation: context.fetchImplementation,
     signal: context.signal,
@@ -335,6 +366,9 @@ async function sendHostedProviderLinqMessageDirect(
       : {}),
     ...(context.loadVaultFile ? { loadVaultFile: context.loadVaultFile } : {}),
     ...(context.loadVaultImage ? { loadVaultImage: context.loadVaultImage } : {}),
+    ...(context.onAppCardFallbackError
+      ? { onAppCardFallbackError: context.onAppCardFallbackError }
+      : {}),
     ...(context.persistAppCardTextFallback
       ? { persistAppCardTextFallback: context.persistAppCardTextFallback }
       : {}),
@@ -348,6 +382,18 @@ function createHostedProviderEffectContext(
   const { publicFetchImplementation, ...providerDependencies } = dependencies;
   return {
     ...requireHostedProviderFetchDependencies(providerDependencies, operation),
+    ...(dependencies.appCardCapabilityFetchImplementation
+      ? {
+          appCardCapabilityFetchImplementation:
+            dependencies.appCardCapabilityFetchImplementation,
+        }
+      : {}),
+    ...(dependencies.appCardTextFallbackFetchImplementation
+      ? {
+          appCardTextFallbackFetchImplementation:
+            dependencies.appCardTextFallbackFetchImplementation,
+        }
+      : {}),
     ...(publicFetchImplementation
       ? { publicFetchImplementation }
       : {}),
@@ -356,6 +402,9 @@ function createHostedProviderEffectContext(
       : {}),
     ...(dependencies.loadVaultImage
       ? { loadVaultImage: dependencies.loadVaultImage }
+      : {}),
+    ...(dependencies.onAppCardFallbackError
+      ? { onAppCardFallbackError: dependencies.onAppCardFallbackError }
       : {}),
     ...(dependencies.persistAppCardTextFallback
       ? { persistAppCardTextFallback: dependencies.persistAppCardTextFallback }
@@ -420,6 +469,22 @@ async function materializeHostedProviderLinqDirectThread(input: {
     };
   } catch (error) {
     if (isHostedProviderDeliveryConfirmationPendingError(error)) {
+      throw error;
+    }
+    if (
+      typeof error === "object"
+      && error !== null
+      && "deliveryMayHaveSucceeded" in error
+      && error.deliveryMayHaveSucceeded === false
+    ) {
+      throw error;
+    }
+    if (
+      typeof error === "object"
+      && error !== null
+      && "linqAttachmentReservationMayHaveSucceeded" in error
+      && error.linqAttachmentReservationMayHaveSucceeded === true
+    ) {
       throw error;
     }
     if (isPotentiallyAcceptedLinqDirectThreadRecoveryError(error)) {

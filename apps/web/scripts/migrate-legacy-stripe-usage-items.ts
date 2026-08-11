@@ -1,5 +1,5 @@
 import {
-  HOSTED_PUBLIC_BILLING_PLAN_CODES,
+  HOSTED_BILLING_PLAN_CODES,
   getHostedBillingPlanDefinition,
 } from "../src/lib/hosted-onboarding/billing-plans";
 import {
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   assertStripeModeMatchesKey(options.stripeMode, stripeSecretKey);
 
   const stripe = requireHostedStripeApi();
-  const knownPlanPriceIds = HOSTED_PUBLIC_BILLING_PLAN_CODES.map((planCode) => {
+  const knownPlanPriceIds = HOSTED_BILLING_PLAN_CODES.map((planCode) => {
     const definition = getHostedBillingPlanDefinition(planCode);
     const priceId = process.env[definition.priceIdEnvKey]?.trim();
     if (!priceId) {

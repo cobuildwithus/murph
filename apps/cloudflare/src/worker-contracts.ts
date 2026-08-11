@@ -1,4 +1,11 @@
+import type {
+  HostedWorkspaceInvocationResult,
+} from "@murphai/hosted-execution/runtime-control";
+import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
 import type { R2BucketLike } from "./bundle-store.ts";
+import type { HostedBrowserVaultReplicaOrphanCandidate } from "./browser-vault-store.ts";
 import type {
   HostedPrivateMediaPublishInput,
   HostedPrivateMediaPublishResult,
@@ -17,6 +24,14 @@ export interface WorkerSendEmailBindingLike {
 
 export interface WorkerAiBindingLike {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
+}
+
+export interface WorkerAnalyticsEngineDatasetLike {
+  writeDataPoint(dataPoint: {
+    blobs?: string[];
+    doubles?: number[];
+    indexes?: string[];
+  }): void;
 }
 
 export type WorkerProviderEgressTokenValidationRejectReason =
@@ -82,6 +97,13 @@ export type WorkerActiveRuntimeUserFenceResult =
       userId: string;
     };
 
+export interface WorkerRuntimeCompletionReceipt {
+  attemptId: string;
+  generation: string;
+  result: HostedWorkspaceInvocationResult;
+  userId: string;
+}
+
 export interface WorkerRunnerContainerStubLike {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }
@@ -108,6 +130,10 @@ export interface WorkerRunnerContainerNamespaceLike<
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
+  prewarmRuntimeShellForUser?(
+    userId: string,
+    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+  ): Promise<void>;
   reconcileRuntimeHealthDataConsentForUser?(userId: string): Promise<unknown>;
   publishHostedPrivateMedia?(
     input: HostedPrivateMediaPublishInput,
@@ -115,6 +141,18 @@ export interface WorkerUserRunnerStubLike {
   createHostedWorkspaceSnapshotUploadSession?(
     input: HostedWorkspaceSnapshotUploadSession,
   ): Promise<HostedWorkspaceSnapshotUploadSession | null>;
+  heartbeatHostedWorkspaceSnapshotUploadSession?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean>;
+  completeHostedWorkspaceSnapshotUploadSession?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean>;
   rememberHostedWorkspaceSnapshotReplacedRef?(input: {
     expectedSession: HostedWorkspaceSnapshotUploadSession;
     replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
@@ -135,11 +173,17 @@ export interface WorkerUserRunnerStubLike {
   recordHostedWorkspaceSnapshotOrphanCandidate?(
     input: HostedWorkspaceSnapshotOrphanCandidate,
   ): Promise<HostedWorkspaceSnapshotOrphanCandidate>;
+  recordHostedBrowserVaultReplicaOrphanCandidate?(
+    input: HostedBrowserVaultReplicaOrphanCandidate,
+  ): Promise<HostedBrowserVaultReplicaOrphanCandidate>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;
     userId: string;
   }): Promise<boolean>;
+  recordRuntimeCompletionFromContainer?(
+    input: WorkerRuntimeCompletionReceipt,
+  ): Promise<{ completed: boolean }>;
   validateRuntimeProviderEgressToken?(input: {
     providerEgressToken: string;
     userId: string;
@@ -181,7 +225,6 @@ export interface WorkerEnvironmentContract<
 > extends Readonly<Record<string, unknown>> {
   AI?: WorkerAiBindingLike;
   BUNDLES: R2BucketLike;
-  BUNDLES_ENAM?: R2BucketLike;
   CF_VERSION_METADATA?: {
     id?: string;
     tag?: string;
@@ -199,6 +242,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID?: string;
   HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET?: string;
+  HOSTED_RUNTIME_RETRY_ANALYTICS?: WorkerAnalyticsEngineDatasetLike;
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_AI_USAGE_REPORTING_SECRET?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
@@ -221,11 +265,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID?: string;
   HOSTED_R2_PRESIGN_ACCOUNT_ID?: string;
   HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT?: string;
-  HOSTED_R2_CUTOVER_PHASE?: string;
-  HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256?: string;
-  HOSTED_R2_WRITE_ADMISSION?: string;
   HOSTED_R2_PRESIGN_BUCKET_NAME?: string;
-  HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME?: string;
   HOSTED_R2_PRESIGN_CONTROL_ENDPOINT?: string;
   HOSTED_R2_PRESIGN_ENDPOINT?: string;
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY?: string;

@@ -416,6 +416,41 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       "packages/query/dist/browser-replica/murph-age.js",
       /packages\/query\/dist\/browser-replica\/murph-age\.js/,
     ],
+    [
+      "dynamic-tool execution runtime",
+      ".deploy/runner-bundle/node_modules/@murphai/assistant-engine/dist/assistant-codex/dynamic-tools.js",
+      /assistant-engine\/dist\/assistant-codex\/dynamic-tools\.js/,
+    ],
+    [
+      "staged assistant-notification wake handler",
+      ".deploy/runner-bundle/node_modules/@murphai/assistant-runtime/dist/hosted-runtime/events/assistant-notification.js",
+      /node_modules\/@murphai\/assistant-runtime\/dist\/hosted-runtime\/events\/assistant-notification\.js/,
+    ],
+    [
+      "workspace assistant-ask-completion wake handler",
+      "packages/assistant-runtime/dist/hosted-runtime/events/assistant-ask-completion.js",
+      /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/assistant-ask-completion\.js/,
+    ],
+    [
+      "staged Environment voice wake handler",
+      ".deploy/runner-bundle/node_modules/@murphai/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
+      /node_modules\/@murphai\/assistant-runtime\/dist\/hosted-runtime\/events\/environment-voice\.js/,
+    ],
+    [
+      "workspace Codex auth wake handler",
+      "packages/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
+      /packages\/assistant-runtime\/dist\/hosted-runtime\/events\/codex-auth\.js/,
+    ],
+    [
+      "Zod locale catalog",
+      "node_modules/zod/v4/locales/index.js",
+      /node_modules\/zod\/v4\/locales\/index\.js/,
+    ],
+    [
+      "non-English Zod locale",
+      "node_modules/zod/v4/locales/fr.js",
+      /node_modules\/zod\/v4\/locales\/fr\.js/,
+    ],
   ])("rejects %s inputs from the static boot closure", (_label, inputPath, expected) => {
     const metafile = staticBootClosureMetafile(inputPath);
 
@@ -427,6 +462,16 @@ describe("runner bundle container-entrypoint esbuild step", () => {
   it("allows the narrow clinical-records retrieval-limits leaf in the static boot closure", () => {
     const metafile = staticBootClosureMetafile(
       ".deploy/runner-bundle/node_modules/@murphai/clinical-records/dist/retrieval-limits.js",
+    );
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS)
+    ).not.toThrow();
+  });
+
+  it("allows Zod's default English locale in the static boot closure", () => {
+    const metafile = staticBootClosureMetafile(
+      "node_modules/zod/v4/locales/en.js",
     );
 
     expect(() =>
@@ -562,9 +607,9 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Mirror the production baselines plus their variance allowances so
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 1_699_250 + 48_000,
-      staticClosureBytes: 8_540_082 + 96_000,
-      totalBytes: 10_276_559 + 32_768,
+      entryBytes: 1_619_381 + 48_000,
+      staticClosureBytes: 7_815_801 + 96_000,
+      totalBytes: 9_770_208 + 32_768,
     });
   });
 

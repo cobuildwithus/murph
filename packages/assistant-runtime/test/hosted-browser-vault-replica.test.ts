@@ -534,6 +534,9 @@ describe("hosted browser-vault replica refresh preparation", () => {
         },
       });
       expect(write).toHaveBeenCalledOnce();
+      expect(write).toHaveBeenCalledWith(expect.objectContaining({
+        replacedReplicaRef: null,
+      }));
       expect(publishRef).toHaveBeenCalledOnce();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -595,6 +598,62 @@ describe("hosted browser-vault replica refresh preparation", () => {
         status: "published",
       });
       expect(write).toHaveBeenCalledOnce();
+      expect(write).toHaveBeenCalledWith(expect.objectContaining({
+        replacedReplicaRef: expect.objectContaining({
+          objectKey: workspace.browserVaultReplicaRef?.objectKey,
+        }),
+      }));
+      expect(publishRef).toHaveBeenCalledOnce();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("retains cleanup context when publishing the new replica conflicts", async () => {
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const currentReplicaRef: HostedBrowserVaultReplicaRef = {
+      byteLength: 128,
+      dataVersion: "browser-data-v1",
+      generatedAt: "2026-05-10T00:00:00.000Z",
+      keyId: "browser-vault-replica:key",
+      objectKey: "users/browser-vault-replicas/member_123/current.json",
+      replicaSchema: "murph.browser-vault-replica",
+      runtimeRootKeyId: "udrk:runtime:test-root",
+      schema: "murph.hosted-browser-vault-replica-ref.v1",
+      sourceBundleHash: "a".repeat(64),
+    };
+    const workspace = createWorkspaceState({
+      browserVaultReplicaRef: currentReplicaRef,
+    });
+    const publishRef = vi.fn(async () => ({
+      published: false as const,
+      workspace,
+    }));
+    const write = vi.fn(async (input: { replica: unknown }) =>
+      createReplicaRefFromReplica(input.replica)
+    );
+
+    try {
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        vaultRoot,
+        workspace,
+      });
+
+      expect(result).toEqual({ status: "publish_conflict" });
+      expect(write).toHaveBeenCalledWith(expect.objectContaining({
+        replacedReplicaRef: currentReplicaRef,
+      }));
       expect(publishRef).toHaveBeenCalledOnce();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });

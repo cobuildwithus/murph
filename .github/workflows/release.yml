@@ -127,6 +127,7 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: npm-tarballs
+          retention-days: 1
           path: |
             dist/npm/*.tgz
             dist/npm/pack-output.json
@@ -147,6 +148,9 @@ jobs:
         with:
           name: npm-tarballs
           path: dist/npm
+
+      - name: Verify release artifacts contain no credentials
+        run: node scripts/release-artifact-secret-guard.mjs --pack-output dist/npm/pack-output.json
 
       - name: Resolve release notes body
         id: release_notes

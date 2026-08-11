@@ -2,13 +2,20 @@ import type { Metadata } from "next";
 
 import { GrowthCharts } from "./growth-charts";
 import { GrowthScorecard } from "./growth-scorecard";
+import { GrowthSponsorships } from "./growth-sponsorships";
+import { GrowthWeeklyTable } from "./growth-weekly-table";
+import { ReferralLinkUsage } from "./referral-link-usage";
+import { TrialStartAttribution } from "./trial-start-attribution";
+import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
 import {
   captureHostedGrowthDailySnapshot,
   readHostedGrowthDashboard,
+  HOSTED_GROWTH_CONVERSION_MATURITY_DAYS,
   type HostedGrowthStatusCounts,
 } from "@/src/lib/hosted-ops/growth-metrics";
-import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
-import { HOSTED_PULSE_TRIAL_DAYS } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  readHostedGrowthSponsorshipMetrics,
+} from "@/src/lib/hosted-ops/growth-sponsorship-metrics";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   Table,
@@ -37,7 +44,10 @@ export default async function HostedOpsGrowthPage() {
 
   const now = new Date();
   await captureHostedGrowthDailySnapshot(now);
-  const dashboard = await readHostedGrowthDashboard(now);
+  const [dashboard, sponsorships] = await Promise.all([
+    readHostedGrowthDashboard(now),
+    readHostedGrowthSponsorshipMetrics(now),
+  ]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -54,8 +64,8 @@ export default async function HostedOpsGrowthPage() {
           <div className="flex flex-wrap gap-2">
             <SummaryChip label="Captured" value={formatDateTime(dashboard.capturedAt)} />
             <SummaryChip
-              label="Trial maturity"
-              value={`${HOSTED_PULSE_TRIAL_DAYS} days`}
+              label="Conversion maturity"
+              value={`${HOSTED_GROWTH_CONVERSION_MATURITY_DAYS} days`}
             />
           </div>
         </div>
@@ -76,12 +86,17 @@ export default async function HostedOpsGrowthPage() {
       <GrowthCharts
         dailySeries={dashboard.dailySeries}
         messageSeries={dashboard.messageSeries}
+        monthlyRevenueSeries={dashboard.monthlyRevenueSeries}
         snapshotSeries={dashboard.snapshotSeries}
       />
 
+      <ReferralLinkUsage usage={dashboard.referralLinkUsage} />
+
+      <TrialStartAttribution attribution={dashboard.trialStartAttribution} />
+
       <section aria-labelledby="growth-revenue-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Recurring revenue comes from active paid plan definitions. The tracked top-up total starts with retained fulfilled history at cutover, adds each new first fulfillment, and may omit purchases deleted before tracking began."
+          description="Recurring plan MRR comes from active paid plan definitions. Sponsorship stays separate because it is usage-backed rather than contracted recurring revenue. The tracked top-up count covers every fulfilled usage-credit purchase, including sponsorship charges, so it overlaps the sponsorship counts below and is not additive. It starts with retained fulfilled history at cutover, adds each new first fulfillment, and may omit purchases deleted before tracking began."
           id="growth-revenue-title"
           title="Revenue mix"
         />
@@ -91,7 +106,7 @@ export default async function HostedOpsGrowthPage() {
               <TableRow>
                 <TableHead>Source</TableHead>
                 <TableHead className="text-right">Count</TableHead>
-                <TableHead className="text-right">MRR</TableHead>
+                <TableHead className="text-right">Plan MRR</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -111,6 +126,15 @@ export default async function HostedOpsGrowthPage() {
                 </TableCell>
                 <TableCell className="text-right">
                   {formatCurrency(dashboard.current.edgeMrrUsdCents)}
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Max individuals</TableCell>
+                <TableCell className="text-right">
+                  {formatInteger(dashboard.current.maxPaidIndividuals)}
+                </TableCell>
+                <TableCell className="text-right">
+                  {formatCurrency(dashboard.current.maxMrrUsdCents)}
                 </TableCell>
               </TableRow>
               <TableRow>
@@ -141,60 +165,24 @@ export default async function HostedOpsGrowthPage() {
         </div>
       </section>
 
-      <section aria-labelledby="growth-weekly-title" className="flex flex-col gap-4">
-        <SectionHeading
-          description="Rolling seven-day acquisition and trial-start volumes, newest first. These changes compare weekly volume; the company growth rate is the MRR score above."
-          id="growth-weekly-title"
-          title="Weekly acquisition"
-        />
-        <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Window</TableHead>
-                <TableHead className="text-right">New members</TableHead>
-                <TableHead className="text-right">Member change</TableHead>
-                <TableHead className="text-right">Trial starts</TableHead>
-                <TableHead className="text-right">Trial change</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {dashboard.weeklyRows.map((row) => (
-                <TableRow key={`${row.startDate}-${row.endDate}`}>
-                  <TableCell>{formatDateRange(row.startDate, row.endDate)}</TableCell>
-                  <TableCell className="text-right">
-                    {formatInteger(row.newMembers)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatChange(row.newMembersWowPercent)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatInteger(row.trialStarts)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {formatChange(row.trialStartsWowPercent)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+      <GrowthSponsorships metrics={sponsorships} />
+
+      <GrowthWeeklyTable rows={dashboard.weeklyRows} />
 
       <section aria-labelledby="growth-cohort-title" className="flex flex-col gap-4">
         <SectionHeading
-          description="Pulse trial cohorts by start week. Converted means the member is currently paid, so churned conversions leave old cohorts. Immature rows are not treated as failed conversions."
+          description="Starter-activation cohorts by week. Converted means the member is currently paid, so churned conversions leave old cohorts. Activations inside the maturity window are not treated as failed conversions."
           id="growth-cohort-title"
-          title="Trial cohorts"
+          title="Starter cohorts"
         />
         <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Trial start week</TableHead>
+                <TableHead>Starter week</TableHead>
                 <TableHead className="text-right">Started</TableHead>
                 <TableHead className="text-right">Converted</TableHead>
-                <TableHead className="text-right">Still trialing</TableHead>
+                <TableHead className="text-right">Still maturing</TableHead>
                 <TableHead className="text-right">Conversion</TableHead>
               </TableRow>
             </TableHeader>
@@ -326,16 +314,6 @@ function formatPercent(value: number | null): string {
   }
 
   return `${formatInteger(Math.round(value))}%`;
-}
-
-function formatChange(value: number | null): string {
-  if (value === null) {
-    return "No week baseline";
-  }
-
-  const rounded = Math.round(value);
-  const prefix = rounded > 0 ? "+" : "";
-  return `${prefix}${formatInteger(rounded)}% week over week`;
 }
 
 function formatDateTime(value: string): string {

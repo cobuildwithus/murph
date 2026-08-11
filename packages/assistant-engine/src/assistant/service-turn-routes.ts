@@ -1,5 +1,5 @@
-import {
-  type AssistantModelTarget,
+import type {
+  AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import type { CodexThreadIdentity } from './codex-thread-route.js'
@@ -20,7 +20,7 @@ import {
 } from './store.js'
 import { resolveAssistantExecutionPlan } from './execution-plan.js'
 import {
-  automationAssistantTargetOverrideToProviderConfigInput,
+  resolveAutomationAssistantTargetOverrideForTarget,
 } from './automation/target-override.js'
 
 export function resolveAssistantTurnRoute(
@@ -30,7 +30,10 @@ export function resolveAssistantTurnRoute(
 ): CodexThreadIdentity {
   return resolveAssistantExecutionPlan({
     defaults,
-    override: resolveAssistantTurnRouteOverride(input),
+    override: resolveAssistantTurnRouteOverride(
+      input,
+      resolved.session.target,
+    ),
     sessionTarget: resolved.session.target,
   }).codexRoute
 }
@@ -58,24 +61,48 @@ export async function resolveAssistantTurnRouteForMessage(
     }
 
     return resolveAssistantExecutionPlan({
-      boundaryDefaultTarget,
-      defaults,
-      override: resolveAssistantTurnRouteOverride(input),
+      defaults: null,
+      override: resolveAutomationAssistantTargetOverrideForTarget(
+        input.assistantTargetOverride,
+        sessionInput.target,
+      ),
+      sessionTarget: sessionInput.target,
     }).codexRoute
   }
 }
 
 function resolveAssistantTurnRouteOverride(
   input: AssistantMessageInput,
+  baseTarget: AssistantModelTarget | null,
 ): AssistantProviderConfigInput | null {
   const messageOverride = compactAssistantProviderConfigInput(input)
+  const automationBaseTarget = applyAssistantProviderConfigOverrideToTarget(
+    baseTarget,
+    messageOverride,
+  )
   const automationOverride =
-    automationAssistantTargetOverrideToProviderConfigInput(
+    resolveAutomationAssistantTargetOverrideForTarget(
       input.assistantTargetOverride,
+      automationBaseTarget,
     )
 
   return compactAssistantProviderConfigInput({
     ...(messageOverride ?? {}),
     ...(automationOverride ?? {}),
   })
+}
+
+function applyAssistantProviderConfigOverrideToTarget(
+  baseTarget: AssistantModelTarget | null,
+  override: AssistantProviderConfigInput | null,
+): AssistantModelTarget | null {
+  if (!override) {
+    return baseTarget
+  }
+
+  return resolveAssistantExecutionPlan({
+    defaults: null,
+    override,
+    sessionTarget: baseTarget,
+  }).primaryTarget
 }

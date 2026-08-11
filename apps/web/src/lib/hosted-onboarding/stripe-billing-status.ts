@@ -81,7 +81,9 @@ export function resolveHostedStripeBillingStatusForWrite(input: {
 }
 
 function isHostedStripeBillingReversalSourceType(sourceType: string): boolean {
-  return sourceType === "stripe.refund.created" || sourceType.startsWith("stripe.charge.dispute.");
+  return sourceType === "stripe.refund.created" ||
+    sourceType === "stripe.refund.updated" ||
+    sourceType.startsWith("stripe.charge.dispute.");
 }
 
 function isHostedStripeSubscriptionSourceType(sourceType: string): boolean {
@@ -89,7 +91,8 @@ function isHostedStripeSubscriptionSourceType(sourceType: string): boolean {
     sourceType === "stripe.customer.subscription.updated" ||
     sourceType === "stripe.customer.subscription.deleted" ||
     sourceType === "stripe.customer.subscription.paused" ||
-    sourceType === "stripe.customer.subscription.resumed";
+    sourceType === "stripe.customer.subscription.resumed" ||
+    sourceType === "stripe.customer.subscription.trial_will_end";
 }
 
 function isExpiredPulseTrialSubscriptionStatusWrite(input: {

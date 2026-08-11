@@ -17,20 +17,9 @@ import {
 } from "./context.ts";
 import { createHostedAssistantTurnEnvironment } from "./environment.ts";
 import {
-  executeHostedAssistantNotificationWake,
-  executeHostedMemberActivatedWake,
-} from "./events/assistant-notification.ts";
-import {
-  executeHostedAssistantAskCompletedWake,
-} from "./events/assistant-ask-completion.ts";
-import {
-  executeHostedEnvironmentVoiceWake,
-} from "./events/environment-voice.ts";
-import {
   createNoopMailboxEffect,
   type HostedMailboxOutcome,
 } from "./events/mailbox-outcome.ts";
-import { executeHostedCodexAuthWake } from "./events/codex-auth.ts";
 import {
   isHostedDeviceSyncMaintenanceModuleLoadError,
   loadHostedDeviceSyncMaintenanceModule,
@@ -49,7 +38,6 @@ import {
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
 
-export { executeHostedAssistantNotificationWake };
 export { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 
 const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
@@ -209,7 +197,10 @@ async function executeHostedSystemWake(input: {
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.kind) {
-    case "member.activated":
+    case "member.activated": {
+      const { executeHostedMemberActivatedWake } = await import(
+        "./events/assistant-notification.ts"
+      );
       return executeHostedMemberActivatedWake({
         wake: input.wake,
         executionContext: input.executionContext,
@@ -221,6 +212,7 @@ async function executeHostedSystemWake(input: {
         }),
         vaultRoot: input.vaultRoot,
       });
+    }
     case "member.channels.updated":
       return createNoopMailboxEffect({
         conversationMetrics: null,
@@ -237,7 +229,10 @@ async function executeHostedSystemWake(input: {
         conversationMetrics: null,
         mailboxLane: "member-preferences-updated",
       });
-    case "assistant.notification.requested":
+    case "assistant.notification.requested": {
+      const { executeHostedAssistantNotificationWake } = await import(
+        "./events/assistant-notification.ts"
+      );
       return executeHostedAssistantNotificationWake({
         wake: input.wake,
         executionContext: input.executionContext,
@@ -250,7 +245,11 @@ async function executeHostedSystemWake(input: {
         }),
         vaultRoot: input.vaultRoot,
       });
-    case "assistant.ask.completed":
+    }
+    case "assistant.ask.completed": {
+      const { executeHostedAssistantAskCompletedWake } = await import(
+        "./events/assistant-ask-completion.ts"
+      );
       return executeHostedAssistantAskCompletedWake({
         wake: input.wake,
         executionContext: input.executionContext,
@@ -264,6 +263,7 @@ async function executeHostedSystemWake(input: {
         }),
         vaultRoot: input.vaultRoot,
       });
+    }
     case "clinical-records.sync-requested": {
       const {
         runHostedClinicalRecordsSyncWakeLane,
@@ -340,7 +340,10 @@ async function executeHostedSystemWake(input: {
         ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
         postCheckpointRecord: deviceSyncMetrics.postCheckpointRecord ?? null,
       });
-    case "environment-voice.captured":
+    case "environment-voice.captured": {
+      const { executeHostedEnvironmentVoiceWake } = await import(
+        "./events/environment-voice.ts"
+      );
       return await executeHostedEnvironmentVoiceWake({
         executionContext: input.executionContext,
         runtime: input.runtime,
@@ -353,6 +356,7 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
+    }
     case "runtime.manual-requested":
     case "runtime.pending-effects-reconcile-requested":
     case "runtime.maintenance-requested":
@@ -363,7 +367,10 @@ async function executeHostedSystemWake(input: {
         conversationMetrics: null,
         mailboxLane: "runtime-control",
       });
-    case "runtime.codex-auth-requested":
+    case "runtime.codex-auth-requested": {
+      const { executeHostedCodexAuthWake } = await import(
+        "./events/codex-auth.ts"
+      );
       return await executeHostedCodexAuthWake({
         operatorHomeRoot: input.operatorHomeRoot,
         platform: input.runtime.platform,
@@ -371,6 +378,7 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
+    }
     case "assistant.ask.requested":
       // The detached controller is the only owner of requested asks. Running
       // one through serial foreground maintenance would grant reply authority

@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -12,7 +13,6 @@ import {
 import {
   executeMurphDynamicToolRequest,
   listMurphDynamicToolNames,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import type {
@@ -280,12 +280,12 @@ describe('executeGenerateImageTool', () => {
         size: '1536x1024',
       },
     }
-    const firstRequest = readMurphDynamicToolRequest({
+    const firstRequest = readTestMurphDynamicToolRequest({
       id: 100,
       method: 'item/tool/call',
       params: toolParams,
     })
-    const secondRequest = readMurphDynamicToolRequest({
+    const secondRequest = readTestMurphDynamicToolRequest({
       id: 101,
       method: 'item/tool/call',
       params: toolParams,
@@ -695,6 +695,15 @@ describe('murph.generate_image dynamic tool execution', () => {
     expect(listMurphDynamicToolNames()).toContain('murph.finish_without_reply')
   })
 
+  it('can disable image generation for a delivery route without changing the default', () => {
+    expect(resolveMurphDynamicTools({}).map((tool) => tool.name)).toContain(
+      'generate_image',
+    )
+    expect(resolveMurphDynamicTools({
+      imageGenerationAvailable: false,
+    }).map((tool) => tool.name)).not.toContain('generate_image')
+  })
+
   it('co-gates message-target tools and executes reactions through the authorizer', async () => {
     const messageRef = `ain_${'a'.repeat(32)}`
     expect(listMurphDynamicToolNames()).toContain('murph.react_to_message')
@@ -710,7 +719,7 @@ describe('murph.generate_image dynamic tool execution', () => {
         'murph.select_reply_target',
       ]))
 
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 23,
       method: 'item/tool/call',
       params: {
@@ -766,7 +775,7 @@ describe('murph.generate_image dynamic tool execution', () => {
 
   it('selects a reply target through the same authorizer', async () => {
     const messageRef = `ain_${'b'.repeat(32)}`
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 25,
       method: 'item/tool/call',
       params: {
@@ -819,7 +828,7 @@ describe('murph.generate_image dynamic tool execution', () => {
 
   it('does not disguise an unexpected target-authority failure as an unavailable ref', async () => {
     const messageRef = `ain_${'c'.repeat(32)}`
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 26,
       method: 'item/tool/call',
       params: {
@@ -844,7 +853,7 @@ describe('murph.generate_image dynamic tool execution', () => {
   })
 
   it('returns a value-free validation digest for invalid reaction arguments', () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 24,
       method: 'item/tool/call',
       params: {
@@ -883,7 +892,7 @@ describe('murph.generate_image dynamic tool execution', () => {
   })
 
   it('executes finish_without_reply as a terminal no-op final action', async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 21,
       method: 'item/tool/call',
       params: {
@@ -922,7 +931,7 @@ describe('murph.generate_image dynamic tool execution', () => {
   })
 
   it('returns a value-free validation digest for invalid no-reply arguments', () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 22,
       method: 'item/tool/call',
       params: {
@@ -958,7 +967,7 @@ describe('murph.generate_image dynamic tool execution', () => {
   })
 
   it('returns a value-free validation digest for invalid image arguments', () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 10,
       method: 'item/tool/call',
       params: {
@@ -1031,7 +1040,7 @@ describe('murph.generate_image dynamic tool execution', () => {
         },
       }))
 
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 10,
       method: 'item/tool/call',
       params: {

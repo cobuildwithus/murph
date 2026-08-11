@@ -61,18 +61,17 @@ import {
   buildRuntimeIssueInputForFailedCodexAction,
   createCodexActionDiagnosticsReducer,
 } from './assistant-codex/action-diagnostics.js'
+import type {
+  MurphDynamicToolFinalActionPatch,
+  MurphDynamicToolReactionPatch,
+  MurphDynamicToolReplyTargetPatch,
+  MurphDynamicToolRequest,
+} from './assistant-codex/dynamic-tools.js'
 import {
-  executeMurphDynamicToolRequest,
-  isComputerDynamicToolRequest,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   type AssistantStyleTurnSettingsOverlay,
-  type MurphDynamicToolFinalActionPatch,
-  type MurphDynamicToolReactionPatch,
-  type MurphDynamicToolReplyTargetPatch,
-  type MurphDynamicToolRequest,
-  readMurphDynamicToolRequest,
-} from './assistant-codex/dynamic-tools.js'
+} from './assistant-codex/dynamic-tool-catalog.js'
 import type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
@@ -101,6 +100,12 @@ import {
   type CodexRpcMessage,
   type PendingCodexRpcRequest,
 } from './assistant-codex/app-server-rpc.js'
+import {
+  readCodexNonEmptyString,
+  readCodexRecord,
+  readCodexThreadTokenUsage,
+  type CodexTokenUsageBreakdown,
+} from './assistant-codex/app-server-protocol.js'
 import {
   resolveCodexChildEnv,
   withHostedCodexModelCatalogConfigOverride,
@@ -140,6 +145,7 @@ import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from './assistant/message-target-selection.js'
 import type {
+  AssistantGenerateSongTurnPolicy,
   AssistantNoReplyDisposition,
   AssistantProviderDynamicTool,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
@@ -158,6 +164,12 @@ import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
+import {
+  completeAssistantProviderStartCriticalPath,
+  readAssistantProviderStartMonotonicTickMs,
+  stampAssistantProviderStartCriticalPath,
+  type AssistantProviderStartCriticalPathContext,
+} from './assistant/provider-start-critical-path.js'
 import type {
   AssistantProgressDelivery,
   AssistantProgressDeliveryResult,
@@ -168,7 +180,7 @@ export { extractCodexTraceUpdates } from './assistant-codex-events.js'
 export {
   listMurphDynamicToolNames,
   resolveMurphDynamicTools,
-} from './assistant-codex/dynamic-tools.js'
+} from './assistant-codex/dynamic-tool-catalog.js'
 export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
 export type { CodexProgressEvent } from './assistant-codex-events.js'
 export type { CodexDisplayOptions } from './assistant-codex/config.js'
@@ -188,6 +200,15 @@ const CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS = 5_000
 const CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS = 120_000
 const CODEX_BACKGROUND_WORK_POLL_INTERVAL_MS = 50
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
+type MurphDynamicToolRuntime =
+  typeof import('./assistant-codex/dynamic-tools.js')
+let murphDynamicToolRuntimePromise: Promise<MurphDynamicToolRuntime> | null = null
+
+function loadMurphDynamicToolRuntime(): Promise<MurphDynamicToolRuntime> {
+  murphDynamicToolRuntimePromise ??=
+    import('./assistant-codex/dynamic-tools.js')
+  return murphDynamicToolRuntimePromise
+}
 const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
 const CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES = [
@@ -302,21 +323,20 @@ function prepareCodexRpcParams(
   return stripped
 }
 
-// Modern app-server clients receive compaction lifecycle as contextCompaction
-// items; `thread/compacted` is the legacy fan-out kept for protocol drift
-// tolerance.
+// Codex emits contextCompaction item lifecycle notifications and also retains
+// the canonical deprecated thread/compacted notification. Both exact pinned
+// protocol shapes are accepted; no dotted or alternate envelope aliases are.
 function isCodexContextCompactionStarted(message: CodexRpcMessage): boolean {
-  const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/started' && method !== 'item.started') {
+  if (message.method !== 'item/started') {
     return false
   }
-
-  return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
+  return readCodexRecord(readCodexRecord(message.params)?.item)?.type
+    === 'contextCompaction'
 }
 
 function readCodexContextCompactionItemId(message: CodexRpcMessage): string | null {
-  return normalizeNullableString(
-    asCodexString(asCodexRecord(asCodexRecord(message.params)?.item)?.id),
+  return readCodexNonEmptyString(
+    readCodexRecord(readCodexRecord(message.params)?.item)?.id,
   )
 }
 
@@ -324,67 +344,54 @@ function isCodexContextCompactionStartedForThread(
   message: CodexRpcMessage,
   threadId: string,
 ): boolean {
-  if (!isCodexContextCompactionStarted(message)) {
-    return false
-  }
-
-  const messageThreadId = extractCodexThreadIdFromMessage(message)
-  return messageThreadId === null || messageThreadId === threadId
+  return isCodexContextCompactionStarted(message)
+    && extractCodexThreadIdFromMessage(message) === threadId
 }
 
 function isCodexLegacyContextCompactionCompletion(message: CodexRpcMessage): boolean {
-  const method = typeof message.method === 'string' ? message.method : null
-  return method === 'thread/compacted' || method === 'thread.compacted'
+  return message.method === 'thread/compacted'
 }
 
 function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
   if (isCodexLegacyContextCompactionCompletion(message)) {
     return true
   }
-  const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/completed' && method !== 'item.completed') {
+  if (message.method !== 'item/completed') {
     return false
   }
-
-  return asCodexRecord(asCodexRecord(message.params)?.item)?.type === 'contextCompaction'
+  return readCodexRecord(readCodexRecord(message.params)?.item)?.type
+    === 'contextCompaction'
 }
 
 function isCodexContextCompactionCompletionForThread(
   message: CodexRpcMessage,
   threadId: string,
 ): boolean {
-  if (!isCodexContextCompactionCompletion(message)) {
-    return false
-  }
-
-  const messageThreadId = extractCodexThreadIdFromMessage(message)
-  return messageThreadId === null || messageThreadId === threadId
+  return isCodexContextCompactionCompletion(message)
+    && extractCodexThreadIdFromMessage(message) === threadId
 }
 
 function isCodexThreadTokenUsageUpdatedMethod(method: string | null): boolean {
-  return (
-    method === 'thread/tokenUsage/updated' ||
-    method === 'thread/token_usage/updated' ||
-    method === 'thread.tokenUsage.updated' ||
-    method === 'thread.token.usage.updated' ||
-    method === 'thread.token_usage.updated'
-  )
+  return method === 'thread/tokenUsage/updated'
 }
 
 function readCodexThreadTokenUsageUpdate(message: CodexRpcMessage): {
-  last: Record<string, unknown> | null
-  threadId: string | null
+  last: CodexTokenUsageBreakdown
+  threadId: string
 } | null {
-  const method = typeof message.method === 'string' ? message.method : null
-  if (!isCodexThreadTokenUsageUpdatedMethod(method)) {
+  if (!isCodexThreadTokenUsageUpdatedMethod(readCodexEventMethod(message))) {
     return null
   }
 
-  const params = asCodexRecord(message.params)
-  return {
-    last: asCodexRecord(asCodexRecord(params?.tokenUsage)?.last),
-    threadId: typeof params?.threadId === 'string' ? params.threadId : null,
-  }
+  const params = readCodexRecord(message.params)
+  const threadId = readCodexNonEmptyString(params?.threadId)
+  const tokenUsage = readCodexThreadTokenUsage(params?.tokenUsage)
+  return threadId && tokenUsage
+    ? {
+        last: tokenUsage.last,
+        threadId,
+      }
+    : null
 }
 
 function buildCodexAppServerNotFoundError(codexCommand: string): VaultCliError {
@@ -461,9 +468,11 @@ export interface CodexAppServerTurnInput {
   baseInstructions?: string | null
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
+  generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
   excludeResumeTurns?: boolean
   model?: string | null
   modelProvider?: string | null
+  onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   outputSchema?: Readonly<Record<string, unknown>> | null
   onFirstAssistantResponseCompleted?: (() => void) | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
@@ -499,6 +508,7 @@ export interface CodexAppServerTurnInput {
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   publicInternetFetch?: typeof fetch | null
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
@@ -668,6 +678,10 @@ function appendRequiredVaultFileApprovalUrls(
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    input.providerStartCriticalPath,
+    'codexAppServerTurnStartedAtMonotonicMs',
+  )
   assertCodexAppServerPermissionRequest(input)
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   if (
@@ -686,6 +700,7 @@ export async function executeCodexAppServerTurn(
     ...input,
     approvalPolicy,
     configOverrides: processInput.configOverrides,
+    ...(providerStartCriticalPath ? { providerStartCriticalPath } : {}),
     runtimeWorkspaceRoots: input.runtimeWorkspaceRoots?.map((root) =>
       path.resolve(root),
     ),
@@ -1824,7 +1839,7 @@ function readCodexSubagentActivity(message: CodexRpcMessage): {
   kind: 'interacted' | 'interrupted' | 'malformed' | 'started'
 } | null {
   const method = typeof message.method === 'string' ? message.method : null
-  if (method !== 'item/completed' && method !== 'item.completed') {
+  if (method !== 'item/completed') {
     return null
   }
   const item = asCodexRecord(asCodexRecord(message.params)?.item)
@@ -2527,7 +2542,7 @@ export interface CodexWarmThreadCompactionUsage {
   cachedInputTokens: number | null
   inputTokens: number
   outputTokens: number | null
-  source: 'estimated' | 'provider'
+  source: 'estimated'
   totalTokens: number
 }
 
@@ -2547,87 +2562,6 @@ function estimateCodexWarmThreadCompactionUsage(
     source: 'estimated',
     totalTokens: threadContextTokensBefore,
   }
-}
-
-function readCodexCompactionCompletionProviderUsage(
-  message: CodexRpcMessage,
-  threadId: string,
-): CodexWarmThreadCompactionUsage | null {
-  if (!isCodexContextCompactionCompletionForThread(message, threadId)) {
-    return null
-  }
-
-  const params = asCodexRecord(message.params)
-  const item = asCodexRecord(params?.item)
-  const candidates = [
-    ...readCodexProviderUsageCandidates(params),
-    ...readCodexProviderUsageCandidates(item),
-  ]
-
-  for (const candidate of candidates) {
-    const usage = readCodexCompactionProviderUsage(candidate)
-    if (usage) {
-      return usage
-    }
-  }
-
-  return null
-}
-
-function readCodexProviderUsageCandidates(
-  value: Record<string, unknown> | null,
-): readonly (Record<string, unknown> | null)[] {
-  if (!value) {
-    return []
-  }
-  const providerUsage = asCodexRecord(value.providerUsage)
-    ?? asCodexRecord(value.provider_usage)
-  return [providerUsage, asCodexRecord(providerUsage?.last)]
-}
-
-function readCodexCompactionProviderUsage(
-  value: Record<string, unknown> | null,
-): CodexWarmThreadCompactionUsage | null {
-  if (!value) {
-    return null
-  }
-
-  const inputTokens = readCodexUsageNumber(value, 'inputTokens', 'input_tokens')
-  const outputTokens = readCodexUsageNumber(value, 'outputTokens', 'output_tokens')
-  const totalTokens = readCodexUsageNumber(value, 'totalTokens', 'total_tokens')
-  if (inputTokens === null || outputTokens === null || totalTokens === null) {
-    return null
-  }
-  if (inputTokens <= 0 || outputTokens < 0 || totalTokens < inputTokens + outputTokens) {
-    return null
-  }
-  const cachedInputTokens = readCodexUsageNumber(
-    value,
-    'cachedInputTokens',
-    'cached_input_tokens',
-  )
-  if (cachedInputTokens !== null && cachedInputTokens > inputTokens) {
-    return null
-  }
-
-  return {
-    cachedInputTokens,
-    inputTokens,
-    outputTokens,
-    source: 'provider',
-    totalTokens,
-  }
-}
-
-function readCodexUsageNumber(
-  value: Record<string, unknown>,
-  camelKey: string,
-  snakeKey: string,
-): number | null {
-  const raw = value[camelKey] ?? value[snakeKey]
-  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
-    ? raw
-    : null
 }
 
 export type CodexWarmThreadCompactionOutcome =
@@ -2730,7 +2664,6 @@ export async function compactWarmCodexThread(input: {
   let compactRequestAccepted = false
   let compactStartedItemId: string | null = null
   let compactCompletionBuffered = false
-  let providerUsage: CodexWarmThreadCompactionUsage | null = null
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let compactionSettleReason: CompactionSettleReason | null = null
   let resolveCompaction!: (reason: CompactionSettleReason) => void
@@ -2812,8 +2745,6 @@ export async function compactWarmCodexThread(input: {
         if (!compactRequestAccepted) {
           return
         }
-        providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
-          ?? providerUsage
         settleCompaction('compacted')
         return
       }
@@ -2826,8 +2757,6 @@ export async function compactWarmCodexThread(input: {
         if (compactStartedItemId === null || itemId !== compactStartedItemId) {
           return
         }
-        providerUsage = readCodexCompactionCompletionProviderUsage(message, vitals.threadId)
-          ?? providerUsage
         if (compactRequestAccepted) {
           settleCompaction('compacted')
         } else {
@@ -2880,8 +2809,7 @@ export async function compactWarmCodexThread(input: {
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
         serviceTier: vitals.serviceTier,
-        usage: providerUsage
-          ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
+        usage: estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
     }
 
@@ -2917,17 +2845,11 @@ function hashCodexRawString(value: string): string {
 }
 
 function readCodexEventMethod(message: CodexRpcMessage): string | null {
-  return typeof message.method === 'string'
-    ? message.method
-    : typeof message.type === 'string'
-      ? message.type
-      : typeof message.event === 'string'
-        ? message.event
-        : null
+  return typeof message.method === 'string' ? message.method : null
 }
 
 function isCodexTurnStartedMethod(method: string | null): boolean {
-  return method === 'turn/started' || method === 'turn.started'
+  return method === 'turn/started'
 }
 
 function createCodexSubagentTurnUsageKey(input: {
@@ -2938,7 +2860,7 @@ function createCodexSubagentTurnUsageKey(input: {
 }
 
 function isCodexTurnCompletedMethod(method: string | null): boolean {
-  return method === 'turn/completed' || method === 'turn.completed'
+  return method === 'turn/completed'
 }
 
 type CodexTransportDiagnosticSource = {
@@ -3126,6 +3048,10 @@ async function runCodexAppServerTurnOnProcess(
   codexProcess: CodexAppServerProcess,
   input: CodexAppServerPreparedTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    input.providerStartCriticalPath,
+    'codexAppServerProcessTurnStartedAtMonotonicMs',
+  )
   const hostedCanonicalWritePort = readHostedCanonicalWritePort()
   let stdout = ''
   let stderr = ''
@@ -3179,6 +3105,17 @@ async function runCodexAppServerTurnOnProcess(
   // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
   // assistant turn, owned here and threaded into the dynamic-tool executor.
   const askGrokTurnState = createAskGrokTurnState()
+  const groupSharedReadTurnState = {
+    invalid: false,
+    readProjectionScopeKeyBatches: [],
+    roster: null,
+  }
+  const generateSongTurnState = input.generateSongPolicy
+    ? {
+        attemptCount: 0,
+        policy: input.generateSongPolicy,
+      }
+    : null
   const subagentTokenUsageByTurn =
     new Map<string, CodexSubagentTurnTokenUsageSample>()
   const trackedSubagentUsageThreadIds = new Set<string>()
@@ -3210,6 +3147,7 @@ async function runCodexAppServerTurnOnProcess(
   let codexTimingTurnStartAckElapsedMs: number | null = null
   let codexTimingTurnStartedNotificationElapsedMs: number | null = null
   let codexTimingTurnCompletedNotificationElapsedMs: number | null = null
+  let currentTurnStartedNotificationObserved = false
   let liveInterruptRequested = false
 
   let completeTurn: (() => void) | null = null
@@ -3220,6 +3158,7 @@ async function runCodexAppServerTurnOnProcess(
   let contextCompactionProgressNotified = false
   let contextCompactionProgressPending = false
   let releaseLiveTurn = () => {}
+  const pendingDynamicToolRequests = new Set<Promise<void>>()
   const pendingProgressDeliveries = new Set<Promise<void>>()
   let dynamicToolExecutionChain: Promise<void> = Promise.resolve()
   const dynamicToolAbortController = new AbortController()
@@ -3702,13 +3641,24 @@ async function runCodexAppServerTurnOnProcess(
     trailingSteerCandidate = null
   }
 
-  const notifyProviderRequestStarted = () => {
+  const notifyProviderRequestStarted = (
+    providedStartedAtMonotonicMs?: number,
+  ) => {
     if (providerRequestStartedNotified) {
       return
     }
     providerRequestStartedNotified = true
+    const providerStartedAtMonotonicMs = providedStartedAtMonotonicMs
+      ?? readAssistantProviderStartMonotonicTickMs()
     const startedAtMs = Date.now()
     codexProviderRequestStartedAtMs = startedAtMs
+    const completedProviderStartCriticalPath =
+      input.providerRequestOrdinal === 0
+        ? completeAssistantProviderStartCriticalPath(
+            providerStartCriticalPath,
+            providerStartedAtMonotonicMs,
+          )
+        : null
     notifyCodexAppServerProviderRequestStartedBestEffort({
       hook: input.onProviderRequestStarted ?? null,
       startedAt: new Date(startedAtMs).toISOString(),
@@ -3718,6 +3668,9 @@ async function runCodexAppServerTurnOnProcess(
           0,
           startedAtMs - codexAppServerTurnStartedAt,
         ),
+        ...(completedProviderStartCriticalPath
+          ? { providerStartCriticalPath: completedProviderStartCriticalPath }
+          : {}),
       },
     })
   }
@@ -3793,6 +3746,23 @@ async function runCodexAppServerTurnOnProcess(
         pendingProgressDeliveries.delete(tracked)
       })
     pendingProgressDeliveries.add(tracked)
+  }
+
+  const trackDynamicToolRequest = (promise: Promise<void>): void => {
+    const tracked = promise
+      .catch((error: unknown) => {
+        rejectOnce(error)
+      })
+      .finally(() => {
+        pendingDynamicToolRequests.delete(tracked)
+      })
+    pendingDynamicToolRequests.add(tracked)
+  }
+
+  const drainPendingDynamicToolRequests = async (): Promise<void> => {
+    while (pendingDynamicToolRequests.size > 0) {
+      await Promise.all([...pendingDynamicToolRequests])
+    }
   }
 
   const drainPendingProgressDeliveries = async (): Promise<void> => {
@@ -4036,10 +4006,10 @@ async function runCodexAppServerTurnOnProcess(
     jsonEvents.push(message)
   }
 
-  const handleAcceptedServerRequest = (
+  const handleAcceptedServerRequest = async (
     message: CodexRpcMessage,
     requestId: CodexRpcId,
-  ): void => {
+  ): Promise<void> => {
     acceptJsonEvent(message)
 
     if (turnTerminal) {
@@ -4057,6 +4027,38 @@ async function runCodexAppServerTurnOnProcess(
       })
       return
     }
+
+    if (message.method !== 'item/tool/call') {
+      denyUnsupportedCodexServerRequest({
+        message,
+        requestId,
+        writeRpcMessage: (payload) => {
+          void tryWriteRpcMessage(payload)
+        },
+      })
+      return
+    }
+
+    const dynamicToolRequestDeliveryContextOrdinal =
+      currentDeliveryContextOrdinal()
+    let dynamicToolRuntime: MurphDynamicToolRuntime
+    try {
+      dynamicToolRuntime = await loadMurphDynamicToolRuntime()
+    } catch {
+      void tryWriteRpcMessage({
+        id: requestId,
+        error: {
+          code: -32000,
+          message: 'Dynamic tool runtime is unavailable.',
+        },
+      })
+      return
+    }
+    const {
+      executeMurphDynamicToolRequest,
+      isComputerDynamicToolRequest,
+      readMurphDynamicToolRequest,
+    } = dynamicToolRuntime
 
     const dynamicToolRequest = readMurphDynamicToolRequest(message)
     if (!dynamicToolRequest) {
@@ -4205,8 +4207,6 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const dynamicToolRequestDeliveryContextOrdinal =
-      currentDeliveryContextOrdinal()
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
       dynamicToolRequest.kind === 'react-to-message' ||
@@ -4352,9 +4352,18 @@ async function runCodexAppServerTurnOnProcess(
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
           currentResponseCard: responseCard,
+          groupChallengeResponseCardAllowed:
+            input.groupConversation === true &&
+            input.dynamicTools.some((tool) =>
+              tool.namespace === 'murph' &&
+              tool.name === 'attach_response_card'
+            ),
+          groupSharedReadTurnState,
           privateDirectResponseCardAllowed: input.groupConversation === false,
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+          onboardingFirstReadCompletionTransitionAvailable:
+            input.onboardingFirstReadCompletionTransitionAvailable ?? false,
           productFeedbackRecorder: input.productFeedbackRecorder ?? null,
           progressDelivery:
             dynamicToolRequest.kind === 'send-progress-update'
@@ -4375,6 +4384,7 @@ async function runCodexAppServerTurnOnProcess(
               ? input.askGrokRuntime ?? null
               : null,
           askGrokTurnState,
+          generateSongTurnState,
         })
         return result
       },
@@ -4544,6 +4554,10 @@ async function runCodexAppServerTurnOnProcess(
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
     const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
+    if (isTurnStartedNotification) {
+      currentTurnStartedNotificationObserved =
+        turnId !== null && extractCodexTurnIdFromMessage(message) === turnId
+    }
     const shouldCaptureTurnStartedNotification =
       providerRequestStartedAtMs !== null &&
       isTurnStartedNotification &&
@@ -4647,7 +4661,7 @@ async function runCodexAppServerTurnOnProcess(
 
     if (
       normalizedEvent.kind !== 'status_item' ||
-      normalizedEvent.itemType !== 'context.compaction'
+      normalizedEvent.itemType !== 'contextCompaction'
     ) {
       input.onTraceEvent?.({
         codexThreadId,
@@ -4973,11 +4987,25 @@ async function runCodexAppServerTurnOnProcess(
         rejectPreStartParentTurnRequest(requestId)
         return
       }
-      handleAcceptedServerRequest(message, requestId)
+      trackDynamicToolRequest(
+        handleAcceptedServerRequest(message, requestId),
+      )
       return
     }
 
-    if (isReusedWarmProcess && messageTurnId === null) {
+    if (
+      messageTurnId === null &&
+      method === 'model/rerouted' &&
+      !currentTurnStartedNotificationObserved
+    ) {
+      return
+    }
+
+    if (
+      isReusedWarmProcess &&
+      messageTurnId === null &&
+      method !== 'model/rerouted'
+    ) {
       return
     }
 
@@ -5220,11 +5248,13 @@ async function runCodexAppServerTurnOnProcess(
         codexThreadId,
       }),
     )
+    const providerStartedAtMonotonicMs =
+      readAssistantProviderStartMonotonicTickMs()
     // The child can begin executing (including side-effecting commands) as
     // soon as the turn/start request is written, so the provider-start
     // barrier arms here rather than at the acknowledgement. A death between
     // write and response must never be classified as pre-provider work.
-    notifyProviderRequestStarted()
+    notifyProviderRequestStarted(providerStartedAtMonotonicMs)
     const turnResult = await withCodexRpcTimeout(
       turnStartRequest,
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
@@ -5233,11 +5263,11 @@ async function runCodexAppServerTurnOnProcess(
     acceptTurnStartResultTurnId(extractCodexTurnIdFromResult(turnResult))
     lifecycleStage = 'turn_started'
     emitAppServerTimingTrace('turn-started')
-    registerLiveTurn()
 
     lifecycleStage = 'turn_running'
     await turnCompleted
     clearInterruptCleanupTimer()
+    await drainPendingDynamicToolRequests()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
     emitActionDiagnosticsTrace()
@@ -5294,6 +5324,7 @@ async function runCodexAppServerTurnOnProcess(
       ? (buildRecordedTerminationError(lastEventError) ?? error)
       : error
     emitActionDiagnosticsTrace()
+    await drainPendingDynamicToolRequests()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
@@ -5580,6 +5611,7 @@ function isInvalidDynamicToolRequest(
       | 'invalid-computer-arguments'
       | 'invalid-device-arguments'
       | 'invalid-generate-voice-memo-arguments'
+      | 'invalid-pending-vault-files-arguments'
       | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-reaction-arguments'
@@ -5596,6 +5628,7 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-computer-arguments' ||
     request.kind === 'invalid-device-arguments' ||
     request.kind === 'invalid-generate-voice-memo-arguments' ||
+    request.kind === 'invalid-pending-vault-files-arguments' ||
     request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-reaction-arguments' ||
@@ -5614,22 +5647,31 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
+    request.kind === 'attach-group-challenge-response-card' ||
     request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'send-vault-file' ||
+    request.kind === 'pending-vault-files-list' ||
+    request.kind === 'pending-vault-files-cancel' ||
     request.kind === 'assistant-configuration' ||
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
-    isComputerDynamicToolRequest(request)
+    request.kind === 'computer-open' ||
+    request.kind === 'computer-act' ||
+    request.kind === 'computer-os-control' ||
+    request.kind === 'computer-pause-for-user' ||
+    request.kind === 'computer-finish-run' ||
+    request.kind === 'invalid-computer-arguments'
 }
 
 function isResponseAttachmentDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
-  return request.kind === 'attach-response-card' ||
+  return request.kind === 'attach-group-challenge-response-card' ||
+    request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'generate-image' ||
     request.kind === 'generate-song' ||
@@ -5644,6 +5686,9 @@ function isInvocationScopedRootToolRequest(
     request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||
     request.kind === 'invalid-device-arguments' ||
+    request.kind === 'pending-vault-files-list' ||
+    request.kind === 'pending-vault-files-cancel' ||
+    request.kind === 'invalid-pending-vault-files-arguments' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
     request.kind === 'invalid-reaction-arguments' ||
@@ -5866,21 +5911,17 @@ function extractCodexProviderActionKey(
   normalizedEvent: CodexNormalizedEvent,
   rawEvent: CodexRpcMessage,
 ): string | null {
+  if (isCodexProductFeedbackDynamicToolEvent(rawEvent)) {
+    return null
+  }
   if (normalizedEvent.kind === 'status_item') {
     if (
-      normalizedEvent.itemType !== 'command.execution' &&
-      normalizedEvent.itemType !== 'dynamic.tool.call' &&
-      normalizedEvent.itemType !== 'file.change'
+      normalizedEvent.itemType !== 'commandExecution' &&
+      normalizedEvent.itemType !== 'dynamicToolCall' &&
+      normalizedEvent.itemType !== 'fileChange'
     ) {
       return null
     }
-    if (
-      normalizedEvent.itemType === 'dynamic.tool.call' &&
-      isCodexProductFeedbackDynamicToolEvent(rawEvent)
-    ) {
-      return null
-    }
-
     return (
       normalizedEvent.itemId ??
       providerActionFallbackKeyFromNormalized(normalizedEvent)
@@ -5903,19 +5944,11 @@ function extractCodexProviderActionKey(
 function isCodexProductFeedbackDynamicToolEvent(
   event: CodexRpcMessage,
 ): boolean {
-  const params = readCodexRecordField(event, 'params')
-  const data = readCodexRecordField(event, 'data')
-  const item =
-    readCodexRecordField(event, 'item') ??
-    readCodexRecordField(params, 'item') ??
-    readCodexRecordField(data, 'item')
-  const itemType = readCodexStringField(item, 'type')
-    ?.replaceAll(/[._-]/gu, '')
-    .toLowerCase()
+  const item = readCodexRecord(readCodexRecord(event.params)?.item)
   return (
-    itemType === 'dynamictoolcall' &&
-    readCodexStringField(item, 'namespace') === 'murph' &&
-    readCodexStringField(item, 'tool') === 'submit_product_feedback'
+    item?.type === 'dynamicToolCall' &&
+    item.namespace === 'murph' &&
+    item.tool === 'submit_product_feedback'
   )
 }
 

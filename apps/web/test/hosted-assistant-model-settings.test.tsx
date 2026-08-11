@@ -128,7 +128,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-test("eligible Pulse members can choose Luna or Terra and discover the Edge upgrade", () => {
+test("eligible Pulse members discover the Edge upgrade from the disabled Sol card", () => {
   const markup = renderToStaticMarkup(
     createElement(HostedAssistantModelSettings, {
       canUpgradeToEdge: true,
@@ -142,8 +142,13 @@ test("eligible Pulse members can choose Luna or Terra and discover the Edge upgr
   assert.match(markup, />Luna</);
   assert.match(markup, />Terra</);
   assert.match(markup, />Sol</);
-  assert.match(markup, /Sol requires an active Edge plan\./);
+  assert.doesNotMatch(markup, /Sol requires an active Edge plan\./);
   assert.match(markup, /High usage · Edge required/);
+  assert.match(markup, /!opacity-100/);
+  assert.match(
+    markup,
+    /aria-describedby="assistant-model-gpt-5\.6-sol-description assistant-model-gpt-5\.6-sol-meta"/,
+  );
   assert.match(markup, />Upgrade to Edge<\/button>/);
   assert.match(markup, /role="radio"/);
   assert.match(markup, /Save change/);
@@ -164,7 +169,8 @@ test("other non-Edge members can still choose Luna or Terra without an invalid u
   assert.match(markup, />Luna</);
   assert.match(markup, />Terra</);
   assert.match(markup, />Sol</);
-  assert.match(markup, /requires an active Edge plan\./);
+  assert.doesNotMatch(markup, /Sol requires an active Edge plan\./);
+  assert.match(markup, /High usage · Edge required/);
   assert.doesNotMatch(markup, />Upgrade to Edge<\/button>/);
   assert.match(markup, /role="radio"/);
   assert.match(markup, /Save change/);
@@ -223,7 +229,7 @@ test("the routing dialog offers the member's endpoint as a third option", () => 
         revision: 4,
         selected: true,
         supportsImages: false,
-        verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+        verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
         verifiedAt: "2026-07-30T12:00:00.000Z",
       },
       initialDormantSolPreference: false,
@@ -396,7 +402,7 @@ test("one save routes replies to the endpoint and keeps the managed default", as
         revision: 4,
         selected: false,
         supportsImages: false,
-        verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+        verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
         verifiedAt: "2026-07-30T12:00:00.000Z",
       },
       initialDormantSolPreference: false,
@@ -621,7 +627,7 @@ function endpointConnection(selected: boolean, revision = 4) {
     selected,
     supportsImages: false,
     verificationProfile:
-      "murph-codex-0.145.0-portable-responses-v1" as const,
+      "murph-codex-0.147.0-portable-responses-v1" as const,
     verifiedAt: "2026-07-30T12:00:00.000Z",
   };
 }

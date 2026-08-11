@@ -12,7 +12,7 @@ import {
 import {
   prepareDuplicateHostedStripeWebhookEventForWorkflowRetry,
 } from "./stripe-webhook-reconciliation";
-import { logHostedStripeFailure } from "./stripe-error-log";
+import { scheduleHostedStripePaymentFailureEventAlert } from "./stripe-alert-email";
 import {
   startHostedStripeWebhookReconciliationWorkflow,
 } from "./stripe-webhook-workflow-start";
@@ -53,6 +53,14 @@ export async function handleHostedStripeWebhook(input: {
     event,
     prisma,
   });
+
+  if (!recorded.duplicate) {
+    scheduleHostedStripePaymentFailureEventAlert({
+      eventId: event.id,
+      eventType: event.type,
+      livemode: event.livemode,
+    });
+  }
 
   await handoffHostedStripeWebhookReconciliation({
     duplicate: recorded.duplicate,
@@ -97,7 +105,7 @@ function constructStripeWebhookEvent(input: {
   try {
     return input.stripe.webhooks.constructEvent(input.rawBody, input.signature, input.webhookSecret);
   } catch (error) {
-    logHostedStripeFailure({ error, operationName: "webhooks.constructEvent" });
+    console.error("Hosted Stripe webhook verification failed.");
     throw hostedOnboardingError({
       code: "STRIPE_SIGNATURE_INVALID",
       message: error instanceof Error ? error.message : "Invalid Stripe webhook signature.",

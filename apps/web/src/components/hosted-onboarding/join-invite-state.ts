@@ -132,7 +132,7 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
         return "Verify your email";
       }
       return status.invite?.verificationMode === "manual_phone"
-        ? "Add your phone"
+        ? "Log in or sign up"
         : "Verify your phone";
     case "checkout":
       return status.messagingSetupRequired
@@ -159,7 +159,7 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
         return "Use the iMessage email address that received this join link.";
       }
       return status.invite?.verificationMode === "manual_phone"
-        ? "Add the phone number Murph should use for your private conversations."
+        ? "Choose phone, Telegram, or email to continue with this invite."
         : "";
     case "checkout":
       return status.messagingSetupRequired

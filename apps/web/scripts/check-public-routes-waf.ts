@@ -6,6 +6,8 @@ export const COMPANION_AUTH_DIAGNOSTICS_PATH =
 export const MURPH_SAFE_SEARCH_PATH = "/api/public/v1/products/search";
 export const MURPH_SAFE_API_DETAIL_PREFIX = "/api/public/v1/products/";
 export const MURPH_SAFE_WEB_DETAIL_PREFIX = "/search/products/";
+export const SIGNUP_REFERRAL_CLAIM_PATH_PREFIX = "/r/";
+export const SIGNUP_REFERRAL_CLAIM_PATH_SUFFIX = "/claim";
 
 export const COMPANION_AUTH_DIAGNOSTICS_ENABLED_ENV =
   "MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED";
@@ -15,6 +17,8 @@ export const MURPH_SAFE_SEARCH_WAF_RULE_ENV =
   "MURPH_SAFE_SEARCH_WAF_RULE_ID";
 export const MURPH_SAFE_DETAIL_WAF_RULE_ENV =
   "MURPH_SAFE_DETAIL_WAF_RULE_ID";
+export const SIGNUP_REFERRAL_CLAIM_WAF_RULE_ENV =
+  "MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID";
 export const PUBLIC_ROUTES_WAF_REQUIRED_ENV =
   "MURPH_PUBLIC_ROUTES_WAF_REQUIRED";
 
@@ -35,14 +39,16 @@ type PublicRoutesWafRuleIds = {
   companionDiagnosticsRuleId?: string;
   detailRuleId: string;
   searchRuleId: string;
+  signupReferralClaimRuleId: string;
 };
 type RuleCondition = {
   neg?: true;
-  op: "eq" | "pre";
+  op: "eq" | "pre" | "suf";
   type: "method" | "path";
   value: string;
 };
 type RuleSpec = {
+  allowSafePredecessors?: true;
   conditionGroups: readonly (readonly RuleCondition[])[];
   id: string;
   label: string;
@@ -75,6 +81,12 @@ const MURPH_SAFE_DETAIL_CONDITION_GROUPS = [
     { op: "pre", type: "path", value: MURPH_SAFE_WEB_DETAIL_PREFIX },
   ],
 ] as const satisfies readonly (readonly RuleCondition[])[];
+
+const SIGNUP_REFERRAL_CLAIM_CONDITION_GROUPS = [[
+  { op: "pre", type: "path", value: SIGNUP_REFERRAL_CLAIM_PATH_PREFIX },
+  { op: "suf", type: "path", value: SIGNUP_REFERRAL_CLAIM_PATH_SUFFIX },
+  { op: "eq", type: "method", value: "POST" },
+]] as const satisfies readonly (readonly RuleCondition[])[];
 
 export function buildPublicRoutesWafConfigUrl(
   projectId: string,
@@ -115,7 +127,19 @@ export function validatePublicRoutesWafConfig(
     if (rule.active !== true) {
       issues.push(`${spec.label} rule is disabled`);
     } else if (activeRules[expectedIndex] !== rule) {
-      issues.push(`${spec.label} rule must be active custom rule ${expectedIndex + 1}`);
+      const actualIndex = activeRules.indexOf(rule);
+      const unexpectedPredecessors = activeRules.slice(expectedIndex, actualIndex);
+      if (
+        spec.allowSafePredecessors !== true
+        || actualIndex < expectedIndex
+        || unexpectedPredecessors.some(hasBypassAction)
+      ) {
+        issues.push(
+          spec.allowSafePredecessors === true
+            ? `${spec.label} rule must not follow an active bypass rule`
+            : `${spec.label} rule must be active custom rule ${expectedIndex + 1}`,
+        );
+      }
     }
 
     if (rule.valid !== true) {
@@ -160,6 +184,10 @@ export async function runPublicRoutesWafPreflight(
     source,
     MURPH_SAFE_DETAIL_WAF_RULE_ENV,
   );
+  const signupReferralClaimRuleId = requireEnvironmentVariable(
+    source,
+    SIGNUP_REFERRAL_CLAIM_WAF_RULE_ENV,
+  );
   const companionDiagnosticsRuleId =
     diagnosticsEnabled
       ? requireEnvironmentVariable(source, COMPANION_AUTH_DIAGNOSTICS_WAF_RULE_ENV)
@@ -169,6 +197,7 @@ export async function runPublicRoutesWafPreflight(
     companionDiagnosticsRuleId,
     detailRuleId,
     searchRuleId,
+    signupReferralClaimRuleId,
   } satisfies PublicRoutesWafRuleIds;
   assertDistinctRuleIds(ruleIds);
 
@@ -238,6 +267,13 @@ function buildRuleSpecs(ruleIds: PublicRoutesWafRuleIds): RuleSpec[] {
       label: "Murph Safe detail",
       limit: 120,
     },
+    {
+      allowSafePredecessors: true,
+      conditionGroups: SIGNUP_REFERRAL_CLAIM_CONDITION_GROUPS,
+      id: ruleIds.signupReferralClaimRuleId,
+      label: "signup referral claim",
+      limit: 10,
+    },
   );
   return specs;
 }
@@ -247,6 +283,7 @@ function assertDistinctRuleIds(ruleIds: PublicRoutesWafRuleIds): void {
     ruleIds.companionDiagnosticsRuleId,
     ruleIds.searchRuleId,
     ruleIds.detailRuleId,
+    ruleIds.signupReferralClaimRuleId,
   ].filter((value): value is string => value !== undefined);
   if (new Set(ids).size !== ids.length) {
     throw new Error("Public route WAF rule IDs must be distinct.");
@@ -298,7 +335,11 @@ function readConditionGroupKey(value: unknown): string | null {
     }
     if (
       (condition.type !== "path" && condition.type !== "method")
-      || (condition.op !== "eq" && condition.op !== "pre")
+      || (
+        condition.op !== "eq"
+        && condition.op !== "pre"
+        && condition.op !== "suf"
+      )
       || typeof condition.value !== "string"
     ) {
       return null;
@@ -339,6 +380,12 @@ function hasRequiredRateLimitAction(rule: JsonRecord, limit: number): boolean {
     && rateLimit.keys[0] === REQUIRED_RATE_LIMIT_KEY
     && (mitigate.actionDuration === undefined || mitigate.actionDuration === null)
     && mitigate.bypassSystem !== true;
+}
+
+function hasBypassAction(rule: JsonRecord): boolean {
+  const action = readRecord(rule, "action");
+  const mitigate = action === null ? null : readRecord(action, "mitigate");
+  return mitigate?.action === "bypass";
 }
 
 function requireEnvironmentVariable(source: EnvSource, name: string): string {

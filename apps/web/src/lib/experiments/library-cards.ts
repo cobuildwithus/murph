@@ -9,6 +9,7 @@ import {
   resolveBrowserVaultExperimentRun,
   resolveBrowserVaultExperimentRunById,
 } from "@/src/lib/browser-vault/experiment-run";
+import { resolveExperimentRunCardDailyCadence } from "@/src/lib/experiments/run-card-daily-cadence";
 import {
   buildExperimentRunCardSummary,
   type ExperimentRunCardSummary,
@@ -88,7 +89,7 @@ export function buildExperimentLibraryCards({
 }): ExperimentLibraryCard[] {
   const protocolCards = protocols.map((protocol) => {
     const privateRun = resolveBrowserVaultExperimentRun({ client, protocol });
-    return protocolToCard(protocol, privateRun);
+    return protocolToCard(client, protocol, privateRun);
   });
   const matchedTrackedExperimentIds = new Set(
     protocolCards.flatMap((card) => card.trackedExperimentId ? [card.trackedExperimentId] : []),
@@ -96,6 +97,7 @@ export function buildExperimentLibraryCards({
   const trackedOnlyCards = trackedExperiments
     .filter((entry) => !matchedTrackedExperimentIds.has(entry.id))
     .map((entry) => trackedExperimentToCard(
+      client,
       entry,
       resolveBrowserVaultExperimentRunById({ client, experimentId: entry.id }),
     ));
@@ -104,6 +106,7 @@ export function buildExperimentLibraryCards({
 }
 
 function protocolToCard(
+  client: BrowserVaultQueryClient | null,
   protocol: ExperimentProtocol,
   privateRun: ExperimentRunProjection | null,
 ): ExperimentLibraryCard {
@@ -132,7 +135,7 @@ function protocolToCard(
     description,
     hasPrivateData: privateRun !== null,
     runStatus: privateRun?.status,
-    runSummary: privateRun ? buildExperimentRunCardSummary(privateRun) : undefined,
+    runSummary: buildPrivateRunCardSummary(client, privateRun),
     startedOn,
     trackedExperimentId: privateRun?.id,
     searchText: [
@@ -154,6 +157,7 @@ function formatProtocolDays(protocol: ExperimentProtocol): number {
 }
 
 function trackedExperimentToCard(
+  client: BrowserVaultQueryClient | null,
   entry: OverviewExperiment,
   privateRun: ExperimentRunProjection | null,
 ): ExperimentLibraryCard {
@@ -183,7 +187,7 @@ function trackedExperimentToCard(
       ?? "This experiment has private data saved on this device, but it doesn't match a public protocol page right now.",
     hasPrivateData: true,
     runStatus,
-    runSummary: privateRun ? buildExperimentRunCardSummary(privateRun) : undefined,
+    runSummary: buildPrivateRunCardSummary(client, privateRun),
     startedOn,
     trackedExperimentId: entry.id,
     searchText: [
@@ -199,6 +203,30 @@ function trackedExperimentToCard(
       .filter((value): value is string => typeof value === "string")
       .join(" "),
   };
+}
+
+function buildPrivateRunCardSummary(
+  client: BrowserVaultQueryClient | null,
+  privateRun: ExperimentRunProjection | null,
+): ExperimentRunCardSummary | undefined {
+  if (!privateRun) {
+    return undefined;
+  }
+
+  const summary = buildExperimentRunCardSummary(privateRun);
+  if (privateRun.status !== "active" && privateRun.status !== "paused") {
+    return summary;
+  }
+
+  const dailyCadence = resolveExperimentRunCardDailyCadence({
+    cadence: privateRun.schedule?.cadence,
+    client,
+    experimentId: privateRun.id,
+  });
+
+  return dailyCadence
+    ? { ...summary, dailyCadence }
+    : summary;
 }
 
 function compareExperimentCards(left: ExperimentLibraryCard, right: ExperimentLibraryCard): number {

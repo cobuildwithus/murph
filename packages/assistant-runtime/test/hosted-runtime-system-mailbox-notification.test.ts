@@ -22,6 +22,7 @@ import {
 import type {
   AssistantExecutionContext,
 } from "@murphai/assistant-engine";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node/assistant-state-fs";
 import {
   readPreferencesDocument,
@@ -41,9 +42,17 @@ vi.mock("../src/hosted-runtime/events.ts", () => ({
   executeHostedMailboxEvent: mocks.executeHostedMailboxEvent,
 }));
 
+import {
+  prepareHostedAssistantNotificationSystemMailboxWake,
+} from "../src/hosted-runtime/events/assistant-notification.ts";
 import type {
   HostedMailboxResolvedImportItem,
 } from "../src/hosted-runtime/mailbox-import.ts";
+import {
+  createEmptyHostedMailboxImportState,
+  readHostedMailboxImportState,
+  writeHostedMailboxImportState,
+} from "../src/hosted-runtime/mailbox-state.ts";
 import {
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
@@ -56,6 +65,7 @@ import {
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   readHostedSystemMailboxState,
+  resolveHostedSystemMailboxHandledThroughSeq,
   type HostedSystemMailboxPendingItem,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
@@ -497,6 +507,526 @@ describe("hosted system mailbox notification execution context", () => {
             status: "pending",
           }),
         ]));
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  const legacyUsageReferralLookalikes: Array<{
+    contextMemberId?: string;
+    label: string;
+    mailboxDedupeKey?: string;
+    mutate: (
+      wake: ReturnType<typeof createLegacyUsageReferralNotificationWake>,
+    ) => void;
+  }> = [
+    {
+      label: "mismatched referral identity",
+      mutate(wake) {
+        wake.notification.deliveryDedupeToken =
+          "usage-referral-reward:different-referral";
+      },
+    },
+    {
+      label: "mismatched mailbox identity",
+      mailboxDedupeKey:
+        "assistant.notification.requested:usage-referral-reward:other",
+      mutate() {},
+    },
+    {
+      label: "wrong channel",
+      mutate(wake) {
+        wake.notification.route.channel = "telegram";
+      },
+    },
+    {
+      label: "non-direct route",
+      mutate(wake) {
+        wake.notification.route.threadIsDirect = false;
+      },
+    },
+    {
+      label: "non-explicit delivery",
+      mutate(wake) {
+        wake.notification.route.delivery.kind = "thread";
+      },
+    },
+    {
+      contextMemberId: "different-runtime-member",
+      label: "wrong runtime member",
+      mutate() {},
+    },
+  ];
+
+  it.each(legacyUsageReferralLookalikes)(
+    "does not recover a legacy referral lookalike with $label",
+    async ({
+      contextMemberId = "member_123",
+      mailboxDedupeKey,
+      mutate,
+    }) => {
+      const notificationKey = "usage-referral-reward:lookalike";
+      const eventId = `assistant.notification.requested:${notificationKey}`;
+      const wake = createLegacyUsageReferralNotificationWake({
+        eventId,
+        memberId: "member_123",
+        notificationKey,
+        target: "linq-frozen-lookalike",
+      });
+      mutate(wake);
+      const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+
+      await expect(prepareHostedAssistantNotificationSystemMailboxWake({
+        assertExternalThreadRouteAuthority,
+        executionContext: {
+          hosted: {
+            memberId: contextMemberId,
+            userEnvKeys: [],
+          },
+        },
+        mailboxDedupeKey: mailboxDedupeKey ?? eventId,
+        signal: null,
+        wake,
+      })).resolves.toEqual({
+        kind: "execute",
+        wake,
+      });
+      expect(assertExternalThreadRouteAuthority).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["warm", "restored"] as const)(
+    "recovers an already-imported authority-less referral on a %s runtime",
+    async (runtimeState) => {
+      const workspace = await createHostedRuntimeWorkspace(
+        "murph-hosted-system-mailbox-referral-recovery-",
+      );
+      const memberId = "member_123";
+      const notificationKey = `usage-referral-reward:${runtimeState}`;
+      const eventId = `assistant.notification.requested:${notificationKey}`;
+      const mailboxItemId = `mailbox_referral_${runtimeState}`;
+      const target = `linq-frozen-${runtimeState}`;
+      const wake = createLegacyUsageReferralNotificationWake({
+        eventId,
+        memberId,
+        notificationKey,
+        target,
+      });
+      const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+      const deliveredTargets: string[] = [];
+      mocks.executeHostedMailboxEvent.mockImplementation(async (input) => {
+        if (input.wake.kind !== "assistant.notification.requested") {
+          throw new TypeError("Expected an assistant notification wake.");
+        }
+        deliveredTargets.push(input.wake.notification.route.delivery.target);
+        expect(input.wake.notification.externalThreadRouteAuthority).toEqual({
+          channel: "linq",
+          containerMemberId: memberId,
+          threadId: target,
+        });
+        return createAssistantNotificationMailboxMetrics();
+      });
+
+      try {
+        await persistAlreadyImportedNotification({
+          eventId,
+          mailboxItemId,
+          mailboxLaneSeq: "7",
+          runtimeState,
+          vaultRoot: workspace.vaultRoot,
+          wake,
+        });
+
+        expect(
+          (await readHostedMailboxImportState({
+            vaultRoot: workspace.vaultRoot,
+          })).watermarks.system,
+        ).toBe("7");
+
+        const runtime = createRuntimeWithExternalRouteAuthority(
+          assertExternalThreadRouteAuthority,
+        );
+        const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => FIXED_NOW,
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+
+        expect(prepared).toMatchObject({
+          itemId: mailboxItemId,
+          status: "processed",
+        });
+        expect(assertExternalThreadRouteAuthority).toHaveBeenCalledExactlyOnceWith(
+          {
+            channel: "linq",
+            containerMemberId: memberId,
+            threadId: target,
+          },
+          { signal: null },
+        );
+        expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            sourceMailboxItemId: mailboxItemId,
+            wake: expect.objectContaining({
+              eventId,
+              notification: expect.objectContaining({
+                externalThreadRouteAuthority: {
+                  channel: "linq",
+                  containerMemberId: memberId,
+                  threadId: target,
+                },
+                route: expect.objectContaining({
+                  delivery: {
+                    kind: "explicit",
+                    target,
+                  },
+                  threadIsDirect: true,
+                }),
+              }),
+            }),
+          }),
+        );
+        expect(deliveredTargets).toEqual([target]);
+        expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+          .toEqual([]);
+        expect(
+          (await readHostedMailboxImportState({
+            vaultRoot: workspace.vaultRoot,
+          })).watermarks.system,
+        ).toBe("7");
+
+        await expect(prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => "2026-04-27T00:01:00.000Z",
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        })).resolves.toBeNull();
+        expect(assertExternalThreadRouteAuthority).toHaveBeenCalledTimes(1);
+        expect(deliveredTargets).toEqual([target]);
+      } finally {
+        await workspace.cleanup();
+      }
+    },
+  );
+
+  it("terminally advances a stale frozen referral target and then runs the next item", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-referral-stale-",
+    );
+    const memberId = "member_123";
+    const staleNotificationKey = "usage-referral-reward:stale-frozen";
+    const staleEventId =
+      `assistant.notification.requested:${staleNotificationKey}`;
+    const staleTarget = "linq-frozen-stale-target";
+    const nextNotificationKey = "usage-referral-reward:next-authorized";
+    const nextEventId = `assistant.notification.requested:${nextNotificationKey}`;
+    const nextTarget = "linq-next-authorized-target";
+    const staleWake = createLegacyUsageReferralNotificationWake({
+      eventId: staleEventId,
+      memberId,
+      notificationKey: staleNotificationKey,
+      target: staleTarget,
+    });
+    const nextWake = createLegacyUsageReferralNotificationWake({
+      eventId: nextEventId,
+      externalThreadRouteAuthority: {
+        channel: "linq",
+        containerMemberId: memberId,
+        threadId: nextTarget,
+      },
+      memberId,
+      notificationKey: nextNotificationKey,
+      target: nextTarget,
+    });
+    const staleError = Object.assign(
+      new Error("Hosted notification route is no longer authorized."),
+      {
+        code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+        retryable: false,
+      },
+    );
+    const assertExternalThreadRouteAuthority = vi.fn(async () => {
+      throw staleError;
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: staleEventId,
+          id: "mailbox_referral_stale",
+          laneSeq: "8",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: staleWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: nextEventId,
+          id: "mailbox_referral_next",
+          laneSeq: "9",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: nextWake,
+      });
+      await writeHostedMailboxImportState({
+        state: {
+          ...createEmptyHostedMailboxImportState(),
+          watermarks: {
+            conversation: "0",
+            system: "9",
+          },
+        },
+        vaultRoot: workspace.vaultRoot,
+      });
+      const before = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(resolveHostedSystemMailboxHandledThroughSeq({
+        importedSeq: "9",
+        state: before,
+      })).toBe("7");
+
+      const runtime = createRuntimeWithExternalRouteAuthority(
+        assertExternalThreadRouteAuthority,
+      );
+      const stale = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(stale).toMatchObject({
+        itemId: "mailbox_referral_stale",
+        metrics: {
+          deliveryIntentIds: [],
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [
+            expect.objectContaining({
+              redacted: expect.objectContaining({
+                eventCode:
+                  "assistant.notification.legacy_usage_referral_terminal_no_send",
+                terminalDisposition: "external_route_authority_stale",
+              }),
+            }),
+          ],
+        },
+        status: "processed",
+      });
+      expect(assertExternalThreadRouteAuthority).toHaveBeenCalledExactlyOnceWith(
+        {
+          channel: "linq",
+          containerMemberId: memberId,
+          threadId: staleTarget,
+        },
+        { signal: null },
+      );
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      const afterStale = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(afterStale.pending).toEqual([
+        expect.objectContaining({ itemId: "mailbox_referral_next" }),
+      ]);
+      expect(resolveHostedSystemMailboxHandledThroughSeq({
+        importedSeq: "9",
+        state: afterStale,
+      })).toBe("8");
+
+      const next = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => "2026-04-27T00:00:01.000Z",
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(next).toMatchObject({
+        itemId: "mailbox_referral_next",
+        status: "processed",
+      });
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sourceMailboxItemId: "mailbox_referral_next",
+          wake: expect.objectContaining({
+            notification: expect.objectContaining({
+              route: expect.objectContaining({
+                delivery: {
+                  kind: "explicit",
+                  target: nextTarget,
+                },
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(
+        JSON.stringify(mocks.executeHostedMailboxEvent.mock.calls),
+      ).not.toContain(staleTarget);
+      expect(assertExternalThreadRouteAuthority).toHaveBeenCalledTimes(1);
+      const afterNext = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(afterNext.pending).toEqual([]);
+      expect(resolveHostedSystemMailboxHandledThroughSeq({
+        importedSeq: "9",
+        state: afterNext,
+      })).toBe("9");
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("keeps an authority-owner outage on the normal ordered retry path", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-referral-retry-",
+    );
+    const notificationKey = "usage-referral-reward:authority-retry";
+    const eventId = `assistant.notification.requested:${notificationKey}`;
+    const target = "linq-frozen-retry-target";
+    const wake = createLegacyUsageReferralNotificationWake({
+      eventId,
+      memberId: "member_123",
+      notificationKey,
+      target,
+    });
+    const assertExternalThreadRouteAuthority = vi.fn()
+      .mockRejectedValueOnce(new VaultCliError(
+        "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+        "Temporary authority owner failure.",
+        { retryable: true },
+      ))
+      .mockResolvedValueOnce(undefined);
+
+    try {
+      await persistAlreadyImportedNotification({
+        eventId,
+        mailboxItemId: "mailbox_referral_retry",
+        mailboxLaneSeq: "12",
+        runtimeState: "warm",
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const runtime = createRuntimeWithExternalRouteAuthority(
+        assertExternalThreadRouteAuthority,
+      );
+
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        errorCode: "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+        itemId: "mailbox_referral_retry",
+        nextWakeAt: "2026-04-27T00:01:00.000Z",
+        status: "retryable_failed",
+      });
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([
+          expect.objectContaining({
+            itemId: "mailbox_referral_retry",
+            lastErrorCode:
+              "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+            nextAttemptAt: "2026-04-27T00:01:00.000Z",
+            status: "pending",
+          }),
+        ]);
+
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => "2026-04-27T00:00:59.999Z",
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toBeNull();
+      expect(assertExternalThreadRouteAuthority).toHaveBeenCalledTimes(1);
+
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        itemId: "mailbox_referral_retry",
+        status: "processed",
+      });
+      expect(assertExternalThreadRouteAuthority).toHaveBeenCalledTimes(2);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          wake: expect.objectContaining({
+            notification: expect.objectContaining({
+              externalThreadRouteAuthority: {
+                channel: "linq",
+                containerMemberId: "member_123",
+                threadId: target,
+              },
+            }),
+          }),
+        }),
+      );
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("leaves a referral lookalike authority-less for the unchanged audience guard", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-referral-lookalike-",
+    );
+    const notificationKey = "usage-referral-reward:dedupe-mismatch";
+    const eventId = `assistant.notification.requested:${notificationKey}`;
+    const wake = createLegacyUsageReferralNotificationWake({
+      eventId,
+      memberId: "member_123",
+      notificationKey,
+      target: "linq-lookalike-target",
+    });
+    wake.notification.deliveryDedupeToken =
+      "usage-referral-reward:different-referral";
+    const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+    mocks.executeHostedMailboxEvent.mockImplementationOnce(async (input) => {
+      if (input.wake.kind !== "assistant.notification.requested") {
+        throw new TypeError("Expected an assistant notification wake.");
+      }
+      expect(
+        input.wake.notification.externalThreadRouteAuthority,
+      ).toBeUndefined();
+      throw new VaultCliError(
+        "ASSISTANT_AUDIENCE_UNVERIFIED",
+        "Assistant target audience could not be verified.",
+        { retryable: false },
+      );
+    });
+
+    try {
+      await persistAlreadyImportedNotification({
+        eventId,
+        mailboxItemId: "mailbox_referral_lookalike",
+        mailboxLaneSeq: "13",
+        runtimeState: "warm",
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntimeWithExternalRouteAuthority(
+          assertExternalThreadRouteAuthority,
+        ),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        errorCode: "ASSISTANT_AUDIENCE_UNVERIFIED",
+        status: "retryable_failed",
+      });
+
+      expect(assertExternalThreadRouteAuthority).not.toHaveBeenCalled();
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
     } finally {
       await workspace.cleanup();
     }
@@ -2393,7 +2923,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("preserves turn-owned preference time instead of later transport order", async () => {
+  it("orders a Web-approved preference wake by its own mailbox sequence", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
       causalOrigin: "turn",
@@ -2420,11 +2950,11 @@ describe("hosted system mailbox notification execution context", () => {
       });
       await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves.toMatchObject({
         pending: [{
-          preferenceCausalSeq: "10",
+          preferenceCausalSeq: "12",
         }],
       });
       mocks.executeHostedMailboxEvent.mockImplementationOnce(async (input) => {
-        expect(input.preferenceCausalSeq).toBe("10");
+        expect(input.preferenceCausalSeq).toBe("12");
         return {
           bootstrapResult: null,
           conversationMetrics: null,
@@ -2449,6 +2979,97 @@ describe("hosted system mailbox notification execution context", () => {
         (await readHostedSystemMailboxState(workspace.vaultRoot)).pending,
         [],
       );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("converges the canonical bank to Web-approved order when source sequences run backward", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const scheduledWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      causalOrigin: "turn",
+      eventId: "member.preferences.updated:scheduled-approved",
+      memberId: "member_123",
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      preferenceCausalSeq: "21",
+      preferences: { tone: "casual" },
+    });
+    const acceptedWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      causalOrigin: "turn",
+      eventId: "member.preferences.updated:accepted-approved",
+      memberId: "member_123",
+      occurredAt: "2026-04-27T00:05:00.000Z",
+      preferenceCausalSeq: "20",
+      preferences: { tone: "formal" },
+    });
+
+    try {
+      await mkdir(workspace.vaultRoot, { recursive: true });
+      await writeFile(
+        path.join(workspace.vaultRoot, VAULT_LAYOUT.metadata),
+        "{}",
+        "utf8",
+      );
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({
+          causalSeq: "41",
+          id: "mailbox_item_scheduled_approved",
+          laneSeq: "41",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: scheduledWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({
+          causalSeq: "42",
+          id: "mailbox_item_accepted_approved",
+          laneSeq: "42",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: acceptedWake,
+      });
+      mocks.executeHostedMailboxEvent.mockImplementation(async (input) => {
+        if (input.wake.kind !== "member.preferences.updated") {
+          throw new TypeError("Expected a member preferences wake.");
+        }
+        const { applyHostedMemberPreferences } = await import(
+          "../src/hosted-runtime/context.ts"
+        );
+        await applyHostedMemberPreferences(
+          input.vaultRoot,
+          input.wake,
+          input.preferenceCausalSeq ?? "0",
+          input.preferenceAppliedAt,
+        );
+        return {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "member-preferences-updated",
+          nextWakeAt: null,
+          postCheckpointRecord: null,
+          redactedLogEntries: [],
+        };
+      });
+
+      for (let index = 0; index < 2; index += 1) {
+        const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["apply-member-preferences"],
+          executionContext: null,
+          now: () => "2026-04-27T00:06:00.000Z",
+          runtime: createRuntime({}),
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+        assert.equal(prepared?.status, "processed");
+      }
+
+      assert.equal(
+        (await readPreferencesDocument(workspace.vaultRoot)).assistant?.tone,
+        "formal",
+      );
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map(
+        (call) => call[0]?.preferenceCausalSeq,
+      )).toEqual(["41", "42"]);
     } finally {
       await workspace.cleanup();
     }
@@ -2865,6 +3486,131 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 });
+
+function createLegacyUsageReferralNotificationWake(input: {
+  eventId: string;
+  externalThreadRouteAuthority?: {
+    channel: "linq";
+    containerMemberId: string;
+    threadId: string;
+  };
+  memberId: string;
+  notificationKey: string;
+  target: string;
+}) {
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: input.eventId,
+    memberId: input.memberId,
+    notification: {
+      deliveryDedupeToken: input.notificationKey,
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: input.notificationKey,
+      ...(input.externalThreadRouteAuthority
+        ? {
+            externalThreadRouteAuthority:
+              input.externalThreadRouteAuthority,
+          }
+        : {}),
+      instructions: "Celebrate the completed referral reward.",
+      responsePolicy: { kind: "require_send" },
+      route: {
+        actorId: "linq-participant",
+        channel: "linq",
+        delivery: {
+          kind: "explicit",
+          target: input.target,
+        },
+        identityId: "direct-identity",
+        threadId: "direct-thread",
+        threadIsDirect: true,
+      },
+    },
+    occurredAt: FIXED_NOW,
+  });
+}
+
+async function persistAlreadyImportedNotification(input: {
+  eventId: string;
+  mailboxItemId: string;
+  mailboxLaneSeq: string;
+  runtimeState: "restored" | "warm";
+  vaultRoot: string;
+  wake: ReturnType<typeof createLegacyUsageReferralNotificationWake>;
+}): Promise<void> {
+  if (input.runtimeState === "warm") {
+    await enqueueHostedSystemMailboxItem({
+      item: createResolvedNotificationItem({
+        dedupeKey: input.eventId,
+        id: input.mailboxItemId,
+        laneSeq: input.mailboxLaneSeq,
+      }),
+      vaultRoot: input.vaultRoot,
+      wake: input.wake,
+    });
+  } else {
+    await restoreHostedSystemMailboxCheckpointRollbackState({
+      state: {
+        pending: [
+          {
+            attemptCount: 0,
+            itemId: input.mailboxItemId,
+            lastAttemptAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            mailboxDedupeKey: input.eventId,
+            mailboxLaneSeq: input.mailboxLaneSeq,
+            nextAttemptAt: null,
+            occurredAt: input.wake.occurredAt,
+            postCheckpointRecord: null,
+            requestId: null,
+            routeAction: "dispatch-assistant-notification",
+            status: "pending",
+            wake: input.wake,
+          },
+        ],
+      },
+      vaultRoot: input.vaultRoot,
+    });
+  }
+
+  await writeHostedMailboxImportState({
+    state: {
+      ...createEmptyHostedMailboxImportState(),
+      watermarks: {
+        conversation: "0",
+        system: input.mailboxLaneSeq,
+      },
+    },
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+function createAssistantNotificationMailboxMetrics() {
+  return {
+    bootstrapResult: null,
+    conversationMetrics: null,
+    mailboxLane: "assistant-notification" as const,
+    nextWakeAt: null,
+    postCheckpointRecord: null,
+    redactedLogEntries: [],
+  };
+}
+
+function createRuntimeWithExternalRouteAuthority(
+  assertExternalThreadRouteAuthority: NonNullable<
+    HostedRuntimePlatform["effectsPort"]["assertExternalThreadRouteAuthority"]
+  >,
+): HostedSystemMailboxRuntimeForTest {
+  return createRuntime({
+    effectsPort: {
+      assertExternalThreadRouteAuthority,
+      async readRawEmailMessage() {
+        return null;
+      },
+      async sendEmail() {},
+    },
+  });
+}
 
 function createRuntime(
   platformOverrides: Partial<HostedRuntimePlatform>,

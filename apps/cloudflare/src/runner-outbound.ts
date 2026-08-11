@@ -16,7 +16,6 @@ import type {
 } from "./workspace-snapshot-store.ts";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA,
-  readHostedWorkspaceSnapshotR2BucketRole,
 } from "./workspace-snapshot-store.ts";
 import {
   buildHostedWorkspaceSnapshotV2Aad,
@@ -37,6 +36,7 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   isHostedWorkspaceSnapshotV2Ref,
+  parseHostedBrowserVaultReplicaRef,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
@@ -49,7 +49,11 @@ import {
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
 } from "@murphai/hosted-execution/routes";
-import { createHostedBrowserVaultReplicaStore } from "./browser-vault-store.ts";
+import {
+  createHostedBrowserVaultReplicaStore,
+  HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+  type HostedBrowserVaultReplicaOrphanCandidate,
+} from "./browser-vault-store.ts";
 import {
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
 } from "./browser-vault-limits.ts";
@@ -99,20 +103,13 @@ import {
   hostedWorkspaceSnapshotObjectKey,
 } from "./storage-paths.ts";
 import {
-  locateHostedR2ObjectBucketRole,
-  readHostedR2BucketForRole,
-  resolveHostedR2CutoverContext,
-  type HostedR2BucketRole,
-  withHostedR2CutoverBucket,
-} from "./r2-cutover.ts";
-import {
   HOSTED_R2_CHECKSUM_MODE_ENABLED,
   HOSTED_R2_CHECKSUM_MODE_HEADER,
   createHostedR2PresignedDeleteUrl,
   createHostedR2PresignedGetUrl,
   createHostedR2PresignedHeadUrl,
   createHostedR2PresignedPutUrl,
-  readHostedR2PresignEnvironmentForBucketRole,
+  readHostedR2PresignEnvironment,
   type HostedR2PresignEnvironment,
 } from "./r2-presigned-url.ts";
 import {
@@ -138,8 +135,6 @@ export async function handleRunnerOutboundRequest(
   userId: string,
 ): Promise<Response> {
   try {
-    const r2CutoverContext = resolveHostedR2CutoverContext(env);
-    env = withHostedR2CutoverBucket(env, r2CutoverContext);
     const url = new URL(request.url);
 
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
@@ -196,7 +191,7 @@ export async function handleRunnerOutboundRequest(
         });
       }
 
-      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap|\/presign-get|\/presign-put)?$/u.exec(
+      const match = /^\/workspace-snapshots\/(?<snapshotId>[A-Za-z0-9][A-Za-z0-9._-]{0,127})(?<suffix>\/complete|\/data-key\/unwrap|\/heartbeat|\/presign-get|\/presign-put)?$/u.exec(
         url.pathname,
       );
       if (!match?.groups) {
@@ -211,6 +206,18 @@ export async function handleRunnerOutboundRequest(
           bucket: env.BUNDLES,
           env,
           environment,
+          request,
+          snapshotId: match.groups.snapshotId,
+          userId,
+        });
+      }
+
+      if (match.groups.suffix === "/heartbeat") {
+        if (request.method !== "POST") {
+          return methodNotAllowed();
+        }
+        return handleRunnerWorkspaceSnapshotHeartbeatRequest({
+          env,
           request,
           snapshotId: match.groups.snapshotId,
           userId,
@@ -600,7 +607,6 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
     expiresAt,
     leaseGeneration: writeFence.generation,
     objectKey,
-    r2BucketRole: resolveHostedR2CutoverContext(input.env).writeBucketRole,
     schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
     snapshotId,
     userId: input.userId,
@@ -632,6 +638,40 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
     objectKey,
     snapshotId,
   });
+}
+
+async function handleRunnerWorkspaceSnapshotHeartbeatRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  snapshotId: string;
+  userId: string;
+}): Promise<Response> {
+  const writeFence = await requireWorkspaceSnapshotWriteFence({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeFence) {
+    return unauthorized();
+  }
+  const body = await readJsonObject(input.request, {
+    limitBytes: 4 * 1024,
+  });
+  const requestedSnapshotId = requireSnapshotDataKeyString(body.snapshotId, "snapshotId");
+  if (requestedSnapshotId !== input.snapshotId) {
+    return jsonError("Hosted workspace snapshot heartbeat snapshotId does not match its route.", 400);
+  }
+  const alive = await heartbeatWorkspaceSnapshotUploadSession({
+    attemptId: writeFence.attemptId,
+    env: input.env,
+    leaseGeneration: writeFence.generation,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+  if (!alive) {
+    return jsonError("Hosted workspace snapshot upload session is stale.", 409);
+  }
+  return json({ alive: true, ok: true });
 }
 
 async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
@@ -734,14 +774,10 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
     return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
   }
 
-  const r2BucketRole = readHostedWorkspaceSnapshotR2BucketRole(session);
   const presigned = await createHostedR2PresignedPutUrl({
     checksumSha256Base64: encodeHostedWorkspaceSnapshotSha256Base64(encryptedObjectSha256),
     contentType: HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
-    environment: readHostedR2PresignEnvironmentForBucketRole(
-      asWorkerStringEnvironment(input.env),
-      r2BucketRole,
-    ),
+    environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.env)),
     expiresSeconds: Math.min(
       HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_PUT_EXPIRES_SECONDS,
       remainingSessionSeconds,
@@ -768,8 +804,8 @@ async function handleRunnerWorkspaceSnapshotPresignPutRequest(input: {
   }
   emitHostedExecutionStructuredLog({
     component: "runner",
-    details: { r2BucketRole, r2PutDrainRecorded: true },
-    message: "Hosted workspace snapshot bucket-affine PUT was issued.",
+    details: { r2PutDrainRecorded: true },
+    message: "Hosted workspace snapshot PUT was issued.",
     phase: "wake.running",
     userId: input.userId,
   });
@@ -914,18 +950,21 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
     return jsonError("Hosted workspace snapshot presign target is outside the bound user namespace.", 403);
   }
 
-  const r2BucketRole = await locateHostedR2ObjectBucketRole(
-    resolveHostedR2CutoverContext(input.env),
-    requestedObjectKey,
-  );
-  if (!r2BucketRole) {
+  const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
+    bucket: input.env.BUNDLES,
+    env: input.env,
+  });
+  if (snapshotObjectStore.configurationError) {
+    throw new Error(snapshotObjectStore.configurationError);
+  }
+  if (!snapshotObjectStore.head) {
+    throw new Error("Hosted workspace snapshot presign GET requires object metadata support.");
+  }
+  if (!await snapshotObjectStore.head(requestedObjectKey)) {
     return notFound();
   }
   const presigned = await createHostedR2PresignedGetUrl({
-    environment: readHostedR2PresignEnvironmentForBucketRole(
-      asWorkerStringEnvironment(input.env),
-      r2BucketRole,
-    ),
+    environment: readHostedR2PresignEnvironment(asWorkerStringEnvironment(input.env)),
     expiresSeconds: HOSTED_WORKSPACE_SNAPSHOT_PRESIGNED_GET_EXPIRES_SECONDS,
     key: requestedObjectKey,
   });
@@ -936,7 +975,6 @@ async function handleRunnerWorkspaceSnapshotPresignGetRequest(input: {
       objectKeyMatchesExpected: true,
       presignSucceeded: true,
       refParsed: true,
-      r2BucketRole,
       snapshotIdMatchesRoute: true,
       workspaceVersionPresent: writeFence.workspaceVersion.length > 0,
     },
@@ -1298,7 +1336,6 @@ async function handleRunnerWorkspaceSnapshotAbortRequest(input: {
 
   await retireWorkspaceSnapshotUploadSession({
     bucket: input.bucket,
-    bucketRole: readHostedWorkspaceSnapshotR2BucketRole(session),
     deleteObject: true,
     env: input.env,
     objectKey: session.objectKey,
@@ -1404,11 +1441,9 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     }),
     "Hosted workspace snapshot complete snapshotRef",
   );
-  const r2BucketRole = readHostedWorkspaceSnapshotR2BucketRole(session);
   if (snapshotRef.archive.encryptedByteSize >= HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      bucketRole: r2BucketRole,
       deleteObject: true,
       env: input.env,
       objectKey: snapshotRef.objectKey,
@@ -1420,7 +1455,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (snapshotRef.archive.totalPlainBytes >= HOSTED_WORKSPACE_SNAPSHOT_MAX_TOTAL_PLAIN_BYTES) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      bucketRole: r2BucketRole,
       deleteObject: true,
       env: input.env,
       objectKey: snapshotRef.objectKey,
@@ -1430,11 +1464,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot exceeds the total plain size limit.", 413);
   }
   const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
-    bucket: readHostedR2BucketForRole(
-      resolveHostedR2CutoverContext(input.env),
-      r2BucketRole,
-    ),
-    bucketRole: r2BucketRole,
+    bucket: input.bucket,
     env: input.env,
   });
   if (snapshotObjectStore.configurationError) {
@@ -1443,7 +1473,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (!snapshotObjectStore.head) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      bucketRole: r2BucketRole,
       deleteObject: true,
       env: input.env,
       objectKey: snapshotRef.objectKey,
@@ -1469,7 +1498,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (!Number.isSafeInteger(object.size)) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      bucketRole: r2BucketRole,
       deleteObject: true,
       env: input.env,
       objectKey: snapshotRef.objectKey,
@@ -1481,7 +1509,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (object.size !== snapshotRef.archive.encryptedByteSize) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      bucketRole: r2BucketRole,
       deleteObject: true,
       env: input.env,
       objectKey: snapshotRef.objectKey,
@@ -1505,7 +1532,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   ) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      bucketRole: r2BucketRole,
       deleteObject: true,
       env: input.env,
       objectKey: snapshotRef.objectKey,
@@ -1521,7 +1547,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (checkpointRequest.reason !== "idle_shutdown") {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      bucketRole: r2BucketRole,
       deleteObject: true,
       env: input.env,
       objectKey: snapshotRef.objectKey,
@@ -1540,7 +1565,6 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   ) {
     await retireWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
-      bucketRole: r2BucketRole,
       deleteObject: true,
       env: input.env,
       objectKey: snapshotRef.objectKey,
@@ -1647,9 +1671,13 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   }
   if (!checkpoint.checkpointed) {
     const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotResponse({
+      attemptId: writeFence.attemptId,
       checkpoint,
+      env: input.env,
+      leaseGeneration: writeFence.generation,
       session,
       snapshotRef,
+      userId: input.userId,
     });
     if (cleanupRetryResponse) {
       return cleanupRetryResponse;
@@ -1694,6 +1722,14 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     }
     return jsonError("Hosted workspace snapshot checkpoint ref mismatch.", 502);
   }
+
+  await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
+    attemptId: writeFence.attemptId,
+    env: input.env,
+    leaseGeneration: writeFence.generation,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
 
   return json({
     checkpoint,
@@ -1856,11 +1892,15 @@ async function recordReplacedWorkspaceSnapshotOrphanCandidate(input: {
   });
 }
 
-function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
+async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
+  attemptId: string;
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
   session: HostedWorkspaceSnapshotUploadSession;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
-}): Response | null {
+  userId: string;
+}): Promise<Response | null> {
   const currentSnapshotRef = input.checkpoint.workspace.snapshotRef;
   if (
     !isHostedWorkspaceSnapshotV2Ref(currentSnapshotRef) ||
@@ -1869,6 +1909,13 @@ function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
     return null;
   }
   const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
+  await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
+    attemptId: input.attemptId,
+    env: input.env,
+    leaseGeneration: input.leaseGeneration,
+    snapshotId: input.session.snapshotId,
+    userId: input.userId,
+  });
 
   return json({
     checkpoint: {
@@ -2048,6 +2095,18 @@ async function recordWorkspaceSnapshotOrphanCandidate(
   return true;
 }
 
+async function recordBrowserVaultReplicaOrphanCandidate(
+  env: RunnerOutboundEnvironmentSource,
+  candidate: HostedBrowserVaultReplicaOrphanCandidate,
+): Promise<void> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(env, candidate.userId);
+  requireRunnerOutboundUserStubMethod(
+    stub,
+    "recordHostedBrowserVaultReplicaOrphanCandidate",
+  );
+  await stub.recordHostedBrowserVaultReplicaOrphanCandidate(candidate);
+}
+
 function collectLegacyWorkspaceSnapshotBundleRefs(
   snapshotRef: HostedExecutionSnapshotRef,
 ): HostedExecutionBundleRef[] {
@@ -2119,7 +2178,6 @@ function hostedWorkspaceSnapshotV2RefsMatch(
 
 async function retireWorkspaceSnapshotUploadSession(input: {
   bucket: WorkspaceSnapshotR2BucketLike | null;
-  bucketRole?: HostedR2BucketRole;
   deleteObject: boolean;
   env: RunnerOutboundEnvironmentSource;
   objectKey?: string;
@@ -2129,7 +2187,6 @@ async function retireWorkspaceSnapshotUploadSession(input: {
   if (input.deleteObject && input.objectKey) {
     const deleted = await deleteWorkspaceSnapshotObjectBestEffort({
       bucket: input.bucket,
-      bucketRole: input.bucketRole,
       env: input.env,
       objectKey: input.objectKey,
     });
@@ -2155,57 +2212,33 @@ async function retireWorkspaceSnapshotUploadSession(input: {
 
 async function deleteWorkspaceSnapshotObjectBestEffort(input: {
   bucket: WorkspaceSnapshotR2BucketLike | null;
-  bucketRole?: HostedR2BucketRole;
   env: RunnerOutboundEnvironmentSource;
   objectKey: string;
 }): Promise<boolean> {
-  const context = resolveHostedR2CutoverContext(input.env);
-  const snapshotObjectStores = context.coexisting
-    ? (["source", "destination"] as const).map((bucketRole) =>
-        createWorkspaceSnapshotObjectStore({
-          bucket: readHostedR2BucketForRole(context, bucketRole),
-          bucketRole,
-          env: input.env,
-        }))
-    : [
-        createWorkspaceSnapshotObjectStore({
-          bucket: input.bucketRole
-            ? readHostedR2BucketForRole(context, input.bucketRole)
-            : input.bucket,
-          bucketRole: input.bucketRole,
-          env: input.env,
-        }),
-      ];
-  if (snapshotObjectStores.some((store) => !store.delete)) {
+  const snapshotObjectStore = createWorkspaceSnapshotObjectStore({
+    bucket: input.bucket,
+    env: input.env,
+  });
+  if (!snapshotObjectStore.delete) {
     return false;
   }
   try {
-    for (const snapshotObjectStore of snapshotObjectStores) {
-      await snapshotObjectStore.delete?.(input.objectKey);
-    }
+    await snapshotObjectStore.delete(input.objectKey);
     return true;
   } catch {
-    // Unique snapshot keys can coexist in both fixed-role buckets while the
-    // managed migration and cutover bridge are active. Failed cleanup is
-    // retained for a later idempotent retry instead of leaving one role's copy
-    // live indefinitely.
     return false;
   }
 }
 
 function createWorkspaceSnapshotObjectStore(input: {
   bucket: WorkspaceSnapshotR2BucketLike | null;
-  bucketRole?: HostedR2BucketRole;
   env: RunnerOutboundEnvironmentSource;
 }): {
   configurationError?: string;
   delete?: (key: string) => Promise<void>;
   head?: (key: string) => Promise<WorkspaceSnapshotR2ObjectLike | null>;
 } {
-  const localS3Environment = readWorkspaceSnapshotLocalS3Environment(
-    input.env,
-    input.bucketRole ?? "source",
-  );
+  const localS3Environment = readWorkspaceSnapshotLocalS3Environment(input.env);
   if (localS3Environment === "missing-control-endpoint") {
     return {
       configurationError:
@@ -2237,13 +2270,12 @@ function createWorkspaceSnapshotObjectStore(input: {
 
 function readWorkspaceSnapshotLocalS3Environment(
   env: RunnerOutboundEnvironmentSource,
-  bucketRole: HostedR2BucketRole,
 ): HostedR2PresignEnvironment | "missing-control-endpoint" | null {
   const stringEnv = asWorkerStringEnvironment(env);
   if (stringEnv.HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT?.trim() !== "1") {
     return null;
   }
-  const environment = readHostedR2PresignEnvironmentForBucketRole(stringEnv, bucketRole);
+  const environment = readHostedR2PresignEnvironment(stringEnv);
   if (!environment.controlEndpoint) {
     return "missing-control-endpoint";
   }
@@ -2476,6 +2508,10 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
   if (!Object.hasOwn(body, "replica")) {
     throw new TypeError("Hosted browser-vault replica write request.replica is required.");
   }
+  const replacedReplicaRef = parseHostedBrowserVaultReplicaRef(
+    body.replacedReplicaRef,
+    "Hosted browser-vault replica write request.replacedReplicaRef",
+  );
 
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,
@@ -2492,7 +2528,23 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     rootKeyId: crypto.rootKeyId,
     userId: input.userId,
   });
+  if (replacedReplicaRef) {
+    await recordBrowserVaultReplicaOrphanCandidate(input.env, {
+      createdAt: new Date().toISOString(),
+      objectKey: replacedReplicaRef.objectKey,
+      schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+      userId: input.userId,
+    });
+  }
   const replicaRef = await replicaStore.writeBrowserVaultReplica({
+    beforeWrite: async (plannedReplicaRef) => {
+      await recordBrowserVaultReplicaOrphanCandidate(input.env, {
+        createdAt: new Date().toISOString(),
+        objectKey: plannedReplicaRef.objectKey,
+        schema: HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA,
+        userId: input.userId,
+      });
+    },
     replica: body.replica,
     userId: input.userId,
   });
@@ -2563,6 +2615,78 @@ async function createWorkspaceSnapshotUploadSession(input: {
     "createHostedWorkspaceSnapshotUploadSession",
   );
   return await stub.createHostedWorkspaceSnapshotUploadSession(input.session);
+}
+
+async function heartbeatWorkspaceSnapshotUploadSession(input: {
+  attemptId: string;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
+  snapshotId: string;
+  userId: string;
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(
+    stub,
+    "heartbeatHostedWorkspaceSnapshotUploadSession",
+  );
+  return await stub.heartbeatHostedWorkspaceSnapshotUploadSession({
+    attemptId: input.attemptId,
+    leaseGeneration: input.leaseGeneration,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+}
+
+async function completeWorkspaceSnapshotUploadSessionHandoff(input: {
+  attemptId: string;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
+  snapshotId: string;
+  userId: string;
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(
+    stub,
+    "completeHostedWorkspaceSnapshotUploadSession",
+  );
+  return await stub.completeHostedWorkspaceSnapshotUploadSession({
+    attemptId: input.attemptId,
+    leaseGeneration: input.leaseGeneration,
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+  });
+}
+
+async function completeWorkspaceSnapshotUploadSessionHandoffBestEffort(input: {
+  attemptId: string;
+  env: RunnerOutboundEnvironmentSource;
+  leaseGeneration: string;
+  snapshotId: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    if (await completeWorkspaceSnapshotUploadSessionHandoff(input)) {
+      return;
+    }
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: { checkpointHandoffCompletionRecorded: false },
+      level: "warn",
+      message: "Hosted workspace snapshot handoff completion marker was stale.",
+      phase: "checkpoint",
+      userId: input.userId,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: { checkpointHandoffCompletionRecorded: false },
+      error,
+      level: "warn",
+      message: "Hosted workspace snapshot handoff completion marker failed.",
+      phase: "checkpoint",
+      userId: input.userId,
+    });
+  }
 }
 
 async function readWorkspaceSnapshotUploadSession(input: {

@@ -61,9 +61,9 @@ export async function reconcileHostedLinqContactCards(input: {
 }): Promise<HostedLinqContactCardReconciliation> {
   const observedAt = input.observedAt ?? new Date();
 
-  // One locked, consistent snapshot of candidacy plus the configured-line
-  // total, so an overlapping revoking health-cron run can never be observed
-  // half-applied and no second unlocked read can disagree with the first.
+  // One repeatable-read snapshot of candidacy plus the configured-line total,
+  // so an overlapping authoritative inventory statement cannot be observed
+  // half-applied and no second read can disagree with the first.
   const { configuredLineCount, lines } = await listHostedLinqConfiguredContactCardLines({
     maxLines: input.maxLines,
     observedAt,
@@ -271,18 +271,9 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   // into a member's saved vCard.
   const snapshot = await readHostedLinqContactCardCandidacySnapshot({
     limit: maxLines,
-    lockMode: "wait",
     observedAt: input.observedAt,
     prisma: input.prisma,
   });
-  if (!snapshot) {
-    throw hostedOnboardingError({
-      code: "LINQ_CONTACT_CARD_RECONCILE_FAILED",
-      message: "Linq contact-card reconciliation could not read a candidacy snapshot.",
-      httpStatus: 502,
-      retryable: true,
-    });
-  }
   return {
     configuredLineCount: snapshot.configuredLineCount,
     lines: snapshot.lines.map((line) => ({
@@ -543,18 +534,13 @@ export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: 
 }): Promise<string | null> {
   const excludePhoneNumber = normalizePhoneNumber(input.excludePhoneNumber);
   try {
-    // Same locked snapshot the reconciler uses: an unlocked two-query read
-    // can straddle a committing ownership move and return a line that was
-    // just revoked, which this resolver would then embed terminally in a
-    // member's saved vCard.
+    // Same repeatable-read snapshot the reconciler uses, so the two-query read
+    // cannot straddle a committing ownership move and return a just-revoked
+    // line for a member's saved vCard.
     const snapshot = await readHostedLinqContactCardCandidacySnapshot({
       limit: HOSTED_LINQ_CONTACT_CARD_LINE_LIMIT,
-      lockMode: "skip",
       prisma: input.prisma,
     });
-    if (!snapshot) {
-      return null;
-    }
     const { lines } = snapshot;
     return lines.find((line) =>
       line.phoneNumber !== excludePhoneNumber
@@ -584,9 +570,9 @@ function foldMurphContactCardVcfLine(line: string): string {
 
 /**
  * Best-effort fetch of a Murph contact-card photo for embedding; any failure
- * returns null so the card ships without a photo instead of failing the
- * share. Defaults to the canonical headshot; pass `imageUrl` to embed a
- * different member-chosen avatar asset.
+ * returns null. Canonical callers may continue without a photo; personalized
+ * callers can require it and fail before send. Defaults to the canonical
+ * headshot; pass `imageUrl` to embed a different member-chosen avatar asset.
  */
 export async function fetchMurphHostedLinqContactCardVcfPhoto(input: {
   fetchImpl?: typeof fetch;
@@ -603,7 +589,12 @@ export async function fetchMurphHostedLinqContactCardVcfPhoto(input: {
     const response = await fetchImpl(imageUrl, {
       // Own-asset fetch only; a redirect means the asset boundary was crossed.
       redirect: "error",
-      signal: input.signal ?? AbortSignal.timeout(MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS),
+      signal: input.signal
+        ? AbortSignal.any([
+            input.signal,
+            AbortSignal.timeout(MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS),
+          ])
+        : AbortSignal.timeout(MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS),
     });
     if (!response.ok) {
       return null;

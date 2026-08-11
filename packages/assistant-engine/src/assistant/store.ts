@@ -140,7 +140,13 @@ export async function resolveAssistantSession(
     if (sessionId) {
       const resolved = await loadAndPersistResolvedSession({
         paths,
-        persistenceInput,
+        persistenceInput: {
+          ...persistenceInput,
+          bindingPatch:
+            persistenceInput.allowBindingRebind
+              ? bindingPatch
+              : bindingPatchWithoutIncomingSystemActor(bindingPatch),
+        },
         sessionId,
       })
       if (!resolved) {
@@ -309,6 +315,24 @@ export async function resolveAssistantSession(
       session: savedSession,
     }
   })
+}
+
+// A runtime-authored completion resumes an already-authorized thread and
+// carries no actor of its own (`actorId: null`), which would otherwise clear
+// the stored binding and fail closed on an isolation conflict. Only that
+// no-actor case is dropped: a differing non-null actor on an explicit session
+// still means the caller is retargeting the session at another participant, so
+// it keeps failing with a routing conflict unless the caller opts in through
+// `allowBindingRebind`. Channel, identity, thread, and directness always stay
+// in the patch so their isolation conflicts still fail closed.
+function bindingPatchWithoutIncomingSystemActor(
+  patch: AssistantBindingPatch,
+): AssistantBindingPatch {
+  if (patch.actorId !== null) {
+    return patch
+  }
+  const { actorId: _actorId, ...rest } = patch
+  return rest
 }
 
 function withAssistantSessionResolutionDiagnostics(

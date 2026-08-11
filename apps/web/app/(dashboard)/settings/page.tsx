@@ -20,7 +20,6 @@ import { HostedHealthDataConsentSettings } from "@/src/components/settings/hoste
 import { SettingsAuthRequired } from "./settings-auth-required";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
-import { PulseTrialBillingContinuation } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
 import { Watch } from "lucide-react";
 import Link from "next/link";
@@ -31,9 +30,10 @@ import {
 } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import {
   canScheduleHostedBillingPlanChange,
-  canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlan,
+  isHostedBillingPlanChangePortalConfigured,
+  parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
@@ -48,23 +48,21 @@ import {
 import {
   readHostedInferenceConnectionView,
 } from "@/src/lib/hosted-inference/connection-store";
-import { readHostedPulseTrialContinuationCookie } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
   HOSTED_START_PAID_GROUP_RETURN_VALUE,
-  HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
-  HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
-  HOSTED_PULSE_TRIAL_CONTINUATION_PATH,
-  HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM,
-  HOSTED_START_PAID_PULSE_RETURN_PARAM,
-  HOSTED_START_PAID_PULSE_RETURN_VALUE,
-} from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
+} from "@/src/lib/hosted-onboarding/billing-group-payment-method-contract";
 import {
   HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE,
   parseHostedBillingPlanChangeReturnValue,
 } from "@/src/lib/hosted-onboarding/billing-plan-change-contract";
-import { hasHostedMemberOwnActiveBilling } from "@/src/lib/hosted-onboarding/entitlement";
 import {
+  hasHostedMemberOwnActiveAccess,
+  hasHostedMemberOwnPaidBilling,
+} from "@/src/lib/hosted-onboarding/entitlement";
+import { hasHostedRecoverableBilling } from "@/src/lib/hosted-onboarding/lifecycle";
+import {
+  isHostedFamilyBillingPortalManageable,
   readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember,
   type HostedFamilyOwnerMemberRow,
@@ -105,12 +103,8 @@ export const metadata: Metadata = createMurphPageMetadata({
 });
 
 type SettingsSearchParams = {
-  action?: string | string[] | undefined;
   addEmail?: string | string[] | undefined;
   addUsage?: string | string[] | undefined;
-  expires?: string | string[] | undefined;
-  signature?: string | string[] | undefined;
-  startPulse?: string | string[] | undefined;
   startGroup?: string | string[] | undefined;
   planUpdate?: string | string[] | undefined;
   usageCheckout?: string | string[] | undefined;
@@ -147,45 +141,20 @@ export default async function SettingsPage({
   );
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
-  // Stripe sends the payment-method return here unsigned-in when the member
-  // opened Murph's payment link outside a browser that holds their session.
-  // Keep the signed continuation params so signing in can resume the switch
-  // instead of dropping it on the floor.
-  const pulseTrialPaymentReturn = readPulseTrialPaymentReturn(resolvedSearchParams);
-
   if (!authenticated) {
     if (
-      pulseTrialPaymentReturn === null
-      && !groupPaymentMethodSaved
+      !groupPaymentMethodSaved
       && planChangeReturn === null
+      && usageTopUpPurchaseReturn === null
     ) {
       redirect("/");
     }
     return <SettingsAuthRequired />;
   }
 
-  // Only the continuation route can verify the signature and set the
-  // session-bound cookie, so hand the now-authenticated visitor back to it.
-  if (pulseTrialPaymentReturn) {
-    redirect(pulseTrialPaymentReturn);
-  }
   if (planChangeReturn === HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE) {
     redirect("/settings#subscription");
   }
-
-  const pulseTrialBillingContinuationAction =
-    readFirstSearchParamValue(
-      resolvedSearchParams[HOSTED_START_PAID_PULSE_RETURN_PARAM],
-    ) === HOSTED_START_PAID_PULSE_RETURN_VALUE
-    && authenticatedMember !== null
-    && session !== null
-      ? await readHostedPulseTrialContinuationCookie({
-          memberId: authenticatedMember.id,
-          sessionId: session.sessionId,
-        })
-      : null;
-  const pulseTrialBillingContinuationPending =
-    pulseTrialBillingContinuationAction !== null;
 
   const prisma = getPrisma();
   const settingsData = authenticatedMember
@@ -215,6 +184,8 @@ export default async function SettingsPage({
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
   const activeFamilyOwner = familyOwner?.billingActive === true;
+  const familyBillingOwner = familyOwner !== null
+    && isHostedFamilyBillingPortalManageable(familyOwner.billingStatus);
   const familyOwnerUsageTopUpMember =
     resolveActiveFamilyOwnerUsageTopUpMember(familyOwner);
   const sponsoredMember = familyAccess !== null && familyOwner === null;
@@ -306,35 +277,84 @@ export default async function SettingsPage({
     : usageTopUpOffers;
   const canStartFamily =
     authenticatedMember != null &&
-    !activeFamilyOwner &&
+    !familyBillingOwner &&
     !sponsoredMember &&
     !authenticatedMember.suspendedAt;
   const currentPlanCode = parseHostedBillingPlanCode(
     billingRef?.currentBillingPlanCode,
   );
   const directPlanUpdateTarget =
-    planChangeReturn === "launch_edge_monthly"
-      || planChangeReturn === "launch_monthly"
+    !activeFamilyOwner &&
+    !sponsoredMember &&
+    (
+      planChangeReturn === "launch_edge_monthly" ||
+      planChangeReturn === "launch_max_monthly" ||
+      planChangeReturn === "launch_monthly"
+    )
       ? planChangeReturn
       : null;
+  const directPlanUpdateActive =
+    directPlanUpdateTarget !== null &&
+    authenticatedMember !== null &&
+    hasHostedMemberOwnActiveAccess(authenticatedMember) &&
+    parseHostedBillingPhase(billingRef?.currentBillingPhase) === "paid" &&
+    currentPlanCode === directPlanUpdateTarget;
   const planChangePending =
-    directPlanUpdateTarget !== null
-    && currentPlanCode !== directPlanUpdateTarget;
+    directPlanUpdateTarget !== null && !directPlanUpdateActive;
   const scheduledPlanCode = parseHostedBillingPlanCode(
     billingRef?.scheduledBillingPlanCode,
   );
   const hasScheduledPlanChange = scheduledPlanCode !== null;
   const groupPlanConfigured = settingsData?.groupPlanAvailable === true;
-  const showGroupPlan = resolveVisibleHostedBillingPlanCodes({
+  const maxPlanConfigured = settingsData?.maxPlanAvailable === true;
+  const visiblePlanCodes = resolveVisibleHostedBillingPlanCodes({
     currentPlanCode,
     groupPlanConfigured,
     hasConfirmedGroupMembership,
+    maxPlanConfigured,
     scheduledPlanCode,
-  }).includes("launch_group_monthly");
+  });
+  const showGroupPlan = visiblePlanCodes.includes("launch_group_monthly");
+  const showMaxPlan = visiblePlanCodes.includes("launch_max_monthly");
+  const ownPaidBillingActive =
+    authenticatedMember !== null &&
+    hasHostedMemberOwnPaidBilling({
+      billingStatus: authenticatedMember.billingStatus,
+      billingRef: {
+        currentBillingPhase: billingRef?.currentBillingPhase ?? null,
+        currentCheckoutOffer: billingRef?.currentCheckoutOffer ?? null,
+        stripeSubscriptionLookupKey: billingRef?.stripeSubscriptionId
+          ? "configured"
+          : null,
+      },
+      suspendedAt: authenticatedMember.suspendedAt,
+    });
+  const hasRecoverableBilling =
+    authenticatedMember !== null &&
+    hasHostedRecoverableBilling({
+      billingStatus: authenticatedMember.billingStatus,
+      hasExistingSubscription: Boolean(billingRef?.stripeSubscriptionId),
+    });
+  const canStartDirectPlan =
+    !hasScheduledPlanChange &&
+    authenticatedMember !== null &&
+    !activeFamilyOwner &&
+    !sponsoredMember &&
+    !authenticatedMember.suspendedAt &&
+    !ownPaidBillingActive &&
+    !hasRecoverableBilling;
+  const canManageBilling =
+    activeFamilyOwner ||
+    (
+      authenticatedMember !== null &&
+      !authenticatedMember.suspendedAt &&
+      Boolean(billingRef?.stripeCustomerId) &&
+      (ownPaidBillingActive || hasRecoverableBilling)
+    );
   const canUpgradeToPulse =
     !hasScheduledPlanChange &&
     authenticatedMember !== null &&
-    hasHostedMemberOwnActiveBilling(authenticatedMember) &&
+    hasHostedMemberOwnActiveAccess(authenticatedMember) &&
     canUpgradeHostedBillingPlan({
       currentBillingPhase: billingRef?.currentBillingPhase,
       currentBillingPlanCode: billingRef?.currentBillingPlanCode,
@@ -344,11 +364,35 @@ export default async function SettingsPage({
   const canUpgradeToEdge =
     !hasScheduledPlanChange &&
     authenticatedMember !== null &&
-    hasHostedMemberOwnActiveBilling(authenticatedMember) &&
+    hasHostedMemberOwnActiveAccess(authenticatedMember) &&
     canUpgradeHostedBillingPlan({
       currentBillingPhase: billingRef?.currentBillingPhase,
       currentBillingPlanCode: billingRef?.currentBillingPlanCode,
       currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      targetPlanCode: "launch_edge_monthly",
+    });
+  const canUpgradeToMax =
+    !hasScheduledPlanChange &&
+    maxPlanConfigured &&
+    authenticatedMember !== null &&
+    hasHostedMemberOwnActiveAccess(authenticatedMember) &&
+    canUpgradeHostedBillingPlan({
+      currentBillingPhase: billingRef?.currentBillingPhase,
+      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      targetPlanCode: "launch_max_monthly",
+    });
+  const canSwitchToEdge =
+    !hasScheduledPlanChange &&
+    authenticatedMember !== null &&
+    canScheduleHostedBillingPlanChange({
+      billingStatus: authenticatedMember.billingStatus,
+      currentBillingPhase: billingRef?.currentBillingPhase,
+      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+      stripeCustomerId: billingRef?.stripeCustomerId,
+      stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+      suspendedAt: authenticatedMember.suspendedAt,
       targetPlanCode: "launch_edge_monthly",
     });
   const canSwitchToGroup =
@@ -430,7 +474,7 @@ export default async function SettingsPage({
             text: Boolean(account.phone.number),
           },
           message: {
-            body: "Hey Murph, what usage missions can I choose from?",
+            body: "Hey Murph, what referral options can I choose from?",
           },
           murphEmailAddress: account.email.murphEmailAddress ?? null,
           murphPhoneNumber: routing?.linqRecipientPhone ?? null,
@@ -463,14 +507,9 @@ export default async function SettingsPage({
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Subscription
         </div>
-        {pulseTrialBillingContinuationAction ? (
-          <PulseTrialBillingContinuation
-            action={pulseTrialBillingContinuationAction}
-          />
-        ) : null}
         {directPlanUpdateTarget ? (
           <HostedPlanUpdateReturn
-            active={currentPlanCode === directPlanUpdateTarget}
+            active={directPlanUpdateActive}
             targetPlanCode={directPlanUpdateTarget}
           />
         ) : null}
@@ -478,26 +517,19 @@ export default async function SettingsPage({
           authenticated={authenticated}
           billingStatus={authenticatedMember?.billingStatus}
           canStartFamily={canStartFamily}
+          canSwitchToEdge={canSwitchToEdge}
           canSwitchToGroup={canSwitchToGroup}
+          familyBillingOwner={familyBillingOwner}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
           groupPaymentMethodSaved={groupPaymentMethodSaved}
           planChangePending={planChangePending}
-          pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
-          canStartPaidPulse={
-            !hasScheduledPlanChange &&
-            canStartHostedPulseTrialPaidPlan({
-              billingStatus: authenticatedMember?.billingStatus,
-              currentBillingPhase: billingRef?.currentBillingPhase,
-              currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-              currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-              hasStripeCustomerId: Boolean(billingRef?.stripeCustomerId),
-              hasStripeSubscriptionId: Boolean(billingRef?.stripeSubscriptionId),
-              suspendedAt: authenticatedMember?.suspendedAt,
-            })
-          }
+          canManageBilling={canManageBilling}
+          canStartDirectPlan={canStartDirectPlan}
           canUpgradeToPulse={canUpgradeToPulse}
           canUpgradeToEdge={canUpgradeToEdge}
+          canUpgradeToMax={canUpgradeToMax}
           showGroupPlan={showGroupPlan}
+          showMaxPlan={showMaxPlan}
           canSwitchToPulse={
             !hasScheduledPlanChange &&
             canSwitchHostedBillingPlanToPulse({
@@ -510,7 +542,6 @@ export default async function SettingsPage({
             })
           }
           currentBillingPhase={billingRef?.currentBillingPhase}
-          currentCheckoutOffer={billingRef?.currentCheckoutOffer}
           currentBillingPlanCode={billingRef?.currentBillingPlanCode}
           currentPeriodEnd={billingRef?.currentPeriodEnd}
           payerMemberId={authenticatedMember?.id}
@@ -743,6 +774,11 @@ async function readSettingsPageData(input: {
     && await isHostedBillingPlanSelectionAvailable({
       billingPlanCode: "launch_group_monthly",
     });
+  const maxPlanAvailable =
+    isHostedBillingPlanChangePortalConfigured("launch_max_monthly")
+    && await isHostedBillingPlanSelectionAvailable({
+      billingPlanCode: "launch_max_monthly",
+    });
   const usageStatus = await readHostedPersonalAiUsageStatus({
     memberId,
     prisma,
@@ -789,6 +825,7 @@ async function readSettingsPageData(input: {
     hasConfirmedGroupMembership,
     inferenceConnection,
     freshPrivySession: await freshPrivySessionPromise,
+    maxPlanAvailable,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,
     usageActivity,
@@ -842,31 +879,6 @@ function readOnlySearchParamValue(
   }
 
   return value.length === 1 ? value[0] : undefined;
-}
-
-// Rebuilds the continuation route's own URL from the params Stripe sent, so the
-// redirect target is fixed by us and never taken from user-controlled input.
-function readPulseTrialPaymentReturn(
-  searchParams: SettingsSearchParams,
-): string | null {
-  const action = readOnlySearchParamValue(searchParams.action);
-  const expires = readOnlySearchParamValue(searchParams.expires);
-  const signature = readOnlySearchParamValue(searchParams.signature);
-
-  if (
-    typeof action !== "string" ||
-    typeof expires !== "string" ||
-    typeof signature !== "string"
-  ) {
-    return null;
-  }
-
-  const params = new URLSearchParams();
-  params.set(HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM, action);
-  params.set(HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM, expires);
-  params.set(HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM, signature);
-
-  return `${HOSTED_PULSE_TRIAL_CONTINUATION_PATH}?${params.toString()}`;
 }
 
 function readUsageTopUpPurchaseReturn(

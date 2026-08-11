@@ -1,4 +1,4 @@
-import * as z from "zod";
+import * as z from "./zod-runtime.ts";
 
 import { ID_PREFIXES } from "./constants.ts";
 import { GENERIC_CONTRACT_ID_PATTERN, idPattern } from "./ids.ts";

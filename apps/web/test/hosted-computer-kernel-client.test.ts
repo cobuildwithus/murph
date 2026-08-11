@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type KernelSdkClient from "@onkernel/sdk";
 
 const kernelSdkMocks = vi.hoisted(() => {
   const computer = {
-    clickMouse: vi.fn(),
-    dragMouse: vi.fn(),
-    moveMouse: vi.fn(),
-    pressKey: vi.fn(),
-    scroll: vi.fn(),
-    typeText: vi.fn(),
+    clickMouse: vi.fn<KernelSdkClient["browsers"]["computer"]["clickMouse"]>(),
+    dragMouse: vi.fn<KernelSdkClient["browsers"]["computer"]["dragMouse"]>(),
+    moveMouse: vi.fn<KernelSdkClient["browsers"]["computer"]["moveMouse"]>(),
+    pressKey: vi.fn<KernelSdkClient["browsers"]["computer"]["pressKey"]>(),
+    scroll: vi.fn<KernelSdkClient["browsers"]["computer"]["scroll"]>(),
+    typeText: vi.fn<KernelSdkClient["browsers"]["computer"]["typeText"]>(),
   };
   const connections = {
     create: vi.fn(),

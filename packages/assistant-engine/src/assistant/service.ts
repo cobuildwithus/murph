@@ -1,5 +1,6 @@
 // Local-only assistant orchestration surface for headless consumers.
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import { prepareAssistantCronNotificationInput } from './cron/output-history.js'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
@@ -9,7 +10,11 @@ import {
   sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
-import { sendAssistantNotificationLocal as sendAssistantNotificationTurnLocal } from './notification-turn.js'
+import {
+  sendAssistantNotificationLocal as sendAssistantNotificationTurnLocal,
+  type AssistantNotificationInput,
+  type AssistantNotificationResult,
+} from './notification-turn.js'
 import { sendAssistantAskContinuationLocal as sendAssistantAskContinuationTurnLocal } from './ask-continuation.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
@@ -18,7 +23,6 @@ export {
   sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
-export { sendAssistantNotificationLocal } from './notification-turn.js'
 export {
   ASSISTANT_ASK_CONTINUATION_TURN_PROFILE,
   buildAssistantAskContinuationMessageInput,
@@ -72,10 +76,18 @@ export async function sendAssistantMessage(
   return sendAssistantMessageLocal(input)
 }
 
+export async function sendAssistantNotificationLocal(
+  input: AssistantNotificationInput,
+): Promise<AssistantNotificationResult> {
+  return sendAssistantNotificationTurnLocal(
+    await prepareAssistantCronNotificationInput(input),
+  )
+}
+
 export async function sendAssistantNotification(
-  input: import('./notification-turn.js').AssistantNotificationInput,
-) {
-  return sendAssistantNotificationTurnLocal(input)
+  input: AssistantNotificationInput,
+): Promise<AssistantNotificationResult> {
+  return sendAssistantNotificationLocal(input)
 }
 
 export async function sendAssistantAskContinuation(

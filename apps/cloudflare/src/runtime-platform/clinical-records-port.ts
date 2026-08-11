@@ -32,14 +32,18 @@ export function createHostedWebClinicalRecordsPort(input: {
   return {
     async createConnectLink(options) {
       const {
+        hostedClinicalRecordsConnectLinkRequestSchema,
         parseHostedClinicalRecordsConnectLinkResponse,
       } = await import("@murphai/hosted-execution/clinical-records");
       const payload = await fetchHostedWebControlPlaneJson({
-        body: {},
+        body: hostedClinicalRecordsConnectLinkRequestSchema.parse({
+          ...(options?.requestKey ? { requestKey: options.requestKey } : {}),
+        }),
         boundUserId: input.boundUserId,
         description: "Hosted clinical records connect link",
         fetchImpl: input.fetchImpl,
         path: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
+        replayOnceOnRetryableFailure: options?.requestKey !== undefined,
         sensitiveResponseBody: {
           maxBytes: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES,
         },

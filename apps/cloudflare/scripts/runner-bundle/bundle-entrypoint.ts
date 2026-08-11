@@ -133,9 +133,97 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // tool path without adding a forbidden boot input. After merging the native-
 // memory relay restoration, macOS measured 10,276,559B total on 2026-08-06;
 // retain the established allowance above that combined measurement.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_276_559 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_540_082;
+//
+// Dynamic-tool request parsing and execution are unnecessary before the first
+// Codex tool call. Splitting that runtime from the provider-visible catalog
+// reduced the static closure to 8,423,496B while keeping the full output at
+// 10,298,233B. Ratchet the static baseline to that measured closure; the
+// existing total ceiling already covers the small lazy-chunk boundary cost.
+// The bounded @murphai/contracts/zod-runtime surface keeps Zod's required
+// English error map while removing the 53-module locale catalog and unrelated
+// namespace exports from production workspace imports. A clean macOS assembly
+// measured a 1,729,632B entry, 8,182,922B static closure, and 9,862,735B total
+// on 2026-08-06. Ratchet the static and total baselines to that implementation
+// while retaining the established cross-platform tolerances.
+//
+// Lazy-loading the rare hosted wake handlers then removes their uncommon
+// activation, notification, ask-completion, Environment voice, and Codex-auth
+// paths from the static boot closure. After merging the Zod runtime change and
+// current main, exact macOS assembly measured a 1,640,840B entry, 8,053,604B
+// static closure, and 9,885,077B total on 2026-08-07. Ratchet both startup-path
+// baselines while retaining the reviewed Zod total ceiling.
+//
+// Combining those startup reductions with the dynamic-tool runtime boundary
+// measured a 1,641,254B entry, 7,885,509B static closure, and 9,902,746B total
+// on 2026-08-07. Against the exact merged-main baseline, the boundary removes
+// 168,095B from startup while adding 17,669B of lazy output. Ratchet all three
+// measurements while retaining the established cross-platform tolerances.
+//
+// Replacing the deferred Junction provider's one generated SDK serializer with
+// its five-field local predicate leaves entry and static startup bytes unchanged
+// while reducing total lazy output to 9,851,385B. Ratchet the total ceiling to
+// retain that removal without changing the startup tolerances.
+//
+// Adding the personalized generated contact card puts its request contract,
+// exact-shape parser, direct route resolution, and acknowledgement handling in
+// the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
+// on 2026-08-09; startup entry and static closure are unchanged, so ratchet
+// only the total ceiling and keep both startup baselines and all tolerances.
+//
+// Adding the single-message group offer, exact reply ownership, and weekly
+// contextualization instructions grows only that lazy assistant output. Exact
+// ubuntu assembly measured a 9,933,709B total on 2026-08-10; retain the startup
+// baselines and established total tolerance.
+//
+// Subsequent reviewed biomarker ranges, hosted
+// runtime-control compaction, and named-diet guidance moved exact ubuntu total
+// output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
+// remain within their existing ceilings and no forbidden subsystem enters the
+// boot graph, so ratchet only the total ceiling and keep both startup baselines
+// and all tolerances.
+//
+// Bounded group-tool failure diagnostics plus the strict included-usage read
+// contract measured a 9,938,038B total on ubuntu and a 7,983,431B static
+// closure on macOS before the mainline additions above were merged. Exact local
+// production assembly of the combined graph measured a 9,986,541B total on
+// 2026-08-10. Adding the workout response-card contract and canonical command
+// reconciliation to that mainline graph measured a 9,994,210B total and
+// 8,019,079B static closure on macOS. After adding the timezone and
+// deliverable-occurrence projection, exact local production assembly measured
+// a 1,674,361B entry, 8,046,334B static closure, and 10,024,188B total. The
+// later combined graph measured the same 1,674,361B entry, an 8,044,557B static
+// closure, and a 10,022,523B total. Retain the larger reviewed measurements and
+// established cross-platform tolerances. The reviewed current-sender private
+// completion path previously raised the exact combined macOS total to
+// 10,029,806B and the static closure to 8,049,480B without adding a forbidden
+// startup input. Adding the recurring-timezone and deliverable-occurrence
+// projection to that graph measured a 1,689,761B entry, 8,064,335B static
+// closure, and 10,044,661B total. Ratchet the entry and total baselines to the
+// exact combined graph while retaining the established cross-platform
+// tolerances.
+//
+// Preserving admitted identity and retry state for Junction blood-pressure
+// history extends the deferred provider's lazy output. After merging the later
+// mainline runtime boundaries, exact local production assembly of the combined
+// graph measured a 1,596,214B entry, 7,718,295B static closure, and 9,637,008B
+// total on 2026-08-10. Ratchet the total while retaining the reviewed startup
+// baselines and all fixed cross-platform allowances.
+//
+// Combining that reduced graph with the reviewed current-sender private
+// completion path measured a 1,614,630B entry, 7,757,204B static closure, and
+// 9,678,656B total on macOS. Both startup measurements remain within the
+// retained reviewed baselines, so ratchet only the total ceiling.
+//
+// Scorer-owned group challenge cards add the normalized score input,
+// deterministic scorer, bounded card mapper, and static presentation to that
+// combined graph. Exact local production assembly after the latest mainline
+// runtime additions measured a 1,619,381B entry, 7,815,801B static closure, and
+// 9,770,208B total on 2026-08-10. No forbidden subsystem entered the boot graph,
+// so ratchet all three measurements and retain the established narrow
+// cross-platform tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_770_208 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
@@ -158,10 +246,17 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/contracts/dist/examples.js",
   "/query/dist/murph-age.js",
   "/query/dist/browser-replica/murph-age.js",
+  "/assistant-engine/dist/assistant-codex/dynamic-tools.js",
+  "/assistant-runtime/dist/hosted-runtime/events/assistant-notification.js",
+  "/assistant-runtime/dist/hosted-runtime/events/assistant-ask-completion.js",
+  "/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
+  "/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
+  "node_modules/zod/v4/locales/",
 ] as const;
 
 const RUNNER_ENTRYPOINT_ALLOWED_BOOT_INPUT_MARKERS = [
   "/clinical-records/dist/retrieval-limits.js",
+  "node_modules/zod/v4/locales/en.js",
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(
@@ -186,6 +281,7 @@ export async function bundleRunnerContainerEntrypoint(
     format: "esm",
     logLevel: "error",
     metafile: true,
+    minifySyntax: true,
     outdir: bundleOutDir,
     platform: "node",
     splitting: true,

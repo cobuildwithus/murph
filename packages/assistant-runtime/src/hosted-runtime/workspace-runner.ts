@@ -37,6 +37,7 @@ import {
   resolveAssistantContextSnapshotPath,
   type AssistantGeneratedImageCapturePersistence,
   type AssistantInputEventRecord,
+  type AssistantProviderStartCriticalPathContext,
   warnAssistantBestEffortFailure,
 } from "@murphai/assistant-engine";
 import type {
@@ -241,6 +242,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   platform: HostedRuntimePlatform;
   persistGeneratedImageCapture?: AssistantGeneratedImageCapturePersistence | null;
   prepareAutoReplyDelivery?: (() => Promise<void>) | null;
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
@@ -378,6 +380,7 @@ export interface HostedWorkspaceRunnerInput {
   withCanonicalWritePersistence?: (<T>(run: () => Promise<T>) => Promise<T>) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   signal?: AbortSignal | null;
@@ -827,12 +830,18 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       result: initialMailboxImport,
     });
   const selectedInitialAssistantInputIds = acceptedInitialAssistantInputBatch
-    ? (await selectHostedAssistantInputIds({
-        freshAssistantInputIds: acceptedInitialAssistantInputBatch.assistantInputIds,
-        mode: "foreground",
-        vaultRoot: input.vaultRoot,
-      })).inputIds
+      ? (await selectHostedAssistantInputIds({
+          freshAssistantInputIds: acceptedInitialAssistantInputBatch.assistantInputIds,
+          mode: "foreground",
+          vaultRoot: input.vaultRoot,
+        })).inputIds
     : [];
+  const selectedInitialAssistantInputBatch = acceptedInitialAssistantInputBatch
+    ? includeHostedWorkspaceRunnerAssistantInputBatch(
+        acceptedInitialAssistantInputBatch,
+        new Set(selectedInitialAssistantInputIds),
+      )
+    : null;
   checkpointRequestSession.seedAssistantInputSelection(
     selectedInitialAssistantInputIds.length,
     acceptedInitialAssistantInputBatch
@@ -1041,7 +1050,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     clearAssistantAutomationScheduleChanged: () => {
       assistantAutomationScheduleChanged = false;
     },
-    initialAssistantInputBatch,
+    initialAssistantInputBatch: selectedInitialAssistantInputBatch,
     initialMailboxImport,
     latestAssistantInputBatch: () =>
       checkpointRequestSession.latestAssistantInputBatch(),
@@ -1059,6 +1068,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         await foregroundMailboxImportLoop?.drainPendingWake();
       }
     },
+    ...(input.providerStartCriticalPath
+      ? { providerStartCriticalPath: input.providerStartCriticalPath }
+      : {}),
     recordDeferredUsage(
       record: AssistantUsageRecord,
       providerRequestAcceptedInputIds?: readonly string[],
@@ -1828,6 +1840,17 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
   ]);
 }
 
+function includeHostedWorkspaceRunnerAssistantInputBatch(
+  batch: HostedWorkspaceRunnerAssistantInputBatch,
+  includedInputIds: ReadonlySet<string>,
+): HostedWorkspaceRunnerAssistantInputBatch | null {
+  return buildHostedWorkspaceRunnerAssistantInputBatch(
+    readHostedWorkspaceRunnerAssistantInputBatchRecords(batch).filter((record) =>
+      includedInputIds.has(record.assistantInputId)
+    ),
+  );
+}
+
 function filterHostedWorkspaceRunnerAssistantInputBatch(
   batch: HostedWorkspaceRunnerAssistantInputBatch,
   excludedInputIds: ReadonlySet<string>,
@@ -1963,8 +1986,12 @@ function readHostedWorkspaceRunnerAssistantInputBatchRecords(
 function buildHostedWorkspaceRunnerAssistantInputBatch(
   records: readonly HostedMailboxAssistantInputRecord[],
 ): HostedWorkspaceRunnerAssistantInputBatch | null {
-  return records.length === 0 ? null : {
-    assistantInputIds: records.map((record) => record.assistantInputId),
+  if (records.length === 0) {
+    return null;
+  }
+  const assistantInputIds = records.map((record) => record.assistantInputId);
+  return {
+    assistantInputIds,
     assistantInputRecords: records,
     emailDeliveryContexts: records.flatMap((record) =>
       record.emailDeliveryContext ? [record.emailDeliveryContext] : []

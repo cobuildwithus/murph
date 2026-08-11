@@ -1,15 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const stripeAlertMocks = vi.hoisted(() => ({
+  scheduleHostedStripeOperationFailureAlert: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/stripe-alert-email", () => ({
+  buildHostedStripeOperationCorrelationId: () =>
+    `stripe_op_${"a".repeat(24)}`,
+  scheduleHostedStripeOperationFailureAlert:
+    stripeAlertMocks.scheduleHostedStripeOperationFailureAlert,
+}));
+
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   logHostedOnboardingDiagnostic,
+  logHostedOnboardingWarning,
   startHostedOnboardingTiming,
 } from "@/src/lib/hosted-onboarding/logging";
 import {
   describeHostedStripeError,
   describeHostedStripeErrorDetails,
   logHostedStripeFailure,
+  reportHostedStripeOperationFailure,
   withHostedStripeFailureLog,
 } from "@/src/lib/hosted-onboarding/stripe-error-log";
 
@@ -79,9 +92,35 @@ describe("hosted onboarding timing logging", () => {
       },
     );
   });
+
+  it("emits sanitized searchable warning payloads", () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    logHostedOnboardingWarning("hosted.test-warning", {
+      eventIdSuffix: "abc123",
+      partsKind: "missing",
+      unsafeEmail: "user@example.com",
+      unsafeUrl: "https://example.test/raw",
+    });
+
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Hosted onboarding warning: hosted.test-warning.",
+      {
+        eventIdSuffix: "abc123",
+        partsKind: "missing",
+        unsafeEmail: "<redacted-email>",
+        unsafeUrl: "<redacted-url>",
+        warning: "hosted.test-warning",
+      },
+    );
+  });
 });
 
 describe("hosted Stripe failure logging", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -132,6 +171,46 @@ describe("hosted Stripe failure logging", () => {
       stripeRequestId: "req_abc123",
       stripeStatusCode: 400,
       stripeType: "StripeInvalidRequestError",
+    });
+    expect(
+      stripeAlertMocks.scheduleHostedStripeOperationFailureAlert,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("alerts only when an action owner classifies the rejection as terminal", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = {
+      code: "api_error",
+      rawType: "api_error",
+      requestId: "req_checkout_123",
+      statusCode: 503,
+      type: "StripeAPIError",
+    };
+
+    reportHostedStripeOperationFailure({
+      error,
+      operationIdentity: "checkout-attempt-123",
+      operationName: "checkout.sessions.create.billing-start",
+      stripeLiveMode: true,
+    });
+
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(
+      stripeAlertMocks.scheduleHostedStripeOperationFailureAlert,
+    ).toHaveBeenCalledWith({
+      fields: {
+        code: "api_error",
+        declineCode: null,
+        message: null,
+        param: null,
+        rawType: "api_error",
+        requestId: "req_checkout_123",
+        statusCode: 503,
+        type: "StripeAPIError",
+      },
+      operationCorrelationId: expect.stringMatching(/^stripe_op_[a-f0-9]{24}$/u),
+      operationName: "checkout.sessions.create.billing-start",
+      stripeLiveMode: true,
     });
   });
 

@@ -6,6 +6,7 @@ import {
   parseReleaseArgs,
   validateReleaseContext,
 } from './release-helpers.mjs';
+import { verifyReleaseArtifacts } from './release-artifact-secret-guard.mjs';
 
 function isAlreadyPublished(output) {
   return /previously published|cannot publish over|version already exists/ui.test(
@@ -94,9 +95,7 @@ async function execFileStreaming(command, args, cwd) {
         return;
       }
 
-      const error = new Error(
-        `Command failed: ${command} ${args.map(shellEscapeArgument).join(' ')}`,
-      );
+      const error = new Error('Release publication command failed.');
       error.code = code ?? 1;
       error.signal = signal ?? null;
       error.stderr = stderr;
@@ -144,6 +143,7 @@ const options = parseReleaseArgs(process.argv.slice(2), {
 const context = await loadReleaseContext();
 const packOutputPath = path.resolve(context.repoRoot, options.packOutput);
 const packOutput = JSON.parse(await readFile(packOutputPath, 'utf8'));
+await verifyReleaseArtifacts(context.repoRoot, packOutput);
 const summary = validateReleaseContext(context, {
   expectVersion: packOutput.version,
 });
@@ -173,11 +173,12 @@ for (const entry of summary.packages) {
     publishArgs.push('--tag', options.npmTag);
   }
 
-  console.log(`+ npm ${publishArgs.join(' ')}`);
+  console.log(`+ npm publish <verified-release-tarball> ${publishArgs.slice(2).join(' ')}`.trim());
   const publishCommand = resolvePublishCommand(publishArgs);
 
   try {
     await execFileStreaming(publishCommand.command, publishCommand.args, context.repoRoot);
+    console.log(`Published ${entry.name}@${entry.version}.`);
   } catch (error) {
     const output = `${error.stdout ?? ''}${error.stderr ?? ''}`;
 

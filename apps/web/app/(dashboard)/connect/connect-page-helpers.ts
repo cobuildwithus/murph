@@ -189,10 +189,12 @@ export function stripDeviceConnectIntentParams() {
 
   const url = new URL(window.location.href);
   url.searchParams.delete("deviceConnectIntent");
+  url.searchParams.delete("connectProvider");
   url.searchParams.delete("connectSource");
   const hashParams = readDeviceConnectIntentHashParams(url.hash);
   if (hashParams) {
     hashParams.delete("deviceConnectIntent");
+    hashParams.delete("connectProvider");
     hashParams.delete("connectSource");
     url.hash = hashParams.toString();
   }
@@ -405,9 +407,11 @@ function readDeviceConnectIntentParams(params: URLSearchParams): InitialDeviceCo
   }
 
   const requestedSource = normalizeConnectSourceId(params.get("connectSource"));
+  const connectProvider = normalizeConnectKey(params.get("connectProvider"));
 
   return {
     claim,
+    ...(connectProvider ? { connectProvider } : {}),
     connectSource: requestedSource,
   };
 }

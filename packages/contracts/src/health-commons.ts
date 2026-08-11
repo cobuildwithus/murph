@@ -1,4 +1,4 @@
-import * as z from "zod";
+import * as z from "./zod-runtime.ts";
 
 export const HEALTH_COMMONS_PAGE_SCHEMA_VERSION = "murph.commons.page.v1" as const;
 export const HEALTH_COMMONS_CATALOG_SCHEMA_VERSION = "murph.commons.catalog.v1" as const;
