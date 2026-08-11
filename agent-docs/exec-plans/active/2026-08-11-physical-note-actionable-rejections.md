@@ -89,17 +89,20 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   compiles and selected the exact test locally, but its paid execution is
   blocked when the provider credential is absent; deterministic owner tests
   remain the authoritative local proof.
-- Complete first-provider request capture used the pinned real Codex App
-  Server, local scripted provider, `gpt-5.6-terra`, low reasoning, production
-  code mode, an explicit physical-note request, and `gpt-tokenizer` 3.4.0
-  `o200k_harmony`. It counted `include`, `input`, `instructions`,
-  `parallel_tool_calls`, `text`, `tool_choice`, and `tools` after normalizing
-  temporary paths and unstable ids. Direct is unchanged at 24,507 tokens /
-  112,170 bytes; group is unchanged at 20,928 / 96,389. The skill recovery
-  text and tool-result instruction enter only after a failed tool call, so
-  assembled initial instructions, tool schemas, and generated guidance are
-  byte-identical. Model selection, reasoning, storage, streaming, service-tier,
-  cache, account, client, and transport metadata were excluded identically.
+- Complete first-provider request capture compared guarded PR base
+  `57c6a766de79cf250ab10588b95cd41fd0129c5f` with runtime candidate
+  `d3956a35ba5c3c07227d227476e22adb397d096c` through the pinned real Codex
+  App Server, local scripted provider, `gpt-5.6-terra`, low reasoning,
+  production code mode, and identical direct/group physical-note requests.
+  `gpt-tokenizer` 3.4.0 `o200k_harmony` counted `include`, `input`,
+  `instructions`, `parallel_tool_calls`, `text`, `tool_choice`, and `tools`
+  after normalizing host paths and generated message ids. Direct is
+  byte-identical at 24,874 tokens / 114,460 bytes; group is byte-identical at
+  22,033 / 102,057. The skill recovery text and tool-result instruction enter
+  only after a failed tool call, so assembled initial instructions, tool
+  schemas, and generated guidance have zero delta. Model selection, reasoning,
+  storage, streaming, service-tier, cache, account, client, and transport
+  metadata were excluded identically.
 
 ## Review retrospective
 
