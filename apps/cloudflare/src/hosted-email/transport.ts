@@ -390,6 +390,11 @@ async function resolveHostedEmailGroupRecipients(input: {
         ? {
             expectedGroupEmailAuthorizationProof:
               input.expectedGroupEmailAuthorizationProof,
+            // Keep the proof visible to the pre-generic Web callback parser
+            // during the bounded deployment/rollback window. Remove this alias
+            // only after the generic Web receiver is the proven rollback floor.
+            expectedNewsletterAuthorizationProof:
+              input.expectedGroupEmailAuthorizationProof,
           }
         : {}),
       groupId: input.groupId,

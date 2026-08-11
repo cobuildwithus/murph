@@ -509,11 +509,21 @@ describe("hosted email routing and transport", () => {
       .toMatchObject({
         body: JSON.stringify({
           expectedGroupEmailAuthorizationProof: "a".repeat(64),
+          expectedNewsletterAuthorizationProof: "a".repeat(64),
           groupId: "group_123",
         }),
         boundUserId: "member_runtime",
         path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
       });
+    const legacyCallbackBody = JSON.parse(
+      String(
+        webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0]?.[0]
+          ?.body,
+      ),
+    ) as Record<string, unknown>;
+    expect(legacyCallbackBody.expectedNewsletterAuthorizationProof).toBe(
+      legacyCallbackBody.expectedGroupEmailAuthorizationProof,
+    );
     expect(emailBinding.send).toHaveBeenCalledTimes(2);
     const firstMessage = emailBinding.send.mock.calls[0]?.[0] as {
       raw: string;

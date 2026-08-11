@@ -237,8 +237,9 @@ Focused coverage must prove:
 - membership, consent, exact grant, verified-email, and proof changes fail
   closed before fanout;
 - accepted parent recovery and generic child retry settlement do not recompose;
-- legacy accepted keys/proof fields remain readable while new writes use only
-  generic names;
+- legacy accepted keys/proof fields remain readable; the group-recipient
+  callback temporarily emits the legacy proof alias alongside the generic
+  field so an old Web rollback still revalidates the composition snapshot;
 - no newsletter-specific tool, port, route, mailbox, cron branch, outbox type,
   authorization service, or capability flag remains in runtime code.
 
@@ -255,6 +256,15 @@ group-skill bundle as one coordinated release, with immediate container
 rollout. Pause or hold scheduled group-email occurrences during the cutover if
 the deploy system cannot make the Web and runner revisions effectively atomic.
 Current-chat automations remain on the ordinary route.
+
+Deploy Web before Cloudflare/runner in that coordinated window. The recipient
+callback is additive during the rollback window: current Cloudflare sends the
+same authorization proof under both the generic field and the legacy alias, so
+an already-accepted parent still fails closed if it reaches the old Web parser.
+Until the generic Web receiver is established and recorded as the hard rollback
+floor, roll Cloudflare/runner back before rolling Web back. Remove the legacy
+callback alias only after production deployment evidence proves that no
+addressable Web rollback artifact depends on it.
 
 After rollout, prove one current-chat occurrence and one group-email
 prepare/send occurrence. Confirm the model receives no addresses or grant
