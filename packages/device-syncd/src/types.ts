@@ -733,11 +733,13 @@ export interface ProviderScheduleResult {
 
 export interface ProviderSnapshotImportReceipt {
   canonicalEventCount: number;
+  canonicalEventExternalRefResourceIds?: readonly string[];
   durableDeliveryAccepted: boolean;
 }
 
 export interface ProviderJobConnectionSource {
   displayName: string | null;
+  firstSeenAt?: string;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
@@ -750,6 +752,9 @@ export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
   signal?: AbortSignal;
+  // Standalone sync discovers provider sub-sources from the provider API.
+  // Hosted sync must treat the Web projection as the admission authority.
+  connectionSourceAdmissionMode?: "discover_unlisted" | "listed_only";
   shouldYield?(): boolean;
   throwIfAborted?(): void;
   // Providers must route job-time side effects through this context instead of

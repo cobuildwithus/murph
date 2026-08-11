@@ -17,6 +17,8 @@ model DeviceConnection {
   metadataJson               Json?                    @map("metadata_json")
   credentialKind             String                   @default("oauth_tokens") @map("credential_kind")
   providerConfigKey          String?                  @map("provider_config_key")
+  providerApplicationId      String?                  @map("provider_application_id")
+  providerApplicationRevision Int?                    @map("provider_application_revision")
   credentialMetadataJson     Json?                    @map("credential_metadata_json")
   setupPhase                 String?                  @map("setup_phase")
   setupExpiresAt             DateTime?                @map("setup_expires_at")
@@ -45,8 +47,10 @@ model DeviceConnection {
   dirtyState                 DeviceSyncDirtyConnection?
   dirtyPayloads              DeviceSyncDirtyPayload[]
   companionCaptureReceipts   DeviceSyncCompanionCaptureReceipt[]
+  providerApplication        DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Restrict)
 
   @@unique([provider, providerAccountBlindIndex])
+  @@index([providerApplicationId])
   @@index([status, nextReconcileAt, updatedAt, id], map: "device_connection_due_reconcile_sweep_idx")
   @@index([userId, provider])
   @@index([setupPhase, setupExpiresAt])
@@ -100,18 +104,38 @@ model DeviceTokenAudit {
 }
 
 model DeviceOauthSession {
-  state        String    @id
-  userId       String?   @map("user_id")
-  provider     String
-  returnTo     String?   @map("return_to")
-  metadataJson Json?     @map("metadata_json")
-  createdAt    DateTime  @map("created_at")
-  expiresAt    DateTime  @map("expires_at")
-  consumedAt   DateTime? @map("consumed_at")
+  state                       String    @id
+  userId                      String?   @map("user_id")
+  provider                    String
+  providerApplicationId       String?   @map("provider_application_id")
+  providerApplicationRevision Int?      @map("provider_application_revision")
+  returnTo                    String?   @map("return_to")
+  metadataJson                Json?     @map("metadata_json")
+  createdAt                   DateTime  @map("created_at")
+  expiresAt                   DateTime  @map("expires_at")
+  consumedAt                  DateTime? @map("consumed_at")
+  providerApplication         DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
   @@index([userId, provider])
+  @@index([providerApplicationId])
   @@map("device_oauth_session")
+}
+
+model DeviceProviderApplication {
+  id                    String    @id
+  memberId              String    @map("member_id")
+  provider              String
+  revision              Int       @default(1)
+  configEncrypted       String    @map("config_encrypted")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  connections           DeviceConnection[]
+  oauthSessions         DeviceOauthSession[]
+
+  @@unique([memberId, provider])
+  @@map("device_provider_application")
 }
 
 model DeviceConnectIntent {
@@ -202,13 +226,14 @@ model DeviceSyncDirtyConnection {
 }
 
 model DeviceSyncDirtyPayload {
-  id            String           @id
-  connectionId  String           @map("connection_id")
-  userId        String           @map("user_id")
-  provider      String
-  dirtyRevision BigInt           @map("dirty_revision")
-  resourceEncrypted String       @map("resource_encrypted")
-  createdAt     DateTime         @default(now()) @map("created_at")
+  id                    String           @id
+  connectionId          String           @map("connection_id")
+  userId                String           @map("user_id")
+  provider              String
+  dirtyRevision         BigInt           @map("dirty_revision")
+  resourceEncrypted     String           @map("resource_encrypted")
+  credentialIndependent Boolean?         @map("credential_independent")
+  createdAt             DateTime         @default(now()) @map("created_at")
   connection    DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([connectionId, dirtyRevision])
@@ -589,6 +614,7 @@ model HostedMember {
   hostedGroupMemberships         HostedGroupMember[]             @relation("HostedGroupMember")
   hostedGroupRuntime             HostedGroup?                    @relation("HostedGroupRuntimeMember")
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
+  deviceProviderApplications     DeviceProviderApplication[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
   mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]

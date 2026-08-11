@@ -20,7 +20,7 @@ type Persona = {
 const PERSONAS: ReadonlyArray<Persona> = [
   {
     avatarAlt: "",
-    avatarSrc: "/personas/sleeper.jpg",
+    avatarSrc: "/personas/sleeper-avatar.avif",
     eyebrow: "The poor sleeper",
     priorMessages: [
       {
@@ -61,7 +61,7 @@ const PERSONAS: ReadonlyArray<Persona> = [
   },
   {
     avatarAlt: "",
-    avatarSrc: "/personas/athlete.jpg",
+    avatarSrc: "/personas/athlete-avatar.avif",
     eyebrow: "The endurance athlete",
     priorMessages: [
       {
@@ -110,7 +110,7 @@ const PERSONAS: ReadonlyArray<Persona> = [
   },
   {
     avatarAlt: "",
-    avatarSrc: "/personas/founder.jpg",
+    avatarSrc: "/personas/founder-avatar.avif",
     eyebrow: "The busy founder",
     priorMessages: [
       {

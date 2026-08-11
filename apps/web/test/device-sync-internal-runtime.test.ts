@@ -274,6 +274,8 @@ describe("device-sync hosted runtime helpers", () => {
         credentialKind: "oauth_tokens",
         credentialMetadata: {},
         providerConfigKey: null,
+        providerApplicationId: null,
+        providerApplicationRevision: null,
         setupExpiresAt: null,
         setupPhase: null,
         displayName: null,

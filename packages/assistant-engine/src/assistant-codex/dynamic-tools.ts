@@ -82,7 +82,7 @@ import {
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  assistantResponseCardSchema,
+  assistantResponseCardAuthoringSchema,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -261,9 +261,22 @@ const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
 const attachResponseCardArgumentsSchema = z
   .object({
-    card: assistantResponseCardSchema,
+    card: assistantResponseCardAuthoringSchema,
   })
   .strict()
+  .superRefine((value, context) => {
+    if (
+      value.card.kind === 'compact_table' &&
+      'workout' in value.card &&
+      value.card.subtitle !== null
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Structured workout card subtitles must be null.',
+        path: ['card', 'subtitle'],
+      })
+    }
+  })
 
 const attachResponseMediaArgumentsSchema = z
   .object({
@@ -375,6 +388,14 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('ask_current_sender'),
+      message_ref: z.string().regex(
+        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      ),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('message_current_sender'),
       message_ref: z.string().regex(
         new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
       ),
@@ -927,6 +948,7 @@ type MurphGroupToolRequest =
         action:
           | 'ask'
           | 'ask_current_sender'
+          | 'message_current_sender'
           | 'ask_member'
           | 'create_join_link'
           | 'create_signup_referral_link'
@@ -947,6 +969,10 @@ type MurphGroupToolRequest =
     }
   | {
       action: 'ask_current_sender'
+      messageRef: string
+    }
+  | {
+      action: 'message_current_sender'
       messageRef: string
     }
   | {
@@ -3491,6 +3517,21 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
+    response.action === 'message_current_sender'
+    && response.result.status === 'unavailable'
+    && response.result.unavailableReason
+      === 'same_channel_direct_route_unavailable'
+  ) {
+    return {
+      ...response,
+      result: {
+        ...response.result,
+        recovery:
+          'Ask the sender to open a direct Murph chat on the same channel, then retry.',
+      },
+    }
+  }
+  if (
     response.action === 'read_chat_participants'
     && response.result.status === 'ok'
   ) {
@@ -3868,7 +3909,10 @@ async function executeGroupTool(input: {
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
     }
-  } else if (input.request.action === 'ask_current_sender') {
+  } else if (
+    input.request.action === 'ask_current_sender'
+    || input.request.action === 'message_current_sender'
+  ) {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
     if (
@@ -3877,11 +3921,11 @@ async function executeGroupTool(input: {
     ) {
       return toolTextResult(
         false,
-        'current-sender ask requires the selected accepted message in this group turn',
+        'current-sender actions require the selected accepted message in this group turn',
       )
     }
     request = {
-      action: 'ask_current_sender',
+      action: input.request.action,
       origin: {
         assistantInputId: input.request.messageRef,
         kind: 'accepted_input',
@@ -5728,11 +5772,14 @@ function parseGroupArguments(
   ) {
     return { ok: true, request: parsed.data }
   }
-  if (parsed.data.action === 'ask_current_sender') {
+  if (
+    parsed.data.action === 'ask_current_sender'
+    || parsed.data.action === 'message_current_sender'
+  ) {
     return {
       ok: true,
       request: {
-        action: 'ask_current_sender',
+        action: parsed.data.action,
         messageRef: parsed.data.message_ref,
       },
     }
@@ -6152,7 +6199,7 @@ function parseAttachResponseCardArguments(
         error: parsed.error,
         rawInput: value,
         schemaName,
-        schemaRootKeys: readZodObjectRootKeys(attachResponseCardArgumentsSchema),
+        schemaRootKeys: ['card'],
         toolName,
       }),
     }

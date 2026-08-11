@@ -125,6 +125,7 @@ interface ScriptedStub {
   completedResponseLabelsSinceBaseline(): string[]
   markRequestBaseline(): void
   queue(...responses: readonly ScriptedResponse[]): void
+  resetQueue(): void
   requestCountSinceBaseline(): number
   requestSummariesSinceBaseline(): ScriptedProviderRequestSummary[]
 }
@@ -177,6 +178,10 @@ function executeCodexAppServerTurn(
   })
 }
 
+function quotePosixShellLiteral(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function requireScriptedStub(): Promise<ScriptedStub> {
   stub ??= await startScriptedResponsesStub()
   return stub
@@ -194,7 +199,7 @@ afterAll(async () => {
       force: true,
       recursive: true,
     })))
-})
+}, 180_000)
 
 describe('real codex app-server with scripted provider', () => {
   it('streams a scripted turn through the real app-server protocol', {
@@ -1840,14 +1845,14 @@ if (!tool) {
     expect(result.finalMessage).not.toMatch(/no (?:future|later) delivery/iu)
   })
 
-  it('preserves both response-card shapes through the real App Server boundary', {
+  it('preserves current response-card shapes and rejects legacy-only nutrition authoring through the real App Server boundary', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const completedWorkoutCard = {
       kind: 'compact_table',
       version: 1,
       title: 'Lower body strength',
-      subtitle: '24 of 24 sets complete',
+      subtitle: null,
       footer: 'Workout completed.',
       tracking: {
         kind: 'workout',
@@ -1908,14 +1913,15 @@ if (!tool) {
           fiberGrams: { total: 15, mealCount: 2 },
         },
         goals: {
-          calories: null,
-          proteinGrams: null,
-          carbsGrams: null,
-          fatGrams: null,
-          fiberGrams: null,
+          calories: { target: 1_800, status: 'under_target' },
+          proteinGrams: { target: 100, status: 'under_target' },
+          carbsGrams: { target: 190, status: 'under_target' },
+          fatGrams: { target: 55, status: 'under_target' },
+          fiberGrams: { target: 25, status: 'under_target' },
         },
       },
     ] as const
+    const completeNutritionCard = cards[2]
 
     for (const card of cards) {
       const scenario = await prepareScriptedTurnScenario()
@@ -1948,6 +1954,2286 @@ if (!tool) {
       expect(result.runtimeIssueInputs).toEqual([])
       expect(result.responseCard).toEqual(card)
     }
+
+    const incompleteNutritionCards = [
+      {
+        kind: 'daily_nutrition',
+        localDate: '2026-08-08',
+        mealCount: 2,
+        totals: {
+          calories: { total: 900, mealCount: 2 },
+          proteinGrams: { total: 70, mealCount: 2 },
+          carbsGrams: { total: 80, mealCount: 2 },
+          fatGrams: { total: 30, mealCount: 2 },
+        },
+      },
+      {
+        ...completeNutritionCard,
+        goals: {
+          calories: null,
+          proteinGrams: null,
+          carbsGrams: null,
+          fatGrams: null,
+          fiberGrams: null,
+        },
+      },
+      ...([
+        'calories',
+        'proteinGrams',
+        'carbsGrams',
+        'fatGrams',
+        'fiberGrams',
+      ] as const).map((metric) => ({
+        ...completeNutritionCard,
+        goals: {
+          ...completeNutritionCard.goals,
+          [metric]: null,
+        },
+      })),
+    ]
+
+    for (const card of incompleteNutritionCards) {
+      const scenario = await prepareScriptedTurnScenario()
+      scenario.stub.captureProviderRequestDiagnostics()
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: { card },
+            name: 'attach_response_card',
+            namespace: 'murph',
+          },
+        },
+        { text: 'INCOMPLETE_CARD_REJECTED' },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        groupConversation: false,
+        prompt: 'Try the requested synthetic response card.',
+      })
+
+      expect(result.responseCard).toBeNull()
+      expect(result.runtimeIssueInputs).toEqual([
+        expect.objectContaining({
+          component: 'assistant.tool-validation',
+          errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+          issueKind: 'schema_rejection',
+          operation: 'murph.attach_response_card',
+        }),
+        expect.objectContaining({
+          component: 'assistant.codex-action',
+          errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+          issueKind: 'tool_error',
+          operation: 'dynamic.tool.call',
+        }),
+      ])
+      expect(result.finalMessage).toBe('INCOMPLETE_CARD_REJECTED')
+    }
+  })
+
+  it('proves complete Goal and safety discovery before nutrition targets and cards', {
+    timeout: 720_000,
+  }, async () => {
+    const activeListCommand =
+      'goal list --status active --limit 200 --format json'
+    const visibleGoalShowCommand =
+      'goal show goal_visible_bundle --format json'
+    const hiddenGoalShowCommand =
+      'goal show goal_hidden_conflict --format json'
+    const memoryCommand = 'memory show --format json'
+    const conditionListCommand =
+      'condition list --status active --limit 200 --format json'
+    const regimenListCommand =
+      'regimen list --status active --limit 200 --format json'
+    const measurementCommand =
+      'measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from 2026-06-15 --to 2026-07-30 --limit 200 --format json'
+    const pregnancyMeasurementCommand =
+      'measurement entry list --metric pregnancy-test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
+    const testEventListCommand =
+      'event list --kind test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
+    const procedureListCommand =
+      'event list --kind procedure --limit 200 --format json'
+    const encounterListCommand =
+      'event list --kind encounter --limit 200 --format json'
+    const totalsCommand =
+      'meal totals --from 2026-07-30 --to 2026-07-30 --format json'
+
+    const pointTarget = (
+      id: string,
+      metric: string,
+      unit: string,
+      value: number,
+    ) => ({
+      evaluation: {
+        comparator: 'between',
+        highValue: value,
+        kind: 'selected-value',
+        value,
+      },
+      id,
+      kind: 'metric',
+      metric,
+      unit,
+    })
+    const completeTargets = [
+      pointTarget('target_calories', 'dietary-calories', 'kcal', 1_800),
+      pointTarget('target_protein', 'protein-grams', 'g', 140),
+      pointTarget('target_carbs', 'carbs-grams', 'g', 190),
+      pointTarget('target_fat', 'fat-grams', 'g', 55),
+      pointTarget('target_fiber', 'fiber-grams', 'g', 25),
+    ]
+    const visibleGoal = {
+      entity: {
+        data: {
+          metricTargets: completeTargets,
+          status: 'active',
+          windowStartAt: '2026-07-01',
+        },
+        id: 'goal_visible_bundle',
+        kind: 'goal',
+        title: 'Plan A',
+      },
+      vault: 'synthetic-vault',
+    }
+    const hiddenGoal = {
+      entity: {
+        data: {
+          metricTargets: [
+            pointTarget(
+              'target_hidden_calories',
+              'dietary-calories',
+              'kcal',
+              1_100,
+            ),
+          ],
+          status: 'active',
+          windowStartAt: '2026-07-01',
+        },
+        id: 'goal_hidden_conflict',
+        kind: 'goal',
+        title: 'Plan L',
+      },
+      vault: 'synthetic-vault',
+    }
+    const conflictItems = Array.from({ length: 12 }, (_, index) => {
+      const itemNumber = index + 1
+      const id = index === 0
+        ? 'goal_visible_bundle'
+        : index === 11
+          ? 'goal_hidden_conflict'
+          : `goal_opaque_${itemNumber}`
+      return {
+        data: {
+          metricTargetsCount: index === 0 ? 5 : index === 11 ? 1 : 0,
+          status: 'active',
+        },
+        id,
+        kind: 'goal',
+        title: `Plan ${itemNumber}`,
+      }
+    })
+    const conflictList = {
+      count: conflictItems.length,
+      filters: { limit: 200, status: 'active' },
+      items: conflictItems,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const saturatedItems = Array.from({ length: 200 }, (_, index) => ({
+      data: {
+        metricTargetsCount: index % 17 === 0 ? 1 : 0,
+        status: 'active',
+      },
+      id: `goal_saturated_${index + 1}`,
+      kind: 'goal',
+      title: `Plan ${index + 1}`,
+    }))
+    const saturatedList = {
+      count: saturatedItems.length,
+      filters: { limit: 200, status: 'active' },
+      items: saturatedItems,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const completeList = {
+      count: 1,
+      filters: { limit: 200, status: 'active' },
+      items: [conflictItems[0]],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const safeMeasurements = {
+      count: 0,
+      filters: {
+        from: '2026-06-15',
+        limit: 200,
+        metric: ['bmi', 'height', 'weight', 'body-weight'],
+        to: '2026-07-30',
+      },
+      items: [],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const memoryResult = (
+      records: readonly { section: string; text: string }[],
+    ) => ({
+      document: {
+        records: records.map((record, index) => ({
+          ...record,
+          id: `memory_record_${index + 1}`,
+          updatedAt: '2026-07-29T12:00:00.000Z',
+        })),
+      },
+      memory: null,
+      vault: 'synthetic-vault',
+    })
+    const adultMemory = memoryResult([{
+      section: 'Identity',
+      text: 'Age: 34',
+    }])
+    const minorMemory = memoryResult([{
+      section: 'Identity',
+      text: 'Age: 16',
+    }])
+    const numberSensitiveMemory = memoryResult([{
+      section: 'Preferences',
+      text: 'Avoid calorie and macro numbers; use an intuitive-eating approach.',
+    }])
+    const measurementResult = (
+      items: readonly Record<string, unknown>[],
+    ) => ({
+      count: items.length,
+      filters: {
+        from: '2026-06-15',
+        limit: 200,
+        metric: ['bmi', 'height', 'weight', 'body-weight'],
+        to: '2026-07-30',
+      },
+      items,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const pregnancyMeasurementResult = (
+      items: readonly Record<string, unknown>[],
+    ) => ({
+      count: items.length,
+      filters: {
+        from: '2025-10-03',
+        limit: 200,
+        metric: ['pregnancy-test'],
+        to: '2026-07-30',
+      },
+      items,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const lowBmiMeasurements = measurementResult([{
+      eventId: 'event_low_bmi',
+      metric: 'bmi',
+      occurredAt: '2026-07-29T12:00:00.000Z',
+      unit: 'kg/m^2',
+      value: 16.8,
+    }])
+    const lowSameEventMeasurements = measurementResult([
+      {
+        eventId: 'event_low_pair',
+        metric: 'height',
+        occurredAt: '2026-07-29T12:00:00.000Z',
+        unit: 'cm',
+        value: 180,
+      },
+      {
+        eventId: 'event_low_pair',
+        metric: 'weight',
+        occurredAt: '2026-07-29T12:00:00.000Z',
+        unit: 'kg',
+        value: 54,
+      },
+    ])
+    const normalBmiMeasurements = measurementResult([{
+      eventId: 'event_normal_bmi',
+      metric: 'bmi',
+      occurredAt: '2026-07-29T12:00:00.000Z',
+      unit: 'kg/m^2',
+      value: 22.1,
+    }])
+    const saturatedMeasurements = measurementResult(
+      Array.from({ length: 200 }, (_, index) => ({
+        eventId: `event_height_only_${index + 1}`,
+        metric: 'height',
+        occurredAt: `2026-07-${String(29 - (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
+        unit: 'cm',
+        value: 180,
+      })),
+    )
+    const noPregnancyMeasurements = pregnancyMeasurementResult([])
+    const negativePregnancyMeasurements = pregnancyMeasurementResult([{
+      eventId: 'event_negative_pregnancy_test',
+      measurementIndex: 0,
+      metric: 'pregnancy-test',
+      occurredAt: '2026-07-29T12:00:00.000Z',
+      qualifiers: { result: 'negative' },
+      recordKind: 'measurement',
+      source: 'device',
+      unit: 'result',
+      value: 0,
+    }])
+    const ambiguousPregnancyMeasurements = pregnancyMeasurementResult([{
+      eventId: 'event_ambiguous_pregnancy_test',
+      measurementIndex: 0,
+      metric: 'pregnancy-test',
+      occurredAt: '2026-07-29T12:00:00.000Z',
+      qualifiers: { result: 'indeterminate' },
+      recordKind: 'measurement',
+      source: 'device',
+      unit: 'result',
+      value: 1,
+    }])
+    const positivePregnancyMeasurements = pregnancyMeasurementResult([{
+      eventId: 'event_positive_pregnancy_test',
+      measurementIndex: 0,
+      metric: 'pregnancy-test',
+      occurredAt: '2026-07-28T12:00:00.000Z',
+      qualifiers: { result: 'positive' },
+      recordKind: 'measurement',
+      source: 'device',
+      unit: 'result',
+      value: 1,
+    }])
+    const laterNegativeAfterPositiveMeasurements = pregnancyMeasurementResult([
+      {
+        eventId: 'event_later_negative_pregnancy_test',
+        measurementIndex: 0,
+        metric: 'pregnancy-test',
+        occurredAt: '2026-07-29T12:00:00.000Z',
+        qualifiers: { result: 'negative' },
+        recordKind: 'measurement',
+        source: 'device',
+        unit: 'result',
+        value: 0,
+      },
+      positivePregnancyMeasurements.items[0]!,
+    ])
+    const saturatedPregnancyMeasurements = pregnancyMeasurementResult(
+      Array.from({ length: 200 }, (_, index) => ({
+        eventId: `event_negative_pregnancy_test_${index + 1}`,
+        measurementIndex: 0,
+        metric: 'pregnancy-test',
+        occurredAt: `2026-07-${String(29 - (index % 20)).padStart(2, '0')}T12:00:00.000Z`,
+        qualifiers: { result: 'negative' },
+        recordKind: 'measurement',
+        source: 'device',
+        unit: 'result',
+        value: 0,
+      })),
+    )
+    const testEventListResult = (
+      items: readonly Record<string, unknown>[],
+    ) => ({
+      count: items.length,
+      filters: {
+        experiment: null,
+        from: '2025-10-03',
+        kind: 'test',
+        limit: 200,
+        tag: [],
+        to: '2026-07-30',
+      },
+      items,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const testEventItem = (
+      id: string,
+      testName: string,
+      resultStatus: string,
+      resultsCount: number,
+    ) => ({
+      data: {
+        resultStatus,
+        ...(resultsCount === 0 ? {} : { resultsCount }),
+        testName,
+      },
+      id,
+      kind: 'blood_test',
+      occurredAt: '2026-07-28T12:00:00.000Z',
+      title: 'Structured clinical result',
+    })
+    const testEventDetail = (input: {
+      id: string
+      resultStatus: string
+      results?: readonly Record<string, unknown>[]
+      summary?: string
+      testName: string
+    }) => ({
+      entity: {
+        data: {
+          resultStatus: input.resultStatus,
+          ...(input.results ? { results: input.results } : {}),
+          ...(input.summary ? { summary: input.summary } : {}),
+          testName: input.testName,
+        },
+        id: input.id,
+        kind: 'blood_test',
+        occurredAt: '2026-07-28T12:00:00.000Z',
+        title: 'Structured clinical result',
+      },
+      vault: 'synthetic-vault',
+    })
+    const noTestEvents = testEventListResult([])
+    const positivePregnancyTestEventId =
+      'event_positive_structured_pregnancy_test'
+    const positivePregnancyTestEvents = testEventListResult([
+      testEventItem(
+        positivePregnancyTestEventId,
+        'serum_hcg_qualitative',
+        'unknown',
+        0,
+      ),
+    ])
+    const positivePregnancyTestEventDetail = testEventDetail({
+      id: positivePregnancyTestEventId,
+      resultStatus: 'unknown',
+      summary: 'Pregnancy test: positive',
+      testName: 'serum_hcg_qualitative',
+    })
+    const negativePregnancyTestEventId =
+      'event_negative_structured_pregnancy_test'
+    const negativePregnancyTestEvents = testEventListResult([
+      testEventItem(
+        negativePregnancyTestEventId,
+        'urine_pregnancy_test',
+        'normal',
+        1,
+      ),
+    ])
+    const negativePregnancyTestEventDetail = testEventDetail({
+      id: negativePregnancyTestEventId,
+      resultStatus: 'normal',
+      results: [{ analyte: 'Pregnancy test', textValue: 'Negative' }],
+      summary: 'Pregnancy test: negative',
+      testName: 'urine_pregnancy_test',
+    })
+    const pendingPregnancyTestEventId =
+      'event_pending_structured_pregnancy_test'
+    const pendingPregnancyTestEvents = testEventListResult([
+      testEventItem(
+        pendingPregnancyTestEventId,
+        'urine_pregnancy_test',
+        'pending',
+        1,
+      ),
+    ])
+    const pendingPregnancyTestEventDetail = testEventDetail({
+      id: pendingPregnancyTestEventId,
+      resultStatus: 'pending',
+      results: [{ analyte: 'Pregnancy test', textValue: 'Positive' }],
+      summary: 'Preliminary pregnancy test: positive',
+      testName: 'urine_pregnancy_test',
+    })
+    const numericHcgTestEventId = 'event_numeric_hcg_result'
+    const unrelatedTestEventId = 'event_unrelated_strep_result'
+    const ambiguousHcgTestEventId = 'event_ambiguous_hcg_result'
+    const negatedHcgTestEventId = 'event_negated_hcg_result'
+    const numericAndUnrelatedTestEvents = testEventListResult([
+      testEventItem(
+        numericHcgTestEventId,
+        'quantitative_hcg',
+        'unknown',
+        1,
+      ),
+      testEventItem(
+        unrelatedTestEventId,
+        'rapid_strep_test',
+        'unknown',
+        1,
+      ),
+      testEventItem(
+        ambiguousHcgTestEventId,
+        'serum_hcg_qualitative',
+        'unknown',
+        1,
+      ),
+      testEventItem(
+        negatedHcgTestEventId,
+        'serum_hcg_qualitative',
+        'unknown',
+        1,
+      ),
+    ])
+    const numericHcgTestEventDetail = testEventDetail({
+      id: numericHcgTestEventId,
+      resultStatus: 'unknown',
+      results: [{
+        analyte: 'beta hCG',
+        unit: 'mIU/mL',
+        value: 86,
+      }],
+      summary: 'Quantitative result available',
+      testName: 'quantitative_hcg',
+    })
+    const unrelatedTestEventDetail = testEventDetail({
+      id: unrelatedTestEventId,
+      resultStatus: 'unknown',
+      results: [{ analyte: 'Strep A', textValue: 'Negative' }],
+      summary: 'No strep detected',
+      testName: 'rapid_strep_test',
+    })
+    const ambiguousHcgTestEventDetail = testEventDetail({
+      id: ambiguousHcgTestEventId,
+      resultStatus: 'unknown',
+      results: [{ analyte: 'hCG qualitative', textValue: 'Equivocal' }],
+      summary: 'Pregnancy status cannot be determined',
+      testName: 'serum_hcg_qualitative',
+    })
+    const negatedHcgTestEventDetail = testEventDetail({
+      id: negatedHcgTestEventId,
+      resultStatus: 'unknown',
+      results: [{ analyte: 'hCG qualitative', textValue: 'Not detected' }],
+      summary: 'Pregnancy test: not detected',
+      testName: 'serum_hcg_qualitative',
+    })
+    const saturatedTestEvents = testEventListResult(
+      Array.from({ length: 200 }, (_, index) =>
+        testEventItem(
+          `event_unrelated_test_${index + 1}`,
+          `unrelated_test_${index + 1}`,
+          'normal',
+          0,
+        )),
+    )
+    const procedureListResult = (
+      items: readonly Record<string, unknown>[],
+    ) => ({
+      count: items.length,
+      filters: {
+        experiment: null,
+        from: null,
+        kind: 'procedure',
+        limit: 200,
+        tag: [],
+        to: null,
+      },
+      items,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const procedureItem = (
+      id: string,
+      procedure: string,
+      status: string,
+    ) => ({
+      data: { procedure, status },
+      id,
+      kind: 'procedure',
+      occurredAt: '2024-03-14T10:00:00.000Z',
+      title: procedure,
+    })
+    const noProcedures = procedureListResult([])
+    const completedBariatricProcedures = procedureListResult([
+      procedureItem(
+        'event_completed_bariatric_procedure',
+        'Roux-en-Y gastric bypass',
+        'completed',
+      ),
+    ])
+    const plannedBariatricProcedureWithoutListStatus = procedureListResult([{
+      data: { procedure: 'gastric sleeve' },
+      id: 'event_planned_bariatric_procedure',
+      kind: 'procedure',
+      occurredAt: '2026-09-14T10:00:00.000Z',
+      title: 'Planned gastric sleeve',
+    }])
+    const plannedBariatricProcedureDetail = {
+      entity: {
+        data: {
+          procedure: 'gastric sleeve',
+          status: 'planned',
+        },
+        id: 'event_planned_bariatric_procedure',
+        kind: 'procedure',
+        occurredAt: '2026-09-14T10:00:00.000Z',
+        title: 'Planned gastric sleeve',
+      },
+      vault: 'synthetic-vault',
+    }
+    const saturatedProcedures = procedureListResult(
+      Array.from({ length: 200 }, (_, index) =>
+        procedureItem(
+          `event_procedure_${index + 1}`,
+          `Unrelated procedure ${index + 1}`,
+          'completed',
+        )),
+    )
+    const encounterListResult = (
+      items: readonly Record<string, unknown>[],
+    ) => ({
+      count: items.length,
+      filters: {
+        experiment: null,
+        from: null,
+        kind: 'encounter',
+        limit: 200,
+        tag: [],
+        to: null,
+      },
+      items,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const encounterItem = (
+      id: string,
+      diagnosesCount: number,
+    ) => ({
+      data: {
+        encounterType: 'office_visit',
+        ...(diagnosesCount === 0 ? {} : { diagnosesCount }),
+      },
+      id,
+      kind: 'encounter',
+      occurredAt: '2026-07-14T10:00:00.000Z',
+      title: 'Clinical visit',
+    })
+    const encounterDetail = (
+      id: string,
+      diagnoses: readonly Record<string, unknown>[],
+    ) => ({
+      entity: {
+        data: {
+          diagnoses,
+          encounterType: 'office_visit',
+        },
+        id,
+        kind: 'encounter',
+        occurredAt: '2026-07-14T10:00:00.000Z',
+        title: 'Clinical visit',
+      },
+      vault: 'synthetic-vault',
+    })
+    const noEncounters = encounterListResult([])
+    const encountersWithoutDiagnoses = encounterListResult([
+      encounterItem('event_encounter_without_diagnoses', 0),
+    ])
+    const activeKidneyEncounterId = 'event_encounter_active_kidney_diagnosis'
+    const activeKidneyEncounters = encounterListResult([
+      encounterItem(activeKidneyEncounterId, 1),
+    ])
+    const activeKidneyEncounterDetail = encounterDetail(
+      activeKidneyEncounterId,
+      [{
+        certainty: 'documented',
+        code: 'N18.30',
+        codeSystem: 'ICD-10-CM',
+        status: 'active',
+        text: 'Chronic kidney disease stage 3',
+      }],
+    )
+    const unresolvedKidneyEncounterId =
+      'event_encounter_unresolved_kidney_diagnosis'
+    const unresolvedKidneyEncounters = encounterListResult([
+      encounterItem(unresolvedKidneyEncounterId, 1),
+    ])
+    const unresolvedKidneyEncounterDetail = encounterDetail(
+      unresolvedKidneyEncounterId,
+      [{
+        certainty: 'unknown',
+        status: 'unknown',
+        text: 'Chronic kidney disease',
+      }],
+    )
+    const nonCurrentEncounterId = 'event_encounter_non_current_diagnoses'
+    const nonCurrentEncounters = encounterListResult([
+      encounterItem(nonCurrentEncounterId, 6),
+    ])
+    const nonCurrentEncounterDetail = encounterDetail(
+      nonCurrentEncounterId,
+      [
+        {
+          certainty: 'documented',
+          status: 'inactive',
+          text: 'Chronic kidney disease',
+        },
+        {
+          certainty: 'documented',
+          status: 'resolved',
+          text: 'Heart disease',
+        },
+        {
+          certainty: 'documented',
+          status: 'history',
+          text: 'Liver disease',
+        },
+        {
+          certainty: 'suspected',
+          status: 'rule_out',
+          text: 'Endocrine disease',
+        },
+        {
+          certainty: 'ruled_out',
+          status: 'active',
+          text: 'Eating disorder',
+        },
+        {
+          certainty: 'documented',
+          status: 'active',
+          text: 'Seasonal allergies',
+        },
+      ],
+    )
+    const saturatedEncounters = encounterListResult(
+      Array.from({ length: 200 }, (_, index) =>
+        encounterItem(`event_encounter_${index + 1}`, 0)),
+    )
+    const canonicalTotals = {
+      from: '2026-07-30',
+      mealCount: 3,
+      metrics: {
+        calories: { mealCount: 3, total: 1_760 },
+        carbsGrams: { mealCount: 3, total: 185 },
+        fatGrams: { mealCount: 3, total: 54 },
+        fiberGrams: { mealCount: 3, total: 24 },
+        proteinGrams: { mealCount: 3, total: 137 },
+      },
+      to: '2026-07-30',
+      vault: 'synthetic-vault',
+    }
+    const eligibleCard = {
+      goals: {
+        calories: { status: 'on_target', target: 1_800 },
+        carbsGrams: { status: 'on_target', target: 190 },
+        fatGrams: { status: 'on_target', target: 55 },
+        fiberGrams: { status: 'on_target', target: 25 },
+        proteinGrams: { status: 'on_target', target: 140 },
+      },
+      kind: 'daily_nutrition',
+      localDate: '2026-07-30',
+      mealCount: 3,
+      totals: canonicalTotals.metrics,
+      version: 2,
+    }
+
+    const runCase = async (input: {
+      card?: Record<string, unknown>
+      commandOutputs: readonly (readonly [string, unknown])[]
+      expectedCommands: readonly string[]
+      failedCommands?: readonly string[]
+      finalMessage: string
+      prompt: string
+      scheduled: boolean
+      snapshotPrompt?: string
+      skillReadCommands: readonly string[]
+      skillSlugs: readonly string[]
+    }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      scenario.stub.resetQueue()
+      const skillsRoot = path.join(
+        scenario.turnInput.workingDirectory,
+        'skills',
+      )
+      await mkdir(skillsRoot, { recursive: true })
+      await Promise.all(input.skillSlugs.map((slug) =>
+        cp(
+          path.join(resolveAssistantSkillsRoot(), slug),
+          path.join(skillsRoot, slug),
+          { recursive: true },
+        )))
+      const commandLog = path.join(
+        scenario.turnInput.workingDirectory,
+        'nutrition-goal-discovery-commands.log',
+      )
+      await writeFile(commandLog, '', 'utf8')
+      const scriptedCommands = new Set([
+        ...input.commandOutputs.map(([command]) => command),
+        ...(input.failedCommands ?? []),
+      ])
+      for (const command of input.expectedCommands) {
+        if (!scriptedCommands.has(command)) {
+          throw new Error(`Missing scripted fixture for ${command}.`)
+        }
+      }
+      await writeFile(
+        path.join(
+          scenario.turnInput.workingDirectory,
+          'run-nutrition-discovery',
+        ),
+        [
+          '#!/bin/sh',
+          'set -eu',
+          ...input.expectedCommands.map(
+            (command) =>
+              `printf '%s\\n' ${quotePosixShellLiteral(command)} >> ${quotePosixShellLiteral(commandLog)}`,
+          ),
+          '',
+        ].join('\n'),
+        { encoding: 'utf8', mode: 0o755 },
+      )
+
+      const responses: ScriptedResponse[] = []
+      if (input.expectedCommands.length > 0) {
+        responses.push({
+          customToolCall: {
+            input: `
+const result = await tools.exec_command({
+  cmd: "./run-nutrition-discovery",
+  yield_time_ms: 30000,
+});
+text(result.output);
+`,
+            name: 'exec',
+          },
+        })
+        for (let waitAttempt = 0; waitAttempt < 4; waitAttempt += 1) {
+          responses.push({
+            functionCall: {
+              arguments: {
+                cell_id: '1',
+                yield_time_ms: 30_000,
+              },
+              name: 'wait',
+            },
+            requestIncludes: ['Script running with cell ID 1'],
+          })
+        }
+      }
+      if (input.card) {
+        responses.push({
+          functionCall: {
+            arguments: { card: input.card },
+            name: 'attach_response_card',
+            namespace: 'murph',
+          },
+        })
+      }
+      responses.push({ text: input.finalMessage })
+      scenario.stub.queue(...responses)
+
+      try {
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput,
+          baseInstructions: buildScriptedHostedSystemPrompt(
+            'direct',
+            false,
+            input.scheduled ? '2026-07-30T21:00:00.000-04:00' : undefined,
+            input.snapshotPrompt,
+          ),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+          env: {
+            ...scenario.turnInput.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          groupConversation: false,
+          prompt: input.prompt,
+          sandbox: 'danger-full-access',
+        })
+        const commandLogText = (await readFile(commandLog, 'utf8')).trim()
+        const commands = commandLogText === '' ? [] : commandLogText.split('\n')
+        expect(commands).toEqual(input.expectedCommands)
+        expect(result.responseCard).toEqual(input.card ?? null)
+        if (input.card) {
+          expect(result.finalMessage).toContain(
+            'Targets: 1,800 calories (on target)',
+          )
+          expect(result.finalMessage).toContain('25g fiber (on target).')
+          expect(result.finalMessage).not.toContain(input.finalMessage)
+        } else {
+          expect(result.finalMessage).toBe(input.finalMessage)
+        }
+      } finally {
+        await stopWarmCodexAppServer()
+      }
+    }
+
+    const scheduledSkillReads = [
+      "sed -n '1,320p' skills/automatic-meal-capture/SKILL.md",
+      "sed -n '1,280p' skills/nutrition-strategy/references/daily-nutrition-card-safety.md",
+    ]
+    const scheduledProposalSkillReads = [
+      ...scheduledSkillReads,
+      "sed -n '1,320p' skills/nutrition-strategy/references/daily-nutrition-card-goals.md",
+    ]
+    const interactiveSkillReads = [
+      "sed -n '1,180p' skills/food-journal/SKILL.md",
+      "sed -n '1,280p' skills/nutrition-strategy/references/daily-nutrition-card-safety.md",
+      "sed -n '1,320p' skills/nutrition-strategy/references/daily-nutrition-card-goals.md",
+    ]
+    const conflictOutputs = [
+      [activeListCommand, conflictList],
+      [visibleGoalShowCommand, visibleGoal],
+      [hiddenGoalShowCommand, hiddenGoal],
+    ] as const
+    const conflictCommands = [
+      activeListCommand,
+      visibleGoalShowCommand,
+      hiddenGoalShowCommand,
+    ]
+
+    await runCase({
+      commandOutputs: conflictOutputs,
+      expectedCommands: conflictCommands,
+      finalMessage: 'Closeout saved without a goal card because active targets conflict.',
+      prompt: [
+        'Scheduled automatic meal closeout for the 2026-07-30 occurrence.',
+        'The visible context suggests one complete bundle, but canonical state has more than ten active Goals.',
+        'Follow the scheduled skill, resolve card authority, and fail closed on any hidden conflict.',
+      ].join(' '),
+      scheduled: true,
+      skillReadCommands: scheduledSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+    })
+    await runCase({
+      commandOutputs: conflictOutputs,
+      expectedCommands: conflictCommands,
+      finalMessage: 'I found conflicting active targets, so I did not attach a card.',
+      prompt: [
+        'Show my daily nutrition card for 2026-07-30.',
+        'The visible context suggests one complete bundle, but canonical state has more than ten active Goals.',
+      ].join(' '),
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+    await runCase({
+      commandOutputs: [[activeListCommand, saturatedList]],
+      expectedCommands: [activeListCommand],
+      finalMessage: 'Closeout saved without a goal card because the active Goal read was saturated.',
+      prompt: [
+        'Scheduled automatic meal closeout for the 2026-07-30 occurrence.',
+        'Resolve the requested goal-aware card, but fail closed if canonical Goal discovery is saturated.',
+      ].join(' '),
+      scheduled: true,
+      skillReadCommands: scheduledSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+    })
+
+    const controlOutputs = [
+      [activeListCommand, completeList],
+      [visibleGoalShowCommand, visibleGoal],
+      [memoryCommand, adultMemory],
+      [conditionListCommand, {
+        count: 0,
+        filters: { limit: 200, status: 'active' },
+        items: [],
+        nextCursor: null,
+        vault: 'synthetic-vault',
+      }],
+      [regimenListCommand, {
+        count: 0,
+        filters: { limit: 200, status: 'active' },
+        items: [],
+        nextCursor: null,
+        vault: 'synthetic-vault',
+      }],
+      [procedureListCommand, noProcedures],
+      [encounterListCommand, noEncounters],
+      [measurementCommand, safeMeasurements],
+      [pregnancyMeasurementCommand, noPregnancyMeasurements],
+      [testEventListCommand, noTestEvents],
+      [totalsCommand, canonicalTotals],
+    ] as const
+    const controlCommands = [
+      activeListCommand,
+      visibleGoalShowCommand,
+      memoryCommand,
+      conditionListCommand,
+      regimenListCommand,
+      procedureListCommand,
+      encounterListCommand,
+      measurementCommand,
+      pregnancyMeasurementCommand,
+      testEventListCommand,
+      totalsCommand,
+    ]
+    for (const control of [
+      {
+        prompt: 'Run the scheduled automatic meal closeout and attach the eligible 2026-07-30 goal-aware card.',
+        scheduled: true,
+        skillReadCommands: scheduledSkillReads,
+        skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+      },
+      {
+        prompt: 'Show my eligible daily nutrition card for 2026-07-30.',
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      },
+    ]) {
+      await runCase({
+        card: eligibleCard,
+        commandOutputs: controlOutputs,
+        expectedCommands: controlCommands,
+        finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_GOAL_READ',
+        ...control,
+      })
+    }
+
+    const listResult = (
+      kind: 'condition' | 'regimen',
+      ids: readonly string[],
+    ) => ({
+      count: ids.length,
+      filters: { limit: 200, status: 'active' },
+      items: ids.map((id, index) => ({
+        data: kind === 'condition'
+          ? { clinicalStatus: 'active' }
+          : { status: 'active' },
+        id,
+        kind,
+        title: `${kind === 'condition' ? 'Condition' : 'Regimen'} ${index + 1}`,
+      })),
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const detailResult = (input: {
+      contraindication?: 'glucose-lowering-medication' | 'kidney-disease'
+      id: string
+      kind: 'condition' | 'regimen'
+    }) => ({
+      entity: {
+        data: input.kind === 'condition'
+          ? {
+              clinicalStatus: 'active',
+              slug: input.contraindication === 'kidney-disease'
+                ? 'chronic-kidney-disease'
+                : `benign-condition-${input.id}`,
+            }
+          : {
+              kind: 'medication',
+              status: 'active',
+              substance: input.contraindication === 'glucose-lowering-medication'
+                ? 'insulin'
+                : `benign-medication-${input.id}`,
+            },
+        id: input.id,
+        kind: input.kind,
+        title: input.contraindication === 'kidney-disease'
+          ? 'Chronic kidney disease'
+          : input.contraindication === 'glucose-lowering-medication'
+            ? 'Basal insulin'
+            : `Benign ${input.kind}`,
+      },
+      vault: 'synthetic-vault',
+    })
+    const conditionIds = Array.from(
+      { length: 6 },
+      (_, index) => `condition_active_${index + 1}`,
+    )
+    const regimenIds = Array.from(
+      { length: 6 },
+      (_, index) => `regimen_active_${index + 1}`,
+    )
+    const completeSafetyOutputs = (input: {
+      hiddenCondition?: boolean
+      hiddenRegimen?: boolean
+    }): readonly (readonly [string, unknown])[] => [
+      [conditionListCommand, listResult('condition', conditionIds)],
+      [regimenListCommand, listResult('regimen', regimenIds)],
+      ...conditionIds.map((id, index) => [
+        `condition show ${id} --format json`,
+        detailResult({
+          contraindication: input.hiddenCondition && index === 5
+            ? 'kidney-disease'
+            : undefined,
+          id,
+          kind: 'condition',
+        }),
+      ] as const),
+      ...regimenIds.map((id, index) => [
+        `regimen show ${id} --format json`,
+        detailResult({
+          contraindication: input.hiddenRegimen && index === 5
+            ? 'glucose-lowering-medication'
+            : undefined,
+          id,
+          kind: 'regimen',
+        }),
+      ] as const),
+    ]
+    const completeSafetyCommands = [
+      conditionListCommand,
+      regimenListCommand,
+      ...conditionIds.map((id) => `condition show ${id} --format json`),
+      ...regimenIds.map((id) => `regimen show ${id} --format json`),
+    ]
+    const emptySafetyOutputs = [
+      [conditionListCommand, listResult('condition', [])],
+      [regimenListCommand, listResult('regimen', [])],
+    ] as const
+    const emptySafetyCommands = [conditionListCommand, regimenListCommand]
+    const hiddenSnapshot = (kind: 'condition' | 'regimen') => [
+      'Current canonical context snapshot (current and readable):',
+      kind === 'condition'
+        ? '- Active conditions: Condition 1; Condition 2; Condition 3; Condition 4; Condition 5. 1 additional active condition is omitted.'
+        : '- Active medication regimens: Regimen 1; Regimen 2; Regimen 3; Regimen 4; Regimen 5. 1 additional active medication regimen is omitted.',
+    ].join('\n')
+
+    const runHiddenSafetyCase = async (input: {
+      deriveTargets?: boolean
+      finalMessage: string
+      kind: 'condition' | 'regimen'
+      prompt: string
+      scheduled: boolean
+    }) => {
+      const goalOutputs: readonly (readonly [string, unknown])[] =
+        input.deriveTargets
+          ? []
+          : [
+              [activeListCommand, completeList],
+              [visibleGoalShowCommand, visibleGoal],
+            ]
+      const goalCommands = input.deriveTargets
+        ? []
+        : [activeListCommand, visibleGoalShowCommand]
+
+      await runCase({
+        commandOutputs: [
+          ...goalOutputs,
+          [memoryCommand, adultMemory],
+          ...completeSafetyOutputs({
+            hiddenCondition: input.kind === 'condition',
+            hiddenRegimen: input.kind === 'regimen',
+          }),
+        ],
+        expectedCommands: [
+          ...goalCommands,
+          memoryCommand,
+          ...completeSafetyCommands,
+        ],
+        finalMessage: input.finalMessage,
+        prompt: input.prompt,
+        scheduled: input.scheduled,
+        skillReadCommands: input.scheduled
+          ? scheduledSkillReads
+          : interactiveSkillReads,
+        skillSlugs: input.scheduled
+          ? ['automatic-meal-capture', 'nutrition-strategy']
+          : ['food-journal', 'nutrition-strategy'],
+        snapshotPrompt: hiddenSnapshot(input.kind),
+      })
+    }
+
+    await runHiddenSafetyCase({
+      finalMessage: 'Closeout saved without numeric feedback because current medication context needs the non-numeric path.',
+      kind: 'regimen',
+      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+      scheduled: true,
+    })
+    await runHiddenSafetyCase({
+      finalMessage: 'Closeout saved without numeric feedback because current health context needs the non-numeric path.',
+      kind: 'condition',
+      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+      scheduled: true,
+    })
+    await runHiddenSafetyCase({
+      finalMessage: 'I kept this non-numeric because your current medication context makes target feedback inappropriate.',
+      kind: 'regimen',
+      prompt: 'Show my daily nutrition card for 2026-07-30.',
+      scheduled: false,
+    })
+    await runHiddenSafetyCase({
+      deriveTargets: true,
+      finalMessage: 'I kept this non-numeric because your current health context makes self-directed targets inappropriate.',
+      kind: 'condition',
+      prompt: 'Set any missing daily nutrition targets for me.',
+      scheduled: false,
+    })
+
+    const saturatedSafetyIds = Array.from(
+      { length: 200 },
+      (_, index) => `safety_saturated_${index + 1}`,
+    )
+    for (const saturation of [
+      {
+        conditionIds: saturatedSafetyIds,
+        finalMessage: 'Closeout saved without a card because active-condition discovery was saturated.',
+        regimenIds: [] as readonly string[],
+      },
+      {
+        conditionIds: [] as readonly string[],
+        finalMessage: 'Closeout saved without a card because active-regimen discovery was saturated.',
+        regimenIds: saturatedSafetyIds,
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [activeListCommand, completeList],
+          [visibleGoalShowCommand, visibleGoal],
+          [memoryCommand, adultMemory],
+          [conditionListCommand, listResult('condition', saturation.conditionIds)],
+          [regimenListCommand, listResult('regimen', saturation.regimenIds)],
+        ],
+        expectedCommands: [
+          activeListCommand,
+          visibleGoalShowCommand,
+          memoryCommand,
+          conditionListCommand,
+          regimenListCommand,
+        ],
+        finalMessage: saturation.finalMessage,
+        prompt: 'Run the scheduled closeout and fail closed if canonical safety discovery is saturated.',
+        scheduled: true,
+        skillReadCommands: scheduledSkillReads,
+        skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+      })
+    }
+
+    const noActiveGoalsList = {
+      count: 0,
+      filters: { limit: 200, status: 'active' },
+      items: [],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const allStatusGoalListCommand = 'goal list --limit 200 --format json'
+    const proposalImportCommand = 'goal import-json --input - --format json'
+    const pausedGoalShowCommand = 'goal show goal_paused_bundle --format json'
+    const activateGoalCommand =
+      'goal save Daily nutrition targets --id goal_paused_bundle --status active --format json'
+    const pausedGoal = {
+      entity: {
+        data: {
+          metricTargets: completeTargets,
+          slug: 'murph-daily-nutrition-starting-targets',
+          status: 'paused',
+          windowStartAt: '2026-07-30',
+        },
+        id: 'goal_paused_bundle',
+        kind: 'goal',
+        title: 'Daily nutrition targets',
+      },
+      vault: 'synthetic-vault',
+    }
+    const activeManagedGoal = {
+      ...pausedGoal,
+      entity: {
+        ...pausedGoal.entity,
+        data: { ...pausedGoal.entity.data, status: 'active' },
+      },
+    }
+    const noManagedGoalsList = {
+      count: 0,
+      filters: { limit: 200 },
+      items: [],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const pausedManagedGoalList = {
+      count: 1,
+      filters: { limit: 200 },
+      items: [{
+        data: {
+          metricTargetsCount: 5,
+          slug: 'murph-daily-nutrition-starting-targets',
+          status: 'paused',
+        },
+        id: 'goal_paused_bundle',
+        kind: 'goal',
+        title: 'Daily nutrition targets',
+      }],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+
+    await runCase({
+      commandOutputs: [
+        [activeListCommand, noActiveGoalsList],
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, noTestEvents],
+        [allStatusGoalListCommand, noManagedGoalsList],
+        [proposalImportCommand, pausedGoal],
+        [pausedGoalShowCommand, pausedGoal],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+        testEventListCommand,
+        allStatusGoalListCommand,
+        proposalImportCommand,
+        pausedGoalShowCommand,
+      ],
+      finalMessage: 'For your first managed closeout, I proposed 1,800 calories, 140g protein, 190g carbs, 55g fat, and 25g fiber starting 2026-07-30, based on your saved adult maintenance context. The proposal is paused until you choose to accept it.',
+      prompt: 'Run the first managed automatic meal closeout for 2026-07-30. Use only already-known responsible inputs, and follow the one-time paused-proposal path when canonical safety and Goal discovery permit it.',
+      scheduled: true,
+      skillReadCommands: scheduledProposalSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+    })
+
+    await runCase({
+      commandOutputs: [
+        [activeListCommand, noActiveGoalsList],
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, noTestEvents],
+        [allStatusGoalListCommand, pausedManagedGoalList],
+        [pausedGoalShowCommand, pausedGoal],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+        testEventListCommand,
+        allStatusGoalListCommand,
+        pausedGoalShowCommand,
+      ],
+      finalMessage: 'Meal closeout saved. Your earlier paused nutrition proposal is unchanged.',
+      prompt: 'Run a later managed automatic meal closeout for 2026-07-31. Do not create, change, or repeat a proposal once the canonical managed Goal already exists in any status.',
+      scheduled: true,
+      skillReadCommands: scheduledProposalSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+    })
+
+    await runCase({
+      commandOutputs: [],
+      expectedCommands: [memoryCommand],
+      failedCommands: [memoryCommand],
+      finalMessage: 'I could not complete the current memory safety check, so I left target setup unchanged.',
+      prompt: 'Set daily nutrition targets for me, but do not proceed if canonical memory is unavailable.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+      snapshotPrompt: 'The context snapshot does not contain the complete canonical memory document.',
+    })
+
+    await runCase({
+      commandOutputs: [[memoryCommand, minorMemory]],
+      expectedCommands: [memoryCommand],
+      finalMessage: 'I kept this non-numeric because self-directed nutrition targets are not available for someone under 18.',
+      prompt: 'Set daily nutrition targets for me using what I shared during onboarding.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+      snapshotPrompt: 'The current context snapshot contains no onboarding age text and does not inject canonical memory.',
+    })
+
+    for (const acceptance of [
+      {
+        finalMessage: 'I left the proposal paused because numeric nutrition targets are not available for someone under 18.',
+        prompt: 'Yes, accept those nutrition targets.',
+      },
+      {
+        finalMessage: 'I left the proposal paused and did not attach the pending card because numeric nutrition guidance is not available for someone under 18.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [[memoryCommand, minorMemory]],
+        expectedCommands: [memoryCommand],
+        finalMessage: acceptance.finalMessage,
+        prompt: acceptance.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+        snapshotPrompt: [
+          'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
+          'The current context snapshot contains no onboarding age text and does not inject canonical memory.',
+        ].join(' '),
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [activeListCommand, completeList],
+        [visibleGoalShowCommand, visibleGoal],
+        [memoryCommand, minorMemory],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        visibleGoalShowCommand,
+        memoryCommand,
+      ],
+      finalMessage: 'Closeout saved without numeric feedback because numeric nutrition guidance is not available for someone under 18.',
+      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+      scheduled: true,
+      skillReadCommands: scheduledSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+      snapshotPrompt: 'The current context snapshot contains no onboarding age text and does not inject canonical memory.',
+    })
+
+    await runCase({
+      commandOutputs: [
+        [activeListCommand, completeList],
+        [visibleGoalShowCommand, visibleGoal],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        visibleGoalShowCommand,
+        memoryCommand,
+      ],
+      failedCommands: [memoryCommand],
+      finalMessage: 'Closeout saved without a goal card because canonical memory was unavailable.',
+      prompt: 'Run the scheduled closeout and fail closed if canonical memory is unavailable.',
+      scheduled: true,
+      skillReadCommands: scheduledSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+      snapshotPrompt: 'The context snapshot does not contain the complete canonical memory document.',
+    })
+
+    await runCase({
+      commandOutputs: [[memoryCommand, numberSensitiveMemory]],
+      expectedCommands: [memoryCommand],
+      finalMessage: 'I kept this non-numeric to respect your saved preference to avoid calorie and macro numbers.',
+      prompt: 'Set daily nutrition targets for me using my saved preferences.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+      snapshotPrompt: 'The context snapshot does not inject the canonical Preferences memory section.',
+    })
+
+    for (const unavailableProcedureRead of [
+      {
+        failed: true,
+        finalMessage: 'I could not complete the current procedure-history safety check, so I left target setup unchanged.',
+        output: noProcedures,
+        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical procedure history is unavailable.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not safely complete the procedure-history check, so I left target setup unchanged.',
+        output: saturatedProcedures,
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical procedure discovery is saturated.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          ...(unavailableProcedureRead.failed
+            ? []
+            : [[procedureListCommand, unavailableProcedureRead.output] as const]),
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+        ],
+        ...(unavailableProcedureRead.failed
+          ? { failedCommands: [procedureListCommand] }
+          : {}),
+        finalMessage: unavailableProcedureRead.finalMessage,
+        prompt: unavailableProcedureRead.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+
+    for (const blockedProcedureCase of [
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I kept this non-numeric because completed bariatric surgery makes self-directed targets inappropriate.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused because completed bariatric surgery requires the qualified-care path.',
+        prompt: 'Yes, accept those nutrition targets.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused and did not attach the pending card because completed bariatric surgery requires the qualified-care path.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [
+          [activeListCommand, completeList],
+          [visibleGoalShowCommand, visibleGoal],
+        ] as const,
+        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
+        finalMessage: 'Closeout saved without numeric feedback because completed bariatric surgery requires the non-numeric path.',
+        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+        scheduled: true,
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          ...blockedProcedureCase.commandPrefix,
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, completedBariatricProcedures],
+        ],
+        expectedCommands: [
+          ...blockedProcedureCase.expectedPrefix,
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+        ],
+        finalMessage: blockedProcedureCase.finalMessage,
+        prompt: blockedProcedureCase.prompt,
+        scheduled: blockedProcedureCase.scheduled,
+        skillReadCommands: blockedProcedureCase.scheduled
+          ? scheduledSkillReads
+          : interactiveSkillReads,
+        skillSlugs: blockedProcedureCase.scheduled
+          ? ['automatic-meal-capture', 'nutrition-strategy']
+          : ['food-journal', 'nutrition-strategy'],
+        ...(!blockedProcedureCase.scheduled && blockedProcedureCase.prompt.startsWith('Yes')
+          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
+          : {}),
+      })
+    }
+
+    for (const unavailableEncounterRead of [
+      {
+        failed: true,
+        finalMessage: 'I could not complete the current encounter-diagnosis safety check, so I left target setup unchanged.',
+        output: noEncounters,
+        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical encounter history is unavailable.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not safely complete the encounter-diagnosis check, so I left target setup unchanged.',
+        output: saturatedEncounters,
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical encounter discovery is saturated.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not read the canonical encounter-diagnosis result, so I left target setup unchanged.',
+        output: { unexpected: 'unreadable encounter list' },
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical encounter discovery is unreadable.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          ...(unavailableEncounterRead.failed
+            ? []
+            : [[encounterListCommand, unavailableEncounterRead.output] as const]),
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+        ],
+        ...(unavailableEncounterRead.failed
+          ? { failedCommands: [encounterListCommand] }
+          : {}),
+        finalMessage: unavailableEncounterRead.finalMessage,
+        prompt: unavailableEncounterRead.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, activeKidneyEncounters],
+      ],
+      expectedCommands: [
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        `event show ${activeKidneyEncounterId} --format json`,
+      ],
+      failedCommands: [`event show ${activeKidneyEncounterId} --format json`],
+      finalMessage: 'I could not complete the encounter-diagnosis detail check, so I left target setup unchanged.',
+      prompt: 'Set daily nutrition targets for me, but do not proceed if a required encounter detail read fails.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    for (const blockedEncounterCase of [
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I kept this non-numeric because an active documented kidney diagnosis requires the qualified-care path.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused because an active documented kidney diagnosis requires the qualified-care path.',
+        prompt: 'Yes, accept those nutrition targets.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused and did not attach the pending card because an active documented kidney diagnosis requires the qualified-care path.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [
+          [activeListCommand, completeList],
+          [visibleGoalShowCommand, visibleGoal],
+        ] as const,
+        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
+        finalMessage: 'Closeout saved without numeric feedback because an active documented kidney diagnosis requires the non-numeric path.',
+        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+        scheduled: true,
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          ...blockedEncounterCase.commandPrefix,
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          [encounterListCommand, activeKidneyEncounters],
+          [`event show ${activeKidneyEncounterId} --format json`, activeKidneyEncounterDetail],
+        ],
+        expectedCommands: [
+          ...blockedEncounterCase.expectedPrefix,
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+          `event show ${activeKidneyEncounterId} --format json`,
+        ],
+        finalMessage: blockedEncounterCase.finalMessage,
+        prompt: blockedEncounterCase.prompt,
+        scheduled: blockedEncounterCase.scheduled,
+        skillReadCommands: blockedEncounterCase.scheduled
+          ? scheduledSkillReads
+          : interactiveSkillReads,
+        skillSlugs: blockedEncounterCase.scheduled
+          ? ['automatic-meal-capture', 'nutrition-strategy']
+          : ['food-journal', 'nutrition-strategy'],
+        ...(!blockedEncounterCase.scheduled && blockedEncounterCase.prompt.startsWith('Yes')
+          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
+          : {}),
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, unresolvedKidneyEncounters],
+        [`event show ${unresolvedKidneyEncounterId} --format json`, unresolvedKidneyEncounterDetail],
+      ],
+      expectedCommands: [
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        `event show ${unresolvedKidneyEncounterId} --format json`,
+      ],
+      finalMessage: 'I kept this non-numeric because a safety-relevant encounter diagnosis has unresolved current status.',
+      prompt: 'Set daily nutrition targets for me, but fail closed on unresolved safety-relevant encounter diagnoses.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    for (const blockedProposal of [
+      {
+        finalMessage: 'I kept this non-numeric because your current measurements make self-directed targets inappropriate.',
+        measurements: lowBmiMeasurements,
+        prompt: 'Set daily nutrition targets for me using the context I already provided.',
+      },
+      {
+        finalMessage: 'I kept this non-numeric because the current same-event measurements make self-directed targets inappropriate.',
+        measurements: lowSameEventMeasurements,
+        prompt: 'Set daily nutrition targets for me using the context I already provided.',
+      },
+      {
+        finalMessage: 'I could not safely complete the measurement check, so I left target setup unchanged.',
+        measurements: saturatedMeasurements,
+        prompt: 'Set daily nutrition targets for me, but fail closed if the canonical measurement read is saturated.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
+          [measurementCommand, blockedProposal.measurements],
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+          measurementCommand,
+        ],
+        finalMessage: blockedProposal.finalMessage,
+        prompt: blockedProposal.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+    await runCase({
+      commandOutputs: [
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+      ],
+      expectedCommands: [
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+      ],
+      failedCommands: [measurementCommand],
+      finalMessage: 'I could not complete the current measurement safety check, so I left target setup unchanged.',
+      prompt: 'Set daily nutrition targets for me, but do not proceed if the canonical measurement read fails.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    for (const unavailablePregnancyRead of [
+      {
+        failed: true,
+        finalMessage: 'I could not complete the current pregnancy-test safety check, so I left target setup unchanged.',
+        output: noPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me, but do not proceed if the canonical pregnancy-test read fails.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not safely complete the pregnancy-test check, so I left target setup unchanged.',
+        output: saturatedPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical pregnancy-test discovery is saturated.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
+          [measurementCommand, normalBmiMeasurements],
+          ...(unavailablePregnancyRead.failed
+            ? []
+            : [[pregnancyMeasurementCommand, unavailablePregnancyRead.output] as const]),
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+          measurementCommand,
+          pregnancyMeasurementCommand,
+        ],
+        ...(unavailablePregnancyRead.failed
+          ? { failedCommands: [pregnancyMeasurementCommand] }
+          : {}),
+        finalMessage: unavailablePregnancyRead.finalMessage,
+        prompt: unavailablePregnancyRead.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+
+    for (const unavailableTestEventRead of [
+      {
+        failed: true,
+        finalMessage: 'I could not complete the current structured pregnancy-result safety check, so I left target setup unchanged.',
+        output: noTestEvents,
+        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical test-event discovery fails.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not safely complete the structured pregnancy-result check, so I left target setup unchanged.',
+        output: saturatedTestEvents,
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical test-event discovery is saturated.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not read the canonical structured test result, so I left target setup unchanged.',
+        output: { unexpected: 'unreadable test-event list' },
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical test-event discovery is unreadable.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
+          [measurementCommand, normalBmiMeasurements],
+          [pregnancyMeasurementCommand, noPregnancyMeasurements],
+          ...(unavailableTestEventRead.failed
+            ? []
+            : [[testEventListCommand, unavailableTestEventRead.output] as const]),
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+          measurementCommand,
+          pregnancyMeasurementCommand,
+          testEventListCommand,
+        ],
+        ...(unavailableTestEventRead.failed
+          ? { failedCommands: [testEventListCommand] }
+          : {}),
+        finalMessage: unavailableTestEventRead.finalMessage,
+        prompt: unavailableTestEventRead.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, positivePregnancyTestEvents],
+      ],
+      expectedCommands: [
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+        testEventListCommand,
+        `event show ${positivePregnancyTestEventId} --format json`,
+      ],
+      failedCommands: [
+        `event show ${positivePregnancyTestEventId} --format json`,
+      ],
+      finalMessage: 'I could not complete the structured pregnancy-result detail check, so I left target setup unchanged.',
+      prompt: 'Set daily nutrition targets for me, but do not proceed if a required test-event detail read fails.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    for (const blockedTestEventCase of [
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I kept this non-numeric because a recent explicit positive structured pregnancy result keeps self-directed targets outside this path.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused because of a recent explicit positive structured pregnancy result.',
+        prompt: 'Yes, accept those nutrition targets.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused and did not attach the pending card because of a recent explicit positive structured pregnancy result.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [
+          [activeListCommand, completeList],
+          [visibleGoalShowCommand, visibleGoal],
+        ] as const,
+        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
+        finalMessage: 'Closeout saved without numeric feedback because a recent explicit positive structured pregnancy result requires the non-numeric path.',
+        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+        scheduled: true,
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          ...blockedTestEventCase.commandPrefix,
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
+          [measurementCommand, normalBmiMeasurements],
+          [pregnancyMeasurementCommand, noPregnancyMeasurements],
+          [testEventListCommand, positivePregnancyTestEvents],
+          [`event show ${positivePregnancyTestEventId} --format json`, positivePregnancyTestEventDetail],
+        ],
+        expectedCommands: [
+          ...blockedTestEventCase.expectedPrefix,
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+          measurementCommand,
+          pregnancyMeasurementCommand,
+          testEventListCommand,
+          `event show ${positivePregnancyTestEventId} --format json`,
+        ],
+        finalMessage: blockedTestEventCase.finalMessage,
+        prompt: blockedTestEventCase.prompt,
+        scheduled: blockedTestEventCase.scheduled,
+        skillReadCommands: blockedTestEventCase.scheduled
+          ? scheduledSkillReads
+          : interactiveSkillReads,
+        skillSlugs: blockedTestEventCase.scheduled
+          ? ['automatic-meal-capture', 'nutrition-strategy']
+          : ['food-journal', 'nutrition-strategy'],
+        ...(!blockedTestEventCase.scheduled && blockedTestEventCase.prompt.startsWith('Yes')
+          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
+          : {}),
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, laterNegativeAfterPositiveMeasurements],
+      ],
+      expectedCommands: [
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+      ],
+      finalMessage: 'I kept this non-numeric because a recent explicit positive pregnancy test keeps self-directed targets outside this path.',
+      prompt: 'Set daily nutrition targets for me. A later negative result must not erase a recent explicit positive result.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    for (const acceptance of [
+      {
+        finalMessage: 'I left the proposal paused and kept this non-numeric because of a recent explicit positive pregnancy test.',
+        prompt: 'Yes, accept those nutrition targets.',
+      },
+      {
+        finalMessage: 'I left the proposal paused and did not attach the pending card because of a recent explicit positive pregnancy test.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
+          [measurementCommand, normalBmiMeasurements],
+          [pregnancyMeasurementCommand, positivePregnancyMeasurements],
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+          measurementCommand,
+          pregnancyMeasurementCommand,
+        ],
+        finalMessage: acceptance.finalMessage,
+        prompt: acceptance.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+        snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [activeListCommand, completeList],
+        [visibleGoalShowCommand, visibleGoal],
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, positivePregnancyMeasurements],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        visibleGoalShowCommand,
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+      ],
+      finalMessage: 'Closeout saved without numeric feedback because a recent explicit positive pregnancy test requires the non-numeric path.',
+      prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+      scheduled: true,
+      skillReadCommands: scheduledSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+    })
+
+    for (const acceptance of [
+      {
+        finalMessage: 'I left the proposal paused and kept this non-numeric because your current measurements make these targets inappropriate.',
+        prompt: 'Yes, accept those nutrition targets.',
+      },
+      {
+        finalMessage: 'I left the proposal paused and did not attach the pending card because your current measurements make numeric guidance inappropriate.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
+          [measurementCommand, lowBmiMeasurements],
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+          measurementCommand,
+        ],
+        finalMessage: acceptance.finalMessage,
+        prompt: acceptance.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+        snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.',
+      })
+    }
+
+    for (const allowedPregnancyEvidence of [
+      {
+        encounterCommands: [encounterListCommand],
+        encounterOutputs: [[encounterListCommand, encountersWithoutDiagnoses]] as const,
+        measurements: noPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile and representative maintenance context; no pregnancy measurements or structured test events exist.',
+        procedureCommands: [procedureListCommand],
+        procedureOutputs: [[procedureListCommand, noProcedures]] as const,
+        testEventCommands: [testEventListCommand],
+        testEventOutputs: [[testEventListCommand, noTestEvents]] as const,
+      },
+      {
+        encounterCommands: [
+          encounterListCommand,
+          `event show ${nonCurrentEncounterId} --format json`,
+        ],
+        encounterOutputs: [
+          [encounterListCommand, nonCurrentEncounters],
+          [`event show ${nonCurrentEncounterId} --format json`, nonCurrentEncounterDetail],
+        ] as const,
+        measurements: negativePregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a planned gastric sleeve plus exact negative measurement and structured pregnancy tests do not prove a current exclusion.',
+        procedureCommands: [
+          procedureListCommand,
+          'event show event_planned_bariatric_procedure --format json',
+        ],
+        procedureOutputs: [
+          [procedureListCommand, plannedBariatricProcedureWithoutListStatus],
+          ['event show event_planned_bariatric_procedure --format json', plannedBariatricProcedureDetail],
+        ] as const,
+        testEventCommands: [
+          testEventListCommand,
+          `event show ${negativePregnancyTestEventId} --format json`,
+        ],
+        testEventOutputs: [
+          [testEventListCommand, negativePregnancyTestEvents],
+          [`event show ${negativePregnancyTestEventId} --format json`, negativePregnancyTestEventDetail],
+        ] as const,
+      },
+      {
+        encounterCommands: [encounterListCommand],
+        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
+        measurements: ambiguousPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a cancelled gastric bypass, conflicting pregnancy-test measurement, and pending structured test do not prove current exclusions.',
+        procedureCommands: [procedureListCommand],
+        procedureOutputs: [[procedureListCommand, procedureListResult([
+          procedureItem('event_cancelled_bariatric_procedure', 'gastric bypass', 'cancelled'),
+        ])]] as const,
+        testEventCommands: [
+          testEventListCommand,
+          `event show ${pendingPregnancyTestEventId} --format json`,
+        ],
+        testEventOutputs: [
+          [testEventListCommand, pendingPregnancyTestEvents],
+          [`event show ${pendingPregnancyTestEventId} --format json`, pendingPregnancyTestEventDetail],
+        ] as const,
+      },
+      {
+        encounterCommands: [encounterListCommand],
+        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
+        measurements: noPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; a completed appendectomy is unrelated and an old positive pregnancy test is stale.',
+        procedureCommands: [procedureListCommand],
+        procedureOutputs: [[procedureListCommand, procedureListResult([
+          procedureItem('event_completed_appendectomy', 'appendectomy', 'completed'),
+        ])]] as const,
+        testEventCommands: [testEventListCommand],
+        testEventOutputs: [[testEventListCommand, noTestEvents]] as const,
+      },
+      {
+        encounterCommands: [encounterListCommand],
+        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
+        measurements: noPregnancyMeasurements,
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile; an ambiguous gastric procedure plus unknown-status numeric-only, unrelated, ambiguous, and negated tests do not prove current exclusions.',
+        procedureCommands: [procedureListCommand],
+        procedureOutputs: [[procedureListCommand, procedureListResult([
+          procedureItem('event_ambiguous_gastric_procedure', 'gastric procedure', 'unknown'),
+        ])]] as const,
+        testEventCommands: [
+          testEventListCommand,
+          `event show ${numericHcgTestEventId} --format json`,
+          `event show ${unrelatedTestEventId} --format json`,
+          `event show ${ambiguousHcgTestEventId} --format json`,
+          `event show ${negatedHcgTestEventId} --format json`,
+        ],
+        testEventOutputs: [
+          [testEventListCommand, numericAndUnrelatedTestEvents],
+          [`event show ${numericHcgTestEventId} --format json`, numericHcgTestEventDetail],
+          [`event show ${unrelatedTestEventId} --format json`, unrelatedTestEventDetail],
+          [`event show ${ambiguousHcgTestEventId} --format json`, ambiguousHcgTestEventDetail],
+          [`event show ${negatedHcgTestEventId} --format json`, negatedHcgTestEventDetail],
+        ] as const,
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          ...allowedPregnancyEvidence.procedureOutputs,
+          ...allowedPregnancyEvidence.encounterOutputs,
+          [measurementCommand, normalBmiMeasurements],
+          [pregnancyMeasurementCommand, allowedPregnancyEvidence.measurements],
+          ...allowedPregnancyEvidence.testEventOutputs,
+          [activeListCommand, noActiveGoalsList],
+          [allStatusGoalListCommand, noManagedGoalsList],
+          [proposalImportCommand, pausedGoal],
+          [pausedGoalShowCommand, pausedGoal],
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          ...allowedPregnancyEvidence.procedureCommands,
+          ...allowedPregnancyEvidence.encounterCommands,
+          measurementCommand,
+          pregnancyMeasurementCommand,
+          ...allowedPregnancyEvidence.testEventCommands,
+          activeListCommand,
+          allStatusGoalListCommand,
+          proposalImportCommand,
+          pausedGoalShowCommand,
+        ],
+        finalMessage: 'Proposed for 2026-07-30: 1,800 calories, 140g protein, 190g carbs, 55g fat, and 25g fiber. These are paused until you accept them.',
+        prompt: allowedPregnancyEvidence.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+
+    await runCase({
+      card: eligibleCard,
+      commandOutputs: [
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, noTestEvents],
+        [activeListCommand, noActiveGoalsList],
+        [allStatusGoalListCommand, pausedManagedGoalList],
+        [activateGoalCommand, activeManagedGoal],
+        [pausedGoalShowCommand, activeManagedGoal],
+        [totalsCommand, canonicalTotals],
+      ],
+      expectedCommands: [
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+        testEventListCommand,
+        activeListCommand,
+        allStatusGoalListCommand,
+        activateGoalCommand,
+        pausedGoalShowCommand,
+        totalsCommand,
+      ],
+      finalMessage: 'CARD_ATTACHED_AFTER_PRE_ACTIVATION_SAFETY',
+      prompt: 'Yes, accept the paused nutrition proposal and show the daily card I requested.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+      snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting acceptance for the pending 2026-07-30 card request.',
+    })
+
+    await runCase({
+      card: eligibleCard,
+      commandOutputs: [
+        [activeListCommand, completeList],
+        [visibleGoalShowCommand, visibleGoal],
+        [memoryCommand, adultMemory],
+        ...completeSafetyOutputs({}),
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, safeMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, noTestEvents],
+        [totalsCommand, canonicalTotals],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        visibleGoalShowCommand,
+        memoryCommand,
+        ...completeSafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+        testEventListCommand,
+        totalsCommand,
+      ],
+      finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_SAFETY_READ',
+      prompt: 'Show my eligible daily nutrition card after checking all six benign active conditions and regimens.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+      snapshotPrompt: [
+        hiddenSnapshot('condition'),
+        hiddenSnapshot('regimen'),
+      ].join('\n'),
+    })
   })
 
   it('discovers deferred Murph schemas through native Codex tool_search', {
@@ -3262,10 +5548,12 @@ function createScriptedSongRuntime(
 function buildScriptedHostedSystemPrompt(
   conversationScope: 'direct' | 'group',
   onboardingGuidance = false,
+  scheduledOccurrenceAt?: string,
+  assistantContextSnapshotPrompt?: string,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: 'Stable CLI contract for scripted hosted proof.',
-    assistantContextSnapshotPrompt: null,
+    assistantContextSnapshotPrompt: assistantContextSnapshotPrompt ?? null,
     assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: true,
@@ -3280,8 +5568,11 @@ function buildScriptedHostedSystemPrompt(
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance,
-    ordinaryInboundTurn: true,
-    turnTrigger: 'automation-auto-reply',
+    ordinaryInboundTurn: scheduledOccurrenceAt === undefined,
+    scheduledOccurrenceAt,
+    turnTrigger: scheduledOccurrenceAt === undefined
+      ? 'automation-auto-reply'
+      : 'automation-cron',
   })
 }
 
@@ -3550,6 +5841,7 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     close: async () => {
       await new Promise<void>((resolve) => {
         server.close(() => resolve())
+        server.closeAllConnections()
       })
     },
     completedResponseLabelsSinceBaseline: () => [...completedResponseLabels],
@@ -3561,6 +5853,9 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     },
     queue: (...responses) => {
       queuedResponses.push(...responses)
+    },
+    resetQueue: () => {
+      queuedResponses.splice(0)
     },
     requestCountSinceBaseline: () => responsesRequestCount - requestBaseline,
     requestSummariesSinceBaseline: () =>
