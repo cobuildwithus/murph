@@ -233,13 +233,12 @@ export async function runOnboardingGoalCheckinAuthorityPrecondition(input: {
   if (
     !Number.isFinite(completedAtMs) ||
     !Number.isFinite(occurrenceAtMs) ||
-    ageMs < ONBOARDING_GOAL_CHECKIN_MINIMUM_AGE_MS ||
-    ageMs > ONBOARDING_GOAL_CHECKIN_MAXIMUM_AGE_MS
+    ageMs < ONBOARDING_GOAL_CHECKIN_MINIMUM_AGE_MS
   ) {
     return {
       kind: 'skip',
       reason:
-        'Onboarding completion is outside the bounded support-gap window.',
+        'Onboarding completion is too recent for the support-gap check.',
     }
   }
 
