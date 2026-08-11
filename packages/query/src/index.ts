@@ -238,6 +238,7 @@ export {
   resolveExperimentSessionMetricSpecForBiomarker,
   validateExperimentSessionMetricValue,
   selectMetricGoalProgress,
+  selectAuthoritativeMetricPoint,
   selectMetricSeries,
   selectMetricTrend,
   selectMetricValue,

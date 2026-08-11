@@ -185,6 +185,7 @@ function sourceAwareSleepDeliveryBody(
     { label: "Oura", source: "oura" },
     { label: "Garmin", source: "garmin" },
     { label: "fitbit", source: "fitbit" },
+    { label: "Manual", source: "manual" },
     { label: "Strava", source: "strava" },
   ] as const;
   return {
@@ -203,7 +204,9 @@ function sourceAwareSleepDeliveryBody(
             sources: Array.from({ length: sourcesPerDay }, (_, sourceIndex) => ({
               label: publicSources[sourceIndex]?.label ?? "unknown",
               recordedAt: "2026-07-24T23:59:59.999Z",
-              ...(sourceIndex === 0 ? { selected: true as const } : {}),
+              ...(publicSources[sourceIndex]?.source === "manual"
+                ? { selected: true as const }
+                : {}),
               source: publicSources[sourceIndex]?.source ?? "unknown",
               unit: "minutes",
               value: 1_000.0000000000001,
