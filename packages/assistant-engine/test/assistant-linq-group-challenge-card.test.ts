@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
+import {
+  buildLinqIMessageAppFallbackText,
+  type AssistantResponseCard,
+} from '@murphai/operator-config/assistant-response-cards'
 import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
 
 import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
@@ -72,7 +75,8 @@ describe('Linq group challenge standings delivery', () => {
           idempotency_key: 'group-challenge-card-1',
           parts: [{
             type: 'imessage_app',
-            fallback_text: 'Ask Murph for this card in text',
+            fallback_text:
+              'Challenge standings. Ask Murph for this card in text',
             layout: {
               caption: 'Weird Health Week — Day 4 of 7',
               subcaption: '1. Maya: 120 points',
@@ -80,6 +84,9 @@ describe('Linq group challenge standings delivery', () => {
           }],
         },
       })
+      expect(buildLinqIMessageAppFallbackText(CHALLENGE_CARD)).not.toMatch(
+        /\d|today|day|time/iu,
+      )
       expect(result.providerMessageId).toBe('group-challenge-card-message')
     },
   )

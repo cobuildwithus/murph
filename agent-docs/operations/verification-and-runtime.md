@@ -82,6 +82,17 @@ run, finish the cheap deterministic proof first:
 This order keeps stochastic evidence useful without making incidental model
 behavior or an avoidable late contradiction trigger repeated expensive runs.
 
+Assistant Engine's opt-in live Codex journeys use
+`MURPH_RUN_REAL_CODEX_E2E=1` with a supported provider credential. The
+generated-image avatar journey must exercise the production tool contracts in
+three natural turns: launch with a truthful wait acknowledgement, trusted
+completion media attachment with no group mutation, and a later explicit
+exact-ref avatar update with no product-feedback submission. Routine package
+verification compiles this scenario but skips the paid provider call when the
+gate or credential is absent; deterministic suites remain authoritative for
+transcript persistence, native-resume rejection, exact reply linkage, byte
+publication, and effect-authority denial.
+
 For hosted Linq weighted line-planning changes, the focused owner proof is the
 hosted-web Vitest slice covering routing policy, on-demand line load, home
 routing, group outreach, canonical thread-route refresh/repair, the bounded

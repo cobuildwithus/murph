@@ -1,5 +1,5 @@
 {
   "publishedOn": "2026-08-11",
-  "title": "A clearer way back to shared cards",
-  "summary": "Shared workout and nutrition cards now point to Murph for iPhone in Messages and use a simpler handoff when opened on the web."
+  "title": "Clearer iMessage card previews",
+  "summary": "iMessage conversation previews now identify the kind of Murph card without exposing the private values inside it."
 }

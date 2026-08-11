@@ -44,8 +44,9 @@ generic-table balloon. Provider chrome is intentionally bounded to the title
 plus derived progress for structured workouts; it does not repeat the image's
 sets below the balloon. Generic-table provider chrome retains its existing
 title, optional subtitle, rows, and footer. The complete semantic text renderer
-remains the workout recovery owner, and the value-free fallback tells the
-member to ask Murph for the card in text if the image is unavailable.
+remains the workout recovery owner, and the value-free fallback identifies the
+message as the member's workout before telling them how to request that complete
+text without exposing its values outside the card.
 
 The bitmap remains rectangular and badge-free because Messages owns the outer
 mask and app icon, but its header keeps the provider's upper-left icon footprint
