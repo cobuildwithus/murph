@@ -423,7 +423,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       );
       expect(overlapForegroundWebhookResponse.status).toBe(202);
       await waitForAssistantProviderResponsesApiRequestCount(
-        overlapProviderBaselineCount + 2,
+        overlapProviderBaselineCount + 3,
         userId,
       );
       const foregroundOverlapProviderRequest =
@@ -434,11 +434,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         request: foregroundOverlapProviderRequest,
         userId,
       });
-      heldOverlapReminderResponse.release();
-      await waitForAssistantProviderResponsesApiRequestCount(
-        overlapProviderBaselineCount + 3,
-        userId,
-      );
 
       const overlapForegroundSend = await requireLinqStub().waitForAdditionalSend({
         baselineCount: overlapForegroundCardBaselineCount,
@@ -470,6 +465,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         scenario: requireScenario(),
         userId,
       });
+      heldOverlapReminderResponse.release();
       const overlapReminderSend = await requireLinqStub().waitForAdditionalSend({
         baselineCount: overlapReminderSendBaselineCount,
         expectedPath: reminderPath,

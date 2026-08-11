@@ -114,6 +114,55 @@ describe("startAssistantProviderStubServer", () => {
     }
   });
 
+  it("starts held Responses API streams before releasing their content", async () => {
+    let release = (): void => {};
+    let markStarted = (): void => {};
+    const releasePromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const server = await startAssistantProviderStubServer({
+      responseState: {
+        queuedResponses: [{
+          beforeResponse: () => releasePromise,
+          onResponseStarted: markStarted,
+          text: "held streamed reply",
+        }],
+      },
+    });
+
+    try {
+      const responsePromise = fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: [],
+            model: "gpt-5.6-terra",
+            stream: true,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+
+      await started;
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+      release();
+      const body = await response.text();
+      expect(body).toContain("response.created");
+      expect(body).toContain("response.completed");
+      expect(body).toContain("held streamed reply");
+    } finally {
+      release();
+      await stopHttpStubServer(server);
+    }
+  });
+
   it("streams a scripted function_call item for tool-call turns", async () => {
     const server = await startAssistantProviderStubServer({
       responseState: {
