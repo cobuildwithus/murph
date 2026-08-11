@@ -68,6 +68,23 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
+  it("keeps the health-data Settings note bound to layout only", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "health-data-settings-row",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      sourcePullRequests: [1615],
+      tryIt: {
+        href: "/settings#data-privacy",
+        label: "Review health data controls",
+      },
+    });
+    expect(item?.summary).toContain("aligned with the other Settings controls");
+    expect(item?.details).toContain("keep their existing destinations");
+  });
+
   it("keeps cleaner plan and model settings scoped to the visible outcome", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "cleaner-plan-and-model-settings",
