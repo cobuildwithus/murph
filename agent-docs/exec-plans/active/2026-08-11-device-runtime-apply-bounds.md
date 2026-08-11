@@ -47,7 +47,7 @@ application authority checks.
    patch attachment and arm the normal wake flow.
 3. [x] Inspect the returned patch completely, scan its paths and privacy
    boundary, and deliberately apply only accepted hunks.
-4. [ ] Prove source overflow, maximum update cardinality, KMS/transaction
+4. [x] Prove source overflow, maximum update cardinality, KMS/transaction
    ordering, prepare-to-commit races, and local PostgreSQL pool behavior.
 5. [ ] Run focused tests, routed typecheck/lint, diff/privacy checks, and the
    required exact-head specialist and final ReviewGPT gates.
@@ -86,18 +86,21 @@ application authority checks.
 
 ## Verification results
 
-- Runtime protocol: 87 focused tests pass, including the 64-source rejection
-  before any control-plane work.
+- Runtime protocol: 95 focused tests pass on the current merged base, including
+  the 64-source rejection before any control-plane work.
 - Runtime authority and prepared-secret owners: 67 focused tests pass. The
   deterministic 100-update cases prove two set reads, one batched secret read,
   one optional batched preseal, serial transaction concurrency of one, no
   post-write hydration, and no KMS/provider work inside a transaction.
-- Shared crypto-root owner: 35 tests pass, including root-reference
+- Shared crypto-root owner and adjacent connection-lock/source coverage pass 44
+  current-base tests, including root-reference
   deduplication, provider unwrap concurrency no greater than four, full
-  in-flight chunk settlement on failure, and root-key zeroization.
-- Adjacent connection/source/OAuth stores pass 56 tests; assistant runtime
-  passes 84 hosted device-sync runtime tests; Hosted Web and device-syncd
-  typechecks pass; scoped Web lint and repository source/artifact guards pass.
+  in-flight chunk settlement on failure, and root-key zeroization. Earlier
+  adjacent connection/source/OAuth coverage also passed 56 tests.
+- Assistant runtime passes 85 hosted device-sync runtime tests on the current
+  merged base; Hosted Web and device-syncd typechecks pass; full Web lint has
+  zero errors; repository source/artifact, docs-drift, diff, and privacy guards
+  pass.
 - A fresh, fully migrated local PostgreSQL cluster passed both proofs: the
   1,641-receipt, 31-wide incident replay stayed within the 15-connection pool,
   and a 100-update no-op apply plus 40 foreground reads stayed within a
@@ -109,5 +112,6 @@ application authority checks.
   CLI runtime artifacts caused unrelated command timeouts and a sleeping worker
   chain. A freshly prepared detached base passed the isolated CLI file 38/38;
   `pnpm build:test-runtime:prepared` then made the changed worktree pass the
-  same file 38/38. The reproducible verification-owner gap is recorded through
-  Frog; a clean broad rerun remains pending on the merge candidate.
+  same file 38/38. After merging current `main`, the prepared runtime build and
+  isolated CLI file again pass 38/38. The reproducible verification-owner gap
+  is recorded through Frog; exact-head CI owns the broad PR suite.
