@@ -1814,7 +1814,7 @@ async function authorizeHostedRuntimeDirectLinqChat(input: {
       prisma: getPrisma(),
       target: input.chatId,
     });
-    if (assertion.threadIsDirect !== true) {
+    if (assertion.resolvedRoute.threadIsDirect !== true) {
       return { unavailableReason: "linq_thread_unauthorized" };
     }
   } catch {

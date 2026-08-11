@@ -5081,16 +5081,23 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               providerDispatchClaimed: true,
             }
           : {}),
-        ...(responseCount === 1
-          ? {}
+        resolvedRoute: responseCount === 1
+          ? {
+              conversationThreadId: null,
+              directRecipientPhoneNumber: null,
+              fromPhoneNumber: "+15550002",
+              target: "chat_123",
+              targetKind: "thread",
+              threadIsDirect: false,
+            }
           : {
-              targetOverride: {
-                conversationThreadId: "hid_current_chat",
-                target: "chat_current",
-                targetKind: "thread",
-              },
-            }),
-        threadIsDirect: responseCount === 1 ? false : true,
+              conversationThreadId: "hid_current_chat",
+              directRecipientPhoneNumber: "+15550001",
+              fromPhoneNumber: "+15550002",
+              target: "chat_current",
+              targetKind: "thread",
+              threadIsDirect: true,
+            },
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -5119,7 +5126,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     })).resolves.toEqual({
       deliveryPosture: "cautious",
       providerDispatchClaimed: true,
-      threadIsDirect: false,
+      resolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: "+15550002",
+        target: "chat_123",
+        targetKind: "thread",
+        threadIsDirect: false,
+      },
     });
     await expect(assertLinqRecentInboundEngagement({
       assistantAskCompletionExpiresAt: "2026-07-16T12:10:00.000Z",
@@ -5129,12 +5143,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: "thread",
     })).resolves.toEqual({
       assistantAskFallbackRequired: true,
-      targetOverride: {
+      resolvedRoute: {
         conversationThreadId: "hid_current_chat",
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
         target: "chat_current",
         targetKind: "thread",
+        threadIsDirect: true,
       },
-      threadIsDirect: true,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -5153,7 +5169,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         deliveryBlockCode: "chat_opted_out",
         deliveryPosture: "unknown-posture",
         ok: true,
-        threadIsDirect: true,
+        resolvedRoute: {
+          conversationThreadId: null,
+          directRecipientPhoneNumber: "+15550001",
+          fromPhoneNumber: "+15550002",
+          target: "chat_blocked",
+          targetKind: "thread",
+          threadIsDirect: true,
+        },
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -5180,7 +5203,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: "thread",
     })).resolves.toEqual({
       deliveryBlockCode: "chat_opted_out",
-      threadIsDirect: true,
+      resolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "chat_blocked",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
     });
   });
 

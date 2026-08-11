@@ -33,7 +33,6 @@ export type {
   HostedRuntimeLinqRecentInboundEngagementResult,
   HostedRuntimeLinqSendRequest,
   HostedRuntimeLinqSendResponse,
-  HostedRuntimeLinqTargetOverride,
   HostedRuntimeLatencyTracePort,
   HostedRuntimeLatencyTraceRecordResponse,
   HostedRuntimeLabsToolPort,

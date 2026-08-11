@@ -1145,24 +1145,33 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const signal = new AbortController().signal;
     const assertLinqRecentInboundEngagement = vi.fn()
       .mockResolvedValueOnce({
-        targetOverride: {
+        resolvedRoute: {
+          conversationThreadId: null,
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: "+15550002",
           target: "chat_current_group",
           targetKind: "thread" as const,
+          threadIsDirect: false,
         },
-        threadIsDirect: false,
       })
       .mockResolvedValueOnce({
-        targetOverride: {
+        resolvedRoute: {
           conversationThreadId: "hid_current_direct",
+          directRecipientPhoneNumber: "+15550001",
+          fromPhoneNumber: "+15550002",
           target: "chat_current_direct",
           targetKind: "thread" as const,
+          threadIsDirect: true,
         },
-        threadIsDirect: true,
       })
       .mockResolvedValueOnce({
-        targetOverride: {
+        resolvedRoute: {
+          conversationThreadId: null,
+          directRecipientPhoneNumber: "+15550001",
+          fromPhoneNumber: "+15550002",
           target: "chat_current_direct",
           targetKind: "thread" as const,
+          threadIsDirect: null,
         },
       });
     const phaseInput = createPhaseInput({});
