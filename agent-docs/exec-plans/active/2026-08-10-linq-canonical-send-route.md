@@ -73,6 +73,7 @@ Success means:
 - Focused Assistant Runtime callback, channel, workspace phase, entrypoint,
   and runner tests pass: 933 tests.
 - Focused Cloudflare parser/platform tests pass: 150 tests.
+- Focused changelog registry and archive tests pass: 41 tests.
 - Hosted-execution, Web, Assistant Runtime, and Cloudflare typechecks pass.
 - The Docker-backed hosted-local scheduled-card scenario built every runtime
   package and runner bundle, then stopped before execution because this host

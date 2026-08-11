@@ -68,6 +68,21 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
+  it("keeps scheduled native delivery current and private", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "scheduled-cards-use-current-private-route",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      sourcePullRequests: [1624],
+      summary: expect.stringContaining("current private Messages conversation"),
+    });
+    expect(item?.details).toContain("If the route changes before delivery");
+    expect(item?.details).toContain("exposing private text through recovery");
+    expect(item?.tryIt).toBeUndefined();
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -558,6 +573,7 @@ describe("changelog registry", () => {
           "web-search-restored",
           "appointment-reminders-by-default",
           "workout-card-status-rendering",
+          "scheduled-cards-use-current-private-route",
         ],
       },
       {

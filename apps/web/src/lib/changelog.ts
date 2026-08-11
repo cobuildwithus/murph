@@ -68,7 +68,7 @@ const RAW_CHANGELOG_EDITIONS = [
     title:
       "Starter access, patterns, reliable referrals, reminders, cards, voices, and web search",
     summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, referral celebrations stay with their intended conversation, reminders keep the local time you asked for, completed workout rows stay clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Starter usage lasts until it is used, patterns compare repeated actions with next-day sleep and recovery, referral celebrations and scheduled cards stay with their intended private conversation, reminders keep the requested local time, completed workout rows stay clear, voice memos keep the selected voice, and managed OpenAI web search works again.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -188,6 +188,24 @@ const RAW_CHANGELOG_EDITIONS = [
           "The status mark is part of the card image itself, so it stays visible anywhere the static preview is shown.",
         relevanceTags: ["workouts", "imessage", "cards", "reliability"],
         sourcePullRequests: [1599],
+      },
+      {
+        id: "scheduled-cards-use-current-private-route",
+        kind: "improvement",
+        priority: 4,
+        title: "Scheduled cards use the current private conversation",
+        summary:
+          "Authorized scheduled nutrition cards now use the member's current private Messages conversation, so the native card can arrive without a new inbound message.",
+        details:
+          "The same live destination check covers ordinary replies, cards, voice memos, and reactions. If the route changes before delivery, Murph stops instead of sending to a stale conversation or exposing private text through recovery.",
+        relevanceTags: [
+          "automations",
+          "imessage",
+          "cards",
+          "privacy",
+          "reliability",
+        ],
+        sourcePullRequests: [1624],
       },
     ],
   },
