@@ -125,6 +125,54 @@ const TABLE_CARD: CompactTablePresentationCardV1 = {
   footer: "Adjust load when form slows down.",
 };
 
+const DENSE_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Eight-exercise workout",
+  subtitle: "Verified canonical workout snapshot for today",
+  rowHeader: "Exercise",
+  columns: ["Set 1", "Set 2", "Set 3", "Set 4"],
+  rows: Array.from({ length: 8 }, (_, rowIndex) => ({
+    label: `Exercise ${rowIndex + 1} movement pattern`,
+    values: Array.from({ length: 4 }, (_, columnIndex) => {
+      if (rowIndex === 7 && columnIndex === 3) {
+        return "Bodyweight × 16";
+      }
+      const cellLength = 22;
+      return `${rowIndex + columnIndex + 1}`.padEnd(cellLength, "x");
+    }),
+  })),
+  footer: "Assists and spotted reps remain on the exact set note.",
+};
+
+const FONT_METRIC_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Recovery signals",
+  subtitle: null,
+  rowHeader: "Metric",
+  columns: ["Today", "Week", "Trend", "Note"],
+  rows: [{
+    label: "Recovery",
+    values: ["deep sleep and mood guidance", "Stable", "Up", "Review"],
+  }],
+  footer: null,
+};
+
+const POSITIVE_KERNING_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Recovery signals",
+  subtitle: null,
+  rowHeader: "Metric",
+  columns: ["Today", "Week", "Trend", "Note"],
+  rows: [{
+    label: "Recovery",
+    values: ["slow gait, ankle impact, or load", "Stable", "Up", "Review"],
+  }],
+  footer: null,
+};
+
 const WORKOUT_CARD: Extract<
   CompactTablePresentationCardV1,
   { workout: unknown }
@@ -132,8 +180,8 @@ const WORKOUT_CARD: Extract<
   kind: "compact_table",
   version: 1,
   title: "Push day",
-  subtitle: "4 of 6 sets complete",
-  footer: "Tap an exercise to log or correct a set.",
+  subtitle: null,
+  footer: "Reply with the exercise, set, and result to log or correct it.",
   workout: {
     version: 1,
     state: "active",
@@ -256,6 +304,7 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.match(serialized, /data-calorie-progress="0\.8364"/u);
   assert.match(serialized, /data-goal-status="under_target"/u);
   assert.match(serialized, /data-calorie-goal-status="under_target"/u);
+  assert.match(serialized, /top:146px/u);
   assert.match(serialized, />UNDER</u);
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /data-goal-status="unavailable"/u);
@@ -390,6 +439,8 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.match(serialized, />16</u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
   assert.doesNotMatch(serialized, /box-shadow/u);
+  assert.match(serialized, /data-provider-icon-clearance="155"/u);
+  assert.match(serialized, /margin-left:155px/u);
 });
 
 test("response-card image route restores and renders the exact compact V4 workout snapshot", async () => {
@@ -414,15 +465,147 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.match(serialized, /IN PROGRESS/u);
   assert.match(serialized, /Bench press/u);
   assert.match(serialized, /Next: 55 lb × 8–10/u);
+  assert.match(
+    serialized,
+    /Reply with the exercise, set, and result to\s+log or correct it\./u,
+  );
+  assert.doesNotMatch(serialized, /Tap an exercise/u);
   assert.match(serialized, /data-workout-progress="0\.6667"/u);
   assert.match(serialized, /data-exercise-state="resolved"/u);
   assert.match(serialized, /data-exercise-state="in-progress"/u);
   assert.doesNotMatch(serialized, /4 of 6 sets complete|TODAY/u);
   assert.match(serialized, /data-exercise-checkmark="true"/u);
   assert.doesNotMatch(serialized, /✓/u);
+  assert.doesNotMatch(serialized, /border-radius:105px/u);
+  assert.doesNotMatch(serialized, /box-shadow/u);
+  assert.match(serialized, /data-provider-icon-clearance="155"/u);
+  assert.match(serialized, /margin-left:155px/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
   assert.doesNotMatch(serialized, /box-shadow/u);
+});
+
+test("workout images ignore legacy subtitles in both pixels and height", async () => {
+  const {
+    CompactTableCardImage,
+    getCompactTableCardImageSize,
+  } = await import("@/src/components/imessage/compact-table-card-image");
+  const legacySubtitleCard: typeof WORKOUT_CARD = {
+    ...WORKOUT_CARD,
+    subtitle: "Legacy progress copy that must not affect the workout image layout",
+  };
+  const currentCard: typeof WORKOUT_CARD = {
+    ...WORKOUT_CARD,
+    subtitle: null,
+  };
+
+  assert.deepEqual(
+    getCompactTableCardImageSize(legacySubtitleCard),
+    getCompactTableCardImageSize(currentCard),
+  );
+  const serialized = renderToStaticMarkup(
+    <CompactTableCardImage card={legacySubtitleCard} />,
+  );
+  assert.doesNotMatch(serialized, /Legacy progress copy/u);
+});
+
+test("workout image keeps Next on the first pending set when it has no target", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const targetlessNextCard = {
+    ...WORKOUT_CARD,
+    workout: {
+      ...WORKOUT_CARD.workout,
+      exercises: [
+        {
+          name: "Bench press",
+          sets: [
+            { status: "pending", target: null, actual: null },
+            { status: "pending", target: "135 lb × 8", actual: null },
+          ],
+        },
+      ],
+    },
+  } satisfies typeof WORKOUT_CARD;
+  const payload = encodePayload(buildWorkoutSessionAppCardEnvelopeV4({
+    title: targetlessNextCard.title,
+    subtitle: targetlessNextCard.subtitle,
+    footer: targetlessNextCard.footer,
+    workout: targetlessNextCard.workout,
+  }));
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+
+  assert.match(serialized, /Next set: no target/u);
+  assert.doesNotMatch(serialized, /Next: 135 lb × 8/u);
+});
+
+test("dense contract-valid tables wrap every value into measured row height", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const { getCompactTableCardImageSize } = await import(
+    "@/src/components/imessage/compact-table-card-image"
+  );
+  const payload = encodePayload({ schemaVersion: 3, card: DENSE_TABLE_CARD });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree, init] = getImageResponseCall();
+  const expectedSize = getCompactTableCardImageSize(DENSE_TABLE_CARD);
+  assert.equal(init.height, expectedSize.height);
+  assert.ok(expectedSize.height > 1_000);
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /data-card-text-lines="2"/u);
+  assert.match(serialized, /white-space:pre-wrap/u);
+  assert.match(serialized, /Bodyweight ×\n16/u);
+  assert.doesNotMatch(serialized, /Bodywe\night/u);
+  assert.match(serialized, /1xxxxxxxxxxxxx\nxxxxxxxx/u);
+});
+
+test("four-column rows use exact DM Sans advances for word breaks and height", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({
+    schemaVersion: 3,
+    card: FONT_METRIC_TABLE_CARD,
+  });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /deep sleep\nand mood\nguidance/u);
+  assert.match(serialized, /height:100px/u);
+  assert.match(serialized, /data-card-text-lines="3"[^>]*>deep sleep/u);
+});
+
+test("positive DM Sans kerning cannot reflow text beyond its measured row", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({
+    schemaVersion: 3,
+    card: POSITIVE_KERNING_TABLE_CARD,
+  });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /slow gait,\nankle impact,\nor load/u);
+  assert.match(serialized, /height:100px/u);
+  assert.match(serialized, /data-card-text-lines="3"[^>]*>slow gait,/u);
+  assert.doesNotMatch(serialized, /slow gait, ankle\nimpact, or load/u);
 });
 
 test("response-card image route renders the exact V5 standings snapshot", async () => {
