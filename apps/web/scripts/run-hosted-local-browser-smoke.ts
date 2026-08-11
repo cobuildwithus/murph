@@ -1,11 +1,25 @@
 import {
   chromium,
-  type BrowserContext,
   type BrowserContextOptions,
   type Locator,
   type Page,
   type Response,
 } from "@playwright/test";
+
+import {
+  buildHostedLocalBrowserSessionCookie,
+  clearHostedLocalBrowserEnvironment,
+  formatHostedLocalBrowserResult,
+  readHostedLocalBrowserEnvironmentValue,
+  readHostedLocalBrowserTimeout,
+} from "./hosted-local-browser-process.ts";
+
+const RUNNER_NAME = "Hosted browser smoke";
+const BROWSER_CONTRACT_ENVIRONMENT_KEYS = [
+  "MURPH_E2E_BROWSER_TIMEOUT_MS",
+  "MURPH_E2E_HOSTED_SESSION_COOKIE",
+  "MURPH_E2E_WEB_BASE_URL",
+] as const;
 
 const MOTION_FREEZE_INIT_SCRIPT = String.raw`
 (() => {
@@ -57,28 +71,28 @@ const browserCases = [
 
 async function main(): Promise<void> {
   const config = readConfig(process.env);
-  clearBrowserContractEnvironment();
-  const webBaseUrl = new URL(config.webBaseUrl);
+  clearHostedLocalBrowserEnvironment(BROWSER_CONTRACT_ENVIRONMENT_KEYS);
   const browser = await chromium.launch({ headless: true });
 
   try {
     for (const browserCase of browserCases) {
       const context = await browser.newContext({
         ...browserCase.contextOptions,
-        baseURL: webBaseUrl.toString(),
+        baseURL: config.webBaseUrl.toString(),
         locale: "en-US",
         reducedMotion: "reduce",
       });
       try {
-        await addHostedSessionCookie({
-          context,
-          sessionCookie: config.sessionCookie,
-          webBaseUrl,
-        });
+        await context.addCookies([
+          buildHostedLocalBrowserSessionCookie({
+            sessionCookie: config.sessionCookie,
+            webBaseUrl: config.webBaseUrl,
+          }),
+        ]);
         const page = await context.newPage();
         page.setDefaultTimeout(config.timeoutMs);
         page.setDefaultNavigationTimeout(config.timeoutMs);
-        await prepareStablePrivatePage(page, webBaseUrl);
+        await prepareStablePrivatePage(page, config.webBaseUrl);
         const pageErrors: string[] = [];
         page.on("pageerror", (error) => {
           pageErrors.push(sanitizeBrowserSmokeFailure(error));
@@ -87,7 +101,7 @@ async function main(): Promise<void> {
         await proveConnectJourney({
           caseName: browserCase.name,
           page,
-          webBaseUrl,
+          webBaseUrl: config.webBaseUrl,
         });
         if (pageErrors.length !== 0) {
           const distinctErrors = [...new Set(pageErrors)].slice(0, 4);
@@ -103,10 +117,10 @@ async function main(): Promise<void> {
     await browser.close();
   }
 
-  process.stdout.write(`MURPH_E2E_RESULT=${JSON.stringify({
+  process.stdout.write(formatHostedLocalBrowserResult({
     cases: browserCases.map((browserCase) => browserCase.name),
     ok: true,
-  })}\n`);
+  }));
 }
 
 async function prepareStablePrivatePage(
@@ -255,63 +269,21 @@ async function requireSingleVisible(input: {
   return first;
 }
 
-async function addHostedSessionCookie(input: {
-  context: BrowserContext;
-  sessionCookie: string;
-  webBaseUrl: URL;
-}): Promise<void> {
-  const pair = input.sessionCookie.split(";", 1)[0]?.trim() ?? "";
-  const separatorIndex = pair.indexOf("=");
-  if (separatorIndex <= 0) {
-    throw new Error("Hosted browser smoke session cookie was malformed.");
-  }
-
-  const cookieName = pair.slice(0, separatorIndex);
-  const cookieUrl = new URL(input.webBaseUrl);
-  if (cookieName.startsWith("__Host-")) {
-    cookieUrl.protocol = "https:";
-  }
-  await input.context.addCookies([{
-    httpOnly: true,
-    name: cookieName,
-    sameSite: "Lax",
-    secure:
-      cookieName.startsWith("__Host-")
-      || input.webBaseUrl.protocol === "https:",
-    url: cookieUrl.toString(),
-    value: decodeURIComponent(pair.slice(separatorIndex + 1)),
-  }]);
-}
-
-function readConfig(env: NodeJS.ProcessEnv): {
+function readConfig(environment: NodeJS.ProcessEnv): {
   sessionCookie: string;
   timeoutMs: number;
-  webBaseUrl: string;
+  webBaseUrl: URL;
 } {
-  const webBaseUrl = requireEnvironmentValue(env, "MURPH_E2E_WEB_BASE_URL");
-  const sessionCookie = requireEnvironmentValue(
-    env,
-    "MURPH_E2E_HOSTED_SESSION_COOKIE",
-  );
-  const timeoutMs = Number(
-    env.MURPH_E2E_BROWSER_TIMEOUT_MS?.trim() || "120000",
-  );
+  const webBaseUrl = new URL(readHostedLocalBrowserEnvironmentValue(
+    environment,
+    "MURPH_E2E_WEB_BASE_URL",
+    RUNNER_NAME,
+  ));
   if (
-    !Number.isInteger(timeoutMs)
-    || timeoutMs < 30_000
-    || timeoutMs > 300_000
-  ) {
-    throw new Error(
-      "MURPH_E2E_BROWSER_TIMEOUT_MS must be an integer from 30000 to 300000.",
-    );
-  }
-
-  const parsedBaseUrl = new URL(webBaseUrl);
-  if (
-    parsedBaseUrl.protocol !== "http:"
+    webBaseUrl.protocol !== "http:"
     || (
-      parsedBaseUrl.hostname !== "localhost"
-      && parsedBaseUrl.hostname !== "127.0.0.1"
+      webBaseUrl.hostname !== "localhost"
+      && webBaseUrl.hostname !== "127.0.0.1"
     )
   ) {
     throw new Error(
@@ -320,31 +292,21 @@ function readConfig(env: NodeJS.ProcessEnv): {
   }
 
   return {
-    sessionCookie,
-    timeoutMs,
-    webBaseUrl: parsedBaseUrl.toString(),
+    sessionCookie: readHostedLocalBrowserEnvironmentValue(
+      environment,
+      "MURPH_E2E_HOSTED_SESSION_COOKIE",
+      RUNNER_NAME,
+    ),
+    timeoutMs: readHostedLocalBrowserTimeout({
+      defaultMs: 120_000,
+      environment,
+      key: "MURPH_E2E_BROWSER_TIMEOUT_MS",
+      maximumMs: 300_000,
+      minimumMs: 30_000,
+      runnerName: RUNNER_NAME,
+    }),
+    webBaseUrl,
   };
-}
-
-function requireEnvironmentValue(
-  env: NodeJS.ProcessEnv,
-  key: string,
-): string {
-  const value = env[key]?.trim();
-  if (!value) {
-    throw new Error(`Hosted browser smoke requires ${key}.`);
-  }
-  return value;
-}
-
-function clearBrowserContractEnvironment(): void {
-  for (const key of [
-    "MURPH_E2E_BROWSER_TIMEOUT_MS",
-    "MURPH_E2E_HOSTED_SESSION_COOKIE",
-    "MURPH_E2E_WEB_BASE_URL",
-  ]) {
-    delete process.env[key];
-  }
 }
 
 function sanitizeBrowserSmokeFailure(error: unknown): string {
