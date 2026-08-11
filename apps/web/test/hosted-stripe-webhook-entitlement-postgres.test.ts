@@ -1255,7 +1255,7 @@ describe.skipIf(!runPostgresProof)(
           billingPlanCode: "launch_monthly",
           blockedAt: null,
           highestBillingPlanCode: "launch_monthly",
-          planResetAt: null,
+          planResetAt: eventCreatedAt,
           spentUsdMicros: 0n,
         });
         await expect(readPendingMailboxProof({
@@ -1300,7 +1300,7 @@ describe.skipIf(!runPostgresProof)(
           billingPlanCode: "launch_monthly",
           blockedAt: null,
           highestBillingPlanCode: "launch_monthly",
-          planResetAt: null,
+          planResetAt: eventCreatedAt,
           spentUsdMicros: 0n,
         });
         await expect(readStripeReceiptProof({
