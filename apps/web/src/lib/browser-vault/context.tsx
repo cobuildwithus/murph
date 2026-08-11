@@ -168,6 +168,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         abortBrowserVaultInFlightLoad();
         providerStartedLoadRef.current = false;
         if (mountedRef.current) {
+          setSessionRefreshPending(false);
           setRuntimeRefreshPending(false);
         }
       }, BROWSER_VAULT_RUNTIME_REFRESH_TIMEOUT_MS);

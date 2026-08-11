@@ -1498,7 +1498,7 @@ test("a runtime refresh wait ends after its in-memory deadline", async () => {
   await rendered.cleanup();
 });
 
-test("a stalled runtime refresh is aborted and retired at the shared deadline", async () => {
+test("a handoff deadline retires its stalled session poll before route and retry", async () => {
   vi.useFakeTimers();
   const currentRef = createReplicaRef();
   const stalledResponse = createDeferred<Response>();
@@ -1511,13 +1511,22 @@ test("a stalled runtime refresh is aborted and retired at the shared deadline", 
       replicaRef: currentRef,
       state: "ready",
     }))
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      refreshPending: true,
+      state: "not_modified",
+    }))
     .mockImplementationOnce((_input: unknown, init?: RequestInit) => {
       if (init?.signal) {
         stalledSignals.push(init.signal);
       }
       return stalledResponse.promise;
     })
-    .mockResolvedValueOnce(jsonResponse({
+    .mockResolvedValue(jsonResponse({
       encryptedReplica: null,
       memberId: "member_123",
       replicaAad: null,
@@ -1543,9 +1552,12 @@ test("a stalled runtime refresh is aborted and retired at the shared deadline", 
   await act(async () => {
     rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
   });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_500);
+  });
   await waitForCondition(
-    () => fetchMock.mock.calls.length === 2,
-    "stalled runtime refresh",
+    () => fetchMock.mock.calls.length === 3,
+    "stalled session poll",
   );
   await waitForText(
     rendered.container,
@@ -1553,7 +1565,7 @@ test("a stalled runtime refresh is aborted and retired at the shared deadline", 
   );
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(60_001);
+    await vi.advanceTimersByTimeAsync(58_501);
   });
   await waitForCondition(
     () => peekBrowserVaultInFlightLoad() === null,
@@ -1572,11 +1584,28 @@ test("a stalled runtime refresh is aborted and retired at the shared deadline", 
   });
   assert.equal(fetchMock.mock.calls.length, fetchCountAtDeadline);
 
+  mocks.usePathname.mockReturnValue("/history");
+  await rendered.rerender(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+  );
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === fetchCountAtDeadline + 1,
+    "replacement route authority request",
+  );
+  const routeBody = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+  assert.equal(routeBody.requestRefresh, undefined);
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+
   await act(async () => {
     rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
   });
   await waitForCondition(
-    () => fetchMock.mock.calls.length === fetchCountAtDeadline + 1,
+    () => fetchMock.mock.calls.length === fetchCountAtDeadline + 2,
     "replacement runtime refresh",
   );
   const replacementBody = JSON.parse(
