@@ -37,6 +37,7 @@ interface TimeseriesRequest {
 }
 
 interface MutableProviderState {
+  expectedProjectedStatus?: string;
   present?: boolean;
   resourceAvailability: Record<string, unknown>;
   status: string;
@@ -102,7 +103,7 @@ function createStoredAccount(input: {
 function createSourceSummary(
   sourceProviderSlug: string,
   firstSeenAt = NOW,
-  status: "connected" | "disconnected" = "connected",
+  status: "connected" | "disconnected" | "error" | "unavailable" = "connected",
   resourceAvailabilitySummary: Record<string, string | number | boolean | null> = {
     blood_pressure: true,
   },
@@ -904,6 +905,15 @@ test("live blood-pressure capability gates provider egress and terminal coverage
       status: "disconnected",
     },
     {
+      resourceAvailability: { activity: true, blood_pressure: true },
+      status: "error",
+    },
+    {
+      expectedProjectedStatus: "unavailable",
+      resourceAvailability: { activity: true, blood_pressure: true },
+      status: "provider_state_added_later",
+    },
+    {
       present: false,
       resourceAvailability: {},
       status: "connected",
@@ -921,9 +931,21 @@ test("live blood-pressure capability gates provider egress and terminal coverage
       firstSeenAt: "2026-03-20T23:55:00.000Z",
     });
 
+    const exhaustedJob = (
+      providerState.status === "error"
+      || providerState.status === "provider_state_added_later"
+    )
+      ? {
+          ...admitted,
+          payload: {
+            ...admitted.payload,
+            emptyBackfillAttempts: 4,
+          },
+        }
+      : admitted;
     const result = await requireValue(provider.jobExecutor).executeJob(
       createJobContext({ projectedSources }),
-      toJobRecord(admitted, 1),
+      toJobRecord(exhaustedJob, 1),
     );
 
     assert.deepEqual(
@@ -932,7 +954,7 @@ test("live blood-pressure capability gates provider egress and terminal coverage
         ? []
         : [{
             resourceAvailabilitySummary: providerState.resourceAvailability,
-            status: providerState.status,
+            status: providerState.expectedProjectedStatus ?? providerState.status,
           }],
     );
     assert.equal(
@@ -2311,6 +2333,76 @@ test.each(SOURCE_DISCONNECT_FENCE_CODES)(
     assert.equal(importedSnapshots.length, 0);
     assert.equal(result.metadataPatch, undefined);
     assert.equal(result.scheduledJobs, undefined);
+  },
+);
+
+test.each(["error", "unavailable"] as const)(
+  "a source becoming %s after pressure egress blocks durable import and preserves exact evidence",
+  async (status) => {
+    const importedSnapshots: unknown[] = [];
+    const requests: TimeseriesRequest[] = [];
+    const provider = createProvider({
+      bloodPressureRecords: [{
+        id: `bp-source-became-${status}`,
+        provider_connection_id: "provider-omron-1",
+        sourceProviderSlug: "omron",
+        timestamp: "2026-05-12T08:30:00.000Z",
+        systolic: 120,
+        diastolic: 78,
+      }],
+      requests,
+    });
+    const bloodPressure = createScheduledBloodPressureJob(provider);
+    const admittedSource = createSourceSummary("omron");
+    const unavailableSource = createSourceSummary("omron", NOW, status);
+    const result = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({
+        account: createAccount({ sources: [admittedSource] }),
+        importedSnapshots,
+        listConnectionSources: async () => requests.length > 0
+          ? [unavailableSource]
+          : [admittedSource],
+      }),
+      toJobRecord(bloodPressure, status === "error" ? 84 : 85),
+    );
+    const continuation = findBloodPressureJob(result.scheduledJobs ?? []);
+
+    assert.equal(requests.length, 1);
+    assert.equal(importedSnapshots.length, 0);
+    assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(continuation.payload?.historicalProviderRecordsSeen, true);
+    assert.equal(
+      continuation.payload?.historicalUnresolvedProviderRecordCount,
+      1,
+    );
+    assert.equal(
+      typeof continuation.payload?.historicalUnresolvedProviderRecordIdentitiesJson,
+      "string",
+    );
+
+    const { result: completedTraversal } = await executeImmediateBloodPressureContinuations({
+      context: createJobContext({
+        importSnapshot: importWithRealJunctionNormalizer,
+        listConnectionSources: async () => [admittedSource],
+      }),
+      job: toJobRecord(continuation, status === "error" ? 86 : 87),
+      provider,
+    });
+    const anchoredReplay = findBloodPressureJob(completedTraversal.scheduledJobs ?? []);
+    assert.equal(completedTraversal.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(anchoredReplay.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+
+    const { result: repaired } = await executeImmediateBloodPressureContinuations({
+      context: createJobContext({
+        importSnapshot: importWithRealJunctionNormalizer,
+        listConnectionSources: async () => [admittedSource],
+        now: "2026-06-12T12:00:00.000Z",
+      }),
+      job: toJobRecord(anchoredReplay, status === "error" ? 88 : 89),
+      provider,
+    });
+    assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
+    assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
   },
 );
 

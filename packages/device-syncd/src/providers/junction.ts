@@ -173,6 +173,7 @@ interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImport
 interface JunctionPreciseTimeseriesImportOptions {
   historicalProviderRecordsSeen?: boolean;
   preservePartialRetryableFailure?: boolean;
+  sourceStatusRequirement?: JunctionImportSourceStatusRequirement;
 }
 
 interface JunctionDirectSummaryImportResult {
@@ -185,6 +186,8 @@ interface JunctionImportAdmissionSource {
   sourceProviderSlug: string;
   status: DeviceConnectionSourceStatus;
 }
+
+type JunctionImportSourceStatusRequirement = "connected" | "not_disconnected";
 
 interface JunctionHistoricalUnresolvedProviderRecords {
   identities: readonly string[];
@@ -1988,6 +1991,9 @@ export function createJunctionDeviceSyncProvider(
             historicalProviderRecordsSeen:
               job.payload.historicalProviderRecordsSeen === true,
             preservePartialRetryableFailure: extendedHistoricalBackfill,
+            sourceStatusRequirement: extendedHistoricalBackfill
+              ? "connected"
+              : undefined,
           },
         );
         const historicalRecordsSeen = extendedHistoricalBackfill
@@ -2725,6 +2731,8 @@ export function createJunctionDeviceSyncProvider(
           context,
           dedupedTimeseries,
           sourceProviders,
+          {},
+          options.sourceStatusRequirement,
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
           const receipt = await context.importSnapshot({
@@ -4573,6 +4581,7 @@ async function prepareJunctionImportSnapshot(
   snapshots: Record<string, unknown[]>,
   providers: readonly JunctionProviderConnection[],
   options: JunctionImportSnapshotSanitizeOptions = {},
+  sourceStatusRequirement: JunctionImportSourceStatusRequirement = "not_disconnected",
 ): Promise<PreparedJunctionImportSnapshot> {
   const currentSources: readonly JunctionImportAdmissionSource[] =
     context.listConnectionSources
@@ -4584,7 +4593,10 @@ async function prepareJunctionImportSnapshot(
     providers,
     currentSources,
     options,
-    context.connectionSourceAdmissionMode !== "listed_only",
+    {
+      allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only",
+      sourceStatusRequirement,
+    },
   );
 }
 
@@ -4593,13 +4605,20 @@ function prepareJunctionImportSnapshotForSources(
   providers: readonly JunctionProviderConnection[],
   currentSources: readonly JunctionImportAdmissionSource[],
   options: JunctionImportSnapshotSanitizeOptions = {},
-  allowUnlistedSources = true,
+  admission: {
+    allowUnlistedSources?: boolean;
+    sourceStatusRequirement?: JunctionImportSourceStatusRequirement;
+  } = {},
 ): PreparedJunctionImportSnapshot {
+  const allowUnlistedSources = admission.allowUnlistedSources ?? true;
+  const sourceStatusRequirement =
+    admission.sourceStatusRequirement ?? "not_disconnected";
   const sourceProviders = providers.filter((provider) =>
     isJunctionSourceAdmittedForImport(
       currentSources,
       provider.origin.sourceProviderSlug ?? provider.slug,
       allowUnlistedSources,
+      sourceStatusRequirement,
     )
   );
 
@@ -4612,6 +4631,7 @@ function prepareJunctionImportSnapshotForSources(
         providers,
         currentSources,
         allowUnlistedSources,
+        sourceStatusRequirement,
       ),
       providers,
       options,
@@ -4624,10 +4644,13 @@ function filterJunctionImportSnapshots(
   providers: readonly JunctionProviderConnection[],
   sources: readonly JunctionImportAdmissionSource[],
   allowUnlistedSources = true,
+  sourceStatusRequirement: JunctionImportSourceStatusRequirement = "not_disconnected",
 ): Record<string, unknown[]> {
   const sourceReferences = buildJunctionSourceReferenceMap(providers);
   const hasPendingSourceAdmission = sources.some((source) =>
-    source.status === "disconnected" || isDeviceSyncSourceDisconnectFenced(source)
+    sourceStatusRequirement === "connected"
+      ? !isDeviceSyncSourceAdmitted([source], source.sourceProviderSlug)
+      : source.status === "disconnected" || isDeviceSyncSourceDisconnectFenced(source)
   );
 
   return Object.fromEntries(
@@ -4640,6 +4663,7 @@ function filterJunctionImportSnapshots(
           sources,
           hasPendingSourceAdmission,
           allowUnlistedSources,
+          sourceStatusRequirement,
         )
       ),
     ]),
@@ -4652,6 +4676,7 @@ function isJunctionImportRecordAdmitted(
   sources: readonly JunctionImportAdmissionSource[],
   hasPendingSourceAdmission: boolean,
   allowUnlistedSources: boolean,
+  sourceStatusRequirement: JunctionImportSourceStatusRequirement,
 ): boolean {
   const record = readPlainObject(value);
   if (!record) {
@@ -4667,6 +4692,7 @@ function isJunctionImportRecordAdmitted(
       sources,
       sourceProviderSlug,
       allowUnlistedSources,
+      sourceStatusRequirement,
     );
   }
 
@@ -5526,7 +5552,7 @@ function isJunctionSourceResourceCurrentlyAvailable(input: {
     input.providers,
   ).some((source) =>
     source.sourceProviderSlug === input.sourceProviderSlug
-    && source.status !== "disconnected"
+    && source.status === "connected"
     && isJunctionResourceAdvertisedAvailable(
       source.resourceAvailabilitySummary[input.resource],
     )
@@ -7150,6 +7176,7 @@ function isJunctionSourceAdmittedForImport(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string | null | undefined,
   allowUnlistedSources = true,
+  sourceStatusRequirement: JunctionImportSourceStatusRequirement = "not_disconnected",
 ): boolean {
   const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
   if (!normalizedSourceProviderSlug) {
@@ -7162,7 +7189,9 @@ function isJunctionSourceAdmittedForImport(
   return matchingSources.length === 0
     ? allowUnlistedSources
     : matchingSources.some((source) =>
-      source.status !== "disconnected" && !isDeviceSyncSourceDisconnectFenced(source)
+      sourceStatusRequirement === "connected"
+        ? isDeviceSyncSourceAdmitted([source], source.sourceProviderSlug)
+        : source.status !== "disconnected" && !isDeviceSyncSourceDisconnectFenced(source)
     );
 }
 
@@ -7209,6 +7238,7 @@ async function resolveJunctionCurrentSourceAdmission(
     sources,
     sourceProviderSlug,
     context.connectionSourceAdmissionMode !== "listed_only",
+    "connected",
   )
     ? "admitted"
     : "pending";
