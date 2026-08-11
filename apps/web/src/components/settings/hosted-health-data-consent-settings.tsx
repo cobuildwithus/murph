@@ -250,9 +250,15 @@ export function HostedHealthDataConsentControl({
               : "text-muted-foreground"
           }`}
         >
-          {active
-            ? "Used to personalize Murph"
-            : paused
+          {active ? (
+            <Link
+              aria-label="Manage health data sources"
+              className="relative inline-flex items-center font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
+              href="/connect"
+            >
+              Manage sources
+            </Link>
+          ) : paused
               ? "Processing paused"
               : presentation === "not-enabled"
                 ? "Not enabled"
@@ -271,39 +277,21 @@ export function HostedHealthDataConsentControl({
           </div>
         ) : null}
       </div>
-      {active ? (
-        <div className="col-start-2 flex min-w-0 items-center gap-2 sm:col-start-3 sm:row-start-1 sm:justify-self-end">
-          <Link
-            className="relative inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:content-['']"
-            href="/connect"
-          >
-            Manage sources
-          </Link>
-          <Button
-            className="min-h-10 border-destructive/30 bg-transparent hover:border-destructive/40 hover:bg-destructive/[0.05] focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-transparent dark:hover:bg-destructive/[0.05] dark:focus-visible:ring-ring/50"
-            disabled={pending}
-            onClick={onAction}
-            size="sm"
-            type="button"
-            variant="destructive"
-          >
-            Withdraw consent
-          </Button>
-        </div>
-      ) : (
-        <Button
-          className="col-start-2 justify-self-start sm:col-start-3 sm:row-start-1 sm:justify-self-end"
-          disabled={pending}
-          onClick={onAction}
-          type="button"
-        >
-          {paused
+      <Button
+        className="col-start-2 justify-self-start sm:col-start-3 sm:row-start-1 sm:justify-self-end"
+        disabled={pending}
+        onClick={onAction}
+        type="button"
+        variant={active ? "destructive" : "default"}
+      >
+        {active
+          ? "Withdraw consent"
+          : paused
             ? "Use Murph again"
             : unavailable
               ? statusPending ? "Checking..." : "Retry status"
               : "Review"}
-        </Button>
-      )}
+      </Button>
     </div>
   );
 }

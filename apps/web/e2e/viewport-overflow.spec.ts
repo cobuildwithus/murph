@@ -211,7 +211,7 @@ test("homepage footer link columns stay separate at the sm breakpoint", async ({
   ).toEqual([]);
 });
 
-test("health-data consent actions stay inline and contained", async ({ page }) => {
+test("health-data consent actions stay aligned and contained", async ({ page }) => {
   test.setTimeout(300_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route("**/*", (route) => {
@@ -229,12 +229,14 @@ test("health-data consent actions stay inline and contained", async ({ page }) =
     200,
   );
 
-  const activeState = page.locator(
-    '[data-design-component="health-data-consent-settings"] ' +
-      '[data-design-state="active-source-and-consent-controls"]',
-  );
-  await expect(activeState).toHaveCount(1);
-  await expect(activeState).toBeVisible();
+  const consentStates = [
+    { active: true, name: "active-source-and-consent-controls" },
+    { active: false, name: "processing-paused" },
+    { active: false, name: "not-enabled" },
+    { active: false, name: "status-unavailable" },
+    { active: false, name: "checking-status" },
+    { active: false, name: "status-retry-failed" },
+  ] as const;
 
   for (const width of [320, 390, 1440] as const) {
     await page.setViewportSize({ width, height: 900 });
@@ -245,66 +247,103 @@ test("health-data consent actions stay inline and contained", async ({ page }) =
       );
     });
 
-    const layout = await activeState.evaluate((state) => {
-      const link = state.querySelector<HTMLAnchorElement>('a[href="/connect"]');
-      const button = Array.from(state.querySelectorAll("button")).find(
-        (candidate) => candidate.textContent?.trim() === "Withdraw consent",
+    for (const consentState of consentStates) {
+      const state = page.locator(
+        `[data-design-component="health-data-consent-settings"] ` +
+          `[data-design-state="${consentState.name}"]`,
       );
-      const group = link?.parentElement;
-      if (!link || !button || !group || button.parentElement !== group) {
-        throw new Error("Active health-data consent actions are missing.");
+      await expect(state).toBeVisible();
+
+      const layout = await state.evaluate((frame) => {
+        const status = frame.querySelector<HTMLParagraphElement>(
+          "p[aria-live='polite']",
+        );
+        const content = status?.parentElement;
+        const title = content?.firstElementChild;
+        const button = frame.querySelector<HTMLButtonElement>("button");
+        const manageLink = frame.querySelector<HTMLAnchorElement>(
+          'a[aria-label="Manage health data sources"]',
+        );
+        if (!content || !title || !button) {
+          throw new Error("Health-data consent action is missing.");
+        }
+
+        const buttonRect = button.getBoundingClientRect();
+        const contentRect = content.getBoundingClientRect();
+        const frameRect = frame.getBoundingClientRect();
+        const manageLinkRect = manageLink?.getBoundingClientRect();
+        const titleRect = title.getBoundingClientRect();
+        return {
+          buttonHeight: buttonRect.height,
+          buttonLeft: buttonRect.left,
+          buttonRight: buttonRect.right,
+          buttonTop: buttonRect.top,
+          contentBottom: contentRect.bottom,
+          contentLeft: contentRect.left,
+          contentRight: contentRect.right,
+          frameClientWidth: frame.clientWidth,
+          frameLeft: frameRect.left,
+          frameRight: frameRect.right,
+          frameScrollWidth: frame.scrollWidth,
+          manageLinkHeight: manageLinkRect?.height ?? null,
+          manageLinkTop: manageLinkRect?.top ?? null,
+          titleBottom: titleRect.bottom,
+        };
+      });
+
+      expect(
+        layout.buttonHeight,
+        `${consentState.name} action should match Settings buttons at ${width}px`,
+      ).toBeGreaterThanOrEqual(36);
+      expect(
+        layout.buttonLeft,
+        `${consentState.name} action should stay inside its frame at ${width}px`,
+      ).toBeGreaterThanOrEqual(
+        layout.frameLeft - OVERFLOW_TOLERANCE_PX,
+      );
+      expect(
+        layout.buttonRight,
+        `${consentState.name} action should stay inside its frame at ${width}px`,
+      ).toBeLessThanOrEqual(
+        layout.frameRight + OVERFLOW_TOLERANCE_PX,
+      );
+      expect(
+        layout.frameScrollWidth,
+        `${consentState.name} consent state should not overflow at ${width}px`,
+      ).toBeLessThanOrEqual(
+        layout.frameClientWidth + OVERFLOW_TOLERANCE_PX,
+      );
+
+      if (width === 1440) {
+        expect(
+          layout.buttonLeft,
+          `${consentState.name} action should use the desktop action column`,
+        ).toBeGreaterThanOrEqual(
+          layout.contentRight - OVERFLOW_TOLERANCE_PX,
+        );
+      } else {
+        expect(
+          Math.abs(layout.buttonLeft - layout.contentLeft),
+          `${consentState.name} action should align with mobile row copy at ${width}px`,
+        ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+        expect(
+          layout.buttonTop,
+          `${consentState.name} action should follow mobile row copy at ${width}px`,
+        ).toBeGreaterThanOrEqual(
+          layout.contentBottom - OVERFLOW_TOLERANCE_PX,
+        );
       }
 
-      const stateRect = state.getBoundingClientRect();
-      const groupRect = group.getBoundingClientRect();
-      const linkRect = link.getBoundingClientRect();
-      const buttonRect = button.getBoundingClientRect();
-      return {
-        buttonHeight: buttonRect.height,
-        buttonLeft: buttonRect.left,
-        buttonTop: buttonRect.top,
-        groupLeft: groupRect.left,
-        groupRight: groupRect.right,
-        linkHeight: linkRect.height,
-        linkLeft: linkRect.left,
-        linkTop: linkRect.top,
-        stateClientWidth: state.clientWidth,
-        stateLeft: stateRect.left,
-        stateRight: stateRect.right,
-        stateScrollWidth: state.scrollWidth,
-      };
-    });
-
-    expect(
-      Math.abs(layout.linkTop - layout.buttonTop),
-      `actions should share one row at ${width}px`,
-    ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
-    expect(
-      layout.linkLeft,
-      `source management should stay first at ${width}px`,
-    ).toBeLessThan(layout.buttonLeft);
-    expect(
-      layout.linkHeight,
-      `source target should stay touchable at ${width}px`,
-    ).toBeGreaterThanOrEqual(40);
-    expect(
-      layout.buttonHeight,
-      `withdrawal target should stay touchable at ${width}px`,
-    ).toBeGreaterThanOrEqual(40);
-    expect(
-      layout.groupLeft,
-      `active action group should stay inside its frame at ${width}px`,
-    ).toBeGreaterThanOrEqual(layout.stateLeft - OVERFLOW_TOLERANCE_PX);
-    expect(
-      layout.groupRight,
-      `active action group should stay inside its frame at ${width}px`,
-    ).toBeLessThanOrEqual(layout.stateRight + OVERFLOW_TOLERANCE_PX);
-    expect(
-      layout.stateScrollWidth,
-      `active consent state should not overflow at ${width}px`,
-    ).toBeLessThanOrEqual(
-      layout.stateClientWidth + OVERFLOW_TOLERANCE_PX,
-    );
+      if (consentState.active) {
+        expect(layout.manageLinkHeight).toBeGreaterThanOrEqual(20);
+        expect(
+          layout.manageLinkTop,
+          `source management should follow the row title at ${width}px`,
+        ).toBeGreaterThanOrEqual(
+          layout.titleBottom - OVERFLOW_TOLERANCE_PX,
+        );
+      }
+    }
   }
 });
 

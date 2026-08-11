@@ -118,13 +118,17 @@ test("renders separate active and paused consent controls", async () => {
   cleanupRender = active.cleanup;
 
   expect(active.container.textContent).toContain("Health data use");
-  expect(active.container.textContent).toContain("Used to personalize Murph");
+  expect(active.container.textContent).not.toContain("Used to personalize Murph");
   expect(active.container.textContent).toContain("Withdraw consent");
   const sourceReviewLink = active.container.querySelector('a[href="/connect"]');
   expect(sourceReviewLink?.textContent).toContain("Manage sources");
-  expect(sourceReviewLink?.className).toContain("min-h-10");
-  expect(sourceReviewLink?.parentElement?.className).toContain("flex");
-  expect(sourceReviewLink?.parentElement?.className).not.toContain("flex-col");
+  expect(sourceReviewLink?.getAttribute("aria-label")).toBe(
+    "Manage health data sources",
+  );
+  expect(sourceReviewLink?.parentElement?.getAttribute("aria-live")).toBe(
+    "polite",
+  );
+  expect(sourceReviewLink?.className).toContain("before:-inset-y-2.5");
   expect(active.container.firstElementChild?.className).toContain("items-center");
   expect(active.container.firstElementChild?.className).toContain(
     "grid-cols-[auto_minmax(0,1fr)]",
@@ -133,15 +137,12 @@ test("renders separate active and paused consent controls", async () => {
     "sm:grid-cols-[auto_minmax(0,1fr)_auto]",
   );
   const withdrawButton = findButton(active.container, "Withdraw consent");
-  expect(withdrawButton.parentElement).toBe(sourceReviewLink?.parentElement);
-  expect(withdrawButton.parentElement?.className).toContain("col-start-2");
-  expect(withdrawButton.parentElement?.className).toContain("sm:col-start-3");
-  expect(withdrawButton.className).toContain("bg-transparent");
-  expect(withdrawButton.className).toContain("border-destructive/30");
-  expect(withdrawButton.className).toContain("hover:bg-destructive/[0.05]");
-  expect(withdrawButton.className).toContain("focus-visible:ring-ring/50");
-  expect(withdrawButton.className).toContain("h-7");
-  expect(withdrawButton.className).toContain("min-h-10");
+  expect(withdrawButton.parentElement).toBe(active.container.firstElementChild);
+  expect(withdrawButton.className).toContain("col-start-2");
+  expect(withdrawButton.className).toContain("sm:col-start-3");
+  expect(withdrawButton.className).toContain("bg-destructive/10");
+  expect(withdrawButton.className).toContain("h-9");
+  expect(withdrawButton.className).not.toContain("bg-transparent");
 
   await cleanupRender();
   cleanupRender = null;
