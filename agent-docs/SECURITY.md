@@ -220,7 +220,17 @@ Last verified: 2026-08-10
   re-resolves the frozen channel and requires the same direct thread.
   A personal Linq wake freezes that resolved source as an explicit delivery
   target so provider entry cannot replace it with a newer home route; source
-  revocation fails closed. Group celebrations carry live external-thread
+  revocation fails closed. An already-imported legacy direct-Linq referral wake
+  may acquire missing proof only inside the local system mailbox when its
+  referral event, mailbox/event/delivery dedupe identities, queue-only mode,
+  required-send policy, hosted member, directness, explicit frozen target, and
+  absent authority match exactly. Before model work the runtime submits only
+  that frozen member/channel/target candidate to the existing signed route
+  owner. Success carries the validated authority through the unchanged audience
+  guard and provider-entry recheck; a definitive unauthorized result is a typed
+  terminal no-send, while unavailable or retryable owner failures retain normal
+  retry. Web must not rewrite mailbox ciphertext or cursors, and recovery must
+  never substitute a home route. Group celebrations carry live external-thread
   authority. Celebration instructions never persist a detached profile name.
   Group calls require
   exactly one runtime-injected
