@@ -1350,7 +1350,7 @@ describe("Strava device-sync provider", () => {
   });
 
   it("revokes the exact Strava token with Basic application authentication", async () => {
-    const fetchImpl = vi.fn(async () => new Response("", { status: 200 }));
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("", { status: 200 }));
     const clientId = "NON_CREDENTIAL_TEST_CLIENT_ID";
     const clientSecret = "NON_CREDENTIAL_TEST_CLIENT_SECRET";
     const accessToken = "NON_CREDENTIAL_TEST_ACCESS_TOKEN";
