@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
-  ChartScatter,
   ChevronsUpDown,
   FlaskConical,
   Home,
@@ -77,11 +76,6 @@ const navItems: {
     href: "/biomarkers",
     matchPrefix: "/biomarkers",
     icon: Activity,
-  },
-  {
-    label: "Patterns",
-    href: "/patterns",
-    icon: ChartScatter,
   },
   { label: "Experiments", href: "/experiments", icon: FlaskConical },
 ];
