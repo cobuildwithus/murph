@@ -3183,13 +3183,13 @@ describe('assistant conversation scope', () => {
       'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
     )
     expect(prompt).toContain(
-      'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.date`, `schedule.localAt.time`, and `schedule.localAt.timeZone`',
+      'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
     )
     expect(prompt).toContain(
       'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
     )
     expect(prompt).toContain(
-      'Resolve words such as today, tonight, and tomorrow against the named timezone current calendar date, not the conversation or system date.',
+      'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
     )
     expect(prompt).toContain(
       'Before making any relative-date claim about an existing automation, inspect the stored automation and answer from its authoritative schedule and verified next occurrence without mutating it',
@@ -3256,13 +3256,13 @@ describe('assistant conversation scope', () => {
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
     expect(prompt).toContain(
-      'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.date`, `schedule.localAt.time`, and `schedule.localAt.timeZone`',
+      'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
     )
     expect(prompt).toContain(
       'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
     )
     expect(prompt).toContain(
-      'Resolve words such as today, tonight, and tomorrow against the named timezone current calendar date, not the conversation or system date.',
+      'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
     )
     expect(prompt).toContain(
       'Before making any relative-date claim about an existing automation, inspect the stored automation and answer from its authoritative schedule and verified next occurrence without mutating it',

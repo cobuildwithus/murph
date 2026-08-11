@@ -33,7 +33,10 @@ describe('hosted domain dynamic tools', () => {
       'For time-based schedules, verify any user-facing timing confirmation against timingVerified',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'pass schedule.kind=at with schedule.localAt.date, schedule.localAt.time, and schedule.localAt.timeZone',
+      'pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'preserve that wording as relativeDay (today for tonight) so the host resolves it against the named timezone',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'raw exact ISO schedule.at is not accepted on generic save or patch',
@@ -50,6 +53,60 @@ describe('hosted domain dynamic tools', () => {
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
     )
+  })
+
+  it('resolves relative one-shot days from the named timezone instead of the system date', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2031-02-15T00:05:00.000Z'))
+      expect(readToolRequest('automation', {
+        action: 'save',
+        instructions: 'Send the reminder tonight.',
+        schedule: {
+          kind: 'at',
+          localAt: {
+            relativeDay: 'today',
+            time: '23:20',
+            timeZone: 'Pacific/Honolulu',
+          },
+        },
+        title: 'Tonight reminder',
+      })).toEqual({
+        kind: 'automation',
+        request: {
+          action: 'save',
+          instructions: 'Send the reminder tonight.',
+          schedule: {
+            at: '2031-02-15T09:20:00.000Z',
+            kind: 'at',
+          },
+          title: 'Tonight reminder',
+        },
+      })
+      expect(readToolRequest('automation', {
+        action: 'save',
+        instructions: 'Send the reminder tomorrow.',
+        schedule: {
+          kind: 'at',
+          localAt: {
+            relativeDay: 'tomorrow',
+            time: '23:20',
+            timeZone: 'Pacific/Honolulu',
+          },
+        },
+        title: 'Tomorrow reminder',
+      })).toMatchObject({
+        kind: 'automation',
+        request: {
+          schedule: {
+            at: '2031-02-16T09:20:00.000Z',
+            kind: 'at',
+          },
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {
@@ -124,6 +181,32 @@ describe('hosted domain dynamic tools', () => {
         title: 'One-shot reminder',
       },
     })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Reject two date sources.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2031-02-14',
+          relativeDay: 'today',
+          time: '23:20',
+          timeZone: 'Pacific/Honolulu',
+        },
+      },
+      title: 'Conflicting date reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Reject a missing date source.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          time: '23:20',
+          timeZone: 'Pacific/Honolulu',
+        },
+      },
+      title: 'Missing date reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
     expect(readToolRequest('automation', {
       action: 'save',
       instructions: 'Send an untrusted exact reminder.',

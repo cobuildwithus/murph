@@ -14,7 +14,10 @@ Updated: 2026-08-11
 ## Success criteria
 
 - The dynamic automation mutation path accepts a structured local one-shot
-  schedule with calendar date, wall-clock time, and IANA timezone.
+  schedule with an explicit calendar date or preserved relative day, wall-clock
+  time, and IANA timezone.
+- Relative words such as today, tonight, and tomorrow are resolved by the host
+  against the named timezone instead of being converted to a date by the model.
 - Exact ISO `at` schedules keep their existing behavior for programmatic callers.
 - Generic model-authored one-shots cannot bypass local-time resolution with raw
   exact-ISO input, while code-owned programmatic callers retain exact instants.
@@ -77,6 +80,9 @@ Updated: 2026-08-11
   error and no patch body; implement from the retained assistant response.
 - Return bounded model-facing recovery for daylight-saving gaps, folds, invalid
   timezones, and optimistic-concurrency conflicts without exposing raw errors.
+- Preserve today/tonight/tomorrow as a bounded semantic field until the trusted
+  resolver computes the named-zone calendar date; use an explicit date only
+  when the request or established context already supplies one.
 - Resolve hosted Linux ancestry exhaustively at the automation CLI mutation
   boundary and treat unreadable, malformed, or cyclic process metadata as unknown.
   Automation CLI mutations fail closed only when the current environment or a
