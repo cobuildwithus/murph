@@ -660,12 +660,10 @@ export async function verifyHostedDomainRootEnvelopeSignatureWithPublicKey(input
   publicKeyPem: string;
 }): Promise<boolean> {
   const publicKey = await importP256PublicKeyFromPem(input.publicKeyPem);
-  let signature: Uint8Array;
-  try {
-    signature = normalizeP256EcdsaSignature(
-      decodeBase64(input.envelope.authoritySignature.signature),
-    );
-  } catch {
+  const signature = tryNormalizeHostedDomainRootEnvelopeAuthoritySignature(
+    input.envelope.authoritySignature.signature,
+  );
+  if (!signature) {
     return false;
   }
   return crypto.subtle.verify(
@@ -676,6 +674,14 @@ export async function verifyHostedDomainRootEnvelopeSignatureWithPublicKey(input
       buildHostedDomainRootEnvelopeSigningPayload(getHostedDomainRootEnvelopeBody(input.envelope)),
     ),
   );
+}
+
+export function hasValidHostedDomainRootEnvelopeAuthoritySignatureEncoding(
+  envelope: Pick<HostedDomainRootKeyEnvelopeV1, "authoritySignature">,
+): boolean {
+  return tryNormalizeHostedDomainRootEnvelopeAuthoritySignature(
+    envelope.authoritySignature.signature,
+  ) !== null;
 }
 
 export async function assertHostedAuthorityVerifyPublicKeyPem(
@@ -1136,6 +1142,16 @@ function normalizeP256EcdsaSignature(signature: Uint8Array): Uint8Array {
     throw new TypeError("ECDSA DER signature contains trailing bytes.");
   }
   return concatBytes(leftPadTo32(r.value), leftPadTo32(s.value));
+}
+
+function tryNormalizeHostedDomainRootEnvelopeAuthoritySignature(
+  signature: string,
+): Uint8Array | null {
+  try {
+    return normalizeP256EcdsaSignature(decodeBase64(signature));
+  } catch {
+    return null;
+  }
 }
 
 function readDerLength(bytes: Uint8Array, offset: number): { length: number; nextOffset: number } {

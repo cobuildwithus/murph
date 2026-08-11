@@ -158,7 +158,8 @@ Updated: 2026-08-11
   signature verification failure. Missing historical verify keys, runtime
   config assembly, public-key import/runtime failures, and other availability
   failures now escape as retryable preparation failures before setup lock or
-  deletion.
+  deletion. Signature encoding remains owned by one shared runtime-state
+  predicate rather than a second app-local DER parser.
 - Added real-classifier pending-setup proof for replacement-line recovery:
   a root signed by a historical authority key remains unconsumed when that key
   is absent from the Web verify keyring, then claims after the verify-only key
@@ -168,6 +169,7 @@ Updated: 2026-08-11
   passed; web focused tests 2 files/58 tests passed; pending-group matrix
   7 files/383 tests passed; package and web typechecks passed; focused ESLint,
   `git diff --check`, and privacy scan passed.
-- Real PostgreSQL rerun was blocked by local database availability:
-  `pg_isready -h 127.0.0.1 -p 5432` reported no response, and the gated suite
-  failed before exercising code with Prisma `unreachable` errors.
+- The final real PostgreSQL rerun passed 1 file/4 tests against the
+  session-owned PostgreSQL 14 cluster configured with `max_connections=50`;
+  the earlier default-port attempt failed before exercising code because it
+  did not target that cluster.
