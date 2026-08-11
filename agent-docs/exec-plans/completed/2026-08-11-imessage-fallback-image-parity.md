@@ -1,6 +1,6 @@
 # iMessage fallback image parity
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -42,7 +42,7 @@ Updated: 2026-08-11
 3. [x] Implement the smallest shared renderer correction and update all studies.
 4. [x] Add focused structural and real-raster regression coverage.
 5. [x] Capture and inspect corrected fallback images beside native references.
-6. [ ] Complete focused verification, review gates, exact-head CI, and PR handoff.
+6. [x] Complete focused verification, review gates, exact-head CI, and PR handoff.
 
 ## Verification
 
@@ -63,3 +63,7 @@ shared-header grid or genuinely overwide stacked fields. A production-route
 regression proves the narrow four-column/eight-row case shrank from 1,200×6,259
 to 1,200×1,129, and refreshed desktop/mobile catalog captures prove the grid and
 canonical SVG badge remain contained.
+ReviewGPT round 3 returned `PASS` with no findings on the resulting substantive
+head, and every required GitHub check passed on that head. Physical
+provider/no-extension composition remains the declared pre-rollout release gate.
+Completed: 2026-08-11
