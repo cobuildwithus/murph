@@ -2273,7 +2273,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               preparationWake ? [preparationWake] : [],
             );
           }
-          if (consumeForegroundWake()) {
+          if (hostAbortObserved || consumeForegroundWake()) {
             return { preempted: true, prepared: preparation !== null };
           }
           const recordItem = readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
@@ -2297,7 +2297,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               generatedAt: new Date().toISOString(),
               platform: foregroundRuntime.platform,
               runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-              signal: runtimeAbortController.signal,
+              signal: hostAbortSignal
+                ? AbortSignal.any([runtimeAbortController.signal, hostAbortSignal])
+                : runtimeAbortController.signal,
               timeoutMs: null,
               vaultRoot: restored.vaultRoot,
               workspace: activeWorkspace,
@@ -2324,7 +2326,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               foregroundWakeObserved = true;
             }
             consumeForegroundWake();
-            return { preempted: foregroundWakeObserved, prepared: true };
+            return {
+              preempted: foregroundWakeObserved || hostAbortObserved,
+              prepared: true,
+            };
           }
           const recordWakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
             enabled: true,

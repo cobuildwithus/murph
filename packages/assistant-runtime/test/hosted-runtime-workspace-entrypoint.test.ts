@@ -11372,16 +11372,14 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(hostAbortController.signal.aborted, true);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
       assert.equal(deviceSyncPort.applyUpdatesCalls, 1);
-      assert.equal(browserWriteCalls, 1);
-      assert.equal(browserPublishCalls, 1);
+      assert.equal(browserWriteCalls, 0);
+      assert.equal(browserPublishCalls, 0);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
-        "idle_shutdown",
         "idle_shutdown",
       ]);
       assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
       assert.equal(checkpointRequests[1]?.expectedWorkspaceVersion, "1");
-      assert.equal(checkpointRequests[2]?.expectedWorkspaceVersion, "2");
       assert.equal(
         typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
         "string",
@@ -11390,10 +11388,6 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests[1]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "0",
       );
-      assert.equal(
-        checkpointRequests[2]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        "1",
-      );
       assert.equal(typeof checkpointRequests[1]?.nextWakeAt, "string");
       // The canonical write may make an immediate assistant snapshot refresh
       // earlier than the device continuation; either wake must be checkpointed.
@@ -11401,9 +11395,14 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests[1]?.nextWakeReason ?? "",
         /^(assistant|device-sync\.reconcile)$/u,
       );
-      assert.equal(checkpointRequests[2]?.nextWakeAt, "2026-04-27T00:05:00.000Z");
-      assert.equal(checkpointRequests[2]?.nextWakeReason, "device-sync.reconcile");
-      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      const retainedState = await readHostedSystemMailboxState(vaultRoot);
+      const retained = retainedState.pending.find((item) => item.itemId === deviceItem.id);
+      assert.equal(retained?.status, "recording");
+      assert.deepEqual(retained?.postCheckpointRecord, {
+        kind: "device-sync.dirty-processed-batch",
+        nextWakeAt: "2026-04-27T00:05:00.000Z",
+        records: [],
+      });
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
