@@ -705,13 +705,22 @@ describe('hosted domain dynamic tools', () => {
     if (!regeneratedRequestA) {
       throw new Error('Expected a regenerated create-only automation request.')
     }
-    await executeMurphDynamicToolRequest({
+    const replayedAResult = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext,
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
       request: regeneratedRequestA,
+    })
+    expect(readResultPayload(replayedAResult)).toMatchObject({
+      action: 'save',
+      created: false,
+      nextOccurrenceAt: '2026-08-12T00:00:00.000Z',
+      replayed: true,
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+      status: 'active',
+      timingVerified: true,
     })
     const requestB = createRequest({
       instructions: 'Send the Lakeside appointment reminder.',

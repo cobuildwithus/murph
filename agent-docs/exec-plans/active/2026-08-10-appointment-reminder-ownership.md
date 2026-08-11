@@ -253,6 +253,38 @@ key derivation into the canonical automation store while the direct-email
 envelope rotates, then verifies stable A replay, independent B ownership,
 foreign-ref refusal, route preservation, exact reschedule, and exact archive.
 
+## Review cap retrospective — round 7
+
+ReviewGPT found that the skill correctly accepted both a new create and an
+exact create-only replay, but its later failure-reporting sentence still
+classified every result without `created: true` as a reminder that was not
+created or changed. The central ambiguous-result recovery path therefore
+returned a valid existing owner while leaving the model contradictory
+instructions about whether to report success.
+
+The requirement-level decisions are:
+
+- Initial reminder success has two disjoint proofs: a new owner with `created:
+  true`, or exact recovery with `created: false` and `replayed: true`.
+- A verified replay is never a creation failure. The response reports the
+  returned owner's actual status; when it is active and timing is verified, it
+  states that the existing reminder was recovered at the returned local time
+  and preserves the normal move/cancel control.
+- Initial failure reporting applies only when the result proves neither a new
+  owner nor an exact recovered owner. Appointment confirmation remains separate
+  from reminder-write failure.
+- Credential-gated real App Server creation scenarios must receive the same
+  concrete host-derived appointment source ref that production prompt assembly
+  provides. Raw prompts without that ref do not prove the create-only path.
+- Durable identity is the host-resolved accepted input plus its source-local
+  ordinal. Current conversation route authorizes and delivers the operation but
+  does not participate in the owner hash.
+
+This is the seventh substantive review round. The accepted finding will be
+fixed and verified, but the repository's hard cap forbids an automatic eighth
+round or merge without a later `ROUND_OUTCOME: PASS`. After the correction,
+the review loop pauses for an explicit continuation decision.
+
 ## Tasks
 
 1. [x] Add canonical create-only ownership and hosted current-conversation list.

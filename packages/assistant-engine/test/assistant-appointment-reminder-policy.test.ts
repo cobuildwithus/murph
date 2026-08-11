@@ -130,6 +130,18 @@ describe('assistant appointment reminder policy', () => {
       'the reminder was saved but no delivery time was verified',
     )
     expect(normalizedSkill).toContain(
+      'An initial result with `created: false` and `replayed: true` means the exact existing reminder was recovered, never that creation failed',
+    )
+    expect(normalizedSkill).toContain(
+      'say that the existing reminder remains active at the returned verified local time and that the member can move or cancel it by replying',
+    )
+    expect(normalizedSkill).toContain(
+      'an initial result proves neither a new owner with `created: true` nor exact recovery with `created: false` and `replayed: true`',
+    )
+    expect(normalizedSkill).not.toContain(
+      'an initial result does not prove `created: true`',
+    )
+    expect(normalizedSkill).toContain(
       'distinguish the still-confirmed appointment from the reminder that was not created or changed',
     )
     expect(normalizedSkill).toContain(

@@ -64,6 +64,9 @@ import {
   appendAssistantTranscriptEntries,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
+import {
+  createAssistantAppointmentReminderSourceRef,
+} from '../src/assistant/appointment-reminder-source-ref.ts'
 import type {
   AssistantHostedAutomationToolRequest,
   AssistantHostedAutomationToolResponse,
@@ -4582,7 +4585,7 @@ describeRealCodex('real Codex support escalation e2e', () => {
 
 describeRealCodex('real Codex appointment reminder e2e', () => {
   it(
-    'keeps one opaque appointment reminder owner through reschedule and cancellation replies',
+    'reports a lost-result replay as active, then preserves its owner through lifecycle replies',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -4600,6 +4603,7 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
       let storedStatus: 'active' | 'archived' | 'paused' = 'active'
       let storedSummary: string | null = null
       let storedTitle = ''
+      let discardedInitialSaveResult = false
 
       try {
         const skillsRoot = path.join(workingDirectory, 'skills')
@@ -4650,21 +4654,25 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
                   throw new Error('Appointment reminders do not reconcile.')
                 }
                 if (request.action === 'save') {
-                  if (storedSchedule !== null) {
-                    throw new Error('The appointment reminder owner already exists.')
+                  if (storedSchedule === null) {
+                    storedSchedule = request.schedule
+                    storedStatus = request.status ?? 'active'
+                    storedSummary = request.summary ?? null
+                    storedTitle = request.title
+                    discardedInitialSaveResult = true
+                    throw new Error(
+                      'The appointment reminder committed, but its result was lost.',
+                    )
                   }
-                  storedSchedule = request.schedule
-                  storedStatus = request.status ?? 'active'
-                  storedSummary = request.summary ?? null
-                  storedTitle = request.title
                   return {
                     action: 'save',
                     ...owner,
-                    created: true,
+                    created: false,
                     effectiveTimeZone: null,
-                    nextOccurrenceAt: request.schedule.kind === 'at'
-                      ? request.schedule.at
+                    nextOccurrenceAt: storedSchedule.kind === 'at'
+                      ? storedSchedule.at
                       : null,
+                    replayed: true,
                     routeBinding: 'current_conversation',
                     schedule: storedSchedule,
                     status: storedStatus,
@@ -4724,11 +4732,14 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
         }
         const created = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: [
-            'My Midtown Clinic appointment is confirmed for August 12, 2026',
-            'at 9:30 AM Eastern. Please handle the normal private follow-through',
-            'for this confirmed appointment and tell me what you did.',
-          ].join(' '),
+          prompt: buildRealCodexAppointmentReminderPrompt({
+            acceptedInputId: 'assistant_input_appointment',
+            message: [
+              'My Midtown Clinic appointment is confirmed for August 12, 2026',
+              'at 9:30 AM Eastern. Please handle the normal private follow-through',
+              'for this confirmed appointment and tell me what you did.',
+            ].join(' '),
+          }),
         })
 
         expectAppointmentSkillRead(readCapabilityRoutingActions(created.jsonEvents))
@@ -4752,8 +4763,29 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
         expect(initialListRequests.some((request) =>
           request.action === 'list' && request.exactTag === undefined
         )).toBe(true)
-        expect(initialSaveRequests).toHaveLength(1)
-        expect(initialSaveRequests[0]).toMatchObject({
+        expect(discardedInitialSaveResult).toBe(true)
+        expect(initialSaveRequests).toHaveLength(2)
+        expect(initialSaveRequests).toEqual([
+          expect.objectContaining({
+            action: 'save',
+            continuityPolicy: 'preserve',
+            createOnly: true,
+            createOnlyEffectKey: 'appointment-reminder:1',
+            createOnlySourceRef: createAssistantAppointmentReminderSourceRef(
+              'assistant_input_appointment',
+            ),
+          }),
+          expect.objectContaining({
+            action: 'save',
+            continuityPolicy: 'preserve',
+            createOnly: true,
+            createOnlyEffectKey: 'appointment-reminder:1',
+            createOnlySourceRef: createAssistantAppointmentReminderSourceRef(
+              'assistant_input_appointment',
+            ),
+          }),
+        ])
+        expect(initialSaveRequests[1]).toMatchObject({
           action: 'save',
           continuityPolicy: 'preserve',
           createOnly: true,
@@ -4767,12 +4799,18 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
           summary: expect.stringMatching(/midtown.{0,80}august 12.{0,80}9:30/iu),
           title: expect.stringMatching(/midtown.{0,80}august 12.{0,80}9:30/iu),
         })
-        expect(initialSaveRequests[0]).not.toHaveProperty('automationId')
-        expect(initialSaveRequests[0]).not.toHaveProperty('slug')
+        expect(initialSaveRequests[1]).not.toHaveProperty('automationId')
+        expect(initialSaveRequests[1]).not.toHaveProperty('slug')
         expect(created.finalMessage).toMatch(
           /8(?::00)?\s*p\.?m\.?|20:00/iu,
         )
+        expect(created.finalMessage).toMatch(
+          /reminder.{0,60}(?:active|recovered)|(?:active|recovered).{0,60}reminder/iu,
+        )
         expect(created.finalMessage).toMatch(/move|cancel/iu)
+        expect(created.finalMessage).not.toMatch(
+          /reminder.{0,60}(?:not created|wasn't created|was not created)/iu,
+        )
 
         const rescheduleRequestStart = requests.length
         const rescheduled = await executeRealCodexAppServerTurn({
@@ -7080,7 +7118,10 @@ async function executeRealCodexAppointmentReminderScenario(input: {
       hostedToolContext,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
-      prompt: input.prompt,
+      prompt: buildRealCodexAppointmentReminderPrompt({
+        acceptedInputId: 'assistant_input_appointment',
+        message: input.prompt,
+      }),
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -7094,6 +7135,18 @@ async function executeRealCodexAppointmentReminderScenario(input: {
   } finally {
     await removeRealCodexTemporaryPaths([workingDirectory])
   }
+}
+
+function buildRealCodexAppointmentReminderPrompt(input: {
+  acceptedInputId: string
+  message: string
+}): string {
+  return [
+    'Input 1:',
+    `Appointment source ref: ${createAssistantAppointmentReminderSourceRef(input.acceptedInputId)}`,
+    '',
+    input.message,
+  ].join('\n')
 }
 
 function expectAppointmentSkillRead(actions: CapabilityRoutingAction[]): void {

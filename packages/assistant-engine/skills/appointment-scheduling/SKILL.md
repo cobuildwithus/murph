@@ -393,10 +393,15 @@ completion. After a verified save or reschedule, state the verified local
 reminder time and say that the member can move or cancel it by replying. When
 `timingVerified` is false, say the reminder was saved but no delivery time was
 verified, state no invented clock time, and offer the existing bounded
-inspect-or-update recovery. When the write fails or an initial result does not
-prove `created: true`, distinguish the still-confirmed appointment from the
-reminder that was not created or changed. For an opt-out, make no reminder
-claim.
+inspect-or-update recovery. An initial result with `created: false` and
+`replayed: true` means the exact existing reminder was recovered, never that
+creation failed. Report its actual returned status; when it is active and its
+timing is verified, say that the existing reminder remains active at the
+returned verified local time and that the member can move or cancel it by
+replying. When the write fails or an initial result proves neither a new owner
+with `created: true` nor exact recovery with `created: false` and `replayed:
+true`, distinguish the still-confirmed appointment from the reminder that was
+not created or changed. For an opt-out, make no reminder claim.
 
 ## Verify and report
 
