@@ -53,6 +53,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Expose pinned workspace Codex CLI for hosted-local model catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          codex_bin_dir="$GITHUB_WORKSPACE/packages/assistant-engine/node_modules/.bin"
+          echo "${codex_bin_dir}" >> "$GITHUB_PATH"
+          "${codex_bin_dir}/codex" --version
+
       - name: Install Chromium
         run: pnpm --dir apps/web exec playwright install --with-deps chromium
 

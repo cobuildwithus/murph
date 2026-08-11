@@ -90,6 +90,8 @@ policy version on the referral receipt; every active-mission snapshot, grant,
 completion notice, and Settings projection thereafter derives the day estimate
 from those persisted facts.
 
+Referral rewards add usage capacity but never mint another Starter grant.
+
 ## Stable signup referral links
 
 Every eligible signed-in member has one deterministic, signed referral URL:

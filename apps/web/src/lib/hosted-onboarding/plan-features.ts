@@ -1,5 +1,3 @@
-import { HOSTED_PULSE_TRIAL_DAYS } from "./billing-plans";
-
 // Single source of truth for the member-facing selling points on every plan
 // card. Surfaces intentionally differ — the join page markets a plan to
 // someone deciding to sign up, while settings and the plan dialogs compare
@@ -10,12 +8,6 @@ import { HOSTED_PULSE_TRIAL_DAYS } from "./billing-plans";
 // model requires their shared premium runtime entitlement
 // (ASSISTANT_MODEL_SOL_REQUIRES_EDGE), so that claim on Pulse or Core would
 // promise something the product blocks.
-
-export const PULSE_TRIAL_FEATURES = [
-  `Full Pulse access for ${HOSTED_PULSE_TRIAL_DAYS} days`,
-  "Card required. Then $8/month unless canceled.",
-  "Cancel anytime",
-] as const;
 
 export const JOIN_PULSE_FEATURES = [
   "Private personal health assistant",

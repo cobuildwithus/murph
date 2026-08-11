@@ -3758,11 +3758,14 @@ describe("hosted Family plan", () => {
   });
 
   it.each([
-    ["paid", HostedBillingStatus.active],
-    ["trial", HostedBillingStatus.active],
-    ["past due", HostedBillingStatus.past_due],
+    ["not-started", HostedBillingStatus.not_started],
+    ["incomplete", HostedBillingStatus.incomplete],
+    ["active", HostedBillingStatus.active],
+    ["past-due", HostedBillingStatus.past_due],
+    ["paused", HostedBillingStatus.paused],
+    ["unpaid", HostedBillingStatus.unpaid],
   ])(
-    "does not silently sponsor a member with a live direct %s subscription",
+    "does not silently sponsor a member with a bound %s direct subscription",
     async (_label, billingStatus) => {
       const tx = createTxMock();
       tx.hostedMember.findUnique.mockResolvedValueOnce({
@@ -3785,6 +3788,27 @@ describe("hosted Family plan", () => {
       expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     },
   );
+
+  it("admits a migrated Starter member after legacy retirement clears the binding", async () => {
+    const tx = createTxMock();
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      billingRef: null,
+      billingStatus: HostedBillingStatus.active,
+    });
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
+
+    await expect(acceptHostedFamilyInviteTx({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      status: "active",
+    });
+
+    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledOnce();
+  });
 
   it("admits a member only after the bound direct subscription is canceled", async () => {
     const tx = createTxMock();

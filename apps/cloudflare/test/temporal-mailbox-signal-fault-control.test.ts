@@ -4,7 +4,7 @@ import {
   armTemporalMailboxSignalFaultForTest,
   clearTemporalMailboxSignalFaultForTest,
   consumeTemporalMailboxSignalFaultForTest,
-} from "./support/temporal-mailbox-signal-fault-control.ts";
+} from "../src/hosted-local-test/temporal-mailbox-signal-fault-control.ts";
 
 const userId = "retell-fault-user";
 const mailboxItemId = "mailbox-item-1";

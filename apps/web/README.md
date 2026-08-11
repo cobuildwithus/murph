@@ -894,7 +894,7 @@ Hosted AI usage metering:
   history.
   Durable celebration copy is unnamed. Unlinked Telegram group evidence stays
   silent and outside assistant access; direct setup behavior is unchanged.
-- Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.
+- Web owns the separate `murph.subscription` callback for an explicit private member choice to start an eligible paid plan or change an existing paid plan. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Starter-to-paid activation uses the ordinary Stripe-hosted checkout boundary; paid plan changes retain their existing Customer Portal or schedule owner. No custom checkout or second billing owner is introduced.
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Web applies the composed access-and-usage gate in runtime reconciliation and
   mailbox fetch/payload routes before exhausted work reaches the runner.
@@ -902,7 +902,7 @@ Hosted AI usage metering:
   receives no billing or credit projection. Runtime usage is recorded after it
   exists.
 - Assistant usage recording may carry the exact authority-bound originating Linq group route for a proactive thread-cap crossing notice. Web reuses the existing claimed Linq delivery path, never derives a group target from personal home routing, and keeps the next-inbound gate notice as the backstop when the target is missing or ambiguous.
-- Pulse Trial uses the same enforced allowance system with a phase-aware 4.50 USD threshold. Trial members cannot buy usage credit; paid phase is authoritative for normal Pulse allowance, while stale or malformed trial entitlement fails admission before any calendar fallback.
+- Starter access uses the same enforced allowance system with one non-expiring $4.50 ledger grant and a lifetime usage meter. Account age and historical trial timestamps are not admission inputs. Paid phase remains authoritative for recurring plan allowance, while purchased and referral credit continue to compose through the same credit ledger.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
@@ -1072,6 +1072,12 @@ hostname mismatch before provider authorization begins.
 
 Set these under `Settings -> Environment Variables` in the Vercel project that
 deploys `apps/web`. Production is the minimum.
+
+Keep `MURPH_ANDROID_APP_ENABLED` unset or set to `0` until the Android app is
+public. Only the exact value `1` reveals Android-only Connect Devices and design
+catalog content. Enabling the complete journey also requires the same flag in
+the Cloudflare GitHub Environment so new runner containers receive matching
+assistant guidance; follow the tandem activation order in `apps/cloudflare/DEPLOY.md`.
 
 Provision `HOSTED_APP_SESSION_HMAC_KEY` in every hosted-web environment that
 will serve authenticated traffic before deploying the strict v2 session code.
@@ -1795,11 +1801,11 @@ The onboarding lane is intentionally thin:
   successful hosted completion issues a strict opaque v2 app session whose
   database row stores a dedicated-key HMAC over its bearer, session id, member,
   Privy identity, and expiry. Legacy unsigned cookies are rejected.
-- Hosted onboarding Checkout uses subscription mode. `invoice.paid` remains
-  the normal positive entitlement source, with one metadata-gated exception: a
-  valid Pulse Trial Checkout completion can activate Pulse in `trial` phase.
-  The separate authenticated Settings usage-credit flow uses one-time payment
-  mode and never changes entitlement.
+- Hosted onboarding grants one non-expiring starter-usage balance without
+  creating Stripe state. Paid-plan Checkout uses subscription mode and
+  `invoice.paid` is the positive subscription-entitlement source. The separate
+  authenticated Settings usage-credit flow uses one-time payment mode and
+  never changes subscription entitlement.
 - Hosted webhook receipts are retry journals for receipt-local side effects,
   not a second execution lifecycle authority.
 - Temporal-bound execution from onboarding and exact message ingress appends
@@ -1814,16 +1820,15 @@ The onboarding lane is intentionally thin:
 
 Current hosted billing assumptions:
 
-- Hosted onboarding Checkout uses Stripe subscription mode. Current one-time
-  Checkout uses the fixed usage-credit catalog for eligible personal, hosted
-  group, and Family-member destinations.
+- Starter enrollment requires no Checkout. Paid hosted onboarding uses Stripe
+  subscription mode, while current one-time Checkout uses the fixed
+  usage-credit catalog for eligible personal, hosted group, and Family-member
+  destinations.
 - The launch tiers are monthly Stripe subscription prices; annual checkout is disabled for now.
 - `invoice.paid` is the paid activation and paid-cycle source of truth.
-- `checkout.session.completed` normally binds refs only, except for the
-  Pulse Trial offer (`pulse_trial_7d`) when metadata, member ownership, and
-  the expanded/retrieved subscription prove an active policy-bound trial.
-- `customer.subscription.*` does not newly activate access and cannot promote
-  a Pulse Trial to paid before the accepted paid invoice.
+- `checkout.session.completed` binds subscription references only;
+  `customer.subscription.*` does not newly activate paid access before the
+  accepted paid invoice.
 - Subscription chargebacks, disputes, and refunds suspend hosted access pending
   manual review. Matching usage-credit financial reversals are intercepted
   before subscription handling. Live financial-state changes append capped
@@ -1831,17 +1836,10 @@ Current hosted billing assumptions:
   credit, with positive entries restoring only value previously revoked.
   Reconciliation failures remain in the durable Stripe retry lane and never
   silently suspend the subscription.
-- No-card Pulse Trial signup is the default checkout-stage path when billing is
-  configured and messaging setup is complete. Set
-  `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
-- Card-based Pulse Trial checkout fallback is gated by
-  `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.
-- `/ops/trials` is the operator-only manual Pulse Trial extension surface. Enter
-  exactly one hosted member ID and Preview before Apply. Preview reads the
-  member's current local billing record and exact Stripe subscription without
-  mutation. Apply checks the same short-lived opaque proof under the shared
-  hosted-member Stripe mutation lock, adds exactly seven days, and reconciles
-  the local trial and usage-period window in that operation.
+- New eligible hosted members receive one semantic-keyed $4.50 starter grant
+  through the existing usage-credit ledger. Duplicate web, companion, invite,
+  retry, and direct-iMessage enrollment paths converge on that grant. There is
+  no trial expiry, trial-extension operation, or new-user Stripe subscription.
 - `/ops/usage` is the operator-only allowance inspection and recovery surface.
   It derives personal-member and synthetic-group message activity from retained
   canonical mailbox rows, derives all-time priced AI cost from immutable usage
@@ -1861,18 +1859,15 @@ Current hosted billing assumptions:
   delivery ID and provider idempotency key. Generic runtime and webhook
   delivery fences keep deterministic durable IDs for latency and receipt
   correlation.
-- A live `trialing` Pulse Trial extends from its current Stripe trial end. A
-  lapsed `paused` no-card Pulse Trial restarts for seven days from Preview time.
-  The proof expires after 15 minutes. Active Family sponsorship and paid,
-  scheduled, canceling, canceled, incomplete, past-due, unpaid, foreign, or
-  otherwise mismatched direct billing are displayed as ineligible and are never
-  mutated. The route does not search for members, process cohorts or batches,
-  or clean up provider subscriptions.
-- Stripe reads and writes use one 80-second attempt. Apply gives the member lock
-  at most 25 seconds to acquire and the locked transaction at most 190 seconds.
-  The provider update uses no proration and carries a proof-derived idempotency
-  key and metadata marker. A retry after Stripe success reconciles local billing
-  instead of adding another seven days.
+- Delayed legacy Stripe trial objects remain eligible only for exact bounded
+  reconciliation or cleanup. They cannot create, extend, or restore free
+  access; starter capacity and paid invoices are the current authorities.
+- Drain those objects only through `pnpm stripe:retire-legacy-pulse-trials
+  --stripe-mode=<test|live>`: dry-run is the default, apply requires the exact
+  observed candidate count, and any provider state that may represent paid
+  service aborts preflight. Remove the compatibility owner only after old trial
+  creators are gone, the dry-run reports zero, and the delayed-event horizon has
+  passed.
 - `/ops/email` is the operator-only member email composer. It accepts up to 100
   explicit hosted member IDs plus one plain-text subject and body. Preview
   resolves verified email first and falls back to the stored Stripe checkout
