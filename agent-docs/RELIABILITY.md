@@ -437,6 +437,9 @@ Last verified: 2026-08-10
   after the owner boundary proves the original group no longer exists. The
   explicit use-invite response is idempotent after cleanup commits, so response
   loss returns the already-validated invite without recreating billing state.
+  Before cleanup, the recovery projection owns the exact group and Checkout
+  attempt; replay and abandonment require that same pair, and reject a changed
+  group or attempt before any provider cleanup can affect the replacement.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a

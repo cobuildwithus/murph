@@ -409,6 +409,21 @@ export type HostedFamilyDraftRecoveryState =
   | "not_abandonable"
   | "recovery_required";
 
+export type HostedFamilyDraftRecoveryProjection =
+  | {
+      state: Exclude<HostedFamilyDraftRecoveryState, "checkout_starting">;
+    }
+  | {
+      checkoutAttemptId: string;
+      groupId: string;
+      state: "checkout_starting";
+    };
+
+type HostedFamilyCheckoutClaimProof = {
+  checkoutAttemptId: string;
+  groupId: string;
+};
+
 export interface HostedAccountGroupBillingLookup {
   billingRef: HostedAccountGroupBillingRefSnapshot;
   group: HostedAccountGroupAccessSnapshot;
@@ -1040,6 +1055,7 @@ export async function readHostedFamilyBillingRecoveryForOwner(input: {
  * wins and the draft is preserved.
  */
 export async function abandonHostedFamilyDraftForOwner(input: {
+  expectedCheckoutClaim?: HostedFamilyCheckoutClaimProof;
   now?: Date;
   ownerMemberId: string;
   prisma?: PrismaClient;
@@ -1052,6 +1068,16 @@ export async function abandonHostedFamilyDraftForOwner(input: {
   });
   if (!draft) {
     return { abandoned: false };
+  }
+  if (
+    input.expectedCheckoutClaim
+    && (
+      draft.id !== input.expectedCheckoutClaim.groupId
+      || draft.billingRef?.checkoutAttemptId
+        !== input.expectedCheckoutClaim.checkoutAttemptId
+    )
+  ) {
+    throw buildHostedFamilyDraftChangedError();
   }
 
   const candidate = await prepareHostedFamilyDraftAbandonmentCandidate({
@@ -2350,7 +2376,7 @@ export async function createHostedFamilyBillingCheckout(input: {
   now?: Date;
   ownerMemberId: string;
   prisma?: PrismaClient;
-  requireExistingCheckoutAttempt?: boolean;
+  requiredCheckoutAttemptId?: string;
   seatCount?: unknown;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
   let restartAllowed = true;
@@ -2379,7 +2405,7 @@ async function createOrResumeHostedFamilyBillingCheckout(
     now?: Date;
     ownerMemberId: string;
     prisma?: PrismaClient;
-    requireExistingCheckoutAttempt?: boolean;
+    requiredCheckoutAttemptId?: string;
     seatCount?: unknown;
   },
 ): Promise<
@@ -2388,7 +2414,8 @@ async function createOrResumeHostedFamilyBillingCheckout(
 > {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const requestedSeatCount = input.requireExistingCheckoutAttempt
+  const requiredCheckoutAttemptId = input.requiredCheckoutAttemptId ?? null;
+  const requestedSeatCount = requiredCheckoutAttemptId
     ? null
     : normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
   const checkoutInput: HostedFamilyBillingCheckoutInput = await prisma.$transaction(async (tx) => {
@@ -2399,6 +2426,9 @@ async function createOrResumeHostedFamilyBillingCheckout(
       },
     });
     if (!group || group.ownerMemberId !== input.ownerMemberId) {
+      if (requiredCheckoutAttemptId) {
+        throw buildHostedFamilyDraftChangedError();
+      }
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_OWNER_REQUIRED",
         httpStatus: 403,
@@ -2413,7 +2443,7 @@ async function createOrResumeHostedFamilyBillingCheckout(
       };
     }
     await assertHostedFamilyOwnerCanStartBillingTx({
-      allowDirectPaidOwner: !input.requireExistingCheckoutAttempt
+      allowDirectPaidOwner: !requiredCheckoutAttemptId
         && input.allowDirectPaidUpgrade !== false,
       groupId: group.id,
       ownerMemberId: group.ownerMemberId,
@@ -2432,22 +2462,25 @@ async function createOrResumeHostedFamilyBillingCheckout(
       });
     }
     const currentAttemptId = currentBillingRef?.checkoutAttemptId ?? null;
-    if (input.requireExistingCheckoutAttempt && !currentAttemptId) {
+    if (
+      requiredCheckoutAttemptId
+      && currentAttemptId !== requiredCheckoutAttemptId
+    ) {
       throw buildHostedFamilyDraftChangedError();
     }
     if (
-      input.requireExistingCheckoutAttempt
+      requiredCheckoutAttemptId
       && currentBillingRef?.checkoutSeatCount == null
     ) {
       throw buildHostedFamilyDraftRecoveryRequiredError();
     }
-    const seatCount = input.requireExistingCheckoutAttempt
+    const seatCount = requiredCheckoutAttemptId
       ? normalizeHostedFamilySeatCount(currentBillingRef?.checkoutSeatCount)
       : requestedSeatCount;
     if (seatCount === null) {
       throw new TypeError("Family checkout seat count was not resolved.");
     }
-    const directPaidUpgrade = input.requireExistingCheckoutAttempt
+    const directPaidUpgrade = requiredCheckoutAttemptId
       || input.allowDirectPaidUpgrade === false
       ? null
       : await readHostedFamilyDirectPaidUpgradeInputTx({
@@ -6204,7 +6237,7 @@ export async function readHostedFamilyDraftRecoveryStateForOwner(input: {
   now?: Date;
   ownerMemberId: string;
   prisma?: HostedOnboardingReadClient;
-}): Promise<HostedFamilyDraftRecoveryState | null> {
+}): Promise<HostedFamilyDraftRecoveryProjection | null> {
   const prisma = input.prisma ?? getPrisma();
   const draft = await readHostedFamilyOwnerDraftRecord({
     ownerMemberId: input.ownerMemberId,
@@ -6215,29 +6248,38 @@ export async function readHostedFamilyDraftRecoveryStateForOwner(input: {
   }
   const state = classifyHostedFamilyOwnerDraft(draft, input.ownerMemberId);
   if (state === "checkout_inconsistent") {
-    return "recovery_required";
+    return { state: "recovery_required" };
   }
   if (state === "billing_authority" || draft.suspendedAt) {
-    return "recovery_required";
+    return { state: "recovery_required" };
   }
   if (await hasHostedFamilyMemberLiveDirectSubscription({
     memberId: input.ownerMemberId,
     prisma,
   })) {
-    return "not_abandonable";
+    return { state: "not_abandonable" };
   }
   if (state === "inert" || state === "checkout_bound") {
-    return "abandonable";
+    return { state: "abandonable" };
   }
   if (state === "checkout_starting") {
-    return hostedFamilyCheckoutClaimIsWithinSafeReplayWindow({
+    if (!hostedFamilyCheckoutClaimIsWithinSafeReplayWindow({
       checkoutCreatedAt: draft.billingRef?.checkoutCreatedAt ?? null,
       now: input.now ?? new Date(),
-    })
-      ? "checkout_starting"
-      : "recovery_required";
+    })) {
+      return { state: "recovery_required" };
+    }
+    const checkoutAttemptId = draft.billingRef?.checkoutAttemptId;
+    if (!checkoutAttemptId) {
+      return { state: "recovery_required" };
+    }
+    return {
+      checkoutAttemptId,
+      groupId: draft.id,
+      state: "checkout_starting",
+    };
   }
-  return "not_abandonable";
+  return { state: "not_abandonable" };
 }
 
 function hostedFamilyCheckoutClaimIsWithinSafeReplayWindow(input: {

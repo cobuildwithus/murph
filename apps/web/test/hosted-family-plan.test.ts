@@ -4205,6 +4205,61 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["group", "hbag_original", "hbfca_original"],
+    ["attempt", "hbag_draft", "hbfca_original"],
+  ])(
+    "rejects a replacement %s before provider cleanup",
+    async (_replacementKind, expectedGroupId, expectedCheckoutAttemptId) => {
+      const currentCheckoutAttemptId = "hbfca_replacement";
+      const currentCheckoutSessionId = "cs_test_replacement";
+      const currentDraft = createNeverPaidFamilyDraftRecord({
+        checkoutAttemptId: currentCheckoutAttemptId,
+        checkoutCreatedAt: new Date("2026-08-01T12:10:00.000Z"),
+        checkoutSeatCount: 3,
+        stripeCheckoutSessionId: currentCheckoutSessionId,
+      });
+      const tx = createTxMock();
+      tx.hostedAccountGroup.findUnique
+        .mockResolvedValueOnce(currentDraft)
+        .mockResolvedValueOnce(currentDraft);
+      runtimeMocks.requireHostedStripeApi.mockReturnValue({
+        checkout: {
+          sessions: {
+            retrieve: vi.fn().mockResolvedValue(
+              makeFamilyDraftStripeCheckoutSession({
+                checkoutAttemptId: currentCheckoutAttemptId,
+                sessionId: currentCheckoutSessionId,
+                status: "expired",
+                subscriptionId: null,
+              }),
+            ),
+          },
+        },
+      });
+      const prisma = tx as FamilyPlanTxMock & {
+        $transaction: ReturnType<typeof vi.fn>;
+      };
+      prisma.$transaction = vi.fn((callback) => callback(tx));
+
+      await expect(abandonHostedFamilyDraftForOwner({
+        expectedCheckoutClaim: {
+          checkoutAttemptId: expectedCheckoutAttemptId,
+          groupId: expectedGroupId,
+        },
+        ownerMemberId: "member_mom",
+        prisma: prisma as never,
+      })).rejects.toMatchObject({
+        code: "HOSTED_FAMILY_DRAFT_CHANGED",
+        httpStatus: 409,
+      });
+
+      expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
+    },
+  );
+
   it("preserves a stale unbound Checkout claim without provider proof", async () => {
     const staleDraft = createNeverPaidFamilyDraftRecord({
       checkoutAttemptId: "hbfca_stale_unbound",
@@ -4319,7 +4374,13 @@ describe("hosted Family plan", () => {
         now: new Date("2026-08-01T12:30:00.000Z"),
         ownerMemberId: "member_mom",
         prisma: tx,
-      })).resolves.toBe(expectedState);
+      })).resolves.toEqual(expectedState === "checkout_starting"
+        ? {
+            checkoutAttemptId: "hbfca_recent_projection",
+            groupId: "hbag_draft",
+            state: expectedState,
+          }
+        : { state: expectedState });
     },
   );
 
@@ -4336,7 +4397,7 @@ describe("hosted Family plan", () => {
     await expect(readHostedFamilyDraftRecoveryStateForOwner({
       ownerMemberId: "member_mom",
       prisma: tx,
-    })).resolves.toBe("not_abandonable");
+    })).resolves.toEqual({ state: "not_abandonable" });
   });
 
   it.each([
@@ -7053,7 +7114,7 @@ describe("hosted Family plan", () => {
       now: new Date("2026-07-28T12:00:00.000Z"),
       ownerMemberId: group.ownerMemberId,
       prisma: prisma as never,
-      requireExistingCheckoutAttempt: true,
+      requiredCheckoutAttemptId: "hbfca_existing",
     })).resolves.toEqual({
       alreadyActive: false,
       url: `https://local.withmurph.ai:3443/checkout/family/${sessionId}`,
@@ -7091,13 +7152,65 @@ describe("hosted Family plan", () => {
       groupId: group.id,
       ownerMemberId: group.ownerMemberId,
       prisma: prisma as never,
-      requireExistingCheckoutAttempt: true,
+      requiredCheckoutAttemptId: "hbfca_existing",
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_DRAFT_CHANGED",
       httpStatus: 409,
     });
 
     expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+  });
+
+  it("does not replay a replacement Family attempt during invite recovery", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const replacementAttemptId = "hbfca_replacement";
+    const tx = createTxMock({ billedSeatCount: null, group });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
+      ...createBillingRefMock({
+        checkoutAttemptId: replacementAttemptId,
+        checkoutCreatedAt: new Date("2026-07-28T11:00:00.000Z"),
+        checkoutSeatCount: 2,
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const checkoutCreate = vi.fn().mockResolvedValue(
+      makeFamilyStripeCheckoutSession({
+        cancelUrl: "https://local.withmurph.ai:3443/settings",
+        checkoutAttemptId: replacementAttemptId,
+        sessionId: "cs_test_replacement",
+        status: "open",
+        subscriptionId: null,
+        url: "https://checkout.stripe.test/replacement",
+      }),
+    );
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: { sessions: { create: checkoutCreate } },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      allowDirectPaidUpgrade: false,
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      requiredCheckoutAttemptId: "hbfca_original",
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DRAFT_CHANGED",
+      httpStatus: 409,
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(checkoutCreate).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
   });
 

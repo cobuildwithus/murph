@@ -2341,7 +2341,7 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
     suspendedAt: null,
   });
   mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(
-    "abandonable",
+    { state: "abandonable" },
   );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");

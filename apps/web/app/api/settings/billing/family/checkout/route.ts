@@ -41,18 +41,22 @@ export const POST = withJsonError(async (request: Request) => {
       message: "Family invite return path is required for invite recovery.",
     });
   }
+  let inviteRecovery: {
+    checkoutAttemptId: string;
+    groupId: string;
+  } | null = null;
   if (abandonForInvite) {
-    const recoveryState = await readHostedFamilyDraftRecoveryStateForOwner({
+    const recovery = await readHostedFamilyDraftRecoveryStateForOwner({
       ownerMemberId: auth.member.id,
       prisma,
     });
-    if (recoveryState === null) {
+    if (recovery === null) {
       return jsonOk({
         alreadyActive: false,
         url: familyInviteReturnPath,
       });
     }
-    if (recoveryState !== "checkout_starting") {
+    if (recovery.state !== "checkout_starting") {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_DRAFT_CHANGED",
         httpStatus: 409,
@@ -60,6 +64,7 @@ export const POST = withJsonError(async (request: Request) => {
         retryable: true,
       });
     }
+    inviteRecovery = recovery;
   }
 
   const group = abandonForInvite
@@ -86,6 +91,14 @@ export const POST = withJsonError(async (request: Request) => {
       retryable: true,
     });
   }
+  if (inviteRecovery && group.id !== inviteRecovery.groupId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_DRAFT_CHANGED",
+      httpStatus: 409,
+      message: "Family setup changed before invite recovery started. Refresh and try again.",
+      retryable: true,
+    });
+  }
 
   const checkout = await createHostedFamilyBillingCheckout({
     allowDirectPaidUpgrade: !abandonForInvite,
@@ -95,10 +108,13 @@ export const POST = withJsonError(async (request: Request) => {
     groupId: group.id,
     ownerMemberId: auth.member.id,
     prisma,
-    requireExistingCheckoutAttempt: abandonForInvite,
+    requiredCheckoutAttemptId: inviteRecovery?.checkoutAttemptId,
     seatCount: abandonForInvite ? undefined : body.seatCount,
   });
   if (abandonForInvite) {
+    if (!inviteRecovery) {
+      throw new TypeError("Family invite recovery claim was not resolved.");
+    }
     if (checkout.alreadyActive || !checkout.url) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_DRAFT_BILLING_SYNCING",
@@ -108,6 +124,10 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }
     const abandonment = await abandonHostedFamilyDraftForOwner({
+      expectedCheckoutClaim: {
+        checkoutAttemptId: inviteRecovery.checkoutAttemptId,
+        groupId: inviteRecovery.groupId,
+      },
       ownerMemberId: auth.member.id,
       prisma,
     });

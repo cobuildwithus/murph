@@ -777,13 +777,15 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
-  const familyDraftRecoveryState: HostedFamilyDraftRecoveryState | null =
+  const familyDraftRecovery =
     familyOwner?.billingStatus === "not_started"
       ? await readHostedFamilyDraftRecoveryStateForOwner({
           ownerMemberId: memberId,
           prisma,
         })
       : null;
+  const familyDraftRecoveryState: HostedFamilyDraftRecoveryState | null =
+    familyDraftRecovery?.state ?? null;
   const familyAccess = await readHostedFamilyAccessForMember({
     memberId,
     prisma,

@@ -60,7 +60,11 @@ beforeEach(async () => {
   });
   mocks.findHostedAccountGroupByOwner.mockResolvedValue({ id: "hbag_family" });
   mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(
-    "checkout_starting",
+    {
+      checkoutAttemptId: "hbfca_existing",
+      groupId: "hbag_family",
+      state: "checkout_starting",
+    },
   );
   mocks.createHostedFamilyBillingCheckout.mockResolvedValue({
     alreadyActive: false,
@@ -98,7 +102,7 @@ test("starts Family checkout for the authenticated hosted owner", async () => {
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
-    requireExistingCheckoutAttempt: false,
+    requiredCheckoutAttemptId: undefined,
     seatCount: undefined,
   });
 });
@@ -122,7 +126,7 @@ test("forwards an explicit seat count and trial-conversion confirmation", async 
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
-    requireExistingCheckoutAttempt: false,
+    requiredCheckoutAttemptId: undefined,
     seatCount: 3,
   });
 });
@@ -170,7 +174,8 @@ test("resolves a starting Checkout and abandons it before returning to the invit
     expect.objectContaining({
       allowDirectPaidUpgrade: false,
       confirmedTrialConversion: undefined,
-      requireExistingCheckoutAttempt: true,
+      groupId: "hbag_family",
+      requiredCheckoutAttemptId: "hbfca_existing",
       seatCount: undefined,
     }),
   );
@@ -183,6 +188,10 @@ test("resolves a starting Checkout and abandons it before returning to the invit
     prisma: expect.any(Object),
   });
   expect(mocks.abandonHostedFamilyDraftForOwner).toHaveBeenCalledWith({
+    expectedCheckoutClaim: {
+      checkoutAttemptId: "hbfca_existing",
+      groupId: "hbag_family",
+    },
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
   });
@@ -236,7 +245,7 @@ test("does not abandon when Checkout becomes active during invite recovery", asy
 
 test("does not create Checkout when the invite recovery state changed", async () => {
   mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValueOnce(
-    "not_abandonable",
+    { state: "not_abandonable" },
   );
   const response = await billingFamilyCheckoutRoute.POST(
     new Request("https://join.example.test/api/settings/billing/family/checkout", {
@@ -309,6 +318,30 @@ test("does not recreate a draft when the starting Checkout disappears", async ()
     url: familyInviteReturnPath,
   });
   expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
+});
+
+test("does not consume a replacement group after invite recovery preflight", async () => {
+  mocks.findHostedAccountGroupByOwner.mockResolvedValueOnce({
+    id: "hbag_replacement",
+  });
+
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath: "/family/accept/invite_return_target",
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(409);
   expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
   expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
 });

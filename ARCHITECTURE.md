@@ -1718,6 +1718,9 @@ against the exact durable group subscription before cleanup; completed provider
 authority is destructively closed only when the original group is proven
 absent. If cleanup committed but its response was lost, the explicit recovery
 request returns the same validated first-party invite without recreating state.
+That recovery carries the projected group and Checkout-attempt identity through
+Session replay and abandonment; either identity changing rejects before provider
+cleanup, so an older request cannot consume a replacement Family checkout.
 
 Direct saved-card funding remains inside that same one-time
 usage-credit branch. Reconciliation accepts only the exact PaymentIntent
