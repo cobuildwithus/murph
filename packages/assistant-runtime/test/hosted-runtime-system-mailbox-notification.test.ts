@@ -917,7 +917,15 @@ describe("hosted system mailbox notification execution context", () => {
         vaultRoot: workspace.vaultRoot,
       })).resolves.toMatchObject({
         errorCode: "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+        item: expect.objectContaining({
+          attemptCount: 1,
+          routeAction: "dispatch-assistant-notification",
+          wake: expect.objectContaining({
+            kind: "assistant.notification.requested",
+          }),
+        }),
         itemId: "mailbox_referral_retry",
+        legacyUsageReferralAuthorityClassification: "eligible",
         nextWakeAt: "2026-04-27T00:01:00.000Z",
         status: "retryable_failed",
       });
@@ -1022,6 +1030,7 @@ describe("hosted system mailbox notification execution context", () => {
         vaultRoot: workspace.vaultRoot,
       })).resolves.toMatchObject({
         errorCode: "ASSISTANT_AUDIENCE_UNVERIFIED",
+        legacyUsageReferralAuthorityClassification: "identity_mismatch",
         status: "retryable_failed",
       });
 

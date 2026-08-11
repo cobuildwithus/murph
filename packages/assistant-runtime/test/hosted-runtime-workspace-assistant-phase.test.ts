@@ -12459,7 +12459,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       errorCode: "system_mailbox.retryable",
       errorMessage: "redacted",
+      item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_123456789",
+      legacyUsageReferralAuthorityClassification: "identity_mismatch",
       nextWakeAt: "2026-04-27T00:10:00.000Z",
       status: "retryable_failed",
     });
@@ -12477,9 +12479,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       level: "warn",
       phase: "checkpoint",
       redactedJson: expect.objectContaining({
+        attemptCount: 2,
         errorCode: "system_mailbox.retryable",
+        legacyUsageReferralAuthorityClassification: "identity_mismatch",
         nextWakeAtPresent: true,
+        routeAction: "dispatch-assistant-notification",
         status: "retryable_failed",
+        wakeKind: "assistant.notification.requested",
       }),
     }));
   });
@@ -12741,7 +12747,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       errorCode: "system_mailbox.retryable",
       errorMessage: "redacted",
+      item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_retryable",
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: "2026-04-27T00:10:00.000Z",
       status: "retryable_failed",
     });
@@ -15755,7 +15763,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         return {
           errorCode: "group_room_model_unavailable",
           errorMessage: "Group room model unavailable.",
+          item,
           itemId: item.itemId,
+          legacyUsageReferralAuthorityClassification: null,
           nextWakeAt: "2026-07-29T18:02:00.000Z",
           status: "retryable_failed",
         };
@@ -16089,7 +16099,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       return {
         errorCode: "synthetic_preferences_retry",
         errorMessage: "Synthetic preferences retry.",
+        item: createMemberPreferencesSystemMailboxItem(),
         itemId: "system_mailbox_item_member_preferences",
+        legacyUsageReferralAuthorityClassification: null,
         nextWakeAt: "2026-04-27T00:01:00.000Z",
         status: "retryable_failed",
       };
@@ -16818,7 +16830,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
       errorMessage: "Hosted member-channel update failed.",
+      item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_member_channels",
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: "2026-04-27T00:01:00.000Z",
       status: "retryable_failed",
     });
@@ -16865,7 +16879,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
       errorMessage: "Hosted member-channel update failed.",
+      item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_member_channels",
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: "2026-04-27T00:30:00.000Z",
       status: "retryable_failed",
     });
@@ -16931,7 +16947,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       .mockResolvedValueOnce({
         errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
         errorMessage: "Hosted member-channel update failed.",
+        item: createSystemMailboxItem(),
         itemId: "system_mailbox_item_member_channels",
+        legacyUsageReferralAuthorityClassification: null,
         nextWakeAt: "2026-04-27T00:30:00.000Z",
         status: "retryable_failed",
       });

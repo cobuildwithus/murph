@@ -24,6 +24,9 @@ import {
   isHostedAssistantAskCompletionPreemptedError,
 } from "./events/assistant-ask-completion-errors.ts";
 import type {
+  HostedLegacyUsageReferralAuthorityClassification,
+} from "./events/assistant-notification.ts";
+import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
@@ -69,7 +72,10 @@ export type HostedSystemMailboxCheckpointPreparation =
   | {
       errorCode: string | null;
       errorMessage: string | null;
+      item: HostedSystemMailboxPendingItem;
       itemId: string;
+      legacyUsageReferralAuthorityClassification:
+        HostedLegacyUsageReferralAuthorityClassification | null;
       nextWakeAt: string;
       status: "retryable_failed";
     }
@@ -407,10 +413,26 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       },
       vaultRoot: input.vaultRoot,
     });
+    const legacyUsageReferralAuthorityClassification =
+      prepared.wake.kind === "assistant.notification.requested"
+        ? (await import("./events/assistant-notification.ts"))
+          .classifyLegacyHostedUsageReferralDirectLinqAuthority({
+            executionContext:
+              input.executionContext
+              ?? buildHostedSystemMailboxExecutionContext({
+                runtime: input.runtime,
+                wake: prepared.wake,
+              }),
+            mailboxDedupeKey: prepared.mailboxDedupeKey,
+            wake: prepared.wake,
+          })
+        : null;
     return {
       errorCode: normalized.code,
       errorMessage: normalized.message,
+      item: prepared,
       itemId: prepared.itemId,
+      legacyUsageReferralAuthorityClassification,
       nextWakeAt,
       status: "retryable_failed",
     };
