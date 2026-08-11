@@ -1,5 +1,7 @@
 import * as z from '@murphai/contracts/zod-runtime'
 import {
+  assistantBasePersonaIdValues,
+  assistantBasePersonaOptions,
   assistantPersonaIdValues,
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
@@ -530,7 +532,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update tone and voice from current accepted input or an exact scheduled automation occurrence. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Treat a request about how Murph should keep writing as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
+    'Read the current hosted conversation runtime\'s effective Murph main personality, optional supporting personality, tone, voice, and model context, or atomically update those fields. Persona changes require current accepted user input plus both mainPersona and supportingPersona; use read first when either current value must be preserved, and pass null to remove support. Exact scheduled automation occurrences may update tone and voice but never personas. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
   inputSchema: {
     oneOf: [
       {
@@ -552,6 +554,21 @@ export const MURPH_PERSONALIZATION_TOOL = {
             type: 'string',
             enum: ['update'],
           },
+          mainPersona: {
+            type: 'string',
+            enum: assistantBasePersonaIdValues,
+            description: assistantBasePersonaOptions
+              .map((option) => `${option.label}=${option.id}`)
+              .join(', '),
+          },
+          supportingPersona: {
+            anyOf: [
+              { type: 'string', enum: assistantBasePersonaIdValues },
+              { type: 'null' },
+            ],
+            description:
+              'Supporting personality paired with mainPersona; null removes support. It must differ from mainPersona.',
+          },
           tone: {
             type: 'string',
             enum: assistantTonePreferenceValues,
@@ -566,6 +583,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
         },
         required: ['action'],
         anyOf: [
+          { required: ['mainPersona', 'supportingPersona'] },
           { required: ['tone'] },
           { required: ['voice'] },
         ],
