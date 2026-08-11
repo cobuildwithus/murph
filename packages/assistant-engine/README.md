@@ -64,13 +64,15 @@ thread-local deny configuration does not change the ordinary process launch
 identity or persist a resumable notification thread.
 
 An authenticated current-sender private Assistant Ask completion is the narrow
-deterministic exception. It starts no formatter or provider turn, keeps the
-member's existing logical direct session and ordinary target, appends the exact
-reviewed assistant text to that session, and clears only the stale native
-provider-resume optimization in the same session save. The next attended turn
-therefore starts a fresh provider thread with bounded committed history that
-includes the private completion. Expiry alone and every generic detached
-notification remain isolated and cannot claim this continuity behavior.
+deterministic exception. It starts no formatter or provider turn and does not
+mutate the member's ordinary conversation when the notification is queued.
+Only after hosted provider acceptance does the durable outbox delivery import
+the exact reviewed assistant text into the matching logical direct session,
+advance that session once, and clear its stale native provider-resume aliases.
+The outbox intent journals an interrupted import, and the next attended direct
+resolution repairs it before provider-resume selection. Rejected completions
+and every generic detached notification remain isolated and cannot claim this
+continuity behavior.
 
 The `creative-response` and `creative-response-text` notification prompt
 profiles are isolated system continuations for verified, explicitly requested

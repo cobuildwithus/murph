@@ -666,15 +666,18 @@ Web-owned exact-text, member, expiry, and direct-route assertion at every
 provider attempt; non-idempotent transport work remains checkpoint-gated. Fresh
 conversation input continues to preempt this pass.
 
-An authenticated current-sender private exact completion keeps the member's
-existing logical direct session and ordinary target, appends the exact reviewed
-assistant text to that session, and clears its stale native provider-resume
-pointer in the same session save. This forces the next attended turn to start a
-fresh provider thread with bounded committed history that includes the private
-completion, without creating another logical session. The runtime recognizes
-this exception only from the complete queue-only, exact-text, one-mailbox-item,
-direct Linq-or-Telegram private-completion envelope; an expiry marker alone and
-all generic detached notifications remain isolated.
+An authenticated current-sender private exact completion does not mutate the
+member's ordinary conversation when the notification is queued. After the
+hosted provider accepts the live-authorized same-channel delivery, the durable
+outbox intent becomes the recovery journal for one import into the matching
+logical direct session: append the exact reviewed assistant text once, advance
+the session once, and clear both stale native provider-resume aliases. An
+interrupted import converges from that journal, and direct attended resolution
+repairs it before provider-resume selection. The runtime recognizes this
+exception only from the complete queue-only, exact-text, one-mailbox-item,
+direct Linq-or-Telegram private-completion proof plus its matching durable
+delivery. Rejected completions, an expiry marker alone, and all generic
+detached notifications remain isolated.
 
 A legacy usage-referral notification can be authority-less even after Web has
 repaired its producer, because the local system mailbox may already have

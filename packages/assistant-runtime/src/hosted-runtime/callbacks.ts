@@ -50,6 +50,7 @@ import {
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  persistAssistantPrivateCompletionContinuityAfterDelivery,
   readAssistantAutomationState,
   readAssistantOutboxIntent,
   readAssistantVaultFileMedia,
@@ -3084,6 +3085,11 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         : null;
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
+        persistDeliveredIntent: async ({ intent, vault }) =>
+          persistAssistantPrivateCompletionContinuityAfterDelivery({
+            intent,
+            vault,
+          }),
         preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
           preflightHostedAssistantDispatch({
             actionApprovalPort: input.actionApprovalPort,

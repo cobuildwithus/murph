@@ -30,6 +30,9 @@ import {
 import {
   bindAssistantResumeStateToThreadCompatibility,
 } from './codex-resume-binding.js'
+import {
+  reconcileAssistantPrivateCompletionContinuityForSession,
+} from './private-completion-continuity.js'
 import { normalizeNullableString } from './shared.js'
 
 export function buildResolveAssistantSessionInput(
@@ -207,9 +210,25 @@ export async function resolveAssistantSessionForMessage(input: {
     messageOverride,
     resolved,
   })
-  return effectiveTarget
+  const effectiveResolved = effectiveTarget
     ? applyEffectiveTargetToResolvedSession(resolved, effectiveTarget)
     : resolved
+  if (
+    input.message.threadIsDirect !== true
+    || input.message.userMessageContent == null
+  ) {
+    return effectiveResolved
+  }
+  const reconciled = {
+    ...effectiveResolved,
+    session: await reconcileAssistantPrivateCompletionContinuityForSession({
+      sessionId: effectiveResolved.session.sessionId,
+      vault: input.message.vault,
+    }),
+  }
+  return effectiveTarget
+    ? applyEffectiveTargetToResolvedSession(reconciled, effectiveTarget)
+    : reconciled
 }
 
 async function resolveAssistantSessionForMessageInput(input: {

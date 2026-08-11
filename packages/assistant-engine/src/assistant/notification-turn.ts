@@ -902,7 +902,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
     input.responseText,
     'notification response',
   )
-  const invalidateNativeResume =
+  const deferPrivateCompletionContinuity =
     isAssistantReviewedPrivateExactCompletion(input.input)
   const turnId = createAssistantTurnId()
   const turnCreatedAt = new Date().toISOString()
@@ -979,13 +979,14 @@ async function sendAssistantExactTextNotificationLocal(input: {
         turnId,
         vault: input.input.vault,
       })
-      savedSession = await persistAssistantExactTextNotificationSession({
-        invalidateNativeResume,
-        responseText,
-        session: deliveryOutcome.session,
-        turnCreatedAt,
-        vault: input.input.vault,
-      })
+      savedSession = deferPrivateCompletionContinuity
+        ? deliveryOutcome.session
+        : await persistAssistantExactTextNotificationSession({
+            responseText,
+            session: deliveryOutcome.session,
+            turnCreatedAt,
+            vault: input.input.vault,
+          })
     } catch (error) {
       await abandonQueuedNotificationDeliveryAfterCommitFailure({
         deliveryOutcome,
@@ -1015,13 +1016,14 @@ async function sendAssistantExactTextNotificationLocal(input: {
     if (deliveryOutcome.kind === 'failed') {
       throw deliveryOutcome.error
     }
-    savedSession = await persistAssistantExactTextNotificationSession({
-      invalidateNativeResume,
-      responseText,
-      session: deliveryOutcome.session,
-      turnCreatedAt,
-      vault: input.input.vault,
-    })
+    savedSession = deferPrivateCompletionContinuity
+      ? deliveryOutcome.session
+      : await persistAssistantExactTextNotificationSession({
+          responseText,
+          session: deliveryOutcome.session,
+          turnCreatedAt,
+          vault: input.input.vault,
+        })
   }
 
   if (
@@ -1116,7 +1118,6 @@ function assistantNotificationDeliveryAcceptedFirstContact(input: {
 }
 
 async function persistAssistantExactTextNotificationSession(input: {
-  invalidateNativeResume: boolean
   responseText: string
   session: AssistantSession
   turnCreatedAt: string
@@ -1136,12 +1137,6 @@ async function persistAssistantExactTextNotificationSession(input: {
   const updatedAt = new Date().toISOString()
   return await state.sessions.save({
     ...input.session,
-    ...(input.invalidateNativeResume
-      ? {
-          codexResume: null,
-          resumeState: null,
-        }
-      : {}),
     updatedAt,
     lastTurnAt: updatedAt,
     turnCount: input.session.turnCount + 1,
@@ -1159,31 +1154,28 @@ function isAssistantReviewedPrivateExactCompletion(
     ? normalizeNullableString(answeredMailboxItemIds[0])
     : null
   if (
-    expiresAt === null ||
-    !Number.isFinite(Date.parse(expiresAt)) ||
-    completionId === null ||
-    answeredMailboxItemIds[0] !== completionId ||
-    [...completionId].length > 256
+    expiresAt === null
+    || !Number.isFinite(Date.parse(expiresAt))
+    || completionId === null
+    || answeredMailboxItemIds[0] !== completionId
+    || [...completionId].length > 256
   ) {
     return false
   }
 
-  // The hosted runtime authenticates this envelope before assistant-engine
-  // entry. Re-check every discriminant so the expiry marker alone cannot grant
-  // conversation continuity to a generic notification.
   const deliveryKey =
     createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(completionId)
   return (
-    input.executionContext?.hosted != null &&
-    input.responsePolicy?.kind === 'require_send_exact_text' &&
-    input.deliveryDispatchMode === 'queue-only' &&
-    input.firstContactPolicy == null &&
-    input.notificationPromptProfile == null &&
-    input.outboxExternalThreadRouteAuthority == null &&
-    input.threadIsDirect === true &&
-    (input.channel === 'linq' || input.channel === 'telegram') &&
-    normalizeNullableString(input.deliveryDedupeToken) === deliveryKey &&
-    normalizeNullableString(input.deliveryIdempotencyKey) === deliveryKey
+    input.executionContext?.hosted != null
+    && input.responsePolicy?.kind === 'require_send_exact_text'
+    && input.deliveryDispatchMode === 'queue-only'
+    && input.firstContactPolicy == null
+    && input.notificationPromptProfile == null
+    && input.outboxExternalThreadRouteAuthority == null
+    && input.threadIsDirect === true
+    && (input.channel === 'linq' || input.channel === 'telegram')
+    && normalizeNullableString(input.deliveryDedupeToken) === deliveryKey
+    && normalizeNullableString(input.deliveryIdempotencyKey) === deliveryKey
   )
 }
 
@@ -1375,8 +1367,6 @@ function buildAssistantNotificationMessageInput(
   const firstContactExactText =
     input.responsePolicy?.kind === 'require_send_exact_text' &&
     input.firstContactPolicy?.markSeenOnDeliveryAccepted === true
-  const reviewedPrivateExactCompletion =
-    isAssistantReviewedPrivateExactCompletion(input)
   // One overlay for each non-user turn boundary, so provider-audit policy
   // cannot drift across caller-specific configuration.
   const executionOverlay = maintenanceTurn
@@ -1439,13 +1429,11 @@ function buildAssistantNotificationMessageInput(
     provider: input.provider,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
-    // First-contact exact text and reviewed private completions do not start a
-    // provider, but they belong to the ordinary direct conversation. Generic
-    // detached notifications remain read-only and isolated.
+    // First-contact exact text does not start a provider. Keep its durable
+    // conversation session on the ordinary target so the next attended turn
+    // continues from the welcome that was already delivered.
     sandbox:
-      scheduledOccurrence ||
-      firstContactExactText ||
-      reviewedPrivateExactCompletion
+      scheduledOccurrence || firstContactExactText
         ? input.sandbox
         : 'read-only',
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,

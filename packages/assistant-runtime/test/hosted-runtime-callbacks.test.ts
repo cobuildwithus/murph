@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => ({
   linqProviderFetchAttemptCount: vi.fn(() => 1),
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
+  persistAssistantPrivateCompletionContinuityAfterDelivery: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   readAssistantOutboxIntent: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
@@ -110,6 +111,8 @@ vi.mock("@murphai/assistant-engine", async () => {
     markAssistantOutboxIntentMirrorTerminalById:
       mocks.markAssistantOutboxIntentMirrorTerminalById,
     normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
+    persistAssistantPrivateCompletionContinuityAfterDelivery:
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
     readAssistantAutomationState: mocks.readAssistantAutomationState,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
     readAssistantOutboxIntentMirrorState:
@@ -8935,14 +8938,23 @@ describe("hosted runtime callbacks", () => {
           replyToMessageId: null,
           target,
         });
+        const persistedDelivery = createDelivery({
+          idempotencyKey,
+          messageLength: responseText.length,
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+          targetKind: "thread",
+        });
+        await dispatchHooks?.persistDeliveredIntent?.({
+          delivery: persistedDelivery,
+          intent: {
+            ...storedIntent,
+            delivery: persistedDelivery,
+          },
+          vault: HOSTED_WAKE.vaultRoot,
+        });
         return createDispatchResult({
-          delivery: createDelivery({
-            idempotencyKey,
-            messageLength: responseText.length,
-            providerMessageId: delivery.providerMessageId,
-            target: delivery.target,
-            targetKind: "thread",
-          }),
+          delivery: persistedDelivery,
           status: "sent",
         });
       },
@@ -8992,6 +9004,23 @@ describe("hosted runtime callbacks", () => {
     expect(
       assertAssistantAskPrivateCompletionAuthority.mock.invocationCallOrder[0],
     ).toBeLessThan(providerFetch.mock.invocationCallOrder[0] ?? 0);
+    expect(
+      providerFetch.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery.mock
+        .invocationCallOrder[0] ?? 0,
+    );
+    expect(
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
+    ).toHaveBeenCalledWith({
+      intent: expect.objectContaining({
+        delivery: expect.objectContaining({
+          providerMessageId: "provider_private_telegram_123",
+        }),
+        intentId: storedIntent.intentId,
+      }),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
   });
 
   it("pins private Telegram delivery against provider migration", async () => {
@@ -9301,6 +9330,9 @@ describe("hosted runtime callbacks", () => {
       .toEqual(["authority", "provider", "authority"]);
     expect(providerFetch).toHaveBeenCalledOnce();
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(
+      mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
+    ).not.toHaveBeenCalled();
   });
 
   it("does not re-home a missing private Linq thread", async () => {
@@ -9510,6 +9542,9 @@ describe("hosted runtime callbacks", () => {
       expect(assertAssistantAskPrivateCompletionAuthority).not.toHaveBeenCalled();
       expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
       expect(mocks.saveAssistantOutboxIntentIfUnchanged).not.toHaveBeenCalled();
+      expect(
+        mocks.persistAssistantPrivateCompletionContinuityAfterDelivery,
+      ).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

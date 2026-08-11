@@ -17,7 +17,6 @@ import type { persistAssistantTurnAndSession } from '../src/assistant/turn-final
 import { sendAssistantNotificationLocal } from '../src/assistant/notification-turn.ts'
 import { resolveAssistantSessionForMessage } from '../src/assistant/session-resolution.ts'
 import {
-  appendAssistantTranscriptEntries,
   listAssistantSessions,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
@@ -372,7 +371,7 @@ describe('notification audience authority integration', () => {
     expect(attended.session.providerOptions.sandbox).toBe('danger-full-access')
   })
 
-  it('keeps a reviewed private exact completion on the ordinary direct session and invalidates native resume', async () => {
+  it('keeps a queued private completion detached until provider acceptance', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'linq-private-completion-continuity-',
     )
@@ -424,23 +423,9 @@ describe('notification audience authority integration', () => {
       codexResume: nativeResume,
       resumeState: nativeResume,
     })
-    const ordinaryContinuityFingerprint =
-      ordinaryWithResume.providerOptions.continuityFingerprint
     expect(ordinary.created).toBe(true)
-    expect(ordinaryContinuityFingerprint).toEqual(expect.any(String))
     expect(ordinaryWithResume.codexResume).toEqual(nativeResume)
     expect(ordinaryWithResume.resumeState).toEqual(nativeResume)
-
-    boundaries.appendTranscript.mockImplementation(
-      async (
-        sessionId: string,
-        entries: Parameters<typeof appendAssistantTranscriptEntries>[2],
-      ) => await appendAssistantTranscriptEntries(vaultRoot, sessionId, entries),
-    )
-    boundaries.saveSession.mockImplementation(
-      async (session: AssistantSession) =>
-        await saveAssistantSession(vaultRoot, session),
-    )
     boundaries.deliverMessage.mockResolvedValueOnce({
       delivery: null,
       deliveryError: null,
@@ -482,58 +467,19 @@ describe('notification audience authority integration', () => {
     )
     expect(completion.deliveryOutcome?.kind).toBe('queued')
     expect(completion.session.sessionId).toBe(ordinaryWithResume.sessionId)
-    expect(completion.session.providerOptions.continuityFingerprint).toBe(
-      ordinaryContinuityFingerprint,
-    )
-    expect(completion.session.providerOptions.sandbox).toBe('danger-full-access')
-    expect(completion.session.codexResume).toBeNull()
-    expect(completion.session.resumeState).toBeNull()
-    expect(boundaries.saveSession).toHaveBeenCalledTimes(1)
-    expect(boundaries.saveSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        codexResume: null,
-        resumeState: null,
-        sessionId: ordinaryWithResume.sessionId,
-      }),
-    )
+    expect(completion.session.providerOptions.sandbox).toBe('read-only')
+    expect(boundaries.saveSession).not.toHaveBeenCalled()
+    const storedSessions = await listAssistantSessions(vaultRoot)
+    expect(storedSessions).toHaveLength(1)
+    expect(storedSessions).toContainEqual(expect.objectContaining({
+      codexResume: nativeResume,
+      resumeState: nativeResume,
+      sessionId: ordinaryWithResume.sessionId,
+      turnCount: ordinaryWithResume.turnCount,
+    }))
     await expect(
       listAssistantTranscriptEntries(vaultRoot, ordinaryWithResume.sessionId),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        kind: 'assistant',
-        text: completionText,
-      }),
-    ])
-    await expect(listAssistantSessions(vaultRoot)).resolves.toEqual([
-      expect.objectContaining({
-        codexResume: null,
-        providerOptions: expect.objectContaining({
-          continuityFingerprint: ordinaryContinuityFingerprint,
-        }),
-        resumeState: null,
-        sessionId: ordinaryWithResume.sessionId,
-      }),
-    ])
-
-    const nextOrdinary = await resolveAssistantSessionForMessage({
-      boundaryDefaultTarget: modelTarget,
-      defaults: null,
-      message: {
-        ...locator,
-        executionContext,
-        prompt: 'Continue the ordinary direct conversation.',
-        vault: vaultRoot,
-      },
-    })
-
-    expect(nextOrdinary.created).toBe(false)
-    expect(nextOrdinary.session.sessionId).toBe(ordinaryWithResume.sessionId)
-    expect(nextOrdinary.session.providerOptions.continuityFingerprint).toBe(
-      ordinaryContinuityFingerprint,
-    )
-    expect(nextOrdinary.session.codexResume).toBeNull()
-    expect(nextOrdinary.session.resumeState).toBeNull()
-    await expect(listAssistantSessions(vaultRoot)).resolves.toHaveLength(1)
+    ).resolves.toEqual([])
   })
 
   it('keeps an exact Telegram welcome on the attended conversation session', async () => {
