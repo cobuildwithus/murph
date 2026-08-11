@@ -486,7 +486,9 @@ export interface HostedVaultShareDailyMetricData {
   value: number;
 }
 
-export const HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES = 4;
+export const HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES = 4;
+export const HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES =
+  HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES + 1;
 export const HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_KEY_MAX_LENGTH = 80;
 export const HOSTED_VAULT_SHARE_SLEEP_METRIC_SOURCE_LABEL_MAX_LENGTH = 80;
 
@@ -1424,6 +1426,12 @@ function parseHostedVaultShareSleepMetricSources(
   if (sourceKeys.size !== sources.length) {
     throw new TypeError(
       `Vault share ${spec.projectionKind} source keys must be unique.`,
+    );
+  }
+  const wearableSourceCount = sources.filter((source) => source.source !== "manual").length;
+  if (wearableSourceCount > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} sources must contain at most ${HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES} wearable entries.`,
     );
   }
 

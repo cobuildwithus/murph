@@ -29,6 +29,7 @@ import {
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
   HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
+  HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES,
   HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY,
   HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -52,6 +53,7 @@ import {
   readMealNutritionTotals,
   readMemoryDocument,
   resolveAdherenceObservationActivityKind,
+  selectAuthoritativeMetricPoint,
   selectMetricSeries,
   summarizeWearableSleepRuntime,
   summarizeWearableSourceHealthRuntime,
@@ -515,7 +517,7 @@ export async function readProjectableDailyMetricDays(
   });
   const acceptsManualSleepStage = spec.metricKey === "deep-sleep-minutes"
     || spec.metricKey === "rem-sleep-minutes";
-  const projectionPoints = acceptsManualSleepStage
+  const dayGrainPoints = acceptsManualSleepStage
     ? points.map((point) =>
         isManualSleepStageCorrection(point)
           && point.grain === "event"
@@ -523,6 +525,9 @@ export async function readProjectableDailyMetricDays(
           : point
       )
     : points;
+  const projectionPoints = acceptsManualSleepStage
+    ? selectAuthoritativeManualSleepStageCorrections(dayGrainPoints)
+    : dayGrainPoints;
   const manualCorrectionDates = acceptsManualSleepStage
     ? new Set(projectionPoints
         .filter((point) =>
@@ -584,6 +589,30 @@ function isManualSleepStageCorrection(point: MetricPoint): boolean {
     && point.source.kind === "observation"
     && point.provenance.provider === null
     && point.provenance.sourceLabel === "Manual";
+}
+
+function selectAuthoritativeManualSleepStageCorrections(
+  points: readonly MetricPoint[],
+): MetricPoint[] {
+  const manualPointsByDate = new Map<string, MetricPoint[]>();
+  for (const point of points) {
+    if (point.grain !== "day" || !isManualSleepStageCorrection(point)) {
+      continue;
+    }
+    const datePoints = manualPointsByDate.get(point.effectiveDate) ?? [];
+    datePoints.push(point);
+    manualPointsByDate.set(point.effectiveDate, datePoints);
+  }
+  const authoritativeManualPointIds = new Set(
+    [...manualPointsByDate.values()].flatMap((datePoints) => {
+      const selected = selectAuthoritativeMetricPoint(datePoints);
+      return selected ? [selected.id] : [];
+    }),
+  );
+  return points.filter((point) =>
+    !isManualSleepStageCorrection(point)
+    || authoritativeManualPointIds.has(point.id)
+  );
 }
 
 async function readProjectableSleepMetricSourcesByDate(input: {
@@ -1051,9 +1080,11 @@ function selectProjectableSleepMetricSources(
   selectedValue: number,
 ): HostedVaultShareSleepMetricSource[] | null {
   const sourceRows = point.sources ?? [];
+  const wearableSourceCount = sourceRows.filter((source) => source.source !== "manual").length;
   if (
     sourceRows.length === 0
     || sourceRows.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES
+    || wearableSourceCount > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES
   ) {
     return null;
   }

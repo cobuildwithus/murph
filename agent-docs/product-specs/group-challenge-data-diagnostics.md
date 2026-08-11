@@ -133,20 +133,22 @@ Deep sleep and REM sleep are each one user-facing permission. New access offers
 always use the source-aware `deep-sleep-sources-days.v1` and
 `rem-sleep-sources-days.v1` scopes, which disclose the canonical value plus one
 bounded entry for every public sleep source that has that metric on the date,
-up to four sources. Each entry carries the canonical public source key and
-label, its value and unit, its nullable canonical source-record time, and
-whether it supplied the canonical selected value. The record also carries `projectedAt`
-and a literal `sourcesDisagree` flag. Source-aware records fail closed instead of
-truncating when the source bound is exceeded or the selected source cannot be
-proved. A canonical manually entered sleep-stage event is projected onto its
+up to four wearable sources plus the optional reserved `Manual` correction
+source. Each entry carries the canonical public source key and label, its value
+and unit, its nullable canonical source-record time, and whether it supplied the
+canonical selected value. The record also carries `projectedAt` and a literal
+`sourcesDisagree` flag. Source-aware records fail closed instead of truncating
+when either source bound is exceeded or the selected source cannot be proved. A
+canonical manually entered sleep-stage event is projected onto its
 member-local day and disclosed as the explicit `manual` / `Manual` source; it is
 never attributed to a connected wearable or aggregator, and it is authoritative
 for that day while wearable values remain visible as disagreeing sources. When
 multiple live manual facts target the same stage and member-local day, canonical
-recording order decides the correction: the newest recorded fact wins after the
-shared metric date, source, and observation-time rules. An invalid newest fact
-omits only its affected day instead of silently reviving an older value or
-erasing other valid shared days. A canonically deleted fact no longer
+recording order decides the correction before value or unit normalization: the
+newest recorded raw fact wins after the shared metric date, source, and
+observation-time rules. An invalid newest fact omits only its affected day
+instead of silently reviving an older value or erasing other valid shared days.
+A canonically deleted fact no longer
 participates, so the next newest live manual fact wins; wearable selection
 resumes only when no live manual fact remains. The legacy
 provider-neutral `deep-sleep-days.v0` and

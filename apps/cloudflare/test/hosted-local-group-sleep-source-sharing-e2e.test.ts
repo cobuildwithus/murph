@@ -50,8 +50,10 @@ const linqApiToken = "linq-local-group-sleep-source-token";
 const linqWebhookSecret = "linq-local-group-sleep-source-webhook-secret";
 const offerRequestText = "Share my Deep and REM sleep from every source with this room.";
 const readRequestText = "Compare the Deep and REM sleep sources that I shared.";
+const invalidReadRequestText = "Check the shared sleep stages before I correct the units.";
 const offerReplyText = "The exact by-source sharing choice is ready.";
 const readReplyText = "The stored Deep and REM source values are available to this room.";
+const invalidReadReplyText = "No valid sleep-stage correction is shared for that date.";
 const correctionReplyText = "I saved that sleep-stage correction.";
 const groupReplyPath = `/chats/${encodeURIComponent(groupChatId)}/messages`;
 const personalReplyPath = `/chats/${encodeURIComponent(personalChatId)}/messages`;
@@ -210,24 +212,86 @@ describe("hosted local group sleep-source sharing e2e", () => {
       metric: "sleep-deep-minutes",
       ordinal: 1,
       stageLabel: "Deep",
+      unit: "minutes",
       value: 60,
     });
     await runManualCorrection({
       metric: "sleep-deep-minutes",
       ordinal: 2,
       stageLabel: "Deep",
-      value: 125,
+      unit: "seconds",
+      value: 5_400,
     });
     await runManualCorrection({
       metric: "sleep-rem-minutes",
       ordinal: 3,
       stageLabel: "REM",
+      unit: "minutes",
       value: 55,
     });
     await runManualCorrection({
       metric: "sleep-rem-minutes",
       ordinal: 4,
       stageLabel: "REM",
+      unit: "seconds",
+      value: 4_200,
+    });
+
+    const invalidProviderRequestBaseline = requireScenario().assistantProviderRequests.length;
+    const invalidReadSendBaseline = requireLinqStub().countObservedSends(groupReplyPath);
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("group", {
+        action: "read_shared",
+        projectionScopes: projectionKinds.map((projectionKind) => ({ projectionKind })),
+      }),
+      invalidReadReplyText,
+    ], { matchInputContains: invalidReadRequestText });
+    const invalidReadWebhook = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      ownerMemberId,
+      groupChatId,
+      {
+        eventId: `evt_group_sleep_source_invalid_read_${runId}`,
+        isGroup: true,
+        messageId: `msg_group_sleep_source_invalid_read_${runId}`,
+        service: "iMessage",
+        text: invalidReadRequestText,
+      },
+    ));
+    expect(invalidReadWebhook.status).toBe(202);
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: invalidReadSendBaseline + 1,
+      expectedPath: groupReplyPath,
+      scenario: requireScenario(),
+      userId: route.containerMemberId,
+    });
+    expect((await requireScenario().waitForHostedCompletion(
+      route.containerMemberId,
+    )).lastErrorCode ?? null).toBeNull();
+    const invalidToolOutputs = requireScenario().assistantProviderRequests
+      .slice(invalidProviderRequestBaseline)
+      .flatMap((request) => collectJsonStrings(JSON.parse(request.body)))
+      .filter((value) =>
+        value.includes(deepProjectionKind)
+        && value.includes(remProjectionKind)
+        && value.includes('"records"')
+      );
+    expect(invalidToolOutputs).toHaveLength(1);
+    expect(invalidToolOutputs[0]).not.toContain('"sources"');
+    expect(invalidToolOutputs[0]).not.toContain('"value":60');
+    expect(invalidToolOutputs[0]).not.toContain('"value":55');
+
+    await runManualCorrection({
+      metric: "sleep-deep-minutes",
+      ordinal: 5,
+      stageLabel: "Deep",
+      unit: "minutes",
+      value: 125,
+    });
+    await runManualCorrection({
+      metric: "sleep-rem-minutes",
+      ordinal: 6,
+      stageLabel: "REM",
+      unit: "minutes",
       value: 95,
     });
 
@@ -242,6 +306,7 @@ describe("hosted local group sleep-source sharing e2e", () => {
       expect(ciphertext).not.toContain("fitbit");
       expect(ciphertext).not.toContain("garmin");
       expect(ciphertext).not.toContain("oura");
+      expect(ciphertext).not.toContain("polar");
     }
 
     const providerRequestBaseline = requireScenario().assistantProviderRequests.length;
@@ -289,6 +354,7 @@ describe("hosted local group sleep-source sharing e2e", () => {
     expect(toolOutputs[0]).toContain('"source":"manual"');
     expect(toolOutputs[0]).toContain('"label":"Manual"');
     expect(toolOutputs[0]).toContain('"source":"oura"');
+    expect(toolOutputs[0]).toContain('"source":"polar"');
     expect(toolOutputs[0]).toContain('"selected":true');
     expect(toolOutputs[0]).toContain('"value":125');
     expect(toolOutputs[0]).toContain('"value":95');
@@ -311,9 +377,10 @@ async function runManualCorrection(input: {
   metric: "sleep-deep-minutes" | "sleep-rem-minutes";
   ordinal: number;
   stageLabel: "Deep" | "REM";
+  unit: "minutes" | "seconds";
   value: number;
 }): Promise<void> {
-  const requestText = `Correct ${input.stageLabel} sleep to ${input.value} minutes on ${sleepDate}.`;
+  const requestText = `Correct ${input.stageLabel} sleep to ${input.value} ${input.unit} on ${sleepDate}.`;
   const workspaceVersion = await readWorkspaceVersion(ownerMemberId);
   const sendBaseline = requireLinqStub().countObservedSends(personalReplyPath);
   requireScenario().queueAssistantResponses([
@@ -326,7 +393,7 @@ async function runManualCorrection(input: {
       "--value",
       String(input.value),
       "--unit",
-      "minutes",
+      input.unit,
       "--occurred-at",
       sleepDate,
       "--title",
@@ -378,6 +445,7 @@ async function seedPersonalSleepSourceSnapshot(): Promise<void> {
     { provider: "fitbit", value: 74 },
     { provider: "garmin", value: 91 },
     { provider: "oura", value: 108 },
+    { provider: "polar", value: 82 },
   ] as const;
   const wearableRecords = providers.flatMap(({ provider, value }, index) => {
     const recordedAt = `${sleepDate}T07:0${index}:00.000Z`;

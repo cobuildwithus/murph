@@ -1066,6 +1066,95 @@ describe("selectProjectableDailyMetricDays", () => {
     }
   });
 
+  it.each([
+    {
+      legacyProjectionKind: "deep-sleep-days.v0" as const,
+      metric: "sleep-deep-minutes",
+      metricKey: "deep-sleep-minutes",
+      sourceProjectionKind: "deep-sleep-sources-days.v1" as const,
+      stage: "deep" as const,
+      title: "Deep sleep",
+    },
+    {
+      legacyProjectionKind: "rem-sleep-days.v0" as const,
+      metric: "sleep-rem-minutes",
+      metricKey: "rem-sleep-minutes",
+      sourceProjectionKind: "rem-sleep-sources-days.v1" as const,
+      stage: "rem" as const,
+      title: "REM sleep",
+    },
+  ])("keeps four wearable $stage sources visible beside the authoritative manual correction", async ({
+    legacyProjectionKind,
+    metric,
+    metricKey,
+    sourceProjectionKind,
+    stage,
+    title,
+  }) => {
+    const vaultRoot = await createSleepSourceProjectionVault([{
+      date: ACTIVITY_DAY.date,
+      providers: ["fitbit", "garmin", "oura", "polar"],
+      stage,
+    }]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const eventsPath = join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl");
+      const existingRecords = await readFile(eventsPath, "utf8");
+      const manualCorrection = {
+        schemaVersion: "murph.event.v1",
+        id: `evt_manual_${stage}_sleep_four_wearables`,
+        kind: "observation",
+        occurredAt: "2026-07-03T07:00:00.000Z",
+        recordedAt: "2026-07-03T12:00:00.000Z",
+        dayKey: ACTIVITY_DAY.date,
+        source: "manual",
+        title,
+        metric,
+        value: 91,
+        unit: "minutes",
+      };
+      await writeFile(
+        eventsPath,
+        `${existingRecords}${JSON.stringify(manualCorrection)}\n`,
+        "utf8",
+      );
+
+      const sourceAware = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec(sourceProjectionKind),
+      );
+      const legacy = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec(legacyProjectionKind),
+      );
+
+      expect(legacy[0]?.data).toMatchObject({ metricKey, value: 91 });
+      expect(sourceAware[0]?.data).toMatchObject({
+        sources: expect.arrayContaining([
+          expect.objectContaining({ source: "fitbit" }),
+          expect.objectContaining({ source: "garmin" }),
+          expect.objectContaining({ source: "oura" }),
+          expect.objectContaining({ source: "polar" }),
+          expect.objectContaining({ selected: true, source: "manual", value: 91 }),
+        ]),
+        value: 91,
+      });
+      const sourceAwareData = sourceAware[0]?.data;
+      if (!sourceAwareData || !("sources" in sourceAwareData)) {
+        throw new Error("Expected source-aware sleep-stage projection data.");
+      }
+      expect(sourceAwareData.sources).toHaveLength(5);
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: sourceProjectionKind,
+        records: sourceAware,
+      }).records).toEqual(sourceAware);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it.each([false, true])(
     "omits an invalid manual sleep-stage date without erasing valid source-aware history (history=%s)",
     async (includesValidHistory) => {
@@ -1134,6 +1223,88 @@ describe("selectProjectableDailyMetricDays", () => {
       }
     },
   );
+
+  it.each([
+    {
+      legacyProjectionKind: "deep-sleep-days.v0" as const,
+      metric: "sleep-deep-minutes",
+      sourceProjectionKind: "deep-sleep-sources-days.v1" as const,
+      stage: "deep" as const,
+      title: "Deep sleep",
+    },
+    {
+      legacyProjectionKind: "rem-sleep-days.v0" as const,
+      metric: "sleep-rem-minutes",
+      sourceProjectionKind: "rem-sleep-sources-days.v1" as const,
+      stage: "rem" as const,
+      title: "REM sleep",
+    },
+  ])("does not revive an older valid manual $stage correction when the newest unit is unsupported", async ({
+    legacyProjectionKind,
+    metric,
+    sourceProjectionKind,
+    stage,
+    title,
+  }) => {
+    const vaultRoot = await createSleepSourceProjectionVault([
+      { date: "2026-07-02", providers: ["garmin"], stage },
+      { date: ACTIVITY_DAY.date, providers: ["garmin"], stage },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const eventsPath = join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl");
+      const existingRecords = await readFile(eventsPath, "utf8");
+      const manualCorrections = [
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_valid_manual_${stage}_sleep_older_unit`,
+          kind: "observation",
+          occurredAt: "2026-07-03T07:00:00.000Z",
+          recordedAt: "2026-07-03T12:00:00.000Z",
+          dayKey: ACTIVITY_DAY.date,
+          source: "manual",
+          title,
+          metric,
+          value: 90,
+          unit: "minutes",
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: `evt_invalid_manual_${stage}_sleep_newer_unit`,
+          kind: "observation",
+          occurredAt: "2026-07-03T07:00:00.000Z",
+          recordedAt: "2026-07-03T13:00:00.000Z",
+          dayKey: ACTIVITY_DAY.date,
+          source: "manual",
+          title,
+          metric,
+          value: 5_400,
+          unit: "seconds",
+        },
+      ];
+      await writeFile(
+        eventsPath,
+        `${existingRecords}${manualCorrections.map((record) => JSON.stringify(record)).join("\n")}\n`,
+        "utf8",
+      );
+
+      const sourceAware = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec(sourceProjectionKind),
+      );
+      const legacy = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec(legacyProjectionKind),
+      );
+
+      expect(sourceAware.map((record) => record.recordKey)).toEqual(["2026-07-02"]);
+      expect(legacy.map((record) => record.recordKey)).toEqual(["2026-07-02"]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
 
   it.each([
     {

@@ -991,6 +991,38 @@ describe("daily metric vault-share delivery records", () => {
         projectionKind: projectionScope.projectionKind,
         records: [manualRecord],
       }).records).toEqual([manualRecord]);
+
+      const manualWithFourWearablesRecord = {
+        ...manualRecord,
+        data: {
+          ...manualRecord.data,
+          sources: [
+            ...VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD.data.sources.map(
+              ({ selected: _selected, ...source }) => source,
+            ),
+            {
+              label: "polar",
+              recordedAt: "2026-07-03T07:08:00.000Z",
+              source: "polar",
+              unit: "minutes",
+              value: 75,
+            },
+            {
+              label: "Manual",
+              recordedAt: "2026-07-03T12:00:00.000Z",
+              selected: true as const,
+              source: "manual",
+              unit: "minutes",
+              value: 91,
+            },
+          ],
+          sourcesDisagree: true,
+        },
+      };
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: projectionScope.projectionKind,
+        records: [manualWithFourWearablesRecord],
+      }).records).toEqual([manualWithFourWearablesRecord]);
     }
   });
 
@@ -1022,11 +1054,11 @@ describe("daily metric vault-share delivery records", () => {
       ...validData,
       projectedAt: "2999-01-01T00:00:00.000Z",
     }, /must not be in the future/u);
-    expectInvalidSources({ ...validData, sources: [] }, /1-4 entries/u);
+    expectInvalidSources({ ...validData, sources: [] }, /1-5 entries/u);
     expectInvalidSources({
       ...validData,
       sources: Array.from({ length: 5 }, (_, index) => ({
-        label: `Source ${index}`,
+        label: `source-${index}`,
         recordedAt: null,
         ...(index === 0 ? { selected: true } : {}),
         source: `source-${index}`,
@@ -1034,7 +1066,19 @@ describe("daily metric vault-share delivery records", () => {
         value: 88,
       })),
       sourcesDisagree: false,
-    }, /1-4 entries/u);
+    }, /at most 4 wearable entries/u);
+    expectInvalidSources({
+      ...validData,
+      sources: Array.from({ length: 6 }, (_, index) => ({
+        label: index === 5 ? "Manual" : `source-${index}`,
+        recordedAt: null,
+        ...(index === 5 ? { selected: true } : {}),
+        source: index === 5 ? "manual" : `source-${index}`,
+        unit: "minutes",
+        value: 88,
+      })),
+      sourcesDisagree: false,
+    }, /1-5 entries/u);
     expectInvalidSources({
       ...validData,
       sources: validData.sources.map((source) => ({ ...source, selected: undefined })),

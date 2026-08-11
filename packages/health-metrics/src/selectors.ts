@@ -138,9 +138,9 @@ function selectPointByPolicy(
   switch (policy.kind) {
     case "qualified-latest":
       selection = {
-        point: sortedLatest(
+        point: selectAuthoritativeMetricPoint(
           comparablePoints.filter((point) => qualifiersMatch(point, policy.requiredQualifiers)),
-        ).at(0) ?? null,
+        ),
       };
       break;
     case "daily-aggregate":
@@ -152,12 +152,14 @@ function selectPointByPolicy(
       break;
     case "latest-lab": {
       const labPoints = comparablePoints.filter((point) => point.source.kind === "test-result");
-      selection = { point: sortedLatest(labPoints, { preferFasting: policy.preferFasting }).at(0) ?? null };
+      selection = {
+        point: selectAuthoritativeMetricPoint(labPoints, { preferFasting: policy.preferFasting }),
+      };
       break;
     }
     case "latest-device-estimate":
     case "latest-valid":
-      selection = { point: sortedLatest(comparablePoints).at(0) ?? null };
+      selection = { point: selectAuthoritativeMetricPoint(comparablePoints) };
       break;
   }
 
@@ -194,7 +196,7 @@ function selectDailyAggregatePoint(
   policy: DailyAggregateSelectionPolicy,
   definition: MetricDefinition,
 ): MetricPolicySelectionResult {
-  const latest = sortedLatest(points).at(0) ?? null;
+  const latest = selectAuthoritativeMetricPoint(points);
   if (!latest) {
     return { point: null };
   }
@@ -297,11 +299,13 @@ function selectDailyAggregatePoint(
   };
 }
 
-function sortedLatest(
+export function selectAuthoritativeMetricPoint(
   points: readonly MetricPoint[],
   options: { preferFasting?: boolean } = {},
-): MetricPoint[] {
-  return points.slice().sort((left, right) => compareMetricPointsForSelection(left, right, options));
+): MetricPoint | null {
+  return points.slice().sort((left, right) =>
+    compareMetricPointsForSelection(left, right, options)
+  ).at(0) ?? null;
 }
 
 function compareMetricPointsForSelection(
