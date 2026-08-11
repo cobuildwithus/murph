@@ -800,10 +800,11 @@ one.
 
 Canonical onboarding state remains the scheduling and execution authority.
 Open, declined, and manual completion do not create the one-shot. Reopened
-state blocks a pending occurrence before delivery. A completion newer than the
-managed automation's last reconciliation also invalidates that occurrence; the
-existing managed owner must reseed it before support can run. Canonical active
-status, revision, and `activeUntil` remain the upper delivery boundary.
+state blocks a pending occurrence before delivery. The canonical occurrence
+must match the current completion's exact third-to-sixth-day schedule and
+seventh-day active boundary at the stable per-member slot; a stale or malformed
+window is skipped until the existing managed owner reconciles it. Canonical
+active status, revision, and `activeUntil` remain the upper delivery boundary.
 
 ## Success Criteria
 
