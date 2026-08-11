@@ -57,6 +57,7 @@ test("renders consent status retry states from the production control", () => {
     createElement(HealthDataConsentControlStudy),
   );
 
+  expect(markup).toContain("lg:col-span-2");
   expect(markup).toContain("Checking status...");
   expect(markup).toContain("Status is still unavailable. Try again.");
   expect(markup).toContain("text-destructive");
@@ -84,5 +85,5 @@ test("renders pending renewed consent from the production prompt", () => {
 
   expect(markup).toContain("Saving...");
   expect(markup).toContain("Use Murph again");
-  expect(markup).toContain("sm:grid-cols-[minmax(0,1fr)_auto]");
+  expect(markup).toContain("sm:grid-cols-[auto_minmax(0,1fr)_auto]");
 });

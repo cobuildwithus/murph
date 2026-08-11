@@ -206,6 +206,12 @@ export function shouldGroupAdjacentAssistantInputCandidates(
   first: AssistantInputCandidate,
   candidate: AssistantInputCandidate,
 ): boolean {
+  if (
+    isHostedImageCompletionAssistantInputCandidate(first) &&
+    isHostedImageCompletionAssistantInputCandidate(candidate)
+  ) {
+    return false
+  }
   return (
     isHostedImageCompletionAssistantInputCandidate(first) &&
     isSameAuthenticatedAssistantGroupRoute(first, candidate)

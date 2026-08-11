@@ -7,11 +7,8 @@ import {
   type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantTonePreference,
-  normalizeIanaTimeZone,
-  resolveSystemTimeZone,
-  toLocalDayKey,
 } from '@murphai/contracts'
-import { loadVault, readPreferencesDocument } from '@murphai/core'
+import { readPreferencesDocument } from '@murphai/core'
 import {
   resolveCodexAssistantTargetCapabilities,
 } from '../codex-runtime.js'
@@ -65,6 +62,10 @@ import {
 import {
   listAssistantTranscriptEntries,
 } from '../store.js'
+import {
+  readAssistantGeneratedImageDeliveryTranscriptMarker,
+  renderAssistantGeneratedImageDeliveryHistoryText,
+} from '../response-media.js'
 import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
@@ -128,6 +129,10 @@ import {
   resolveAssistantVoiceMemoDeliveryChannel,
   type AssistantVoiceMemoDeliveryChannel,
 } from '../voice-memo-delivery.js'
+import {
+  resolveAssistantPromptTimeContext,
+  type AssistantPromptTimeContext,
+} from '../prompt-time.js'
 
 const ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS = 64
 
@@ -227,11 +232,6 @@ export interface AssistantPromptCapabilityAvailability {
   assistantHostedDeviceConnectAvailable: boolean
   assistantHostedDeviceConnectProviders: readonly AssistantHostedDeviceConnectProvider[]
   assistantKnowledgeToolsAvailable: boolean
-}
-
-export interface AssistantPromptTimeContext {
-  currentLocalDate: string
-  currentTimeZone: string
 }
 
 export type AssistantCodexTurnPromptProfile =
@@ -364,7 +364,8 @@ export async function buildCodexTurnExecutionPlan(input: {
   const profile = resolveAssistantCodexTurnExecutionProfile({
     profile: input.profile,
   })
-  const promptTimeContext = await resolveAssistantPromptTimeContext(input.input.vault)
+  const promptTimeContext = input.input.promptTimeContext
+    ?? await resolveAssistantPromptTimeContext(input.input.vault)
   const preferenceContext = await resolveAssistantTurnPreferenceContext(input.input.vault)
 
   return {
@@ -743,6 +744,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         )
       }
       return buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+        canonicalTimeZoneAvailable:
+          input.promptTimeContext.canonicalTimeZoneAvailable !== false,
         currentLocalDate: input.promptTimeContext.currentLocalDate,
         currentTimeZone: input.promptTimeContext.currentTimeZone,
         profile: maintenanceProfile,
@@ -804,6 +807,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantTone,
       cliAccess: input.sharedPlan.cliAccess,
       channel: resolvedChannel,
+      canonicalTimeZoneAvailable:
+        input.promptTimeContext.canonicalTimeZoneAvailable !== false,
       currentLocalDate: input.promptTimeContext.currentLocalDate,
       currentTimeZone: input.promptTimeContext.currentTimeZone,
       conversationScope,
@@ -1161,6 +1166,21 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
         userPromptKey: null,
       }]
     }
+    if (entry.kind === 'status') {
+      const generatedImage =
+        readAssistantGeneratedImageDeliveryTranscriptMarker(entry.text)
+      return generatedImage
+        ? [{
+            message: {
+              content: renderAssistantGeneratedImageDeliveryHistoryText(
+                generatedImage,
+              ),
+              role: 'assistant',
+            },
+            userPromptKey: null,
+          }]
+        : []
+    }
     if (entry.kind !== 'assistant' && entry.kind !== 'user') {
       return []
     }
@@ -1332,28 +1352,6 @@ function resolveRoutePlanningSlowestSpan(
 
 function elapsedSince(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt)
-}
-
-export async function resolveAssistantPromptTimeContext(
-  vaultRoot: string,
-): Promise<AssistantPromptTimeContext> {
-  const fallbackTimeZone = resolveSystemTimeZone()
-  let currentTimeZone = fallbackTimeZone
-
-  try {
-    const loadedVault = await loadVault({
-      vaultRoot,
-    })
-    currentTimeZone =
-      normalizeIanaTimeZone(loadedVault.metadata.timezone) ?? fallbackTimeZone
-  } catch {
-    // Prompt time context is best-effort and should not block the turn.
-  }
-
-  return {
-    currentLocalDate: toLocalDayKey(new Date(), currentTimeZone),
-    currentTimeZone,
-  }
 }
 
 // Assemble the personality that drives thread-context band rendering. Persona

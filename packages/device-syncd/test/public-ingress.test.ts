@@ -3134,6 +3134,7 @@ test("public ingress passes only a stripped webhook summary into accepted hooks"
             eventType: "demo.updated",
             traceId: "trace-summary",
             occurredAt: "2026-04-11T12:59:00.000Z",
+            providerSentAt: "2026-04-11T12:59:30.000Z",
             resourceCategory: "  sleep  ",
             jobs: [
               {
@@ -3183,6 +3184,7 @@ test("public ingress passes only a stripped webhook summary into accepted hooks"
           },
         ],
         occurredAt: "2026-04-11T12:59:00.000Z",
+        providerSentAt: "2026-04-11T12:59:30.000Z",
         resourceCategory: "sleep",
       },
     },

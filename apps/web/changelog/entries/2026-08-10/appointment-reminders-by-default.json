@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 200,
+  "item": {
+    "id": "appointment-reminders-by-default",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Confirmed appointments come with a reminder",
+    "summary": "When a future care appointment is confirmed in a private conversation, Murph now creates one useful reminder by default unless you opt out.",
+    "details": "Morning appointments use the prior evening, later appointments use the same morning, and Murph keeps the same reminder up to date when an appointment is rescheduled or canceled.",
+    "relevanceTags": ["appointments", "reminders", "automations", "care"],
+    "sourcePullRequests": [1586],
+    "tryIt": {
+      "label": "Tell Murph about an appointment",
+      "prompt": "I have a confirmed dentist appointment next Thursday at 2 PM."
+    }
+  }
+}

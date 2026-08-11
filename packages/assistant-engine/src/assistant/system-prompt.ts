@@ -64,6 +64,7 @@ export interface AssistantSystemPromptInput {
   assistantTone?: AssistantTonePreference | null;
   channel: string | null;
   cliAccess: Pick<AssistantCliAccessContext, "rawCommand" | "setupCommand">;
+  canonicalTimeZoneAvailable?: boolean;
   currentLocalDate: string;
   currentTimeZone: string;
   conversationScope?: AssistantConversationScope;
@@ -77,6 +78,7 @@ export interface AssistantSystemPromptInput {
 }
 
 export interface AssistantMaintenanceSystemPromptInput {
+  canonicalTimeZoneAvailable?: boolean;
   currentLocalDate: string;
   currentTimeZone: string;
   profile: AssistantMaintenanceProfile;
@@ -698,6 +700,8 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
     conversationScope === "unverified-external"
       ? ASSISTANT_DATE_STYLE_GUIDANCE_TEXT
       : buildAssistantTimeStyleContextText({
+          canonicalTimeZoneAvailable:
+            input.canonicalTimeZoneAvailable !== false,
           personalCurrentTimeAvailable:
             input.hostedRuntime === true && conversationScope === "direct",
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
@@ -886,11 +890,15 @@ function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): strin
   const conversationScope = input.conversationScope ?? "direct";
   const audienceVerified = conversationScope !== "unverified-external";
   const scheduledOccurrenceContext = buildAssistantScheduledOccurrenceContextText({
+    canonicalTimeZoneAvailable: input.canonicalTimeZoneAvailable !== false,
     occurrenceAt: input.scheduledOccurrenceAt ?? null,
     timeZone: input.currentTimeZone,
   });
   return joinPromptSections(
-    buildAssistantCurrentDateLineText(input.currentLocalDate),
+    buildAssistantCurrentDateLineText(
+      input.currentLocalDate,
+      input.canonicalTimeZoneAvailable !== false,
+    ),
     input.hostedRuntime === true
       && audienceVerified
       && input.ordinaryInboundTurn === true
@@ -918,6 +926,7 @@ export function buildAssistantMaintenanceSystemPromptWithCacheMetadata(
 ): AssistantSystemPromptResult {
   const staticCacheableCorePrompt = buildAssistantMaintenanceExecutionGuidanceText(input.profile);
   const dynamicTurnContextPrompt = buildAssistantCurrentDateContextText({
+    canonicalTimeZoneAvailable: input.canonicalTimeZoneAvailable !== false,
     currentLocalDate: input.currentLocalDate,
     currentMurphProductBaseUrl: null,
     currentTimeZone: input.currentTimeZone,
@@ -1005,14 +1014,26 @@ const ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT =
 const ASSISTANT_TIME_SENSITIVE_ADVICE_GUIDANCE_TEXT =
   "When timing materially affects immediate advice, use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise to what still makes sense now.";
 
-function buildAssistantTimezoneLineText(currentTimeZone: string): string {
-  return `The user's canonical timezone for this vault is ${currentTimeZone}.`;
+const ASSISTANT_TIMESTAMP_INTERPRETATION_GUIDANCE_TEXT =
+  "Treat timestamps ending in `Z` or carrying an explicit offset as exact instants, not as local clock labels. Before stating a local time, use the canonical IANA timezone with timezone-aware rendering or an explicitly supplied local clock; never relabel the raw UTC clock as local time.";
+
+function buildAssistantTimezoneLineText(
+  currentTimeZone: string,
+  canonicalTimeZoneAvailable: boolean,
+): string {
+  return canonicalTimeZoneAvailable
+    ? `The user's canonical timezone for this vault is ${currentTimeZone}.`
+    : "The member's canonical timezone is unknown for this turn. Treat supplied `Z` timestamps as UTC and do not infer member-local clock values from the runtime environment.";
 }
 
-function buildAssistantCurrentDateLineText(currentLocalDate: string): string {
-  return `Today's date for the user is ${formatAssistantHumanReadableLocalDate(
-    currentLocalDate
-  )}.`;
+function buildAssistantCurrentDateLineText(
+  currentLocalDate: string,
+  canonicalTimeZoneAvailable = true,
+): string {
+  const formattedDate = formatAssistantHumanReadableLocalDate(currentLocalDate);
+  return canonicalTimeZoneAvailable
+    ? `Today's date for the user is ${formattedDate}.`
+    : `The current UTC date is ${formattedDate}; the member-local date is unknown for this turn.`;
 }
 
 function buildAssistantProductBaseUrlLineText(
@@ -1024,13 +1045,18 @@ function buildAssistantProductBaseUrlLineText(
 }
 
 function buildAssistantTimeStyleContextText(input: {
+  canonicalTimeZoneAvailable: boolean;
   personalCurrentTimeAvailable: boolean;
   currentMurphProductBaseUrl: string | null;
   currentTimeZone: string;
 }): string {
   return joinPromptSections(
     [
-      buildAssistantTimezoneLineText(input.currentTimeZone),
+      buildAssistantTimezoneLineText(
+        input.currentTimeZone,
+        input.canonicalTimeZoneAvailable,
+      ),
+      ASSISTANT_TIMESTAMP_INTERPRETATION_GUIDANCE_TEXT,
       ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
       ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT,
       ...(input.personalCurrentTimeAvailable
@@ -1042,14 +1068,22 @@ function buildAssistantTimeStyleContextText(input: {
 }
 
 function buildAssistantCurrentDateContextText(input: {
+  canonicalTimeZoneAvailable: boolean;
   currentLocalDate: string;
   currentMurphProductBaseUrl: string | null;
   currentTimeZone: string;
 }): string {
   return joinPromptSections(
     [
-      buildAssistantTimezoneLineText(input.currentTimeZone),
-      buildAssistantCurrentDateLineText(input.currentLocalDate),
+      buildAssistantTimezoneLineText(
+        input.currentTimeZone,
+        input.canonicalTimeZoneAvailable,
+      ),
+      ASSISTANT_TIMESTAMP_INTERPRETATION_GUIDANCE_TEXT,
+      buildAssistantCurrentDateLineText(
+        input.currentLocalDate,
+        input.canonicalTimeZoneAvailable,
+      ),
       ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
     ].join("\n"),
     buildAssistantProductBaseUrlLineText(input.currentMurphProductBaseUrl)
@@ -1560,6 +1594,7 @@ function buildAssistantCreativeNotificationDecisionContractText(
 }
 
 function buildAssistantScheduledOccurrenceContextText(input: {
+  canonicalTimeZoneAvailable: boolean;
   occurrenceAt: string | null;
   timeZone: string;
 }): string | null {
@@ -1570,6 +1605,13 @@ function buildAssistantScheduledOccurrenceContextText(input: {
   const occurrence = new Date(input.occurrenceAt);
   if (!Number.isFinite(occurrence.getTime())) {
     return null;
+  }
+
+  if (!input.canonicalTimeZoneAvailable) {
+    return `Scheduled occurrence context:
+- Occurrence instant: ${code(occurrence.toISOString())}.
+- Member timezone and local date: unknown for this turn.
+- Use the exact UTC instant as the only trusted time boundary; do not infer a member-local date.`;
   }
 
   return `Scheduled occurrence context:

@@ -1,6 +1,8 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-const RUNNER_STATE_SCHEMA_VERSION = 15;
+// Version 16 is also a semantic rollback floor: its runner can persist the
+// physical media-owner fact inside strict provider-message effects.
+export const RUNNER_STATE_SCHEMA_VERSION = 16;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -30,7 +32,7 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
     )
   `);
 
-  assertRunnerStateSchemaVersionSupported(sql);
+  assertStoredRunnerStateSchemaVersionSupported(sql);
   for (const [columnName, definition] of Object.entries({
     active_attempt_id: "TEXT",
     active_generation: "INTEGER NOT NULL DEFAULT 0",
@@ -75,11 +77,22 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
   });
 }
 
-function assertRunnerStateSchemaVersionSupported(sql: DurableObjectSqlStorageLike): void {
-  const version = readRunnerStateSchemaVersion(sql);
-  if (version > RUNNER_STATE_SCHEMA_VERSION) {
+function assertStoredRunnerStateSchemaVersionSupported(
+  sql: DurableObjectSqlStorageLike,
+): void {
+  assertRunnerStateSchemaVersionSupported({
+    observedVersion: readRunnerStateSchemaVersion(sql),
+    supportedVersion: RUNNER_STATE_SCHEMA_VERSION,
+  });
+}
+
+export function assertRunnerStateSchemaVersionSupported(input: {
+  observedVersion: number;
+  supportedVersion: number;
+}): void {
+  if (input.observedVersion > input.supportedVersion) {
     throw new Error(
-      `Hosted runner Durable Object schema version ${version} is newer than supported version ${RUNNER_STATE_SCHEMA_VERSION}.`,
+      `Hosted runner Durable Object schema version ${input.observedVersion} is newer than supported version ${input.supportedVersion}.`,
     );
   }
 }

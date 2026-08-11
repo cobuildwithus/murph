@@ -17,6 +17,7 @@ import type {
 } from '@murphai/hosted-execution/contracts'
 import type {
   AssistantSession,
+  AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import type { CodexThreadIdentity } from './codex-thread-route.js'
@@ -106,6 +107,12 @@ export type AssistantHostedInvocationScope =
   | AssistantHostedAcceptedInputInvocationScope
   | AssistantHostedScheduledInvocationScope
 
+export interface AssistantHostedImageCompletionEffectScope {
+  authorizedOriginAssistantInputId: string | null
+  completionAssistantInputId: string
+  exactMedia: readonly [AssistantVaultImageResponseMedia] | null
+}
+
 export type AssistantHostedVaultFileSendResult =
   | {
       approvalUrl: string
@@ -151,6 +158,14 @@ export interface AssistantHostedToolContext {
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
+  currentHostedImageCompletionEffectScope?():
+    AssistantHostedImageCompletionEffectScope | null
+  verifyGeneratedImageDelivery?(input: {
+    contentType: AssistantVaultImageResponseMedia['contentType']
+    imageRef: string
+    sha256: string
+    sizeBytes: number
+  }): Promise<boolean>
   currentAssistantInputId?(): string | null
   claimSubscriptionAssistantInputId?(): string | null
   claimIMessageContactAssistantInputId?(): string | null
@@ -203,6 +218,12 @@ export function createAssistantHostedToolContext(input: {
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
   ) => void
   recordNewsletterPendingDeliveryIntentId?: (intentId: string) => void
+  verifyGeneratedImageDelivery?: (input: {
+    contentType: AssistantVaultImageResponseMedia['contentType']
+    imageRef: string
+    sha256: string
+    sizeBytes: number
+  }) => Promise<boolean>
   sendVaultFile?: (
     ref: string,
     toolCallId?: string | null,
@@ -248,9 +269,38 @@ export function createAssistantHostedToolContext(input: {
       })
     : null
   const newsletterTool = newsletterOutboxTool ?? newsletterPort
+  const readRawCurrentAssistantInputId = () =>
+    executionContext?.currentAssistantInputId?.() ?? null
+  const readCurrentHostedImageCompletionEffectScope = ():
+    AssistantHostedImageCompletionEffectScope | null => {
+    const deliveryContext = readDeliveryContext()
+    const restriction =
+      deliveryContext.messageInput.hostedImageCompletionEffectRestriction ?? null
+    const currentAssistantInputId = readRawCurrentAssistantInputId()
+    const acceptedUserActionInputIds =
+      input.getUserActionAcceptedInputIds?.() ?? []
+    if (
+      restriction === null ||
+      (
+        currentAssistantInputId !== null &&
+        currentAssistantInputId !== restriction.completionAssistantInputId &&
+        acceptedUserActionInputIds.includes(currentAssistantInputId)
+      )
+    ) {
+      return null
+    }
+    return {
+      authorizedOriginAssistantInputId:
+        restriction.authorizedOriginAssistantInputId,
+      completionAssistantInputId: restriction.completionAssistantInputId,
+      exactMedia: restriction.exactMedia,
+    }
+  }
   const readCurrentUserActionAssistantInputId = () => {
-    const currentAssistantInputId =
-      executionContext?.currentAssistantInputId?.() ?? null
+    if (readCurrentHostedImageCompletionEffectScope() !== null) {
+      return null
+    }
+    const currentAssistantInputId = readRawCurrentAssistantInputId()
     const userActionAcceptedInputIds =
       input.getUserActionAcceptedInputIds?.() ?? []
     return currentAssistantInputId !== null &&
@@ -259,6 +309,9 @@ export function createAssistantHostedToolContext(input: {
       : null
   }
   const readCurrentUserActionScope = (): AssistantHostedUserActionScope | null => {
+    if (readCurrentHostedImageCompletionEffectScope() !== null) {
+      return null
+    }
     const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []
     if (acceptedInputIds.length === 0) {
       return null
@@ -272,6 +325,9 @@ export function createAssistantHostedToolContext(input: {
     }
   }
   const readCurrentInvocationScope = (): AssistantHostedInvocationScope | null => {
+    if (readCurrentHostedImageCompletionEffectScope() !== null) {
+      return null
+    }
     const userActionScope = readCurrentUserActionScope()
     const assistantInputId = userActionScope?.acceptedInputIds.at(-1) ?? null
     if (
@@ -397,7 +453,9 @@ export function createAssistantHostedToolContext(input: {
       : {}),
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentAssistantInputId: () =>
-      executionContext?.currentAssistantInputId?.() ?? null,
+      readCurrentHostedImageCompletionEffectScope() === null
+        ? readRawCurrentAssistantInputId()
+        : null,
     claimSubscriptionAssistantInputId: () => {
       if (subscriptionActionClaimed) {
         return null
@@ -458,6 +516,9 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
     },
+    currentHostedImageCompletionEffectScope:
+      readCurrentHostedImageCompletionEffectScope,
+    verifyGeneratedImageDelivery: input.verifyGeneratedImageDelivery,
     currentScheduledAutomationAuthority: () => {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
@@ -468,7 +529,9 @@ export function createAssistantHostedToolContext(input: {
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
     currentUserActionScope: readCurrentUserActionScope,
     currentProductFeedbackAcceptedInputIds: () =>
-      input.getProductFeedbackAcceptedInputIds?.() ?? [],
+      readCurrentHostedImageCompletionEffectScope() === null
+        ? input.getProductFeedbackAcceptedInputIds?.() ?? []
+        : [],
     pendingVaultFilesAvailable: input.pendingVaultFilesAvailable === true,
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
