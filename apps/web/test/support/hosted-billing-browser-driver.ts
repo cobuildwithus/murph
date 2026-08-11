@@ -607,56 +607,6 @@ async function clickHydratedMurphControl(
   await control.click();
 }
 
-async function waitForExpectedBillingControl(input: {
-  control: Locator;
-  label: string;
-  page: Page;
-  webBaseUrl: string;
-}): Promise<void> {
-  try {
-    await input.control.waitFor({ state: "visible", timeout: 30_000 });
-  } catch {
-    const state = await classifyMurphBillingPage(input.page, input.webBaseUrl);
-    throw new Error(`${input.label} control was unavailable (rendered-state=${state}).`);
-  }
-}
-
-async function classifyMurphBillingPage(
-  page: Page,
-  webBaseUrl: string,
-): Promise<string> {
-  const current = new URL(page.url());
-  const expectedOrigin = new URL(webBaseUrl).origin;
-  if (current.origin !== expectedOrigin) {
-    return readStripeSurfaceForTest(current) ?? "external";
-  }
-
-  const route = current.pathname.startsWith("/join/")
-    ? "join"
-    : current.pathname === "/settings"
-      ? "settings"
-      : "other-murph-route";
-  const markers = [
-    ["checkout-panel", page.getByRole("button", { exact: true, name: "Get Pulse" })],
-    ["auto-trial", page.getByText("Setting up your Murph", { exact: true })],
-    ["legal-consent", page.getByRole("heading", { exact: true, name: "One quick step" })],
-    [
-      "session-mismatch",
-      page.getByText("This browser is signed in with a different Murph account.", {
-        exact: true,
-      }),
-    ],
-    ["application-error", page.getByText(/Application error/iu)],
-  ] as const;
-  const visibleMarkers: string[] = [];
-  for (const [label, locator] of markers) {
-    if (await locator.first().isVisible().catch(() => false)) {
-      visibleMarkers.push(label);
-    }
-  }
-  return `${route}:${visibleMarkers.join(",") || "unknown"}`;
-}
-
 async function assertSuccessfulResponse(response: Response): Promise<void> {
   if (!response.ok()) {
     throw new Error(`Murph billing route returned HTTP ${response.status()}.`);
