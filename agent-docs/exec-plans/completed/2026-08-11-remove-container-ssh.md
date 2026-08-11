@@ -1,6 +1,6 @@
 # Remove Cloudflare Container SSH
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -58,3 +58,26 @@ Updated: 2026-08-11
   `authorized_keys`, and no SSH-only compatibility flag.
 - Exact-head GitHub Actions plus preliminary ReviewGPT coverage lens and final
   ReviewGPT security/deploy gate.
+
+## Completion evidence
+
+- Cloudflare config tests passed: 38 tests across deploy rendering, the
+  checked-in scaffold, and hosted-local fidelity; the post-specialist focused
+  rerun passed 35 tests.
+- Hosted-local environment tests passed: 94 tests. Both affected package
+  typechecks passed.
+- The private workflow test passed 10 tests and the full private `pnpm verify`
+  suite passed after the accepted coverage correction.
+- Public preliminary coverage review returned one accepted per-class scaffold
+  assertion gap, which is resolved. Final review round 1 returned two accepted
+  findings: preserve independent PID isolation and cover the hosted-local
+  config owner. Final round 2 returned `ROUND_OUTCOME: PASS` with no qualifying
+  findings.
+- Private preliminary review returned one accepted retired-mapping assertion
+  gap, which is resolved. Private final round 1 returned
+  `ROUND_OUTCOME: PASS` with no implementation findings.
+- Both PR heads merge cleanly with current `main`. Public exact-head CI is green
+  except for a current-main assistant prompt assertion mismatch outside this
+  diff. Private exact-head CI is green except for the same public-main wearable
+  replay scenario that failed before and after its test-only head update.
+Completed: 2026-08-11
