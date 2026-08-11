@@ -162,8 +162,9 @@ the normal compatibility-first Web/Cloudflare rollout and the owning
 post-deploy migration workflow; they do not replay this completed hard cut.
 
 The legacy provider-object drain is complete. On 2026-08-10 an authenticated
-production dry-run reported zero candidates, so no apply was required. The
-one-time Ops control, batch route and service, and local CLI were then removed.
+production apply retired 69 exact candidates, then its automatic verification
+reported zero remaining candidates and convergence. The one-time Ops control,
+batch route and service, and local CLI were then removed.
 
 Keep the configured accepted legacy Pulse Price and the per-member cleanup and
 event-compatibility guards unchanged through the delayed-event and manual-replay

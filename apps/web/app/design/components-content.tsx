@@ -217,7 +217,7 @@ function Section({
   title: string;
 }) {
   return (
-    <div id={id} className="flex flex-col gap-6">
+    <div id={id} className="flex scroll-mt-24 flex-col gap-6">
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
     </div>

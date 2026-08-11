@@ -1857,8 +1857,9 @@ Current hosted billing assumptions:
   reconciliation or cleanup. They cannot create, extend, or restore free
   access; starter capacity and paid invoices are the current authorities.
 - The legacy provider-object drain is complete: an authenticated production
-  dry-run reported zero candidates, so no apply was required, and the one-time
-  Ops control, batch route and service, and CLI were removed. Keep the accepted
+  apply retired 69 exact candidates, then its automatic verification reported
+  zero remaining candidates and convergence. The one-time Ops control, batch
+  route and service, and CLI were removed. Keep the accepted
   legacy Pulse Price and per-member cleanup/event guards through the maximum
   delayed-event and manual-replay horizon; then remove that bounded
   compatibility together in a separate contracting change.

@@ -79,8 +79,9 @@ Updated: 2026-08-10
 - PR #1602 merged at `58e5a5bc88` after the exact pushed head passed required
   GitHub checks, the preliminary specialist review, and final ReviewGPT round
   2 with no findings. The production Vercel deployment reached Ready.
-- On 2026-08-10 the operator reported that the authenticated production dry-run
-  found zero candidates. No apply was required, and this agent did not mutate
+- On 2026-08-10 the authenticated production apply retired 69 exact candidates;
+  its automatic verification reported zero remaining candidates and
+  convergence. The operator initiated the action; this agent did not mutate
   production billing or database state.
 - The terminal cleanup removes the now-obsolete one-time surface while leaving
   the existing per-member Stripe event and Family-conversion guards intact
