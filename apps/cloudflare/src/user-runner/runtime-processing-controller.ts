@@ -457,7 +457,13 @@ export class RuntimeProcessingController {
       }
     }
 
-    if (activeFence.processingMode === "inbox_media_retention") {
+    const canCoalesceWithoutWake =
+      activeFence.processingMode === "inbox_media_retention"
+      || (
+        activeFence.processingMode === "system_mailbox"
+        && requestedProcessingMode === "system_mailbox"
+      );
+    if (canCoalesceWithoutWake) {
       const activeRuntimeState =
         await this.readActiveRuntimeFenceLiveness({
           activeFence,
