@@ -74,7 +74,7 @@ describe('hosted domain dynamic tools', () => {
           },
         },
         title: 'Tonight reminder',
-      }, '2031-02-15T09:59:59.900Z')).toEqual({
+      }, referenceWindow('2031-02-15T09:59:59.900Z'))).toEqual({
         kind: 'automation',
         request: {
           action: 'save',
@@ -98,7 +98,7 @@ describe('hosted domain dynamic tools', () => {
           },
         },
         title: 'Tomorrow reminder',
-      }, '2031-02-15T09:59:59.900Z')).toMatchObject({
+      }, referenceWindow('2031-02-15T09:59:59.900Z'))).toMatchObject({
         kind: 'automation',
         request: {
           schedule: {
@@ -122,6 +122,25 @@ describe('hosted domain dynamic tools', () => {
       }, null)).toMatchObject({
         kind: 'invalid-automation-arguments',
         safeFailureCode: 'local_at_reference_unavailable',
+      })
+      expect(readToolRequest('automation', {
+        action: 'save',
+        instructions: 'Ask for an explicit calendar date.',
+        schedule: {
+          kind: 'at',
+          localAt: {
+            relativeDay: 'today',
+            time: '23:20',
+            timeZone: 'Pacific/Honolulu',
+          },
+        },
+        title: 'Ambiguous accepted input date',
+      }, {
+        earliestAt: '2031-02-15T09:59:59.900Z',
+        latestAt: '2031-02-15T10:00:00.100Z',
+      })).toMatchObject({
+        kind: 'invalid-automation-arguments',
+        safeFailureCode: 'local_at_reference_spans_dates',
       })
     } finally {
       vi.useRealTimers()
@@ -624,6 +643,38 @@ describe('hosted domain dynamic tools', () => {
       'ask for another local time',
     )
 
+    const spanningDateRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send a reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '09:00',
+          timeZone: 'Pacific/Honolulu',
+        },
+      },
+      title: 'Ambiguous relative-date reminder',
+    }, {
+      earliestAt: '2031-02-15T09:59:59.900Z',
+      latestAt: '2031-02-15T10:00:00.100Z',
+    })
+    if (!spanningDateRequest) {
+      throw new Error('Expected an invalid spanning-date request.')
+    }
+    const spanningDateResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({}),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: spanningDateRequest,
+    })
+    expect(spanningDateResult.rpcResult).toMatchObject({ success: false })
+    expect(spanningDateResult.rpcResult.contentItems[0]?.text).toContain(
+      'ask the user for an explicit calendar date',
+    )
+
     const conflict = Object.assign(new Error('private conflict detail'), {
       code: 'VAULT_AUTOMATION_CONFLICT',
     })
@@ -765,7 +816,10 @@ describe('hosted domain dynamic tools', () => {
 function readToolRequest(
   tool: 'automation' | 'device',
   argumentsValue: unknown,
-  automationRelativeDateReferenceAt: string | null = new Date().toISOString(),
+  automationRelativeDateReferenceWindow: {
+    earliestAt: string
+    latestAt: string
+  } | null = referenceWindow(new Date().toISOString()),
 ) {
   return readTestMurphDynamicToolRequest(
     {
@@ -777,8 +831,18 @@ function readToolRequest(
         turnId: 'turn-active-root-1',
       },
     },
-    { automationRelativeDateReferenceAt },
+    { automationRelativeDateReferenceWindow },
   )
+}
+
+function referenceWindow(at: string): {
+  earliestAt: string
+  latestAt: string
+} {
+  return {
+    earliestAt: at,
+    latestAt: at,
+  }
 }
 
 function createHostedToolContext(input: {

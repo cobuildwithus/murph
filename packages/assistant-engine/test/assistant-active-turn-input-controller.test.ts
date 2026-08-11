@@ -114,9 +114,10 @@ test('active-turn controller only steers exact conversations while open', async 
     })
     assert.ok(steered)
     steered.catch(() => undefined)
-    assert.deepEqual(await controller.admitAvailable(), {
+    expect(await controller.admitAvailable()).toEqual({
       acceptedInputs: [
         {
+          acceptedAt: expect.any(String),
           id: 'manual-1',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'Same thread',
@@ -163,9 +164,10 @@ test('active-turn controller only steers exact conversations while open', async 
       })
       assert.ok(sessionSteered)
       sessionSteered.catch(() => undefined)
-      assert.deepEqual(await sessionOnlyController.admitAvailable(), {
+      expect(await sessionOnlyController.admitAvailable()).toEqual({
         acceptedInputs: [
           {
+            acceptedAt: expect.any(String),
             id: 'manual-1',
             promptFallbackReason: 'manual-input',
             promptFallbackText: 'Session fallback',
@@ -309,6 +311,7 @@ test('active-turn controller lets only an already-started deferred steer settle 
     await expect(admission).resolves.toEqual({
       acceptedInputs: [
         {
+          acceptedAt: expect.any(String),
           id: 'manual-1',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'Already started before the first response',
@@ -443,9 +446,10 @@ test('active-turn controller drains queued manual input before probed hook input
     assert.ok(steered)
     steered.catch(() => undefined)
 
-    assert.deepEqual(await controller.admitAvailable(), {
+    expect(await controller.admitAvailable()).toEqual({
       acceptedInputs: [
         {
+          acceptedAt: expect.any(String),
           id: 'manual-1',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'Manual input',
@@ -566,9 +570,10 @@ test('active-turn controller does not admit probed hook input after provider rel
     expect(providerSteerOrder).toEqual(['causal-seq', 'provider'])
     releaseLiveTurn()
 
-    assert.deepEqual(await controller.admitLiveSteered(), {
+    expect(await controller.admitLiveSteered()).toEqual({
       acceptedInputs: [
         {
+          acceptedAt: expect.any(String),
           id: 'manual-1',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'Live-steered input',
@@ -729,7 +734,10 @@ test('active-turn controller can notify every active turn in one vault', async (
     ])
     expect(steer).toHaveBeenCalledWith({
       prompt: 'Vault-level hook input',
-      relativeDateReferenceAt: '2031-02-15T09:59:59.900Z',
+      relativeDateReferenceWindow: {
+        earliestAt: '2031-02-15T09:59:59.900Z',
+        latestAt: '2031-02-15T09:59:59.900Z',
+      },
       userMessageContent: [
         {
           text: 'Vault-level hook input',
@@ -814,9 +822,10 @@ test('active-turn controller drains in-flight live steer input without post-rele
     const admission = controller.admitLiveSteered()
     steerRelease.resolve()
 
-    assert.deepEqual(await admission, {
+    expect(await admission).toEqual({
       acceptedInputs: [
         {
+          acceptedAt: expect.any(String),
           id: 'manual-1',
           promptFallbackReason: 'manual-input',
           promptFallbackText: 'In-flight live steer input',
@@ -1040,7 +1049,7 @@ test('active-turn controller only probes input after explicit notification or pr
     assert.equal(admissionCount, 1)
     expect(steer).toHaveBeenCalledWith({
       prompt: 'Notification hook input',
-      relativeDateReferenceAt: expect.any(String),
+      relativeDateReferenceWindow: null,
       userMessageContent: [
         {
           text: 'Notification hook input',
@@ -1152,9 +1161,10 @@ test('active-turn controller re-steers pending input into a replacement live pro
           },
         ])
       })
-      assert.deepEqual(await controller.admitLiveSteered(), {
+      expect(await controller.admitLiveSteered()).toEqual({
         acceptedInputs: [
           {
+            acceptedAt: expect.any(String),
             id: 'manual-1',
             promptFallbackReason: 'manual-input',
             promptFallbackText: 'Re-steer me',
@@ -1334,7 +1344,7 @@ test('active-turn controller reruns input-available admission for in-flight noti
     expect(steer).toHaveBeenCalledTimes(1)
     expect(steer).toHaveBeenCalledWith({
       prompt: 'Rerun hook input',
-      relativeDateReferenceAt: expect.any(String),
+      relativeDateReferenceWindow: null,
       userMessageContent: [
         {
           text: 'Rerun hook input',

@@ -18,6 +18,9 @@ import {
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
 import type {
+  AssistantAcceptedTurnInputReferenceWindow,
+} from '../../assistant/active-turn-input-journal.js'
+import type {
   AssistantHostedAutomationTool,
   AssistantHostedAutomationToolRequest,
   AssistantHostedAutomationToolResponse,
@@ -101,6 +104,7 @@ type AutomationLocalAtFailureCode =
   | 'local_at_fold'
   | 'local_at_gap'
   | 'local_at_invalid_timezone'
+  | 'local_at_reference_spans_dates'
   | 'local_at_reference_unavailable'
 
 class AutomationLocalAtResolutionError extends Error {
@@ -319,7 +323,7 @@ export type AutomationDynamicToolRequest =
 
 export function readAutomationDynamicToolRequest(input: {
   arguments: unknown
-  relativeDateReferenceAt?: string | null
+  relativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   tool: string | null
 }): AutomationDynamicToolRequest | null {
   if (input.tool !== MURPH_AUTOMATION_TOOL.name) {
@@ -348,7 +352,7 @@ export function readAutomationDynamicToolRequest(input: {
         : {}),
       request: resolveAutomationDynamicToolRequest(
         parsed.args,
-        input.relativeDateReferenceAt ?? null,
+        input.relativeDateReferenceWindow ?? null,
       ),
     }
   } catch (error) {
@@ -382,7 +386,7 @@ function isUnknownRecord(value: unknown): value is Record<string, unknown> {
 
 function resolveAutomationDynamicToolRequest(
   args: z.infer<typeof automationArgumentsSchema>,
-  relativeDateReferenceAt: string | null,
+  relativeDateReferenceWindow: AssistantAcceptedTurnInputReferenceWindow | null,
 ): AssistantHostedAutomationToolRequest {
   if (args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION) {
     return buildOnboardingFirstPersonalReadAutomationSaveRequest()
@@ -392,7 +396,7 @@ function resolveAutomationDynamicToolRequest(
       ...args,
       schedule: resolveDynamicAutomationSchedule(
         args.schedule,
-        relativeDateReferenceAt,
+        relativeDateReferenceWindow,
       ),
     }
   }
@@ -405,7 +409,7 @@ function resolveAutomationDynamicToolRequest(
         : {
             schedule: resolveDynamicAutomationSchedule(
               schedule,
-              relativeDateReferenceAt,
+              relativeDateReferenceWindow,
             ),
           }),
     }
@@ -415,13 +419,13 @@ function resolveAutomationDynamicToolRequest(
 
 function resolveDynamicAutomationSchedule(
   schedule: z.infer<typeof automationDynamicToolScheduleSchema>,
-  relativeDateReferenceAt: string | null,
+  relativeDateReferenceWindow: AssistantAcceptedTurnInputReferenceWindow | null,
 ): AutomationSchedule {
   if ('localAt' in schedule) {
     return {
       at: resolveOneShotLocalAt(
         schedule.localAt,
-        relativeDateReferenceAt,
+        relativeDateReferenceWindow,
       ),
       kind: 'at',
     }
@@ -431,7 +435,7 @@ function resolveDynamicAutomationSchedule(
 
 function resolveOneShotLocalAt(
   localAt: z.infer<typeof automationOneShotLocalAtSchema>,
-  relativeDateReferenceAt: string | null,
+  relativeDateReferenceWindow: AssistantAcceptedTurnInputReferenceWindow | null,
 ): string {
   const timeZone = normalizeIanaTimeZone(localAt.timeZone)
   if (!timeZone) {
@@ -445,7 +449,7 @@ function resolveOneShotLocalAt(
     ? resolveLocalAtRelativeDate(
         localAt.relativeDay,
         timeZone,
-        relativeDateReferenceAt,
+        relativeDateReferenceWindow,
       )
     : parseLocalAtDate(localAt.date)
   const time = parseLocalAtTime(localAt.time)
@@ -494,19 +498,39 @@ function resolveOneShotLocalAt(
 function resolveLocalAtRelativeDate(
   relativeDay: typeof automationLocalAtRelativeDayValues[number] | undefined,
   timeZone: string,
-  referenceAt: string | null,
+  referenceWindow: AssistantAcceptedTurnInputReferenceWindow | null,
 ): { day: number; month: number; year: number } {
   if (relativeDay === undefined) {
     throw new Error('schedule.localAt requires an explicit date or relativeDay.')
   }
-  const referenceAtMs = referenceAt === null ? Number.NaN : Date.parse(referenceAt)
-  if (!Number.isFinite(referenceAtMs)) {
+  const earliestAtMs = referenceWindow === null
+    ? Number.NaN
+    : Date.parse(referenceWindow.earliestAt)
+  const latestAtMs = referenceWindow === null
+    ? Number.NaN
+    : Date.parse(referenceWindow.latestAt)
+  if (
+    !Number.isFinite(earliestAtMs)
+    || !Number.isFinite(latestAtMs)
+    || earliestAtMs > latestAtMs
+  ) {
     throw new AutomationLocalAtResolutionError(
       'local_at_reference_unavailable',
-      'schedule.localAt.relativeDay requires the accepted input reference time.',
+      'schedule.localAt.relativeDay requires the accepted input reference window.',
     )
   }
-  const current = formatTimeZoneDateTimeParts(referenceAtMs, timeZone)
+  const current = formatTimeZoneDateTimeParts(earliestAtMs, timeZone)
+  const latest = formatTimeZoneDateTimeParts(latestAtMs, timeZone)
+  if (
+    current.year !== latest.year
+    || current.month !== latest.month
+    || current.day !== latest.day
+  ) {
+    throw new AutomationLocalAtResolutionError(
+      'local_at_reference_spans_dates',
+      'schedule.localAt.relativeDay is ambiguous because the accepted inputs span calendar dates in that timezone; ask for an explicit YYYY-MM-DD date.',
+    )
+  }
   const dayOffset = relativeDay === 'tomorrow' ? 1 : 0
   const resolved = new Date(Date.UTC(
     current.year,

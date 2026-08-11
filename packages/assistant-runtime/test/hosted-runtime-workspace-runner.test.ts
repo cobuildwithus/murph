@@ -4722,7 +4722,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     let admissionCount = 0;
     const liveSteerInputs: Array<{
       prompt: string;
-      relativeDateReferenceAt: string;
+      relativeDateReferenceWindow: {
+        earliestAt: string;
+        latestAt: string;
+      } | null;
       userMessageContent?: unknown;
     }> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -4849,11 +4852,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             turnId: "turn-runner-active-turn",
           });
           items.push(createMailboxItem({
+            createdAt: "2026-04-26T00:00:02.000Z",
             id: "mailbox_item_runner_late",
             laneSeq: "2",
             occurredAt: "2026-04-26T00:00:02.000Z",
           }));
           items.push(createMailboxItem({
+            createdAt: "2026-04-26T00:00:03.000Z",
             id: "mailbox_item_runner_late_second",
             laneSeq: "3",
             occurredAt: "2026-04-26T00:00:03.000Z",
@@ -4896,10 +4901,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(liveSteerInputs.length, 1);
       const liveSteerInput = liveSteerInputs[0];
       assert.ok(liveSteerInput);
-      assert.match(
-        liveSteerInput.relativeDateReferenceAt,
-        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
-      );
+      assert.deepEqual(liveSteerInput.relativeDateReferenceWindow, {
+        earliestAt: "2026-04-26T00:00:02.000Z",
+        latestAt: "2026-04-26T00:00:03.000Z",
+      });
       assert.deepEqual({
         prompt: liveSteerInput.prompt,
         userMessageContent: liveSteerInput.userMessageContent,

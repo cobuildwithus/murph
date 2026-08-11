@@ -96,6 +96,9 @@ import {
 import type {
   AssistantConversationScope,
 } from '../assistant/conversation-policy.js'
+import type {
+  AssistantAcceptedTurnInputReferenceWindow,
+} from '../assistant/active-turn-input-journal.js'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
@@ -1273,7 +1276,7 @@ function isMurphDynamicToolNamespace(namespace: string | null): boolean {
 export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
   input?: {
-    automationRelativeDateReferenceAt?: string | null
+    automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   },
 ): MurphDynamicToolRequest | null {
   const request = parseDynamicToolCallRequest(message)
@@ -1291,8 +1294,8 @@ export function readMurphDynamicToolRequest(
 
   const automationRequest = readAutomationDynamicToolRequest({
     arguments: request.arguments,
-    relativeDateReferenceAt:
-      input?.automationRelativeDateReferenceAt ?? null,
+    relativeDateReferenceWindow:
+      input?.automationRelativeDateReferenceWindow ?? null,
     tool: request.tool,
   })
   if (automationRequest) {
@@ -1865,6 +1868,11 @@ export async function executeMurphDynamicToolRequest(input: {
           return toolTextResult(
             false,
             'the relative reminder date could not be safely anchored to the accepted message; ask the user for an explicit calendar date before retrying',
+          )
+        case 'local_at_reference_spans_dates':
+          return toolTextResult(
+            false,
+            'the accepted messages span different calendar dates in that timezone; ask the user for an explicit calendar date before retrying',
           )
         default:
           return toolTextResult(false, 'invalid automation arguments')

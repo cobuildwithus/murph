@@ -17,6 +17,7 @@ import type { AssistantChannelAdapter } from '../src/assistant/channel-adapters.
 import {
   readAssistantAcceptedTurnInputJournal,
   resolveAssistantAcceptedTurnInputJournalPath,
+  resolveAssistantAcceptedTurnInputReferenceWindow,
   type AssistantAcceptedTurnInputItemInput,
   type AssistantCodexContinuation,
 } from '../src/assistant/active-turn-input-journal.ts'
@@ -36,7 +37,13 @@ import {
   readAssistantInputEvent,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
-import { createStoreBackedAssistantInputSource } from '../src/assistant/input-source.ts'
+import {
+  assistantInputCandidateFromStoredEvent,
+  createStoreBackedAssistantInputSource,
+} from '../src/assistant/input-source.ts'
+import {
+  readAutomationDynamicToolRequest,
+} from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { resolveAssistantConversationKey } from '../src/assistant/bindings.ts'
 import {
   ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
@@ -470,6 +477,127 @@ test('sendAssistantMessageLocal gives hosted manual phone-call turns a real acce
     acceptedInputIds: ['manual-phone-call:turn-1'],
     conversationScope: 'direct',
   })
+})
+
+test('sendAssistantMessageLocal keeps a stored pre-midnight receipt authoritative after delayed initial processing', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2031-02-15T10:00:00.100Z'))
+  const context = await createTempVaultContext(
+    'assistant-local-service-relative-date-initial-',
+  )
+  tempRoots.push(context.parentRoot)
+  const storedInput = await upsertAssistantInputEvent({
+    vault: context.vaultRoot,
+    now: new Date('2031-02-15T10:00:00.100Z'),
+    event: {
+      content: {
+        attachmentDescriptors: [],
+        text: 'Remind me tomorrow at 9 AM Honolulu time.',
+      },
+      conversation: {
+        accountId: 'acct_1',
+        actorId: 'actor_1',
+        actorIsSelf: false,
+        source: 'telegram',
+        threadId: 'thread-1',
+        threadIsDirect: true,
+      },
+      occurredAt: '2031-02-15T09:59:58.000Z',
+      receivedAt: '2031-02-15T09:59:59.900Z',
+      replyTarget: {
+        channel: 'telegram',
+        messageId: 'message-relative-date-initial',
+        threadId: 'thread-1',
+      },
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_relative_date_initial',
+        laneSeq: '1',
+      }),
+    },
+  })
+  const acceptedInput = assistantInputCandidateFromStoredEvent(
+    storedInput,
+  ).acceptedInput
+  const { mocks, sendAssistantMessageLocal, session } =
+    await loadLocalServiceModule({
+      realAcceptedInputPersistence: true,
+    })
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      const referenceWindow = resolveAssistantAcceptedTurnInputReferenceWindow(
+        providerInput.acceptedInputItems ?? [],
+      )
+      expect(referenceWindow).toEqual({
+        earliestAt: '2031-02-15T09:59:59.900Z',
+        latestAt: '2031-02-15T09:59:59.900Z',
+      })
+      expect(readAutomationDynamicToolRequest({
+        arguments: {
+          action: 'save',
+          instructions: 'Send the reminder.',
+          schedule: {
+            kind: 'at',
+            localAt: {
+              relativeDay: 'tomorrow',
+              time: '09:00',
+              timeZone: 'Pacific/Honolulu',
+            },
+          },
+          title: 'Tomorrow reminder',
+        },
+        relativeDateReferenceWindow: referenceWindow,
+        tool: 'automation',
+      })).toMatchObject({
+        kind: 'automation',
+        request: {
+          schedule: {
+            at: '2031-02-15T19:00:00.000Z',
+            kind: 'at',
+          },
+        },
+      })
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          codexContinuation: {
+            kind: 'explicit-structured-history',
+          },
+          codexThreadId: 'provider-thread-relative-date-initial',
+          response: 'Reminder saved.',
+          responseDeliveryContextOrdinal: 0,
+          route: {
+            routeId: 'route-relative-date-initial',
+          },
+          session,
+          transcriptResponse: 'Reminder saved.',
+        },
+      }
+    },
+  )
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [acceptedInput],
+    },
+    deliverResponse: false,
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Remind me tomorrow at 9 AM Honolulu time.',
+    vault: context.vaultRoot,
+  })
+
+  expect(
+    (await readAssistantAcceptedTurnInputJournal(
+      context.vaultRoot,
+      'turn-1',
+    ))?.inputs[0]?.acceptedAt,
+  ).toBe('2031-02-15T09:59:59.900Z')
 })
 
 test('sendAssistantMessageLocal passes lazy scheduled group tools without invoking them', async () => {
@@ -1595,15 +1723,7 @@ test('sendAssistantMessageLocal resolves one accepted-message ref for reply and 
   await sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [
-        {
-          contentRef: {
-            kind: 'assistant-input-event',
-            refId: acceptedMessage.inputId,
-            version: acceptedMessage.schema,
-          },
-          id: acceptedMessage.inputId,
-          source: 'assistant-input',
-        },
+        assistantInputCandidateFromStoredEvent(acceptedMessage).acceptedInput,
       ],
     },
     deliverResponse: true,
@@ -1688,15 +1808,7 @@ test('sendAssistantMessageLocal fails closed before reply delivery when second-p
   const result = await sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [
-        {
-          contentRef: {
-            kind: 'assistant-input-event',
-            refId: acceptedMessage.inputId,
-            version: acceptedMessage.schema,
-          },
-          id: acceptedMessage.inputId,
-          source: 'assistant-input',
-        },
+        assistantInputCandidateFromStoredEvent(acceptedMessage).acceptedInput,
       ],
     },
     deliverResponse: true,
@@ -1788,15 +1900,7 @@ test('sendAssistantMessageLocal fails closed before reaction delivery when secon
   const result = await sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [
-        {
-          contentRef: {
-            kind: 'assistant-input-event',
-            refId: acceptedMessage.inputId,
-            version: acceptedMessage.schema,
-          },
-          id: acceptedMessage.inputId,
-          source: 'assistant-input',
-        },
+        assistantInputCandidateFromStoredEvent(acceptedMessage).acceptedInput,
       ],
     },
     deliverResponse: true,
@@ -1972,15 +2076,8 @@ test('sendAssistantMessageLocal carries the provider reaction patch into the no-
   const result = await sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [olderEligibleMessage, newerIneligibleMessage].map(
-        (message) => ({
-          contentRef: {
-            kind: 'assistant-input-event' as const,
-            refId: message.inputId,
-            version: message.schema,
-          },
-          id: message.inputId,
-          source: 'assistant-input' as const,
-        }),
+        (message) =>
+          assistantInputCandidateFromStoredEvent(message).acceptedInput,
       ),
     },
     channel: 'linq',
@@ -3059,15 +3156,9 @@ test('sendAssistantMessageLocal leaves an acknowledged uncovered steer pending a
       return {
         acceptedInputs: [
           {
-            contentRef: {
-              kind: 'assistant-input-event',
-              refId: uncoveredInput.inputId,
-              version: uncoveredInput.schema,
-            },
-            id: uncoveredInput.inputId,
+            ...assistantInputCandidateFromStoredEvent(uncoveredInput).acceptedInput,
             promptFallbackReason: 'missing-content-ref',
             promptFallbackText: 'Late durable follow up',
-            source: 'assistant-input',
           },
         ],
         kind: 'accepted',
@@ -3141,15 +3232,7 @@ test('sendAssistantMessageLocal leaves an acknowledged uncovered steer pending a
   const resultPromise = sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [
-        {
-          contentRef: {
-            kind: 'assistant-input-event',
-            refId: initialInput.inputId,
-            version: initialInput.schema,
-          },
-          id: initialInput.inputId,
-          source: 'assistant-input',
-        },
+        assistantInputCandidateFromStoredEvent(initialInput).acceptedInput,
       ],
     },
     activeTurnCheckpoint,
@@ -3541,15 +3624,9 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
       return {
         acceptedInputs: [
           {
-            contentRef: {
-              kind: 'assistant-input-event',
-              refId: nextInput.inputId,
-              version: nextInput.schema,
-            },
-            id: nextInput.inputId,
+            ...assistantInputCandidateFromStoredEvent(nextInput).acceptedInput,
             promptFallbackReason: 'missing-content-ref',
             promptFallbackText: prompt,
-            source: 'assistant-input',
           },
         ],
         kind: 'accepted',
@@ -3646,15 +3723,7 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
     activeTurnCheckpoint,
     acceptedTurnInput: {
       initialInputs: [
-        {
-          contentRef: {
-            kind: 'assistant-input-event',
-            refId: earlierHostedInput.inputId,
-            version: earlierHostedInput.schema,
-          },
-          id: earlierHostedInput.inputId,
-          source: 'assistant-input',
-        },
+        assistantInputCandidateFromStoredEvent(earlierHostedInput).acceptedInput,
       ],
     },
     activeTurnInput,
@@ -3776,6 +3845,8 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
 })
 
 test('sendAssistantMessageLocal attributes required progress after real live steering to the same provider request', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2031-02-15T10:00:00.100Z'))
   const context = await createTempVaultContext(
     'assistant-local-service-active-turn-event-steer-',
   )
@@ -3797,7 +3868,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
   })
   const hostedInput = await upsertAssistantInputEvent({
     vault: context.vaultRoot,
-    now: new Date('2026-04-22T10:00:01.000Z'),
+    now: new Date('2031-02-15T10:00:00.100Z'),
     event: {
       content: {
         attachmentDescriptors: [],
@@ -3811,8 +3882,8 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
         threadId: 'thread-1',
         threadIsDirect: true,
       },
-      occurredAt: '2026-04-22T10:00:00.000Z',
-      receivedAt: '2026-04-22T10:00:00.000Z',
+      occurredAt: '2031-02-15T09:59:58.000Z',
+      receivedAt: '2031-02-15T09:59:59.900Z',
       replyTarget: {
         channel: 'linq',
         messageId: 'message-event-steer',
@@ -3824,11 +3895,16 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
       }),
     },
   })
+  const hostedCandidate = assistantInputCandidateFromStoredEvent(hostedInput)
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
   const requiredProgressRequested = createDeferred<void>()
   const requiredProgressDelivered = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
+  const liveSteeredReferenceWindows: Array<{
+    earliestAt: string
+    latestAt: string
+  } | null> = []
   const providerRequestStarted = vi.fn()
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
@@ -3853,15 +3929,9 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
       return {
         acceptedInputs: [
           {
-            contentRef: {
-              kind: 'assistant-input-event',
-              refId: hostedInput.inputId,
-              version: hostedInput.schema,
-            },
-            id: hostedInput.inputId,
+            ...hostedCandidate.acceptedInput,
             promptFallbackReason: 'missing-content-ref',
             promptFallbackText: 'Event-backed follow up',
-            source: 'assistant-input',
           },
         ],
         kind: 'accepted',
@@ -3917,6 +3987,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
       sessionId: session.sessionId,
       steer: async (input) => {
         liveSteeredPrompts.push(input.prompt)
+        liveSteeredReferenceWindows.push(input.relativeDateReferenceWindow)
       },
       turnId: 'turn-1',
     })
@@ -3978,6 +4049,35 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
   })
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Event-backed follow up'])
+  })
+  expect(liveSteeredReferenceWindows).toEqual([{
+    earliestAt: '2031-02-15T09:59:59.900Z',
+    latestAt: '2031-02-15T09:59:59.900Z',
+  }])
+  expect(readAutomationDynamicToolRequest({
+    arguments: {
+      action: 'save',
+      instructions: 'Send the reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '09:00',
+          timeZone: 'Pacific/Honolulu',
+        },
+      },
+      title: 'Live-steered tomorrow reminder',
+    },
+    relativeDateReferenceWindow: liveSteeredReferenceWindows[0] ?? null,
+    tool: 'automation',
+  })).toMatchObject({
+    kind: 'automation',
+    request: {
+      schedule: {
+        at: '2031-02-15T19:00:00.000Z',
+        kind: 'at',
+      },
+    },
   })
   requiredProgressRequested.resolve()
   await requiredProgressDelivered.promise
@@ -4220,6 +4320,7 @@ test('sendAssistantMessageLocal rejects initial assistant-input refs before prov
       acceptedTurnInput: {
         initialInputs: [
           {
+            acceptedAt: '2026-04-22T10:00:00.000Z',
             contentRef: {
               kind: 'assistant-input-event',
               refId: 'ain_00000000000000000000000000000004',
@@ -4318,6 +4419,7 @@ test('sendAssistantMessageLocal rejects initial assistant-input refs before manu
       acceptedTurnInput: {
         initialInputs: [
           {
+            acceptedAt: '2026-04-22T10:00:00.000Z',
             contentRef: {
               kind: 'assistant-input-event',
               refId: 'ain_00000000000000000000000000000007',
@@ -4387,6 +4489,7 @@ test('sendAssistantMessageLocal rejects late assistant-input refs before transcr
         .mockResolvedValueOnce({
           acceptedInputs: [
             {
+              acceptedAt: '2026-04-22T10:00:00.000Z',
               contentRef: {
                 kind: 'assistant-input-event',
                 refId: 'ain_00000000000000000000000000000005',
@@ -6315,15 +6418,7 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
   await sendAssistantMessageLocal({
     acceptedTurnInput: {
       initialInputs: [
-        {
-          contentRef: {
-            kind: 'assistant-input-event',
-            refId: hostedInput.inputId,
-            version: hostedInput.schema,
-          },
-          id: hostedInput.inputId,
-          source: 'assistant-input',
-        },
+        assistantInputCandidateFromStoredEvent(hostedInput).acceptedInput,
       ],
     },
     channel: 'linq',

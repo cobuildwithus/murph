@@ -3211,7 +3211,10 @@ describe('Codex assistant registry helpers', () => {
         closeInputAdmission,
         registerLiveProviderTurn: vi.fn(() => () => {}),
       },
-      automationRelativeDateReferenceAt: '2031-02-15T09:59:59.900Z',
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2031-02-15T09:59:59.900Z',
+        latestAt: '2031-02-15T09:59:59.900Z',
+      },
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -3225,9 +3228,10 @@ describe('Codex assistant registry helpers', () => {
     expect(appServerInput?.onFirstAssistantResponseCompleted).toEqual(
       expect.any(Function),
     )
-    expect(appServerInput?.automationRelativeDateReferenceAt).toBe(
-      '2031-02-15T09:59:59.900Z',
-    )
+    expect(appServerInput?.automationRelativeDateReferenceWindow).toEqual({
+      earliestAt: '2031-02-15T09:59:59.900Z',
+      latestAt: '2031-02-15T09:59:59.900Z',
+    })
     appServerInput?.onFirstAssistantResponseCompleted?.()
     expect(closeInputAdmission).toHaveBeenCalledTimes(1)
   })
@@ -3564,6 +3568,51 @@ describe('Codex assistant registry helpers', () => {
       runtimeWorkspaceRoots: ['/tmp/provider-tests'],
     })
     expect(appServerInput?.sandbox).toBeUndefined()
+  })
+
+  it('forwards resident member-workspace permissions through start and resume inputs', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Completed ordinary hosted work.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Completed ordinary hosted work.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'member-workspace-thread',
+      stderr: '',
+      stdout: '',
+      threadId: 'member-workspace-thread',
+      turnId: 'turn-member-workspace',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: {
+        provider: 'codex-cli',
+        sandbox: 'danger-full-access',
+      },
+      turn: {
+        dynamicTools: [],
+        permissions: 'murph-member-workspace',
+        prompt: 'Update the ordinary member vault.',
+        resume: {
+          codexThreadId: 'member-workspace-thread',
+        },
+        runtimeWorkspaceRoots: ['/tmp/provider-tests'],
+        workingDirectory: '/tmp/provider-tests',
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(appServerInput).toMatchObject({
+      permissions: 'murph-member-workspace',
+      resumeSessionId: 'member-workspace-thread',
+      runtimeWorkspaceRoots: ['/tmp/provider-tests'],
+    })
+    expect(appServerInput?.sandbox).toBeUndefined()
+    expect(appServerInput?.processLifetime).toBeUndefined()
+    expect(appServerInput?.ephemeral).toBeUndefined()
   })
 
   it('does not replay committed history after stale native resume fails', async () => {

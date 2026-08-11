@@ -4,6 +4,7 @@ import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
+  buildMurphMemberWorkspacePermissionProfileTomlLines,
 } from "../src/assistant-permissions.ts";
 
 describe("group-read Codex permissions", () => {
@@ -69,6 +70,25 @@ describe("group-read Codex permissions", () => {
       "",
       "[permissions.murph-member-memory-maintenance.network]",
       "enabled = false",
+      "",
+    ]);
+  });
+
+  it("keeps ordinary hosted vault writes while making canonical automations read-only", () => {
+    expect(buildMurphMemberWorkspacePermissionProfileTomlLines()).toEqual([
+      "# Ordinary hosted member turns may mutate the vault except canonical automations.",
+      "[permissions.murph-member-workspace.filesystem]",
+      '":minimal" = "read"',
+      '":tmpdir" = "write"',
+      '":slash_tmp" = "write"',
+      "glob_scan_max_depth = 64",
+      "",
+      '[permissions.murph-member-workspace.filesystem.":workspace_roots"]',
+      '"." = "write"',
+      '"bank/automations" = "read"',
+      "",
+      "[permissions.murph-member-workspace.network]",
+      "enabled = true",
       "",
     ]);
   });

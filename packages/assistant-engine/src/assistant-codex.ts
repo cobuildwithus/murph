@@ -7,6 +7,9 @@ import path from 'node:path'
 import type {
   HostedCodexAuthAction,
 } from '@murphai/hosted-execution/contracts'
+import {
+  MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+} from '@murphai/hosted-execution/assistant-permissions'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -18,6 +21,9 @@ import type {
   AssistantResponseMedia,
   AssistantSandbox,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import type {
+  AssistantAcceptedTurnInputReferenceWindow,
+} from './assistant/active-turn-input-journal.js'
 import {
   renderAssistantResponseCardText,
   renderAssistantResponseCardTranscriptText,
@@ -457,7 +463,7 @@ async function waitForCodexProgressDrain(
 
 export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
-  automationRelativeDateReferenceAt?: string | null
+  automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
   approvalPolicy?: string
@@ -635,7 +641,7 @@ export type CodexAppServerSteerInput = {
   threadId: string
   turnId: string
   prompt: string
-  relativeDateReferenceAt?: string | null
+  relativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   images?: readonly CodexAppServerImageInput[] | null
 }
 
@@ -768,16 +774,32 @@ function assertCodexAppServerPermissionRequest(
     return
   }
 
+  const residentWorkspacePermissionRequest =
+    permissions === MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
   const invalidFields = [
     ...(input.sandbox ? ['sandbox'] : []),
-    ...(normalizeNullableString(input.resumeSessionId) ? ['resumeSessionId'] : []),
-    ...(input.ephemeral === true ? [] : ['ephemeral']),
-    ...(input.processLifetime === 'one-shot' ? [] : ['processLifetime']),
+    ...(
+      residentWorkspacePermissionRequest || !normalizeNullableString(input.resumeSessionId)
+        ? []
+        : ['resumeSessionId']
+    ),
+    ...(
+      residentWorkspacePermissionRequest || input.ephemeral === true
+        ? []
+        : ['ephemeral']
+    ),
+    ...(
+      residentWorkspacePermissionRequest || input.processLifetime === 'one-shot'
+        ? []
+        : ['processLifetime']
+    ),
   ]
   if (invalidFields.length > 0) {
     throw new VaultCliError(
       'ASSISTANT_CODEX_APP_SERVER_REQUEST_INVALID',
-      'Named Codex permissions require a fresh ephemeral thread in a one-shot process without a legacy sandbox.',
+      residentWorkspacePermissionRequest
+        ? 'Named Codex permissions cannot be combined with a legacy sandbox.'
+        : 'Restricted named Codex permissions require a fresh ephemeral thread in a one-shot process without a legacy sandbox.',
       {
         invalidFields,
         retryable: false,
@@ -3112,8 +3134,12 @@ async function runCodexAppServerTurnOnProcess(
     readProjectionScopeKeyBatches: [],
     roster: null,
   }
-  const automationRelativeDateReferenceAts: Array<string | null> = [
-    input.automationRelativeDateReferenceAt ?? null,
+  const automationRelativeDateReferenceWindows: Array<
+    AssistantAcceptedTurnInputReferenceWindow | null
+  > = [
+    input.automationRelativeDateReferenceWindow
+      ? { ...input.automationRelativeDateReferenceWindow }
+      : null,
   ]
   const generateSongTurnState = input.generateSongPolicy
     ? {
@@ -4086,8 +4112,8 @@ async function runCodexAppServerTurnOnProcess(
     } = dynamicToolRuntime
 
     const dynamicToolRequest = readMurphDynamicToolRequest(message, {
-      automationRelativeDateReferenceAt:
-        automationRelativeDateReferenceAts[
+      automationRelativeDateReferenceWindow:
+        automationRelativeDateReferenceWindows[
           dynamicToolRequestDeliveryContextOrdinal
         ] ?? null,
     })
@@ -5134,9 +5160,11 @@ async function runCodexAppServerTurnOnProcess(
       images: steerInput.images,
       tempRoot: input.tempRoot,
     })
-    const deliveryContextOrdinal = automationRelativeDateReferenceAts.length
-    automationRelativeDateReferenceAts.push(
-      normalizeNullableString(steerInput.relativeDateReferenceAt),
+    const deliveryContextOrdinal = automationRelativeDateReferenceWindows.length
+    automationRelativeDateReferenceWindows.push(
+      steerInput.relativeDateReferenceWindow
+        ? { ...steerInput.relativeDateReferenceWindow }
+        : null,
     )
     try {
       await withCodexRpcTimeout(
@@ -5152,8 +5180,11 @@ async function runCodexAppServerTurnOnProcess(
         'turn/steer',
       )
     } catch (error) {
-      if (automationRelativeDateReferenceAts.length === deliveryContextOrdinal + 1) {
-        automationRelativeDateReferenceAts.pop()
+      if (
+        automationRelativeDateReferenceWindows.length ===
+          deliveryContextOrdinal + 1
+      ) {
+        automationRelativeDateReferenceWindows.pop()
       }
       throw error
     }
@@ -5621,7 +5652,10 @@ function assertCodexThreadStartPermissionAttestation(input: {
   if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
     mismatchedFields.push('cwd')
   }
-  if (instructionSources === null || instructionSources.length !== 0) {
+  if (
+    input.input.processLifetime === 'one-shot' &&
+    (instructionSources === null || instructionSources.length !== 0)
+  ) {
     mismatchedFields.push('instructionSources')
   }
   if (
@@ -5636,7 +5670,7 @@ function assertCodexThreadStartPermissionAttestation(input: {
 
   throw new VaultCliError(
     'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
-    'Codex app-server did not attest the requested read-only execution context.',
+    'Codex app-server did not attest the requested named-permission execution context.',
     {
       mismatchedFields,
       retryable: false,
@@ -5886,6 +5920,7 @@ function assertCodexResumeContextMatches(input: {
 }): void {
   const result = asCodexRecord(input.threadResult)
   const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
+  const expectedPermissions = normalizeNullableString(input.input.permissions)
   const checks: [field: string, expected: string | null, actual: string | null][] = [
     [
       'threadId',
@@ -5905,7 +5940,9 @@ function assertCodexResumeContextMatches(input: {
     ],
     [
       'sandbox',
-      mapCodexAppServerSandboxMode(input.input.sandbox) ?? null,
+      expectedPermissions
+        ? null
+        : mapCodexAppServerSandboxMode(input.input.sandbox) ?? null,
       readCodexResumeSandboxMode(result?.sandbox),
     ],
   ]
@@ -5913,6 +5950,28 @@ function assertCodexResumeContextMatches(input: {
   const mismatchedFields = checks
     .filter(([, expected, actual]) => expected !== null && actual !== expected)
     .map(([field]) => field)
+  if (expectedPermissions) {
+    const activePermissionProfile = asCodexRecord(result?.activePermissionProfile)
+    const actualRoots = asCodexStringArray(result?.runtimeWorkspaceRoots)
+    const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
+    if (
+      normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
+        expectedPermissions ||
+      normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
+    ) {
+      mismatchedFields.push('activePermissionProfile')
+    }
+    if (
+      !actualRoots ||
+      actualRoots.length !== expectedRoots.length ||
+      actualRoots.some(
+        (root, index) =>
+          path.resolve(root) !== path.resolve(expectedRoots[index] ?? ''),
+      )
+    ) {
+      mismatchedFields.push('runtimeWorkspaceRoots')
+    }
+  }
   if (mismatchedFields.length === 0) {
     return
   }

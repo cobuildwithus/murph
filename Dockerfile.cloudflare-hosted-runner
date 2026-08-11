@@ -29,8 +29,6 @@ RUN mkdir -p /usr/local/share/murph \
 
 COPY --from=runner-app-permissions --chown=root:root /app/ /app/
 
-RUN install -m 0444 /dev/null /app/.murph-hosted-runner-image
-
 USER runner
 
 ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local

@@ -1840,7 +1840,10 @@ text(JSON.stringify(result));
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      automationRelativeDateReferenceAt: '2031-02-15T09:59:59.900Z',
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2031-02-15T09:59:59.900Z',
+        latestAt: '2031-02-15T09:59:59.900Z',
+      },
       baseInstructions: buildScriptedHostedSystemPrompt('group', true),
       dynamicTools: [MURPH_AUTOMATION_TOOL],
       hostedToolContext: {
@@ -1975,7 +1978,10 @@ text(JSON.stringify(result));
         steered = delay(500).then(() =>
           turn.steer({
             prompt: 'Remind me tonight at 11:20 PM Honolulu time.',
-            relativeDateReferenceAt: '2031-02-15T09:59:59.900Z',
+            relativeDateReferenceWindow: {
+              earliestAt: '2031-02-15T09:59:59.900Z',
+              latestAt: '2031-02-15T09:59:59.900Z',
+            },
           }))
       },
       prompt: 'Reply before I send another message.',

@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-
 import { Cli, z } from "incur";
 
 import {
@@ -300,20 +298,6 @@ function buildAutomationRouteFromOptions(
   });
   return automationRouteSchema.parse(
     resolveAssistantDeliveryRouteWithCurrentRoute(explicit, null),
-  );
-}
-
-export const HOSTED_RUNNER_IMAGE_SENTINEL_PATH =
-  "/app/.murph-hosted-runner-image";
-
-export function assertAutomationCliMutationAllowed(): void {
-  if (!existsSync(HOSTED_RUNNER_IMAGE_SENTINEL_PATH)) {
-    return;
-  }
-
-  throw new VaultCliError(
-    "invalid_option",
-    "Hosted automation mutations are available only through Murph's root hosted automation tool.",
   );
 }
 
@@ -690,7 +674,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     options: withBaseOptions(automationSaveOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
-      assertAutomationCliMutationAllowed();
       const now = new Date().toISOString();
       const route = buildAutomationRouteFromOptions({
         channel: context.options.channel,
@@ -777,7 +760,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     options: withBaseOptions(automationEditOptionSchemas),
     output: automationSaveResultSchema,
     async run(context) {
-      assertAutomationCliMutationAllowed();
       const now = new Date().toISOString();
       const existing = await showAutomation(context.options.vault, context.args.lookup);
       if (!existing) {
@@ -891,7 +873,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      assertAutomationCliMutationAllowed();
       const existing = await showAutomation(context.options.vault, context.args.lookup);
       if (!existing) {
         throw new VaultCliError(
@@ -996,7 +977,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSupportSeriesReconcileResultSchema,
     async run(context) {
-      assertAutomationCliMutationAllowed();
       const supportSeriesId = context.args.seriesId.trim();
       const supportSeriesTag = requireAutomationSupportSeriesTagFromId(
         supportSeriesId,
@@ -1035,7 +1015,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      assertAutomationCliMutationAllowed();
       const input = automationScaffoldPayloadSchema.parse(
         await loadJsonInputObject(
           context.options.input,

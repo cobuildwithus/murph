@@ -5,6 +5,9 @@ import {
 import type {
   CodexRpcMessage,
 } from '../../src/assistant-codex/app-server-rpc.ts'
+import type {
+  AssistantAcceptedTurnInputReferenceWindow,
+} from '../../src/assistant/active-turn-input-journal.ts'
 
 const TEST_THREAD_ID = 'thread-test'
 const TEST_TURN_ID = 'turn-test'
@@ -19,7 +22,7 @@ const TEST_REQUEST_ID = 'request-test'
 export function readTestMurphDynamicToolRequest(
   message: CodexRpcMessage,
   input?: {
-    automationRelativeDateReferenceAt?: string | null
+    automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   },
 ): MurphDynamicToolRequest | null {
   const params = isRecord(message.params) ? message.params : {}
