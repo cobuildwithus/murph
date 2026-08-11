@@ -1353,7 +1353,7 @@ describe("HostedBillingSettings", () => {
     }
   });
 
-  test("carries the exact Family invite when continuing a starting checkout", async () => {
+  test("keeps Stripe Checkout neutral when starting an owned plan from invite recovery", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
       alreadyActive: false,
       url: null,
@@ -1399,7 +1399,6 @@ describe("HostedBillingSettings", () => {
 
       assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
         method: "POST",
-        payload: { familyInviteReturnPath },
         url: "/api/settings/billing/family/checkout",
       });
     } finally {

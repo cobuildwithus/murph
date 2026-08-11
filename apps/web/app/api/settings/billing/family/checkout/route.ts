@@ -23,24 +23,25 @@ export const POST = withJsonError(async (request: Request) => {
   const body = await readOptionalJsonObject(request, {
     limitBytes: 1_024,
   });
-  const familyInviteReturnPath = body.familyInviteReturnPath == null
-    ? null
-    : parseHostedFamilyInviteReturnPath(body.familyInviteReturnPath);
-  if (body.familyInviteReturnPath != null && !familyInviteReturnPath) {
+  const abandonForInvite = body.abandonForInvite === true;
+  const familyInviteReturnPath = abandonForInvite
+    ? parseHostedFamilyInviteReturnPath(body.familyInviteReturnPath)
+    : null;
+  if (!abandonForInvite && body.familyInviteReturnPath != null) {
     throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_INVITE_RETURN_INVALID",
+      code: "HOSTED_FAMILY_INVITE_RETURN_UNEXPECTED",
       httpStatus: 400,
-      message: "Family invite return path is invalid.",
+      message: "Family invite return is only allowed during invite recovery.",
     });
   }
-  if (body.abandonForInvite === true && !familyInviteReturnPath) {
+  if (abandonForInvite && !familyInviteReturnPath) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_INVITE_RETURN_REQUIRED",
       httpStatus: 400,
       message: "Family invite return path is required for invite recovery.",
     });
   }
-  if (body.abandonForInvite === true) {
+  if (abandonForInvite) {
     const recoveryState = await readHostedFamilyDraftRecoveryStateForOwner({
       ownerMemberId: auth.member.id,
       prisma,
@@ -62,15 +63,14 @@ export const POST = withJsonError(async (request: Request) => {
     }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   const checkout = await createHostedFamilyBillingCheckout({
-    allowDirectPaidUpgrade: body.abandonForInvite !== true,
+    allowDirectPaidUpgrade: !abandonForInvite,
     confirmedTrialConversion: body.confirmedTrialConversion,
-    familyInviteReturnPath,
     groupId: group.id,
     ownerMemberId: auth.member.id,
     prisma,
     seatCount: body.seatCount,
   });
-  if (body.abandonForInvite === true) {
+  if (abandonForInvite) {
     if (checkout.alreadyActive || !checkout.url) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_DRAFT_BILLING_SYNCING",

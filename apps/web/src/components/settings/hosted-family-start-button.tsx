@@ -65,9 +65,6 @@ export function HostedFamilyStartButton(props: {
         ...(props.trialConversionConfirmation
           ? { confirmedTrialConversion: true }
           : {}),
-        ...(props.familyInviteReturnPath
-          ? { familyInviteReturnPath: props.familyInviteReturnPath }
-          : {}),
       };
       const response = await requestHostedOnboardingJson<{
         alreadyActive: boolean;

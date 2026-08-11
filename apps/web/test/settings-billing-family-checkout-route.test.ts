@@ -90,7 +90,6 @@ test("starts Family checkout for the authenticated hosted owner", async () => {
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
     allowDirectPaidUpgrade: true,
     confirmedTrialConversion: undefined,
-    familyInviteReturnPath: null,
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
@@ -114,7 +113,6 @@ test("forwards an explicit seat count and trial-conversion confirmation", async 
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
     allowDirectPaidUpgrade: true,
     confirmedTrialConversion: true,
-    familyInviteReturnPath: null,
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
@@ -122,7 +120,7 @@ test("forwards an explicit seat count and trial-conversion confirmation", async 
   });
 });
 
-test("forwards one exact Family invite return", async () => {
+test("rejects an invite return outside explicit invite recovery", async () => {
   const familyInviteReturnPath = "/family/accept/invite_return_target";
   const response = await billingFamilyCheckoutRoute.POST(
     new Request("https://join.example.test/api/settings/billing/family/checkout", {
@@ -135,13 +133,9 @@ test("forwards one exact Family invite return", async () => {
     }),
   );
 
-  expect(response.status).toBe(200);
-  expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith(
-    expect.objectContaining({
-      allowDirectPaidUpgrade: true,
-      familyInviteReturnPath,
-    }),
-  );
+  expect(response.status).toBe(400);
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
 });
 
 test("resolves a starting Checkout and abandons it before returning to the invite", async () => {
@@ -168,9 +162,11 @@ test("resolves a starting Checkout and abandons it before returning to the invit
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith(
     expect.objectContaining({
       allowDirectPaidUpgrade: false,
-      familyInviteReturnPath,
     }),
   );
+  expect(
+    mocks.createHostedFamilyBillingCheckout.mock.calls[0]?.[0],
+  ).not.toHaveProperty("familyInviteReturnPath");
   expect(mocks.readHostedFamilyDraftRecoveryStateForOwner).toHaveBeenCalledWith({
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
@@ -257,7 +253,10 @@ test.each([
 ])("rejects a non-canonical Family invite return %s", async (familyInviteReturnPath) => {
   const response = await billingFamilyCheckoutRoute.POST(
     new Request("https://join.example.test/api/settings/billing/family/checkout", {
-      body: JSON.stringify({ familyInviteReturnPath }),
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath,
+      }),
       headers: {
         "content-type": "application/json",
         origin: "https://join.example.test",

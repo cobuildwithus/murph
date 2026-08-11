@@ -16,26 +16,9 @@ export function buildHostedFamilyInviteAcceptancePath(inviteCode: string): strin
 }
 
 export function buildHostedFamilyInviteRecoveryPath(inviteCode: string): string {
-  return buildHostedFamilyInviteRecoveryPathFromValidatedReturn(
-    buildHostedFamilyInviteAcceptancePath(inviteCode),
-  );
-}
-
-export function buildHostedFamilyInviteRecoveryPathFromReturnPath(
-  value: unknown,
-): string | null {
-  const returnPath = parseHostedFamilyInviteReturnPath(value);
-  if (!returnPath) {
-    return null;
-  }
-  return buildHostedFamilyInviteRecoveryPathFromValidatedReturn(returnPath);
-}
-
-function buildHostedFamilyInviteRecoveryPathFromValidatedReturn(
-  returnPath: string,
-): string {
   const query = new URLSearchParams({
-    [HOSTED_FAMILY_INVITE_RETURN_PARAM]: returnPath,
+    [HOSTED_FAMILY_INVITE_RETURN_PARAM]:
+      buildHostedFamilyInviteAcceptancePath(inviteCode),
   });
   return `/settings?${query.toString()}#subscription`;
 }

@@ -148,11 +148,8 @@ import {
   retrieveAndExpireHostedSubscriptionCheckout,
 } from "./subscription-checkout-lifecycle";
 import {
-  buildHostedFamilyInviteRecoveryPathFromReturnPath,
   buildHostedFamilyInviteRecoveryUrl,
   HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
-  HOSTED_FAMILY_INVITE_RETURN_PARAM,
-  parseHostedFamilyInviteReturnPath,
 } from "./app-routes";
 
 export { HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE } from "./app-routes";
@@ -713,18 +710,14 @@ type HostedFamilyBillingCheckoutInput =
   | HostedFamilyDirectPaidUpgradeInput
   | {
       alreadyActive: false;
-      cancelUrl: string;
       checkoutAttemptId: string;
-      familyInviteReturnPath: string | null;
       group: HostedAccountGroupAccessSnapshot;
       mode: "existingCheckout";
       sessionId: string;
     }
   | {
       alreadyActive: false;
-      cancelUrl: string;
       checkoutAttemptId: string;
-      familyInviteReturnPath: string | null;
       group: HostedAccountGroupAccessSnapshot;
       mode: "newCheckout";
       priceId: string;
@@ -2352,7 +2345,6 @@ async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
 export async function createHostedFamilyBillingCheckout(input: {
   allowDirectPaidUpgrade?: boolean;
   confirmedTrialConversion?: unknown;
-  familyInviteReturnPath?: unknown;
   groupId: string;
   now?: Date;
   ownerMemberId: string;
@@ -2381,7 +2373,6 @@ async function createOrResumeHostedFamilyBillingCheckout(
   input: {
     allowDirectPaidUpgrade?: boolean;
     confirmedTrialConversion?: unknown;
-    familyInviteReturnPath?: unknown;
     groupId: string;
     now?: Date;
     ownerMemberId: string;
@@ -2394,9 +2385,6 @@ async function createOrResumeHostedFamilyBillingCheckout(
 > {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const familyInviteReturnPath = normalizeHostedFamilyCheckoutInviteReturnPath(
-    input.familyInviteReturnPath,
-  );
   const seatCount = normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
   const checkoutInput: HostedFamilyBillingCheckoutInput = await prisma.$transaction(async (tx) => {
     const group = await tx.hostedAccountGroup.findUnique({
@@ -2475,15 +2463,9 @@ async function createOrResumeHostedFamilyBillingCheckout(
       });
     }
     if (currentAttemptId && currentBillingRef?.stripeCheckoutSessionId) {
-      const cancelUrl = buildHostedFamilyCheckoutCancelUrl({
-        familyInviteReturnPath,
-        publicBaseUrl: requireHostedOnboardingPublicBaseUrl(),
-      });
       return {
         alreadyActive: false,
-        cancelUrl,
         checkoutAttemptId: currentAttemptId,
-        familyInviteReturnPath,
         group,
         mode: "existingCheckout",
         sessionId: currentBillingRef.stripeCheckoutSessionId,
@@ -2518,12 +2500,7 @@ async function createOrResumeHostedFamilyBillingCheckout(
 
     return {
       alreadyActive: false,
-      cancelUrl: buildHostedFamilyCheckoutCancelUrl({
-        familyInviteReturnPath,
-        publicBaseUrl,
-      }),
       checkoutAttemptId,
-      familyInviteReturnPath,
       group,
       mode: "newCheckout",
       priceId,
@@ -2562,7 +2539,7 @@ async function createOrResumeHostedFamilyBillingCheckout(
     const metadata = buildHostedFamilyStripeMetadata(checkoutInput.group);
     metadata.checkoutAttemptId = checkoutInput.checkoutAttemptId;
     const checkoutParams: Stripe.Checkout.SessionCreateParams = {
-      cancel_url: checkoutInput.cancelUrl,
+      cancel_url: `${checkoutInput.publicBaseUrl}/settings`,
       client_reference_id: checkoutInput.group.id,
       line_items: [{
         price: checkoutInput.priceId,
@@ -2625,24 +2602,6 @@ async function createOrResumeHostedFamilyBillingCheckout(
         message: "This hosted account is suspended. Contact support to restore access.",
       });
     }
-    if (
-      checkoutInput.familyInviteReturnPath
-      && checkoutSession.cancel_url !== checkoutInput.cancelUrl
-    ) {
-      return resumeHostedFamilyBillingCheckout({
-        checkoutInput: {
-          alreadyActive: false,
-          cancelUrl: checkoutInput.cancelUrl,
-          checkoutAttemptId: checkoutInput.checkoutAttemptId,
-          familyInviteReturnPath: checkoutInput.familyInviteReturnPath,
-          group: checkoutInput.group,
-          mode: "existingCheckout",
-          sessionId: checkoutSession.id,
-        },
-        prisma,
-        stripe,
-      });
-    }
     if (!checkoutSession.url) {
       throw hostedOnboardingError({
         code: "CHECKOUT_URL_MISSING",
@@ -2653,10 +2612,7 @@ async function createOrResumeHostedFamilyBillingCheckout(
 
     return {
       alreadyActive: false,
-      url: buildHostedFamilyCheckoutRedirectUrl({
-        checkoutUrl: checkoutSession.url,
-        familyInviteReturnPath: checkoutInput.familyInviteReturnPath,
-      }) ??
+      url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: checkoutSession.url }) ??
         checkoutSession.url,
     };
   };
@@ -2703,46 +2659,6 @@ async function resumeHostedFamilyBillingCheckout(input: {
   }
 
   if (session.status === "open") {
-    if (
-      input.checkoutInput.familyInviteReturnPath
-      && session.cancel_url !== input.checkoutInput.cancelUrl
-    ) {
-      const terminal = await retrieveAndExpireHostedSubscriptionCheckout({
-        sessionId: session.id,
-        stripe: input.stripe,
-      });
-      if (terminal.status !== "expired" || terminal.subscriptionId) {
-        throw hostedOnboardingError({
-          code: "HOSTED_FAMILY_BILLING_SYNCING",
-          httpStatus: 409,
-          message:
-            "Family checkout completed while its invite return was being restored. Try again shortly.",
-          retryable: true,
-        });
-      }
-      await input.prisma.$transaction(
-        async (tx) => {
-          await revalidateHostedFamilyCheckoutClaimTx({
-            checkoutAttemptId: input.checkoutInput.checkoutAttemptId,
-            groupId: input.checkoutInput.group.id,
-            ownerMemberId: input.checkoutInput.group.ownerMemberId,
-            sessionId: session.id,
-            subscriptionId: null,
-            tx,
-          });
-          await applyHostedFamilyStripeCheckoutExpiredTx({
-            session: {
-              ...session,
-              status: "expired",
-              subscription: null,
-            },
-            tx,
-          });
-        },
-        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-      );
-      return "restart";
-    }
     if (!session.url) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
@@ -2765,10 +2681,7 @@ async function resumeHostedFamilyBillingCheckout(input: {
     );
     return {
       alreadyActive: false,
-      url: buildHostedFamilyCheckoutRedirectUrl({
-        checkoutUrl: session.url,
-        familyInviteReturnPath: input.checkoutInput.familyInviteReturnPath,
-      }) ??
+      url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: session.url }) ??
         session.url,
     };
   }
@@ -3798,69 +3711,25 @@ export function readHostedFamilyCheckoutSessionIdFromUrl(
     .find(isHostedFamilyCheckoutSessionId) ?? null;
 }
 
-function normalizeHostedFamilyCheckoutInviteReturnPath(
-  value: unknown,
-): string | null {
-  if (value == null) {
-    return null;
-  }
-  const returnPath = parseHostedFamilyInviteReturnPath(value);
-  if (!returnPath) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_INVITE_RETURN_INVALID",
-      httpStatus: 400,
-      message: "Family invite return path is invalid.",
-    });
-  }
-  return returnPath;
-}
-
-function buildHostedFamilyCheckoutCancelUrl(input: {
-  familyInviteReturnPath: string | null;
-  publicBaseUrl: string;
-}): string {
-  const cancelPath = input.familyInviteReturnPath
-    ? buildHostedFamilyInviteRecoveryPathFromReturnPath(
-        input.familyInviteReturnPath,
-      )
-    : "/settings";
-  if (!cancelPath) {
-    throw new TypeError("Family invite return path was not canonical.");
-  }
-  return new URL(cancelPath, input.publicBaseUrl).toString();
-}
-
 export function buildHostedFamilyCheckoutRedirectUrl(input: {
   checkoutUrl: string | null | undefined;
-  familyInviteReturnPath?: unknown;
   publicBaseUrl?: string | null;
 }): string | null {
   const sessionId = readHostedFamilyCheckoutSessionIdFromUrl(input.checkoutUrl);
   if (!sessionId) {
     return null;
   }
-  const familyInviteReturnPath = normalizeHostedFamilyCheckoutInviteReturnPath(
-    input.familyInviteReturnPath,
-  );
-
   const publicBaseUrl = normalizeNullableString(input.publicBaseUrl) ??
     requireHostedOnboardingPublicBaseUrl();
   const url = new URL(publicBaseUrl);
   url.pathname = `/checkout/family/${encodeURIComponent(sessionId)}`;
   url.search = "";
   url.hash = "";
-  if (familyInviteReturnPath) {
-    url.searchParams.set(
-      HOSTED_FAMILY_INVITE_RETURN_PARAM,
-      familyInviteReturnPath,
-    );
-  }
 
   return url.toString();
 }
 
 export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
-  familyInviteReturnPath?: unknown;
   prisma?: PrismaClient;
   sessionId: string;
 }): Promise<string> {
@@ -3872,10 +3741,6 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
       message: "Family checkout session was not found.",
     });
   }
-  const familyInviteReturnPath = normalizeHostedFamilyCheckoutInviteReturnPath(
-    input.familyInviteReturnPath,
-  );
-
   const prisma = input.prisma ?? getPrisma();
   const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
   let session: Stripe.Checkout.Session;
@@ -3938,20 +3803,6 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
   });
 
   if (session.status === "open") {
-    if (
-      familyInviteReturnPath
-      && session.cancel_url !== buildHostedFamilyCheckoutCancelUrl({
-        familyInviteReturnPath,
-        publicBaseUrl: requireHostedOnboardingPublicBaseUrl(),
-      })
-    ) {
-      throw hostedOnboardingError({
-        code: "HOSTED_FAMILY_CHECKOUT_RETURN_MISMATCH",
-        httpStatus: 409,
-        message: "Family checkout no longer matches this invite return. Continue from Settings.",
-        retryable: true,
-      });
-    }
     const checkoutUrl = normalizeNullableString(session.url);
     if (checkoutUrl) {
       return checkoutUrl;
