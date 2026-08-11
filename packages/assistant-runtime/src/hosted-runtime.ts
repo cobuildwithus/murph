@@ -591,7 +591,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   prefetch: HostedMailboxPrefixPrefetch,
 ): Promise<{
   containsOnlyBrowserVaultRefreshWakes: boolean;
-  containsOnlyDeviceSyncWakes: boolean;
+  containsOnlyDeviceSyncDirtyWakes: boolean;
   containsOnlySafeSystemWakes: boolean;
   hasSystemWork: boolean;
 }> {
@@ -602,10 +602,11 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
         item.lane === "system"
         && item.kind === "runtime.browser-vault-refresh-requested"
       ),
-    containsOnlyDeviceSyncWakes: response.items.length > 0
+    containsOnlyDeviceSyncDirtyWakes: response.items.length > 0
       && response.items.every((item) =>
         item.lane === "system"
         && item.kind === "device-sync.wake"
+        && item.dedupeKey.startsWith("device-sync:dirty:")
       ),
     containsOnlySafeSystemWakes: response.items.length > 0
       && response.items.every((item) =>
@@ -2663,244 +2664,279 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stageDurableCheckpointFollowUp(committedWorkspace, durableCheckpointEffects.wake);
       return true;
     };
-      type HostedVaultShareOfferWake = {
-        initialMailboxPrefetch: HostedMailboxPrefixPrefetch | null;
-        latencySeed: HostedRuntimeWakeLatencySeed;
-      };
-      const logHostedVaultShareProjectionOfferOutcome = (
-        vaultShareOffer: Awaited<ReturnType<typeof offerHostedVaultShareProjectionBestEffort>>,
-      ): void => {
-        if (vaultShareOffer.outcome !== "error") {
-          return;
-        }
+    type HostedVaultShareOfferWake = {
+      initialMailboxPrefetch: HostedMailboxPrefixPrefetch | null;
+      latencySeed: HostedRuntimeWakeLatencySeed;
+    };
+    const logHostedVaultShareProjectionOfferOutcome = (
+      vaultShareOffer: Awaited<ReturnType<typeof offerHostedVaultShareProjectionBestEffort>>,
+    ): void => {
+      if (vaultShareOffer.outcome !== "error") {
+        return;
+      }
 
-        emitHostedExecutionStructuredLog({
-          component: "runtime",
-          details: {
-            requestId,
-            vaultShareOfferOutcome: vaultShareOffer.outcome,
-          },
-          level: "warn",
-          message: "Hosted vault-share projection offer failed; continuing wake.",
-          phase: "wake.running",
-          userId: null,
+      emitHostedExecutionStructuredLog({
+        component: "runtime",
+        details: {
+          requestId,
+          vaultShareOfferOutcome: vaultShareOffer.outcome,
+        },
+        level: "warn",
+        message: "Hosted vault-share projection offer failed; continuing wake.",
+        phase: "wake.running",
+        userId: null,
+      });
+    };
+    const classifyHostedPostCheckpointWake = async (input: {
+      latencySeed: HostedRuntimeWakeLatencySeed;
+      requestId: string;
+    }): Promise<{
+      containsOnlyBrowserVaultRefreshWakes: boolean;
+      containsOnlyDeviceSyncDirtyWakes: boolean;
+      wake: HostedVaultShareOfferWake;
+    }> => {
+      try {
+        const initialMailboxPrefetch = await createHostedForegroundMailboxPrefetch({
+          lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+          limitPerLane: mailboxBudget.fetchLimitPerLane,
+          requestId: input.requestId,
+          runnerInput: baseRunnerInput,
         });
-      };
-      let vaultShareWakeClassificationOrdinal = 0;
-      const classifyHostedVaultShareOfferWake = async (
+        const inspection =
+          await inspectHostedPreCheckpointSystemMailboxPrefetch(
+            initialMailboxPrefetch,
+          );
+        return {
+          containsOnlyBrowserVaultRefreshWakes:
+            inspection.containsOnlyBrowserVaultRefreshWakes,
+          containsOnlyDeviceSyncDirtyWakes:
+            inspection.containsOnlyDeviceSyncDirtyWakes,
+          wake: {
+            initialMailboxPrefetch,
+            latencySeed: input.latencySeed,
+          },
+        };
+      } catch {
+        // Empty, mixed, or uninspectable wakes preserve foreground priority.
+        return {
+          containsOnlyBrowserVaultRefreshWakes: false,
+          containsOnlyDeviceSyncDirtyWakes: false,
+          wake: {
+            initialMailboxPrefetch: null,
+            latencySeed: input.latencySeed,
+          },
+        };
+      }
+    };
+    let vaultShareWakeClassificationOrdinal = 0;
+    const offerHostedVaultShareProjectionDuringIdle = async (input: {
+      deferDeviceSyncWakes?: boolean;
+      deferredDeviceSyncWake?: HostedVaultShareOfferWake | null;
+    } = {}): Promise<HostedVaultShareOfferWake | null> => {
+      const vaultSharePort = guardedRuntime.platform.vaultSharePort ?? null;
+      if (!vaultSharePort) {
+        return input.deferredDeviceSyncWake ?? null;
+      }
+
+      let deferredDeviceSyncWake = input.deferredDeviceSyncWake ?? null;
+      const shutdownWasSignaled = (): boolean =>
+        options.shutdownSignal?.aborted === true;
+      const classifyWake = async (
         latencySeed: HostedRuntimeWakeLatencySeed,
       ): Promise<{
-        containsOnlyDeviceSyncWakes: boolean;
+        mayWaitForProjection: boolean;
         wake: HostedVaultShareOfferWake;
       }> => {
-        try {
-          vaultShareWakeClassificationOrdinal += 1;
-          const initialMailboxPrefetch = await createHostedForegroundMailboxPrefetch({
-            lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
-            limitPerLane: mailboxBudget.fetchLimitPerLane,
-            requestId:
-              `${requestId}:vault-share-wake-classify:${vaultShareWakeClassificationOrdinal}`,
-            runnerInput: baseRunnerInput,
-          });
-          const inspection =
-            await inspectHostedPreCheckpointSystemMailboxPrefetch(
-              initialMailboxPrefetch,
-            );
+        const foregroundWake = {
+          initialMailboxPrefetch: null,
+          latencySeed: deferredDeviceSyncWake?.latencySeed ?? latencySeed,
+        };
+        if (
+          input.deferDeviceSyncWakes !== true
+          || shutdownWasSignaled()
+        ) {
           return {
-            containsOnlyDeviceSyncWakes: inspection.containsOnlyDeviceSyncWakes,
-            wake: {
-              initialMailboxPrefetch,
-              latencySeed,
-            },
-          };
-        } catch {
-          // Empty, mixed, or uninspectable wakes preserve foreground priority.
-          return {
-            containsOnlyDeviceSyncWakes: false,
-            wake: {
-              initialMailboxPrefetch: null,
-              latencySeed,
-            },
+            mayWaitForProjection: false,
+            wake: foregroundWake,
           };
         }
+        vaultShareWakeClassificationOrdinal += 1;
+        const classification = await classifyHostedPostCheckpointWake({
+          latencySeed,
+          requestId:
+            `${requestId}:vault-share-wake-classify:${vaultShareWakeClassificationOrdinal}`,
+        });
+        return {
+          mayWaitForProjection:
+            !shutdownWasSignaled()
+            && classification.containsOnlyDeviceSyncDirtyWakes,
+          wake: {
+            ...classification.wake,
+            latencySeed: deferredDeviceSyncWake?.latencySeed ?? latencySeed,
+          },
+        };
       };
-      const offerHostedVaultShareProjectionDuringIdle = async (input: {
-        deferDeviceSyncWakes?: boolean;
-        deferredDeviceSyncWake?: HostedVaultShareOfferWake | null;
-      } = {}): Promise<HostedVaultShareOfferWake | null> => {
-        const vaultSharePort = guardedRuntime.platform.vaultSharePort ?? null;
-        if (!vaultSharePort) {
-          return input.deferredDeviceSyncWake ?? null;
+      const rememberDeferredDeviceSyncWake = (
+        wake: HostedVaultShareOfferWake,
+      ): void => {
+        deferredDeviceSyncWake = wake;
+      };
+      const pendingWakeLatencySeed = consumePendingHostedRuntimeWake(
+        options.runtimeWakeSignal ?? null,
+        options.shutdownSignal ?? null,
+      );
+      if (pendingWakeLatencySeed) {
+        const classification = await classifyWake(pendingWakeLatencySeed);
+        if (!classification.mayWaitForProjection) {
+          return classification.wake;
+        }
+        rememberDeferredDeviceSyncWake(classification.wake);
+      }
+      if (shutdownWasSignaled()) {
+        return deferredDeviceSyncWake;
+      }
+
+      const offer = offerHostedVaultShareProjectionBestEffort({
+        vaultRoot: restored.vaultRoot,
+        vaultSharePort,
+      });
+      const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
+      if (!runtimeWakeSignal) {
+        const offerSignal = options.shutdownSignal
+          ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
+          : runtimeAbortController.signal;
+        try {
+          logHostedVaultShareProjectionOfferOutcome(
+            await raceHostedRuntimeCancellation(offer, offerSignal),
+          );
+        } catch (error) {
+          if (shutdownWasSignaled() && !runtimeAbortController.signal.aborted) {
+            return deferredDeviceSyncWake;
+          }
+          throw error;
+        }
+        return deferredDeviceSyncWake;
+      }
+
+      type VaultShareOfferWaitResult =
+        | { kind: "external_wake"; notification: RuntimeWakeNotification }
+        | { kind: "finished" }
+        | {
+          kind: "offer";
+          offer: Awaited<ReturnType<typeof offerHostedVaultShareProjectionBestEffort>>;
+        };
+
+      const offerWithAbort = raceHostedRuntimeCancellation(
+        offer,
+        runtimeAbortController.signal,
+      );
+      const offerResult = offerWithAbort.then((vaultShareOffer) => ({
+        kind: "offer" as const,
+        offer: vaultShareOffer,
+      }));
+      while (true) {
+        if (shutdownWasSignaled()) {
+          void offerWithAbort.then(logHostedVaultShareProjectionOfferOutcome, () => undefined);
+          return deferredDeviceSyncWake;
         }
 
-        let deferredDeviceSyncWake = input.deferredDeviceSyncWake ?? null;
-        const classifyWake = async (
-          latencySeed: HostedRuntimeWakeLatencySeed,
-        ): Promise<{
-          mayWaitForProjection: boolean;
-          wake: HostedVaultShareOfferWake;
-        }> => {
-          if (input.deferDeviceSyncWakes !== true) {
-            return {
-              mayWaitForProjection: false,
-              wake: {
-                initialMailboxPrefetch: null,
-                latencySeed,
-              },
-            };
+        const wakeAbortController = new AbortController();
+        const abortWake = () => {
+          wakeAbortController.abort(readHostedRuntimeAbortReason(runtimeAbortController.signal));
+        };
+        const abortWakeAfterShutdown = () => {
+          wakeAbortController.abort(
+            options.shutdownSignal?.reason instanceof Error
+              ? options.shutdownSignal.reason
+              : new Error("Hosted vault-share projection offer skipped after shutdown."),
+          );
+        };
+        runtimeAbortController.signal.addEventListener("abort", abortWake, { once: true });
+        options.shutdownSignal?.addEventListener("abort", abortWakeAfterShutdown, { once: true });
+        if (shutdownWasSignaled()) {
+          abortWakeAfterShutdown();
+        }
+        let waitResult: VaultShareOfferWaitResult = { kind: "finished" };
+        let wake: Promise<VaultShareOfferWaitResult> = Promise.resolve({
+          kind: "finished",
+        });
+        try {
+          wake = runtimeWakeSignal.wait(wakeAbortController.signal)
+            .then((notification) => ({
+              kind: "external_wake" as const,
+              notification,
+            }))
+            .catch((error: unknown) => {
+              if (
+                wakeAbortController.signal.aborted
+                && !runtimeAbortController.signal.aborted
+              ) {
+                return { kind: "finished" as const };
+              }
+              throw error;
+            });
+          waitResult = await Promise.race([offerResult, wake]);
+        } finally {
+          runtimeAbortController.signal.removeEventListener("abort", abortWake);
+          options.shutdownSignal?.removeEventListener("abort", abortWakeAfterShutdown);
+          if (!wakeAbortController.signal.aborted) {
+            wakeAbortController.abort();
           }
-          const classification = await classifyHostedVaultShareOfferWake(latencySeed);
-          return {
-            mayWaitForProjection: classification.containsOnlyDeviceSyncWakes,
-            wake: classification.wake,
-          };
-        };
-        const rememberDeferredDeviceSyncWake = (
-          wake: HostedVaultShareOfferWake,
-        ): void => {
-          deferredDeviceSyncWake = {
-            initialMailboxPrefetch: wake.initialMailboxPrefetch,
-            latencySeed: deferredDeviceSyncWake?.latencySeed ?? wake.latencySeed,
-          };
-        };
-        const pendingWakeLatencySeed = consumePendingHostedRuntimeWake(
+        }
+
+        if (waitResult.kind === "external_wake") {
+          const latencySeed = createHostedRuntimeWakeLatencySeed(waitResult.notification);
+          if (!latencySeed) {
+            continue;
+          }
+          const classification = await classifyWake(latencySeed);
+          if (!classification.mayWaitForProjection) {
+            void offerWithAbort.then(logHostedVaultShareProjectionOfferOutcome, () => undefined);
+            return classification.wake;
+          }
+          rememberDeferredDeviceSyncWake(classification.wake);
+          continue;
+        }
+
+        const deliveredWakeResult = await wake;
+        if (deliveredWakeResult.kind === "external_wake") {
+          const latencySeed = createHostedRuntimeWakeLatencySeed(
+            deliveredWakeResult.notification,
+          );
+          if (latencySeed) {
+            const classification = await classifyWake(latencySeed);
+            if (!classification.mayWaitForProjection) {
+              return classification.wake;
+            }
+            rememberDeferredDeviceSyncWake(classification.wake);
+          }
+        }
+
+        if (waitResult.kind === "offer") {
+          logHostedVaultShareProjectionOfferOutcome(waitResult.offer);
+        } else {
+          void offerWithAbort.then(logHostedVaultShareProjectionOfferOutcome, () => undefined);
+          return deferredDeviceSyncWake;
+        }
+
+        const finalWakeLatencySeed = consumePendingHostedRuntimeWake(
           options.runtimeWakeSignal ?? null,
           options.shutdownSignal ?? null,
         );
-        if (pendingWakeLatencySeed) {
-          const classification = await classifyWake(pendingWakeLatencySeed);
+        if (finalWakeLatencySeed) {
+          const classification = await classifyWake(finalWakeLatencySeed);
           if (!classification.mayWaitForProjection) {
             return classification.wake;
           }
           rememberDeferredDeviceSyncWake(classification.wake);
         }
-
-        const offer = offerHostedVaultShareProjectionBestEffort({
-          vaultRoot: restored.vaultRoot,
-          vaultSharePort,
-        });
-        const runtimeWakeSignal =
-          options.shutdownSignal?.aborted === true
-            ? null
-            : options.runtimeWakeSignal ?? null;
-        if (!runtimeWakeSignal) {
-          logHostedVaultShareProjectionOfferOutcome(
-            await raceHostedRuntimeCancellation(offer, runtimeAbortController.signal),
-          );
-          return deferredDeviceSyncWake;
-        }
-
-        type VaultShareOfferWaitResult =
-          | { kind: "external_wake"; notification: RuntimeWakeNotification }
-          | { kind: "finished" }
-          | {
-            kind: "offer";
-            offer: Awaited<ReturnType<typeof offerHostedVaultShareProjectionBestEffort>>;
-          };
-
-        const offerWithAbort = raceHostedRuntimeCancellation(
-          offer,
-          runtimeAbortController.signal,
-        );
-        const offerResult = offerWithAbort.then((vaultShareOffer) => ({
-          kind: "offer" as const,
-          offer: vaultShareOffer,
-        }));
-        while (true) {
-          const wakeAbortController = new AbortController();
-          const abortWake = () => {
-            wakeAbortController.abort(readHostedRuntimeAbortReason(runtimeAbortController.signal));
-          };
-          const abortWakeAfterShutdown = () => {
-            wakeAbortController.abort(
-              options.shutdownSignal?.reason instanceof Error
-                ? options.shutdownSignal.reason
-                : new Error("Hosted vault-share projection offer skipped after shutdown."),
-            );
-          };
-          runtimeAbortController.signal.addEventListener("abort", abortWake, { once: true });
-          options.shutdownSignal?.addEventListener("abort", abortWakeAfterShutdown, { once: true });
-          let waitResult: VaultShareOfferWaitResult = { kind: "finished" };
-          let wake: Promise<VaultShareOfferWaitResult> = Promise.resolve({
-            kind: "finished",
-          });
-          try {
-            wake = runtimeWakeSignal.wait(wakeAbortController.signal)
-              .then((notification) => ({
-                kind: "external_wake" as const,
-                notification,
-              }))
-              .catch((error: unknown) => {
-                if (
-                  wakeAbortController.signal.aborted
-                  && !runtimeAbortController.signal.aborted
-                ) {
-                  return { kind: "finished" as const };
-                }
-                throw error;
-              });
-            waitResult = await Promise.race([offerResult, wake]);
-          } finally {
-            runtimeAbortController.signal.removeEventListener("abort", abortWake);
-            options.shutdownSignal?.removeEventListener("abort", abortWakeAfterShutdown);
-            if (!wakeAbortController.signal.aborted) {
-              wakeAbortController.abort();
-            }
-          }
-
-          if (waitResult.kind === "external_wake") {
-            const latencySeed = createHostedRuntimeWakeLatencySeed(waitResult.notification);
-            if (!latencySeed) {
-              continue;
-            }
-            const classification = await classifyWake(latencySeed);
-            if (!classification.mayWaitForProjection) {
-              void offerWithAbort.then(logHostedVaultShareProjectionOfferOutcome, () => undefined);
-              return classification.wake;
-            }
-            rememberDeferredDeviceSyncWake(classification.wake);
-            continue;
-          }
-
-          const deliveredWakeResult = await wake;
-          if (deliveredWakeResult.kind === "external_wake") {
-            const latencySeed = createHostedRuntimeWakeLatencySeed(
-              deliveredWakeResult.notification,
-            );
-            if (latencySeed) {
-              const classification = await classifyWake(latencySeed);
-              if (!classification.mayWaitForProjection) {
-                return classification.wake;
-              }
-              rememberDeferredDeviceSyncWake(classification.wake);
-            }
-          }
-
-          if (waitResult.kind === "offer") {
-            logHostedVaultShareProjectionOfferOutcome(waitResult.offer);
-          } else {
-            void offerWithAbort.then(logHostedVaultShareProjectionOfferOutcome, () => undefined);
-            return deferredDeviceSyncWake;
-          }
-
-          const finalWakeLatencySeed = consumePendingHostedRuntimeWake(
-            options.runtimeWakeSignal ?? null,
-            options.shutdownSignal ?? null,
-          );
-          if (finalWakeLatencySeed) {
-            const classification = await classifyWake(finalWakeLatencySeed);
-            if (!classification.mayWaitForProjection) {
-              return classification.wake;
-            }
-            rememberDeferredDeviceSyncWake(classification.wake);
-          }
-          return deferredDeviceSyncWake;
-        }
-      };
-      const overlayPendingWakeOnCommittedWorkspace = (
-        checkpointPendingBeforePass: boolean,
-        presentedInvocationLocalProjectedAssistantWakeKey: string | null,
-      ): HostedWorkspaceState | null => {
+        return deferredDeviceSyncWake;
+      }
+    };
+    const overlayPendingWakeOnCommittedWorkspace = (
+      checkpointPendingBeforePass: boolean,
+      presentedInvocationLocalProjectedAssistantWakeKey: string | null,
+    ): HostedWorkspaceState | null => {
         if (committedWorkspace === null) {
           return null;
         }
@@ -3318,7 +3354,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         latencySeed: HostedRuntimeWakeLatencySeed | null;
         rearmIdleCheckpointAfterEmptyProbe: boolean;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
-        retainInitialMailboxImportAfterPrefetch?: boolean;
         runAssistantWithoutMailboxWork?: boolean;
         shouldContinue?: () => boolean;
         signal?: AbortSignal;
@@ -3333,10 +3368,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           options.shutdownSignal?.aborted !== true
           && (input.shouldContinue?.() ?? true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
-        const retainInitialMailboxImportAfterPrefetch =
-          input.retainInitialMailboxImportAfterPrefetch === true
-          && input.initialMailboxPrefetch !== null
-          && input.initialMailboxPrefetch !== undefined;
         let invocationLocalAssistantInputBatch:
           HostedWorkspaceRunnerAssistantInputBatch | null = null;
         const stageMailboxImportWake = async (
@@ -3433,10 +3464,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             runtimeStateDirty ||= runtimeStateDirtyAfterMailboxImport;
           }
         };
-        if (!shouldContinue() && !retainInitialMailboxImportAfterPrefetch) {
+        if (!shouldContinue()) {
           return false;
         }
-        // A retained wake that has started importing finishes before shutdown
+        // A wake that has started importing finishes before shutdown
         // checkpointing; shutdown only suppresses the follow-up assistant pass.
         const importSignal = runtimeAbortController.signal;
         const wakeInitialMailboxImportContext =
@@ -3460,7 +3491,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               `${requestId}:${foregroundProbeRequestIdKind}-foreground-prefetch:${idleWakeOrdinal + 1}`,
             runnerInput: baseRunnerInput,
           });
-        if (!shouldContinue() && !retainInitialMailboxImportAfterPrefetch) {
+        if (input.signal) {
+          try {
+            await raceHostedRuntimeCancellation(
+              initialMailboxPrefetch.response,
+              input.signal,
+            );
+          } catch (error) {
+            if (input.signal.aborted) {
+              throw error;
+            }
+            // The mailbox-import owner performs its existing one-shot refetch.
+          }
+        }
+        if (!shouldContinue()) {
           return false;
         }
         const importMailboxLanes = async (
@@ -3695,7 +3739,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const runPostCheckpointMailboxWake = async (input: {
         initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
         latencySeed: HostedRuntimeWakeLatencySeed | null;
-        retainInitialMailboxImportAfterPrefetch?: boolean;
         shouldContinue: () => boolean;
         signal: AbortSignal;
       }): Promise<boolean> => {
@@ -3704,9 +3747,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           rearmIdleCheckpointAfterEmptyProbe: false,
           requestIdKind: "checkpoint-wake",
           initialMailboxPrefetch: input.initialMailboxPrefetch ?? null,
-          ...(input.retainInitialMailboxImportAfterPrefetch === true
-            ? { retainInitialMailboxImportAfterPrefetch: true }
-            : {}),
           shouldContinue: input.shouldContinue,
           signal: input.signal,
           systemMailboxAdmission: "all",
@@ -4251,22 +4291,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             throw error;
           }
         };
-        const runRetainedPostCheckpointMailboxWake = async (
-          wake: Parameters<typeof runPostCheckpointMailboxWake>[0],
-        ): Promise<boolean | null> => {
-          try {
-            return await runPostCheckpointMailboxWake(wake);
-          } catch (error) {
-            if (
-              postCheckpointWorkSignal.aborted
-              && options.shutdownSignal?.aborted === true
-              && !runtimeAbortController.signal.aborted
-            ) {
-              return null;
-            }
-            throw error;
-          }
-        };
         if (conversationInputAhead && mayRunPostCheckpointWork()) {
           const conversationInputHandled = await runOptionalPostCheckpointWork(
             async () =>
@@ -4296,8 +4320,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         let deferredBrowserVaultWakePrefetch: HostedMailboxPrefixPrefetch | null = null;
         let deferredDeviceSyncWake: HostedVaultShareOfferWake | null = null;
-        const retainDeferredDeviceSyncWakeForReplacement = (): void => {
-          if (!deferredDeviceSyncWake) {
+        let mailboxWakeNeedsReplacement = false;
+        const scheduleReplacementForRetainedMailboxWake = (): void => {
+          if (
+            !mailboxWakeNeedsReplacement
+            && !deferredBrowserVaultWakePrefetch
+            && !deferredDeviceSyncWake
+          ) {
             return;
           }
           pendingWake = selectEarliestHostedRuntimeWake([
@@ -4313,37 +4342,37 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           invocationStatus = "scheduled";
         };
         if (mayRunPostCheckpointWork() && checkpointWakeLatencySeed) {
-          const checkpointWakePrefetch = await createHostedForegroundMailboxPrefetch({
-            lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
-            limitPerLane: mailboxBudget.fetchLimitPerLane,
-            requestId:
-              `${requestId}:checkpoint-wake-classify:${runtimePassOrdinal + 1}`,
-            runnerInput: baseRunnerInput,
+          const checkpointWakeClassification = await classifyHostedPostCheckpointWake({
+            latencySeed: checkpointWakeLatencySeed,
+            requestId: `${requestId}:checkpoint-wake-classify:${runtimePassOrdinal + 1}`,
           });
-          const checkpointWakeInspection =
-            await inspectHostedPreCheckpointSystemMailboxPrefetch(
-              checkpointWakePrefetch,
-            );
-          if (
+          if (!mayRunPostCheckpointWork()) {
+            mailboxWakeNeedsReplacement = true;
+          } else if (
             browserVaultReplicaRefreshRequested
-            && checkpointWakeInspection.containsOnlyBrowserVaultRefreshWakes
+            && checkpointWakeClassification.containsOnlyBrowserVaultRefreshWakes
           ) {
-            deferredBrowserVaultWakePrefetch = checkpointWakePrefetch;
-          } else if (checkpointWakeInspection.containsOnlyDeviceSyncWakes) {
+            deferredBrowserVaultWakePrefetch =
+              checkpointWakeClassification.wake.initialMailboxPrefetch;
+          } else if (checkpointWakeClassification.containsOnlyDeviceSyncDirtyWakes) {
             // The state just checkpointed is safe to project before another
-            // personal device-sync pass; mixed or human work still runs first.
-            deferredDeviceSyncWake = {
-              initialMailboxPrefetch: checkpointWakePrefetch,
-              latencySeed: checkpointWakeLatencySeed,
-            };
+            // level-triggered dirty hint; explicit device commands and human work
+            // still run first.
+            deferredDeviceSyncWake = checkpointWakeClassification.wake;
           } else {
-            const checkpointWakeHandled = await runRetainedPostCheckpointMailboxWake({
-              initialMailboxPrefetch: checkpointWakePrefetch,
-              latencySeed: checkpointWakeLatencySeed,
-              retainInitialMailboxImportAfterPrefetch: true,
-              shouldContinue: mayRunPostCheckpointWork,
-              signal: postCheckpointWorkSignal,
-            });
+            const checkpointWakeHandled = await runOptionalPostCheckpointWork(
+              async () =>
+                await runPostCheckpointMailboxWake({
+                  initialMailboxPrefetch:
+                    checkpointWakeClassification.wake.initialMailboxPrefetch,
+                  latencySeed: checkpointWakeClassification.wake.latencySeed,
+                  shouldContinue: mayRunPostCheckpointWork,
+                  signal: postCheckpointWorkSignal,
+                }),
+            );
+            if (!checkpointWakeHandled && !mayRunPostCheckpointWork()) {
+              mailboxWakeNeedsReplacement = true;
+            }
             if (runtimeStateDirty) {
               continue;
             }
@@ -4354,7 +4383,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         const durableCheckpointEffects = await runDurableCheckpointEffectsBestEffort();
         if (durableCheckpointEffects.requiresFollowUpCheckpoint) {
-          pendingCheckpointWakeLatencySeed ??= deferredDeviceSyncWake?.latencySeed ?? null;
+          pendingCheckpointWakeLatencySeed ??=
+            deferredDeviceSyncWake?.latencySeed
+            ?? (mailboxWakeNeedsReplacement ? checkpointWakeLatencySeed : null);
           stageDurableCheckpointFollowUp(
             checkpoint.workspace,
             durableCheckpointEffects.wake,
@@ -4384,7 +4415,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             dueAssistantWakeHandled
             && (runtimeStateDirty || await drainCleanDurableCheckpointEffects())
           ) {
-            pendingCheckpointWakeLatencySeed ??= deferredDeviceSyncWake?.latencySeed ?? null;
+            pendingCheckpointWakeLatencySeed ??=
+              deferredDeviceSyncWake?.latencySeed
+              ?? (mailboxWakeNeedsReplacement ? checkpointWakeLatencySeed : null);
             continue;
           }
         }
@@ -4420,10 +4453,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             }
           }
           if (!vaultShareWakeHandled && !mayRunPostCheckpointWork()) {
-            retainDeferredDeviceSyncWakeForReplacement();
+            scheduleReplacementForRetainedMailboxWake();
           }
         } else {
-          retainDeferredDeviceSyncWakeForReplacement();
+          scheduleReplacementForRetainedMailboxWake();
         }
         let browserVaultRefresh = await runOptionalPostCheckpointWork(
           async () =>

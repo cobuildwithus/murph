@@ -319,6 +319,19 @@ missing; `null` means no snapshot has been supplied. Revoke and regrant clear
 the column in the same authority transaction, and regrant rotates the share id,
 so a stale producer cannot update a later grant generation.
 
+The grantor's personal runtime offers this replacement projection only after its
+source state crosses the existing successful checkpoint boundary. A pending
+mailbox prefix may wait behind an in-flight projection only when every item is a
+system-lane `device-sync.wake` with the production `device-sync:dirty:` dedupe
+prefix. Those rows are level-triggered dirty hints. Connection, disconnect,
+manual-reconcile, and scheduled-reconcile commands remain foreground work, as do
+mixed or uninspectable prefixes and failed classification fetches. A successful
+classification prefetch is reused by the foreground import instead of fetched a
+second time. Once graceful shutdown is observed, the retiring runtime neither
+starts nor re-enters projection or mailbox import; it returns an immediate
+`mailbox` wake so the existing replacement-runtime reconciliation owns the
+durable row.
+
 `murph.group action="read_shared"` accepts one to three unique exact selectable
 projection scopes. The signed Web handler captures the current group roster and
 exact active grants, decrypts only the captured encrypted snapshots, and returns
