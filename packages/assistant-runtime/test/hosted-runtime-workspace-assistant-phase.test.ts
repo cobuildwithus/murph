@@ -7953,7 +7953,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({ request: expect.any(Function) }),
     );
     expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
-      "fitbit",
+      "google_health",
       "garmin",
       "oura",
       "withings",

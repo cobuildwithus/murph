@@ -5,7 +5,10 @@ import { useSearchParams } from "next/navigation";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-dialogs";
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
-import { markLocallyDisconnectedSources } from "@/app/(dashboard)/connect/connect-page-helpers";
+import {
+  markLocallyCompletedFitbitMigrations,
+  markLocallyDisconnectedSources,
+} from "@/app/(dashboard)/connect/connect-page-helpers";
 import {
   APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
   listAppleHealthRelayConnectSources,
@@ -25,6 +28,33 @@ const ZEPP_CONNECT_SOURCE: ConnectSource = {
   id: "zepp",
   ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI.zepp,
 };
+
+const FITBIT_MIGRATION_SOURCE: ConnectSource = {
+  description:
+    "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+  disconnectConnectionId: "design-fitbit-migration",
+  disconnectSourceProviderSlug: "fitbit",
+  id: "fitbit-migration-cutover",
+  logo: {
+    className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+    height: 36,
+    src: "/brand-logos/connect/fitbit.svg",
+    width: 128,
+  },
+  migrationState: "cutover_ready",
+  name: "Fitbit",
+};
+
+const FITBIT_COMPLETED_MIGRATION_SOURCE =
+  markLocallyCompletedFitbitMigrations(
+    [{ ...FITBIT_MIGRATION_SOURCE, id: "fitbit" }],
+    new Set(["fitbit"]),
+  )[0] ?? {
+    ...FITBIT_MIGRATION_SOURCE,
+    connected: true,
+    disconnectSourceProviderSlug: "google_health",
+    id: "fitbit",
+  };
 
 const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
@@ -130,21 +160,7 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
     authenticated: true,
     errorMessage: null,
-    source: {
-      description:
-        "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
-      disconnectConnectionId: "design-fitbit-migration",
-      disconnectSourceProviderSlug: "fitbit",
-      id: "fitbit-migration-cutover",
-      logo: {
-        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-        height: 36,
-        src: "/brand-logos/connect/fitbit.svg",
-        width: 128,
-      },
-      migrationState: "cutover_ready",
-      name: "Fitbit",
-    },
+    source: FITBIT_MIGRATION_SOURCE,
   },
   {
     authenticated: false,
@@ -273,7 +289,11 @@ export function ConnectSourceCardStudy({
   const studyState = searchParams?.get("connectDisconnectStudy") ?? null;
   const disconnectDialogSource = studyState === "source"
     ? DESIGN_CONNECT_SOURCE_CASES[0]?.source ?? null
-    : null;
+    : studyState === "fitbit-migration-dialog" ||
+        studyState === "fitbit-migration-pending" ||
+        studyState === "fitbit-migration-error"
+      ? FITBIT_MIGRATION_SOURCE
+      : null;
   const defaultStudyCases = androidAppAvailable
     ? DESIGN_CONNECT_SOURCE_CASES
     : DESIGN_CONNECT_SOURCE_CASES.filter(
@@ -286,6 +306,12 @@ export function ConnectSourceCardStudy({
           ...studyCase,
           source: DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES[index] ?? studyCase.source,
         }))
+      : studyState === "fitbit-migration-completed"
+        ? [{
+            authenticated: true,
+            errorMessage: null,
+            source: FITBIT_COMPLETED_MIGRATION_SOURCE,
+          }]
       : defaultStudyCases;
 
   return (
@@ -314,9 +340,11 @@ export function ConnectSourceCardStudy({
       </div>
 
       <ConnectDisconnectDialog
-        errorMessage={null}
+        errorMessage={studyState === "fitbit-migration-error"
+          ? "The legacy Fitbit connection could not be stopped."
+          : null}
         inert
-        pending={false}
+        pending={studyState === "fitbit-migration-pending"}
         source={disconnectDialogSource}
         onConfirm={() => Promise.resolve()}
         onOpenChange={() => {}}
