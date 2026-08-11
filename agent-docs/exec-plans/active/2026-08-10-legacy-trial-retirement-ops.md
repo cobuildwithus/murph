@@ -11,6 +11,8 @@ Updated: 2026-08-10
   credential is intentionally not downloadable.
 - Complete the bounded cleanup with an aggregate dry-run, an exact-count apply,
   and an automatic verification that zero candidates remain.
+- Retire the one-time operator capability after production reports zero while
+  preserving only the delayed-event compatibility required by Stripe billing.
 
 ## Success criteria
 
@@ -51,6 +53,9 @@ Updated: 2026-08-10
    complete diff, and push the exact review candidate.
 6. Resolve exact-head specialist/final review and CI, merge and deploy, then run
    dry-run/apply/dry-run-to-zero from production Ops.
+7. After the production dry-run reports zero, remove the one-time Ops control,
+   route, batch service, CLI, studies, and dedicated tests. Preserve the
+   per-member delayed-event compatibility until its separate horizon expires.
 
 ## Verification log
 
@@ -71,3 +76,12 @@ Updated: 2026-08-10
   substitute was added.
 - Changelog: not applicable. This is an allowlisted internal operator control
   and runbook correction, not a member-visible product change.
+- PR #1602 merged at `58e5a5bc88` after the exact pushed head passed required
+  GitHub checks, the preliminary specialist review, and final ReviewGPT round
+  2 with no findings. The production Vercel deployment reached Ready.
+- On 2026-08-10 the operator reported that the authenticated production dry-run
+  found zero candidates. No apply was required, and this agent did not mutate
+  production billing or database state.
+- The terminal cleanup removes the now-obsolete one-time surface while leaving
+  the existing per-member Stripe event and Family-conversion guards intact
+  until the delayed-event and manual-replay horizon has passed.
