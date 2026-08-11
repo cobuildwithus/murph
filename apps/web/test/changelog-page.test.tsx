@@ -64,6 +64,7 @@ describe("ChangelogPage", () => {
     );
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).toContain("Completed workout rows keep their checkmark");
+    expect(markup).toContain("Health data controls line up with Settings");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("Voice memos keep your chosen voice");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
@@ -113,6 +114,9 @@ describe("ChangelogPage", () => {
     );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-10#voice-memos-use-your-voice"',
+    );
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-10#health-data-settings-row"',
     );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-09#public-referral-home"',

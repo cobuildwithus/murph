@@ -176,6 +176,22 @@ const RAW_CHANGELOG_EDITIONS = [
         relevanceTags: ["workouts", "imessage", "cards", "reliability"],
         sourcePullRequests: [1599],
       },
+      {
+        id: "health-data-settings-row",
+        kind: "improvement",
+        priority: 2,
+        title: "Health data controls line up with Settings",
+        summary:
+          "Health data use now keeps source and consent actions aligned with the other Settings controls on larger screens while staying compact on phones.",
+        details:
+          "Manage sources and Withdraw consent keep their existing destinations, confirmation, status, and recovery behavior.",
+        relevanceTags: ["settings", "health-data", "privacy", "accessibility"],
+        sourcePullRequests: [1615],
+        tryIt: {
+          href: "/settings#data-privacy",
+          label: "Review health data controls",
+        },
+      },
     ],
   },
   {
