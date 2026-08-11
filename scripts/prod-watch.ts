@@ -129,6 +129,7 @@ const DEFAULT_REMEDIATION_CONCURRENCY = 2;
 const MAX_PROVIDER_EVIDENCE_BYTES = 256 * 1_024;
 const MAX_SUBPROCESS_OUTPUT_BYTES = 1 * 1_024 * 1_024;
 const MAX_CODEX_EVENT_BYTES = 512 * 1_024;
+const VERCEL_MAX_RESPONSE_BYTES = 4 * MAX_SUBPROCESS_OUTPUT_BYTES;
 const SCHEDULER_INTERVAL_MS = 300_000;
 const LAUNCHD_LABEL = "com.murph.prod-watch";
 const LAUNCHD_MANAGED_MARKER = "murph-prod-watch-managed:v1";
@@ -2864,7 +2865,67 @@ export function shouldContinueVercelPagination(rowCount: number, hasMoreRows: un
   return rowCount > 0 && hasMoreRows === true;
 }
 
-async function fetchVercelJson(url: string, token: string, signal?: AbortSignal): Promise<unknown> {
+async function readResponseTextWithinLimit(
+  response: Response,
+  maxBytes: number,
+  onLimitExceeded?: () => void,
+): Promise<string> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new Error("response_byte_limit_invalid");
+  }
+
+  const rejectOversizedResponse = async (cancel: () => Promise<unknown>): Promise<never> => {
+    try {
+      onLimitExceeded?.();
+    } catch {
+      // The size-limit error remains authoritative even if abort notification fails.
+    }
+    try {
+      await cancel();
+    } catch {
+      // Cancellation is best effort after the response has already been rejected.
+    }
+    throw Object.assign(new Error("vercel_api_output_too_large"), { code: "EFBIG" });
+  };
+
+  const advertisedLength = response.headers.get("content-length");
+  if (advertisedLength !== null
+    && /^\d+$/u.test(advertisedLength)
+    && BigInt(advertisedLength) > BigInt(maxBytes)) {
+    return await rejectOversizedResponse(async () => await response.body?.cancel());
+  }
+
+  if (response.body === null) {
+    return "";
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value.byteLength > maxBytes - totalBytes) {
+        return await rejectOversizedResponse(async () => await reader.cancel());
+      }
+      if (value.byteLength > 0) {
+        chunks.push(value);
+        totalBytes += value.byteLength;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(
+    chunks.map((chunk) => Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)),
+    totalBytes,
+  ).toString("utf8");
+}
+
+export async function fetchVercelJson(url: string, token: string, signal?: AbortSignal): Promise<unknown> {
   const controller = new AbortController();
   const onAbort = () => controller.abort();
   signal?.addEventListener("abort", onAbort, { once: true });
@@ -2881,10 +2942,11 @@ async function fetchVercelJson(url: string, token: string, signal?: AbortSignal)
     if (!response.ok) {
       throw Object.assign(new Error("vercel_api_failed"), { code: "EHELPER" });
     }
-    const raw = await response.text();
-    if (Buffer.byteLength(raw) > 4 * MAX_SUBPROCESS_OUTPUT_BYTES) {
-      throw Object.assign(new Error("vercel_api_output_too_large"), { code: "EFBIG" });
-    }
+    const raw = await readResponseTextWithinLimit(
+      response,
+      VERCEL_MAX_RESPONSE_BYTES,
+      () => controller.abort(),
+    );
     return JSON.parse(raw) as unknown;
   } catch (error) {
     if ((error as { name?: unknown }).name === "AbortError") {

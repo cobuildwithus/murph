@@ -57,6 +57,7 @@ import {
   buildImmutableRemediationPushArgs,
   buildRemediationChildEnv,
   buildRemediationReviewRequest,
+  fetchVercelJson,
   nextVercelSampleDuration,
   parseReviewGptTerminalBlock,
   renderLaunchdPlistTemplate,
@@ -217,6 +218,47 @@ describe("production-watch snapshot contract", () => {
     expect(nextVercelSampleDuration(10_000)).toBe(5_000);
     expect(nextVercelSampleDuration(101)).toBe(100);
     expect(nextVercelSampleDuration(100)).toBeUndefined();
+  });
+
+  it("cancels an oversized Vercel response stream before consuming the remaining body", async () => {
+    const responseLimitBytes = 4 * 1_024 * 1_024;
+    const chunkBytes = 256 * 1_024;
+    const totalChunks = 256;
+    let generatedBytes = 0;
+    let cancelled = false;
+    let abortObserved = false;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input, init) => {
+      init?.signal?.addEventListener("abort", () => {
+        abortObserved = true;
+      }, { once: true });
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (generatedBytes >= totalChunks * chunkBytes) {
+            controller.close();
+            return;
+          }
+          generatedBytes += chunkBytes;
+          controller.enqueue(new Uint8Array(chunkBytes).fill(0x20));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      await expect(fetchVercelJson("https://example.invalid/vercel", "test-token"))
+        .rejects.toMatchObject({ code: "EFBIG" });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(abortObserved).toBe(true);
+    expect(cancelled).toBe(true);
+    expect(generatedBytes).toBeLessThanOrEqual(responseLimitBytes + 2 * chunkBytes);
+    expect(generatedBytes).toBeLessThan(totalChunks * chunkBytes);
   });
 
   it("keeps a healthy fixture bounded, aggregate-only, and quiet", () => {
