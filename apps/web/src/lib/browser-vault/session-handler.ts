@@ -103,7 +103,7 @@ export function createBrowserVaultSessionRoute() {
         replicaAad: null,
         replicaKeyEnvelope: null,
         replicaRef,
-        refreshPending: freshnessAssessment.shouldRefresh || requestRefresh,
+        refreshPending: freshnessAssessment.shouldRefresh,
         state: "not_modified",
         workspaceVersion,
       });
@@ -129,7 +129,7 @@ export function createBrowserVaultSessionRoute() {
           })),
           deviceSyncImportPending,
           freshness,
-          refreshPending: freshnessAssessment.shouldRefresh || requestRefresh,
+          refreshPending: freshnessAssessment.shouldRefresh,
           workspaceVersion,
         },
       );

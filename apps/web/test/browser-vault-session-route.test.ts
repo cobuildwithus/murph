@@ -653,7 +653,7 @@ describe("browser vault session route", () => {
     }
   });
 
-  it("forwards the authenticated member and replica ref to the hosted control client when the known ref is stale", async () => {
+  it("keeps explicit refresh ownership out of a fresh ready response", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
@@ -683,6 +683,7 @@ describe("browser vault session route", () => {
           ...createReplicaRef(),
           objectKey: "users/browser-vault-replicas/opaque/stale-replica.json",
         },
+        requestRefresh: true,
       }),
     );
 
@@ -691,6 +692,13 @@ describe("browser vault session route", () => {
       browserPublicKeyJwk: browser.publicKeyJwk,
       replicaRef: createReplicaRef(),
       userId: "member_123",
+    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      refreshPending: false,
+      state: "ready",
     });
   });
 
@@ -1349,7 +1357,7 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("signals a requested refresh even when the known replica is current", async () => {
+  it("signals a requested refresh without duplicating its pending owner", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
     mocks.readHostedWorkspace.mockResolvedValue({
@@ -1380,7 +1388,7 @@ describe("browser vault session route", () => {
     });
     await expect(response.json()).resolves.toMatchObject({
       replicaRef,
-      refreshPending: true,
+      refreshPending: false,
       state: "not_modified",
     });
   });
