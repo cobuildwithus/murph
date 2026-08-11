@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -21,6 +21,7 @@ Last verified: 2026-08-10
 | `agent-docs/product-specs/hosted-support-escalation.md` | Direct support address plus explicit, member-linked, de-identified product-team escalation with a three-email-per-UTC-day server limit and stable provider idempotency. | Implemented |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan for 2-6 sponsored people with mixed Pulse/Edge seats, exact owner-funded member usage top-ups, private member accounts, chat-first invites, and privacy boundaries. | Active |
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
+| `agent-docs/product-specs/creator-programs.md` | Curated, white-glove creator partnerships that turn an approved body of health knowledge into a personalized community experience, with aggregate-only creator reporting and no self-serve runtime yet. | Specified |
 | `agent-docs/product-specs/murph-safe-public-product-search.md` | Public supplement and branded-food evidence search, normalized API contract, exact product-test semantics, privacy, and abuse bounds. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
 | `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored onboarding through a compact progressive-disclosure skill: private relationship, observable bounded-history resume rules, brief aspiration-thread capture, explicit park, progressive health foundation, contextual return, collaborative first step, finite completion, and one code-owned first personal read. | Active |

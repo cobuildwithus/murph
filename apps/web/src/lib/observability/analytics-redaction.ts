@@ -7,6 +7,7 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/clubs",
   "/connect",
   "/consumer-health-data-privacy-policy",
+  "/creators",
   "/design",
   "/device-sync/connect/complete",
   "/environment",

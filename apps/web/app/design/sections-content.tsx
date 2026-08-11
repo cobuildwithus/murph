@@ -43,6 +43,7 @@ import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study"
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
 import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
 import { ClubsPageStudy } from "./clubs-page-study";
+import { CreatorsPageStudy } from "./creators-page-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
 import {
   AppleHealthRelaySetupStudy,
@@ -525,6 +526,12 @@ export function SectionsContent() {
 
       <StudySection title="Clubs profiles, iMessage, and wearables">
         <ClubsPageStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Health creators · expertise into personal guidance">
+        <CreatorsPageStudy />
       </StudySection>
 
       <Separator />
