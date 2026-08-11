@@ -11096,6 +11096,13 @@ describe("hosted workspace runtime entrypoint", () => {
         fetchRequests,
         items: [],
       });
+      const mailboxPort: HostedRuntimeMailboxPort = {
+        ...baseMailboxPort,
+        async fetch(request) {
+          fetchRequests.push(request);
+          return await new Promise<HostedMailboxFetchResponse>(() => undefined);
+        },
+      };
       runtimeWakeSignal.notify();
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
@@ -11117,7 +11124,7 @@ describe("hosted workspace runtime entrypoint", () => {
           platform: createPlatform({
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
             deviceSyncPort: baseDeviceSyncPort,
-            mailboxPort: baseMailboxPort,
+            mailboxPort,
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
@@ -11138,7 +11145,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.immediateRecheckRequested, true);
       assert.equal(baseDeviceSyncPort.fetchSnapshotCalls, 0);
       assert.equal(baseDeviceSyncPort.fetchDirtyStatesCalls, 0);
+      assert.deepEqual(fetchRequests, []);
       assert.deepEqual(checkpointRequests, []);
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(mocks.cancelPendingWarmCodexPreinitialization.mock.calls.length, 0);
       assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 1);
     } finally {
       vi.useRealTimers();

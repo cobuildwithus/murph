@@ -1798,6 +1798,55 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const systemMailboxInitialForegroundWakeObserved =
       input.request.processingMode === "system_mailbox"
       && initialPendingRuntimeWake !== null;
+    if (systemMailboxInitialForegroundWakeObserved) {
+      const projectedWake = await resolveHostedSystemMailboxProcessingModeWake({
+        mailboxImportRetryAt: null,
+        nowMs: Date.now(),
+        operatorHomeRoot: restored.operatorHomeRoot,
+        runtimeEnv: invocationRuntimeEnv,
+        vaultRoot: restored.vaultRoot,
+      });
+      const returnedWake = selectEarliestHostedRuntimeWake([
+        {
+          at: projectedWake.nextWakeAt,
+          reason: projectedWake.nextWakeReason,
+        },
+        {
+          at: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
+          reason: activeWorkspace?.inboxMediaRetentionWakeAt
+            ? "inbox_media_retention"
+            : null,
+        },
+      ]);
+      const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
+        redactedStatus: activeWorkspace?.redactedStatus ?? null,
+        vaultRoot: restored.vaultRoot,
+      });
+      const invocationResult = {
+        immediateRecheckRequested: true as const,
+        nextWakeAt: returnedWake.nextWakeAt,
+        ...(returnedWake.nextWakeReason
+          ? { nextWakeReason: returnedWake.nextWakeReason }
+          : {}),
+        redactedStatus,
+        status: resolveHostedWorkspaceInvocationStatus({
+          mailboxBudgetExhausted: mailboxBudgetExhausted(),
+          nextWakeAt: returnedWake.nextWakeAt,
+        }),
+      };
+      emitPhaseLog({
+        details: {
+          immediateRecheckRequested: true,
+          invocationStatus: invocationResult.status,
+          nextWakeAtPresent: invocationResult.nextWakeAt !== null,
+        },
+        input,
+        requestId,
+        stage: "runtime.return",
+        status: "done",
+      });
+      return invocationResult;
+    }
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
       mergeHostedRuntimeWakeLatencySeeds(
         initialPendingRuntimeWake,
@@ -2062,7 +2111,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialMailboxImport.checkpointDeferred && initialMailboxImport.stateChanged
         || hostedVaultStartupPreparation.mutated;
       let checkpointed = false;
-      let foregroundWakeObserved = systemMailboxInitialForegroundWakeObserved;
+      let foregroundWakeObserved = false;
       const consumeForegroundWake = (): boolean => {
         if (foregroundWakeObserved) {
           return true;
