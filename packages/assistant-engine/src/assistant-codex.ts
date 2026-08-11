@@ -3112,6 +3112,11 @@ async function runCodexAppServerTurnOnProcess(
   // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
   // assistant turn, owned here and threaded into the dynamic-tool executor.
   const askGrokTurnState = createAskGrokTurnState()
+  const groupSharedReadTurnState = {
+    invalid: false,
+    readProjectionScopeKeyBatches: [],
+    roster: null,
+  }
   const generateSongTurnState = input.generateSongPolicy
     ? {
         attemptCount: 0,
@@ -4354,6 +4359,13 @@ async function runCodexAppServerTurnOnProcess(
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
           currentResponseCard: responseCard,
+          groupChallengeResponseCardAllowed:
+            input.groupConversation === true &&
+            input.dynamicTools.some((tool) =>
+              tool.namespace === 'murph' &&
+              tool.name === 'attach_response_card'
+            ),
+          groupSharedReadTurnState,
           privateDirectResponseCardAllowed: input.groupConversation === false,
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
@@ -5647,6 +5659,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
+    request.kind === 'attach-group-challenge-response-card' ||
     request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'send-vault-file' ||
@@ -5669,7 +5682,8 @@ function isSerializedDynamicToolRequest(
 function isResponseAttachmentDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
-  return request.kind === 'attach-response-card' ||
+  return request.kind === 'attach-group-challenge-response-card' ||
+    request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'generate-image' ||
     request.kind === 'generate-song' ||

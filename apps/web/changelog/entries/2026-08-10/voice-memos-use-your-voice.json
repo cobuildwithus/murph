@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 350,
+  "item": {
+    "id": "voice-memos-use-your-voice",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Voice memos keep your chosen voice",
+    "summary": "Ordinary voice memos now use the voice already selected for your Murph instead of switching voices on their own.",
+    "details": "A different named voice is used only when you explicitly ask to test it or request that voice for one memo. Saving a named voice and asking to hear it immediately still works as a one-time preview.",
+    "relevanceTags": ["voice", "messaging", "personalization", "reliability"],
+    "sourcePullRequests": [1587]
+  }
+}

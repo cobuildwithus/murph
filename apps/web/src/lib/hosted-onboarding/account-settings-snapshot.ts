@@ -2,9 +2,10 @@ import "server-only";
 
 import {
   assistantWebPersonalitySettingIds,
-  type AssistantWebPersonalitySettingId,
+  type AssistantPersonaId,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
+  type AssistantWebPersonalitySettingId,
 } from "@murphai/contracts";
 import type {
   HostedAssistantProductModel,
@@ -39,6 +40,7 @@ export interface HostedAccountSettingsSnapshot {
     configurationAvailable: boolean;
     dormantSolPreference: boolean;
     model: HostedAssistantProductModel;
+    persona: AssistantPersonaId | null;
     personality: Record<AssistantWebPersonalitySettingId, number | null>;
     provider?: HostedAssistantProvider;
     solAvailable: boolean;
@@ -100,6 +102,7 @@ const hostedAccountSettingsMemberSelect =
     ...HOSTED_MEMBER_ASSISTANT_MODEL_SELECT,
     assistantDetail: true,
     assistantHumor: true,
+    assistantPersona: true,
     assistantPush: true,
     assistantUnhinged: true,
     assistantTone: true,
@@ -169,6 +172,7 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
     webPersonality[id] = projectedAssistantPreferences.personality[id];
   }
   const assistantPreferences = {
+    persona: projectedAssistantPreferences.persona,
     personality: webPersonality,
     tone: projectedAssistantPreferences.tone,
     voice: projectedAssistantPreferences.voice,

@@ -7,6 +7,7 @@ import {
 } from '@murphai/contracts'
 import { loadJsonInputObject } from '../json-input.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { resolveMetricDefinition } from '@murphai/health-metrics'
 import {
   compactObject,
   normalizeOptionalText,
@@ -119,7 +120,8 @@ export function normalizeMeasurementEntry(value: unknown, fieldName = 'measureme
           ...candidate,
           metric:
             typeof candidate.metric === 'string'
-              ? normalizeMetricSlug(candidate.metric, `${fieldName}.metric`)
+              ? resolveMetricDefinition(candidate.metric)?.key
+                ?? normalizeMetricSlug(candidate.metric, `${fieldName}.metric`)
               : candidate.metric,
           qualifiers: normalizeQualifierMap(candidate.qualifiers),
           note:

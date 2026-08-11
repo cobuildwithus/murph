@@ -150,6 +150,7 @@ const DESIGN_VISUALS = {
 
 const LATEST_PRODUCTION_ITEM_IDS = new Set([
   "appointment-reminders-by-default",
+  "blood-pressure-history-completion",
   "sharper-single-photo-review",
   "web-search-restored",
   "workout-card-status-rendering",

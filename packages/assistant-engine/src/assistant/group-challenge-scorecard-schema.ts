@@ -26,7 +26,9 @@ const trimmedTextSchema = (maxLength: number) => z
   .max(maxLength)
   .refine((value) => value.trim() === value, 'Expected trimmed text.')
 
-const opaqueIdSchema = trimmedTextSchema(MAX_OPAQUE_ID_LENGTH)
+export const groupChallengeParticipantIdSchema = trimmedTextSchema(
+  MAX_OPAQUE_ID_LENGTH,
+)
 const nonNegativeSafeIntegerSchema = z
   .number()
   .int()
@@ -34,7 +36,7 @@ const nonNegativeSafeIntegerSchema = z
   .max(Number.MAX_SAFE_INTEGER)
 const positiveSafeIntegerSchema = nonNegativeSafeIntegerSchema.min(1)
 
-const scorecardComponentSchema = z.object({
+export const groupChallengeScorecardComponentSchema = z.object({
   id: stableIdSchema,
   label: trimmedTextSchema(MAX_TEXT_LENGTH),
   maxPoints: nonNegativeSafeIntegerSchema.optional(),
@@ -58,13 +60,16 @@ const objectiveSchema = z.discriminatedUnion('kind', [
 ])
 
 const teamSchema = z.object({
-  captainParticipantId: opaqueIdSchema.optional(),
+  captainParticipantId: groupChallengeParticipantIdSchema.optional(),
   id: stableIdSchema,
   name: trimmedTextSchema(MAX_TEXT_LENGTH),
-  participantIds: z.array(opaqueIdSchema).min(1).max(MAX_GROUP_CHALLENGE_PARTICIPANTS),
+  participantIds: z
+    .array(groupChallengeParticipantIdSchema)
+    .min(1)
+    .max(MAX_GROUP_CHALLENGE_PARTICIPANTS),
 }).strict()
 
-const formatSchema = z.discriminatedUnion('kind', [
+export const groupChallengeFormatSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('collective'),
     objective: targetObjectiveSchema,
@@ -93,27 +98,31 @@ const componentObservationSchema = z.discriminatedUnion('status', [
   }).strict(),
 ])
 
-const participantObservationSchema = z.object({
+export const groupChallengeParticipantObservationSchema = z.object({
   components: z
     .array(componentObservationSchema)
     .min(1)
     .max(GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS),
-  participantId: opaqueIdSchema,
+  participantId: groupChallengeParticipantIdSchema,
+}).strict()
+
+export const groupChallengeParticipantObservationsSchema = z
+  .array(groupChallengeParticipantObservationSchema)
+  .min(1)
+  .max(MAX_GROUP_CHALLENGE_PARTICIPANTS)
+
+export const groupChallengeScorecardSchema = z.object({
+  components: z
+    .array(groupChallengeScorecardComponentSchema)
+    .min(1)
+    .max(GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS),
 }).strict()
 
 export const groupChallengeScoreInputSchema: z.ZodType<GroupChallengeScoreInput> = z
   .object({
-    format: formatSchema,
-    participants: z
-      .array(participantObservationSchema)
-      .min(1)
-      .max(MAX_GROUP_CHALLENGE_PARTICIPANTS),
-    scorecard: z.object({
-      components: z
-        .array(scorecardComponentSchema)
-        .min(1)
-        .max(GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS),
-    }).strict(),
+    format: groupChallengeFormatSchema,
+    participants: groupChallengeParticipantObservationsSchema,
+    scorecard: groupChallengeScorecardSchema,
   })
   .strict()
 
@@ -144,20 +153,20 @@ const participantScoreSchema = z.object({
     status: componentStatusSchema,
   }).strict()),
   coverage: coverageSchema,
-  participantId: opaqueIdSchema,
+  participantId: groupChallengeParticipantIdSchema,
   verifiedPoints: nonNegativeSafeIntegerSchema,
 }).strict()
 const individualEntrySchema = z.object({
   coverage: coverageSchema,
   objectiveProgress: objectiveProgressSchema.optional(),
-  participantId: opaqueIdSchema,
+  participantId: groupChallengeParticipantIdSchema,
   verifiedPoints: nonNegativeSafeIntegerSchema,
 }).strict()
 const teamEntrySchema = z.object({
   coverage: coverageSummarySchema,
   name: trimmedTextSchema(MAX_TEXT_LENGTH),
   objectiveProgress: objectiveProgressSchema.optional(),
-  participantIds: z.array(opaqueIdSchema),
+  participantIds: z.array(groupChallengeParticipantIdSchema),
   teamId: stableIdSchema,
   verifiedPoints: nonNegativeSafeIntegerSchema.nullable(),
   verifiedSubtotalPoints: nonNegativeSafeIntegerSchema,
