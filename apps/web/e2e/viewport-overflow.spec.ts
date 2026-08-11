@@ -464,17 +464,40 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
             await readContrast(),
             "default destructive contrast",
           ).toBeGreaterThanOrEqual(4.5);
-          await button.hover();
-          expect(
-            await readContrast(),
-            "hover destructive contrast",
-          ).toBeGreaterThanOrEqual(4.5);
-          await page.mouse.move(0, 0);
-          await button.focus();
-          expect(
-            await readContrast(),
-            "focus destructive contrast",
-          ).toBeGreaterThanOrEqual(4.5);
+          const inertProbe = page.locator(
+            "[data-playwright-consent-interaction-probe]",
+          );
+          await state.evaluate((frame) => {
+            const inertAncestor = frame.closest<HTMLElement>("[inert]");
+            if (!inertAncestor) {
+              throw new Error("Consent design study should be inert.");
+            }
+            inertAncestor.setAttribute(
+              "data-playwright-consent-interaction-probe",
+              "",
+            );
+            inertAncestor.removeAttribute("inert");
+          });
+          try {
+            await button.hover();
+            expect(
+              await readContrast(),
+              "hover destructive contrast",
+            ).toBeGreaterThanOrEqual(4.5);
+            await page.mouse.move(0, 0);
+            await button.focus();
+            expect(
+              await readContrast(),
+              "focus destructive contrast",
+            ).toBeGreaterThanOrEqual(4.5);
+          } finally {
+            await inertProbe.evaluate((element) => {
+              element.setAttribute("inert", "");
+              element.removeAttribute(
+                "data-playwright-consent-interaction-probe",
+              );
+            });
+          }
         }
       }
     }
