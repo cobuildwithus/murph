@@ -208,6 +208,51 @@ creates and removes a correction-added owner independently, preserves an
 unrelated accepted input across reorder and lifecycle operations, and leaves
 one archived owner after cancellation.
 
+## Review retrospective — round 6
+
+ReviewGPT found that exact-source replay still hashed the current delivery
+route. A direct email reply envelope can rotate when later input B joins the
+same authenticated thread, so replaying source A after an ambiguous commit
+could derive a second canonical owner even though A's source ref and ordinal
+were unchanged.
+
+The requirement-level decisions are:
+
+- Durable appointment-effect identity is the exact accepted source input plus
+  its source-local appointment ordinal. Current conversation id, audience
+  scope, recipient/reply envelope, mailbox ids, and other execution-current
+  route values authorize or deliver the operation but never identify the
+  persisted effect.
+- The accepted input id is already a vault-local, journaled immutable fact and
+  uniquely separates independent inputs. Core remains scoped to the vault's
+  canonical automation registry, so no second route-derived discriminator is
+  needed in the replay hash.
+- Source authority stays fail-closed: an ordinary source ref must resolve
+  against the current accepted-input journal; a correction may additionally
+  resolve its original only after stored provider authority matches. Removing
+  route fields from identity does not authorize a foreign source ref or
+  retarget the stored automation route.
+- Ordinary route evolution, including rotating direct-email reply envelopes,
+  cannot mint a new owner for the same source effect. A different accepted
+  input remains independent even when it uses ordinal one in the same thread.
+- Required proof commits A through the production hosted key boundary under
+  one authenticated email envelope, discards the result, admits B in the same
+  thread under a different envelope, replays A to the original owner, creates B
+  independently, rejects a foreign source, and reschedules/cancels A with no
+  second active owner.
+
+This correction continues to use the accepted-input journal, provider
+provenance, canonical automation record, and registry lock. It removes mutable
+route state from identity and adds no index, reconciliation loop, queue, state
+machine, or durable ownership layer.
+
+The implemented v3 replay key hashes only the host-resolved accepted input id;
+Core continues to combine that key with the source-local ordinal. The focused
+production-boundary proof now sends dynamic tool requests through real hosted
+key derivation into the canonical automation store while the direct-email
+envelope rotates, then verifies stable A replay, independent B ownership,
+foreign-ref refusal, route preservation, exact reschedule, and exact archive.
+
 ## Tasks
 
 1. [x] Add canonical create-only ownership and hosted current-conversation list.

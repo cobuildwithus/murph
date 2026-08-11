@@ -529,12 +529,11 @@ export function createAssistantHostedScheduledRequestKey(input: {
 }
 
 export function createAssistantHostedAutomationCreateReplayKey(input: {
-  scope: AssistantHostedUserActionScope
-  sourceInputIds?: readonly string[]
+  sourceInputIds: readonly string[]
   sourceRef: string
 }): `automation_create_${string}` | null {
   const acceptedInputId = resolveAssistantAppointmentReminderSourceInputId({
-    acceptedInputIds: input.sourceInputIds ?? input.scope.acceptedInputIds,
+    acceptedInputIds: input.sourceInputIds,
     sourceRef: input.sourceRef,
   })
   if (!acceptedInputId) {
@@ -543,10 +542,7 @@ export function createAssistantHostedAutomationCreateReplayKey(input: {
   const digest = createHash('sha256')
     .update(JSON.stringify({
       acceptedInputId,
-      conversationId: input.scope.conversationId,
-      conversationScope: input.scope.conversationScope,
-      recipientKey: input.scope.recipientKey,
-      schema: 'murph.automation-create-replay-key.v2',
+      schema: 'murph.automation-create-replay-key.v3',
     }))
     .digest('hex')
   return `automation_create_${digest}`

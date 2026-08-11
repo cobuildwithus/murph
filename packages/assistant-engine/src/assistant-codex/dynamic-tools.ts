@@ -1945,7 +1945,6 @@ export async function executeMurphDynamicToolRequest(input: {
       const createOnlyReplayKey =
         userActionScope && input.request.createOnlySourceRef
           ? createAssistantHostedAutomationCreateReplayKey({
-            scope: userActionScope,
             sourceInputIds: appointmentReminderSourceInputIds,
             sourceRef: input.request.createOnlySourceRef,
           })

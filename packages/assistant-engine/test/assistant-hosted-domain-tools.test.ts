@@ -1,6 +1,15 @@
-import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
-import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  listAutomations,
+  patchAutomation,
+  upsertAutomation,
+} from '@murphai/core'
+
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import {
   executeMurphDynamicToolRequest,
   MURPH_AUTOMATION_TOOL,
@@ -29,6 +38,15 @@ const APPOINTMENT_SOURCE_REF_A =
   createAssistantAppointmentReminderSourceRef(APPOINTMENT_INPUT_A)
 const APPOINTMENT_SOURCE_REF_B =
   createAssistantAppointmentReminderSourceRef(APPOINTMENT_INPUT_B)
+const tempRoots: string[] = []
+
+afterEach(async () => {
+  await Promise.all(
+    tempRoots.splice(0, tempRoots.length).map(async (root) =>
+      await rm(root, { force: true, recursive: true })
+    ),
+  )
+})
 
 describe('hosted domain dynamic tools', () => {
   it('keeps device and automation default-off', () => {
@@ -540,21 +558,90 @@ describe('hosted domain dynamic tools', () => {
     )
   })
 
-  it('keeps each create-only owner bound to its source when later input joins and results replay', async () => {
+  it('keeps email replay on the exact source owner when a later reply envelope joins', async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-hosted-email-appointment-replay-'),
+    )
+    tempRoots.push(vaultRoot)
+    let recipientKey = 'email-envelope-a'
     const automationRequest = vi.fn<
       NonNullable<AssistantHostedToolContext['automationTool']>['request']
-    >(async () => ({
-      action: 'save' as const,
-      automationId: 'automation-appointment-1',
-      created: true,
-      effectiveTimeZone: null,
-      lookupId: 'automation-opaque-owner-1',
-      nextOccurrenceAt: '2026-08-12T00:00:00.000Z',
-      routeBinding: 'current_conversation' as const,
-      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' as const },
-      status: 'active' as const,
-      timingVerified: true,
-    }))
+    >(async (request, context) => {
+      if (request.action === 'save') {
+        const result = await upsertAutomation({
+          ...(request.activeUntil === undefined
+            ? {}
+            : { activeUntil: request.activeUntil }),
+          ...(request.assistantTargetOverride === undefined
+            ? { assistantTargetOverride: null }
+            : { assistantTargetOverride: request.assistantTargetOverride }),
+          continuityPolicy: request.continuityPolicy ?? 'preserve',
+          ...(request.createOnly === true ? { createOnly: true } : {}),
+          ...(request.createOnlyEffectKey === undefined
+            ? {}
+            : { createOnlyEffectKey: request.createOnlyEffectKey }),
+          ...(context?.createOnlyReplayKey === undefined
+            ? {}
+            : { createOnlyReplayKey: context.createOnlyReplayKey }),
+          instructions: request.instructions,
+          route: {
+            channel: 'email',
+            deliverySource: null,
+            deliveryTarget: recipientKey,
+            identityId: 'email-account',
+            participantId: null,
+            threadId: 'email-thread',
+          },
+          schedule: request.schedule,
+          status: request.status ?? 'active',
+          summary: request.summary ?? null,
+          supportKind: request.supportKind ?? null,
+          tags: request.tags === undefined ? [] : [...request.tags],
+          title: request.title,
+          vaultRoot,
+        })
+        return {
+          action: 'save',
+          automationId: result.record.automationId,
+          created: result.created,
+          effectiveTimeZone: null,
+          lookupId: result.record.slug,
+          nextOccurrenceAt: result.record.schedule.kind === 'at'
+            ? result.record.schedule.at
+            : null,
+          replayed: request.createOnly === true && result.created === false,
+          routeBinding: 'current_conversation',
+          schedule: result.record.schedule,
+          status: result.record.status,
+          timingVerified: true,
+        }
+      }
+      if (request.action === 'patch') {
+        const result = await patchAutomation({
+          lookup: request.lookup,
+          ...(request.schedule === undefined
+            ? {}
+            : { schedule: request.schedule }),
+          ...(request.status === undefined ? {} : { status: request.status }),
+          vaultRoot,
+        })
+        return {
+          action: 'patch',
+          automationId: result.record.automationId,
+          created: result.created,
+          effectiveTimeZone: null,
+          lookupId: result.record.slug,
+          nextOccurrenceAt: result.record.schedule.kind === 'at'
+            ? result.record.schedule.at
+            : null,
+          routeBinding: 'preserved',
+          schedule: result.record.schedule,
+          status: result.record.status,
+          timingVerified: true,
+        }
+      }
+      throw new Error(`Unexpected automation action: ${request.action}`)
+    })
     const automationTool = {
       request: automationRequest,
     }
@@ -582,7 +669,7 @@ describe('hosted domain dynamic tools', () => {
         conversationScope: 'direct',
         inboundMailboxItemIds,
         originSessionId: 'session-appointment',
-        recipientKey: 'recipient-appointment',
+        recipientKey,
       }),
     })
 
@@ -607,6 +694,9 @@ describe('hosted domain dynamic tools', () => {
 
     acceptedInputIds = [APPOINTMENT_INPUT_A, APPOINTMENT_INPUT_B]
     inboundMailboxItemIds = ['mailbox-appointment-a', 'mailbox-appointment-b']
+    // Direct-email reply envelopes rotate per message even inside one
+    // authenticated thread. Current delivery changes to B before A replays.
+    recipientKey = 'email-envelope-b'
     const regeneratedRequestA = createRequest({
       instructions: 'Regenerated copy for the Midtown reminder.',
       sourceRef: APPOINTMENT_SOURCE_REF_A,
@@ -686,6 +776,68 @@ describe('hosted domain dynamic tools', () => {
     })
     expect(unknownSourceResult.rpcResult.success).toBe(false)
     expect(automationRequest).toHaveBeenCalledTimes(5)
+
+    const createdOwners = await listAutomations({ vaultRoot })
+    expect(createdOwners.count).toBe(2)
+    const ownerA = createdOwners.items.find((item) =>
+      item.title === 'Midtown appointment on August 12 at 9:30 AM'
+    )
+    const ownerB = createdOwners.items.find((item) =>
+      item.title === 'Lakeside appointment on August 12 at 3 PM'
+    )
+    if (!ownerA || !ownerB) {
+      throw new Error('Expected independently persisted A and B owners.')
+    }
+    expect(ownerA.route.deliveryTarget).toBe('email-envelope-a')
+    expect(ownerB.route.deliveryTarget).toBe('email-envelope-b')
+
+    const rescheduleA = readToolRequest('automation', {
+      action: 'patch',
+      lookup: ownerA.automationId,
+      schedule: { at: '2026-08-14T12:00:00.000Z', kind: 'at' },
+      status: 'active',
+    })
+    const cancelA = readToolRequest('automation', {
+      action: 'patch',
+      lookup: ownerA.automationId,
+      status: 'archived',
+    })
+    if (!rescheduleA || !cancelA) {
+      throw new Error('Expected exact-owner lifecycle requests.')
+    }
+    for (const request of [rescheduleA, cancelA]) {
+      await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 0,
+        progressDelivery: null,
+        request,
+      })
+    }
+
+    const finalOwners = await listAutomations({ vaultRoot })
+    expect(finalOwners).toEqual({
+      count: 2,
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          automationId: ownerA.automationId,
+          route: expect.objectContaining({
+            deliveryTarget: 'email-envelope-a',
+          }),
+          schedule: { at: '2026-08-14T12:00:00.000Z', kind: 'at' },
+          status: 'archived',
+        }),
+        expect.objectContaining({
+          automationId: ownerB.automationId,
+          route: expect.objectContaining({
+            deliveryTarget: 'email-envelope-b',
+          }),
+          status: 'active',
+        }),
+      ]),
+    })
+    expect(automationRequest).toHaveBeenCalledTimes(7)
   })
 
   it('authorizes trusted correction lineage without trusting a cross-actor target', async () => {
