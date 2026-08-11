@@ -9509,7 +9509,7 @@ describe("hosted workspace runtime entrypoint", () => {
       expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
       expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledWith(
         expect.objectContaining({
-          force: false,
+          force: true,
           vaultRoot,
         }),
       );

@@ -2326,7 +2326,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
         try {
           const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
-            force: false,
+            force: true,
             generatedAt: new Date().toISOString(),
             platform: foregroundRuntime.platform,
             runtimeWakeSignal: options.runtimeWakeSignal ?? null,
