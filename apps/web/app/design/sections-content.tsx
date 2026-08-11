@@ -61,7 +61,10 @@ import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
-import { PersonaOnboardingStudy } from "./persona-onboarding-study";
+import {
+  PersonaOnboardingStudy,
+  PersonaSettingsStudy,
+} from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
@@ -108,6 +111,7 @@ export function SectionsContent() {
         <div
           id="homepage-solo-first-hero"
           data-design-section="homepage-solo-first-hero"
+          data-design-state="soft-topic-labels"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
@@ -536,6 +540,8 @@ export function SectionsContent() {
       <StudySection title="Persona onboarding with stacked tone samples">
         <div data-design-section="persona-onboarding">
           <PersonaOnboardingStudy />
+          <Separator />
+          <PersonaSettingsStudy />
         </div>
       </StudySection>
 
