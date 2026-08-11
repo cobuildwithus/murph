@@ -245,6 +245,21 @@ describe('notification audience authority integration', () => {
     expect(boundaries.deliverMessage).not.toHaveBeenCalled()
   })
 
+  it('rejects an explicit direct Linq target without exact binding proof', async () => {
+    const context = await createPersistedLegacyContext('direct-unverified-audience-')
+
+    await expect(sendNotification({
+      context,
+      deliveryTarget: 'linq-direct-unverified-chat',
+      threadIsDirect: true,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_AUDIENCE_UNVERIFIED',
+    })
+
+    expect(boundaries.executeProvider).not.toHaveBeenCalled()
+    expect(boundaries.deliverMessage).not.toHaveBeenCalled()
+  })
+
   it('does not let a direct session authorize a different explicit target', async () => {
     const context = await createPersistedLegacyContext('mismatched-audience-')
     const storedTarget = 'linq-stored-direct-chat'

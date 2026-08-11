@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-09
+Last verified: 2026-08-10
 
 ## Non-Negotiable Rules
 
@@ -49,6 +49,19 @@ Last verified: 2026-08-09
   not substitute for this transport-level boundary.
 - Do not echo model API keys, base headers, or other provider credentials in CLI output, fixtures, or persisted artifacts.
 - Hosted browser device OAuth is a same-host, same-member, initiating-browser boundary. Start must issue one short-lived host-only proof bound to provider, OAuth state, member, and app-session generation. Callback GET must validate that proof against the active session and pass the session member as exact `expectedOwnerId` before state consumption or provider exchange; it then redirects back into the app with no interstitial confirmation. A missing or invalid proof consumes only the OAuth state and redirects to Connect so a transferable provider callback cannot be relayed into the initiating member later. This proof is ephemeral and adds no durable state owner. `DEVICE_SYNC_PUBLIC_BASE_URL` may change the callback path but must use the hostname that served the authenticated browser start; Web start/runtime plus build validation must reject both explicit and derived split-host values before OAuth mutation. Cloudflare preflight verifies explicit callback overrides only. Keep both `__Host-` cookies host-only: do not add a Domain cookie or cross-host handoff. Suppress Vercel Analytics and Speed Insights on both hosted device callback path families so provider authorization query parameters never enter those vendors. Junction `pending_link` and `link_returned` accounts are inert until proof-verified callback completion: no webhook acceptance, dirty state, wake, scheduling, provider execution, canonical import, or sync-success promotion. Once a shared account is `source_confirmed`, adding or retrying another Junction-backed source must preserve that phase and all established siblings. Keep the target source `disconnected` and exclude only its webhook and pull work until the runtime establishment hook atomically commits source admission with durable initial work; shared ingress must not write that fact independently. Explicit disconnect or a newer connection epoch wins over a late callback, which fails without admitting the target. Retry cleanup may deregister only that target. Whole-account revoke remains exclusive to explicit connection-wide disconnect. Local and tunneled `device-syncd` callbacks remain a separate explicit daemon contract.
+- Member-owned device provider credentials are personal-member-only Web
+  authority. Encrypt them in their dedicated hosted secure-box lane with AAD
+  bound to the application row and revision; never project ciphertext,
+  plaintext credentials, or provider configuration into browsers, prompts,
+  logs, workspace state, or durable assistant runtime state. OAuth creation,
+  callback consumption, connection use, refresh, revoke, disconnect, and
+  deletion must all resolve the same member, provider, application id, and
+  revision. A rotated or replaced application cannot consume old OAuth state
+  or authorize a stale connection. Shared provider webhook authentication does
+  not authorize an app-bound connection: durable admission rechecks the raw
+  binding under the connection lock and terminally drops that work. Only
+  credential-bearing runtime snapshots may decrypt and project the
+  invocation-scoped configuration.
 - Established shared Junction account preservation is one closed persistence
   contract across hosted and local operation. Shared ingress selects
   `preserve_established` for a source addition and `replace` for an account
@@ -76,7 +89,7 @@ Last verified: 2026-08-09
   - Web binds every hidden identity and revalidates the exact group route, personal runtime, membership and grant generations, permission digest, origin, expiry, and runtime fence at admission, before the personal read, and before completion append. Leave/rejoin, revoke/regrant, stale route, expiry, or changed authority fails closed.
   - Accepted-input completion carries its exact mailbox anchor into one isolated, output-only continuation in the caller group runtime. The reviewed answer is bounded untrusted input, and the caller may use only its existing group history to resolve public references before creating the ordinary outbox intent. Final Linq or Telegram egress rechecks the same live authority before provider dispatch; missing or mismatched proof is terminal. If authority disappears after queueing, the existing intent replaces all answer text and media with the fixed text-only fallback.
   - A scheduled occurrence remains one ordinary Codex turn: start every selected ask, then use ordinary shell waits and exact replay to poll each accepted ask until it returns completed or unavailable. The existing request expiry bounds the loop. The cron owner revalidates the current canonical automation and non-direct route immediately before each Murph tool call; Web then revalidates the exact request, completion, and live disclosure authority before returning a completed result. Scheduled completion never wakes the group runtime, starts another provider turn, creates an outbox delivery, or holds a callback open while the member runtime works.
-  - There is no incoming model reviewer. The personal read-only candidate receives the exact permission context. One fresh outgoing reviewer receives only that permission, the question, and candidate; it has an empty workspace and no shell, personal workspace, application tools, network, delivery route, or persistence. It may only allow or deny. An allowed answer enters only the caller group's isolated output-only continuation; denied candidates do not enter Murph durable state, operational logs, errors, or delivery.
+  - There is no incoming model reviewer. The personal read-only candidate receives the exact permission context. One fresh outgoing reviewer receives only that permission, the question, and candidate; it has an empty workspace and no shell, personal workspace, application tools, network, delivery route, or persistence. It may only allow or deny. An allowed answer enters only its target-bound completion adapter: the caller group's isolated output-only continuation for group disclosure, or the exact personal notification described below for private continuation. Denied candidates do not enter Murph durable state, operational logs, errors, or delivery.
   - Treat every reviewed answer as untrusted data, not authority for another action. The caller continuation receives no personal vault, target tools, shell, web, apps, plugins, or native provider resume authority and must not infer private facts beyond the reviewed answer. Do not add roster fan-out, broad vault mounts, member fallback, candidate/reviewer write tools, a rewrite loop, a policy engine, a second scheduler, a queue, or continuation lifecycle.
 - Treat AgentMail inbox ids, message metadata, attachment download URLs, and outbound email thread bindings as high-sensitivity operator data; never log or fixture real mailbox details or API keys.
 
@@ -207,7 +220,17 @@ Last verified: 2026-08-09
   re-resolves the frozen channel and requires the same direct thread.
   A personal Linq wake freezes that resolved source as an explicit delivery
   target so provider entry cannot replace it with a newer home route; source
-  revocation fails closed. Group celebrations carry live external-thread
+  revocation fails closed. An already-imported legacy direct-Linq referral wake
+  may acquire missing proof only inside the local system mailbox when its
+  referral event, mailbox/event/delivery dedupe identities, queue-only mode,
+  required-send policy, hosted member, directness, explicit frozen target, and
+  absent authority match exactly. Before model work the runtime submits only
+  that frozen member/channel/target candidate to the existing signed route
+  owner. Success carries the validated authority through the unchanged audience
+  guard and provider-entry recheck; a definitive unauthorized result is a typed
+  terminal no-send, while unavailable or retryable owner failures retain normal
+  retry. Web must not rewrite mailbox ciphertext or cursors, and recovery must
+  never substitute a home route. Group celebrations carry live external-thread
   authority. Celebration instructions never persist a detached profile name.
   Group calls require
   exactly one runtime-injected
@@ -723,6 +746,21 @@ Last verified: 2026-08-09
   with the fixed text-only fallback before provider dispatch.
   Textless, oversized, direct, email, stale-route, cross-runtime, scheduled, or
   unresolved requests disclose nothing and create no reusable grant.
+- Private current-sender continuation carries no grant or group-return
+  authority. The group model may supply only the exact accepted message
+  reference. Web reopens it under the synthetic group runtime, derives the
+  canonical sender, and targets only that sender's active personal runtime.
+  Thread-container, direct, unknown-audience, scheduled, stale-route, or
+  unresolved-sender contexts fail closed. Completion may create only one
+  deterministic queue-only notification for that same member's current
+  same-channel `direct-member` route, with `threadIsDirect: true` and no external
+  group-thread authority. It contains the exact reviewed text, authorizes no
+  second model turn or action, cannot post to the group, and cannot be
+  redirected by retry. At provider entry, Web reopens the original completion
+  proof and revalidates its expiry, the exact reviewed-text digest, the same
+  personal member, and the member's current same-channel `direct-member` route.
+  Expired, revoked, text-mismatched, or route-drifted proof is terminal and has
+  no group fallback.
 - The hosted assistant-configuration tool may reach only the bounded signed `POST /api/internal/hosted-execution/assistant-configuration/tool` web callback through `web-control.worker` under the exact active runtime write fence. The callback binds the operation to the runtime-authenticated member, accepts only the closed Luna/Terra/Sol model set and common `low`/`medium`/`high`/`xhigh` reasoning set, and re-derives active personal access plus Sol's paid-Edge entitlement from web-owned Postgres state. Reads need no member decision. Assistant-driven updates require an explicit request in eligible accepted user input for that turn. The runtime forwards only the terminal input id from a locally revalidated, bounded exact-successor provider batch; inside the mutation transaction, web binds it to the callback member and exactly one live conversation-lane mailbox row before the matching field-level preference write. Missing, legacy, mismatched, or ambiguous input authority fails closed. Never trust a model-provided member id, plan, availability list, current preference, causal sequence, or configuration claim as authority. A successful mutation changes only nullable web-owned next-turn preference fields; it must not mutate the running turn, mint a wake, or return billing records, credentials, or other member data to the runtime. The control request accepts only the input-bound update shape and rejects approval or resolved-target fields before the handler runs. The authenticated Settings form remains a separate direct member-action boundary protected by the normal app session and CSRF controls.
 - Only an authoritative assistant-configuration web response with `updated` or `unchanged` status may refresh the ephemeral target for later provider turns in that invocation. Failure statuses leave it unchanged, the current turn remains immutable, and web remains the sole durable preference owner. A model or reasoning change must preserve the provider-native Codex thread and apply both settings on the next separately accepted `turn/start`; it must not bootstrap a replacement thread merely because those preferences changed. Idle compaction must attribute usage from the model actually bound to the warm thread rather than the future preference and skip provider work when that bound model cannot be priced.
 - The hosted plan-usage tool may reach only the bounded signed `POST /api/internal/hosted-execution/plan-usage/tool` web callback through `web-control.worker` under the exact active runtime write fence. It accepts no model-provided member id or arguments: web binds the read to the runtime-authenticated member and returns the same bounded usage projection used by Settings. Web alone derives access, plan labels, percentages, forecast, and any recommended billing action from current Postgres state. The tool has no Stripe read or mutation authority, cannot create or lock an allowance period, and must return `group_not_supported` for synthetic thread containers rather than exposing personal billing facts in a group runtime.

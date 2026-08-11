@@ -1,9 +1,9 @@
-import type {
-  DailyNutritionResponseCard,
-  DailyNutritionResponseCardV2,
-  NutritionCardGoalSnapshot,
-  NutritionCardGoalStatus,
-  NutritionCardMetric,
+import {
+  nutritionCardGoalStatusLabels,
+  type DailyNutritionResponseCard,
+  type DailyNutritionResponseCardV2,
+  type NutritionCardGoalSnapshot,
+  type NutritionCardMetric,
 } from "@murphai/contracts";
 
 import { IMESSAGE_CARD_COLOR } from "./card-image-chrome";
@@ -87,13 +87,15 @@ export function NutritionCardImage({
       }}
     >
       <div
+        data-calorie-goal-status={calorieGoal?.status ?? "no-goal"}
         style={{
           position: "absolute",
           top: 146,
           left: 45,
           display: "flex",
-          alignItems: "baseline",
-          gap: 18,
+          flexDirection: "column",
+          alignItems: "flex-start",
+          gap: 10,
           maxWidth: 800,
           whiteSpace: "nowrap",
         }}
@@ -101,26 +103,35 @@ export function NutritionCardImage({
         <div
           style={{
             display: "flex",
-            fontSize: 143,
-            fontWeight: 600,
-            lineHeight: 1,
-            letterSpacing: "-0.045em",
-            fontVariantNumeric: "tabular-nums",
+            alignItems: "baseline",
+            gap: 18,
           }}
         >
-          {calories === null ? "—" : formatNumber(calories)}
+          <div
+            style={{
+              display: "flex",
+              fontSize: 143,
+              fontWeight: 600,
+              lineHeight: 1,
+              letterSpacing: "-0.045em",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {calories === null ? "—" : formatNumber(calories)}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              color: COLOR.secondary,
+              fontSize: 56,
+              fontWeight: 500,
+              lineHeight: 1,
+            }}
+          >
+            cal
+          </div>
         </div>
-        <div
-          style={{
-            display: "flex",
-            color: COLOR.secondary,
-            fontSize: 56,
-            fontWeight: 500,
-            lineHeight: 1,
-          }}
-        >
-          cal
-        </div>
+        <GoalStatusLabel fontSize={27} goal={calorieGoal} />
       </div>
 
       <CalorieRing
@@ -271,8 +282,46 @@ function Metric({
       >
         {metric.total === null ? "—" : `${formatNumber(metric.total)}g`}
       </div>
+      <GoalStatusLabel fontSize={23} goal={goal} />
     </div>
   );
+}
+
+function GoalStatusLabel({
+  fontSize,
+  goal,
+}: {
+  fontSize: number;
+  goal: NutritionCardGoalSnapshot | null | undefined;
+}) {
+  if (goal === null || goal === undefined || goal.status === "unavailable") {
+    return null;
+  }
+
+  return (
+    <div
+      data-goal-status-label={goal.status}
+      style={{
+        display: "flex",
+        color: getStatusColor(goal),
+        fontSize,
+        fontWeight: 700,
+        lineHeight: 1,
+        letterSpacing: "0.04em",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {formatGoalStatusLabel(goal.status)}
+    </div>
+  );
+}
+
+function formatGoalStatusLabel(
+  status: NutritionCardGoalSnapshot["status"],
+): string {
+  const label = nutritionCardGoalStatusLabels[status];
+  return (status === "on_target" ? label : label.replace(" target", ""))
+    .toUpperCase();
 }
 
 function getCalorieProgress(
@@ -305,7 +354,10 @@ function getStatusColor(
     over_target: COLOR.offTarget,
     unavailable: COLOR.secondary,
     under_target: COLOR.offTarget,
-  } as const satisfies Record<NutritionCardGoalStatus, string>;
+  } as const satisfies Record<
+    NutritionCardGoalSnapshot["status"],
+    string
+  >;
   return colors[goal.status];
 }
 
