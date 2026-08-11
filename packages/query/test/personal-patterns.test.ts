@@ -14,6 +14,7 @@ import {
 } from "../src/browser.ts";
 import { buildPersonalPatternReport } from "../src/personal-patterns.ts";
 import { createVaultReadModel } from "../src/read-model.ts";
+import type { MetricPoint } from "../src/metrics/index.ts";
 import {
   buildPersonalPatternReportRuntime,
   rebuildQueryProjection,
@@ -85,6 +86,71 @@ test("Browser Vault parsing preserves a missing legacy Personal Patterns project
   const parsed = parseBrowserVaultReplica(replica);
 
   assert.equal(parsed.personalPatterns, undefined);
+});
+
+test("Personal Patterns reuses the canonical provider activity-kind resolver", () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities: [
+      ...runningDates.map((date, index) => event(`provider_run_${index}`, date, "activity_session", {
+        workout: { sportName: "Run" },
+      })),
+      ...Array.from({ length: 112 }, (_, index) => {
+        const date = addDays(start, index);
+        return observation(
+          `provider_hrv_${index}`,
+          date,
+          "hrv",
+          runningDates.includes(addDays(date, -1)) ? 70 : 50,
+          "ms",
+        );
+      }),
+    ],
+    vaultRoot: "test://personal-pattern-provider-activity",
+  }), {
+    asOf: "2026-04-27T12:00:00.000Z",
+  });
+
+  assert.equal(report.factors[0]?.id, "running");
+  assert.equal(report.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+});
+
+test("Browser Vault Personal Patterns falls back to its selected metric rows", async () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const vault = createVaultReadModel({
+    entities: runningDates.map((date, index) => event(`metric_run_${index}`, date, "activity_session", {
+      activityType: "running",
+    })),
+    vaultRoot: "test://personal-pattern-metric-rows",
+  });
+  const metricPoints = Array.from({ length: 112 }, (_, index) => {
+    const date = addDays(start, index);
+    return metricPoint(
+      `metric_hrv_${index}`,
+      date,
+      "hrv-rmssd",
+      runningDates.includes(addDays(date, -1)) ? 70 : 50,
+      "ms",
+    );
+  });
+
+  assert.deepEqual(buildPersonalPatternReport(vault, {
+    asOf: "2026-04-27T12:00:00.000Z",
+  }).factors, []);
+
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-27T12:00:00.000Z",
+    metricPoints,
+    sourceBundleHash: "m".repeat(64),
+    vault,
+  });
+  const report = parseBrowserVaultReplica(replica).personalPatterns;
+
+  assert.equal(report?.factors[0]?.id, "running");
+  assert.equal(report?.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+  assert.equal(report?.testedCellCount, 1);
 });
 
 test("Personal Patterns qualifies factors before applying the six-row display cap", () => {
@@ -622,6 +688,50 @@ function observation(
     unit,
     value,
   });
+}
+
+function metricPoint(
+  id: string,
+  date: string,
+  metricKey: string,
+  value: number,
+  unit: string,
+): MetricPoint {
+  return {
+    biomarkerKey: null,
+    canonicalUnit: unit,
+    canonicalValue: value,
+    comparator: null,
+    confidence: "high",
+    context: {},
+    effectiveDate: date,
+    grain: "day",
+    id,
+    metricKey,
+    observedAt: `${date}T00:00:00.000Z`,
+    provenance: {
+      dataOrigin: null,
+      externalRef: null,
+      labName: null,
+      provider: "whoop",
+      rawRefs: [],
+      sourceLabel: "Wearable summary",
+    },
+    recordedAt: null,
+    reportedAt: null,
+    schemaVersion: "murph.metric-point.v1",
+    source: {
+      family: "derived",
+      kind: "wearable-summary",
+      path: "",
+      recordId: `record:${id}`,
+      resultIndex: null,
+    },
+    statistic: "value",
+    textValue: null,
+    unit,
+    value,
+  };
 }
 
 function entity(
