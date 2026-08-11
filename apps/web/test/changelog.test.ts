@@ -123,6 +123,21 @@ describe("changelog registry", () => {
     expect(item?.tryIt).toBeUndefined();
   });
 
+  it("keeps scheduled native delivery current and private", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "scheduled-cards-use-current-private-route",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      sourcePullRequests: [1624],
+      summary: expect.stringContaining("current private Messages conversation"),
+    });
+    expect(item?.details).toContain("If the route changes before delivery");
+    expect(item?.details).toContain("exposing private text through recovery");
+    expect(item?.tryIt).toBeUndefined();
+  });
+
   it("keeps iMessage card preview copy descriptive and value-free", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "descriptive-imessage-card-previews",
