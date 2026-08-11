@@ -154,7 +154,7 @@ test("real-font nutrition omits duplicate status rows and stays contained", asyn
     schemaVersion: 2,
     card: DIRECTIONAL_NUTRITION_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 509]);
+  assert.deepEqual([image.width, image.height], [1_200, 539]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);
@@ -170,7 +170,7 @@ test("real-font nutrition omits duplicate status rows and stays contained", asyn
   assert.equal(
     hasGrayscaleDarkPixel(
       image,
-      { left: 45, right: 1_155, top: 455, bottom: 470 },
+      { left: 45, right: 1_155, top: 485, bottom: 500 },
     ),
     false,
   );

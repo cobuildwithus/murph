@@ -13,7 +13,7 @@ const SYNTHETIC_TEAM_CARD: ChallengeStandingsResponseCardV1 = {
   version: 1,
   format: "teams",
   title: "Challenge standings",
-  subtitle: null,
+  subtitle: "Week 2 of 4",
   objective: { kind: "target", targetPoints: 250 },
   entries: [
     {
@@ -76,7 +76,8 @@ export function ImessageChallengeStandingsCardStudy() {
           incomplete ranks stay neutral, and a shared target remains group
           progress rather than an individual result. The canonical Murph mark
           and title share the same aligned header used by workout and table
-          cards, with optional supporting text directly under the title.
+          cards, with optional supporting text aligned to the card content edge
+          below the shared row.
         </p>
       </div>
       <div className="flex flex-col gap-5 sm:gap-8">

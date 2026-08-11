@@ -319,7 +319,7 @@ test("nutrition card image route renders the bounded V2 snapshot without caching
 
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 509);
+  assert.equal(init.height, 539);
   assert.deepEqual(
     init.fonts?.map((font) => [font.name, font.weight]),
     [
@@ -502,8 +502,8 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
   assert.match(serialized, /data-imessage-card-title-row="true"/u);
   assert.match(serialized, /transform:translateY\(-8px\)/u);
-  assert.match(serialized, /margin-left:150px/u);
-  assert.match(serialized, /gap:15px/u);
+  assert.match(serialized, /margin-left:15px/u);
+  assert.match(serialized, /gap:30px/u);
   assert.doesNotMatch(serialized, /margin-top:171px/u);
   assert.match(serialized, /<h1/u);
   assert.match(serialized, /data-compact-table-layout="grid"/u);
@@ -785,8 +785,8 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
   assert.match(serialized, /data-imessage-card-title-row="true"/u);
   assert.match(serialized, /transform:translateY\(-8px\)/u);
-  assert.match(serialized, /margin-left:150px/u);
-  assert.match(serialized, /gap:15px/u);
+  assert.match(serialized, /margin-left:15px/u);
+  assert.match(serialized, /gap:30px/u);
   assert.doesNotMatch(serialized, /margin-top:171px/u);
   assert.match(serialized, /<h1/u);
   assert.doesNotMatch(

@@ -210,7 +210,8 @@ Render the macOS and app-absent fallback as the compact default state of the
 shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
 cream field, large calorie value, calorie progress ring, and one-row protein,
 carbohydrates, fat, and fiber readings visually aligned with the Messages
-extension. The bitmap stays rectangular because Messages owns the outer corner
+extension, with a clear pause between the calorie row and macro grid. The
+bitmap stays rectangular because Messages owns the outer corner
 mask, but the bitmap itself embeds the canonical Murph mark in the same 36×27pt
 upper-left badge footprint as the native balloon. Installed extensions retain
 their native icon; app-absent static cards omit the optional square App Store
@@ -228,10 +229,11 @@ Compact-table and workout fallback images use the same chrome contract: keep
 the bitmap rectangular, embed the canonical Murph mark in the native badge
 footprint, place the title beside that mark in one shared header, and let
 Messages supply only the outer corner mask and caption. The badge and title use
-one optically centered row with a tight gap; optional supporting text starts
-directly under the title rather than participating in that centering. Do not
-reserve a larger empty icon gutter. Keep structural rounding only where it
-communicates an inner state, such as a progress track or set-status marker.
+one optically centered row with a measured gap; optional supporting text uses
+the card content inset below that row rather than participating in its
+centering. Do not reserve a larger empty icon gutter. Keep structural rounding
+only where it communicates an inner state, such as a progress track or
+set-status marker.
 When a generic table uses stacked fields, keep each measured header above its
 full-width measured value so every contract-valid token remains contained. The
 exact intrinsic width of the row-header, column-header, and value tracks plus

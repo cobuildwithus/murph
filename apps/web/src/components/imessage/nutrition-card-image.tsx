@@ -14,7 +14,7 @@ import {
 
 export const IMESSAGE_NUTRITION_CARD_IMAGE_SIZE = {
   width: 1200,
-  height: 509,
+  height: 539,
 } as const;
 
 const NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {

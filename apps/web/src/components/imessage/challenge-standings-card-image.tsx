@@ -495,7 +495,7 @@ function getChallengeStandingsLayout(
     ? null
     : wrapCardText(
       card.subtitle,
-      HEADER_TEXT_WIDTH,
+      CARD_CONTENT_WIDTH,
       IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
     );
   const footer = card.footer === null

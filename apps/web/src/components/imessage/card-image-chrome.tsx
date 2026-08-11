@@ -21,7 +21,7 @@ const BADGE = {
 } as const;
 
 const IMESSAGE_CARD_BADGE_CONTENT_GAP = 40;
-const IMESSAGE_CARD_HEADER_BADGE_GAP = 15;
+const IMESSAGE_CARD_HEADER_BADGE_GAP = 30;
 const IMESSAGE_CARD_HEADER_LEFT_OFFSET =
   BADGE.left - IMESSAGE_CARD_HORIZONTAL_PADDING;
 const IMESSAGE_CARD_HEADER_TOP_OFFSET =
@@ -152,7 +152,7 @@ export function IMessageCardHeader({
           data-card-text-lines={subtitle.lineCount}
           style={{
             display: "flex",
-            marginLeft: BADGE.width + IMESSAGE_CARD_HEADER_BADGE_GAP,
+            marginLeft: IMESSAGE_CARD_HORIZONTAL_PADDING - BADGE.left,
             color: IMESSAGE_CARD_COLOR.secondary,
             fontSize: IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
             lineHeight: 1.2,
