@@ -275,6 +275,19 @@ describe("changelog registry", () => {
     );
   });
 
+  it("keeps transferred phone-call results uncertainty-aware", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "phone-call-results-return-to-chat",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [857, 1363],
+      details: expect.stringContaining(
+        "asks what happened instead of guessing the outcome",
+      ),
+    });
+  });
+
   it("publishes the complete July 20 through August 5 shipment set", () => {
     expect(
       listChangelogEditions().slice(0, 17).map((edition) => ({
