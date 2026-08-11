@@ -1533,6 +1533,21 @@ remains value-free and names a truthful text-recovery action to avoid Apple
 data-detector downgrade. No persisted card state, authenticated card API,
 cleanup owner, extension network read, or second queue exists.
 
+Exercise routine cards use the same singular outbox effect through a dedicated
+model tool so both model-facing schemas stay below the Codex compaction limit.
+The frozen V1 snapshot contains bounded localized labels, concrete cues, honest
+per-exercise and transition timing, and only catalog-backed public exercise
+image URLs with their alt text and provenance. The total duration must equal
+the sum of those parts. Telegram projects any response-card kind into one Bot
+API rich message. Routine cards use a table, collapsed exercise details, and a
+slideshow when catalog images exist. A definitive pre-acceptance rich-message
+rejection falls back to the deterministic card text. Timeout, transport, and
+retryable failures never start a second send because Telegram acceptance is
+then ambiguous. Linq keeps its existing native nutrition and compact-table
+cards; exercise routines use the deterministic text fallback there. The card
+still cannot coexist with response media, and no new queue, persisted state
+owner, callback action, or mutable message state exists.
+
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
 normalized vault ref plus hash, size, filename, and allowlisted image MIME

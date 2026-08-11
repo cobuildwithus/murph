@@ -10,11 +10,15 @@ import {
   assistantResponseCardSchema,
   compactTableResponseCardV1Schema,
   dailyNutritionResponseCardV2Schema,
+  exerciseRoutineResponseCardV1Schema,
   type AssistantResponseCard,
   type CompactTableResponseCardV1,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
+  type ExerciseRoutineCardExerciseV1,
+  type ExerciseRoutineCardImageV1,
+  type ExerciseRoutineResponseCardV1,
   type NutritionCardGoalSnapshot,
   type NutritionCardGoalStatus,
   type NutritionCardMetric,
@@ -84,6 +88,8 @@ export {
   dailyNutritionResponseCardV1Schema,
   dailyNutritionResponseCardV2Schema,
   dailyNutritionResponseCardSchema,
+  exerciseRoutineCardV1Bounds,
+  exerciseRoutineResponseCardV1Schema,
   nutritionCardGoalStatusValues,
   type AssistantResponseCard,
   type CompactTableResponseCardV1,
@@ -92,6 +98,9 @@ export {
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
+  type ExerciseRoutineCardExerciseV1,
+  type ExerciseRoutineCardImageV1,
+  type ExerciseRoutineResponseCardV1,
   type NutritionCardGoalSnapshot,
   type NutritionCardGoalStatus,
   type NutritionCardMetric,
@@ -99,6 +108,8 @@ export {
 
 export const assistantResponseCardJsonSchema =
   createAssistantResponseCardJsonSchema()
+export const exerciseRoutineResponseCardJsonSchema =
+  createExerciseRoutineResponseCardJsonSchema()
 
 /**
  * User-visible semantic text used by non-native routes and definitive native
@@ -113,6 +124,8 @@ export function renderAssistantResponseCardText(
       return renderDailyNutritionResponseCardText(parsed)
     case 'compact_table':
       return renderCompactTableResponseCardText(parsed, false)
+    case 'exercise_routine':
+      return renderExerciseRoutineResponseCardText(parsed)
   }
 }
 
@@ -130,6 +143,27 @@ export function renderAssistantResponseCardTranscriptText(
       return renderDailyNutritionResponseCardText(parsed)
     case 'compact_table':
       return renderCompactTableResponseCardText(parsed, true)
+    case 'exercise_routine':
+      return renderExerciseRoutineResponseCardText(parsed)
+  }
+}
+
+export type TelegramRichMessage = {
+  html: string
+}
+
+/** Build one Telegram-native rich message from a frozen response card. */
+export function buildTelegramRichMessage(
+  card: AssistantResponseCard,
+): TelegramRichMessage {
+  const parsed = assistantResponseCardSchema.parse(card)
+  switch (parsed.kind) {
+    case 'daily_nutrition':
+      return { html: renderTelegramNutritionCardHtml(parsed) }
+    case 'compact_table':
+      return { html: renderTelegramCompactTableCardHtml(parsed) }
+    case 'exercise_routine':
+      return { html: renderTelegramExerciseRoutineCardHtml(parsed) }
   }
 }
 
@@ -137,6 +171,11 @@ export function buildLinqIMessageAppLayout(
   card: AssistantResponseCard,
 ): LinqIMessageAppLayout {
   const parsed = assistantResponseCardSchema.parse(card)
+  if (parsed.kind === 'exercise_routine') {
+    throw new TypeError(
+      'Exercise routine response cards do not have a native iMessage layout.',
+    )
+  }
   if (parsed.kind === 'compact_table') {
     return {
       caption: 'Murph',
@@ -181,6 +220,11 @@ export function buildLinqIMessageAppCardUrl(
   card: AssistantResponseCard,
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
+  if (parsed.kind === 'exercise_routine') {
+    throw new TypeError(
+      'Exercise routine response cards do not have a native iMessage app URL.',
+    )
+  }
   return parsed.kind === 'compact_table'
     ? encodeCompactTableAppCardUrl(parsed)
     : encodeDailyNutritionAppCardUrl(parsed)
@@ -257,6 +301,147 @@ function renderCompactTableResponseCardText(
         `[Murph tracked workout source: ${card.tracking.entityId}; snapshot: ${card.tracking.snapshotAt}]`,
       ]
   return [heading, '', ...rows, ...footer, ...tracking].join('\n')
+}
+
+function renderExerciseRoutineResponseCardText(
+  card: ExerciseRoutineResponseCardV1,
+): string {
+  const heading = card.subtitle === null
+    ? card.title
+    : `${card.title} — ${card.subtitle}`
+  const exercises = card.exercises.flatMap((exercise, index) => [
+    '',
+    `${index + 1}. ${exercise.name} — ${exercise.dose} (${formatRoutineDuration(exercise.estimatedSeconds)})`,
+    ...exercise.instructions.map((instruction) => `   • ${instruction}`),
+  ])
+  const footer = card.footer === null ? [] : ['', card.footer]
+  return [
+    heading,
+    `${card.intensity} · ${formatRoutineDuration(card.totalSeconds)}`,
+    ...exercises,
+    '',
+    `⚠️ ${card.safety}`,
+    ...footer,
+  ].join('\n')
+}
+
+function renderTelegramExerciseRoutineCardHtml(
+  card: ExerciseRoutineResponseCardV1,
+): string {
+  const subtitle = card.subtitle === null
+    ? ''
+    : `<p>${escapeTelegramRichHtml(card.subtitle)}</p>`
+  const rows = card.exercises.map((exercise) =>
+    `<tr><td><b>${escapeTelegramRichHtml(exercise.name)}</b></td><td>${escapeTelegramRichHtml(exercise.dose)}</td><td align="right">${escapeTelegramRichHtml(formatRoutineDuration(exercise.estimatedSeconds))}</td></tr>`
+  ).join('')
+  const details = card.exercises.map((exercise) =>
+    `<details><summary>${escapeTelegramRichHtml(exercise.name)} · ${escapeTelegramRichHtml(exercise.dose)}</summary><ol>${exercise.instructions.map((instruction) => `<li>${escapeTelegramRichHtml(instruction)}</li>`).join('')}</ol></details>`
+  ).join('')
+  const images = card.exercises.flatMap((exercise) =>
+    exercise.images.map((image) => ({ exercise, image }))
+  )
+  const slideshow = images.length === 0
+    ? ''
+    : `<tg-slideshow>${images.map(({ image }) => renderTelegramRoutineImage(image)).join('')}<figcaption>${escapeTelegramRichHtml(card.labels.visualGuide)}<br>${images.map(({ exercise, image }, index) => renderTelegramRoutineImageCaption(index, exercise, image)).join('<br>')}</figcaption></tg-slideshow>`
+  const footer = card.footer === null
+    ? ''
+    : `<footer>${escapeTelegramRichHtml(card.footer)}</footer>`
+
+  return [
+    `<h2>${escapeTelegramRichHtml(card.title)}</h2>`,
+    subtitle,
+    `<p><b>${escapeTelegramRichHtml(card.intensity)}</b> · ${escapeTelegramRichHtml(formatRoutineDuration(card.totalSeconds))}</p>`,
+    `<table bordered striped><tr><th>${escapeTelegramRichHtml(card.labels.exercise)}</th><th>${escapeTelegramRichHtml(card.labels.dose)}</th><th>${escapeTelegramRichHtml(card.labels.time)}</th></tr>${rows}</table>`,
+    details,
+    slideshow,
+    `<blockquote>⚠️ ${escapeTelegramRichHtml(card.safety)}</blockquote>`,
+    footer,
+  ].join('')
+}
+
+function renderTelegramRoutineImage(
+  image: ExerciseRoutineCardImageV1,
+): string {
+  return `<img src="${escapeTelegramRichHtmlAttribute(image.url)}"/>`
+}
+
+function renderTelegramRoutineImageCaption(
+  index: number,
+  exercise: ExerciseRoutineCardExerciseV1,
+  image: ExerciseRoutineCardImageV1,
+): string {
+  return `${index + 1}. <b>${escapeTelegramRichHtml(exercise.name)}</b> · ${escapeTelegramRichHtml(image.step)} — ${escapeTelegramRichHtml(image.alt)}`
+}
+
+function renderTelegramCompactTableCardHtml(
+  card: CompactTableResponseCardV1,
+): string {
+  const subtitle = card.subtitle === null
+    ? ''
+    : `<p>${escapeTelegramRichHtml(card.subtitle)}</p>`
+  const heading = `<tr><th></th>${card.columns.map((column) => `<th>${escapeTelegramRichHtml(column)}</th>`).join('')}</tr>`
+  const rows = card.rows.map((row) =>
+    `<tr><td><b>${escapeTelegramRichHtml(row.label)}</b></td>${row.values.map((value) => `<td>${escapeTelegramRichHtml(value)}</td>`).join('')}</tr>`
+  ).join('')
+  const footer = card.footer === null
+    ? ''
+    : `<footer>${escapeTelegramRichHtml(card.footer)}</footer>`
+  return `<h2>${escapeTelegramRichHtml(card.title)}</h2>${subtitle}<table bordered striped>${heading}${rows}</table>${footer}`
+}
+
+function renderTelegramNutritionCardHtml(
+  card: DailyNutritionResponseCard,
+): string {
+  const rows = [
+    ['Calories', `${formatNutritionCardNumber(readRequiredCalorieTotal(card))} cal`],
+    ...renderAvailableNutritionTotals(card).map((value) => {
+      const [amount, ...label] = value.split(' ')
+      return [label.join(' '), amount]
+    }),
+  ]
+  const partial = renderPartialNutritionLabel(card)
+  const partialHtml = partial === null
+    ? ''
+    : `<blockquote>${escapeTelegramRichHtml(partial)}</blockquote>`
+  const goalsHtml = !isDailyNutritionResponseCardV2(card)
+    ? ''
+    : `<details><summary>Goals</summary><ul>${[
+        renderLinqNutritionGoal('calories', card.goals.calories, ' cal'),
+        renderLinqNutritionGoal('protein', card.goals.proteinGrams, 'g'),
+        renderLinqNutritionGoal('carbs', card.goals.carbsGrams, 'g'),
+        renderLinqNutritionGoal('fat', card.goals.fatGrams, 'g'),
+        renderLinqNutritionGoal('fiber', card.goals.fiberGrams, 'g'),
+      ].map((goal) => `<li>${escapeTelegramRichHtml(goal)}</li>`).join('')}</ul></details>`
+  return [
+    `<h2>${escapeTelegramRichHtml(formatNutritionCardDate(card.localDate))}</h2>`,
+    `<p>${card.mealCount} ${card.mealCount === 1 ? 'meal' : 'meals'}</p>`,
+    `<figure><img src="${escapeTelegramRichHtmlAttribute(buildLinqIMessageAppCardImageUrl(card))}"/></figure>`,
+    `<table bordered striped>${rows.map(([label, value]) => `<tr><td>${escapeTelegramRichHtml(label ?? '')}</td><td align="right"><b>${escapeTelegramRichHtml(value ?? '')}</b></td></tr>`).join('')}</table>`,
+    goalsHtml,
+    partialHtml,
+  ].join('')
+}
+
+function formatRoutineDuration(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  return remainingSeconds === 0
+    ? `${minutes} min`
+    : `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
+}
+
+function escapeTelegramRichHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+}
+
+function escapeTelegramRichHtmlAttribute(value: string): string {
+  return escapeTelegramRichHtml(value).replaceAll('"', '&quot;')
 }
 
 function renderDailyNutritionResponseCardText(
@@ -399,7 +584,7 @@ function isDailyNutritionResponseCardV2(
 
 function createAssistantResponseCardJsonSchema() {
   // Retained nutrition V1 cards remain valid at the runtime boundary. New tool
-  // calls author only the current nutrition version or a compact table.
+  // calls author only current card versions.
   const authoringSchema = z.union([
     dailyNutritionResponseCardV2Schema,
     compactTableResponseCardV1Schema,
@@ -411,6 +596,18 @@ function createAssistantResponseCardJsonSchema() {
   return {
     ...portableSchema,
     description:
-      'Current card authoring contract: daily_nutrition V2 or compact_table V1.',
+      'Current general card authoring contract: daily_nutrition V2 or compact_table V1.',
+  }
+}
+
+function createExerciseRoutineResponseCardJsonSchema() {
+  const {
+    $schema: _dialect,
+    ...portableSchema
+  } = z.toJSONSchema(exerciseRoutineResponseCardV1Schema)
+  return {
+    ...portableSchema,
+    description:
+      'Exercise routine card V1 with honest timing and catalog-backed images.',
   }
 }

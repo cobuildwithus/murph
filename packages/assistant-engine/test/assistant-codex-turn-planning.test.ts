@@ -902,7 +902,10 @@ describe('assistant Codex turn planning', () => {
       resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
     )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
-      ordinaryToolNames.filter((name) => name !== 'attach_response_card'),
+      ordinaryToolNames.filter((name) =>
+        name !== 'attach_response_card' &&
+        name !== 'attach_exercise_routine_card'
+      ),
     )
 
     const onboardingGoalCheckinPlan = await resolveAssistantRouteTurnPlan({
@@ -2467,7 +2470,10 @@ describe('assistant Codex turn planning', () => {
     expect(scheduled.dynamicTools.map((tool) => tool.name)).toEqual(
       direct.dynamicTools
         .map((tool) => tool.name)
-        .filter((name) => name !== 'attach_response_card'),
+        .filter((name) =>
+          name !== 'attach_response_card' &&
+          name !== 'attach_exercise_routine_card'
+        ),
     )
     expect(scheduled.systemPrompt).toContain('Lab test discovery:')
     expect(outputOnly.dynamicTools.map((tool) => tool.name)).not.toContain('labs')

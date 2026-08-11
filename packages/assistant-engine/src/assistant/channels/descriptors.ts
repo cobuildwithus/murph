@@ -21,6 +21,9 @@ import {
   resolveTelegramBotToken,
   setTelegramMessageReaction,
 } from '@murphai/operator-config/telegram-runtime'
+import {
+  buildTelegramRichMessage,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantChannelAdapter,
@@ -44,6 +47,7 @@ import {
   setLinqMessageReaction,
   sendLinqVoiceMemoMessage,
   sendTelegramImageMessage,
+  sendTelegramRichMessage,
   prepareTelegramVoiceMemoMessage,
   sendPreparedTelegramVoiceMemoMessage,
   sendTelegramMessage,
@@ -86,7 +90,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ candidate, dependencies, idempotencyKey, media, message, replyToMessageId }) {
+  async sendMessage({ candidate, card, dependencies, idempotencyKey, media, message, replyToMessageId }) {
     if (hasVoiceMemoMedia(media)) {
       return await sendTelegramVoiceMemoDelivery({
         candidate,
@@ -106,6 +110,29 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         message,
         replyToMessageId,
       })
+    }
+    if (card !== null) {
+      const request = {
+        fallbackMessage: message,
+        idempotencyKey: idempotencyKey ?? null,
+        replyToMessageId: replyToMessageId ?? null,
+        richMessage: buildTelegramRichMessage(card),
+        ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+        target: candidate.target,
+      }
+      const delivered = dependencies.sendTelegramRich
+        ? await dependencies.sendTelegramRich(request)
+        : await sendTelegramRichMessage(
+            request,
+            dependencies.signal ? { signal: dependencies.signal } : {},
+          )
+      return {
+        cleanupMessages: readDeliveredCleanupMessages(delivered),
+        cleanupTargetAliases: readDeliveredCleanupTargetAliases(delivered),
+        target: readDeliveredTarget(delivered) ?? candidate.target,
+        providerMessageId: readDeliveredProviderMessageId(delivered),
+        providerMessageIds: readDeliveredProviderMessageIds(delivered),
+      }
     }
 
     const delivered = dependencies.sendTelegram

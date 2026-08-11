@@ -4,6 +4,10 @@ import {
   compactTableResponseCardV1Schema,
   type CompactTableResponseCardV1,
 } from "./compact-table-card.ts";
+import {
+  exerciseRoutineResponseCardV1Schema,
+  type ExerciseRoutineResponseCardV1,
+} from "./exercise-routine-card.ts";
 
 export const MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE = `Hey, I'm Murph.
 
@@ -89,7 +93,8 @@ export type DailyNutritionResponseCard =
 
 export type AssistantResponseCard =
   | DailyNutritionResponseCard
-  | CompactTableResponseCardV1;
+  | CompactTableResponseCardV1
+  | ExerciseRoutineResponseCardV1;
 
 const nutritionCardMealCountSchema = z
   .number()
@@ -319,6 +324,7 @@ export const assistantResponseCardSchema: z.ZodType<AssistantResponseCard> =
   z.union([
     dailyNutritionResponseCardSchema,
     compactTableResponseCardV1Schema,
+    exerciseRoutineResponseCardV1Schema,
   ]);
 
 function isValidLocalCalendarDate(value: string): boolean {

@@ -20,6 +20,7 @@ export * from "./assistant.ts";
 export * from "./assistant-personas.ts";
 export * from "./activity-kind.ts";
 export * from "./compact-table-card.ts";
+export * from "./exercise-routine-card.ts";
 export * from "./memory.ts";
 export * from "./message-links.ts";
 export * from "./preferences.ts";

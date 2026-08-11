@@ -46,7 +46,10 @@ import {
   hostedComputerOsControlRequestSchema,
 } from '@murphai/hosted-execution/computer-use'
 import { assistantVaultImageMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
-import { assistantResponseCardJsonSchema } from '@murphai/operator-config/assistant-response-cards'
+import {
+  assistantResponseCardJsonSchema,
+  exerciseRoutineResponseCardJsonSchema,
+} from '@murphai/operator-config/assistant-response-cards'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
 } from '../assistant/group-shared-read-limits.js'
@@ -254,6 +257,21 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
     additionalProperties: false,
     properties: {
       card: assistantResponseCardJsonSchema,
+    },
+    required: ['card'],
+  },
+} as const
+
+export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
+  namespace: 'murph',
+  name: 'attach_exercise_routine_card',
+  description:
+    'Attach one private-direct exercise routine card only for a movement-instruction turn or saved instructions for the exact scheduled occurrence that ask Murph to teach the routine now. The card must completely answer the request and replaces final text. First run vault-cli exercise show for each named movement. Copy image URL, alt, step, and exercise_catalog:<id>:<step> source exactly from those results; never invent media. Keep each instruction concrete and short. Set each estimatedSeconds honestly and make totalSeconds equal exercise time plus transitionSeconds. Do not claim a longer routine than the card contains. The runtime sends one Telegram rich message and provides deterministic text fallback on other channels. Do not repeat values in final send_message and do not combine this card with response media.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      card: exerciseRoutineResponseCardJsonSchema,
     },
     required: ['card'],
   },
@@ -1303,6 +1321,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
@@ -1408,6 +1427,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
+    [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],

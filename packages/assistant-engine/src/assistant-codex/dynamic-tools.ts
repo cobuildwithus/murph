@@ -83,6 +83,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   assistantResponseCardSchema,
+  exerciseRoutineResponseCardV1Schema,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -230,6 +231,7 @@ import {
   GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
+  MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
@@ -257,6 +259,12 @@ const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 const attachResponseCardArgumentsSchema = z
   .object({
     card: assistantResponseCardSchema,
+  })
+  .strict()
+
+const attachExerciseRoutineCardArgumentsSchema = z
+  .object({
+    card: exerciseRoutineResponseCardV1Schema,
   })
   .strict()
 
@@ -1316,6 +1324,20 @@ export function readMurphDynamicToolRequest(
     }
     case MURPH_ATTACH_RESPONSE_CARD_TOOL.name: {
       const parsed = parseAttachResponseCardArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-response-card-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'attach-response-card',
+        card: parsed.card,
+      }
+    }
+    case MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name: {
+      const parsed = parseAttachExerciseRoutineCardArguments(request.arguments)
       if (!parsed.ok) {
         return {
           kind: 'invalid-response-card-arguments',
@@ -6140,6 +6162,35 @@ function parseAttachResponseCardArguments(
         rawInput: value,
         schemaName,
         schemaRootKeys: readZodObjectRootKeys(attachResponseCardArgumentsSchema),
+        toolName,
+      }),
+    }
+  }
+
+  return {
+    card: parsed.data.card,
+    ok: true,
+  }
+}
+
+function parseAttachExerciseRoutineCardArguments(
+  value: unknown,
+):
+  | { ok: true; card: AssistantResponseCard }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const schemaName = 'murph.attach_exercise_routine_card.input'
+  const toolName = 'murph.attach_exercise_routine_card'
+  const parsed = attachExerciseRoutineCardArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName,
+        schemaRootKeys: readZodObjectRootKeys(
+          attachExerciseRoutineCardArgumentsSchema,
+        ),
         toolName,
       }),
     }

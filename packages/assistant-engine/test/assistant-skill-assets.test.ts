@@ -1467,6 +1467,12 @@ describe('assistant skill assets', () => {
       'A setup-only activation turn, plan or save confirmation, reminder or review scheduling, and the first-launch close are not movement-instruction turns merely because the saved plan contains named exercises.',
     )
     expect(compactCatalog).toContain(
+      '`murph.attach_exercise_routine_card`',
+    )
+    expect(compactCatalog).toContain(
+      '`totalSeconds` must equal their sum.',
+    )
+    expect(compactCatalog).toContain(
       'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
     )
     expect(compactCatalog).toContain(

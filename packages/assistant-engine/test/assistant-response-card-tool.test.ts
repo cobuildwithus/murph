@@ -7,6 +7,7 @@ import type { AssistantResponseCard } from '@murphai/operator-config/assistant-r
 
 import {
   executeMurphDynamicToolRequest,
+  MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -44,6 +45,36 @@ const CARD_V2: AssistantResponseCard = {
   },
 }
 
+const ROUTINE_CARD: AssistantResponseCard = {
+  exercises: [{
+    dose: '8 repetitions',
+    estimatedSeconds: 45,
+    images: [{
+      alt: 'Person with a forearm resting on a door frame.',
+      source: 'exercise_catalog:doorway-stretch:setup',
+      step: 'Setup',
+      url: 'https://cdn.example.test/doorway-stretch.png',
+    }],
+    instructions: ['Take a small step forward.', 'Keep the ribs quiet.'],
+    name: 'Doorway stretch',
+  }],
+  footer: null,
+  intensity: 'Easy',
+  kind: 'exercise_routine',
+  labels: {
+    dose: 'Dose',
+    exercise: 'Exercise',
+    time: 'Time',
+    visualGuide: 'Visual guide',
+  },
+  safety: 'Stop if pain increases.',
+  subtitle: null,
+  title: 'Short reset',
+  totalSeconds: 60,
+  transitionSeconds: 15,
+  version: 1,
+}
+
 const IMAGE: AssistantResponseMedia = {
   alt: null,
   kind: 'image',
@@ -73,14 +104,17 @@ function executeCardTool(input: {
   })
 }
 
-function readCardToolRequest(argumentsValue: unknown) {
+function readCardToolRequest(
+  argumentsValue: unknown,
+  tool = 'attach_response_card',
+) {
   return readMurphDynamicToolRequest({
     id: 1,
     method: 'item/tool/call',
     params: {
       arguments: argumentsValue,
       namespace: 'murph',
-      tool: 'attach_response_card',
+      tool,
     },
   })
 }
@@ -138,16 +172,19 @@ function normalizeCodexSchemaForSize(value: unknown): unknown {
 
 describe('murph.attach_response_card', () => {
   it('keeps the complete input schema below the Codex compaction boundary', () => {
-    const serializedBytes = Buffer.byteLength(
-      JSON.stringify(normalizeCodexSchemaForSize(
-        MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema,
-      )),
-      'utf8',
-    )
+    for (const tool of [
+      MURPH_ATTACH_RESPONSE_CARD_TOOL,
+      MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+    ]) {
+      const serializedBytes = Buffer.byteLength(
+        JSON.stringify(normalizeCodexSchemaForSize(tool.inputSchema)),
+        'utf8',
+      )
 
-    // Mirrors the supported-key projection used for the pinned App Server's
-    // 5,000-byte compaction decision; compaction erases nested card shapes.
-    expect(serializedBytes).toBeLessThan(5_000)
+      // Mirrors the supported-key projection used for the pinned App Server's
+      // 5,000-byte compaction decision; compaction erases nested card shapes.
+      expect(serializedBytes).toBeLessThan(5_000)
+    }
   })
 
   it('describes the private on-demand canonical-read contract', () => {
@@ -188,6 +225,19 @@ describe('murph.attach_response_card', () => {
     expect(readCardToolRequest({ card: CARD_V2 })).toEqual({
       card: CARD_V2,
       kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest(
+      { card: ROUTINE_CARD },
+      'attach_exercise_routine_card',
+    )).toEqual({
+      card: ROUTINE_CARD,
+      kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest(
+      { card: CARD_V2 },
+      'attach_exercise_routine_card',
+    )).toMatchObject({
+      kind: 'invalid-response-card-arguments',
     })
     expect(readCardToolRequest({ card: CARD, extra: true })).toMatchObject({
       kind: 'invalid-response-card-arguments',

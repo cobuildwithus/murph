@@ -1,0 +1,80 @@
+# Telegram rich routine preview
+
+Status: active, visual direction approved; implementation in progress
+Created: 2026-08-11
+Updated: 2026-08-11
+
+## Goal
+
+- Design a clear Telegram rich-message presentation for exercise routines.
+- Reuse the strongest presentation patterns and semantic data from the current
+  iMessage response cards.
+- Give the user a standalone HTML review artifact before production work or a
+  pull request proceeds.
+
+## Success criteria
+
+- The review covers every current iMessage card family and its fallback shape.
+- Telegram previews show the normal routine, multiple images, compact fallback,
+  unavailable media, long text, and narrow-phone states.
+- Each exercise has an exact dose, honest duration, and visibly bound image.
+- The HTML is self-contained, responsive, and easy to inspect locally.
+- No PR is opened before explicit user approval of the visual direction.
+
+## Scope
+
+- In scope: current card inventory, Telegram presentation design, standalone
+  HTML previews, and the smallest implementation plan derived from approval.
+- Out of scope: callback-button workflows, a second queue, and new persisted
+  presentation state.
+
+## Constraints
+
+- Preserve existing outbox, retry, delivery-authority, and card ownership.
+- Do not add persisted product state for presentation.
+- Use the current Murph warm-desert design language.
+- Keep ordinary text and media-group delivery as a truthful fallback.
+
+## Tasks
+
+1. [x] Inventory current iMessage cards and fallback presentations.
+2. [x] Define the smallest shared semantic presentation shape.
+3. [x] Build the standalone Telegram HTML preview set.
+4. [x] Verify desktop and phone rendering, then request visual approval.
+5. [x] After approval, implement production delivery and focused tests.
+6. [ ] Complete required review, CI, commit, and PR gates.
+
+## Decisions
+
+- Treat the preview as product UI shown inside a Telegram conversation.
+- The user approved the preview before production work began.
+- Telegram Bot API 10.2 supports `sendRichMessage`, tables, details, and
+  slideshows. Use those native blocks instead of a generated card image.
+- Keep one response card as one outbox effect and one provider request.
+- Use a dedicated routine-card tool so both Codex tool schemas remain below the
+  5,000-byte compaction limit. Both tools create the same response-card effect.
+- Omit inline buttons until Murph has an explicit callback workflow.
+- A definitive non-retryable 4xx can fall back to deterministic text. Ambiguous
+  or retryable failure must not start a second provider request.
+
+## Verification
+
+- The standalone file renders without browser errors.
+- A 390 px viewport has no page-level horizontal overflow.
+- Desktop and phone screenshots were inspected locally.
+- The preview contains seven Telegram phone states: rich routine, text
+  fallback, captioned album, nutrition, compact workout table, unavailable
+  media, and a long routine.
+- Fable confirmed the information direction and single-effect constraint. Its
+  Telegram capability concern relied on older API behavior and was superseded
+  by the current official Bot API documentation.
+- Impeccable found low design slop. Its valid findings corrected the nutrition
+  percentage and added accessible names to fallback images.
+- Focused typechecks pass for contracts, operator-config, assistant-engine, and
+  the Cloudflare runner.
+- Operator card tests pass: 12 tests, including the maximum rich-message size.
+- Assistant channel, card-tool, skill, and turn-planning tests pass: 174 tests,
+  with 6 existing skips.
+- Cloudflare provider-egress conformance and intercept tests pass: 247 tests.
+- Agent docs drift check passes.
+- `git diff --check` passes.

@@ -10,9 +10,12 @@ import {
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppCardImageUrl,
   buildLinqIMessageAppLayout,
+  buildTelegramRichMessage,
+  exerciseRoutineResponseCardJsonSchema,
   renderAssistantResponseCardText,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
+  type ExerciseRoutineResponseCardV1,
 } from '../src/assistant-response-cards.ts'
 
 const COMPLETE_CARD: DailyNutritionResponseCard = {
@@ -46,6 +49,50 @@ const COMPLETE_CARD_V2: DailyNutritionResponseCardV2 = {
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
+}
+
+const ROUTINE_CARD: ExerciseRoutineResponseCardV1 = {
+  exercises: [
+    {
+      dose: '8 repetitions',
+      estimatedSeconds: 45,
+      images: [
+        {
+          alt: 'Person standing tall with the forearm on a door frame.',
+          source: 'exercise_catalog:doorway-chest-stretch:setup',
+          step: 'Setup',
+          url: 'https://cdn.example.test/doorway-stretch.png?x=1&y=2',
+        },
+      ],
+      instructions: [
+        'Stand tall without forcing the lower back.',
+        'Move only through a comfortable range.',
+      ],
+      name: 'Doorway stretch <easy>',
+    },
+    {
+      dose: '5 per side',
+      estimatedSeconds: 60,
+      images: [],
+      instructions: ['Turn slowly and keep the hips quiet.'],
+      name: 'Torso rotation',
+    },
+  ],
+  footer: 'Breathe normally.',
+  intensity: 'Easy',
+  kind: 'exercise_routine',
+  labels: {
+    dose: 'Dose',
+    exercise: 'Exercise',
+    time: 'Time',
+    visualGuide: 'Visual guide',
+  },
+  safety: 'Stop if pain or dizziness increases.',
+  subtitle: 'Shoulders and chest',
+  title: 'Short reset',
+  totalSeconds: 120,
+  transitionSeconds: 15,
+  version: 1,
 }
 
 function decodeAppCardUrl(url: string): unknown {
@@ -166,6 +213,93 @@ describe('assistant response cards', () => {
     })
     expect(assistantResponseCardJsonSchema).not.toHaveProperty('$defs')
     expect(assistantResponseCardSchema.parse(COMPLETE_CARD)).toEqual(COMPLETE_CARD)
+  })
+
+  it('requires honest routine timing and renders one accessible rich message', () => {
+    expect(exerciseRoutineResponseCardJsonSchema).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        exercises: { maxItems: 8, minItems: 1, type: 'array' },
+        kind: { const: 'exercise_routine' },
+        totalSeconds: { maximum: 3600, type: 'integer' },
+        version: { const: 1 },
+      },
+    })
+    expect(assistantResponseCardSchema.parse(ROUTINE_CARD)).toEqual(ROUTINE_CARD)
+    expect(() => assistantResponseCardSchema.parse({
+      ...ROUTINE_CARD,
+      totalSeconds: 480,
+    })).toThrow('totalSeconds must equal exercise time plus transitionSeconds')
+
+    expect(renderAssistantResponseCardText(ROUTINE_CARD)).toContain(
+      'Doorway stretch <easy> — 8 repetitions (45s)',
+    )
+    const richMessage = buildTelegramRichMessage(ROUTINE_CARD)
+    expect(richMessage.html).toContain('<table bordered striped>')
+    expect(richMessage.html).toContain('<details>')
+    expect(richMessage.html).toContain('<tg-slideshow>')
+    expect(richMessage.html).toContain('Doorway stretch &lt;easy&gt;')
+    expect(richMessage.html).toContain(
+      'https://cdn.example.test/doorway-stretch.png?x=1&amp;y=2',
+    )
+    expect(richMessage.html).toContain(
+      'Person standing tall with the forearm on a door frame.',
+    )
+  })
+
+  it('preserves nutrition goals in the Telegram rich projection', () => {
+    const richMessage = buildTelegramRichMessage(COMPLETE_CARD_V2)
+    expect(richMessage.html).toContain('<details><summary>Goals</summary>')
+    expect(richMessage.html).toContain('calories goal 2,100 cal, under target')
+    expect(richMessage.html).toContain('<table bordered striped>')
+  })
+
+  it('keeps exercise routine cards on the deterministic iMessage text fallback', () => {
+    expect(() => buildLinqIMessageAppLayout(ROUTINE_CARD)).toThrow(
+      'do not have a native iMessage layout',
+    )
+    expect(() => buildLinqIMessageAppCardUrl(ROUTINE_CARD)).toThrow(
+      'do not have a native iMessage app URL',
+    )
+  })
+
+  it('keeps a maximum routine below the Telegram rich-message limit', () => {
+    const imageUrlPrefix = 'https://cdn.example.test/'
+    const maximumText = 'x'.repeat(160)
+    const maximumImageUrl = imageUrlPrefix.padEnd(500, 'a')
+    const maximumRoutine: ExerciseRoutineResponseCardV1 = {
+      ...ROUTINE_CARD,
+      exercises: Array.from({ length: 8 }, (_, index) => ({
+        dose: maximumText,
+        estimatedSeconds: 1,
+        images: [{
+          alt: maximumText,
+          source: `exercise_catalog:${'a'.repeat(130)}:${index}`,
+          step: maximumText,
+          url: maximumImageUrl,
+        }],
+        instructions: [maximumText, maximumText, maximumText],
+        name: maximumText,
+      })),
+      footer: maximumText,
+      intensity: maximumText,
+      labels: {
+        dose: maximumText,
+        exercise: maximumText,
+        time: maximumText,
+        visualGuide: maximumText,
+      },
+      safety: maximumText,
+      subtitle: maximumText,
+      title: maximumText,
+      totalSeconds: 8,
+      transitionSeconds: 0,
+    }
+
+    const parsed = assistantResponseCardSchema.parse(maximumRoutine)
+    expect(buildTelegramRichMessage(parsed).html.length).toBeLessThanOrEqual(
+      32_768,
+    )
   })
 
   it('rejects malformed, unknown, and implausible daily nutrition values', () => {
