@@ -50,6 +50,21 @@ state_dir="${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-
 lock_file="$state_dir/lock"
 mkdir -p "$state_dir"
 
+mark_worktree_non_indexable() {
+  local exclude_file="$common_dir/info/exclude"
+  local exclude_rule='/.metadata_never_index'
+
+  mkdir -p "$common_dir/info"
+  if ! grep -Fqx "$exclude_rule" "$exclude_file" 2>/dev/null; then
+    if [[ -s "$exclude_file" ]]; then
+      printf '\n%s\n' "$exclude_rule" >>"$exclude_file"
+    else
+      printf '%s\n' "$exclude_rule" >>"$exclude_file"
+    fi
+  fi
+  touch "$target_path/.metadata_never_index"
+}
+
 if [[ "${MURPH_CREATE_WORKTREE_LOCK_HELD:-0}" != 1 ]]; then
   if command -v flock >/dev/null 2>&1; then
     exec flock -w 5 "$lock_file" env MURPH_CREATE_WORKTREE_LOCK_HELD=1 \
@@ -106,7 +121,10 @@ if [[ -d "$target_path" ]] \
   && [[ -d "$admin_dir" ]]; then
   admin_dir="$(cd "$admin_dir" && pwd -P)"
   case "$admin_dir" in
-    "$common_dir"/worktrees/*) : >"$admin_dir/murph-storage-guard-authorized" ;;
+    "$common_dir"/worktrees/*)
+      : >"$admin_dir/murph-storage-guard-authorized"
+      mark_worktree_non_indexable
+      ;;
     *)
       printf 'create-worktree: new checkout has an unexpected administrative directory\n' >&2
       exit 1

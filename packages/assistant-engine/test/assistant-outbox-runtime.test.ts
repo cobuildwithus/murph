@@ -125,6 +125,7 @@ const TEST_LINQ_DELIVERY_SOURCE: NonNullable<
 
 const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
   kind: 'daily_nutrition',
+  version: 2,
   localDate: '2026-07-28',
   mealCount: 3,
   totals: {
@@ -132,6 +133,14 @@ const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
     proteinGrams: { total: 94.5, mealCount: 3 },
     carbsGrams: { total: 193.125, mealCount: 3 },
     fatGrams: { total: 34.75, mealCount: 3 },
+    fiberGrams: { total: 26.5, mealCount: 3 },
+  },
+  goals: {
+    calories: { target: 2_100, status: 'under_target' },
+    proteinGrams: { target: 100, status: 'on_target' },
+    carbsGrams: { target: 220, status: 'on_target' },
+    fatGrams: { target: 40, status: 'on_target' },
+    fiberGrams: { target: 30, status: 'under_target' },
   },
 }
 
@@ -1145,6 +1154,15 @@ describe('assistant outbox runtime', () => {
   it('persists and dispatches response cards through the existing outbox owner', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-card-')
     const rendered = renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD)
+    for (const target of [
+      '2,100 calories (under target)',
+      '100g protein (on target)',
+      '220g carbs (on target)',
+      '40g fat (on target)',
+      '30g fiber (under target)',
+    ]) {
+      expect(rendered).toContain(target)
+    }
     const intent = await createAssistantOutboxIntent({
       actorId: '+15550001',
       card: NUTRITION_RESPONSE_CARD,

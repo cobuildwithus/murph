@@ -17,6 +17,9 @@ import {
 } from "@/src/components/ui/dialog";
 import { Spinner } from "@/src/components/ui/spinner";
 import {
+  LegacyTrialRetirementControl,
+} from "@/src/components/hosted-ops/legacy-trial-retirement-control";
+import {
   Table,
   TableBody,
   TableCell,
@@ -190,6 +193,8 @@ export function MemberUsageClient({
           )}
         />
       </section>
+
+      <LegacyTrialRetirementControl />
 
       {message ? (
         <Alert variant={message.tone === "error" ? "destructive" : "default"}>

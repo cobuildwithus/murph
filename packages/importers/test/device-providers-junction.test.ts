@@ -4173,7 +4173,7 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
           { date: "2026-04-22", test_result: "indeterminate" },
         ],
         home_pregnancy_test: [
-          { date: "2026-04-28", test_result: "negative" },
+          { date: "2026-04-28", test_result: "positive" },
         ],
         detected_deviations: [
           { date: "2026-04-30", deviation: "irregular_menstrual_cycles" },
@@ -4264,9 +4264,9 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   const pregnancyEvent = measurementEvents.find((event) => event.title === "Junction pregnancy test");
   assert.deepEqual(readMeasurement(pregnancyEvent), {
     metric: "pregnancy-test",
-    value: 0,
+    value: 1,
     unit: "result",
-    qualifiers: { result: "negative" },
+    qualifiers: { result: "positive" },
   });
 
   const deviationEvent = measurementEvents.find((event) => event.title === "Junction cycle deviation");
