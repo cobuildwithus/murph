@@ -95,7 +95,7 @@ export function MurphCardHandoffPanel({
 
       <DialogFooter className="flex-col sm:flex-row-reverse">
         <a
-          aria-label="Open Murph in the App Store (opens in a new tab)"
+          aria-label="Open App Store (opens in a new tab)"
           autoFocus
           className={buttonVariants()}
           href={MURPH_IOS_APP_STORE_URL}

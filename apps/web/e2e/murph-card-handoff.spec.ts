@@ -66,7 +66,7 @@ test("shared-card fragments open a private, accessible App Store handoff", async
     await expect(dialog).not.toContainText(envelope);
     await expect(
       dialog.getByRole("link", {
-        name: "Open Murph in the App Store (opens in a new tab)",
+        name: "Open App Store (opens in a new tab)",
       }),
     ).toHaveAttribute(
       "href",

@@ -118,6 +118,9 @@ test("opens the App Store handoff without exposing the opaque card value", async
       `a[href="${MURPH_IOS_APP_STORE_URL}"]`,
     );
     expect(appStoreLink?.textContent).toContain("Open App Store");
+    expect(appStoreLink?.getAttribute("aria-label")).toBe(
+      "Open App Store (opens in a new tab)",
+    );
     expect(appStoreLink?.getAttribute("target")).toBe("_blank");
     expect(appStoreLink?.getAttribute("rel")).toBe("noopener noreferrer");
     expect(
