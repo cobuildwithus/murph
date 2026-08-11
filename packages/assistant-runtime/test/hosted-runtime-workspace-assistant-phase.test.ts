@@ -5536,6 +5536,42 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         state: { nextRunAt: "2026-08-10T03:00:00.000Z" },
       });
 
+      const beforeInspect = await showAutomation({
+        slug: "daily-evening-reminder",
+        vaultRoot,
+      });
+      if (!beforeInspect) {
+        throw new Error("Expected daily reminder before inspection.");
+      }
+      const recordPath = path.join(vaultRoot, beforeInspect.relativePath);
+      const recordBytesBeforeInspect = await readFile(recordPath, "utf8");
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: "daily-evening-reminder",
+      })).resolves.toEqual({
+        action: "inspect",
+        automationId: beforeInspect.automationId,
+        effectiveTimeZone: "America/Chicago",
+        lookupId: "daily-evening-reminder",
+        nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+        routeBinding: "preserved",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "22:00",
+          timeZone: "America/Chicago",
+        },
+        status: "active",
+        timingVerified: true,
+        updatedAt: dailyRevised.updatedAt,
+      });
+      await expect(readFile(recordPath, "utf8")).resolves.toBe(
+        recordBytesBeforeInspect,
+      );
+      await expect(showAutomation({
+        slug: "daily-evening-reminder",
+        vaultRoot,
+      })).resolves.toEqual(beforeInspect);
+
       mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValueOnce({
         timeZone: "America/New_York",
         vaultTimeZoneVerified: false,

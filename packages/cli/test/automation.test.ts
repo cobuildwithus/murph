@@ -1,27 +1,20 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { Cli } from "incur";
 import { afterEach, test, vi } from "vitest";
-
-import { createWorkspaceSourceImportExecOptions } from "../../../config/workspace-source-resolution.js";
 
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
-import { HOSTED_RUNTIME_PROCESS_ENV } from "@murphai/hosted-execution/env";
 import { upsertAutomation } from "@murphai/core";
 import {
   automationRecordSchema,
   automationScaffoldResultSchema,
-  assertAutomationCliMutationAllowed,
   createAutomationScaffoldPayload,
   registerAutomationCommands,
-  resolveAutomationCliProcessLineage,
 } from "../src/commands/automation.js";
 import { createTempVaultContext, runInProcessJsonCli } from "./cli-test-helpers.js";
 
@@ -33,11 +26,6 @@ const LEGACY_ROUTE_TARGET_ENV_NAME = [
   "MURPH_ASSISTANT_CURRENT",
   "DELIVERY_ROUTE_TARGET",
 ].join("_");
-const cliPackageDirectory = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
-
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -571,227 +559,6 @@ test("automation save guidance keeps examples shell-copyable", async () => {
     assert.match(rendered, /--instructions 'Ask about mobility work and summarize the next step\.'/u);
   }
 });
-
-test("hosted automation CLI mutations fail closed while reads stay available", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-automation-hosted-root-tool-",
-  );
-
-  try {
-    const cli = Cli.create("vault-cli", {
-      description: "automation test cli",
-      version: "0.0.0-test",
-    });
-    registerAutomationCommands(cli);
-
-    const seeded = await runInProcessJsonCli(cli, [
-      "automation",
-      "save",
-      "Existing reminder",
-      "--slug",
-      "existing-reminder",
-      "--status",
-      "paused",
-      "--instructions",
-      "Send the reminder.",
-      "--schedule-kind",
-      "dailyLocal",
-      "--schedule-local-time",
-      "08:30",
-      "--channel",
-      "telegram",
-      "--delivery-target",
-      "telegram_thread_real",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(seeded.envelope.ok, true);
-
-    vi.stubEnv(HOSTED_RUNTIME_PROCESS_ENV, "1");
-    const mutations = [
-      [
-        "automation",
-        "save",
-        "Blocked reminder",
-        "--instructions",
-        "Send the reminder.",
-        "--vault",
-        vaultRoot,
-      ],
-      [
-        "automation",
-        "edit",
-        "existing-reminder",
-        "--summary",
-        "Blocked edit",
-        "--vault",
-        vaultRoot,
-      ],
-      [
-        "automation",
-        "set-status",
-        "existing-reminder",
-        "--status",
-        "active",
-        "--vault",
-        vaultRoot,
-      ],
-      [
-        "automation",
-        "reconcile-support-series",
-        "habit:blocked",
-        "--vault",
-        vaultRoot,
-      ],
-      [
-        "automation",
-        "import-json",
-        "--input",
-        `@${path.join(parentRoot, "not-read.json")}`,
-        "--vault",
-        vaultRoot,
-      ],
-    ] as const;
-
-    for (const args of mutations) {
-      const result = await runInProcessJsonCli(cli, [...args]);
-      assert.equal(result.exitCode, 1);
-      assert.equal(result.envelope.ok, false);
-      if (!result.envelope.ok) {
-        assert.match(result.envelope.error.message ?? "", /root hosted automation tool/u);
-      }
-    }
-
-    const shown = await runInProcessJsonCli(cli, [
-      "automation",
-      "show",
-      "existing-reminder",
-      "--vault",
-      vaultRoot,
-    ]);
-    const listed = await runInProcessJsonCli(cli, [
-      "automation",
-      "list",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(shown.envelope.ok, true);
-    assert.equal(listed.envelope.ok, true);
-  } finally {
-    await rm(parentRoot, { recursive: true, force: true });
-  }
-});
-
-test("automation CLI lineage exhausts ancestors and preserves local writes across opaque proc state", () => {
-  const procFiles = new Map<string, string>();
-  for (let pid = 400; pid > 380; pid -= 1) {
-    procFiles.set(`/proc/${pid}/environ`, "");
-    procFiles.set(`/proc/${pid}/status`, `Name:\tchild\nPPid:\t${pid - 1}\n`);
-  }
-  procFiles.set(
-    "/proc/380/environ",
-    `PATH=/usr/bin\0${HOSTED_RUNTIME_PROCESS_ENV}=1\0`,
-  );
-  const readFileSync = (filePath: string): string => {
-    const content = procFiles.get(filePath);
-    if (content === undefined) {
-      throw new Error(`Unexpected proc read: ${filePath}`);
-    }
-    return content;
-  };
-
-  assert.equal(resolveAutomationCliProcessLineage({
-    env: {},
-    pid: 400,
-    platform: "linux",
-    readFileSync,
-  }), "hosted");
-  assert.equal(resolveAutomationCliProcessLineage({
-    env: {},
-    pid: 700,
-    platform: "linux",
-    readFileSync: () => {
-      throw new Error("proc unavailable");
-    },
-  }), "unknown");
-  assert.doesNotThrow(() => assertAutomationCliMutationAllowed({
-    env: {},
-    pid: 700,
-    platform: "linux",
-    readFileSync: () => {
-      throw new Error("proc unavailable");
-    },
-  }));
-  assert.equal(resolveAutomationCliProcessLineage({
-    env: {},
-    pid: 1,
-    platform: "linux",
-    readFileSync: (filePath) =>
-      filePath.endsWith("/environ") ? "" : "Name:\tinit\nPPid:\t0\n",
-  }), "local");
-});
-
-test.runIf(process.platform === "linux")(
-  "automation CLI mutation guard survives nested marker-unset children and a fake receipt directory",
-  () => {
-    const source = `
-      import { spawnSync } from "node:child_process";
-      import { assertAutomationCliMutationAllowed } from "./packages/cli/src/commands/automation.ts";
-
-      const depth = Number(process.argv[1]);
-      const source = process.env.MURPH_AUTOMATION_LINEAGE_TEST_SOURCE;
-      if (!source || !Number.isInteger(depth) || depth < 0) {
-        throw new Error("invalid lineage test input");
-      }
-      if (depth === 0) {
-        try {
-          assertAutomationCliMutationAllowed();
-          process.stdout.write("allowed");
-        } catch {
-          process.stdout.write("blocked");
-        }
-      } else {
-        const env = { ...process.env };
-        delete env.MURPH_HOSTED_RUNTIME_PROCESS;
-        env.MURPH_HOSTED_CANONICAL_WRITE_RECEIPT_DIR = "/tmp/not-authority";
-        const child = spawnSync(
-          process.execPath,
-          ["--import", "tsx/esm", "--input-type=module", "--eval", source, String(depth - 1)],
-          { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"] },
-        );
-        if (child.error) throw child.error;
-        if (child.status !== 0) {
-          process.stderr.write(child.stderr);
-          process.exit(child.status ?? 1);
-        }
-        process.stdout.write(child.stdout);
-      }
-    `;
-    const workspaceExec = createWorkspaceSourceImportExecOptions(
-      cliPackageDirectory,
-    );
-    const child = spawnSync(
-      process.execPath,
-      ["--import", "tsx/esm", "--input-type=module", "--eval", source, "3"],
-      {
-        cwd: workspaceExec.cwd,
-        encoding: "utf8",
-        env: {
-          ...workspaceExec.env,
-          MURPH_AUTOMATION_LINEAGE_TEST_SOURCE: source,
-          MURPH_HOSTED_RUNTIME_PROCESS: "1",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    if (child.error) {
-      throw child.error;
-    }
-    assert.equal(child.status, 0, child.stderr);
-    assert.equal(child.stdout, "blocked");
-  },
-  30_000,
-);
 
 test("automation edit patches sparse fields without implicit route rebinding", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-edit-");

@@ -29,8 +29,10 @@ Updated: 2026-08-11
   current stored automation, including the existing optimistic concurrency guard.
 - Generic hosted saves are atomic create-only operations; existing records can
   change only through versioned patch or their existing scoped reconciliation owner.
-- Hosted CLI mutation restrictions cannot be bypassed by unsetting an ordinary
-  hosted env var in a child shell.
+- Hosted CLI mutation restrictions are tied to the immutable hosted-runner image
+  role, not inherited environment or mutable process ancestry.
+- The hosted automation tool has a read-only inspect action that returns the
+  stored version and scheduler-owned timing projection without changing bytes.
 - Focused tests cover the timezone boundary incident, DST gap/fold handling,
   readback/guard behavior, and hosted mutation boundary.
 
@@ -68,11 +70,12 @@ Updated: 2026-08-11
    exact ISO `at`.
 3. Add authoritative mutation readback and require inspection/concurrency for
    correction and cancellation paths.
-4. Harden hosted CLI mutation detection against child shells that remove ordinary
-   hosted env vars, including nested process trees, without disabling local Linux
-   automation when an unrelated ancestor hides process metadata.
-5. Add focused regression tests.
-6. Run focused package checks and commit with the plan archived.
+4. Remove automation CLI mutations from the hosted-runner image role while
+   preserving the ordinary local CLI on Linux and other platforms.
+5. Add a typed read-only hosted inspect operation backed by the same scheduler
+   projection used after writes.
+6. Add focused regression tests.
+7. Run focused package checks and commit with the plan archived.
 
 ## Decisions
 
@@ -83,12 +86,33 @@ Updated: 2026-08-11
 - Preserve today/tonight/tomorrow as a bounded semantic field until the trusted
   resolver computes the named-zone calendar date; use an explicit date only
   when the request or established context already supplies one.
-- Resolve hosted Linux ancestry exhaustively at the automation CLI mutation
-  boundary and treat unreadable, malformed, or cyclic process metadata as unknown.
-  Automation CLI mutations fail closed only when the current environment or a
-  readable ancestor proves hosted lineage. Unknown lineage remains usable for
-  local Linux callers because hardened runners commonly hide unrelated ancestor
-  environments; the inherited current-process marker is still checked first.
+- Make the typed root hosted automation port the exclusive hosted mutation owner.
+  The hosted-runner image contains a root-owned, read-only role sentinel, and the
+  automation CLI rejects every mutation when that immutable image role is present.
+  Local CLI installs have no sentinel and retain normal save, edit, status,
+  reconcile, and import behavior.
+- Keep the existing scheduler projection as the sole owner of next-occurrence
+  calculations. The new typed inspect action reads the stored record and returns
+  its current version plus that projection without calling a write use case.
+
+## Retrospective
+
+The first hardening pass treated inherited hosted environment and Linux process
+ancestry as authority. That repeated the original design mistake: it inferred a
+durable product role from mutable execution context. It could deny legitimate
+local Linux callers when process metadata was opaque, yet a sufficiently detached
+hosted child could be reparented outside the marked ancestry and regain the CLI
+mutation surface.
+
+The replacement boundary is deliberately smaller. Hosted automation writes are
+owned only by the typed root tool. The container image itself declares that role
+with a fixed root-owned sentinel under the already root-owned read-only application
+tree, so environment deletion, nested children, detachment, and reparenting do not
+change the decision. No lease, receipt directory, process registry, or additional
+state machine is introduced. The same change also closes a separate contract gap:
+prompts required inspecting existing timing, but the model-facing port exposed no
+read action. A typed inspect request now reuses the authoritative scheduler
+projection and is covered by a byte-for-byte no-mutation test.
 
 ## Verification
 
@@ -106,4 +130,13 @@ Updated: 2026-08-11
   passed.
 - `pnpm --dir packages/assistant-engine test test/assistant-codex-runtime.test.ts -t "requires exact active-turn identity"`
   passed.
+- `pnpm --dir packages/assistant-engine test test/assistant-hosted-domain-tools.test.ts test/model-behavior.test.ts test/onboarding-first-personal-read.test.ts test/assistant-codex-scripted-runtime.test.ts`
+  passed with 136 tests.
+- `pnpm --dir packages/assistant-runtime test test/hosted-runtime-workspace-assistant-phase.test.ts`
+  passed with 282 tests, including byte-for-byte read-only inspect coverage.
+- `pnpm --dir packages/cli test test/automation.test.ts test/automation-hosted-image.test.ts`
+  passed with 22 tests.
+- `pnpm --dir apps/web test:prepared test/changelog.test.ts` passed with 35
+  tests. An earlier command using the nonexistent `changelog-schema.test.ts`
+  filter exited with no tests; the repository's actual changelog suite passed.
 Completed: 2026-08-11

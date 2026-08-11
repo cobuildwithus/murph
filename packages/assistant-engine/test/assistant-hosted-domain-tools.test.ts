@@ -45,6 +45,9 @@ describe('hosted domain dynamic tools', () => {
       'Generic save is create-only',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'pass expectedUpdatedAt from that readback',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
@@ -134,6 +137,17 @@ describe('hosted domain dynamic tools', () => {
   })
 
   it('accepts typed automation writes without exposing model-controlled routes', () => {
+    expect(readToolRequest('automation', {
+      action: 'inspect',
+      lookup: 'evening-wind-down',
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'inspect',
+        lookup: 'evening-wind-down',
+      },
+    })
+
     expect(readToolRequest('automation', {
       action: 'save',
       activeUntil: '2026-08-01T00:00:00.000Z',
@@ -504,6 +518,64 @@ describe('hosted domain dynamic tools', () => {
       request,
     })
     expect(unavailable.rpcResult).toMatchObject({ success: false })
+  })
+
+  it('executes read-only automation inspection through the injected port', async () => {
+    const automationTool = {
+      request: vi.fn(async () => ({
+        action: 'inspect' as const,
+        automationId: 'automation-1',
+        effectiveTimeZone: 'America/Chicago',
+        lookupId: 'evening-wind-down',
+        nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
+        routeBinding: 'preserved' as const,
+        schedule: {
+          kind: 'dailyLocal' as const,
+          localTime: '22:30',
+          timeZone: 'America/Chicago',
+        },
+        status: 'active' as const,
+        timingVerified: true,
+        updatedAt: '2026-08-10T00:00:00.000Z',
+      })),
+    }
+    const request = readToolRequest('automation', {
+      action: 'inspect',
+      lookup: 'evening-wind-down',
+    })
+    if (!request) {
+      throw new Error('Expected an automation inspection request.')
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ automationTool }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(automationTool.request).toHaveBeenCalledWith({
+      action: 'inspect',
+      lookup: 'evening-wind-down',
+    }, { signal: null })
+    expect(readResultPayload(result)).toEqual({
+      action: 'inspect',
+      automationId: 'automation-1',
+      effectiveTimeZone: 'America/Chicago',
+      lookupId: 'evening-wind-down',
+      nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
+      routeBinding: 'preserved',
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '22:30',
+        timeZone: 'America/Chicago',
+      },
+      status: 'active',
+      timingVerified: true,
+      updatedAt: '2026-08-10T00:00:00.000Z',
+    })
   })
 
   it('returns safe recovery instructions for local-time and write-conflict failures', async () => {

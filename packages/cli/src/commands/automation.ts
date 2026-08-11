@@ -1,11 +1,7 @@
-import { readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 
 import { Cli, z } from "incur";
 
-import {
-  HOSTED_RUNTIME_PROCESS_ENV,
-  isHostedRuntimeProcessEnv,
-} from "@murphai/hosted-execution/env";
 import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
@@ -307,59 +303,11 @@ function buildAutomationRouteFromOptions(
   );
 }
 
-export type AutomationCliProcessLineage = "hosted" | "local" | "unknown";
+export const HOSTED_RUNNER_IMAGE_SENTINEL_PATH =
+  "/app/.murph-hosted-runner-image";
 
-export function resolveAutomationCliProcessLineage(input: {
-  env?: NodeJS.ProcessEnv;
-  pid?: number;
-  platform?: NodeJS.Platform;
-  readFileSync?: (filePath: string, encoding: BufferEncoding) => string;
-} = {}): AutomationCliProcessLineage {
-  const env = input.env ?? process.env;
-  if (isHostedRuntimeProcessEnv(env)) {
-    return "hosted";
-  }
-  if ((input.platform ?? process.platform) !== "linux") {
-    return "local";
-  }
-
-  const readProcFile = input.readFileSync ?? readFileSync;
-  const seen = new Set<number>();
-  let pid = input.pid ?? process.pid;
-  while (true) {
-    if (!Number.isInteger(pid) || pid <= 0 || seen.has(pid)) {
-      return "unknown";
-    }
-    seen.add(pid);
-    try {
-      const environ = readProcFile(`/proc/${pid}/environ`, "utf8");
-      if (
-        environ
-          .split("\0")
-          .some((entry) => entry === `${HOSTED_RUNTIME_PROCESS_ENV}=1`)
-      ) {
-        return "hosted";
-      }
-      const status = readProcFile(`/proc/${pid}/status`, "utf8");
-      const parentMatch = /^PPid:\s*(\d+)$/mu.exec(status);
-      if (!parentMatch) {
-        return "unknown";
-      }
-      const parentPid = Number(parentMatch[1]);
-      if (parentPid === 0) {
-        return "local";
-      }
-      pid = parentPid;
-    } catch {
-      return "unknown";
-    }
-  }
-}
-
-export function assertAutomationCliMutationAllowed(
-  input: Parameters<typeof resolveAutomationCliProcessLineage>[0] = {},
-): void {
-  if (resolveAutomationCliProcessLineage(input) !== "hosted") {
+export function assertAutomationCliMutationAllowed(): void {
+  if (!existsSync(HOSTED_RUNNER_IMAGE_SENTINEL_PATH)) {
     return;
   }
 

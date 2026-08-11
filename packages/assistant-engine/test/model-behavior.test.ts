@@ -3180,7 +3180,7 @@ describe('assistant conversation scope', () => {
       'Scheduled automation changes for this conversation are available through `murph.automation`.',
     )
     expect(prompt).toContain(
-      'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
+      'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
     )
     expect(prompt).toContain(
       'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',
@@ -3192,7 +3192,7 @@ describe('assistant conversation scope', () => {
       'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
     )
     expect(prompt).toContain(
-      'Before making any relative-date claim about an existing automation, inspect the stored automation and answer from its authoritative schedule and verified next occurrence without mutating it',
+      'Before making any relative-date claim about an existing automation, call `action: inspect` and answer from its authoritative schedule and verified next occurrence without mutating it',
     )
     expect(prompt).toContain(
       'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
@@ -3265,7 +3265,7 @@ describe('assistant conversation scope', () => {
       'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
     )
     expect(prompt).toContain(
-      'Before making any relative-date claim about an existing automation, inspect the stored automation and answer from its authoritative schedule and verified next occurrence without mutating it',
+      'Before making any relative-date claim about an existing automation, call `action: inspect` and answer from its authoritative schedule and verified next occurrence without mutating it',
     )
     expect(prompt).toContain(
       'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',

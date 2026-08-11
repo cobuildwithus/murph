@@ -76,6 +76,7 @@ import {
   showAutomation,
   stripAutomationAvailabilityConflictBlock,
   upsertAutomation,
+  type AutomationRecord,
 } from "@murphai/core";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
@@ -1551,6 +1552,14 @@ function createHostedAssistantAutomationTool(input: {
         );
       }
       context?.signal?.throwIfAborted();
+      if (request.action === "inspect") {
+        return await buildHostedAutomationToolResponse({
+          action: "inspect",
+          record: existing,
+          routeBinding: "preserved",
+          vaultRoot: input.vaultRoot,
+        });
+      }
       const route = request.retargetToCurrentConversation === true
         ? currentRoute
         : existing.route;
@@ -1670,13 +1679,22 @@ function assertActiveHostedAutomationRoute(input: {
   }
 }
 
-async function buildHostedAutomationToolResponse(input: {
-  action: "patch" | "save";
-  result: Awaited<ReturnType<typeof upsertAutomation>>;
-  routeBinding: "current_conversation" | "preserved";
-  vaultRoot: string;
-}): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
-  const schedule = input.result.record.schedule;
+async function buildHostedAutomationToolResponse(input:
+  | {
+      action: "inspect";
+      record: AutomationRecord;
+      routeBinding: "preserved";
+      vaultRoot: string;
+    }
+  | {
+      action: "patch" | "save";
+      result: Awaited<ReturnType<typeof upsertAutomation>>;
+      routeBinding: "current_conversation" | "preserved";
+      vaultRoot: string;
+    }
+): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
+  const record = input.action === "inspect" ? input.record : input.result.record;
+  const schedule = record.schedule;
   let effectiveTimeZone =
     schedule.kind === "cron" || schedule.kind === "dailyLocal"
       ? schedule.timeZone ?? null
@@ -1700,7 +1718,7 @@ async function buildHostedAutomationToolResponse(input: {
     }
   }
   if (
-    input.result.record.status !== "archived"
+    record.status !== "archived"
     && schedule.kind !== "deviceActivity"
   ) {
     try {
@@ -1709,7 +1727,7 @@ async function buildHostedAutomationToolResponse(input: {
       }
       const projection = await getAssistantCronAutomationTimingProjection(
         input.vaultRoot,
-        input.result.record.relativePath,
+        record.relativePath,
         defaultTimeZone,
       );
       const { job } = projection;
@@ -1718,7 +1736,7 @@ async function buildHostedAutomationToolResponse(input: {
         timingVerified = false;
       }
       if (
-        job.updatedAt !== input.result.record.updatedAt
+        job.updatedAt !== record.updatedAt
         || JSON.stringify(job.schedule) !== JSON.stringify(schedule)
       ) {
         timingVerified = false;
@@ -1727,19 +1745,28 @@ async function buildHostedAutomationToolResponse(input: {
       timingVerified = false;
     }
   }
-  return {
-    action: input.action,
-    automationId: input.result.record.automationId,
-    created: input.result.created,
+  const responseFields = {
+    automationId: record.automationId,
     effectiveTimeZone,
-    lookupId: input.result.record.slug,
+    lookupId: record.slug,
     nextOccurrenceAt,
-    routeBinding: input.routeBinding,
     schedule,
-    status: input.result.record.status,
+    status: record.status,
     timingVerified,
-    updatedAt: input.result.record.updatedAt,
+    updatedAt: record.updatedAt,
   };
+  return input.action === "inspect"
+    ? {
+        action: "inspect",
+        ...responseFields,
+        routeBinding: "preserved",
+      }
+    : {
+        action: input.action,
+        ...responseFields,
+        created: input.result.created,
+        routeBinding: input.routeBinding,
+      };
 }
 
 export async function runHostedWorkspaceAssistantPhase(
