@@ -928,6 +928,11 @@ Last verified: 2026-08-10
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
+- Cloudflare runner Containers must explicitly render Wrangler SSH disabled for
+  every class and must contain no authorized keys. Deploy automation must not
+  accept an environment-controlled SSH key or compatibility switch that can
+  restore an operator shell. Use structured logs, Durable Object status,
+  Container inventory, and managed deploy smoke as the diagnostic boundary.
 - The same protected-main Cloudflare workflow may attach the GitHub `Preview`
   Environment only for the explicit `preview` target. That environment must
   contain staging-only credentials and must not duplicate production database,
