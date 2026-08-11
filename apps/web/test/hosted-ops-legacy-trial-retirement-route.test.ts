@@ -5,7 +5,8 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   requireHostedOpsRequestAccess: vi.fn(),
-  requireHostedStripeBillingPlanConfig: vi.fn(),
+  requireHostedStripeApiMode: vi.fn(),
+  requireValidatedHostedStripeBillingPlanConfig: vi.fn(),
   runHostedLegacyPulseTrialRetirement: vi.fn(),
 }));
 
@@ -14,8 +15,9 @@ vi.mock("@/src/lib/hosted-ops/access", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  requireHostedStripeBillingPlanConfig:
-    mocks.requireHostedStripeBillingPlanConfig,
+  requireHostedStripeApiMode: mocks.requireHostedStripeApiMode,
+  requireValidatedHostedStripeBillingPlanConfig:
+    mocks.requireValidatedHostedStripeBillingPlanConfig,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -60,11 +62,14 @@ describe("hosted Ops legacy trial retirement route", () => {
     mocks.requireHostedOpsRequestAccess.mockResolvedValue({
       member: { id: "member_ops" },
     });
-    mocks.requireHostedStripeBillingPlanConfig.mockReturnValue({
+    mocks.requireHostedStripeApiMode.mockReturnValue({
+      stripe,
+      stripeLiveMode: true,
+    });
+    mocks.requireValidatedHostedStripeBillingPlanConfig.mockResolvedValue({
       billingPlanCode: "launch_monthly",
       priceId: "price_pulse",
       stripe,
-      stripeLiveMode: true,
     });
   });
 
@@ -79,7 +84,10 @@ describe("hosted Ops legacy trial retirement route", () => {
     expect(mocks.requireHostedOpsRequestAccess).toHaveBeenCalledWith(request, {
       requireMutationOrigin: true,
     });
-    expect(mocks.requireHostedStripeBillingPlanConfig).toHaveBeenCalledWith({
+    expect(mocks.requireHostedStripeApiMode).toHaveBeenCalledOnce();
+    expect(
+      mocks.requireValidatedHostedStripeBillingPlanConfig,
+    ).toHaveBeenCalledWith({
       billingPlanCode: "launch_monthly",
     });
     expect(mocks.runHostedLegacyPulseTrialRetirement).toHaveBeenCalledWith({
@@ -108,12 +116,52 @@ describe("hosted Ops legacy trial retirement route", () => {
     const response = await route.POST(buildRequest({ operation: "dry-run" }));
 
     expect(response.status).toBe(404);
-    expect(mocks.requireHostedStripeBillingPlanConfig).not.toHaveBeenCalled();
+    expect(mocks.requireHostedStripeApiMode).not.toHaveBeenCalled();
+    expect(
+      mocks.requireValidatedHostedStripeBillingPlanConfig,
+    ).not.toHaveBeenCalled();
     expect(mocks.getPrisma).not.toHaveBeenCalled();
     expect(mocks.runHostedLegacyPulseTrialRetirement).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "HOSTED_OPS_ACCESS_DENIED" },
     });
+  });
+
+  it("rejects test Stripe in production before billing data is read", async () => {
+    mocks.requireHostedStripeApiMode.mockImplementationOnce(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_USAGE_CREDIT_LIVE_STRIPE_REQUIRED",
+        httpStatus: 500,
+        message: "Hosted production billing requires live Stripe.",
+        retryable: false,
+      });
+    });
+
+    const response = await route.POST(buildRequest({ operation: "dry-run" }));
+
+    expect(response.status).toBe(500);
+    expect(
+      mocks.requireValidatedHostedStripeBillingPlanConfig,
+    ).not.toHaveBeenCalled();
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.runHostedLegacyPulseTrialRetirement).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unreachable exact Price before billing data is read", async () => {
+    mocks.requireValidatedHostedStripeBillingPlanConfig.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_BILLING_PRICE_UNAVAILABLE",
+        httpStatus: 502,
+        message: "Stripe billing is unavailable for this plan right now.",
+        retryable: true,
+      }),
+    );
+
+    const response = await route.POST(buildRequest({ operation: "dry-run" }));
+
+    expect(response.status).toBe(502);
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.runHostedLegacyPulseTrialRetirement).not.toHaveBeenCalled();
   });
 
   it("applies only the exact dry-run count and automatically verifies zero", async () => {
@@ -166,7 +214,10 @@ describe("hosted Ops legacy trial retirement route", () => {
     const response = await route.POST(buildRequest({ operation: "apply" }));
 
     expect(response.status).toBe(400);
-    expect(mocks.requireHostedStripeBillingPlanConfig).not.toHaveBeenCalled();
+    expect(mocks.requireHostedStripeApiMode).not.toHaveBeenCalled();
+    expect(
+      mocks.requireValidatedHostedStripeBillingPlanConfig,
+    ).not.toHaveBeenCalled();
     expect(mocks.runHostedLegacyPulseTrialRetirement).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: {

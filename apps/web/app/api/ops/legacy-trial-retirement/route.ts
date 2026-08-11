@@ -11,7 +11,8 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import {
-  requireHostedStripeBillingPlanConfig,
+  requireHostedStripeApiMode,
+  requireValidatedHostedStripeBillingPlanConfig,
 } from "@/src/lib/hosted-onboarding/runtime";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -37,14 +38,15 @@ export const POST = withJsonError(async (request: Request) => {
     body.expectedCandidates,
     operation,
   );
-  const config = requireHostedStripeBillingPlanConfig({
+  const { stripeLiveMode } = requireHostedStripeApiMode();
+  const config = await requireValidatedHostedStripeBillingPlanConfig({
     billingPlanCode: "launch_monthly",
   });
   const commonInput = {
     priceId: config.priceId,
     prisma: getPrisma(),
     stripe: config.stripe,
-    stripeMode: config.stripeLiveMode ? "live" : "test",
+    stripeMode: stripeLiveMode ? "live" : "test",
   } as const;
 
   try {
