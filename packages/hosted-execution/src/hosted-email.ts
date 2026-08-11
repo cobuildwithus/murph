@@ -3,7 +3,7 @@ import {
   readNullableStringValue,
 } from "./parsers/assertions.ts";
 import { normalizeHostedExecutionString } from "./env.ts";
-import { isHostedRuntimeNewsletterAuthorizationProof } from "./runtime-control.ts";
+import { isHostedRuntimeGroupEmailAuthorizationProof } from "./runtime-control.ts";
 
 type EnvSource = Readonly<Record<string, unknown>>;
 
@@ -74,7 +74,7 @@ export interface HostedEmailRouteResolutionCallbackResponse {
 }
 
 export interface HostedEmailGroupRecipientsCallbackRequest {
-  expectedNewsletterAuthorizationProof?: string | null;
+  expectedGroupEmailAuthorizationProof?: string | null;
   groupId: string;
 }
 
@@ -436,22 +436,27 @@ export function parseHostedEmailGroupRecipientsCallbackRequest(
   if (!groupId) {
     throw new TypeError("Hosted email group recipients callback request groupId must be present.");
   }
+  if (record.expectedNewsletterAuthorizationProof !== undefined) {
+    throw new TypeError(
+      "Hosted email group recipients callback request uses a retired proof field.",
+    );
+  }
 
-  const expectedNewsletterAuthorizationProof =
-    record.expectedNewsletterAuthorizationProof ?? null;
+  const expectedGroupEmailAuthorizationProof =
+    record.expectedGroupEmailAuthorizationProof ?? null;
   if (
-    expectedNewsletterAuthorizationProof !== null
-    && !isHostedRuntimeNewsletterAuthorizationProof(expectedNewsletterAuthorizationProof)
+    expectedGroupEmailAuthorizationProof !== null
+    && !isHostedRuntimeGroupEmailAuthorizationProof(expectedGroupEmailAuthorizationProof)
   ) {
     throw new TypeError(
-      "Hosted email group recipients callback request expectedNewsletterAuthorizationProof must be a SHA-256 hex digest.",
+      "Hosted email group recipients callback request expectedGroupEmailAuthorizationProof must be a SHA-256 hex digest.",
     );
   }
 
   return {
-    ...(expectedNewsletterAuthorizationProof === null
+    ...(expectedGroupEmailAuthorizationProof === null
       ? {}
-      : { expectedNewsletterAuthorizationProof }),
+      : { expectedGroupEmailAuthorizationProof }),
     groupId,
   };
 }

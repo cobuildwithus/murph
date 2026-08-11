@@ -44,8 +44,22 @@ generic-table balloon. Provider chrome is intentionally bounded to the title
 plus derived progress for structured workouts; it does not repeat the image's
 sets below the balloon. Generic-table provider chrome retains its existing
 title, optional subtitle, rows, and footer. The complete semantic text renderer
-remains the workout recovery owner, and the value-free fallback tells the
-member to ask Murph for the card in text if the image is unavailable.
+remains the workout recovery owner, and the value-free fallback identifies the
+message as the member's workout before telling them how to request that complete
+text without exposing its values outside the card.
+
+The bitmap remains rectangular and badge-free because Messages owns the outer
+mask and app icon, but its header keeps the provider's upper-left icon footprint
+clear. Removing the image-owned logo must not move title text beneath the
+provider overlay.
+
+Shared workout footer copy must remain truthful on both projections: it may ask
+the member to reply with an exercise, set, and result, but must not promise a
+native-only tap control. The static workout summary derives `Next` from the
+first pending set in order; a targetless first pending set stays visibly
+targetless instead of borrowing a later set's target. Static text wraps at a
+deterministic display width, and the same calculation owns the raster height so
+every contract-valid title, row, cell, and footer remains inside the image.
 
 The image URL carries the exact same strict authority-free V3 or V4 presentation
 envelope as the native fragment in a bounded queryless path. V3 tracking remains

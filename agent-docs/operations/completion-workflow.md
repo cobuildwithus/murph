@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-09
+Last verified: 2026-08-11
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -71,9 +71,9 @@ the separate final pushed-head ReviewGPT gate.
 Every PR must also make one explicit changelog decision before the review
 candidate is pushed. A member-visible feature or improvement, including a
 meaningful reliability, recovery, performance, accessibility, copy, or UX
-change, updates `apps/web/src/lib/changelog.ts` in the same PR using
-`$write-changelog`. Internal-only work records a concrete not-applicable reason
-in the PR body. Never publish private evidence, security-sensitive
+change, adds an isolated item under `apps/web/changelog/entries/` in the same PR
+using `$write-changelog`. Internal-only work records a concrete not-applicable
+reason in the PR body. Never publish private evidence, security-sensitive
 implementation detail, or an outcome the shipped code does not prove.
 
 Keep the current layer explicit: implementation, local completion, or PR/external
@@ -160,7 +160,9 @@ product-decision owners.
    scenario with the narrowest useful local command and expand only when the
    evidence requires it. Before a direct push to `main` or another shared
    default branch, reconcile the exact candidate and run
-   `pnpm verify:acceptance`.
+   `pnpm verify:acceptance` once for that push attempt. If the remote advances
+   while it runs, do not restart full acceptance solely because the base moved;
+   follow the one-rebase direct-push rule in `verification-and-runtime.md`.
 2. Run a scope and shape check before polish: confirm the diff is still proportional to the task, new abstractions are immediately justified, any new persisted state is explicitly classified and versioned, and any architecture/API/trust-boundary change is documented or split into an explicit plan. This check owns simplification: delete dead code, cut speculative structure, and collapse needless indirection yourself; there is no separate simplify subagent pass.
    During this check, invoke `$write-changelog` and classify the change. Add a
    same-PR changelog item for every member-visible outcome, or record the
@@ -207,7 +209,7 @@ product-decision owners.
 12. Rerun the focused local checks affected by remediation, then push so required CI evaluates the exact new PR head. If CI fails, diagnose from the narrowest reproducer outward. For a direct shared-default push, rerun `pnpm verify:acceptance` against the final reconciled candidate.
 13. Run the final review locally as the parent agent after findings from both ReviewGPT stages are resolved: re-read the full diff with fresh eyes, walk changed call paths, inspect any applied coverage patch in context, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent. If that review causes a behavior-bearing change, push it and run the required next final-gate round.
 14. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. Include every public-safe Frog entry created or modified during the task in that same scoped commit; do not finish with a task-owned entry untracked, unstaged, or omitted. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, preserve the Frog entry, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
-15. For PR-lane work, fetch the latest `main` or configured base and run `git merge-tree --write-tree HEAD origin/<base>` before final handoff. Green required CI on the PR-authored head plus a clean current-base merge-tree is sufficient preparation; do not merge or rebase only to chase a base that can move again while CI runs. If the merge-tree reports conflicts, update the branch normally, resolve and inspect them, rerun affected proof and required CI, and push. If the user authorized the actual merge and strict up-to-date checks block it, use the repository merge queue when available or perform one normal base update at the merge boundary, let required CI gate that head, and merge promptly. Do not start repeated base-refresh/CI loops during preparation. Follow the ReviewGPT loop's base-update and patch-change rules.
+15. For PR-lane work, fetch the latest `main` or configured base and run `git merge-tree --write-tree HEAD origin/<base>` before final handoff. Green required CI on the PR-authored head plus a clean current-base merge-tree is sufficient preparation; do not merge or rebase only to chase a base that can move again while CI runs. If the merge-tree reports conflicts during preparation, update the branch normally, resolve and inspect them, rerun affected proof and required CI, and push. At an authorized merge boundary, wait only for routed review gates and required GitHub checks. If strict up-to-date checks block the merge, prefer the repository merge queue; otherwise perform at most one normal base update for the unchanged reviewed patch, inspect conflicts, run affected proof, and let required CI gate that head. If the base advances again after it is green, never perform a second base update or restart CI: rerun the merge-tree and use an already-authorized non-refresh merge path when clean, or report `moving-base race` and stop with the PR and worktree active. Do not start repeated base-refresh/CI loops during preparation. Follow the ReviewGPT loop's exact terminal, base-update, and patch-change rules.
 16. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, run `scripts/retire-worktree <path>` from another checkout before final handoff. The command is the mandatory task-worktree retirement gate defined in `agent-docs/operations/agent-workflow-routing.md`; preserve and report the checkout when it fails closed.
 17. Final handoff must report required-check results, direct scenario evidence,
     the preliminary specialist lens verdicts, product-experience purpose
@@ -255,9 +257,13 @@ Required:
   body workflow checks the rendered section on every PR.
 - **Changelog.** Add one `## Changelog` section with exactly one disposition:
   `Changelog: updated` or `Changelog: not applicable`. For `updated`, change
-  `apps/web/src/lib/changelog.ts` in the same PR and add one `Items:` bullet
-  naming the edition date and stable item IDs. For `not applicable`, add one
-  concrete `Reason:` bullet explaining why no member-visible behavior changed.
+  one or more isolated entry fragments and/or edition metadata files in the
+  same PR and add one `Items:` bullet naming the edition date and affected
+  stable item IDs. A metadata-only edit names the existing items in that
+  edition. An intentional historical correction may instead edit the frozen
+  legacy registry and must name its affected existing items; normal new items
+  never use that path. For `not applicable`, add one concrete `Reason:` bullet
+  explaining why no member-visible behavior changed.
   Use `$write-changelog` to inventory source PRs, group related outcomes, add
   useful visuals, protect private or sensitive details, and update the focused
   archive proof. The pull-request body workflow validates this declaration on

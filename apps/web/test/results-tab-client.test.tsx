@@ -69,6 +69,7 @@ beforeEach(() => {
     ref: null,
     refreshPending: false,
     refresh: mocks.refresh,
+    runtimeRefreshPending: false,
     status: "error",
     workspaceVersion: null,
   } satisfies BrowserVaultContextValue);
@@ -128,6 +129,7 @@ test("keeps a completed run and its context visible instead of applying the acti
     ref: null,
     refreshPending: false,
     refresh: mocks.refresh,
+    runtimeRefreshPending: false,
     status: "ready",
     workspaceVersion: "v1",
   } satisfies BrowserVaultContextValue);

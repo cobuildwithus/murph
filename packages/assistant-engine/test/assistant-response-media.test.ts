@@ -1,10 +1,26 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
   normalizeAssistantResponseMediaList,
+  readAssistantGeneratedImageDeliveryTranscriptMarker,
 } from '../src/assistant/response-media.ts'
 
 describe('assistant response media', () => {
+  it('rejects an oversized generated-image delivery ref', () => {
+    const marker = buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+      contentType: 'image/png',
+      deliveryContextOrdinal: 0,
+      ref: `raw/captures/${'a'.repeat(1024)}`,
+      sha256: '1'.repeat(64),
+      sizeBytes: 1,
+      turnId: 'turn-generated-image',
+    })
+
+    expect(readAssistantGeneratedImageDeliveryTranscriptMarker(marker))
+      .toBeNull()
+  })
+
   it('normalizes, dedupes, and preserves response media order without runtime state', () => {
     expect(normalizeAssistantResponseMediaList([
       {

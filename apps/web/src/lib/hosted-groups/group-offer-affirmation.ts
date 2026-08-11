@@ -11,7 +11,6 @@ import {
 } from "../hosted-onboarding/bounded-post-commit";
 import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
-import { enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort } from "./group-newsletter";
 import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
   signalHostedGroupJoinConfirmationRuntimeBestEffort,
@@ -50,8 +49,8 @@ export type HostedGroupOfferAffirmationKind = "disclosure" | "join";
 export async function acceptHostedGroupOfferAffirmation(input: {
   affirmationEventId: string;
   /**
-   * Runs the optional post-commit tail (join confirmation, maintenance wake,
-   * newsletter nudge) after the caller has already acknowledged the member.
+   * Runs the optional post-commit tail (join confirmation and maintenance
+   * wake) after the caller has already acknowledged the member.
    * Telegram passes this so a tapped button is never held behind work that does
    * not decide whether the grant committed.
    */
@@ -187,20 +186,6 @@ export async function acceptHostedGroupOfferAffirmation(input: {
       });
     }
 
-    if (
-      result.grantedVaultShareProjectionKinds.includes("group-email.v0")
-    ) {
-      await runHostedGroupOfferAffirmationPostCommitBestEffort({
-        deadlineMs: postCommitDeadlineMs,
-        operation: () =>
-          enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
-            groupId: result.groupId,
-            memberId: input.memberId,
-            prisma: input.prisma,
-          }),
-        signal: input.signal,
-      });
-    }
   };
 
   if (input.deferPostCommit) {

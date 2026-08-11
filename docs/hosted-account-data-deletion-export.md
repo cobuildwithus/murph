@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-07-26
+Last verified: 2026-08-09
 
 ## Purpose
 
@@ -19,7 +19,7 @@ Account deletion is intentionally stricter than normal settings reads. Vault exp
 1. `POST /api/settings/sensitive-action-challenge` derives a binding from the authenticated member, action kind, and Murph app-session id. It stores only a SHA-256 hash of the random challenge token and expires the row after 15 minutes.
 2. The browser signs the exact server-generated message with the canonical Privy embedded Ethereum wallet. Murph does not clear Privy's one-hour MFA verification cache; each action still requires a fresh one-time wallet signature.
 3. The real export or deletion route fetches the current Privy user, requires passkey-only wallet MFA, recovers the signer locally, compares it with the canonical embedded wallet, and atomically deletes the matching challenge before any sensitive work begins.
-4. Settings vault export uses the same encrypted browser-vault replica plumbing as dashboard reads but runs through a self-contained `POST /api/settings/vault-export/session` route rather than the tolerant dashboard handler. The route verifies the MFA-bound signature first, then re-reads workspace state and pending-dirty device-sync state with fail-closed semantics on either lookup error, compares the current workspace source-state hash against the replica's `sourceBundleHash`, fetches the encrypted replica from the hosted execution control client, and only then atomically consumes the one-time challenge. A stale, in-flight, missing, source-hash-mismatched, or dirty-state-lookup-failed replica is rejected with a retryable `409 BROWSER_VAULT_SESSION_NOT_FRESH` without consuming the challenge, so the user can retry with the same one-time signature once the replica catches up.
+4. Settings vault export uses the same encrypted browser-vault replica plumbing as dashboard reads but runs through a self-contained `POST /api/settings/vault-export/session` route. The route verifies the MFA-bound signature first, then re-reads workspace state and pending device-sync state, compares the current workspace source-state hash against the replica's `sourceBundleHash`, fetches the encrypted retained replica from the hosted execution control client, and only then atomically consumes the one-time challenge. An existing retained replica remains exportable while source changes or device imports are pending; the response marks that state so the client explains that recent changes may be absent, and active processing receives a best-effort refresh signal. A missing workspace or replica returns a retryable error without consuming the challenge. Withdrawn consent never wakes processing and can export only the latest replica already retained.
 5. The Settings client decrypts the browser-vault replica in-browser and downloads the decrypted JSON. The decrypted vault payload never passes through a separate hosted metadata-export endpoint; the obsolete public `/api/settings/data-export` route was removed.
 6. `POST /api/settings/privacy/delete` keeps authenticated privacy access for members without active billing, requires the exact typed phrase, and consumes its distinct `account.delete` authorization before suspending the member or starting provider cleanup.
 7. All challenge and action routes enforce browser mutation-origin protection and bounded JSON request bodies.
@@ -121,7 +121,7 @@ The Settings vault export does not include:
 | `prisma.clinical_record_connection` | Live delete | Metadata/counts | Deletes encrypted patient context and access/refresh tokens. Canonical imported records remain governed by the vault export/deletion path. |
 | `prisma.clinical_record_retrieval_run` | Live delete | Metadata/counts | Deletes generation/status/count metadata; raw FHIR bodies are never stored in this table. |
 | `prisma.clinical_record_retrieval_request` | Live delete | Not exported secret | Deletes run-scoped request idempotency fingerprints and byte accounting before runs and connections; provider page URLs are not persisted here. |
-| `prisma.hosted_web_internal_request_nonce` | Live delete | Metadata/counts | Deletes per-user anti-replay nonces. |
+| `prisma.hosted_web_internal_request_nonce` | Live delete | Metadata/counts | Deletes per-user anti-replay nonces; bounded hourly global expiry is additive and does not replace this delete. |
 | `prisma.device_webhook_trace` | Live delete | Documented only | Deletes webhook traces for provider accounts linked to the member's device connections when linkage is available. User export omits trace rows and trace counts until the minimized webhook trace model has a safe user linkage. |
 | `kernel.managed_auth_connections` | Live delete | Not exported secret | Deletes durable domain connections, saved credentials, and active login workflows before the member profile. Murph does not persist connection ids or credential values locally. |
 | `cloudflare.runner_durable_object` | Best-effort delete | Documented only | Hosted execution control clears user runner SQL state and alarms when configured. |

@@ -21,9 +21,9 @@ import {
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
-  HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
   isHostedRuntimeAssistantAskDiagnosticCode,
   isHostedRuntimeAssistantAskRequestId,
@@ -33,9 +33,8 @@ import {
   type HostedRuntimeGroupSummary,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
-  type HostedRuntimeNewsletterParticipantSummary,
-  type HostedRuntimeNewsletterToolRequest,
-  type HostedRuntimeNewsletterToolResponse,
+  type HostedRuntimeGroupEmailParticipantSummary,
+  type HostedRuntimeGroupEmailEffectResponse,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -88,10 +87,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import {
-  buildSharedGroupWeeklyMembers,
-  type SharedGroupWeeklyMember,
-} from '@murphai/query'
-import {
+  type AssistantHostedGroupSharedMember,
   type AssistantHostedGroupSharedProjection,
   type AssistantHostedGroupSharedReadResponse,
   type AssistantHostedGroupSharedReader,
@@ -116,17 +112,20 @@ import {
 import {
   scoreGroupChallengeJson,
 } from '../assistant/group-challenge-scorecard-schema.js'
-import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import {
   createAssistantHostedScheduledRequestKey,
+  type AssistantHostedImageCompletionEffectScope,
   type AssistantHostedInvocationScope,
   type AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
 import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
-import { normalizeAssistantResponseMediaList } from '../assistant/response-media.js'
+import {
+  matchesExactAssistantVaultImageResponseMedia,
+  normalizeAssistantResponseMediaList,
+} from '../assistant/response-media.js'
 import {
   buildSafeToolCallValidationDigest,
   type SafeToolCallValidationDigest,
@@ -267,7 +266,6 @@ import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
-  MURPH_NEWSLETTER_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
@@ -523,10 +521,11 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_shared'),
+      audience: z.literal('group_email').optional(),
       projectionScopes: z
         .array(groupVaultShareProjectionScopeSchema)
         .min(1)
-        .max(ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES)
+        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
         .refine(
           (projectionScopes) =>
             new Set(
@@ -534,6 +533,29 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
             ).size === projectionScopes.length,
           { message: 'projectionScopes must contain unique exact scopes' },
         ),
+    })
+    .strict()
+    .refine(
+      (request) =>
+        request.audience === 'group_email'
+        || request.projectionScopes.length
+          <= ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
+      {
+        message: `ordinary shared reads allow at most ${ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES} scopes`,
+        path: ['projectionScopes'],
+      },
+    ),
+  z
+    .object({
+      action: z.literal('send_email'),
+      html: z.string().trim().min(1).max(HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH),
+      subject: z.string().trim().min(1).max(HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH),
+      text: z
+        .string()
+        .trim()
+        .max(HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH)
+        .nullable()
+        .optional(),
     })
     .strict(),
   z
@@ -613,27 +635,6 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       message_ref: z
         .string()
         .regex(new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u')),
-    })
-    .strict(),
-])
-
-const newsletterArgumentsSchema = z.discriminatedUnion('action', [
-  z
-    .object({
-      action: z.literal('prepare'),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal('send'),
-      html: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH),
-      subject: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH),
-      text: z
-        .string()
-        .trim()
-        .max(HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH)
-        .nullable()
-        .optional(),
     })
     .strict(),
 ])
@@ -912,7 +913,7 @@ export type MurphDynamicToolResponseMediaPatch = {
 export type MurphDynamicToolFinalActionPatch =
   | {
       kind: 'none'
-      owner?: 'vault-file'
+      owner?: 'group-email' | 'vault-file'
     }
   | {
       kind: 'reply-required'
@@ -986,13 +987,21 @@ type MurphGroupToolRequest =
           | 'create_signup_referral_link'
           | 'post_disclosure_request'
           | 'post_join_offer'
+          | 'prepare_email'
           | 'read_usage_referral'
           | 'revoke_own_email_share'
       }
     >
   | {
       action: 'read_shared'
+      audience?: 'group_email'
       projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
+    }
+  | {
+      action: 'send_email'
+      html: string
+      subject: string
+      text?: string | null
     }
   | {
       action: 'ask'
@@ -1203,10 +1212,6 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
-      kind: 'invalid-newsletter-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
     }
@@ -1234,10 +1239,6 @@ export type MurphDynamicToolRequest =
       kind: 'group'
       request: MurphGroupToolRequest
       toolCallId?: string
-    }
-  | {
-      kind: 'newsletter'
-      request: HostedRuntimeNewsletterToolRequest
     }
   | {
       kind: 'submit-product-feedback'
@@ -1597,19 +1598,6 @@ export function readMurphDynamicToolRequest(
         ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
-    case MURPH_NEWSLETTER_TOOL.name: {
-      const parsed = parseNewsletterArguments(request.arguments)
-      if (!parsed.ok) {
-        return {
-          kind: 'invalid-newsletter-arguments',
-          validationDigest: parsed.validationDigest,
-        }
-      }
-      return {
-        kind: 'newsletter',
-        request: parsed.request,
-      }
-    }
     case MURPH_FINISH_WITHOUT_REPLY_TOOL.name: {
       const parsed = parseFinishWithoutReplyArguments(request.arguments)
       if (!parsed.ok) {
@@ -1826,6 +1814,20 @@ export async function executeMurphDynamicToolRequest(input: {
   askGrokTurnState?: AskGrokTurnState | null
   generateSongTurnState?: GenerateSongTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
+  const hostedImageCompletionEffectScope =
+    input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
+  if (
+    hostedImageCompletionEffectScope !== null &&
+    !isHostedImageCompletionToolRequestAllowed({
+      request: input.request,
+      scope: hostedImageCompletionEffectScope,
+    })
+  ) {
+    return toolTextResult(
+      false,
+      'this hosted image completion carries no authority for that tool action',
+    )
+  }
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
     !canExecuteComputerDynamicTools(input.hostedToolContext ?? null)
@@ -1883,8 +1885,6 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid assistant configuration arguments')
     case 'invalid-group-arguments':
       return toolTextResult(false, 'invalid group arguments')
-    case 'invalid-newsletter-arguments':
-      return toolTextResult(false, 'invalid newsletter arguments')
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-card-arguments':
@@ -1958,6 +1958,24 @@ export async function executeMurphDynamicToolRequest(input: {
           ...toolTextResult(
             false,
             'private response image could not be prepared',
+          ),
+          responseMediaPatch: {
+            media: [],
+            op: 'replace',
+          },
+        }
+      }
+      if (
+        hostedImageCompletionEffectScope !== null &&
+        !matchesExactHostedImageCompletionMedia({
+          actual: media,
+          expected: hostedImageCompletionEffectScope.exactMedia,
+        })
+      ) {
+        return {
+          ...toolTextResult(
+            false,
+            'the trusted completion image no longer matches its saved media',
           ),
           responseMediaPatch: {
             media: [],
@@ -2179,13 +2197,29 @@ export async function executeMurphDynamicToolRequest(input: {
       let artwork: ResolvedGenerateImageReference | null = null
       let originAssistantInputId: string | null = null
       try {
+        const completionEffectScope =
+          hostedToolContext.currentHostedImageCompletionEffectScope?.() ?? null
         trustedCompletion = hasExplicitArtwork
           ? null
           : await readAssistantHostedImageCompletion({
               assistantInputId:
-                hostedToolContext.currentAssistantInputId?.() ?? null,
+                completionEffectScope?.completionAssistantInputId
+                ?? hostedToolContext.currentAssistantInputId?.()
+                ?? null,
               vault: vaultRoot,
             })
+        if (
+          completionEffectScope !== null
+          && !matchesTrustedHostedImageCompletionScope({
+            completion: trustedCompletion,
+            scope: completionEffectScope,
+          })
+        ) {
+          return toolTextResult(
+            false,
+            'physical-note sending requires the exact trusted hosted image completion authorized for this turn',
+          )
+        }
         const userActionScope = hasExplicitArtwork
           ? hostedToolContext.currentUserActionScope?.() ?? null
           : null
@@ -2581,12 +2615,6 @@ export async function executeMurphDynamicToolRequest(input: {
         toolCallId: input.request.toolCallId ?? null,
         vaultRoot: input.vaultRoot ?? null,
       })
-    case 'newsletter':
-      return await executeNewsletterTool({
-        hostedToolContext: input.hostedToolContext ?? null,
-        request: input.request.request,
-        vaultRoot: input.vaultRoot ?? null,
-      })
     case 'finish-without-reply':
       return {
         ...toolTextResult(true, 'finished without reply'),
@@ -2909,6 +2937,63 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     }
   }
+}
+
+function isHostedImageCompletionToolRequestAllowed(input: {
+  request: MurphDynamicToolRequest
+  scope: AssistantHostedImageCompletionEffectScope
+}): boolean {
+  if (input.request.kind === 'finish-without-reply') {
+    return true
+  }
+  if (input.request.kind === 'attach-response-media') {
+    const requested = input.request.media.length === 1
+      ? input.request.media[0]
+      : null
+    const expected = input.scope.exactMedia?.[0] ?? null
+    // The model relays a vault descriptor, but the vault remains authoritative
+    // for mutable capture metadata such as hash, size, filename and content
+    // type. Admit only the exact trusted ref here. The attachment path then
+    // rehydrates that ref from the vault and performs the full exact-media
+    // comparison before exposing a response patch.
+    return requested?.kind === 'vault_image' &&
+      expected !== null &&
+      requested.ref === expected.ref
+  }
+  // Physical-note generation already owns an exact-origin continuation: the
+  // model must have launched generation with an authorized message_ref, and
+  // that executor re-reads the completion and verifies the vault bytes.
+  return input.request.kind === 'send-physical-note' &&
+    input.scope.authorizedOriginAssistantInputId !== null &&
+    input.scope.exactMedia !== null
+}
+
+function matchesExactHostedImageCompletionMedia(input: {
+  actual: readonly AssistantResponseMedia[]
+  expected: AssistantHostedImageCompletionEffectScope['exactMedia']
+}): boolean {
+  const expected = input.expected?.[0] ?? null
+  return expected !== null && matchesExactAssistantVaultImageResponseMedia({
+    actual: input.actual,
+    expected,
+  })
+}
+
+function matchesTrustedHostedImageCompletionScope(input: {
+  completion: Awaited<ReturnType<typeof readAssistantHostedImageCompletion>>
+  scope: AssistantHostedImageCompletionEffectScope
+}): boolean {
+  const completion = input.completion
+  const media = input.scope.exactMedia?.[0] ?? null
+  return completion !== null &&
+    completion.originAssistantInputIdExact &&
+    completion.originAssistantInputId ===
+      input.scope.authorizedOriginAssistantInputId &&
+    media !== null &&
+    completion.imageRef === media.ref &&
+    completion.imageSha256 === media.sha256 &&
+    completion.contentType === media.contentType &&
+    completion.sizeBytes === media.sizeBytes
 }
 
 async function resolveAttachedResponseMedia(input: {
@@ -3522,9 +3607,22 @@ function groupSharedModelResult(
  */
 function groupSharedModelResultText(
   modelResult: ReturnType<typeof groupSharedModelResult>,
+  options: {
+    audience?: 'group_email'
+    result?: Record<string, unknown>
+  } = {},
 ): { capacityPartial: boolean; text: string } {
   const serialize = (value: unknown): string =>
-    JSON.stringify({ action: 'read_shared', result: value })
+    JSON.stringify({
+      action: 'read_shared',
+      ...(options.audience === undefined
+        ? {}
+        : { audience: options.audience }),
+      result: {
+        ...options.result,
+        ...(typeof value === 'object' && value !== null ? value : {}),
+      },
+    })
   let text = serialize(modelResult)
   if (
     text.length <= ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS
@@ -4042,10 +4140,25 @@ async function executeGroupTool(input: {
   vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (input.request.action === 'read_shared') {
+    if (
+      'audience' in input.request
+      && input.request.audience === 'group_email'
+    ) {
+      return executeGroupEmailEffect({
+        hostedToolContext: input.hostedToolContext,
+        request: input.request,
+      })
+    }
     return executeGroupSharedRead({
       hostedToolContext: input.hostedToolContext,
       request: input.request,
       turnState: input.groupSharedReadTurnState,
+    })
+  }
+  if (input.request.action === 'send_email') {
+    return executeGroupEmailEffect({
+      hostedToolContext: input.hostedToolContext,
+      request: input.request,
     })
   }
   const groupTool = input.hostedToolContext?.groupTool ?? null
@@ -4801,6 +4914,15 @@ async function prepareGroupAvatarRuntimeRequest(input: {
         input.hostedToolContext?.persistGeneratedImageCapture ?? null,
       providerRequestOrdinal: input.nextUsageOrdinal(),
       requireHostedPrivateImageDelivery: true,
+      ...(input.captureScope === 'group-avatar'
+        ? {
+            validateResolvedReferenceImages: async (references) =>
+              await validateGeneratedGroupAvatarSourceReferences({
+                hostedToolContext: input.hostedToolContext,
+                references,
+              }),
+          }
+        : {}),
       vaultRoot: input.vaultRoot,
     })
     if (!generated.rpcSuccess) {
@@ -4846,6 +4968,7 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     hostedToolContext: input.hostedToolContext,
     imageRef: avatar.imageRef,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    verifyGeneratedDelivery: true,
     vaultRoot: input.vaultRoot,
   })
   if (!published.rpcSuccess) {
@@ -4864,6 +4987,7 @@ async function publishGroupAvatarImageReference(input: {
   hostedToolContext: AssistantHostedToolContext | null
   imageRef: string
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
+  verifyGeneratedDelivery?: boolean
   vaultRoot: string | null
 }): Promise<
   | { rpcSuccess: true; url: string }
@@ -4908,6 +5032,20 @@ async function publishGroupAvatarImageReference(input: {
     }
   }
 
+  if (input.verifyGeneratedDelivery === true) {
+    const deliveryVerified = await verifyGeneratedGroupAvatarSourceReference({
+      hostedToolContext: input.hostedToolContext,
+      reference,
+    })
+    if (!deliveryVerified) {
+      return {
+        rpcSuccess: false,
+        rpcText:
+          'generated image must be visible before it can become the group avatar',
+      }
+    }
+  }
+
   try {
     const published = await publisher.publishPrivateImageUrl({
       bytes: reference.bytes,
@@ -4922,107 +5060,187 @@ async function publishGroupAvatarImageReference(input: {
   }
 }
 
+async function validateGeneratedGroupAvatarSourceReferences(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  references: readonly ResolvedGenerateImageReference[]
+}): Promise<string | null> {
+  for (const reference of input.references) {
+    const deliveryVerified = await verifyGeneratedGroupAvatarSourceReference({
+      hostedToolContext: input.hostedToolContext,
+      reference,
+    })
+    if (!deliveryVerified) {
+      return 'generated image must be visible before it can become the group avatar'
+    }
+  }
+  return null
+}
+
+async function verifyGeneratedGroupAvatarSourceReference(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  reference: ResolvedGenerateImageReference
+}): Promise<boolean> {
+  if (!input.reference.sourceRef.startsWith('raw/captures/')) {
+    return true
+  }
+  const verified = await input.hostedToolContext
+    ?.verifyGeneratedImageDelivery?.({
+      contentType: input.reference.mediaType,
+      imageRef: input.reference.sourceRef,
+      sha256: input.reference.sha256,
+      sizeBytes: input.reference.bytes.byteLength,
+    })
+  return verified !== false
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
-async function executeNewsletterTool(input: {
+async function executeGroupEmailEffect(input: {
   hostedToolContext: AssistantHostedToolContext | null
-  request: HostedRuntimeNewsletterToolRequest
-  vaultRoot: string | null
+  request:
+    | Extract<MurphGroupToolRequest, { action: 'read_shared' }>
+    | Extract<MurphGroupToolRequest, { action: 'send_email' }>
 }): Promise<MurphDynamicToolExecutionResult> {
-  const newsletterTool = input.hostedToolContext?.newsletterTool ?? null
-  if (!newsletterTool) {
-    recordNewsletterUnavailable(input.hostedToolContext, 'newsletter_tool_unavailable')
-    return toolTextResult(false, 'newsletter tools are unavailable for this turn')
+  const groupEmailEffect = input.hostedToolContext?.groupEmailEffect ?? null
+  if (!groupEmailEffect) {
+    recordGroupEmailUnavailable(
+      input.hostedToolContext,
+      'group_email_effect_unavailable',
+    )
+    return toolTextResult(false, 'group email is unavailable for this turn')
   }
+
   try {
-    const scheduledAutomationAuthority =
-      input.hostedToolContext?.currentScheduledAutomationAuthority?.() ??
-      null
-    const request: HostedRuntimeNewsletterToolRequest = {
-      ...input.request,
-      scheduledAutomationAuthority,
+    if (input.request.action === 'send_email') {
+      const result = await groupEmailEffect.request({
+        action: 'send_email',
+        html: input.request.html,
+        subject: input.request.subject,
+        ...(input.request.text === undefined
+          ? {}
+          : { text: input.request.text }),
+      })
+      if (result.action !== 'send_email') {
+        recordGroupEmailUnavailable(
+          input.hostedToolContext,
+          'group_email_effect_response_mismatch',
+        )
+        return toolTextResult(false, 'group email send could not be accepted')
+      }
+      input.hostedToolContext?.recordGroupEmailSendResult?.(result)
+      const skippedNoEmailMemberIds =
+        'skippedNoEmailMemberIds' in result.result
+          ? result.result.skippedNoEmailMemberIds
+          : []
+      return {
+        ...toolTextResult(
+          !isGroupEmailAllRecipientSendFailure(result),
+          safeToolPayloadText({
+            action: 'send_email',
+            result: {
+              ...result.result,
+              missingVerifiedEmailCount: skippedNoEmailMemberIds.length,
+            },
+          }),
+        ),
+        // A durable external effect is terminal for this scheduled turn. The
+        // normal bound group outbox must not emit a second copy of the edition.
+        finalActionPatch: { kind: 'none', owner: 'group-email' },
+      }
     }
-    const result = await newsletterTool.request(request)
-    if (result.action === 'send') {
-      input.hostedToolContext?.recordNewsletterSendResult?.(result)
-    } else if (result.action === 'prepare' && result.result.status === 'unavailable') {
-      recordNewsletterUnavailable(
-        input.hostedToolContext,
-        result.result.unavailableReason,
-      )
+
+    const result = await groupEmailEffect.request({
+      action: 'prepare_email',
+      projectionScopes: input.request.projectionScopes,
+    })
+    if (
+      result.action !== 'prepare_email'
+      || result.result.status === 'unavailable'
+    ) {
+      const unavailableReason =
+        result.result.status === 'unavailable'
+          ? result.result.unavailableReason
+          : 'group_email_effect_response_mismatch'
+      recordGroupEmailUnavailable(input.hostedToolContext, unavailableReason)
+      return groupEmailPreparationUnavailableResult(unavailableReason)
     }
-    const toolSucceeded = !isNewsletterAllRecipientSendFailure(result)
-    if (result.action !== 'prepare' || result.result.status !== 'ok') {
-      return toolTextResult(toolSucceeded, safeToolPayloadText(result))
-    }
-    const skippedNoEmailMemberIds = result.result.participants
-      .filter((participant) => !participant.hasEmail)
-      .map((participant) => participant.memberId)
-    if (skippedNoEmailMemberIds.length === result.result.participants.length) {
-      input.hostedToolContext?.closeNewsletterCapability?.()
-      input.hostedToolContext?.recordNewsletterSendResult?.({
-        action: 'send',
+
+    const eligibleParticipants = result.result.participants.filter(
+      (participant) => participant.hasEmail,
+    )
+    const missingVerifiedEmailCount =
+      result.result.participants.length - eligibleParticipants.length
+    if (eligibleParticipants.length === 0) {
+      input.hostedToolContext?.closeGroupEmailCapability?.()
+      input.hostedToolContext?.recordGroupEmailSendResult?.({
+        action: 'send_email',
         result: {
           participantCount: 0,
-          skippedNoEmailMemberIds,
+          skippedNoEmailMemberIds: result.result.participants.map(
+            (participant) => participant.memberId,
+          ),
           status: 'no_recipients',
         },
       })
     }
-    const referenceAt = scheduledAutomationAuthority?.occurrenceAt ?? null
-    const members = await readNewsletterWeeklyMembers({
+
+    const shared = await readGroupEmailSharedData({
       groupSharedReader: input.hostedToolContext?.groupSharedReader ?? null,
       participants: result.result.participants,
-      referenceAt,
-      vaultRoot: input.vaultRoot,
+      projectionScopes: input.request.projectionScopes,
     })
-    if (members === null) {
-      recordNewsletterUnavailable(
+    if (shared === null) {
+      recordGroupEmailUnavailable(
         input.hostedToolContext,
-        'newsletter_preparation_unavailable',
+        'group_email_shared_read_unavailable',
       )
-      return groupSharedProjectionUnavailableResult(input.request.action)
+      return groupEmailPreparationUnavailableResult(
+        'shared_projection_unavailable',
+      )
     }
 
-    return toolTextResult(true, safeToolPayloadText({
-      action: 'prepare',
-      result: {
-        missingEmailParticipants: stripNewsletterAuthorizationSnapshot(
-          result.result.missingEmailParticipants,
-        ),
-        members,
-        participants: stripNewsletterAuthorizationSnapshot(
-          result.result.participants,
-        ),
-        referenceAt,
-        status: 'ok',
-      },
-    }))
+    return toolTextResult(
+      true,
+      groupSharedModelResultText(groupSharedModelResult(shared), {
+        audience: 'group_email',
+        result: {
+          missingVerifiedEmailCount,
+          recipientCount: eligibleParticipants.length,
+          referenceAt:
+            input.hostedToolContext
+              ?.currentScheduledAutomationAuthority?.()
+              ?.occurrenceAt ?? null,
+        },
+      }).text,
+    )
   } catch {
-    recordNewsletterUnavailable(input.hostedToolContext, 'newsletter_tool_failed')
-    return toolTextResult(false, 'newsletter tool request failed')
+    recordGroupEmailUnavailable(
+      input.hostedToolContext,
+      'group_email_effect_failed',
+    )
+    return toolTextResult(false, 'group email request failed')
   }
 }
 
-function recordNewsletterUnavailable(
+function recordGroupEmailUnavailable(
   hostedToolContext: AssistantHostedToolContext | null,
   unavailableReason: string,
 ): void {
-  hostedToolContext?.closeNewsletterCapability?.()
-  hostedToolContext?.recordNewsletterSendResult?.({
-    action: 'send',
+  hostedToolContext?.closeGroupEmailCapability?.()
+  hostedToolContext?.recordGroupEmailSendResult?.({
+    action: 'send_email',
     result: { status: 'unavailable', unavailableReason },
   })
 }
 
-function isNewsletterAllRecipientSendFailure(
-  result: HostedRuntimeNewsletterToolResponse,
+function isGroupEmailAllRecipientSendFailure(
+  result: HostedRuntimeGroupEmailEffectResponse,
 ): boolean {
   return (
-    result.action === 'send' &&
-    (
+    result.action === 'send_email'
+    && (
       result.result.status === 'unavailable'
       || (
         result.result.status === 'partial_failure'
@@ -5032,21 +5250,17 @@ function isNewsletterAllRecipientSendFailure(
   )
 }
 
-async function readNewsletterWeeklyMembers(input: {
+async function readGroupEmailSharedData(input: {
   groupSharedReader: AssistantHostedGroupSharedReader | null
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[]
-  referenceAt: string | null
-  vaultRoot: string | null
-}): Promise<SharedGroupWeeklyMember[] | null> {
-  if (!input.referenceAt || !input.vaultRoot) {
-    return []
-  }
-
-  const projectionScopes = readNewsletterAuthorizedProjectionScopes(
-    input.participants,
-  )
-  if (projectionScopes.length === 0) {
-    return []
+  participants: readonly HostedRuntimeGroupEmailParticipantSummary[]
+  projectionScopes: readonly HostedVaultShareSelectableProjectionScope[]
+}): Promise<AssistantHostedGroupSharedReadResponse | null> {
+  if (input.projectionScopes.length === 0) {
+    return {
+      members: [],
+      requestedProjectionScopeKeys: [],
+      status: 'none',
+    }
   }
   const groupSharedReader = input.groupSharedReader
   if (!groupSharedReader) {
@@ -5054,21 +5268,15 @@ async function readNewsletterWeeklyMembers(input: {
   }
 
   try {
-    const [timeZone, responses] = await Promise.all([
-      readNewsletterTimeZone(input.vaultRoot),
-      Promise.all(
-        chunkNewsletterProjectionScopes(projectionScopes).map((batch) =>
-          groupSharedReader.request({ projectionScopes: batch })
-        ),
+    const responses = await Promise.all(
+      chunkGroupEmailProjectionScopes(input.projectionScopes).map(
+        (projectionScopes) =>
+          groupSharedReader.request({ projectionScopes }),
       ),
-    ])
-    if (
-      timeZone === null
-      || responses.some((response) => response.status === 'unavailable')
-    ) {
+    )
+    if (responses.some((response) => response.status === 'unavailable')) {
       return null
     }
-
     const availableResponses = responses.filter(
       (response): response is Extract<
         AssistantHostedGroupSharedReadResponse,
@@ -5076,11 +5284,15 @@ async function readNewsletterWeeklyMembers(input: {
       > => response.status === 'ok',
     )
     if (availableResponses.length === 0) {
-      return []
+      return {
+        members: [],
+        requestedProjectionScopeKeys: input.projectionScopes.map(
+          buildHostedVaultShareProjectionScopeKey,
+        ),
+        status: 'none',
+      }
     }
     if (availableResponses.length !== responses.length) {
-      // A group or membership changed between bounded reads. Do not combine
-      // different live snapshots.
       return null
     }
 
@@ -5100,101 +5312,72 @@ async function readNewsletterWeeklyMembers(input: {
       return null
     }
 
+    const requestedScopeKeys = new Set(
+      input.projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
+    )
     const authorizedScopeKeysByMember = new Map(
       input.participants
         .filter((participant) => participant.hasEmail)
         .map((participant) => [
           participant.memberId,
           new Set(
-            participant.authorizedShares.map(
-              (share) => share.projectionScopeKey,
-            ),
+            participant.authorizedShares
+              .map((share) => share.projectionScopeKey)
+              .filter((scopeKey) => requestedScopeKeys.has(scopeKey)),
           ),
         ]),
     )
-    const members = new Map<string, {
-      displayName: string | null
-      memberId: string
-      shares: Array<{
-        projectionScopeKey: string
-        records: Array<{ data: object }>
-      }>
-    }>()
+    const members = new Map<string, AssistantHostedGroupSharedMember>()
 
     for (const response of availableResponses) {
       for (const member of response.members) {
-        const authorizedScopeKeys = authorizedScopeKeysByMember.get(member.memberId)
+        const authorizedScopeKeys =
+          authorizedScopeKeysByMember.get(member.memberId)
         if (!authorizedScopeKeys) {
           continue
         }
+        const projections = member.projections.filter((projection) =>
+          projection.grantStatus === 'granted'
+          && authorizedScopeKeys.has(projection.projectionScopeKey)
+        )
         const existing = members.get(member.memberId)
-        if (existing && existing.displayName !== member.displayName) {
+        if (!existing) {
+          members.set(member.memberId, {
+            ...member,
+            projections: [...projections],
+          })
+          continue
+        }
+        if (
+          existing.displayName !== member.displayName
+          || existing.participantId !== member.participantId
+          || !hasExactStringEntries(
+            existing.currentTurnHandles,
+            member.currentTurnHandles,
+          )
+        ) {
           return null
         }
-        const accumulator = existing ?? {
-          displayName: member.displayName,
-          memberId: member.memberId,
-          shares: [],
-        }
-        for (const projection of member.projections) {
-          if (
-            projection.grantStatus !== 'granted'
-            || !authorizedScopeKeys.has(projection.projectionScopeKey)
-            || projection.records.length === 0
-          ) {
-            continue
-          }
-          accumulator.shares.push({
-            projectionScopeKey: projection.projectionScopeKey,
-            records: projection.records.map((record) => ({
-              data: record.data,
-            })),
-          })
-        }
-        members.set(member.memberId, accumulator)
+        members.set(member.memberId, {
+          ...existing,
+          projections: [...existing.projections, ...projections],
+        })
       }
     }
 
-    return buildSharedGroupWeeklyMembers({
-      members: [...members.values()].filter((member) => member.shares.length > 0),
-      referenceAt: input.referenceAt,
-      timeZone,
-    })
+    return {
+      members: [...members.values()],
+      requestedProjectionScopeKeys: input.projectionScopes.map(
+        buildHostedVaultShareProjectionScopeKey,
+      ),
+      status: 'ok',
+    }
   } catch {
     return null
   }
 }
 
-// The newsletter reads the global selectable registry, so it must be intersected
-// with the newsletter's own configured allowlist. Otherwise any scope a member
-// grants for another surface (e.g. challenge-only nutrient totals) would flow into
-// scheduled email composition even though the newsletter was never configured for it.
-const NEWSLETTER_ALLOWED_PROJECTION_KINDS = new Set<string>(
-  GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES,
-)
-
-function readNewsletterAuthorizedProjectionScopes(
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[],
-): HostedVaultShareSelectableProjectionScope[] {
-  const authorizedScopeKeys = new Set(
-    participants
-      .filter((participant) => participant.hasEmail)
-      .flatMap((participant) =>
-        participant.authorizedShares.map(
-          (share) => share.projectionScopeKey,
-        )
-      ),
-  )
-  return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.filter(
-    (projectionScope) =>
-      NEWSLETTER_ALLOWED_PROJECTION_KINDS.has(projectionScope.projectionKind) &&
-      authorizedScopeKeys.has(
-        buildHostedVaultShareProjectionScopeKey(projectionScope),
-      ),
-  )
-}
-
-function chunkNewsletterProjectionScopes(
+function chunkGroupEmailProjectionScopes(
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[],
 ): HostedVaultShareSelectableProjectionScope[][] {
   const batches: HostedVaultShareSelectableProjectionScope[][] = []
@@ -5211,33 +5394,18 @@ function chunkNewsletterProjectionScopes(
   return batches
 }
 
-async function readNewsletterTimeZone(vaultRoot: string): Promise<string | null> {
-  try {
-    const { loadVault } = await import('@murphai/core')
-    return (await loadVault({ vaultRoot })).metadata.timezone
-  } catch {
-    return null
-  }
-}
-
-function stripNewsletterAuthorizationSnapshot(
-  participants: readonly HostedRuntimeNewsletterParticipantSummary[],
-): Array<Pick<HostedRuntimeNewsletterParticipantSummary, 'hasEmail' | 'memberId'>> {
-  return participants.map(({ hasEmail, memberId }) => ({ hasEmail, memberId }))
-}
-
-function groupSharedProjectionUnavailableResult(
-  action: HostedRuntimeNewsletterToolRequest['action'],
+function groupEmailPreparationUnavailableResult(
+  unavailableReason: string,
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(true, safeToolPayloadText({
-    action,
+    action: 'read_shared',
+    audience: 'group_email',
     result: {
       status: 'unavailable',
-      unavailableReason: 'shared_projection_unavailable',
+      unavailableReason,
     },
   }))
 }
-
 async function executeProgressUpdateTool(input: {
   deliveryContextOrdinal: number | null
   progressDelivery: AssistantProgressDelivery | null
@@ -6029,7 +6197,13 @@ function parsePersonalizationArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.personalization.input',
-        schemaRootKeys: ['action', 'tone', 'voice'],
+        schemaRootKeys: [
+          'action',
+          'mainPersona',
+          'supportingPersona',
+          'tone',
+          'voice',
+        ],
         toolName: 'murph.personalization',
       }),
     }
@@ -6117,9 +6291,15 @@ function parseGroupArguments(
       ok: true,
       request: {
         action: 'read_shared',
+        ...(parsed.data.audience === undefined
+          ? {}
+          : { audience: parsed.data.audience }),
         projectionScopes: parsed.data.projectionScopes,
       },
     }
+  }
+  if (parsed.data.action === 'send_email') {
+    return { ok: true, request: parsed.data }
   }
   if (parsed.data.action === 'offer_access') {
     return { ok: true, request: parsed.data }
@@ -6290,45 +6470,6 @@ function parseGroupArguments(
     }
   }
   return { ok: true, request: { action: 'read_current' } }
-}
-
-function parseNewsletterArguments(
-  value: unknown,
-):
-  | {
-      request: HostedRuntimeNewsletterToolRequest
-      ok: true
-    }
-  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = newsletterArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: parsed.error,
-        rawInput: value,
-        schemaName: 'murph.newsletter.input',
-        schemaRootKeys: ['action', 'html', 'subject', 'text'],
-        toolName: 'murph.newsletter',
-      }),
-    }
-  }
-  if (parsed.data.action === 'prepare') {
-    return {
-      ok: true,
-      request: { action: 'prepare' },
-    }
-  }
-
-  return {
-    ok: true,
-    request: {
-      action: 'send',
-      html: parsed.data.html,
-      subject: parsed.data.subject,
-      ...(parsed.data.text === undefined ? {} : { text: parsed.data.text }),
-    },
-  }
 }
 
 function parseFinishWithoutReplyArguments(

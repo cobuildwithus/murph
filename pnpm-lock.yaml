@@ -718,6 +718,9 @@ importers:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@murphai/health-metrics':
+        specifier: workspace:*
+        version: link:../health-metrics
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
@@ -1019,6 +1022,9 @@ importers:
       '@murphai/health-commons':
         specifier: workspace:*
         version: link:../health-commons
+      '@murphai/health-metrics':
+        specifier: workspace:*
+        version: link:../health-metrics
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers

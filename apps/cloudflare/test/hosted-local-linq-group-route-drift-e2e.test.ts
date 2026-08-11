@@ -237,8 +237,16 @@ describe("hosted local Linq group route drift e2e", () => {
       expectedMethod: "POST",
       expectedPath: "/capability/check_imessage",
     });
+    const route = await requireScenario().readHostedThreadRoute({
+      channel: "linq",
+      threadId: groupChatId,
+    });
+    expect(route).toMatchObject({ ownerMemberId });
+    if (!route) {
+      throw new Error("Expected the Linq group card fixture to retain its durable route.");
+    }
     const completionPromise = requireScenario().waitForHostedCompletion(
-      ownerMemberId,
+      route.containerMemberId,
       { timeoutMs: 600_000 },
     );
     const response = await postSignedLinqWebhook(buildHostedLinqInboundEvent(

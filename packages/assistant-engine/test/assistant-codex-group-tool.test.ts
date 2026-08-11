@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   addCaptureWithLookup,
@@ -43,6 +44,19 @@ import {
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from "../src/assistant/group-shared-read-limits.ts";
+import {
+  createAssistantOutboxIntent,
+  listAssistantOutboxIntents,
+  saveAssistantOutboxIntent,
+} from "../src/assistant/outbox.ts";
+import {
+  buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
+  resolveAssistantGeneratedImageDelivery,
+} from "../src/assistant/response-media.ts";
+import {
+  appendAssistantTranscriptEntries,
+  listAssistantTranscriptEntries,
+} from "../src/assistant/store.ts";
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from "../src/assistant/message-target-selection.ts";
@@ -53,7 +67,6 @@ import {
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
-  MURPH_NEWSLETTER_TOOL,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.ts";
@@ -76,29 +89,19 @@ function groupToolCall(
   };
 }
 
-function newsletterToolCall(argumentsValue: unknown): Record<string, unknown> {
-  return {
-    id: "request-newsletter-test",
-    method: "item/tool/call",
-    params: {
-      arguments: argumentsValue,
-      callId: "call-newsletter-test",
-      namespace: "murph",
-      threadId: "thread-test",
-      tool: MURPH_NEWSLETTER_TOOL.name,
-      turnId: "turn-test",
-    },
-  };
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
-type NewsletterToolRequest = NonNullable<AssistantHostedToolContext["newsletterTool"]>["request"];
-const NEWSLETTER_AUTHORIZATION_PROOF = "a".repeat(64);
 type GroupToolRequest = NonNullable<AssistantHostedToolContext["groupTool"]>["request"];
 type GroupToolResponse = Awaited<ReturnType<GroupToolRequest>>;
 type GroupPermissionOfferRequest = NonNullable<
   AssistantHostedToolContext["groupPermissionOfferTool"]
 >["request"];
 type GroupSharedReadRequest = AssistantHostedGroupSharedReader["request"];
+type GroupEmailEffectRequest = NonNullable<
+  AssistantHostedToolContext["groupEmailEffect"]
+>["request"];
 
 const webpBytes = new Uint8Array([
   0x52, 0x49, 0x46, 0x46,
@@ -126,6 +129,7 @@ describe("murph.group dynamic tool", () => {
       "post_disclosure_request",
       "revoke_disclosure_grant",
       "read_shared",
+      "send_email",
       "read_current",
       "prepare_next_group",
       "read_next_group",
@@ -216,6 +220,14 @@ describe("murph.group dynamic tool", () => {
       .toContain("actual scope snapshot");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.avatarSource.description)
+      .toBe(
+        'Required for action="set_chat_avatar". Generate a new square avatar or reuse an exact existing private image ref.',
+      );
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.imageRef.description)
+      .toBe(
+        'Required for action="set_chat_avatar" with avatarSource="image_ref". Use the exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
+      );
     expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
     expect(MURPH_GROUP_TOOL.description)
       .toContain("authorized direct, group, or scheduled context");
@@ -1268,6 +1280,7 @@ describe("murph.group dynamic tool", () => {
           { projectionKind: "device-sync-status.v0" },
         ],
       },
+      toolCallId: "call-test",
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
@@ -4334,12 +4347,21 @@ describe("murph.group dynamic tool", () => {
     expect(groupRequest).not.toHaveBeenCalled();
   });
 
-  it("uploads a user-sent image ref before setting the group avatar", async () => {
+  it.each([
+    ["user-sent", "raw/inbox/avatar.png"],
+    [
+      "Murph-generated canonical capture",
+      "raw/captures/2026/08/generated-avatar/avatar.png",
+    ],
+  ] as const)("uploads a %s image ref before setting the group avatar", async (
+    _source,
+    imageRef,
+  ) => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
     try {
-      await mkdir(join(vaultRoot, "raw", "inbox"), { recursive: true });
+      await mkdir(dirname(join(vaultRoot, imageRef)), { recursive: true });
       await writeFile(
-        join(vaultRoot, "raw", "inbox", "avatar.png"),
+        join(vaultRoot, imageRef),
         Buffer.from(
           "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
           "base64",
@@ -4366,7 +4388,7 @@ describe("murph.group dynamic tool", () => {
         action: "set_chat_avatar",
         alt: "Our group avatar",
         avatarSource: "image_ref",
-        imageRef: "raw/inbox/avatar.png",
+        imageRef,
       }));
       if (!request || request.kind !== "group") {
         throw new Error("Expected group request.");
@@ -4394,6 +4416,10 @@ describe("murph.group dynamic tool", () => {
         "murph-hosted.cobuildwithus.workers.dev",
       );
       expect(result.responseMediaPatch).toBeUndefined();
+      expect(groupRequest).toHaveBeenNthCalledWith(
+        1,
+        { action: "preflight_set_chat_avatar" },
+      );
       expect(privateImageUrlPublish).toHaveBeenCalledOnce();
       expect(privateImageUrlPublish.mock.calls[0]?.[0]).toEqual({
         bytes: expect.any(Uint8Array),
@@ -4403,6 +4429,554 @@ describe("murph.group dynamic tool", () => {
         2,
         { action: "set_chat_avatar", groupChatIconUrl: SIGNED_PRIVATE_IMAGE_URL },
       );
+      expect(groupRequest.mock.invocationCallOrder[0])
+        .toBeLessThan(privateImageUrlPublish.mock.invocationCallOrder[0]!);
+      expect(privateImageUrlPublish.mock.invocationCallOrder[0])
+        .toBeLessThan(groupRequest.mock.invocationCallOrder[1]!);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps an undelivered generated completion image out of a later avatar update", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-pending-"));
+    const imageRef = "raw/captures/2026/08/pending-avatar/avatar.png";
+    const sessionId = "session_pending_generated_avatar";
+    const completionTurnId = "turn_pending_generated_avatar_completion";
+    const deliveryTurnId = "turn_pending_generated_avatar_delivery";
+    const imageBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const media = {
+      alt: "Pending generated avatar",
+      contentType: "image/png",
+      filename: "avatar.png",
+      kind: "vault_image",
+      ref: imageRef,
+      sha256: sha256Hex(imageBytes),
+      sizeBytes: imageBytes.byteLength,
+      source: "gpt-image-2",
+    } as const;
+    try {
+      await mkdir(dirname(join(vaultRoot, imageRef)), { recursive: true });
+      await writeFile(join(vaultRoot, imageRef), imageBytes);
+      const transcriptEntries = await appendAssistantTranscriptEntries(
+        vaultRoot,
+        sessionId,
+        [{
+          kind: "status",
+          text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+            contentType: media.contentType,
+            deliveryContextOrdinal: 0,
+            ref: media.ref,
+            sha256: media.sha256,
+            sizeBytes: media.sizeBytes,
+            turnId: completionTurnId,
+          }),
+        }],
+      );
+      const intent = await createAssistantOutboxIntent({
+        channel: "linq",
+        explicitTarget: "thread-pending-avatar",
+        media: [media],
+        message: "Pending generated avatar",
+        sessionId,
+        threadId: "thread-pending-avatar",
+        threadIsDirect: false,
+        turnId: deliveryTurnId,
+        vault: vaultRoot,
+      });
+
+      const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
+        request.action === "preflight_set_chat_avatar"
+          ? {
+              action: "preflight_set_chat_avatar",
+              result: { status: "ok" },
+            }
+          : {
+              action: "set_chat_avatar",
+              result: { status: "requested" },
+            });
+      const privateImageUrlPublish = vi.fn<
+        AssistantHostedPrivateImageUrlPublisher["publishPrivateImageUrl"]
+      >(async () => ({
+        expiresAt: "2033-05-18T03:33:20.000Z",
+        url: SIGNED_PRIVATE_IMAGE_URL,
+      }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        alt: "Our group avatar",
+        avatarSource: "image_ref",
+        imageRef,
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+            conversationId: "conversation_pending_avatar",
+            conversationScope: "group",
+            inboundMailboxItemIds: ["mailbox_pending_avatar"],
+            originSessionId: sessionId,
+            recipientKey: "recipient_pending_avatar",
+          }),
+          groupRequest,
+          privateImageUrlPublish,
+          verifyGeneratedImageDelivery: async (candidate) =>
+            resolveAssistantGeneratedImageDelivery({
+              currentMedia: candidate,
+              imageRef: candidate.imageRef,
+              intents: await listAssistantOutboxIntents(vaultRoot),
+              sessionId,
+              transcriptEntries: await listAssistantTranscriptEntries(
+                vaultRoot,
+                sessionId,
+              ),
+            }),
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(result.rpcResult).toEqual({
+        contentItems: [{
+          text: "generated image must be visible before it can become the group avatar",
+          type: "inputText",
+        }],
+        success: false,
+      });
+      expect(groupRequest).toHaveBeenCalledOnce();
+      expect(groupRequest).toHaveBeenCalledWith({
+        action: "preflight_set_chat_avatar",
+      });
+      expect(privateImageUrlPublish).not.toHaveBeenCalled();
+
+      const sentAt = "2026-08-10T12:00:00.000Z";
+      const delivered = {
+        channel: "linq",
+        idempotencyKey: "pending-avatar-delivery",
+        messageLength: intent.message.length,
+        providerMessageEffects: [{
+          carriesIntentMedia: true as const,
+          message: intent.message,
+          providerMessageId: "linq-message-pending-avatar",
+        }],
+        providerMessageId: "linq-message-pending-avatar",
+        providerMessageIds: ["linq-message-pending-avatar"],
+        providerThreadId: "thread-pending-avatar",
+        sentAt,
+        target: "thread-pending-avatar",
+        targetKind: "thread" as const,
+      };
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        generatedImageOriginKnown: true,
+        imageRef,
+        intents: [intent],
+        sessionId,
+        transcriptEntries: [],
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        imageRef,
+        intents: [intent],
+        sessionId,
+        transcriptEntries: [],
+      })).toBe(true);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: {
+            ...delivered,
+            providerMessageEffects: delivered.providerMessageEffects.map(
+              ({ carriesIntentMedia: _ignored, ...effect }) => effect,
+            ),
+          },
+          status: "retryable",
+        }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        generatedImageOriginKnown: true,
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: delivered,
+          status: "retryable",
+        }],
+        sessionId,
+        transcriptEntries: [],
+      })).toBe(true);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: delivered,
+          status: "sending",
+        }],
+        sessionId: "session_pending_generated_avatar_other",
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        imageRef,
+        intents: [{ ...intent, delivery: delivered, status: "sending" }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(true);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: delivered,
+          media: [{
+            ...media,
+            sha256: "b".repeat(64),
+          }],
+          status: "sending",
+        }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        imageRef,
+        intents: [{ ...intent, delivery: delivered, status: "failed" }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(true);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: delivered,
+          deliveryConfirmationPending: true,
+          status: "retryable",
+        }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        imageRef,
+        intents: [{ ...intent, delivery: delivered, status: "abandoned" }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        imageRef,
+        intents: [{
+          ...intent,
+          delivery: {
+            ...delivered,
+            providerMessageEffects: [
+              ...delivered.providerMessageEffects,
+              ...delivered.providerMessageEffects,
+            ],
+          },
+          status: "failed",
+        }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
+        imageRef,
+        intents: [{ ...intent, status: "failed" }],
+        sessionId,
+        transcriptEntries,
+      })).toBe(false);
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...intent,
+        delivery: delivered,
+        sentAt,
+        status: "sent",
+        updatedAt: sentAt,
+      });
+      const deliveredResult = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+            conversationId: "conversation_pending_avatar",
+            conversationScope: "group",
+            inboundMailboxItemIds: ["mailbox_pending_avatar"],
+            originSessionId: sessionId,
+            recipientKey: "recipient_pending_avatar",
+          }),
+          groupRequest,
+          privateImageUrlPublish,
+          verifyGeneratedImageDelivery: async (candidate) =>
+            resolveAssistantGeneratedImageDelivery({
+              currentMedia: candidate,
+              imageRef: candidate.imageRef,
+              intents: await listAssistantOutboxIntents(vaultRoot),
+              sessionId,
+              transcriptEntries: await listAssistantTranscriptEntries(
+                vaultRoot,
+                sessionId,
+              ),
+            }),
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(deliveredResult.rpcResult.success).toBe(true);
+      expect(groupRequest).toHaveBeenCalledTimes(3);
+      expect(privateImageUrlPublish).toHaveBeenCalledOnce();
+
+      await writeFile(join(vaultRoot, imageRef), Buffer.from(webpBytes));
+      const replacedResult = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+            conversationId: "conversation_pending_avatar",
+            conversationScope: "group",
+            inboundMailboxItemIds: ["mailbox_pending_avatar"],
+            originSessionId: sessionId,
+            recipientKey: "recipient_pending_avatar",
+          }),
+          groupRequest,
+          privateImageUrlPublish,
+          verifyGeneratedImageDelivery: async (candidate) =>
+            resolveAssistantGeneratedImageDelivery({
+              currentMedia: candidate,
+              imageRef: candidate.imageRef,
+              intents: await listAssistantOutboxIntents(vaultRoot),
+              sessionId,
+              transcriptEntries: await listAssistantTranscriptEntries(
+                vaultRoot,
+                sessionId,
+              ),
+            }),
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+      expect(replacedResult.rpcResult).toEqual({
+        contentItems: [{
+          text: "generated image must be visible before it can become the group avatar",
+          type: "inputText",
+        }],
+        success: false,
+      });
+      expect(groupRequest).toHaveBeenCalledTimes(4);
+      expect(privateImageUrlPublish).toHaveBeenCalledOnce();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("requires visible generated references before generating a group avatar", async () => {
+    const vaultRoot = await mkdtemp(join(
+      tmpdir(),
+      "assistant-codex-group-avatar-generated-reference-",
+    ));
+    const generatedRef = "raw/captures/2026/08/generated-reference/avatar.png";
+    const ordinaryRef = "raw/captures/2026/08/ordinary-reference/avatar.png";
+    const sessionId = "session_generated_avatar_reference";
+    const completionTurnId = "turn_generated_avatar_reference_completion";
+    const deliveryTurnId = "turn_generated_avatar_reference_delivery";
+    const imageBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const media = {
+      alt: "Generated avatar reference",
+      contentType: "image/png",
+      filename: "avatar.png",
+      kind: "vault_image",
+      ref: generatedRef,
+      sha256: sha256Hex(imageBytes),
+      sizeBytes: imageBytes.byteLength,
+      source: "gpt-image-2",
+    } as const;
+    try {
+      await initializeVault({ vaultRoot });
+      for (const imageRef of [generatedRef, ordinaryRef]) {
+        await mkdir(dirname(join(vaultRoot, imageRef)), { recursive: true });
+        await writeFile(join(vaultRoot, imageRef), imageBytes);
+      }
+      await appendAssistantTranscriptEntries(vaultRoot, sessionId, [{
+        kind: "status",
+        text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+          contentType: media.contentType,
+          deliveryContextOrdinal: 0,
+          ref: media.ref,
+          sha256: media.sha256,
+          sizeBytes: media.sizeBytes,
+          turnId: completionTurnId,
+        }),
+      }]);
+      const intent = await createAssistantOutboxIntent({
+        channel: "linq",
+        explicitTarget: "thread-generated-avatar-reference",
+        media: [media],
+        message: "Generated avatar reference",
+        sessionId,
+        threadId: "thread-generated-avatar-reference",
+        threadIsDirect: false,
+        turnId: deliveryTurnId,
+        vault: vaultRoot,
+      });
+      const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
+        request.action === "preflight_set_chat_avatar"
+          ? {
+              action: "preflight_set_chat_avatar",
+              result: { status: "ok" },
+            }
+          : {
+              action: "set_chat_avatar",
+              result: { status: "requested" },
+            });
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse({
+          data: [{ b64_json: Buffer.from(webpBytes).toString("base64") }],
+          usage: {
+            input_tokens: 4,
+            output_tokens: 6,
+            total_tokens: 10,
+          },
+        }));
+      const privateImageUrlPublish = vi.fn<
+        AssistantHostedPrivateImageUrlPublisher["publishPrivateImageUrl"]
+      >(async () => ({
+        expiresAt: "2033-05-18T03:33:20.000Z",
+        url: SIGNED_PRIVATE_IMAGE_URL,
+      }));
+      let requestOrdinal = 0;
+      const run = async (referenceImageRefs: string[]) => {
+        const currentRequestOrdinal = requestOrdinal++;
+        const request = readMurphDynamicToolRequest(groupToolCall({
+          action: "set_chat_avatar",
+          alt: "Our generated avatar",
+          avatarSource: "generate",
+          prompt: "A clean square badge based on these references",
+          referenceImageRefs,
+        }, {
+          callId: `call_generated_avatar_reference_${currentRequestOrdinal}`,
+          id: 300 + currentRequestOrdinal,
+        }));
+        if (!request || request.kind !== "group") {
+          throw new Error("Expected group request.");
+        }
+        return await executeMurphDynamicToolRequest({
+          env: { OPENAI_API_KEY: "openai-test-key" },
+          fetchImpl,
+          hostedToolContext: createGroupHostedToolContext({
+            groupRequest,
+            privateImageUrlPublish,
+            verifyGeneratedImageDelivery: async (candidate) =>
+              resolveAssistantGeneratedImageDelivery({
+                currentMedia: candidate,
+                imageRef: candidate.imageRef,
+                intents: await listAssistantOutboxIntents(vaultRoot),
+                sessionId,
+                transcriptEntries: await listAssistantTranscriptEntries(
+                  vaultRoot,
+                  sessionId,
+                ),
+              }),
+          }),
+          nextUsageOrdinal: () => 1,
+          progressDelivery: null,
+          request,
+          vaultRoot,
+        });
+      };
+
+      const hiddenResult = await run([generatedRef]);
+      expect(hiddenResult.rpcResult).toEqual({
+        contentItems: [{
+          text: "generated image must be visible before it can become the group avatar",
+          type: "inputText",
+        }],
+        success: false,
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(privateImageUrlPublish).not.toHaveBeenCalled();
+      expect(groupRequest).toHaveBeenCalledExactlyOnceWith({
+        action: "preflight_set_chat_avatar",
+      });
+
+      const mixedResult = await run([ordinaryRef, generatedRef]);
+      expect(mixedResult.rpcResult.success).toBe(false);
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(privateImageUrlPublish).not.toHaveBeenCalled();
+      expect(groupRequest).toHaveBeenCalledTimes(2);
+
+      const sentAt = "2026-08-10T12:00:00.000Z";
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...intent,
+        delivery: {
+          channel: "linq",
+          idempotencyKey: "generated-avatar-reference-delivery",
+          messageLength: intent.message.length,
+          providerMessageEffects: [{
+            carriesIntentMedia: true,
+            message: intent.message,
+            providerMessageId: "linq-message-generated-avatar-reference",
+          }],
+          providerMessageId: "linq-message-generated-avatar-reference",
+          providerMessageIds: ["linq-message-generated-avatar-reference"],
+          providerThreadId: "thread-generated-avatar-reference",
+          sentAt,
+          target: "thread-generated-avatar-reference",
+          targetKind: "thread",
+        },
+        sentAt,
+        status: "sent",
+        updatedAt: sentAt,
+      });
+
+      const deliveredResult = await run([generatedRef]);
+      expect(deliveredResult.rpcResult.success).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(privateImageUrlPublish).toHaveBeenCalledOnce();
+      expect(groupRequest).toHaveBeenCalledTimes(4);
+
+      await writeFile(join(vaultRoot, generatedRef), Buffer.from(webpBytes));
+      const replacedResult = await run([generatedRef]);
+      expect(replacedResult.rpcResult).toEqual({
+        contentItems: [{
+          text: "generated image must be visible before it can become the group avatar",
+          type: "inputText",
+        }],
+        success: false,
+      });
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(privateImageUrlPublish).toHaveBeenCalledOnce();
+      expect(groupRequest).toHaveBeenCalledTimes(5);
+
+      const ordinaryResult = await run([ordinaryRef]);
+      expect(ordinaryResult.rpcResult.success).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(privateImageUrlPublish).toHaveBeenCalledTimes(2);
+      expect(groupRequest).toHaveBeenCalledTimes(7);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -4892,881 +5466,150 @@ describe("murph.group dynamic tool", () => {
   });
 });
 
-describe("murph.newsletter dynamic tool", () => {
-  it("advertises the supported actions", () => {
-    expect(MURPH_NEWSLETTER_TOOL.inputSchema.properties.action.enum).toEqual([
-      "prepare",
-      "send",
-    ]);
-    expect(MURPH_NEWSLETTER_TOOL.inputSchema.properties).not.toHaveProperty("groupId");
-    expect(MURPH_NEWSLETTER_TOOL.inputSchema.required).toEqual(["action"]);
-  });
-
-  it("keeps the automation name in scheduled email subjects", () => {
-    expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "current scheduled automation instructions",
-    );
-    expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "Start the subject",
-    );
-    expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "never a generic label",
-    );
-    expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "shared facts from the seven completed local days",
-    );
-    expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "exact live email and health-share grants",
-    );
-    expect(MURPH_NEWSLETTER_TOOL.description).toContain(
-      "compose only from its members",
-    );
-  });
-
-  it("derives the group from runtime authority and rejects model-supplied targets", () => {
-    expect(readMurphDynamicToolRequest(newsletterToolCall({
-      action: "prepare",
+describe("murph.group email actions", () => {
+  it("parses email preparation as an audience-bound shared read", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      audience: "group_email",
+      projectionScopes: [
+        { projectionKind: "steps-days.v0" },
+        { projectionKind: "sleep-times.v0" },
+        { projectionKind: "hrv-days.v0" },
+        { projectionKind: "workouts.v0" },
+      ],
     }))).toEqual({
-      kind: "newsletter",
+      kind: "group",
       request: {
-        action: "prepare",
+        action: "read_shared",
+        audience: "group_email",
+        projectionScopes: [
+          { projectionKind: "steps-days.v0" },
+          { projectionKind: "sleep-times.v0" },
+          { projectionKind: "hrv-days.v0" },
+          { projectionKind: "workouts.v0" },
+        ],
       },
+      toolCallId: "call-test",
     });
+  });
 
-    expect(readMurphDynamicToolRequest(newsletterToolCall({
-      action: "send",
-      html: "<p>Weekly</p>",
-      subject: "Weekly note",
-      text: "Weekly",
+  it("parses a recipient-free durable group email effect", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "send_email",
+      html: "<p>Weekly update</p>",
+      subject: "Weekly update",
+      text: "Weekly update",
     }))).toEqual({
-      kind: "newsletter",
+      kind: "group",
       request: {
-        action: "send",
-        html: "<p>Weekly</p>",
-        subject: "Weekly note",
-        text: "Weekly",
+        action: "send_email",
+        html: "<p>Weekly update</p>",
+        subject: "Weekly update",
+        text: "Weekly update",
       },
+      toolCallId: "call-test",
     });
-
-    expect(readMurphDynamicToolRequest(newsletterToolCall({
-      action: "send",
-      html: "<p>Weekly</p>",
-      subject: "Weekly note",
-      to: ["one@example.test"],
-    }))?.kind).toBe("invalid-newsletter-arguments");
-
-    expect(readMurphDynamicToolRequest(newsletterToolCall({
-      action: "prepare",
-      groupId: "group_1",
-    }))?.kind).toBe("invalid-newsletter-arguments");
   });
 
-  it("prepares recipient eligibility and an empty member set without shared scopes", async () => {
-    vi.useFakeTimers();
-    try {
-      const hostedToolContext = createNewsletterHostedToolContext();
-      const request = readMurphDynamicToolRequest(newsletterToolCall({
-        action: "prepare",
-      }));
-      if (!request || request.kind !== "newsletter") {
-        throw new Error("Expected newsletter request.");
+  it("exposes only email-eligible members and their exact authorized projections", async () => {
+    const requestedScopes = [
+      { projectionKind: "steps-days.v0" as const },
+      { projectionKind: "sleep-times.v0" as const },
+    ];
+    const groupEmailRequest = vi.fn<GroupEmailEffectRequest>(async (request) => {
+      if (request.action !== "prepare_email") {
+        throw new Error("Expected group email preparation.");
       }
-
-      vi.setSystemTime(new Date("2026-07-06T12:00:00.000Z"));
-      const first = await executeMurphDynamicToolRequest({
-        env: {},
-        fetchImpl: fetch,
-        hostedToolContext,
-        nextUsageOrdinal: () => 1,
-        progressDelivery: null,
-        request,
-        vaultRoot: null,
-      });
-      vi.setSystemTime(new Date("2026-07-20T12:00:00.000Z"));
-      const second = await executeMurphDynamicToolRequest({
-        env: {},
-        fetchImpl: fetch,
-        hostedToolContext,
-        nextUsageOrdinal: () => 1,
-        progressDelivery: null,
-        request,
-        vaultRoot: null,
-      });
-
-      expect(readNewsletterToolPayload(first)).toEqual({
-        action: "prepare",
+      return {
+        action: "prepare_email",
         result: {
-          missingEmailParticipants: [],
-          members: [],
-          participants: [
-            {
-              hasEmail: true,
-              memberId: "member_a",
-            },
-          ],
-          referenceAt: "2026-07-06T03:30:00.000Z",
-          status: "ok",
-        },
-      });
-      expect(readNewsletterToolPayload(second)).toEqual(readNewsletterToolPayload(first));
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("records no recipients and closes send authority after an all-missing-email prepare", async () => {
-    const closeNewsletterCapability = vi.fn();
-    const recordNewsletterSendResult = vi.fn();
-    const newsletterRequest = vi.fn<NewsletterToolRequest>(async (request) => ({
-      action: "prepare",
-      result: {
-        authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-        groupId: "group_1",
-        missingEmailParticipants: [
-          {
-            authorizedShares: [],
-            hasEmail: false,
-            memberId: "member_a",
-          },
-        ],
-        participants: [
-          {
-            authorizedShares: [],
-            hasEmail: false,
-            memberId: "member_a",
-          },
-        ],
-        status: "ok",
-      },
-    }));
-    const request = readMurphDynamicToolRequest(newsletterToolCall({
-      action: "prepare",
-    }));
-    if (!request || request.kind !== "newsletter") {
-      throw new Error("Expected newsletter request.");
-    }
-
-    const result = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createNewsletterHostedToolContext({
-        closeNewsletterCapability,
-        newsletterRequest,
-        recordNewsletterSendResult,
-      }),
-      nextUsageOrdinal: () => 1,
-      progressDelivery: null,
-      request,
-      vaultRoot: null,
-    });
-
-    expect(readNewsletterToolPayload(result)).toEqual({
-      action: "prepare",
-      result: {
-        members: [],
-        missingEmailParticipants: [
-          { hasEmail: false, memberId: "member_a" },
-        ],
-        participants: [
-          { hasEmail: false, memberId: "member_a" },
-        ],
-        referenceAt: "2026-07-06T03:30:00.000Z",
-        status: "ok",
-      },
-    });
-    expect(closeNewsletterCapability).toHaveBeenCalledTimes(1);
-    expect(recordNewsletterSendResult).toHaveBeenCalledWith({
-      action: "send",
-      result: {
-        participantCount: 0,
-        skippedNoEmailMemberIds: ["member_a"],
-        status: "no_recipients",
-      },
-    });
-    expect(newsletterRequest).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns an empty member set when no shared scopes are authorized", async () => {
-    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-stats-missing-"));
-    try {
-      const hostedToolContext = createNewsletterHostedToolContext();
-      const request = readMurphDynamicToolRequest(newsletterToolCall({
-        action: "prepare",
-      }));
-      if (!request || request.kind !== "newsletter") {
-        throw new Error("Expected newsletter request.");
-      }
-
-      const result = await executeMurphDynamicToolRequest({
-        env: {},
-        fetchImpl: fetch,
-        hostedToolContext,
-        nextUsageOrdinal: () => 1,
-        progressDelivery: null,
-        request,
-        vaultRoot,
-      });
-
-      expect(result.rpcResult.success).toBe(true);
-      expect(readNewsletterToolPayload(result)).toEqual({
-        action: "prepare",
-        result: {
-          missingEmailParticipants: [],
-          members: [],
-          participants: [
-            {
-              hasEmail: true,
-              memberId: "member_a",
-            },
-          ],
-          referenceAt: "2026-07-06T03:30:00.000Z",
-          status: "ok",
-        },
-      });
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("summarizes only live Web-owned records for email-authorized participants and scopes", async () => {
-    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-eligible-"));
-    try {
-      await initializeVault({ timezone: "UTC", vaultRoot });
-      const sequence: string[] = [];
-      const newsletterRequest = vi.fn<NewsletterToolRequest>(async () => {
-        sequence.push("newsletter.authority");
-        return {
-          action: "prepare",
-          result: {
-            authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-            groupId: "group_1",
-            missingEmailParticipants: [{
-              authorizedShares: [],
-              hasEmail: false,
-              memberId: "member_opted_out",
+          authorizationProof: "authorization-proof-hidden",
+          groupId: "group-id-hidden",
+          missingEmailParticipants: [{
+            authorizedShares: [{
+              projectionScopeKey: "steps-days.v0",
+              shareId: "share-missing-email-hidden",
             }],
-            participants: [
-              {
-                authorizedShares: [
-                  {
-                    projectionScopeKey: "steps-days.v0",
-                    shareId: "share-member-a-steps",
-                  },
-                  {
-                    projectionScopeKey: "workouts.v0",
-                    shareId: "share-member-a-workouts",
-                  },
-                ],
-                hasEmail: true,
-                memberId: "member_a",
-              },
-              {
-                authorizedShares: [{
-                  projectionScopeKey: "workouts.v0",
-                  shareId: "share-opted-out-workouts",
-                }],
-                hasEmail: false,
-                memberId: "member_opted_out",
-              },
-              {
-                authorizedShares: [{
-                  projectionScopeKey: "steps-days.v0",
-                  shareId: "share-current-replacement",
-                }],
-                hasEmail: true,
-                memberId: "member_stale_grant",
-              },
-            ],
-            status: "ok",
-          },
-        };
-      });
-      const groupSharedReader: AssistantHostedGroupSharedReader = {
-        request: vi.fn<AssistantHostedGroupSharedReader["request"]>(async ({
-          projectionScopes,
-        }) => {
-          sequence.push("shared.read");
-          expect(projectionScopes).toEqual([
-            { projectionKind: "workouts.v0" },
-            { projectionKind: "steps-days.v0" },
-          ]);
-          return {
-            members: [
-              {
-                currentTurnHandles: [],
-                displayName: "Ada",
-                memberId: "member_a",
-                participantId: "participant_a",
-                projections: [
-                  {
-                    dataStatus: "available",
-                    grantStatus: "granted",
-                    projectionScope: { projectionKind: "steps-days.v0" },
-                    projectionScopeKey: "steps-days.v0",
-                    records: [
-                      "2026-06-30",
-                      "2026-07-01",
-                      "2026-07-02",
-                      "2026-07-03",
-                      "2026-07-04",
-                      "2026-07-05",
-                      "2026-07-06",
-                      "2026-07-07",
-                    ].map((date, index) => ({
-                      data: {
-                        date,
-                        metricKey: "steps",
-                        unit: "count",
-                        value: (index + 1) * 1_000,
-                      },
-                      occurredAt: `${date}T00:00:00.000Z`,
-                      recordKey: date,
-                    })),
-                  },
-                  {
-                    dataStatus: "available",
-                    grantStatus: "granted",
-                    projectionScope: { projectionKind: "workouts.v0" },
-                    projectionScopeKey: "workouts.v0",
-                    records: [
-                      newsletterWorkoutsRecord("2026-07-04", [
-                        { kind: "running", minutes: 20, startLocalMs: 1_000 },
-                        { kind: "running", minutes: 40, startLocalMs: 2_000 },
-                        { kind: "strength", minutes: 45, startLocalMs: 3_000 },
-                      ]),
-                      newsletterWorkoutsRecord("2026-07-06", [
-                        { kind: "running", minutes: 30, startLocalMs: 4_000 },
-                      ]),
-                      newsletterWorkoutsRecord("2026-07-07", [
-                        { kind: "running", minutes: 300, startLocalMs: 5_000 },
-                      ]),
-                    ],
-                  },
-                ],
-              },
-              {
-                currentTurnHandles: [],
-                displayName: "Opted out",
-                memberId: "member_opted_out",
-                participantId: "participant_opted_out",
-                projections: [{
-                  dataStatus: "available",
-                  grantStatus: "granted",
-                  projectionScope: { projectionKind: "workouts.v0" },
-                  projectionScopeKey: "workouts.v0",
-                  records: [newsletterWorkoutsRecord("2026-07-06", [{
-                    kind: "running",
-                    minutes: 500,
-                    startLocalMs: 6_000,
-                  }])],
-                }],
-              },
-              {
-                currentTurnHandles: [],
-                displayName: "No current data",
-                memberId: "member_stale_grant",
-                participantId: "participant_stale_grant",
-                projections: [
-                  {
-                    dataStatus: "missing",
-                    grantStatus: "granted",
-                    projectionScope: { projectionKind: "steps-days.v0" },
-                    projectionScopeKey: "steps-days.v0",
-                    records: [],
-                  },
-                  {
-                    dataStatus: "available",
-                    grantStatus: "granted",
-                    projectionScope: { projectionKind: "workouts.v0" },
-                    projectionScopeKey: "workouts.v0",
-                    records: [newsletterWorkoutsRecord("2026-07-06", [{
-                      kind: "running",
-                      minutes: 600,
-                      startLocalMs: 7_000,
-                    }])],
-                  },
-                ],
-              },
-            ],
-            requestedProjectionScopeKeys: ["steps-days.v0", "workouts.v0"],
-            status: "ok",
-          };
-        }),
-      };
-      const request = readMurphDynamicToolRequest(newsletterToolCall({
-        action: "prepare",
-      }));
-      if (!request || request.kind !== "newsletter") {
-        throw new Error("Expected newsletter request.");
-      }
-
-      const result = await executeMurphDynamicToolRequest({
-        env: {},
-        fetchImpl: fetch,
-        hostedToolContext: createNewsletterHostedToolContext({
-          groupSharedReader,
-          newsletterRequest,
-          occurrenceAt: "2026-07-07T03:30:00.000Z",
-        }),
-        nextUsageOrdinal: () => 1,
-        progressDelivery: null,
-        request,
-        vaultRoot,
-      });
-
-      expect(sequence).toEqual(["newsletter.authority", "shared.read"]);
-      expect(readNewsletterToolPayload(result)).toEqual({
-        action: "prepare",
-        result: {
-          members: [{
-            displayName: "Ada",
-            memberId: "member_a",
-            weeklyStats: [
-              {
-                completedDaysAvg: 4_000,
-                observedDayCount: 7,
-                observedDates: [
-                  "2026-06-30",
-                  "2026-07-01",
-                  "2026-07-02",
-                  "2026-07-03",
-                  "2026-07-04",
-                  "2026-07-05",
-                  "2026-07-06",
-                ],
-                stream: "steps",
-                throughDate: "2026-07-06",
-                unit: "count",
-              },
-              {
-                completedDaysAvg: 1.5,
-                observedDayCount: 2,
-                observedDates: ["2026-07-04", "2026-07-06"],
-                stream: "workout-kind-running-count",
-                throughDate: "2026-07-06",
-                unit: "count",
-              },
-              {
-                completedDaysAvg: 45,
-                observedDayCount: 2,
-                observedDates: ["2026-07-04", "2026-07-06"],
-                stream: "workout-kind-running-minutes",
-                throughDate: "2026-07-06",
-                unit: "minutes",
-              },
-              {
-                completedDaysAvg: 1,
-                observedDayCount: 1,
-                observedDates: ["2026-07-04"],
-                stream: "workout-kind-strength-count",
-                throughDate: "2026-07-04",
-                unit: "count",
-              },
-              {
-                completedDaysAvg: 45,
-                observedDayCount: 1,
-                observedDates: ["2026-07-04"],
-                stream: "workout-kind-strength-minutes",
-                throughDate: "2026-07-04",
-                unit: "minutes",
-              },
-            ],
+            hasEmail: false,
+            memberId: "member_missing_email",
           }],
-          missingEmailParticipants: [
-            { hasEmail: false, memberId: "member_opted_out" },
-          ],
-          participants: [
-            { hasEmail: true, memberId: "member_a" },
-            { hasEmail: false, memberId: "member_opted_out" },
-            { hasEmail: true, memberId: "member_stale_grant" },
-          ],
-          referenceAt: "2026-07-07T03:30:00.000Z",
-          status: "ok",
-        },
-      });
-      const serialized = JSON.stringify(readNewsletterToolPayload(result));
-      expect(serialized).not.toContain("startLocalMs");
-      expect(serialized).not.toContain("calendarClosedThroughDate");
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("excludes challenge-only nutrient grants from newsletter shared reads", async () => {
-    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-nutrient-"));
-    try {
-      await initializeVault({ timezone: "UTC", vaultRoot });
-      const newsletterRequest = vi.fn<NewsletterToolRequest>(async () => ({
-        action: "prepare",
-        result: {
-          authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-          groupId: "group_1",
-          missingEmailParticipants: [],
           participants: [
             {
               authorizedShares: [
-                { projectionScopeKey: "steps-days.v0", shareId: "share-steps" },
-                { projectionScopeKey: "calories-days.v0", shareId: "share-cal" },
-                { projectionScopeKey: "carbs-days.v0", shareId: "share-carb" },
-                { projectionScopeKey: "fat-days.v0", shareId: "share-fat" },
-                { projectionScopeKey: "fiber-days.v0", shareId: "share-fiber" },
+                {
+                  projectionScopeKey: "steps-days.v0",
+                  shareId: "share-eligible-steps-hidden",
+                },
+                {
+                  projectionScopeKey: "sleep-times.v0",
+                  shareId: "share-eligible-sleep-hidden",
+                },
               ],
               hasEmail: true,
-              memberId: "member_a",
+              memberId: "member_eligible",
+            },
+            {
+              authorizedShares: [{
+                projectionScopeKey: "steps-days.v0",
+                shareId: "share-missing-email-hidden",
+              }],
+              hasEmail: false,
+              memberId: "member_missing_email",
+            },
+            {
+              authorizedShares: [{
+                projectionScopeKey: "steps-days.v0",
+                shareId: "share-partial-steps-hidden",
+              }],
+              hasEmail: true,
+              memberId: "member_partial_scope",
             },
           ],
           status: "ok",
         },
-      }));
-      const groupSharedReader: AssistantHostedGroupSharedReader = {
-        request: vi.fn<AssistantHostedGroupSharedReader["request"]>(async ({
-          projectionScopes,
-        }) => {
-          // The member granted four nutrient scopes for a challenge, but the
-          // newsletter is only configured for steps; the reader must never be
-          // asked for the challenge-only nutrient scopes.
-          expect(projectionScopes).toEqual([{ projectionKind: "steps-days.v0" }]);
-          return {
-            members: [{
-              currentTurnHandles: [],
-              displayName: "Ada",
-              memberId: "member_a",
-              participantId: "participant_a",
-              projections: [{
-                dataStatus: "available",
-                grantStatus: "granted",
-                projectionScope: { projectionKind: "steps-days.v0" },
-                projectionScopeKey: "steps-days.v0",
-                records: [{
-                  data: { date: "2026-07-06", metricKey: "steps", unit: "count", value: 7_000 },
-                  occurredAt: "2026-07-06T00:00:00.000Z",
-                  recordKey: "2026-07-06",
-                }],
-              }],
-            }],
-            requestedProjectionScopeKeys: ["steps-days.v0"],
-            status: "ok",
-          };
-        }),
       };
-      const request = readMurphDynamicToolRequest(newsletterToolCall({
-        action: "prepare",
-      }));
-      if (!request || request.kind !== "newsletter") {
-        throw new Error("Expected newsletter request.");
-      }
-
-      const result = await executeMurphDynamicToolRequest({
-        env: {},
-        fetchImpl: fetch,
-        hostedToolContext: createNewsletterHostedToolContext({
-          groupSharedReader,
-          newsletterRequest,
-          occurrenceAt: "2026-07-07T03:30:00.000Z",
+    });
+    const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
+      members: [
+        sharedEmailMember({
+          memberId: "member_eligible",
+          participantId: "participant_eligible",
+          values: { steps: 8_400, workouts: 2 },
         }),
-        nextUsageOrdinal: () => 1,
-        progressDelivery: null,
-        request,
-        vaultRoot,
-      });
-
-      expect(groupSharedReader.request).toHaveBeenCalledTimes(1);
-      const payload = readNewsletterToolPayload(result);
-      expect(payload).toMatchObject({
-        action: "prepare",
-        result: {
-          members: [{ memberId: "member_a", weeklyStats: [{ stream: "steps" }] }],
-        },
-      });
-      const serialized = JSON.stringify(payload);
-      for (const nutrientKey of ["dietary-calories", "carbs-grams", "fat-grams", "fiber-grams"]) {
-        expect(serialized).not.toContain(nutrientKey);
-      }
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  it.each([
-    {
-      finalParticipants: [
-        { authorizedShares: [], hasEmail: true, memberId: "member_a" },
+        sharedEmailMember({
+          memberId: "member_missing_email",
+          participantId: "participant_missing_email",
+          values: { steps: 7_200, workouts: 1 },
+        }),
+        sharedEmailMember({
+          memberId: "member_partial_scope",
+          participantId: "participant_partial_scope",
+          values: { steps: 9_100, workouts: 3 },
+        }),
       ],
-      revokeKind: "health share",
-    },
-    {
-      finalParticipants: [],
-      revokeKind: "email grant",
-    },
-    {
-      finalParticipants: [],
-      revokeKind: "member access",
-    },
-    {
-      finalParticipants: [
-        {
-          authorizedShares: [{
-            projectionScopeKey: "steps-days.v0",
-            shareId: "share-member-a",
-          }],
-          hasEmail: false,
-          memberId: "member_a",
-        },
-      ],
-      revokeKind: "verified email",
-    },
-  ])("does not read shared data after final $revokeKind authority removes eligibility", async ({
-    finalParticipants,
-  }) => {
-    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-revoked-"));
-    try {
-      await initializeVault({ timezone: "UTC", vaultRoot });
-      const groupSharedRequest = vi.fn<
-        AssistantHostedGroupSharedReader["request"]
-      >(async () => {
-        throw new Error("Ineligible participants must not trigger a shared read.");
-      });
-      const newsletterRequest = vi.fn<NewsletterToolRequest>(async () => ({
-        action: "prepare",
-        result: {
-          authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-          groupId: "group_1",
-          missingEmailParticipants: [],
-          participants: finalParticipants,
-          status: "ok",
-        },
-      }));
-      const request = readMurphDynamicToolRequest(newsletterToolCall({
-        action: "prepare",
-      }));
-      if (!request || request.kind !== "newsletter") {
-        throw new Error("Expected newsletter request.");
-      }
-
-      const result = await executeMurphDynamicToolRequest({
-        env: {},
-        fetchImpl: fetch,
-        hostedToolContext: createNewsletterHostedToolContext({
-          groupSharedReader: { request: groupSharedRequest },
-          newsletterRequest,
-        }),
-        nextUsageOrdinal: () => 1,
-        progressDelivery: null,
-        request,
-        vaultRoot,
-      });
-
-      expect(readNewsletterToolPayload(result)).toMatchObject({
-        action: "prepare",
-        result: {
-          members: [],
-          participants: finalParticipants.map(({ hasEmail, memberId }) => ({
-            hasEmail,
-            memberId,
-          })),
-          status: "ok",
-        },
-      });
-      expect(groupSharedRequest).not.toHaveBeenCalled();
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("fails prepare closed when the lazy shared read is unavailable without gating a later send", async () => {
-    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-read-unavailable-"));
-    try {
-      await initializeVault({ timezone: "UTC", vaultRoot });
-      const newsletterRequest = vi.fn<NewsletterToolRequest>(async (request) =>
-        request.action === "prepare"
-          ? {
-              action: "prepare" as const,
-              result: {
-                authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-                groupId: "group_1",
-                missingEmailParticipants: [],
-                participants: [{
-                  authorizedShares: [{
-                    projectionScopeKey: "steps-days.v0",
-                    shareId: "share-member-a",
-                  }],
-                  hasEmail: true,
-                  memberId: "member_a",
-                }],
-                status: "ok" as const,
-              },
-            }
-          : {
-              action: "send" as const,
-              result: {
-                participantCount: 1,
-                skippedNoEmailMemberIds: [],
-                status: "sent" as const,
-              },
-            }
-      );
-      const groupSharedRequest = vi.fn(async () => ({
-        status: "unavailable" as const,
-        unavailableReason: "control_plane_unavailable",
-      }));
-      const hostedToolContext = createNewsletterHostedToolContext({
-        groupSharedReader: { request: groupSharedRequest },
-        newsletterRequest,
-      });
-      const prepareRequest = readMurphDynamicToolRequest(newsletterToolCall({
-        action: "prepare",
-      }));
-      const sendRequest = readMurphDynamicToolRequest(newsletterToolCall({
-        action: "send",
-        html: "<p>Weekly</p>",
-        subject: "Weekly note",
-        text: "Weekly",
-      }));
-      if (
-        !prepareRequest
-        || prepareRequest.kind !== "newsletter"
-        || !sendRequest
-        || sendRequest.kind !== "newsletter"
-      ) {
-        throw new Error("Expected newsletter requests.");
-      }
-
-      const prepareResult = await executeMurphDynamicToolRequest({
-        env: {},
-        fetchImpl: fetch,
-        hostedToolContext,
-        nextUsageOrdinal: () => 1,
-        progressDelivery: null,
-        request: prepareRequest,
-        vaultRoot,
-      });
-      const sendResult = await executeMurphDynamicToolRequest({
-        env: {},
-        fetchImpl: fetch,
-        hostedToolContext,
-        nextUsageOrdinal: () => 1,
-        progressDelivery: null,
-        request: sendRequest,
-        vaultRoot,
-      });
-
-      expect(readNewsletterToolPayload(prepareResult)).toEqual({
-        action: "prepare",
-        result: {
-          status: "unavailable",
-          unavailableReason: "shared_projection_unavailable",
-        },
-      });
-      expect(readNewsletterToolPayload(sendResult)).toEqual({
-        action: "send",
-        result: {
-          participantCount: 1,
-          skippedNoEmailMemberIds: [],
-          status: "sent",
-        },
-      });
-      expect(groupSharedRequest).toHaveBeenCalledTimes(1);
-      expect(newsletterRequest).toHaveBeenCalledTimes(2);
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("batches exact authorized scopes into at most three lazy reads after newsletter authority", async () => {
-    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-newsletter-batches-"));
-    try {
-      await initializeVault({ timezone: "UTC", vaultRoot });
-      const projectionScopes = [
-        { projectionKind: "steps-days.v0" },
-        { projectionKind: "hrv-days.v0" },
-        { projectionKind: "activity-days.v0" },
-        { projectionKind: "workout-days.v0" },
-        { projectionKind: "resting-heart-rate-days.v0" },
-      ] as const;
-      const sequence: string[] = [];
-      const newsletterRequest = vi.fn<NewsletterToolRequest>(async () => {
-        sequence.push("newsletter.authority");
-        return {
-          action: "prepare",
-          result: {
-            authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-            groupId: "group_1",
-            missingEmailParticipants: [],
-            participants: [{
-              authorizedShares: projectionScopes.map((projectionScope) => ({
-                projectionScopeKey: projectionScope.projectionKind,
-                shareId: `share-${projectionScope.projectionKind}`,
-              })),
-              hasEmail: true,
-              memberId: "member_a",
-            }],
-            status: "ok",
-          },
-        };
-      });
-      const groupSharedRequest = vi.fn<AssistantHostedGroupSharedReader["request"]>(
-        async ({ projectionScopes: batch }) => {
-          sequence.push("shared.read");
-          return {
-            members: [],
-            requestedProjectionScopeKeys: batch.map(
-              (projectionScope) => projectionScope.projectionKind,
-            ),
-            status: "none",
-          };
-        },
-      );
-      const request = readMurphDynamicToolRequest(newsletterToolCall({
-        action: "prepare",
-      }));
-      if (!request || request.kind !== "newsletter") {
-        throw new Error("Expected newsletter request.");
-      }
-
-      const result = await executeMurphDynamicToolRequest({
-        env: {},
-        fetchImpl: fetch,
-        hostedToolContext: createNewsletterHostedToolContext({
-          groupSharedReader: { request: groupSharedRequest },
-          newsletterRequest,
-        }),
-        nextUsageOrdinal: () => 1,
-        progressDelivery: null,
-        request,
-        vaultRoot,
-      });
-
-      expect(readNewsletterToolPayload(result)).toMatchObject({
-        action: "prepare",
-        result: { members: [], status: "ok" },
-      });
-      expect(sequence[0]).toBe("newsletter.authority");
-      expect(groupSharedRequest.mock.calls.map(([call]) => call.projectionScopes.length))
-        .toEqual([3, 2]);
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("records a rejected newsletter request as an unavailable send result", async () => {
-    const closeNewsletterCapability = vi.fn();
-    const recordNewsletterSendResult = vi.fn();
-    const request = readMurphDynamicToolRequest(newsletterToolCall({
-      action: "prepare",
+      requestedProjectionScopeKeys: ["steps-days.v0", "sleep-times.v0"],
+      status: "ok",
     }));
-    if (!request || request.kind !== "newsletter") {
-      throw new Error("Expected newsletter request.");
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      audience: "group_email",
+      projectionScopes: requestedScopes,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group email shared-read request.");
     }
 
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
-      hostedToolContext: createNewsletterHostedToolContext({
-        closeNewsletterCapability,
-        newsletterRequest: async () => {
-          throw new Error("Web callback rejected the request.");
-        },
-        recordNewsletterSendResult,
+      hostedToolContext: createGroupHostedToolContext({
+        currentScheduledAutomationAuthority: () => ({
+          automationId: "automation-weekly-update",
+          occurrenceAt: "2026-08-10T13:00:00.000Z",
+        }),
+        groupEmailRequest,
+        groupSharedReadRequest,
+        groupToolAvailable: false,
       }),
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
@@ -5774,155 +5617,168 @@ describe("murph.newsletter dynamic tool", () => {
       vaultRoot: null,
     });
 
-    expect(result.rpcResult).toEqual({
-      contentItems: [
-        { type: "inputText", text: "newsletter tool request failed" },
-      ],
-      success: false,
+    expect(groupEmailRequest).toHaveBeenCalledWith({
+      action: "prepare_email",
+      projectionScopes: requestedScopes,
     });
-    expect(closeNewsletterCapability).toHaveBeenCalledTimes(1);
-    expect(recordNewsletterSendResult).toHaveBeenCalledWith({
-      action: "send",
+    expect(groupSharedReadRequest).toHaveBeenCalledWith({
+      projectionScopes: requestedScopes,
+    });
+    expect(result.rpcResult.success).toBe(true);
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "read_shared",
+      audience: "group_email",
       result: {
-        status: "unavailable",
-        unavailableReason: "newsletter_tool_failed",
-      },
-    });
-  });
-
-  it("returns a failed tool result and records post-turn failure for all-recipient send failure", async () => {
-    const recordNewsletterSendResult = vi.fn();
-    const hostedToolContext = createNewsletterHostedToolContext({
-      newsletterRequest: async (request) =>
-        request.action === "send"
-          ? {
-              action: "send",
-              result: {
-                status: "unavailable",
-                unavailableReason: "send_failed",
-              },
-            }
-          : {
-              action: "prepare",
-              result: {
-                authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-                groupId: "group_1",
-                missingEmailParticipants: [],
-                participants: [
-                  {
-                    authorizedShares: [],
-                    hasEmail: true,
-                    memberId: "member_a",
+        members: [
+          {
+            participantId: "participant_eligible",
+            projections: {
+              "sleep-times.v0": {
+                grantedAt: "2026-08-01T12:00:00.000Z",
+                records: [{
+                  data: {
+                    date: "2026-08-09",
+                    sleepEndAt: "2026-08-09T07:00:00.000Z",
+                    sleepStartAt: "2026-08-09T00:00:00.000Z",
                   },
-                ],
-                status: "ok",
+                  occurredAt: "2026-08-09T07:00:00.000Z",
+                  recordKey: "2026-08-09",
+                }],
+                status: "available",
+              },
+              "steps-days.v0": {
+                grantedAt: "2026-08-01T12:00:00.000Z",
+                records: [{
+                  data: {
+                    date: "2026-08-09",
+                    metricKey: "steps",
+                    unit: "count",
+                    value: 8_400,
+                  },
+                  occurredAt: "2026-08-09T00:00:00.000Z",
+                  recordKey: "2026-08-09",
+                }],
+                status: "available",
               },
             },
-      recordNewsletterSendResult,
+          },
+          {
+            participantId: "participant_partial_scope",
+            projections: {
+              "steps-days.v0": {
+                grantedAt: "2026-08-01T12:00:00.000Z",
+                records: [{
+                  data: {
+                    date: "2026-08-09",
+                    metricKey: "steps",
+                    unit: "count",
+                    value: 9_100,
+                  },
+                  occurredAt: "2026-08-09T00:00:00.000Z",
+                  recordKey: "2026-08-09",
+                }],
+                status: "available",
+              },
+            },
+          },
+        ],
+        missingVerifiedEmailCount: 1,
+        recipientCount: 2,
+        referenceAt: "2026-08-10T13:00:00.000Z",
+        requestedProjectionScopeKeys: ["steps-days.v0", "sleep-times.v0"],
+        status: "ok",
+      },
     });
-    const request = readMurphDynamicToolRequest(newsletterToolCall({
-      action: "send",
-      html: "<p>Weekly</p>",
-      subject: "Weekly note",
-      text: "Weekly",
-    }));
-    if (!request || request.kind !== "newsletter") {
-      throw new Error("Expected newsletter request.");
+    const modelText = JSON.stringify(readGroupToolPayload(result));
+    for (const hidden of [
+      "authorization-proof-hidden",
+      "group-id-hidden",
+      "member_eligible",
+      "member_missing_email",
+      "member_partial_scope",
+      "share-eligible-steps-hidden",
+      "share-eligible-sleep-hidden",
+      "share-missing-email-hidden",
+      "share-partial-steps-hidden",
+      "participant_missing_email",
+      "workouts.v0",
+    ]) {
+      expect(modelText).not.toContain(hidden);
     }
-
-    const result = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext,
-      nextUsageOrdinal: () => 1,
-      progressDelivery: null,
-      request,
-      vaultRoot: null,
-    });
-
-    expect(result.rpcResult.success).toBe(false);
-    expect(readNewsletterToolPayload(result)).toEqual({
-      action: "send",
-      result: {
-        status: "unavailable",
-        unavailableReason: "send_failed",
-      },
-    });
-    expect(recordNewsletterSendResult).toHaveBeenCalledWith({
-      action: "send",
-      result: {
-        status: "unavailable",
-        unavailableReason: "send_failed",
-      },
-    });
   });
 });
 
-function createNewsletterHostedToolContext(input: {
-  closeNewsletterCapability?: () => void;
-  groupSharedReader?: AssistantHostedGroupSharedReader;
-  newsletterRequest?: NewsletterToolRequest;
-  occurrenceAt?: string;
-  recordNewsletterSendResult?: (result: unknown) => void;
-} = {}): AssistantHostedToolContext {
-  const context = {
-    connectedApps: null,
-    computerToolsAvailable: false,
-    ...(input.closeNewsletterCapability
-      ? { closeNewsletterCapability: input.closeNewsletterCapability }
-      : {}),
-    currentHostedDeliveryContext: () => null,
-    currentHostedMailboxItemIds: () => [],
-    currentUserActionScope: () => null,
-    currentScheduledAutomationAuthority: () => ({
-      automationId: "automation_newsletter",
-      occurrenceAt: input.occurrenceAt ?? "2026-07-06T03:30:00.000Z",
-    }),
-    familyPlanTool: null,
-    groupSharedReader: input.groupSharedReader ?? null,
-    groupTool: null,
-    newsletterTool: {
-      request: input.newsletterRequest ?? (async (request) =>
-        request.action === "prepare"
-          ? {
-              action: "prepare",
-              result: {
-                authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-                groupId: "group_1",
-                missingEmailParticipants: [],
-                participants: [
-                  {
-                    authorizedShares: [],
-                    hasEmail: true,
-                    memberId: "member_a",
-                  },
-                ],
-                status: "ok",
-              },
-            }
-          : {
-              action: "send",
-              result: {
-                participantCount: 1,
-                skippedNoEmailMemberIds: [],
-                status: "sent",
-              },
-            }
-      ),
-    },
-    phoneCalls: null,
-    ...(input.recordNewsletterSendResult
-      ? { recordNewsletterSendResult: input.recordNewsletterSendResult }
-      : {}),
-    sendVaultFile: async () => {
-      throw new Error("Vault-file sending is unavailable for this test.");
-    },
-    vaultFileSendAvailable: false,
+function sharedEmailMember(input: {
+  memberId: string;
+  participantId: string;
+  values: { steps: number; workouts: number };
+}) {
+  return {
+    currentTurnHandles: [],
+    displayName: null,
+    memberId: input.memberId,
+    participantId: input.participantId,
+    projections: [
+      {
+        dataStatus: "available" as const,
+        grantedAt: "2026-08-01T12:00:00.000Z",
+        grantStatus: "granted" as const,
+        projectionScope: { projectionKind: "steps-days.v0" as const },
+        projectionScopeKey: "steps-days.v0",
+        records: [{
+          data: {
+            date: "2026-08-09",
+            metricKey: "steps" as const,
+            unit: "count",
+            value: input.values.steps,
+          },
+          occurredAt: "2026-08-09T00:00:00.000Z",
+          recordKey: "2026-08-09",
+        }],
+      },
+      {
+        dataStatus: "available" as const,
+        grantedAt: "2026-08-01T12:00:00.000Z",
+        grantStatus: "granted" as const,
+        projectionScope: { projectionKind: "sleep-times.v0" as const },
+        projectionScopeKey: "sleep-times.v0",
+        records: [{
+          data: {
+            date: "2026-08-09",
+            sleepEndAt: "2026-08-09T07:00:00.000Z",
+            sleepStartAt: "2026-08-09T00:00:00.000Z",
+          },
+          occurredAt: "2026-08-09T07:00:00.000Z",
+          recordKey: "2026-08-09",
+        }],
+      },
+      {
+        dataStatus: "available" as const,
+        grantedAt: "2026-08-01T12:00:00.000Z",
+        grantStatus: "granted" as const,
+        projectionScope: { projectionKind: "workouts.v0" as const },
+        projectionScopeKey: "workouts.v0",
+        records: [{
+          data: {
+            calendarClosedThroughDate: "2026-08-09",
+            date: "2026-08-09",
+            timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+            workouts: Array.from(
+              { length: input.values.workouts },
+              () => ({ kind: "running", minutes: 30, startLocalMs: 64_800_000 }),
+            ),
+          },
+          occurredAt: "2026-08-09T18:00:00.000Z",
+          recordKey: "2026-08-09",
+        }],
+      },
+    ],
   };
-  return context as AssistantHostedToolContext;
 }
 
 function createGroupHostedToolContext(input: {
+  currentScheduledAutomationAuthority?:
+    AssistantHostedToolContext["currentScheduledAutomationAuthority"];
   currentHostedDeliveryContext?:
     AssistantHostedToolContext["currentHostedDeliveryContext"];
   currentInvocationScope?: AssistantHostedToolContext["currentInvocationScope"];
@@ -5931,6 +5787,7 @@ function createGroupHostedToolContext(input: {
     AssistantHostedToolContext["groupTool"]
   >["directAttachmentRouteStatus"];
   groupPermissionOfferRequest?: GroupPermissionOfferRequest;
+  groupEmailRequest?: GroupEmailEffectRequest;
   groupSharedReadRequest?: GroupSharedReadRequest;
   groupRequest?: GroupToolRequest;
   groupToolAvailable?: boolean;
@@ -5939,6 +5796,9 @@ function createGroupHostedToolContext(input: {
   ];
   persistGeneratedImageCapture?: NonNullable<
     AssistantHostedToolContext["persistGeneratedImageCapture"]
+  >;
+  verifyGeneratedImageDelivery?: NonNullable<
+    AssistantHostedToolContext["verifyGeneratedImageDelivery"]
   >;
 } = {}): AssistantHostedToolContext {
   const currentUserActionScope = input.currentUserActionScope ?? (() => null);
@@ -5963,7 +5823,8 @@ function createGroupHostedToolContext(input: {
         : null;
     }),
     currentUserActionScope,
-    currentScheduledAutomationAuthority: () => null,
+    currentScheduledAutomationAuthority:
+      input.currentScheduledAutomationAuthority ?? (() => null),
     familyPlanTool: null,
     groupPermissionOfferTool: input.groupPermissionOfferRequest
       ? { request: input.groupPermissionOfferRequest }
@@ -5982,49 +5843,22 @@ function createGroupHostedToolContext(input: {
             ? { directAttachmentRouteStatus: input.directAttachmentRouteStatus }
             : {}),
         },
-    newsletterTool: null,
+    groupEmailEffect: input.groupEmailRequest
+      ? { request: input.groupEmailRequest }
+      : null,
     phoneCalls: null,
     persistGeneratedImageCapture:
       input.persistGeneratedImageCapture ?? (async (write) => await write()),
     privateImageUrlPublisher: input.privateImageUrlPublish
       ? { publishPrivateImageUrl: input.privateImageUrlPublish }
       : null,
+    verifyGeneratedImageDelivery: input.verifyGeneratedImageDelivery,
     sendVaultFile: async () => {
       throw new Error("Vault-file sending is unavailable for this test.");
     },
     vaultFileSendAvailable: false,
   };
   return context as AssistantHostedToolContext;
-}
-
-function readNewsletterToolPayload(
-  result: Awaited<ReturnType<typeof executeMurphDynamicToolRequest>>,
-): unknown {
-  const item = result.rpcResult.contentItems[0];
-  if (!item || item.type !== "inputText") {
-    throw new Error("Expected text tool payload.");
-  }
-  return JSON.parse(item.text);
-}
-
-function newsletterWorkoutsRecord(
-  date: string,
-  workouts: Array<{
-    kind: string;
-    minutes: number;
-    startLocalMs: number;
-  }>,
-) {
-  return {
-    data: {
-      calendarClosedThroughDate: "2026-07-06",
-      date,
-      timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
-      workouts,
-    },
-    occurredAt: `${date}T00:00:00.000Z`,
-    recordKey: date,
-  };
 }
 
 function readGroupToolPayload(

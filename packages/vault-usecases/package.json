@@ -79,6 +79,7 @@
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/health-commons": "workspace:*",
+    "@murphai/health-metrics": "workspace:*",
     "@murphai/importers": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/query": "workspace:*",

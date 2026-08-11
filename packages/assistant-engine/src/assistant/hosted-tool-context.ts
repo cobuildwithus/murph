@@ -4,8 +4,8 @@ import type {
   HostedReturnContactKind,
 } from '@murphai/hosted-execution/return-contact'
 import type {
-  HostedRuntimeNewsletterToolResponse,
-  HostedRuntimeNewsletterScheduledAuthority,
+  HostedRuntimeGroupEmailEffectResponse,
+  HostedRuntimeGroupEmailScheduledAuthority,
   HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -17,6 +17,7 @@ import type {
 } from '@murphai/hosted-execution/contracts'
 import type {
   AssistantSession,
+  AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import type { CodexThreadIdentity } from './codex-thread-route.js'
@@ -42,7 +43,7 @@ import type {
   AssistantHostedImageGenerationLauncher,
   AssistantGeneratedImageCapturePersistence,
   AssistantHostedLabsTool,
-  AssistantHostedNewsletterTool,
+  AssistantHostedGroupEmailEffect,
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
   AssistantPhysicalNotePort,
@@ -54,7 +55,7 @@ import type {
 import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
-import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
+import { createAssistantGroupEmailOutboxTool } from './group-email-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
 
 export interface AssistantHostedDeliveryContext {
@@ -106,6 +107,12 @@ export type AssistantHostedInvocationScope =
   | AssistantHostedAcceptedInputInvocationScope
   | AssistantHostedScheduledInvocationScope
 
+export interface AssistantHostedImageCompletionEffectScope {
+  authorizedOriginAssistantInputId: string | null
+  completionAssistantInputId: string
+  exactMedia: readonly [AssistantVaultImageResponseMedia] | null
+}
+
 export type AssistantHostedVaultFileSendResult =
   | {
       approvalUrl: string
@@ -136,7 +143,7 @@ export interface AssistantHostedToolContext {
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   readonly persistGeneratedImageCapture?: AssistantGeneratedImageCapturePersistence | null
-  readonly newsletterTool?: AssistantHostedNewsletterTool | null
+  readonly groupEmailEffect?: AssistantHostedGroupEmailEffect | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
   readonly physicalNotes?: AssistantPhysicalNotePort | null
@@ -151,14 +158,25 @@ export interface AssistantHostedToolContext {
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
+  currentHostedImageCompletionEffectScope?():
+    AssistantHostedImageCompletionEffectScope | null
+  verifyGeneratedImageDelivery?(input: {
+    contentType: AssistantVaultImageResponseMedia['contentType']
+    imageRef: string
+    sha256: string
+    sizeBytes: number
+  }): Promise<boolean>
   currentAssistantInputId?(): string | null
   claimSubscriptionAssistantInputId?(): string | null
   claimIMessageContactAssistantInputId?(): string | null
-  currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
+  currentScheduledAutomationAuthority?(): HostedRuntimeGroupEmailScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
-  closeNewsletterCapability?(): void
-  recordNewsletterSendResult?(
-    result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
+  closeGroupEmailCapability?(): void
+  recordGroupEmailSendResult?(
+    result: Extract<
+      HostedRuntimeGroupEmailEffectResponse,
+      { action: 'send_email' }
+    >,
   ): void
   recordDetachedUsage?(input: {
     effectiveEnv: Readonly<Record<string, string | undefined>>
@@ -193,16 +211,25 @@ export function createAssistantHostedToolContext(input: {
   getUserActionAcceptedInputIds?: () => readonly string[]
   getProductFeedbackAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
-  newsletterOutbox?: {
+  groupEmailOutbox?: {
     turnId: string
     vault: string
   } | null
   pendingVaultFilesAvailable?: boolean
   route?: CodexThreadIdentity | null
-  recordNewsletterSendResult?: (
-    result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
+  recordGroupEmailSendResult?: (
+    result: Extract<
+      HostedRuntimeGroupEmailEffectResponse,
+      { action: 'send_email' }
+    >,
   ) => void
-  recordNewsletterPendingDeliveryIntentId?: (intentId: string) => void
+  recordGroupEmailPendingDeliveryIntentId?: (intentId: string) => void
+  verifyGeneratedImageDelivery?: (input: {
+    contentType: AssistantVaultImageResponseMedia['contentType']
+    imageRef: string
+    sha256: string
+    sizeBytes: number
+  }) => Promise<boolean>
   sendVaultFile?: (
     ref: string,
     toolCallId?: string | null,
@@ -216,8 +243,8 @@ export function createAssistantHostedToolContext(input: {
     executionContext?.clinicalRecordsConnectLinkTool ?? null
   const imageGenerationLauncher =
     executionContext?.imageGenerationLauncher ?? null
-  const newsletterPort = input.messageInput.scheduledAutomationAuthority
-    ? executionContext?.newsletterTool ?? null
+  const groupEmailHost = input.messageInput.scheduledAutomationAuthority
+    ? executionContext?.groupTool ?? null
     : null
   const readDeliveryContext = () => input.getDeliveryContext?.() ?? {
     messageInput: input.messageInput,
@@ -235,22 +262,51 @@ export function createAssistantHostedToolContext(input: {
       recipientKey: context?.recipientKey ?? null,
     }
   }
-  const newsletterOutboxTool = newsletterPort && input.newsletterOutbox
-    ? createAssistantNewsletterOutboxTool({
+  const groupEmailOutboxTool = groupEmailHost && input.groupEmailOutbox
+    ? createAssistantGroupEmailOutboxTool({
         automationAuthority: input.messageInput.outboxAutomationAuthority ?? null,
         authority: input.messageInput.scheduledAutomationAuthority ?? null,
-        newsletterTool: newsletterPort,
+        groupTool: groupEmailHost,
         recordPendingDeliveryIntentId:
-          input.recordNewsletterPendingDeliveryIntentId,
+          input.recordGroupEmailPendingDeliveryIntentId,
         sessionId: input.session.sessionId,
-        turnId: input.newsletterOutbox.turnId,
-        vault: input.newsletterOutbox.vault,
+        turnId: input.groupEmailOutbox.turnId,
+        vault: input.groupEmailOutbox.vault,
       })
     : null
-  const newsletterTool = newsletterOutboxTool ?? newsletterPort
+  const groupEmailEffect = groupEmailOutboxTool
+  const readRawCurrentAssistantInputId = () =>
+    executionContext?.currentAssistantInputId?.() ?? null
+  const readCurrentHostedImageCompletionEffectScope = ():
+    AssistantHostedImageCompletionEffectScope | null => {
+    const deliveryContext = readDeliveryContext()
+    const restriction =
+      deliveryContext.messageInput.hostedImageCompletionEffectRestriction ?? null
+    const currentAssistantInputId = readRawCurrentAssistantInputId()
+    const acceptedUserActionInputIds =
+      input.getUserActionAcceptedInputIds?.() ?? []
+    if (
+      restriction === null ||
+      (
+        currentAssistantInputId !== null &&
+        currentAssistantInputId !== restriction.completionAssistantInputId &&
+        acceptedUserActionInputIds.includes(currentAssistantInputId)
+      )
+    ) {
+      return null
+    }
+    return {
+      authorizedOriginAssistantInputId:
+        restriction.authorizedOriginAssistantInputId,
+      completionAssistantInputId: restriction.completionAssistantInputId,
+      exactMedia: restriction.exactMedia,
+    }
+  }
   const readCurrentUserActionAssistantInputId = () => {
-    const currentAssistantInputId =
-      executionContext?.currentAssistantInputId?.() ?? null
+    if (readCurrentHostedImageCompletionEffectScope() !== null) {
+      return null
+    }
+    const currentAssistantInputId = readRawCurrentAssistantInputId()
     const userActionAcceptedInputIds =
       input.getUserActionAcceptedInputIds?.() ?? []
     return currentAssistantInputId !== null &&
@@ -259,6 +315,9 @@ export function createAssistantHostedToolContext(input: {
       : null
   }
   const readCurrentUserActionScope = (): AssistantHostedUserActionScope | null => {
+    if (readCurrentHostedImageCompletionEffectScope() !== null) {
+      return null
+    }
     const acceptedInputIds = input.getUserActionAcceptedInputIds?.() ?? []
     if (acceptedInputIds.length === 0) {
       return null
@@ -272,6 +331,9 @@ export function createAssistantHostedToolContext(input: {
     }
   }
   const readCurrentInvocationScope = (): AssistantHostedInvocationScope | null => {
+    if (readCurrentHostedImageCompletionEffectScope() !== null) {
+      return null
+    }
     const userActionScope = readCurrentUserActionScope()
     const assistantInputId = userActionScope?.acceptedInputIds.at(-1) ?? null
     if (
@@ -354,7 +416,7 @@ export function createAssistantHostedToolContext(input: {
       : null,
     persistGeneratedImageCapture:
       executionContext?.persistGeneratedImageCapture ?? null,
-    newsletterTool,
+    groupEmailEffect,
     personalizationTool: executionContext?.personalizationTool ?? null,
     planUsageTool: executionContext?.planUsageTool ?? null,
     physicalNotes: executionContext?.physicalNotes ?? null,
@@ -397,7 +459,9 @@ export function createAssistantHostedToolContext(input: {
       : {}),
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentAssistantInputId: () =>
-      executionContext?.currentAssistantInputId?.() ?? null,
+      readCurrentHostedImageCompletionEffectScope() === null
+        ? readRawCurrentAssistantInputId()
+        : null,
     claimSubscriptionAssistantInputId: () => {
       if (subscriptionActionClaimed) {
         return null
@@ -458,17 +522,22 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
     },
+    currentHostedImageCompletionEffectScope:
+      readCurrentHostedImageCompletionEffectScope,
+    verifyGeneratedImageDelivery: input.verifyGeneratedImageDelivery,
     currentScheduledAutomationAuthority: () => {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
     },
     currentInvocationScope: readCurrentInvocationScope,
-    closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
-    recordNewsletterSendResult: input.recordNewsletterSendResult,
+    closeGroupEmailCapability: groupEmailOutboxTool?.closeCapability,
+    recordGroupEmailSendResult: input.recordGroupEmailSendResult,
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
     currentUserActionScope: readCurrentUserActionScope,
     currentProductFeedbackAcceptedInputIds: () =>
-      input.getProductFeedbackAcceptedInputIds?.() ?? [],
+      readCurrentHostedImageCompletionEffectScope() === null
+        ? input.getProductFeedbackAcceptedInputIds?.() ?? []
+        : [],
     pendingVaultFilesAvailable: input.pendingVaultFilesAvailable === true,
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
