@@ -244,11 +244,11 @@ Messages extension, open one compact handoff dialog after hydration. Reuse the
 standard Dialog and Button conventions without a logo, eyebrow, numbered step
 grid, or promotional accent treatment. In one short description, tell the user
 to install or open Murph and then return to Messages and tap the card again.
-Use Open App Store as the primary action, Cancel as the secondary action, and
-the standard close control. Stack both actions at full width using the large
-settings-dialog button convention so the App Store destination remains the
-clear primary path. The dialog must not display or decode the fragment, add
-device-specific branching, or turn the fallback into a signup flow.
+Use Open App Store as the primary action, Cancel as a ghost secondary action,
+and the standard close control. Stack both actions at full width using the
+large settings-dialog button convention so the App Store destination remains
+the clear primary path. The dialog must not display or decode the fragment,
+add device-specific branching, or turn the fallback into a signup flow.
 
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep

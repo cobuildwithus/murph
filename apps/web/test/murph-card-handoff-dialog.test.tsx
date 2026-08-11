@@ -31,8 +31,11 @@ vi.mock("@/src/components/ui/button", () => ({
     variant?: string;
   }) => {
     void size;
-    void variant;
-    return createElement("button", props, children);
+    return createElement(
+      "button",
+      { ...props, "data-variant": variant },
+      children,
+    );
   },
   buttonVariants: () => "button-variant",
 }));
@@ -131,6 +134,7 @@ test("opens the App Store handoff without exposing the opaque card value", async
     const dismissButton = [...rendered.container.querySelectorAll("button")]
       .find((button) => button.textContent?.trim() === "Cancel");
     expect(dismissButton).not.toBeNull();
+    expect(dismissButton?.getAttribute("data-variant")).toBe("ghost");
     await act(async () => {
       dismissButton?.click();
     });

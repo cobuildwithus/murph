@@ -110,7 +110,7 @@ export function MurphCardHandoffPanel({
           onClick={onDismiss}
           size="xl"
           type="button"
-          variant="outline"
+          variant="ghost"
         >
           Cancel
         </Button>

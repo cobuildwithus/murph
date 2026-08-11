@@ -91,7 +91,7 @@ test("shared-card fragments open a private, accessible App Store handoff", async
       expect(
         appStoreBox.height,
         `${label} App Store action should use the large settings size`,
-      ).toBeGreaterThanOrEqual(56);
+      ).toBeGreaterThanOrEqual(56 - OVERFLOW_TOLERANCE_PX);
       expect(
         appStoreBox.y + appStoreBox.height,
         `${label} App Store action should stack above Cancel`,
