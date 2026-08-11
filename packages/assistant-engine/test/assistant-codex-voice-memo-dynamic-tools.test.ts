@@ -249,7 +249,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     expect(request).toMatchObject({
       args: {
         text: 'Send a short reminder.',
-        voiceId: null,
+        userRequestedVoiceOptionId: null,
       },
       kind: 'generate-voice-memo',
     })
