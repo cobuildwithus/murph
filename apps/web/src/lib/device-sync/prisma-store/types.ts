@@ -46,6 +46,10 @@ export interface HostedSignalRecord {
 export interface HostedDeviceSyncDirtyResource {
   count: number;
   dirtyPayloadId?: string;
+  eventType?: string | null;
+  firstEventOccurredAt?: string | null;
+  firstProviderSentAt?: string | null;
+  firstWebhookReceivedAt?: string | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
   resource: string | null;

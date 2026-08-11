@@ -736,6 +736,7 @@ describe("Strava device-sync provider", () => {
     expect(createResult?.acceptanceMode).toBe("durable_webhook_work");
     expect(createResult?.externalAccountId).toBe("12345");
     expect(createResult?.eventType).toBe("activity.create");
+    expect(createResult?.providerSentAt).toBe(STRAVA_WEBHOOK_NOW);
     expect(createResult?.jobs).toEqual([
       {
         kind: "resource",

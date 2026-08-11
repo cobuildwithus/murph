@@ -82,11 +82,32 @@ export interface HostedDeviceSyncRuntimeDirtyPayloadJob {
   dirtyPayloadId: string;
   jobId: string;
   processedRevision: string;
+  timing?: HostedDeviceSyncImportTiming;
+}
+
+export interface HostedDeviceSyncImportTiming {
+  eventCount: number;
+  eventType: string | null;
+  firstEventOccurredAt: string | null;
+  firstProviderSentAt: string | null;
+  firstWebhookReceivedAt: string | null;
+  resource: string | null;
+  resourceCategory: string | null;
+  sourceProviderSlug: string | null;
+}
+
+export interface HostedDeviceSyncCompletedImportTiming extends HostedDeviceSyncImportTiming {
+  importCompletedAt: string;
+  importExecutionStartedAt: string | null;
+  jobCreatedAt: string;
+  jobKind: string;
+  provider: string;
 }
 
 interface HostedDirtyDeviceSyncJob {
   dirtyPayloadId: string | null;
   input: DeviceSyncJobInput;
+  resource: HostedExecutionDeviceSyncDirtyResource;
 }
 
 interface HostedDirtyDeviceSyncApplyResult {
@@ -800,6 +821,7 @@ function buildHostedDirtyDeviceSyncJobs(
       ? resource.dirtyPayloadId
       : null,
     input: hostedDirtyResourceToDeviceSyncJobInput(resource, dirtyState, occurredAt),
+    resource,
   }));
 }
 
@@ -828,9 +850,34 @@ function enqueueHostedDirtyDeviceSyncJobs(input: {
           dirtyPayloadId: job.dirtyPayloadId,
           jobId: enqueued.id,
           processedRevision: input.processedRevision,
+          ...buildHostedDeviceSyncImportTiming(job.resource),
         }]
       : [];
   });
+}
+
+function buildHostedDeviceSyncImportTiming(
+  resource: HostedExecutionDeviceSyncDirtyResource,
+): { timing: HostedDeviceSyncImportTiming } | Record<string, never> {
+  const firstEventOccurredAt = resource.firstEventOccurredAt ?? null;
+  const firstProviderSentAt = resource.firstProviderSentAt ?? null;
+  const firstWebhookReceivedAt = resource.firstWebhookReceivedAt ?? null;
+  if (!firstEventOccurredAt && !firstProviderSentAt && !firstWebhookReceivedAt) {
+    return {};
+  }
+
+  return {
+    timing: {
+      eventCount: resource.count,
+      eventType: resource.eventType ?? null,
+      firstEventOccurredAt,
+      firstProviderSentAt,
+      firstWebhookReceivedAt,
+      resource: resource.resource,
+      resourceCategory: resource.resourceCategory,
+      sourceProviderSlug: resource.sourceProviderSlug,
+    },
+  };
 }
 
 /**
@@ -844,12 +891,13 @@ function enqueueHostedDirtyDeviceSyncJobs(input: {
 export function promoteHostedCompletedDirtyPayloadAcks(input: {
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
-}): void {
+}): HostedDeviceSyncCompletedImportTiming[] {
   if (input.state.pendingDirtyPayloadJobs.length === 0) {
-    return;
+    return [];
   }
 
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
+  const completedImports: HostedDeviceSyncCompletedImportTiming[] = [];
   const completedByAck = new Map<string, Set<string>>();
   const remaining: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
   for (const pending of input.state.pendingDirtyPayloadJobs) {
@@ -865,6 +913,20 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
     if (!completed) {
       remaining.push(pending);
       continue;
+    }
+    if (
+      job?.status === "succeeded"
+      && job.finishedAt
+      && pending.timing
+    ) {
+      completedImports.push({
+        ...pending.timing,
+        importCompletedAt: job.finishedAt,
+        importExecutionStartedAt: job.startedAt,
+        jobCreatedAt: job.createdAt,
+        jobKind: job.kind,
+        provider: job.provider,
+      });
     }
     const ackKey = buildHostedDirtyAckKey(pending.connectionId, pending.processedRevision);
     const ids = completedByAck.get(ackKey) ?? new Set<string>();
@@ -887,6 +949,7 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
     ];
   }
   input.state.pendingDirtyPayloadJobs = remaining;
+  return completedImports;
 }
 
 function buildHostedDirtyAckKey(connectionId: string, processedRevision: string): string {

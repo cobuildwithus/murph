@@ -108,6 +108,48 @@ No isolated tombstone remains after account deletion. A warm runner or late
 network drain cannot recreate diagnostics because append checks primary member
 authority only after acquiring the same isolated advisory lock used by cleanup.
 
+## Wearable import timing
+
+Successful hosted webhook imports write the buffered info event
+`device-sync.import_completed`. Its content-free `redacted_json` separates the
+observable stages instead of treating all missing-data time as one delay:
+
+- `oldestEventOccurredAt`: provider resource/event occurrence time
+- `oldestProviderSentAt`: verified signed webhook-envelope send time, when the
+  provider exposes one
+- `oldestWebhookReceivedAt`: Murph ingress receipt time
+- `jobCreatedAt`, `importExecutionStartedAt`, `importCompletedAt`: local runtime
+  queue and successful execution boundaries
+- `eventToProviderSendMs`, `providerSendToWebhookMs`, `webhookToImportMs`,
+  `eventToImportMs`, `runtimeQueueMs`, and `importExecutionMs`: nonnegative
+  derived intervals when both clocks are available and ordered
+- `eventCount`, `provider`, `sourceProvider`, `eventType`, `jobKind`,
+  `resourceCategory`, and `resource`: bounded categorical context
+
+For a coalesced dirty resource, `oldest*` timestamps describe the first event in
+the batch and `eventCount` states the batch size. Clock skew does not become a
+negative latency: the source timestamps remain present while only the affected
+derived interval is omitted. The event contains no member identifier, device
+identifier, raw wearable value, or webhook body. Like other debug/info logs it
+uses the nonblocking runtime-log buffer and seven-day retention.
+
+Example bounded diagnostic read:
+
+```sql
+SELECT
+  at,
+  redacted_json->>'provider' AS provider,
+  redacted_json->>'sourceProvider' AS source_provider,
+  (redacted_json->>'providerSendToWebhookMs')::bigint AS upstream_delivery_ms,
+  (redacted_json->>'webhookToImportMs')::bigint AS murph_import_ms,
+  (redacted_json->>'eventToImportMs')::bigint AS total_event_to_import_ms
+FROM hosted_runtime_log
+WHERE at >= now() - interval '24 hours'
+  AND event_code = 'device-sync.import_completed'
+ORDER BY at DESC
+LIMIT 100;
+```
+
 ## Reads and retention
 
 Status and latency dashboards read only the isolated store. If a dedicated

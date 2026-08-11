@@ -402,7 +402,7 @@ function verifyStravaWebhookSignature(input: {
   rawBody: Buffer;
   signingSecret: string | null;
   timestampToleranceMs: number;
-}): void {
+}): string {
   const parsed = parseStravaWebhookSignatureHeader(input.headers.get("x-strava-signature"));
 
   if (!parsed) {
@@ -459,6 +459,8 @@ function verifyStravaWebhookSignature(input: {
       httpStatus: 401,
     });
   }
+
+  return new Date(timestampMs).toISOString();
 }
 
 function buildStravaWebhookPreflightResponse(input: {
@@ -1053,7 +1055,7 @@ export function createStravaDeviceSyncProvider(
       });
     },
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
-      verifyStravaWebhookSignature({
+      const providerSentAt = verifyStravaWebhookSignature({
         headers: context.headers,
         now: context.now,
         rawBody: context.rawBody,
@@ -1151,6 +1153,7 @@ export function createStravaDeviceSyncProvider(
         eventType,
         traceId,
         occurredAt,
+        providerSentAt,
         resourceCategory: objectType,
         jobs,
       };

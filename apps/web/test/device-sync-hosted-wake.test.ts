@@ -3863,6 +3863,10 @@ describe("hosted device-sync wakes", () => {
       resources: [
         {
           count: 1,
+          eventType: "sleep.updated",
+          firstEventOccurredAt: "2026-03-26T11:59:00.000Z",
+          firstProviderSentAt: null,
+          firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
           jobKind: "reconcile",
           payload: {
             windowStart: "2026-03-19T00:00:00.000Z",
@@ -5027,6 +5031,7 @@ describe("hosted device-sync wakes", () => {
               },
             ],
             occurredAt: "2026-03-26T11:59:00.000Z",
+            providerSentAt: "2026-03-26T11:59:30.000Z",
             payload: {
               Authorization: "Bearer provider-secret-token",
               nested: [
@@ -5091,6 +5096,10 @@ describe("hosted device-sync wakes", () => {
     expect(dirtyResources).toEqual([
       {
         count: 1,
+        eventType: "sleep.updated",
+        firstEventOccurredAt: "2026-03-26T11:59:00.000Z",
+        firstProviderSentAt: "2026-03-26T11:59:30.000Z",
+        firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
         jobKind: "reconcile",
         payload: {
           windowStart: "2026-03-19T00:00:00.000Z",
@@ -5207,6 +5216,10 @@ describe("hosted device-sync wakes", () => {
     expect(dirtyResources).toEqual([
       {
         count: 1,
+        eventType: "daily.data.steps.created",
+        firstEventOccurredAt: "2026-05-26T11:59:00.000Z",
+        firstProviderSentAt: null,
+        firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
         jobKind: "resource",
         payload: {
           eventType: "daily.data.steps.created",
@@ -5515,6 +5528,10 @@ describe("hosted device-sync wakes", () => {
     expect(dirtyResources).toEqual([
       {
         count: 1,
+        eventType: "workout.updated",
+        firstEventOccurredAt: "2026-03-26T11:59:00.000Z",
+        firstProviderSentAt: null,
+        firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
         jobKind: "resource",
         payload: {
           eventType: "workout.updated",
@@ -5530,6 +5547,10 @@ describe("hosted device-sync wakes", () => {
       },
       {
         count: 1,
+        eventType: "workout.updated",
+        firstEventOccurredAt: "2026-03-26T11:59:00.000Z",
+        firstProviderSentAt: null,
+        firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
         jobKind: "delete",
         payload: {
           eventType: "workout.deleted",
@@ -5662,6 +5683,10 @@ describe("hosted device-sync wakes", () => {
     expect(dirtyResources).toEqual([
       {
         count: 1,
+        eventType: "session.deleted",
+        firstEventOccurredAt: "2026-03-26T11:59:00.000Z",
+        firstProviderSentAt: null,
+        firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
         jobKind: "delete",
         payload: {
           dataType: "session",

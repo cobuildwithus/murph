@@ -16,6 +16,7 @@ import {
   type InboxListResult,
   type InboxShowResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
+import { initializeVault } from '@murphai/core'
 import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
 import type { AssistantAutomationInputSummary } from '../src/assistant/automation/input-summary.ts'
 import {
@@ -1239,43 +1240,46 @@ describe('assistant auto-reply prompt builder support', () => {
   it('builds grouped prompts with attachment excerpts and shared capture context', () => {
     const longTranscript = 'T'.repeat(2_050)
     const longExtractedText = 'E'.repeat(2_050)
-    const result = buildAssistantAutoReplyPrompt([
-      createPromptInput({
-        attachments: [
-          createAttachment({
-            derivedPath: 'derived/attachments/capture-1.txt',
-            kind: 'audio',
-            mime: 'audio/mpeg',
-            fileName: 'voice-note.mp3',
-            extractedText: longExtractedText,
-            transcriptText: longTranscript,
-          }),
-        ],
-        captureOverrides: {
-          actorName: 'Jordan',
-          occurredAt: '2026-04-08T00:00:00.000Z',
-          text: 'First message',
-        },
-        telegramMetadata: {
-          mediaGroupId: 'group-1',
-          messageId: '201',
-          replyContext: null,
-        },
-      }),
-      createPromptInput({
-        captureOverrides: {
-          actorName: 'Jordan',
-          captureId: 'capture-2',
-          occurredAt: '2026-04-08T00:00:05.000Z',
-          text: 'Second message',
-        },
-        telegramMetadata: {
-          mediaGroupId: 'group-1',
-          messageId: '202',
-          replyContext: null,
-        },
-      }),
-    ])
+    const result = buildAssistantAutoReplyPrompt(
+      [
+        createPromptInput({
+          attachments: [
+            createAttachment({
+              derivedPath: 'derived/attachments/capture-1.txt',
+              kind: 'audio',
+              mime: 'audio/mpeg',
+              fileName: 'voice-note.mp3',
+              extractedText: longExtractedText,
+              transcriptText: longTranscript,
+            }),
+          ],
+          captureOverrides: {
+            actorName: 'Jordan',
+            occurredAt: '2026-04-08T00:00:00.000Z',
+            text: 'First message',
+          },
+          telegramMetadata: {
+            mediaGroupId: 'group-1',
+            messageId: '201',
+            replyContext: null,
+          },
+        }),
+        createPromptInput({
+          captureOverrides: {
+            actorName: 'Jordan',
+            captureId: 'capture-2',
+            occurredAt: '2026-04-08T00:00:05.000Z',
+            text: 'Second message',
+          },
+          telegramMetadata: {
+            mediaGroupId: 'group-1',
+            messageId: '202',
+            replyContext: null,
+          },
+        }),
+      ],
+      { timeZone: 'America/New_York' },
+    )
 
     expect(result.kind).toBe('ready')
     if (result.kind !== 'ready') {
@@ -1283,7 +1287,7 @@ describe('assistant auto-reply prompt builder support', () => {
     }
     expect(result.prompt).toContain('Source: telegram')
     expect(result.prompt).toContain(
-      'Occurred at: 2026-04-08T00:00:00.000Z -> 2026-04-08T00:00:05.000Z',
+      'Occurred at (America/New_York local; UTC in brackets): 2026-04-07 20:00:00 [UTC 2026-04-08T00:00:00.000Z] -> 2026-04-07 20:00:05 [UTC 2026-04-08T00:00:05.000Z]',
     )
     expect(result.prompt).toContain('Grouped inputs: 2')
     expect(result.prompt).toContain('Telegram media group: present')
@@ -1296,6 +1300,33 @@ describe('assistant auto-reply prompt builder support', () => {
     expect(result.prompt).toContain(
       'Large audio/video attachment transcript content omitted from prompt to keep context small',
     )
+  })
+
+  it('renders summer event times in the vault timezone without model arithmetic', async () => {
+    const { vaultRoot } = await createTempVault('assistant-automation-timezone-')
+    await initializeVault({
+      timezone: 'America/New_York',
+      vaultRoot,
+    })
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          captureOverrides: {
+            occurredAt: '2026-07-15T17:45:30.000Z',
+            text: 'Can you check this?',
+          },
+        }),
+      ],
+      vaultRoot,
+    )
+
+    expect(result).toEqual({
+      kind: 'ready',
+      prompt: expect.stringContaining(
+        'Occurred at (America/New_York local; UTC in brackets): 2026-07-15 13:45:30 [UTC 2026-07-15T17:45:30.000Z]',
+      ),
+      userMessageContent: null,
+    })
   })
 
   it('keeps lifecycle context when no textual or rich evidence is available', async () => {

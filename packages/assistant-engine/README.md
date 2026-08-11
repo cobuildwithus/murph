@@ -6,6 +6,17 @@ This package owns headless assistant execution and assistant-specific tool surfa
 
 Neutral vault services live in `@murphai/vault-usecases/vault-services`, and inbox service composition lives in `@murphai/inbox-services`. `assistant-engine` consumes those owners instead of owning their factories. Canonical writes still terminate in `packages/core`. Provider-target normalization plus hosted provider preset/config utilities are owned by `@murphai/operator-config` and consumed here directly.
 
+## Prompt time context
+
+Inbound auto-reply prompts render occurrence instants before provider execution.
+Each occurrence includes the local clock derived from the vault's canonical IANA
+timezone and the original UTC instant. Provider models must not be asked to
+convert or relabel a bare UTC clock from separately supplied timezone context.
+The thread-stable prompt also forbids relabeling `Z` or offset timestamps as
+local clock values when a tool or older context exposes an exact instant.
+If vault metadata cannot be read, prompt construction falls back best-effort to
+the runtime timezone and still names that timezone explicitly.
+
 ## Codex Warmth
 
 Codex app-server turns use one warm process for the full lifetime of a warm Node

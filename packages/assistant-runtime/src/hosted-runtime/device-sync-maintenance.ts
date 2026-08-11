@@ -23,6 +23,7 @@ import {
   reconcileHostedDeviceSyncControlPlaneState,
   promoteHostedCompletedDirtyPayloadAcks,
   syncHostedDeviceSyncControlPlaneState,
+  type HostedDeviceSyncCompletedImportTiming,
   type HostedDeviceSyncRuntimeSyncState,
 } from "../hosted-device-sync-runtime.ts";
 import type {
@@ -195,9 +196,13 @@ export async function runHostedDeviceSyncPass(
       service,
       shouldYield,
     });
-    promoteHostedCompletedDirtyPayloadAcks({
+    const completedImports = promoteHostedCompletedDirtyPayloadAcks({
       service,
       state: syncState,
+    }) ?? [];
+    writeHostedDeviceSyncImportCompletedRuntimeLogs({
+      completedImports,
+      platform: options.runtimeLogPlatform ?? null,
     });
     await writeHostedDeviceSyncJobFailureRuntimeLogs({
       platform: options.runtimeLogPlatform ?? null,
@@ -297,6 +302,97 @@ export async function runHostedDeviceSyncPass(
   } finally {
     closeHostedRuntimeDeviceSyncService(service);
   }
+}
+
+function writeHostedDeviceSyncImportCompletedRuntimeLogs(input: {
+  completedImports: readonly HostedDeviceSyncCompletedImportTiming[];
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+}): void {
+  if (!input.platform?.logPort) {
+    return;
+  }
+
+  for (const completed of input.completedImports) {
+    const eventToProviderSendMs = nonnegativeDurationMs(
+      completed.firstEventOccurredAt,
+      completed.firstProviderSentAt,
+    );
+    const providerSendToWebhookMs = nonnegativeDurationMs(
+      completed.firstProviderSentAt,
+      completed.firstWebhookReceivedAt,
+    );
+    const webhookToImportMs = nonnegativeDurationMs(
+      completed.firstWebhookReceivedAt,
+      completed.importCompletedAt,
+    );
+    const eventToImportMs = nonnegativeDurationMs(
+      completed.firstEventOccurredAt,
+      completed.importCompletedAt,
+    );
+    const runtimeQueueMs = nonnegativeDurationMs(
+      completed.jobCreatedAt,
+      completed.importExecutionStartedAt,
+    );
+    const importExecutionMs = nonnegativeDurationMs(
+      completed.importExecutionStartedAt,
+      completed.importCompletedAt,
+    );
+
+    void writeHostedRuntimeLogBestEffort({
+      entry: {
+        at: completed.importCompletedAt,
+        component: "device-sync",
+        eventCode: "device-sync.import_completed",
+        level: "info",
+        phase: "invoke",
+        redactedJson: {
+          eventCount: completed.eventCount,
+          eventType: completed.eventType
+            ? toHostedRuntimeLogCode(completed.eventType)
+            : null,
+          importCompletedAt: completed.importCompletedAt,
+          importExecutionStartedAt: completed.importExecutionStartedAt,
+          jobCreatedAt: completed.jobCreatedAt,
+          jobKind: toHostedRuntimeLogCode(completed.jobKind),
+          oldestEventOccurredAt: completed.firstEventOccurredAt,
+          oldestProviderSentAt: completed.firstProviderSentAt,
+          oldestWebhookReceivedAt: completed.firstWebhookReceivedAt,
+          provider: toHostedRuntimeLogCode(completed.provider),
+          resource: completed.resource
+            ? toHostedRuntimeLogCode(completed.resource)
+            : null,
+          resourceCategory: completed.resourceCategory
+            ? toHostedRuntimeLogCode(completed.resourceCategory)
+            : null,
+          sourceProvider: completed.sourceProviderSlug
+            ? toHostedRuntimeLogCode(completed.sourceProviderSlug)
+            : null,
+          ...(eventToProviderSendMs === null ? {} : { eventToProviderSendMs }),
+          ...(providerSendToWebhookMs === null ? {} : { providerSendToWebhookMs }),
+          ...(webhookToImportMs === null ? {} : { webhookToImportMs }),
+          ...(eventToImportMs === null ? {} : { eventToImportMs }),
+          ...(runtimeQueueMs === null ? {} : { runtimeQueueMs }),
+          ...(importExecutionMs === null ? {} : { importExecutionMs }),
+        },
+      },
+      platform: input.platform,
+    });
+  }
+}
+
+function nonnegativeDurationMs(
+  startAt: string | null,
+  endAt: string | null,
+): number | null {
+  if (!startAt || !endAt) {
+    return null;
+  }
+  const startMs = Date.parse(startAt);
+  const endMs = Date.parse(endAt);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return null;
+  }
+  return endMs - startMs;
 }
 
 export function resolveHostedDeviceSyncNextWakeAt(input: {

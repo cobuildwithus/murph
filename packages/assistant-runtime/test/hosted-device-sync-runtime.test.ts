@@ -2979,6 +2979,10 @@ describe("hosted device-sync runtime", () => {
           {
             count: 12,
             dirtyPayloadId: "dsp_payload_steps_1",
+            eventType: "daily.data.steps.created",
+            firstEventOccurredAt: "2026-04-04T09:55:00.000Z",
+            firstProviderSentAt: "2026-04-04T09:59:00.000Z",
+            firstWebhookReceivedAt: "2026-04-04T10:00:00.000Z",
             jobKind: "resource",
             resource: "steps",
             resourceCategory: "timeseries",
@@ -3068,6 +3072,16 @@ describe("hosted device-sync runtime", () => {
         dirtyPayloadId: "dsp_payload_steps_1",
         jobId: jobs[0]?.id,
         processedRevision: "42",
+        timing: {
+          eventCount: 12,
+          eventType: "daily.data.steps.created",
+          firstEventOccurredAt: "2026-04-04T09:55:00.000Z",
+          firstProviderSentAt: "2026-04-04T09:59:00.000Z",
+          firstWebhookReceivedAt: "2026-04-04T10:00:00.000Z",
+          resource: "steps",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+        },
       }]);
       assert.deepEqual(
         {
@@ -3094,7 +3108,33 @@ describe("hosted device-sync runtime", () => {
       );
 
       assert.equal(await service.drainWorker(1), 1);
-      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      const completedImports = promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      const [completedImport] = completedImports;
+      assert.ok(completedImport);
+      assert.match(completedImport.importCompletedAt, /^\d{4}-\d{2}-\d{2}T/u);
+      assert.match(completedImport.importExecutionStartedAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.match(completedImport.jobCreatedAt, /^\d{4}-\d{2}-\d{2}T/u);
+      assert.deepEqual({
+        ...completedImport,
+        importCompletedAt: "<timestamp>",
+        importExecutionStartedAt: "<timestamp>",
+        jobCreatedAt: "<timestamp>",
+      }, {
+        eventCount: 12,
+        eventType: "daily.data.steps.created",
+        firstEventOccurredAt: "2026-04-04T09:55:00.000Z",
+        firstProviderSentAt: "2026-04-04T09:59:00.000Z",
+        firstWebhookReceivedAt: "2026-04-04T10:00:00.000Z",
+        importCompletedAt: "<timestamp>",
+        importExecutionStartedAt: "<timestamp>",
+        jobCreatedAt: "<timestamp>",
+        jobKind: "resource",
+        provider: "demo",
+        resource: "steps",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+      });
+      assert.equal(completedImports.length, 1);
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_wake",
         nextWakeAt: null,

@@ -148,6 +148,19 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    (more imports, more visible skips); it must never make it quieter (a new
    silent skip, a deferred floor, a gated import).
 
+   Successful hosted webhook imports emit a best-effort
+   `device-sync.import_completed` runtime log after the canonical job succeeds.
+   The existing dirty-resource carrier preserves the first provider event time,
+   verified signed-envelope send time when available, Murph webhook receipt
+   time, event count, and categorical resource metadata. The runtime combines
+   those fields with local job creation, execution start, and completion times
+   to expose upstream delivery, webhook-to-import, queue, execution, and total
+   oldest-event latency. Coalesced resources deliberately report the oldest
+   event in the batch. Missing or negatively ordered clocks keep their raw
+   timestamps but omit the affected duration. This telemetry remains
+   metadata-only and buffered; it cannot delay acceptance, import, or the pull
+   floor, and it is not a recovery owner.
+
 6. **Historical completion is source/resource coverage, not account-level
    traffic.** A useful activity record cannot complete an advertised sleep
    obligation, and one connected source cannot satisfy another source's

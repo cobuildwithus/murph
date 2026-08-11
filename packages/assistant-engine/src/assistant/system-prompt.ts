@@ -997,6 +997,9 @@ const ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT =
 const ASSISTANT_TIME_SENSITIVE_ADVICE_GUIDANCE_TEXT =
   "When timing materially affects immediate advice, use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise to what still makes sense now.";
 
+const ASSISTANT_TIMESTAMP_INTERPRETATION_GUIDANCE_TEXT =
+  "Treat timestamps ending in `Z` or carrying an explicit offset as exact instants, not as local clock labels. Before stating a local time, use the canonical IANA timezone with timezone-aware rendering or an explicitly supplied local clock; never relabel the raw UTC clock as local time.";
+
 function buildAssistantTimezoneLineText(currentTimeZone: string): string {
   return `The user's canonical timezone for this vault is ${currentTimeZone}.`;
 }
@@ -1023,6 +1026,7 @@ function buildAssistantTimeStyleContextText(input: {
   return joinPromptSections(
     [
       buildAssistantTimezoneLineText(input.currentTimeZone),
+      ASSISTANT_TIMESTAMP_INTERPRETATION_GUIDANCE_TEXT,
       ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
       ASSISTANT_RELATIVE_DATE_GUIDANCE_TEXT,
       ...(input.personalCurrentTimeAvailable
@@ -1041,6 +1045,7 @@ function buildAssistantCurrentDateContextText(input: {
   return joinPromptSections(
     [
       buildAssistantTimezoneLineText(input.currentTimeZone),
+      ASSISTANT_TIMESTAMP_INTERPRETATION_GUIDANCE_TEXT,
       buildAssistantCurrentDateLineText(input.currentLocalDate),
       ASSISTANT_DATE_STYLE_GUIDANCE_TEXT,
     ].join("\n"),

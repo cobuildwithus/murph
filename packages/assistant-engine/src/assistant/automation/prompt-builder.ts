@@ -1,6 +1,7 @@
 import type {
   AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { normalizeIanaTimeZone } from '@murphai/contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type {
   AssistantGroupParticipantDisplayNameSource,
@@ -27,6 +28,10 @@ import {
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
 import { readAssistantInputMessageRef } from '../message-target-selection.js'
+import {
+  formatAssistantPromptInstant,
+  resolveAssistantPromptTimeContext,
+} from '../prompt-time.js'
 import { normalizeNullableString } from '../shared.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
@@ -127,6 +132,9 @@ type AssistantAutoReplyPromptInputWithBundles = AssistantAutoReplyPromptInput & 
  */
 export function buildAssistantAutoReplyPrompt(
   inputs: readonly AssistantAutoReplyPromptInput[],
+  options: {
+    timeZone?: string
+  } = {},
 ): AssistantAutoReplyPrompt {
   const sections = inputs
     .map((entry, index) => {
@@ -179,7 +187,11 @@ export function buildAssistantAutoReplyPrompt(
 
   return {
     kind: 'ready',
-    prompt: buildAssistantAutoReplyPromptText(inputs, sections),
+    prompt: buildAssistantAutoReplyPromptText(
+      inputs,
+      sections,
+      options.timeZone ?? 'UTC',
+    ),
   }
 }
 
@@ -189,8 +201,11 @@ export async function prepareAssistantAutoReplyInput(
   options: {
     materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
     onEvent?: (event: AssistantRunEvent) => void
+    timeZone?: string
   } = {},
 ): Promise<AssistantAutoReplyPreparedInput> {
+  const promptTimeZone = normalizeIanaTimeZone(options.timeZone)
+    ?? (await resolveAssistantPromptTimeContext(vaultRoot)).currentTimeZone
   const derivedEvidenceReadBudget = createAssistantDerivedEvidenceReadBudget()
   const preparedInputs: AssistantAutoReplyPromptInputWithBundles[] = []
   for (const entry of inputs) {
@@ -249,7 +264,11 @@ export async function prepareAssistantAutoReplyInput(
     .filter((section): section is string => section !== null)
 
   const hasTextualContent = textualSections.length > 0
-  const nextPrompt = buildAssistantAutoReplyPromptText(inputs, textualSections)
+  const nextPrompt = buildAssistantAutoReplyPromptText(
+    inputs,
+    textualSections,
+    promptTimeZone,
+  )
   const attachmentSources = buildPreparedAttachmentSources(preparedInputs)
 
   const preparedMultimodalInput =
@@ -727,6 +746,7 @@ function renderInlineAttachmentFragmentTitle(
 
 function buildAssistantAutoReplyContextLines(
   inputs: readonly AssistantAutoReplyPromptInput[],
+  timeZone: string,
 ): Array<string | null> {
   const firstInput = inputs[0]
   const lastInput = inputs[inputs.length - 1]
@@ -734,13 +754,14 @@ function buildAssistantAutoReplyContextLines(
     return []
   }
 
+  const normalizedTimeZone = normalizeIanaTimeZone(timeZone) ?? 'UTC'
   const mediaGroupId = resolveGroupedTelegramMediaGroupId(inputs)
   return [
     `Source: ${firstInput.source}`,
-    `Occurred at: ${
+    `Occurred at (${normalizedTimeZone} local; UTC in brackets): ${
       firstInput.occurredAt === lastInput.occurredAt
-        ? firstInput.occurredAt
-        : `${firstInput.occurredAt} -> ${lastInput.occurredAt}`
+        ? formatAssistantPromptInstant(firstInput.occurredAt, normalizedTimeZone)
+        : `${formatAssistantPromptInstant(firstInput.occurredAt, normalizedTimeZone)} -> ${formatAssistantPromptInstant(lastInput.occurredAt, normalizedTimeZone)}`
     }`,
     `Thread: ${firstInput.conversation.threadId ?? 'unknown'}`,
     firstInput.conversation.threadIsDirect === false
@@ -770,8 +791,9 @@ function resolveGroupedTelegramMediaGroupId(
 function buildAssistantAutoReplyPromptText(
   inputs: readonly AssistantAutoReplyPromptInput[],
   sections: readonly string[],
+  timeZone: string,
 ): string {
-  const contextLines = buildAssistantAutoReplyContextLines(inputs).filter(
+  const contextLines = buildAssistantAutoReplyContextLines(inputs, timeZone).filter(
     (line): line is string => line !== null,
   )
   return sections.length > 0

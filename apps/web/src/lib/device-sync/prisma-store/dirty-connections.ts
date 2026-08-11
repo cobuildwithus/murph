@@ -1717,9 +1717,10 @@ function mergeDirtyResourceInto(
   const key = buildDirtyResourceKey(normalized);
   const previous = merged[key] ?? null;
   merged[key] = withDirtyResourceWindowPayload(previous
-    ? {
+      ? {
         ...normalized,
         count: previous.count + normalized.count,
+        ...mergeDirtyResourceTiming(previous, normalized),
         windowStart: minIso(previous.windowStart, normalized.windowStart),
         windowEnd: maxIso(previous.windowEnd, normalized.windowEnd),
       }
@@ -1729,10 +1730,22 @@ function mergeDirtyResourceInto(
 function normalizeDirtyResource(
   resource: HostedDeviceSyncDirtyResource,
 ): HostedDeviceSyncDirtyResource {
+  const eventType = truncateDirtyKey(normalizeNullableString(resource.eventType));
+  const firstEventOccurredAt = normalizeIso(resource.firstEventOccurredAt);
+  const firstProviderSentAt = normalizeIso(resource.firstProviderSentAt);
+  const firstWebhookReceivedAt = normalizeIso(resource.firstWebhookReceivedAt);
   return {
     count: Math.max(1, Math.min(1_000_000, Math.trunc(resource.count))),
     ...(resource.dirtyPayloadId
       ? { dirtyPayloadId: truncateDirtyKey(normalizeNullableString(resource.dirtyPayloadId)) ?? resource.dirtyPayloadId }
+      : {}),
+    ...(eventType || firstEventOccurredAt || firstProviderSentAt || firstWebhookReceivedAt
+      ? {
+          eventType,
+          firstEventOccurredAt,
+          firstProviderSentAt,
+          firstWebhookReceivedAt,
+        }
       : {}),
     jobKind: truncateDirtyKey(normalizeNullableString(resource.jobKind) ?? "reconcile") ?? "reconcile",
     payload: readDirtyResourcePayload(resource.payload),
@@ -1742,6 +1755,36 @@ function normalizeDirtyResource(
     windowEnd: normalizeIso(resource.windowEnd),
     windowStart: normalizeIso(resource.windowStart),
   };
+}
+
+function mergeDirtyResourceTiming(
+  previous: HostedDeviceSyncDirtyResource,
+  next: HostedDeviceSyncDirtyResource,
+): Pick<
+  HostedDeviceSyncDirtyResource,
+  "eventType" | "firstEventOccurredAt" | "firstProviderSentAt" | "firstWebhookReceivedAt"
+> | Record<string, never> {
+  const eventType = previous.eventType ?? next.eventType ?? null;
+  const firstEventOccurredAt = minIso(
+    previous.firstEventOccurredAt,
+    next.firstEventOccurredAt,
+  );
+  const firstProviderSentAt = minIso(
+    previous.firstProviderSentAt,
+    next.firstProviderSentAt,
+  );
+  const firstWebhookReceivedAt = minIso(
+    previous.firstWebhookReceivedAt,
+    next.firstWebhookReceivedAt,
+  );
+  return eventType || firstEventOccurredAt || firstProviderSentAt || firstWebhookReceivedAt
+    ? {
+        eventType,
+        firstEventOccurredAt,
+        firstProviderSentAt,
+        firstWebhookReceivedAt,
+      }
+    : {};
 }
 
 function buildDirtyResourceKey(resource: HostedDeviceSyncDirtyResource): string {
@@ -1815,6 +1858,16 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
     mergeDirtyResourceInto(next, {
       count: typeof record.count === "number" ? record.count : 1,
       ...(typeof record.dirtyPayloadId === "string" ? { dirtyPayloadId: record.dirtyPayloadId } : {}),
+      eventType: typeof record.eventType === "string" ? record.eventType : null,
+      firstEventOccurredAt: typeof record.firstEventOccurredAt === "string"
+        ? record.firstEventOccurredAt
+        : null,
+      firstProviderSentAt: typeof record.firstProviderSentAt === "string"
+        ? record.firstProviderSentAt
+        : null,
+      firstWebhookReceivedAt: typeof record.firstWebhookReceivedAt === "string"
+        ? record.firstWebhookReceivedAt
+        : null,
       jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
       payload: readDirtyResourcePayload(record.payload),
       resource: typeof record.resource === "string" ? record.resource : null,
@@ -1851,6 +1904,16 @@ async function readDirtyPayloadResourceJson(input: {
   mergeDirtyResourceInto(merged, {
     count: typeof record.count === "number" ? record.count : 1,
     dirtyPayloadId: input.row.id,
+    eventType: typeof record.eventType === "string" ? record.eventType : null,
+    firstEventOccurredAt: typeof record.firstEventOccurredAt === "string"
+      ? record.firstEventOccurredAt
+      : null,
+    firstProviderSentAt: typeof record.firstProviderSentAt === "string"
+      ? record.firstProviderSentAt
+      : null,
+    firstWebhookReceivedAt: typeof record.firstWebhookReceivedAt === "string"
+      ? record.firstWebhookReceivedAt
+      : null,
     jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
     payload: readDirtyResourcePayload(record.payload),
     resource: typeof record.resource === "string" ? record.resource : null,
@@ -1990,9 +2053,12 @@ function maxDate(left: Date | null, right: Date | null): Date | null {
   return left.getTime() >= right.getTime() ? left : right;
 }
 
-function minIso(left: string | null, right: string | null): string | null {
+function minIso(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): string | null {
   if (!left) {
-    return right;
+    return right ?? null;
   }
   if (!right) {
     return left;

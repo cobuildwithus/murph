@@ -419,6 +419,10 @@ export interface HostedExecutionDeviceSyncRuntimeApplyResponse {
 export interface HostedExecutionDeviceSyncDirtyResource {
   count: number;
   dirtyPayloadId?: string;
+  eventType?: string | null;
+  firstEventOccurredAt?: string | null;
+  firstProviderSentAt?: string | null;
+  firstWebhookReceivedAt?: string | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
   resource: string | null;
@@ -1362,6 +1366,10 @@ function parseHostedExecutionDeviceSyncDirtyResource(
   label: string,
 ): HostedExecutionDeviceSyncDirtyResource {
   const record = requireObject(value, label);
+  const hasImportTiming = record.eventType !== undefined
+    || record.firstEventOccurredAt !== undefined
+    || record.firstProviderSentAt !== undefined
+    || record.firstWebhookReceivedAt !== undefined;
 
   return {
     count: requirePositiveInteger(record.count, `${label}.count`),
@@ -1370,6 +1378,31 @@ function parseHostedExecutionDeviceSyncDirtyResource(
       : {
           dirtyPayloadId: requireString(record.dirtyPayloadId, `${label}.dirtyPayloadId`),
         }),
+    ...(hasImportTiming
+      ? {
+          eventType: record.eventType === undefined
+            ? null
+            : readNullableStringValue(record.eventType, `${label}.eventType`),
+          firstEventOccurredAt: record.firstEventOccurredAt === undefined
+            ? null
+            : readNullableIsoTimestamp(
+                record.firstEventOccurredAt,
+                `${label}.firstEventOccurredAt`,
+              ),
+          firstProviderSentAt: record.firstProviderSentAt === undefined
+            ? null
+            : readNullableIsoTimestamp(
+                record.firstProviderSentAt,
+                `${label}.firstProviderSentAt`,
+              ),
+          firstWebhookReceivedAt: record.firstWebhookReceivedAt === undefined
+            ? null
+            : readNullableIsoTimestamp(
+                record.firstWebhookReceivedAt,
+                `${label}.firstWebhookReceivedAt`,
+              ),
+        }
+      : {}),
     jobKind: requireString(record.jobKind, `${label}.jobKind`),
     payload: readHostedExecutionDeviceSyncDirtyPayload(record.payload, `${label}.payload`),
     resource: readNullableStringValue(record.resource, `${label}.resource`),

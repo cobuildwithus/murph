@@ -1670,8 +1670,12 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 
   const resourceCategory = normalizeNullableString(input.webhook.resourceCategory);
   const dirtyResources = buildHostedWebhookDirtyResources({
+    eventType: input.webhook.eventType,
+    eventOccurredAt: input.webhook.occurredAt ?? null,
     jobs: input.webhook.jobs ?? [],
     provider: input.account.provider,
+    providerSentAt: input.webhook.providerSentAt ?? null,
+    webhookReceivedAt: input.now,
   });
   await persistHostedDeviceSyncWebhookAccepted({
     acceptedAt: input.now,
@@ -2484,8 +2488,12 @@ function normalizeHostedDeviceSyncJobHints(input: {
 }
 
 function buildHostedWebhookDirtyResources(input: {
+  eventOccurredAt?: string | null;
+  eventType?: string | null;
   jobs: readonly DeviceSyncJobInput[];
   provider: string;
+  providerSentAt?: string | null;
+  webhookReceivedAt?: string | null;
 }): HostedDeviceSyncDirtyResource[] {
   const resources: HostedDeviceSyncDirtyResource[] = [];
 
@@ -2493,6 +2501,7 @@ function buildHostedWebhookDirtyResources(input: {
     const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);
     resources.push({
       count: 1,
+      ...buildHostedWebhookDirtyResourceTiming(input),
       jobKind: job.kind,
       payload: readHostedDirtyResourcePayload(payload),
       resource: readHostedDirtyResourceString(payload.resource),
@@ -2506,6 +2515,7 @@ function buildHostedWebhookDirtyResources(input: {
   if (resources.length === 0) {
     resources.push({
       count: 1,
+      ...buildHostedWebhookDirtyResourceTiming(input),
       jobKind: "reconcile",
       resource: null,
       resourceCategory: null,
@@ -2516,6 +2526,29 @@ function buildHostedWebhookDirtyResources(input: {
   }
 
   return resources;
+}
+
+function buildHostedWebhookDirtyResourceTiming(input: {
+  eventOccurredAt?: string | null;
+  eventType?: string | null;
+  providerSentAt?: string | null;
+  webhookReceivedAt?: string | null;
+}): Pick<
+  HostedDeviceSyncDirtyResource,
+  "eventType" | "firstEventOccurredAt" | "firstProviderSentAt" | "firstWebhookReceivedAt"
+> | Record<string, never> {
+  const eventType = normalizeNullableString(input.eventType);
+  const firstEventOccurredAt = normalizeNullableString(input.eventOccurredAt);
+  const firstProviderSentAt = normalizeNullableString(input.providerSentAt);
+  const firstWebhookReceivedAt = normalizeNullableString(input.webhookReceivedAt);
+  return eventType || firstEventOccurredAt || firstProviderSentAt || firstWebhookReceivedAt
+    ? {
+        eventType,
+        firstEventOccurredAt,
+        firstProviderSentAt,
+        firstWebhookReceivedAt,
+      }
+    : {};
 }
 
 function readHostedDirtyResourceString(value: unknown): string | null {
