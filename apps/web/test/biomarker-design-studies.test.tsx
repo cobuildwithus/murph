@@ -131,6 +131,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain(
     'data-design-variant="venice-terra-sol-locked"',
   );
+  expect(sectionsMarkup).toContain(
+    "Settings inference routing, locked models, and endpoint",
+  );
   expect(sectionsMarkup).toContain("High usage · Edge required");
   expect(sectionsMarkup).toContain(">Upgrade to Edge</button>");
   expect(sectionsMarkup).not.toContain("Sol requires an active Edge plan.");

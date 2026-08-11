@@ -220,7 +220,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings custom inference routing and endpoint">
+      <StudySection title="Settings inference routing, locked models, and endpoint">
         <SettingsCustomInferenceStudy />
       </StudySection>
 
