@@ -2331,18 +2331,33 @@ async function collectProviderEvidenceWithCodex(input: {
   };
 }): Promise<ProviderEvidenceEnvelope> {
   throwIfAborted(input.signal);
-  const [deterministic, cloudflare] = await Promise.all([
-    collectDeterministicProviderEvidence({
-      ...input,
-      env: input.codexRuntime?.env,
-    }),
-    collectCloudflareProviderEvidenceWithCodex(input),
-  ]);
+  const deterministicPromise = collectDeterministicProviderEvidence({
+    ...input,
+    env: input.codexRuntime?.env,
+  });
+  const cloudflarePromise = collectCloudflareProviderEvidenceWithCodex(input);
+  let firstRejection: unknown;
+  let hasFirstRejection = false;
+  for (const branch of [deterministicPromise, cloudflarePromise]) {
+    void branch.catch((error: unknown) => {
+      if (!hasFirstRejection) {
+        hasFirstRejection = true;
+        firstRejection = error;
+      }
+    });
+  }
+  const [deterministic, cloudflare] = await Promise.allSettled([
+    deterministicPromise,
+    cloudflarePromise,
+  ] as const);
+  if (deterministic.status === "rejected" || cloudflare.status === "rejected") {
+    throw firstRejection;
+  }
   throwIfAborted(input.signal);
   return combineProviderEvidence(
-    deterministic.sources,
-    cloudflare.source,
-    [...deterministic.failures, ...cloudflare.failures],
+    deterministic.value.sources,
+    cloudflare.value.source,
+    [...deterministic.value.failures, ...cloudflare.value.failures],
   );
 }
 

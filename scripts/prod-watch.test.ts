@@ -2669,6 +2669,55 @@ describe("production-watch locking and dry-run behavior", () => {
       .toBe("on_demand");
   });
 
+  it("settles a started provider sibling before propagating the first branch rejection", () => {
+    const runtimeRoot = makeTempRoot();
+    const databaseEnv = installDatabaseFixtureHelper(runtimeRoot, "healthy");
+    const codexRoot = path.join(runtimeRoot, "slow-codex");
+    mkdirSync(codexRoot, { recursive: true });
+    const invalidProviderPath = path.join(runtimeRoot, "invalid-provider.json");
+    writeFileSync(invalidProviderPath, "{}", { mode: 0o600 });
+    chmodSync(invalidProviderPath, 0o600);
+    const validProviderPath = path.join(runtimeRoot, "valid-provider.json");
+    writeCurrentProviderFixture(validProviderPath);
+    const childFinishedPath = path.join(runtimeRoot, "provider-child-finished");
+    const codexPath = path.join(codexRoot, "codex");
+    writeFileSync(codexPath, [
+      `#!${process.execPath}`,
+      "const { copyFileSync, writeFileSync } = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "if (args.includes('mcp') && args.includes('list') && args.includes('--json')) {",
+      "  process.stdout.write('[{\"name\":\"cloudflare_observability_oauth\",\"enabled\":true}]\\n');",
+      "  process.exit(0);",
+      "}",
+      "const outputIndex = args.indexOf('--output-last-message');",
+      "if (outputIndex === -1 || args[outputIndex + 1] === undefined) process.exit(2);",
+      "setTimeout(() => {",
+      `  copyFileSync(${JSON.stringify(validProviderPath)}, args[outputIndex + 1]);`,
+      `  writeFileSync(${JSON.stringify(childFinishedPath)}, String(Date.now()));`,
+      "  process.stdout.write('{\"type\":\"turn.completed\",\"status\":\"completed\"}\\n');",
+      "}, 2_000);",
+      "",
+    ].join("\n"), { mode: 0o755 });
+    chmodSync(codexPath, 0o755);
+
+    const result = runProdWatch([
+      "collect",
+      "--provider-child",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot, {
+      ...databaseEnv,
+      MURPH_PROD_WATCH_CODEX_BIN: codexPath,
+      MURPH_PROD_WATCH_CODEX_PROFILE: "test-profile",
+      TEST_PROVIDER_FIXTURE: invalidProviderPath,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const snapshot = JSON.parse(result.stdout) as ProductionWatchSnapshot;
+    const childFinishedAt = Number(readFileSync(childFinishedPath, "utf8"));
+    expect(Date.parse(snapshot.generatedAt)).toBeGreaterThanOrEqual(childFinishedAt);
+  });
+
   it("runs a read-only diagnosis worker before escalating a provider incident", () => {
     const runtimeRoot = makeTempRoot();
     const codexEnv = installFakeCodex(runtimeRoot);
