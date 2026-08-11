@@ -85,6 +85,7 @@ test("HeroClocksIn renders the solo exchange without animation for reduced motio
   );
   assert.ok(composer);
   assert.ok(topic);
+  assert.ok(topic.classList.contains("text-[#c1baae]"));
   const controls = [...view.container.querySelectorAll("input, button")];
   assert.ok(controls.indexOf(composer) < controls.indexOf(topic));
   assert.ok(
