@@ -1095,9 +1095,15 @@ describe('assistant codex runtime', () => {
     },
     {
       expectedImageDetail: 'high',
+      model: 'gpt-5.2',
+      modelProvider: 'openai',
+      providerRequestOrdinal: 3,
+    },
+    {
+      expectedImageDetail: 'high',
       model: 'member-model',
       modelProvider: 'hosted-custom-inference',
-      providerRequestOrdinal: 3,
+      providerRequestOrdinal: 4,
     },
   ] as const)(
     'executes Codex app-server turns for $modelProvider at provider ordinal $providerRequestOrdinal',

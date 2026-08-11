@@ -697,6 +697,7 @@ export async function executeCodexAppServerTurn(
   const preparedImages = await materializeCodexImages({
     images: normalizeCodexAppServerImageDetails({
       images: input.images,
+      model: input.model,
       modelProvider: input.modelProvider,
       turnKind: 'initial',
     }),
@@ -5129,6 +5130,7 @@ async function runCodexAppServerTurnOnProcess(
     const preparedSteerImages = await materializeCodexImages({
       images: normalizeCodexAppServerImageDetails({
         images: steerInput.images,
+        model: input.model,
         modelProvider: input.modelProvider,
         turnKind: 'steer',
       }),
