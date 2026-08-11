@@ -1607,11 +1607,14 @@ function pushJunctionNoteTags(
 
     const tags = normalizeJunctionNoteTags(entry.tags);
     const start = firstStringFromPaths(entry, ["start", "startAt", "start_at"]);
-    const timestamp = resolveRecordTimestamp(
+    const baseTimestamp = resolveRecordTimestamp(
       start ? { ...entry, observedAtRaw: start } : entry,
       context,
       resourceContext.sourceProviderSlug,
     );
+    const timestamp = withTimestampOverride(baseTimestamp, {
+      dayKey: baseTimestamp.dayKey ?? extractIsoDatePrefix(start) ?? undefined,
+    });
     if (!timestamp.occurredAt || !timestamp.dayKey || tags.length === 0) continue;
 
     const stableId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);

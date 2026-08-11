@@ -24,6 +24,7 @@ const NOW = "2026-06-11T12:00:00.000Z";
 const SAME_DAY_LATER = "2026-06-11T18:00:00.000Z";
 const BACKFILL_WINDOW_END = "2026-06-11T00:00:00.000Z";
 const BP_HISTORY_COVERAGE_KEY = "junctionBloodPressureHistoryBackfillCoverage";
+const NOTE_HISTORY_COVERAGE_KEY = "junctionNoteHistoryBackfillCoverage";
 const SOURCE_DISCONNECT_FENCE_CODES = [
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
@@ -281,6 +282,8 @@ function createProvider(input: {
   bloodPressureFailureRequest?: number;
   bloodPressureGroups?: Readonly<Record<string, readonly Record<string, unknown>[]>>;
   bloodPressureRecords?: readonly Record<string, unknown>[];
+  includeNote?: boolean;
+  noteRecords?: readonly Record<string, unknown>[];
   bloodPressureRequestFailure?: {
     active: boolean;
     fromRequest: number;
@@ -293,6 +296,7 @@ function createProvider(input: {
   providerListRequests?: { count: number };
   providerState?: MutableProviderState;
   requests: TimeseriesRequest[];
+  summaryBackfillDays?: number;
   timeseriesBackfillDays?: number;
 }) {
   let bloodPressureRequestCount = 0;
@@ -310,8 +314,10 @@ function createProvider(input: {
     environment: "sandbox",
     region: "us",
     summaryResources: ["activity"],
-    summaryBackfillDays: 30,
-    timeseriesResources: ["blood_pressure", "stress_level"],
+    summaryBackfillDays: input.summaryBackfillDays ?? 30,
+    timeseriesResources: input.includeNote
+      ? ["blood_pressure", "stress_level", "note"]
+      : ["blood_pressure", "stress_level"],
     ...(input.timeseriesBackfillDays === undefined
       ? {}
       : { timeseriesBackfillDays: input.timeseriesBackfillDays }),
@@ -385,16 +391,32 @@ function createProvider(input: {
         const bloodPressureGroups = input.bloodPressureGroups ?? {
           omron: input.bloodPressureRecords ?? [],
         };
+        const noteWindowStart = url.searchParams.get("start_date");
+        const noteWindowEnd = url.searchParams.get("end_date");
+        const noteRecords = (input.noteRecords ?? []).filter((record) => {
+          const timestamp = typeof record.start === "string" ? record.start : null;
+          return timestamp !== null
+            && (noteWindowStart === null || timestamp >= noteWindowStart)
+            && (noteWindowEnd === null || timestamp < noteWindowEnd);
+        });
+        const resourceGroups = resource === "note"
+          ? { oura: noteRecords }
+          : bloodPressureGroups;
         const records = resource === "blood_pressure"
           ? Object.values(bloodPressureGroups).flat()
-          : [];
+          : resource === "note"
+            ? noteRecords
+            : [];
         return createJsonResponse(
           records.length > 0
             ? {
                 groups: Object.fromEntries(
-                  Object.entries(bloodPressureGroups).map(([source, sourceRecords]) => [
+                  Object.entries(resourceGroups).map(([source, sourceRecords]) => [
                     source,
-                    [{ data: [...sourceRecords] }],
+                    [{
+                      data: [...sourceRecords],
+                      source: { provider: source, type: "ring" },
+                    }],
                   ]),
                 ),
               }
@@ -423,6 +445,22 @@ async function executeImmediateBloodPressureContinuations(input: {
   executionCount: number;
   result: ProviderJobResult;
 }> {
+  return executeImmediateResourceContinuations({
+    ...input,
+    resource: "blood_pressure",
+  });
+}
+
+async function executeImmediateResourceContinuations(input: {
+  context: ProviderJobContext;
+  job: DeviceSyncJobRecord;
+  provider: ReturnType<typeof createProvider>;
+  resource: string;
+  startingIndex?: number;
+}): Promise<{
+  executionCount: number;
+  result: ProviderJobResult;
+}> {
   const executor = requireValue(input.provider.jobExecutor);
   let currentJob = input.job;
   let executionCount = 0;
@@ -432,7 +470,7 @@ async function executeImmediateBloodPressureContinuations(input: {
     const result = await executor.executeJob(input.context, currentJob);
     executionCount += 1;
     const continuation = result.scheduledJobs?.find((job) =>
-      job.kind === "resource" && job.payload?.resource === "blood_pressure"
+      job.kind === "resource" && job.payload?.resource === input.resource
     );
     if (!continuation || continuation.availableAt) {
       return { executionCount, result };
@@ -441,7 +479,7 @@ async function executeImmediateBloodPressureContinuations(input: {
     nextIndex += 1;
   }
 
-  throw new Error("Blood-pressure history did not reach a delayed or terminal result.");
+  throw new Error(`${input.resource} history did not reach a delayed or terminal result.`);
 }
 
 test("the persisted-source scheduler gives sparse blood pressure its own full-history resumable job", async () => {
@@ -733,6 +771,91 @@ test("an existing source receives one migration anchored to its first-seen windo
       job.kind === "resource"
       && job.payload?.resource === "blood_pressure"
     ),
+    false,
+  );
+});
+
+test("Oura notes receive one full summary-history migration while dense timeseries stay bounded", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { note: true },
+      slug: "oura",
+    }],
+    includeNote: true,
+    noteRecords: [{
+      id: "note-history-1",
+      end: "2026-01-05T20:05:00.000Z",
+      sourceProviderSlug: "oura",
+      sourceType: "ring",
+      start: "2026-01-05T20:00:00.000Z",
+      tags: ["sauna"],
+    }],
+    requests,
+    summaryBackfillDays: 180,
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sourceFirstSeenAt = NOW;
+  const sources = [createSourceSummary(
+    "oura",
+    sourceFirstSeenAt,
+    "connected",
+    { blood_pressure: false, note: true, stress_level: true },
+  )];
+  const scheduled = createScheduledJobs(
+    createStoredAccount({ sources }),
+    NOW,
+  );
+  const note = requireValue(scheduled.jobs.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "note"
+  ));
+
+  assert.deepEqual(note.payload, {
+    historicalBackfill: true,
+    historicalWindowStart: "2025-12-13T00:00:00.000Z",
+    resource: "note",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "oura",
+    windowEnd: BACKFILL_WINDOW_END,
+    windowStart: "2025-12-13T00:00:00.000Z",
+  });
+
+  const importedSnapshots: unknown[] = [];
+  const { executionCount, result } = await executeImmediateResourceContinuations({
+    context: createJobContext({ canonicalEventCount: 1, importedSnapshots }),
+    job: toJobRecord(note, 1),
+    provider,
+    resource: "note",
+  });
+  assert.equal(executionCount, 180);
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(result.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v1|oura");
+  assert.equal(
+    requests.filter((request) => request.resource === "note").length,
+    180,
+  );
+
+  requests.length = 0;
+  const bounded = requireValue(scheduled.jobs.find((job) => job.kind === "reconcile"));
+  await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({ metadata: result.metadataPatch }),
+    }),
+    toJobRecord(bounded, 2),
+  );
+  assert.equal(
+    requests.filter((request) => request.resource === "stress_level").length,
+    7,
+  );
+
+  const completed = createScheduledJobs(
+    createStoredAccount({ metadata: result.metadataPatch, sources }),
+    "2026-06-12T12:00:00.000Z",
+  );
+  assert.equal(
+    completed.jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
     false,
   );
 });
