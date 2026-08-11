@@ -21,9 +21,16 @@ const BADGE = {
 } as const;
 
 const IMESSAGE_CARD_BADGE_CONTENT_GAP = 40;
+const IMESSAGE_CARD_HEADER_BADGE_GAP = 15;
+const IMESSAGE_CARD_HEADER_LEFT_OFFSET =
+  BADGE.left - IMESSAGE_CARD_HORIZONTAL_PADDING;
+const IMESSAGE_CARD_HEADER_TOP_OFFSET =
+  BADGE.top - IMESSAGE_CARD_VERTICAL_PADDING;
 
 export const IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET =
-  BADGE.left + BADGE.width + IMESSAGE_CARD_BADGE_CONTENT_GAP;
+  BADGE.left + BADGE.width + IMESSAGE_CARD_HEADER_BADGE_GAP
+  - IMESSAGE_CARD_HORIZONTAL_PADDING;
+export const IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT = BADGE.height;
 export const IMESSAGE_CARD_HEADER_TEXT_GAP = 15;
 export const IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE = 64;
 export const IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE = 56;
@@ -42,18 +49,28 @@ type IMessageCardHeaderText = {
  * provide an app badge when the extension is absent, so the fallback bitmap
  * fills that exact footprint with Murph's checked-in SVG mark.
  */
-export function IMessageCardBadge({ logoSrc }: { logoSrc: string }) {
+export function IMessageCardBadge({
+  logoSrc,
+  placement = "absolute",
+}: {
+  logoSrc: string;
+  placement?: "absolute" | "inline";
+}) {
+  const isAbsolute = placement === "absolute";
+  const placementStyle = isAbsolute
+    ? { position: "absolute" as const, top: BADGE.top, left: BADGE.left }
+    : { position: "relative" as const };
   return (
     <div
       aria-hidden="true"
       data-murph-card-badge="svg"
+      data-murph-card-badge-placement={placement}
       style={{
-        position: "absolute",
-        top: BADGE.top,
-        left: BADGE.left,
+        ...placementStyle,
         display: "flex",
         width: BADGE.width,
         height: BADGE.height,
+        flexShrink: 0,
         alignItems: "center",
         justifyContent: "center",
         border: "2px solid rgba(20,18,23,0.08)",
@@ -92,24 +109,33 @@ export function IMessageCardHeader({
   title: IMessageCardHeaderText;
 }) {
   return (
-    <>
-      <IMessageCardBadge logoSrc={logoSrc} />
+    <div
+      data-card-header="beside-badge"
+      data-imessage-card-header="true"
+      style={{
+        display: "flex",
+        height,
+        flexDirection: "column",
+        marginLeft: IMESSAGE_CARD_HEADER_LEFT_OFFSET,
+        gap: IMESSAGE_CARD_HEADER_TEXT_GAP,
+        transform: `translateY(${IMESSAGE_CARD_HEADER_TOP_OFFSET}px)`,
+      }}
+    >
       <div
-        data-card-header="beside-badge"
-        data-imessage-card-header="true"
+        data-imessage-card-title-row="true"
         style={{
           display: "flex",
-          height,
-          flexDirection: "column",
-          justifyContent: "center",
-          marginLeft: IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET,
-          gap: IMESSAGE_CARD_HEADER_TEXT_GAP,
+          minHeight: IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT,
+          alignItems: "center",
+          gap: IMESSAGE_CARD_HEADER_BADGE_GAP,
         }}
       >
+        <IMessageCardBadge logoSrc={logoSrc} placement="inline" />
         <h1
           data-card-text-lines={title.lineCount}
           style={{
             display: "flex",
+            flex: 1,
             margin: 0,
             fontSize: IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
             fontWeight: 600,
@@ -120,21 +146,22 @@ export function IMessageCardHeader({
         >
           {title.text}
         </h1>
-        {subtitle === null ? null : (
-          <div
-            data-card-text-lines={subtitle.lineCount}
-            style={{
-              display: "flex",
-              color: IMESSAGE_CARD_COLOR.secondary,
-              fontSize: IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
-              lineHeight: 1.2,
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {subtitle.text}
-          </div>
-        )}
       </div>
-    </>
+      {subtitle === null ? null : (
+        <div
+          data-card-text-lines={subtitle.lineCount}
+          style={{
+            display: "flex",
+            marginLeft: BADGE.width + IMESSAGE_CARD_HEADER_BADGE_GAP,
+            color: IMESSAGE_CARD_COLOR.secondary,
+            fontSize: IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
+            lineHeight: 1.2,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {subtitle.text}
+        </div>
+      )}
+    </div>
   );
 }

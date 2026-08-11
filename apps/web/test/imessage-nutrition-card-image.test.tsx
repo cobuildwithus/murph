@@ -487,7 +487,7 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 737);
+  assert.equal(init.height, 768);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /imessage-native-compact-table-card/u);
   assert.match(serialized, /Weekly plan/u);
@@ -498,7 +498,11 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.match(serialized, /data-murph-card-badge="svg"/u);
   assert.match(serialized, /data-imessage-card-header="true"/u);
   assert.match(serialized, /data-card-header="beside-badge"/u);
-  assert.match(serialized, /margin-left:205px/u);
+  assert.match(serialized, /margin-left:-15px/u);
+  assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
+  assert.match(serialized, /data-imessage-card-title-row="true"/u);
+  assert.match(serialized, /transform:translateY\(-8px\)/u);
+  assert.match(serialized, /margin-left:150px/u);
   assert.match(serialized, /gap:15px/u);
   assert.doesNotMatch(serialized, /margin-top:171px/u);
   assert.match(serialized, /<h1/u);
@@ -542,7 +546,10 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.match(serialized, /data-murph-card-badge="svg"/u);
   assert.match(serialized, /data-imessage-card-header="true"/u);
   assert.match(serialized, /data-card-header="beside-badge"/u);
-  assert.match(serialized, /margin-left:205px/u);
+  assert.match(serialized, /margin-left:-15px/u);
+  assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
+  assert.match(serialized, /data-imessage-card-title-row="true"/u);
+  assert.match(serialized, /transform:translateY\(-8px\)/u);
   assert.match(serialized, /<h1/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
@@ -757,7 +764,7 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 1_019);
+  assert.equal(init.height, 986);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /imessage-native-challenge-standings-card/u);
   assert.match(serialized, /Summer movement\s+challenge/u);
@@ -774,7 +781,11 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   assert.match(serialized, /data-murph-card-badge="svg"/u);
   assert.match(serialized, /data-imessage-card-header="true"/u);
   assert.match(serialized, /data-card-header="beside-badge"/u);
-  assert.match(serialized, /margin-left:205px/u);
+  assert.match(serialized, /margin-left:-15px/u);
+  assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
+  assert.match(serialized, /data-imessage-card-title-row="true"/u);
+  assert.match(serialized, /transform:translateY\(-8px\)/u);
+  assert.match(serialized, /margin-left:150px/u);
   assert.match(serialized, /gap:15px/u);
   assert.doesNotMatch(serialized, /margin-top:171px/u);
   assert.match(serialized, /<h1/u);
@@ -825,7 +836,7 @@ test("standings image keeps collective progress collective", async () => {
     ...COLLECTIVE_STANDINGS_CARD,
     title: "T".repeat(60),
     subtitle: "S".repeat(120),
-  })).toEqual({ width: 1_200, height: 1_082 });
+  })).toEqual({ width: 1_200, height: 1_015 });
 });
 
 test("standings image sizes semibold titles and maximum score context", async () => {
@@ -854,7 +865,7 @@ test("standings image sizes semibold titles and maximum score context", async ()
     <ChallengeStandingsCardImage card={boundaryCard} />,
   );
 
-  assert.match(serialized, /standings progress\nchallenge morning/u);
+  assert.match(serialized, /standings progress challenge\nmorning/u);
   assert.match(serialized, /OF 9,007,199,254,740,991 PTS/u);
   assert.match(serialized, /data-score-column-width="525"/u);
   assert.match(serialized, /data-score-points-font-size="47"/u);

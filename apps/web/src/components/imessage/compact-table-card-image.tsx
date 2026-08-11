@@ -9,6 +9,7 @@ import {
   IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET,
   IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
   IMESSAGE_CARD_HEADER_TEXT_GAP,
+  IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT,
   IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
 } from "./card-image-chrome";
 import {
@@ -606,14 +607,17 @@ function getCompactTableCardImageLayout(
   const footer = card.footer === null
     ? null
     : wrapCardText(card.footer, CARD_CONTENT_WIDTH, FOOTER_FONT_SIZE);
-  const measuredHeaderHeight = Math.ceil(
-    title.lineCount * IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE * 1.1
-    + (subtitle === null
-      ? 0
-      : IMESSAGE_CARD_HEADER_TEXT_GAP
-        + subtitle.lineCount * IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE * 1.2),
+  const titleRowHeight = Math.max(
+    IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT,
+    Math.ceil(
+      title.lineCount * IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE * 1.1,
+    ),
   );
-  const headerHeight = Math.max(101, measuredHeaderHeight);
+  const subtitleHeight = subtitle === null
+    ? 0
+    : IMESSAGE_CARD_HEADER_TEXT_GAP
+      + subtitle.lineCount * IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE * 1.2;
+  const headerHeight = Math.ceil(titleRowHeight + subtitleHeight);
   const footerHeight = footer === null
     ? 0
     : 45 + Math.ceil(footer.lineCount * FOOTER_FONT_SIZE * 1.2);

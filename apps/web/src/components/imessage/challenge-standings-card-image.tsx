@@ -10,6 +10,7 @@ import {
   IMESSAGE_CARD_HEADER_BESIDE_BADGE_INSET,
   IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE,
   IMESSAGE_CARD_HEADER_TEXT_GAP,
+  IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT,
   IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE,
 } from "./card-image-chrome";
 import {
@@ -502,11 +503,15 @@ function getChallengeStandingsLayout(
     : wrapCardText(card.footer, CARD_CONTENT_WIDTH, FOOTER_FONT_SIZE);
   const titleHeight = title.lineCount
     * IMESSAGE_CARD_HEADER_TITLE_FONT_SIZE * 1.05;
+  const titleRowHeight = Math.max(
+    IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT,
+    Math.ceil(titleHeight),
+  );
   const subtitleHeight = subtitle === null
     ? 0
     : IMESSAGE_CARD_HEADER_TEXT_GAP
       + subtitle.lineCount * IMESSAGE_CARD_HEADER_SUBTITLE_FONT_SIZE * 1.2;
-  const headerHeight = Math.max(101, Math.ceil(titleHeight + subtitleHeight));
+  const headerHeight = Math.ceil(titleRowHeight + subtitleHeight);
   const footerHeight = footer === null
     ? 0
     : 53 + footer.lineCount * FOOTER_FONT_SIZE * 1.25;
