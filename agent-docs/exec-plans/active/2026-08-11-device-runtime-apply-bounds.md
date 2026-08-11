@@ -71,6 +71,12 @@ application authority checks.
   state drift. The implementation keeps the narrow connection epoch, observed
   row/source/token versions, ciphertext, lease, disconnect, provider-
   application, and active-root fences.
+- The preliminary ReviewGPT specialist pass returned three coverage findings
+  and no patch artifact. Accepted all three as test-only evidence gaps: exact
+  foreground overlap while the first advisory-lock transaction is held, the
+  composed 100-by-64 source-write shape, and the prepared-token store owner.
+  Reused the existing transaction spy, fanout harness, and Prisma store
+  fixtures; no production or generic test abstraction changed.
 
 ## Verification
 
@@ -88,10 +94,12 @@ application authority checks.
 
 - Runtime protocol: 95 focused tests pass on the current merged base, including
   the 64-source rejection before any control-plane work.
-- Runtime authority and prepared-secret owners: 67 focused tests pass. The
+- Runtime authority and prepared-secret owners: 68 focused tests pass. The
   deterministic 100-update cases prove two set reads, one batched secret read,
   one optional batched preseal, serial transaction concurrency of one, no
-  post-write hydration, and no KMS/provider work inside a transaction.
+  post-write hydration, and no KMS/provider work inside a transaction. The
+  composed maximum proves 6,400 serial source upserts, 6,702 modeled database-
+  owner operations, and transaction concurrency of one.
 - Shared crypto-root owner and adjacent connection-lock/source coverage pass 44
   current-base tests, including root-reference
   deduplication, provider unwrap concurrency no greater than four, full
@@ -101,11 +109,17 @@ application authority checks.
   merged base; Hosted Web and device-syncd typechecks pass; full Web lint has
   zero errors; repository source/artifact, docs-drift, diff, and privacy guards
   pass.
+- The direct OAuth connection-store suite passes 50 tests, including prepared
+  token write/clear selected-row returns, obsolete-lease cleanup, and active-
+  lease rejection without a write.
 - A fresh, fully migrated local PostgreSQL cluster passed both proofs: the
   1,641-receipt, 31-wide incident replay stayed within the 15-connection pool,
   and a 100-update no-op apply plus 40 foreground reads stayed within a
   two-connection pool with one set connection read, one set source read, 100
-  serial live connection/source reads, and zero writes.
+  serial live connection/source reads, and zero writes. A transaction barrier
+  now holds the first advisory-lock transaction open while all 40 foreground
+  reads finish through the other pooled connection and proves that no second
+  apply transaction enters before release.
 - Broad diff verification passed repository guards, all affected typechecks,
   and the full assistant-engine (3,468), assistant-cli (128),
   assistant-runtime (2,165), and assistantd (40) test inventories before stale

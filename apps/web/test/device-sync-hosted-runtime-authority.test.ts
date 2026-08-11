@@ -553,6 +553,9 @@ function createRuntimeApplyFanoutHarness() {
     recordsById.set(input.record.id, written);
     return written;
   });
+  const upsertConnectionSource = vi.fn(async () => {
+    expect(activeTransactions).toBe(1);
+  });
   const withConnectionMutationLock = vi.fn(async (
     connectionId: string,
     callback: (tx: {
@@ -610,7 +613,7 @@ function createRuntimeApplyFanoutHarness() {
     },
     readRuntimeApplyConnectionSecretMaterial,
     syncDurableConnectionState,
-    upsertConnectionSource: vi.fn(async () => undefined),
+    upsertConnectionSource,
     withConnectionMutationLock,
   };
 
@@ -637,6 +640,7 @@ function createRuntimeApplyFanoutHarness() {
     readRuntimeApplyConnectionSecretMaterial,
     records,
     syncDurableConnectionState,
+    upsertConnectionSource,
     withConnectionMutationLock,
   };
 }
@@ -1054,6 +1058,62 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       + harness.preparedRootBindingReads
       + harness.persistPreparedRuntimeApplyTokenWrite.mock.calls.length;
     expect(datastoreStatements).toBe(502);
+  });
+
+  it("bounds the composed N=100 by 64-source apply to 6,400 serial source writes", async () => {
+    const harness = createRuntimeApplyFanoutHarness();
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: harness.records.map((record) => ({
+            connectionId: record.id,
+            observedConnectedAt: record.connectedAt,
+            sources: Array.from({ length: 64 }, (_, index) => ({
+              lastSeenAt: "2026-04-06T10:00:00.000Z",
+              observedLastSeenAt: null,
+              sourceInstanceKey: `${record.id}:source:${index}`,
+              sourceProviderSlug: `source_${index}`,
+              status: "connected",
+            })),
+          })),
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates).toHaveLength(100);
+    expect(response.updates.every((update) =>
+      update.tokenUpdate === "unchanged"
+      && update.writeUpdate === "applied"
+    )).toBe(true);
+    expect(harness.preparationConnectionRead).toHaveBeenCalledOnce();
+    expect(harness.preparationSourceRead).toHaveBeenCalledOnce();
+    expect(harness.readRuntimeApplyConnectionSecretMaterial).toHaveBeenCalledOnce();
+    expect(harness.prepareRuntimeApplyTokenWrites).not.toHaveBeenCalled();
+    expect(harness.withConnectionMutationLock).toHaveBeenCalledTimes(100);
+    expect(harness.maxActiveTransactions).toBe(1);
+    expect(harness.liveConnectionReads).toBe(100);
+    expect(harness.liveSourceReads).toBe(100);
+    expect(harness.preparedRootBindingReads).toBe(0);
+    expect(harness.upsertConnectionSource).toHaveBeenCalledTimes(6_400);
+    expect(harness.persistPreparedRuntimeApplyTokenWrite).not.toHaveBeenCalled();
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.forbiddenPostWriteHydration).not.toHaveBeenCalled();
+
+    const datastoreStatements =
+      harness.preparationConnectionRead.mock.calls.length
+      + harness.preparationSourceRead.mock.calls.length
+      + harness.withConnectionMutationLock.mock.calls.length
+      + harness.liveConnectionReads
+      + harness.liveSourceReads
+      + harness.upsertConnectionSource.mock.calls.length;
+    expect(datastoreStatements).toBe(6_702);
   });
 
   it.each([

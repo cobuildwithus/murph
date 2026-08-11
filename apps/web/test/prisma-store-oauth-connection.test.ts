@@ -2253,6 +2253,177 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(findUnique).not.toHaveBeenCalled();
   });
 
+  it("persists a prepared runtime token write and clears only an obsolete refresh lease", async () => {
+    const record = {
+      ...createConnection({
+        credentialKind: "provider_config",
+        providerConfigKey: "legacy-profile",
+        refreshLeaseExpiresAt: new Date("2026-03-25T04:05:00.000Z"),
+        refreshLeaseOwner: "agent-refresh:obsolete",
+        refreshLeaseTokenVersion: 1,
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: { profile: "legacy" },
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const written = {
+      ...createConnection({
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        providerConfigKey: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+        refreshTokenEncrypted: "sealed-refresh-token",
+        tokenVersion: 3,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const update = vi.fn(async () => written);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {} as never,
+    });
+
+    const result = await store.persistPreparedRuntimeApplyTokenWrite({
+      prepared: {
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: "2026-03-26T04:00:00.000Z",
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        refreshTokenEncrypted: "sealed-refresh-token",
+        rootKeyId: "device-root-active",
+        tokenVersion: 3,
+      },
+      record,
+      tx: {
+        deviceConnection: { update },
+      } as never,
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: new Date("2026-03-26T04:00:00.000Z"),
+        credentialKind: "oauth_tokens",
+        credentialMetadataJson: {},
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        providerConfigKey: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseOwner: null,
+        refreshLeaseTokenVersion: null,
+        refreshTokenEncrypted: "sealed-refresh-token",
+        tokenVersion: 3,
+      },
+      where: { id: record.id },
+    }));
+    expect(result).toBe(written);
+  });
+
+  it("persists a prepared runtime token clear without changing credential ownership", async () => {
+    const record = {
+      ...createConnection({
+        accessTokenEncrypted: "enc:access-token",
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "enc:acct_456",
+        keyVersion: "v1",
+        refreshTokenEncrypted: "enc:refresh-token",
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const written = {
+      ...createConnection({
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "sealed-account-id",
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const update = vi.fn(async () => written);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {} as never,
+    });
+
+    const result = await store.persistPreparedRuntimeApplyTokenWrite({
+      prepared: {
+        accessTokenEncrypted: null,
+        accessTokenExpiresAt: null,
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: null,
+        refreshTokenEncrypted: null,
+        rootKeyId: "device-root-active",
+        tokenVersion: null,
+      },
+      record,
+      tx: {
+        deviceConnection: { update },
+      } as never,
+    });
+
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        accessTokenEncrypted: null,
+        accessTokenExpiresAt: null,
+        credentialKind: "oauth_tokens",
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: null,
+        providerConfigKey: null,
+        refreshTokenEncrypted: null,
+        tokenVersion: null,
+      },
+      where: { id: record.id },
+    }));
+    expect(result).toBe(written);
+  });
+
+  it("rejects a prepared runtime token write while the current refresh lease is active", async () => {
+    const record = {
+      ...createConnection({
+        refreshLeaseExpiresAt: new Date("2026-03-25T04:05:00.000Z"),
+        refreshLeaseOwner: "agent-refresh:active",
+        refreshLeaseTokenVersion: 2,
+        tokenVersion: 2,
+      }),
+      credentialMetadataJson: {},
+      metadataJson: {},
+      scopesJson: [],
+    } satisfies HostedConnectionRecord;
+    const update = vi.fn();
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {} as never,
+    });
+
+    await expect(store.persistPreparedRuntimeApplyTokenWrite({
+      prepared: {
+        accessTokenEncrypted: "sealed-access-token",
+        accessTokenExpiresAt: null,
+        externalAccountIdEncrypted: "sealed-account-id",
+        keyVersion: "hosted-device-secure-box:v1",
+        refreshTokenEncrypted: "sealed-refresh-token",
+        rootKeyId: "device-root-active",
+        tokenVersion: 3,
+      },
+      record,
+      tx: {
+        deviceConnection: { update },
+      } as never,
+    })).rejects.toMatchObject({
+      code: "TOKEN_REFRESH_IN_PROGRESS",
+      retryable: true,
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("preserves the stored external account binding across token clears, tokenless reads, and retokenization", async () => {
     let connection = createConnection({
       accessTokenEncrypted: "enc:access-token",

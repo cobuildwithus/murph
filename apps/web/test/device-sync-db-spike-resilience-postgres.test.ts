@@ -384,9 +384,38 @@ describe.skipIf(!runPostgresProof)(
         poolMax: 1,
       });
       const store = new PrismaDeviceSyncControlPlaneStore({ prisma });
+      const runWithConnectionMutationLock =
+        store.withConnectionMutationLock.bind(store);
+      let firstTransactionEnteredResolve!: () => void;
+      const firstTransactionEntered = new Promise<void>((resolve) => {
+        firstTransactionEnteredResolve = resolve;
+      });
+      let releaseFirstTransactionResolve!: () => void;
+      const releaseFirstTransaction = new Promise<void>((resolve) => {
+        releaseFirstTransactionResolve = resolve;
+      });
+      let activeApplyTransactions = 0;
+      let maxActiveApplyTransactions = 0;
       const withConnectionMutationLock = vi.spyOn(
         store,
         "withConnectionMutationLock",
+      ).mockImplementation(async (connectionId, callback) =>
+        runWithConnectionMutationLock(connectionId, async (tx) => {
+          activeApplyTransactions += 1;
+          maxActiveApplyTransactions = Math.max(
+            maxActiveApplyTransactions,
+            activeApplyTransactions,
+          );
+          try {
+            if (withConnectionMutationLock.mock.calls.length === 1) {
+              firstTransactionEnteredResolve();
+              await releaseFirstTransaction;
+            }
+            return await callback(tx);
+          } finally {
+            activeApplyTransactions -= 1;
+          }
+        })
       );
       const memberId = `hbm_device_sync_apply_${suffix}`;
       const connectedAt = new Date("2026-08-11T12:00:00.000Z");
@@ -445,7 +474,9 @@ describe.skipIf(!runPostgresProof)(
               }),
               trustedUserId: memberId,
             });
-            await Promise.resolve();
+            await firstTransactionEntered;
+            expect(activeApplyTransactions).toBe(1);
+            expect(withConnectionMutationLock).toHaveBeenCalledTimes(1);
             const foreground = Array.from(
               { length: RUNTIME_APPLY_FOREGROUND_READS },
               async () => {
@@ -457,10 +488,17 @@ describe.skipIf(!runPostgresProof)(
                 foregroundLatenciesMs.push(performance.now() - startedAt);
               },
             );
-            const [applyResponse] = await Promise.all([
-              applyPromise,
-              Promise.all(foreground),
-            ]);
+            const foregroundFailure = await Promise.all(foreground).then(
+              () => null,
+              (error: unknown) => error,
+            );
+            expect(activeApplyTransactions).toBe(1);
+            expect(withConnectionMutationLock).toHaveBeenCalledTimes(1);
+            releaseFirstTransactionResolve();
+            const applyResponse = await applyPromise;
+            if (foregroundFailure) {
+              throw foregroundFailure;
+            }
             return applyResponse;
           },
         );
@@ -474,6 +512,7 @@ describe.skipIf(!runPostgresProof)(
         expect(withConnectionMutationLock).toHaveBeenCalledTimes(
           RUNTIME_APPLY_CONNECTIONS,
         );
+        expect(maxActiveApplyTransactions).toBe(1);
         expect(operationCounts.get("DeviceConnection.findMany") ?? 0).toBe(1);
         expect(operationCounts.get("DeviceConnection.findFirst") ?? 0).toBe(
           RUNTIME_APPLY_CONNECTIONS,
