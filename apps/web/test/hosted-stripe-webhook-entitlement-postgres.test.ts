@@ -1181,12 +1181,9 @@ describe.skipIf(!runPostgresProof)(
 
       workflowBoundary.start.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
-      runtimeRecheckBoundary.signal
-        .mockRejectedValueOnce(new Error("Temporal fixture unavailable"))
-        .mockResolvedValue({
-          signalAccepted: true,
-          workflowId: `hosted-user-runtime:${memberId}`,
-        });
+      runtimeRecheckBoundary.signal.mockRejectedValue(
+        new Error("Temporal fixture unavailable"),
+      );
       configureHostedStripeFixtureEnvironment({
         edgePriceId,
         pulsePriceId,
@@ -1280,6 +1277,10 @@ describe.skipIf(!runPostgresProof)(
           expect.objectContaining({ userId: memberId }),
         );
 
+        runtimeRecheckBoundary.signal.mockResolvedValue({
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${memberId}`,
+        });
         await makeStripeReceiptImmediatelyRetryable({
           eventId: stripeEventId,
           prisma,
@@ -1360,12 +1361,9 @@ describe.skipIf(!runPostgresProof)(
 
       workflowBoundary.start.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
-      runtimeRecheckBoundary.signal
-        .mockRejectedValueOnce(new Error("Temporal fixture unavailable"))
-        .mockResolvedValue({
-          signalAccepted: true,
-          workflowId: `hosted-user-runtime:${memberId}`,
-        });
+      runtimeRecheckBoundary.signal.mockRejectedValue(
+        new Error("Temporal fixture unavailable"),
+      );
       configureHostedStripeFixtureEnvironment({
         edgePriceId,
         familyEdgePriceId,
@@ -1499,6 +1497,10 @@ describe.skipIf(!runPostgresProof)(
           expect.objectContaining({ userId: memberId }),
         );
 
+        runtimeRecheckBoundary.signal.mockResolvedValue({
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${memberId}`,
+        });
         await makeStripeReceiptImmediatelyRetryable({
           eventId: stripeEventId,
           prisma,
@@ -1596,12 +1598,9 @@ describe.skipIf(!runPostgresProof)(
 
       workflowBoundary.start.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
-      runtimeRecheckBoundary.signal
-        .mockRejectedValueOnce(new Error("Temporal fixture unavailable"))
-        .mockResolvedValue({
-          signalAccepted: true,
-          workflowId: `hosted-user-runtime:${ownerMemberId}`,
-        });
+      runtimeRecheckBoundary.signal.mockRejectedValue(
+        new Error("Temporal fixture unavailable"),
+      );
       configureHostedStripeFixtureEnvironment({
         edgePriceId,
         familyEdgePriceId,
@@ -1767,6 +1766,10 @@ describe.skipIf(!runPostgresProof)(
         });
         expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(1);
 
+        runtimeRecheckBoundary.signal.mockResolvedValue({
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${ownerMemberId}`,
+        });
         await makeStripeReceiptImmediatelyRetryable({
           eventId: stripeEventId,
           prisma,
