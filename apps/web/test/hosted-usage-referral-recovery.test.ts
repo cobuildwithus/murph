@@ -80,7 +80,7 @@ describe("hosted usage-referral recovery", () => {
     ]);
     const findMailboxItems = vi.fn().mockResolvedValue([
       {
-        id: "mailbox_referral_existing",
+        id: "mailbox_generic_predecessor",
         lane: "conversation",
         laneSeq: 11n,
         userId: "member_existing_source",
@@ -184,12 +184,23 @@ describe("hosted usage-referral recovery", () => {
     expect(findMailboxItems).toHaveBeenCalledOnce();
     const pendingMailboxQuery = findMailboxItems.mock.calls[0]?.[0];
     expect(pendingMailboxQuery?.strings.join(" ")).toContain(
-      "item.lane_seq = counter.consumed_seq + 1",
+      "GREATEST(",
     );
-    expect(pendingMailboxQuery?.values).toEqual([
+    expect(pendingMailboxQuery?.strings.join(" ")).toContain(
+      "referral.lane_seq > lane_cursor.consumed_seq",
+    );
+    expect(pendingMailboxQuery?.strings.join(" ")).toContain(
+      "item.lane_seq > pending_referral_lane.consumed_seq",
+    );
+    expect(pendingMailboxQuery?.values.filter(
+      (value: unknown): value is string => typeof value === "string",
+    )).toEqual([
       "assistant.notification.requested:usage-referral-reward:%",
-      HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
+      "assistant.notification.requested:usage-referral-reward:%",
     ]);
+    expect(pendingMailboxQuery?.values.at(-1)).toBe(
+      HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
+    );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(
       1,
       {
@@ -225,7 +236,7 @@ describe("hosted usage-referral recovery", () => {
           laneSeq: "11",
           userId: "member_existing_source",
         },
-        mailboxItemId: "mailbox_referral_existing",
+        mailboxItemId: "mailbox_generic_predecessor",
         prisma,
       },
     );

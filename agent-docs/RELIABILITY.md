@@ -1063,12 +1063,14 @@ Last verified: 2026-08-10
   route authority before every provider attempt, and non-idempotent transport
   work remains checkpoint-gated. Generic notifications or unrelated pending
   outbox work cannot hitchhike. Fresh conversation input retains priority.
-  Referral recovery also re-signals bounded oldest celebration pointers only
-  when they are the exact current head after their canonical lane-consumption
-  cursor, so a post-commit signal failure remains recoverable without repeatedly
-  interrupting an already-running backlog drain or adding another queue or state
-  machine. Web must not rewrite an encrypted payload after the runtime may have
-  imported it and advanced its watermark. For the exact authority-less direct-Linq
+  Referral recovery also selects each lane containing a live pending celebration
+  and re-signals only its first live item after the same effective consumption
+  cursor used by runtime projection. That item may be an earlier non-referral
+  predecessor. This preserves ordered recovery after lost post-commit signals
+  while Temporal's existing no-progress backoff coalesces repeated recovery
+  passes, without another queue or state machine. Web must not rewrite an
+  encrypted payload after the runtime may have imported it and advanced its
+  watermark. For the exact authority-less direct-Linq
   usage-referral shape, the local system-mailbox owner reasserts the frozen
   member/channel/direct target before model work, adds proof only in memory on
   success, terminally records a definitive stale route without sending, and

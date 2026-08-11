@@ -892,11 +892,13 @@ Hosted AI usage metering:
   attributed stable-link activations. Conversational referrals also use
   immediate post-commit reconciliation, and that same cron converges on one
   final referral grant and one atomic source-mailbox celebration fence.
-  Recovery also re-signals bounded oldest celebration pointers only when they
-  are the exact current head after their canonical lane-consumption cursor, so
-  a failed Temporal signal is recoverable without repeatedly interrupting an
-  active backlog drain. Web does not read or rewrite encrypted payloads. If an
-  authority-less legacy direct-Linq wake was already imported,
+  Recovery selects each lane containing a live pending celebration and
+  re-signals only its first live item after the runtime projection's effective
+  consumed cursor. That head may be an earlier non-referral predecessor, so a
+  failed Temporal signal remains recoverable in ordinary lane order while the
+  existing no-progress backoff coalesces repeat passes. Web does not read or
+  rewrite encrypted payloads. If an authority-less legacy direct-Linq wake was
+  already imported,
   the local runtime reasserts its frozen target through Web's existing route
   owner before model work. An exact live match continues through the normal
   audience and provider-entry guards, a definitive stale match ends without a
