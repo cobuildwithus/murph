@@ -504,6 +504,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: number;
         rollout_active_grace_period?: number;
         rollout_step_percentage?: number[];
+        ssh: { enabled: boolean };
       }>;
       durable_objects: {
         bindings: Array<{
@@ -547,6 +548,7 @@ describe("hosted deploy automation helpers", () => {
         max_instances: number;
         rollout_active_grace_period?: number;
         rollout_step_percentage?: number[];
+        ssh: { enabled: boolean };
       }>;
       durable_objects: {
         bindings: Array<{
@@ -589,12 +591,14 @@ describe("hosted deploy automation helpers", () => {
     ]);
     expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
     for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
+      expect(generatedContainer.ssh).toEqual({ enabled: false });
       expect(checkedInConfig.containers[index]).toMatchObject({
         class_name: generatedContainer.class_name,
         instance_type: generatedContainer.instance_type,
         max_instances: generatedContainer.max_instances,
         rollout_active_grace_period: generatedContainer.rollout_active_grace_period,
         rollout_step_percentage: generatedContainer.rollout_step_percentage,
+        ssh: generatedContainer.ssh,
       });
     }
     expect(checkedInConfig.durable_objects.bindings).toEqual(generatedConfig.durable_objects.bindings);
