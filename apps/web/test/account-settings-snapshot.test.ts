@@ -4,7 +4,6 @@ import { createHostedEmailUserReplyAliasRoute } from "@murphai/hosted-execution/
 const mocks = vi.hoisted(() => ({
   findUniqueHostedMember: vi.fn(),
   getPrisma: vi.fn(),
-  projectHostedMemberAssistantPreferences: vi.fn(),
   projectHostedMemberEmailAuthorizationState: vi.fn(),
   readHostedMemberBillingPrivateState: vi.fn(),
   readHostedMemberIdentityPhoneNumber: vi.fn(),
@@ -48,18 +47,6 @@ vi.mock("@/src/lib/hosted-onboarding/assistant-model-preference", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/member-preferences", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/member-preferences")
-  >("@/src/lib/hosted-onboarding/member-preferences");
-
-  return {
-    ...actual,
-    projectHostedMemberAssistantPreferences:
-      mocks.projectHostedMemberAssistantPreferences,
-  };
-});
-
 vi.mock("@/src/lib/hosted-onboarding/member-private-codecs", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-onboarding/member-private-codecs")
@@ -95,15 +82,6 @@ describe("hosted account settings snapshot", () => {
     process.env.HOSTED_EMAIL_LOCAL_PART = "murph";
     process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-email-signing-secret";
     mocks.findUniqueHostedMember.mockResolvedValue(null);
-    mocks.projectHostedMemberAssistantPreferences.mockReturnValue({
-      personality: {
-        detail: null,
-        humor: null,
-        push: null,
-      },
-      tone: null,
-      voice: null,
-    });
     mocks.projectHostedMemberEmailAuthorizationState.mockResolvedValue({
       directPublicSender: null,
       memberId: "member_123",
@@ -273,7 +251,11 @@ describe("hosted account settings snapshot", () => {
       select: expect.any(Object),
       where: { id: "member_123" },
     });
-    expect(query.select).not.toHaveProperty("assistantPersona");
+    expect(query.select).toHaveProperty("assistantPersona", true);
+    expect(query.select).toHaveProperty("assistantDetail", true);
+    expect(query.select).toHaveProperty("assistantHumor", true);
+    expect(query.select).toHaveProperty("assistantPush", true);
+    expect(query.select).toHaveProperty("assistantUnhinged", true);
     expect(query.select.identity.select).toEqual({
       memberId: true,
       phoneNumberEncrypted: true,
@@ -412,43 +394,34 @@ describe("hosted account settings snapshot", () => {
     });
   });
 
-  it("never leaks the conversational-only Unhinged dial into the settings snapshot", async () => {
-    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord());
-    // The underlying projection carries all four dials; the snapshot must
-    // expose only the three web-visible ones.
-    mocks.projectHostedMemberAssistantPreferences.mockReturnValue({
-      personality: {
-        detail: 8,
-        humor: 7,
-        push: 6,
-        unhinged: 9,
-      },
-      tone: "casual",
-      voice: "warm",
-    });
+  it("projects web style levels while keeping Unhinged out of Settings", async () => {
+    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord({
+      assistantDetail: 8,
+      assistantHumor: 7,
+      assistantPersona: "scientist-with-classic",
+      assistantPush: 6,
+      assistantUnhinged: 9,
+    }));
 
     const snapshot = await readHostedAccountSettingsSnapshot({
       memberId: "member_123",
     });
 
+    expect(snapshot.assistant?.persona).toBe("scientist-with-classic");
     expect(snapshot.assistant?.personality).toEqual({
       detail: 8,
       humor: 7,
       push: 6,
     });
+    expect(snapshot.assistant?.personality).not.toHaveProperty("unhinged");
   });
 
   it("normalizes assistant preferences for settings display", async () => {
-    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord());
-    mocks.projectHostedMemberAssistantPreferences.mockReturnValue({
-      personality: {
-        detail: 8,
-        humor: 7,
-        push: 6,
-      },
-      tone: "casual",
-      voice: "warm",
-    });
+    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord({
+      assistantPersona: "scientist-with-classic",
+      assistantTone: "casual",
+      assistantVoice: "warm",
+    }));
 
     await expect(readHostedAccountSettingsSnapshot({
       memberId: "member_123",
@@ -457,12 +430,13 @@ describe("hosted account settings snapshot", () => {
         configurationAvailable: true,
         dormantSolPreference: false,
         model: "gpt-5.6-terra",
-        provider: "openai",
+        persona: "scientist-with-classic",
         personality: {
-          detail: 8,
-          humor: 7,
-          push: 6,
+          detail: null,
+          humor: null,
+          push: null,
         },
+        provider: "openai",
         solAvailable: false,
         tone: "casual",
         voice: "warm",
@@ -471,21 +445,18 @@ describe("hosted account settings snapshot", () => {
 
     // Roster ids can be retired, so stored values that no longer resolve fall
     // back to the defaults instead of leaking a stale id into the settings UI.
-    mocks.projectHostedMemberAssistantPreferences.mockReturnValue({
-      personality: {
-        detail: null,
-        humor: null,
-        push: null,
-      },
-      tone: null,
-      voice: null,
-    });
+    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord({
+      assistantPersona: "retired-persona",
+      assistantTone: "LOUD",
+      assistantVoice: "retired-voice",
+    }));
 
     await expect(readHostedAccountSettingsSnapshot({
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
         model: "gpt-5.6-terra",
+        persona: null,
         personality: {
           detail: null,
           humor: null,
@@ -504,6 +475,7 @@ describe("hosted account settings snapshot", () => {
     })).resolves.toMatchObject({
       assistant: {
         model: "gpt-5.6-terra",
+        persona: null,
         personality: {
           detail: null,
           humor: null,
@@ -641,6 +613,7 @@ function makeSettingsMemberRecord(
     assistantDetail: null,
     assistantHumor: null,
     assistantModelPreference: null,
+    assistantPersona: null,
     assistantProviderPreference: null,
     assistantPush: null,
     assistantUnhinged: null,

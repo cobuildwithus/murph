@@ -6188,7 +6188,13 @@ function parsePersonalizationArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.personalization.input',
-        schemaRootKeys: ['action', 'tone', 'voice'],
+        schemaRootKeys: [
+          'action',
+          'mainPersona',
+          'supportingPersona',
+          'tone',
+          'voice',
+        ],
         toolName: 'murph.personalization',
       }),
     }

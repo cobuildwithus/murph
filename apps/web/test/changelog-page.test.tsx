@@ -60,7 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Group photos, Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
+      "Group photos, Starter, patterns, personality, health history, referrals, reminders, cards, voices, and clearer pages",
     );
     expect(markup).toContain("Blood-pressure history waits for the whole sync");
     expect(markup).toContain("Response cards stay compact in Messages");

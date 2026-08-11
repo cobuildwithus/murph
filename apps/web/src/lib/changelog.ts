@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Group photos, Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
+      "Group photos, Starter, patterns, personality, health history, referrals, reminders, cards, voices, and clearer pages",
     summary:
-      "Use a visible Murph-made image as a group photo after an explicit request. Starter usage waits until used; patterns link actions to next-day sleep; blood-pressure history survives source-access changes; referrals stay in their conversation; reminders keep local time; cards and voice choices stay clear; search stays current; pages start lighter; and private reports show their shape while loading.",
+      "Visible Murph-made images can become group photos when explicitly asked. Starter waits until used; patterns link actions to next-day sleep; edit personality in Settings or chat; blood-pressure history survives source changes; referrals stay in their chat; reminders keep local time; cards and voices stay clear; search stays current; pages start lighter; and private reports show shape while loading.",
     items: [
       {
         id: "generated-image-group-photo",
@@ -128,6 +128,22 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           href: "/patterns",
           label: "View your patterns",
+        },
+      },
+      {
+        id: "personality-settings-and-chat",
+        kind: "feature",
+        priority: 4,
+        title: "Choose how Murph shows up",
+        summary:
+          "Choose Murph's main and optional supporting personality in Settings, or ask Murph to change them in chat.",
+        details:
+          "Both paths update the same saved personality. Explicit tone, voice, Humor, Push, and Detail choices stay unchanged; where you have not customized tone or voice, Settings shows the selected personality's defaults. A group request changes only that room's Murph rather than anyone's private settings.",
+        relevanceTags: ["personality", "settings", "chat", "groups"],
+        sourcePullRequests: [1589],
+        tryIt: {
+          href: "/settings",
+          label: "Edit Murph's personality",
         },
       },
       {
