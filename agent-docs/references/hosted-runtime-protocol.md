@@ -321,16 +321,21 @@ so a stale producer cannot update a later grant generation.
 
 The grantor's personal runtime offers this replacement projection only after its
 source state crosses the existing successful checkpoint boundary. A pending
-mailbox prefix may wait behind an in-flight projection only when every item is a
-system-lane `device-sync.wake` with the production `device-sync:dirty:` dedupe
-prefix. Those rows are level-triggered dirty hints. Connection, disconnect,
-manual-reconcile, and scheduled-reconcile commands remain foreground work, as do
-mixed or uninspectable prefixes and failed classification fetches. A successful
-classification prefetch is reused by the foreground import instead of fetched a
-second time. Once graceful shutdown is observed, the retiring runtime neither
-starts nor re-enters projection or mailbox import; it returns an immediate
-`mailbox` wake so the existing replacement-runtime reconciliation owns the
-durable row.
+mailbox prefix may wait behind an in-flight projection only when the same
+bounded response proves every fetched lane reaches its lane-wide high-water and
+every visible item is a system-lane `device-sync.wake` with the production
+`device-sync:dirty:` dedupe prefix. Those rows are level-triggered dirty hints.
+A full page whose high-water lies beyond its visible suffix is incomplete and
+remains foreground work, so connection, disconnect, manual-reconcile, and
+scheduled-reconcile commands cannot hide behind dirty hints. Mixed or
+uninspectable prefixes and failed classification fetches likewise remain
+foreground. A successful classification prefetch is reused by the foreground
+import instead of fetched a second time. An invocation that exhausts its mailbox
+budget returns the existing durable continuation before making another
+projection offer. Once graceful shutdown is observed, the retiring runtime
+neither starts nor re-enters projection or mailbox import; it returns an
+immediate `mailbox` wake so the existing replacement-runtime reconciliation owns
+the durable row.
 
 `murph.group action="read_shared"` accepts one to three unique exact selectable
 projection scopes. The signed Web handler captures the current group roster and

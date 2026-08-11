@@ -596,19 +596,52 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   hasSystemWork: boolean;
 }> {
   const response = await prefetch.response;
+  const reachesEveryLaneHighWater = prefetch.lanes.every((lane) => {
+    const laneHighWaters = response.maxSeqByLane.filter((entry) => entry.lane === lane);
+    if (laneHighWaters.length !== 1) {
+      return false;
+    }
+
+    const importedSeq = parseHostedMailboxSeqOrNull(prefetch.importedSeqByLane[lane]);
+    const maxSeq = parseHostedMailboxSeqOrNull(laneHighWaters[0]?.maxSeq);
+    if (importedSeq === null || maxSeq === null) {
+      return false;
+    }
+
+    let visibleMaxSeq: bigint | null = null;
+    for (const item of response.items) {
+      if (item.lane !== lane) {
+        continue;
+      }
+      const itemSeq = parseHostedMailboxSeqOrNull(item.laneSeq);
+      if (itemSeq === null) {
+        return false;
+      }
+      if (visibleMaxSeq === null || itemSeq > visibleMaxSeq) {
+        visibleMaxSeq = itemSeq;
+      }
+    }
+
+    return visibleMaxSeq === null
+      ? maxSeq <= importedSeq
+      : visibleMaxSeq === maxSeq;
+  });
   return {
-    containsOnlyBrowserVaultRefreshWakes: response.items.length > 0
+    containsOnlyBrowserVaultRefreshWakes: reachesEveryLaneHighWater
+      && response.items.length > 0
       && response.items.every((item) =>
         item.lane === "system"
         && item.kind === "runtime.browser-vault-refresh-requested"
       ),
-    containsOnlyDeviceSyncDirtyWakes: response.items.length > 0
+    containsOnlyDeviceSyncDirtyWakes: reachesEveryLaneHighWater
+      && response.items.length > 0
       && response.items.every((item) =>
         item.lane === "system"
         && item.kind === "device-sync.wake"
         && item.dedupeKey.startsWith("device-sync:dirty:")
       ),
-    containsOnlySafeSystemWakes: response.items.length > 0
+    containsOnlySafeSystemWakes: reachesEveryLaneHighWater
+      && response.items.length > 0
       && response.items.every((item) =>
         item.lane === "system"
         && (
@@ -4370,7 +4403,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   signal: postCheckpointWorkSignal,
                 }),
             );
-            if (!checkpointWakeHandled && !mayRunPostCheckpointWork()) {
+            if (checkpointWakeHandled === null && !mayRunPostCheckpointWork()) {
               mailboxWakeNeedsReplacement = true;
             }
             if (runtimeStateDirty) {
@@ -4421,7 +4454,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             continue;
           }
         }
-        if (mayRunPostCheckpointWork()) {
+        if (
+          mayRunPostCheckpointWork()
+          && !mailboxBudgetExhausted()
+        ) {
           const vaultShareOfferWake = await runOptionalPostCheckpointWork(
             async () =>
               await offerHostedVaultShareProjectionDuringIdle({
@@ -4455,7 +4491,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (!vaultShareWakeHandled && !mayRunPostCheckpointWork()) {
             scheduleReplacementForRetainedMailboxWake();
           }
-        } else {
+        } else if (!mayRunPostCheckpointWork()) {
           scheduleReplacementForRetainedMailboxWake();
         }
         let browserVaultRefresh = await runOptionalPostCheckpointWork(

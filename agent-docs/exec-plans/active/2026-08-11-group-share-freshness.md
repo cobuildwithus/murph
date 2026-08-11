@@ -66,6 +66,31 @@ Web-owned share/control boundary.
   flight, while a live transient failure still reaches the existing single
   refetch owner.
 
+## Round 2 requirement-level retrospective
+
+- Trigger: round 2 found that the accepted source-classification correction
+  still treated a bounded visible prefix as the complete pending system lane.
+  A full dirty prefix can therefore hide a later explicit device command, the
+  same underlying source-evidence gap as round 1.
+- Original requirement: dirty hints may wait behind checkpointed projection,
+  but explicit device commands and human work remain foreground at the maximum
+  admitted backlog.
+- Shape comparison: the first-reviewed source patch was 279 additions and 100
+  deletions. The round-2 head was 303 additions and 91 deletions after adding
+  shared classification, dirty-prefix provenance, exact-prefetch fallback,
+  shutdown authority, and replacement handoff while deleting partial import
+  after shutdown. Review-driven tests grew from 588 to 1,180 added lines.
+- Decision: continue with a shrinking correction at the existing classifier.
+  Deferral requires the same bounded response to prove that the visible system
+  suffix reaches its lane-wide `maxSeqByLane` high-water; incomplete or invalid
+  evidence fails open to foreground import. Reuse the one existing serial read,
+  exact prefetch, and durable mailbox continuation. Add no owner, state, queue,
+  lease, fence, lifecycle, or reconciliation path.
+- Required composed proof: fill the visible prefix entirely with dirty hints,
+  place an explicit command immediately beyond it, prove projection yields to
+  foreground continuation until the command is imported, and retain peak fetch
+  concurrency one.
+
 ## Verification
 
 - Focused regressions reproduce the old repeated-dirty starvation and prove a
@@ -85,9 +110,16 @@ Web-owned share/control boundary.
   failed-classifier fallback shutdown, and explicit lifecycle/manual-command
   preemption.
 - The complete hosted-runtime entrypoint test file and package typecheck pass.
+- The complete assistant-runtime coverage suite passes: 86 files, 2,171 tests,
+  with 4 skipped. Two pre-existing shutdown expectations were updated to the
+  reviewed no-import, immediate-replacement contract after the first exact-head
+  CI run exposed them; the consumed-replay case also proves the replacement
+  invocation imports the still-durable row.
 - The Cloudflare due-wake owner-release regression and agent-doc drift check
   pass.
-- Final exact-head ReviewGPT round 2 and required PR CI remain pending.
+- Final exact-head ReviewGPT round 2 required the retrospective above. Its
+  production-shaped maximum-prefix reproduction now fails against the reviewed
+  head and will gate the shrinking correction and next exact-head round.
 
 Status: in progress
 Updated: 2026-08-11
