@@ -423,7 +423,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       );
       expect(overlapForegroundWebhookResponse.status).toBe(202);
       await waitForAssistantProviderResponsesApiRequestCount(
-        overlapProviderBaselineCount + 3,
+        overlapProviderBaselineCount + 2,
         userId,
       );
       const foregroundOverlapProviderRequest =
@@ -434,6 +434,11 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         request: foregroundOverlapProviderRequest,
         userId,
       });
+      heldOverlapReminderResponse.release();
+      await waitForAssistantProviderResponsesApiRequestCount(
+        overlapProviderBaselineCount + 3,
+        userId,
+      );
 
       const overlapForegroundSend = await requireLinqStub().waitForAdditionalSend({
         baselineCount: overlapForegroundCardBaselineCount,
@@ -465,15 +470,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         scenario: requireScenario(),
         userId,
       });
-      requireScenario().queueAssistantResponses([
-        buildHostedAssistantNotificationDecisionResponse({
-          privateSummary: "deliver overlap sleep reminder after foreground reply",
-          text: overlapReminderText,
-        }),
-      ], {
-        matchInputContains: scheduledReminderInstructions,
-      });
-      heldOverlapReminderResponse.release();
       const overlapReminderSend = await requireLinqStub().waitForAdditionalSend({
         baselineCount: overlapReminderSendBaselineCount,
         expectedPath: reminderPath,
@@ -483,6 +479,8 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       });
       expect(requireLinqStub().readObservedMessageText(overlapReminderSend))
         .toBe(overlapReminderText);
+      expect(requireObservedRequestTimestamp(overlapForegroundSend))
+        .toBeLessThanOrEqual(requireObservedRequestTimestamp(overlapReminderSend));
       const overlapFinalStatus = await requireScenario().waitForHostedCompletion(userId, {
         timeoutMs: scheduledReminderCompletionWaitMs,
       });
@@ -1020,6 +1018,14 @@ function summarizeObservedLinqRequests(): Array<{ method: string; url: string }>
     method: request.method,
     url: request.url,
   }));
+}
+
+function requireObservedRequestTimestamp(request: ObservedLinqRequest): number {
+  const observedAtEpochMs = request.observedAtEpochMs;
+  if (typeof observedAtEpochMs !== "number" || !Number.isSafeInteger(observedAtEpochMs)) {
+    throw new Error("Expected a Linq request observation timestamp.");
+  }
+  return observedAtEpochMs;
 }
 
 function readObservedLinqMessageParts(request: ObservedLinqRequest): unknown[] {

@@ -197,7 +197,10 @@ function buildAssistantProviderMurphCodeModeInput(
   tool: string,
   toolArguments: Record<string, unknown>,
 ): string {
+  // Scripted provider responses cannot inspect a yielded cell and call `wait`.
+  // Keep the nested tool in the initial exec window on loaded CI runners.
   return [
+    '// @exec: {"yield_time_ms": 30000}',
     `const result = await tools.murph__${tool}(${JSON.stringify(toolArguments)});`,
     "text(result);",
   ].join("\n");

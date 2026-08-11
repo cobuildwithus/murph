@@ -200,6 +200,8 @@ describe("startAssistantProviderStubServer", () => {
       expect(body).toContain("response.completed");
       expect(body).toContain('"type":"custom_tool_call"');
       expect(body).toContain('"name":"exec"');
+      expect(body).toContain("yield_time_ms");
+      expect(body).toContain("30000");
       expect(body).toContain("tools.murph__automation");
       expect(body).toContain("Morning reminder");
     } finally {
