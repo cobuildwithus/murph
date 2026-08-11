@@ -1221,7 +1221,16 @@ async function runCodexMemberWorkspacePermissionProbe(input: {
         preloadMarkerPath,
         preloadPath,
         readArgs: [
-          ["automation", "list", "--limit", "10", "--format", "json"],
+          [
+            "automation",
+            "list",
+            "--text",
+            "Hosted smoke member workspace seed",
+            "--limit",
+            "10",
+            "--format",
+            "json",
+          ],
           [
             "automation",
             "show",
