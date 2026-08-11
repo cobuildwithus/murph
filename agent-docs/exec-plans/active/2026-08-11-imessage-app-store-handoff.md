@@ -29,6 +29,10 @@ compact and consistent with Murph's normal dialogs.
 - Focused Web dialog and changelog tests plus Web typecheck.
 - Desktop and mobile browser proof for the live fragment handoff and catalog.
 - Exact-head specialist/review gates and CI required by the completion workflow.
+- Before merge, physical no-extension iPhone and macOS proof that the provider
+  install affordance preserves representative nutrition, workout/compact-table,
+  and challenge cards, including captions, image-failure recovery, and
+  VoiceOver order.
 
 ## Tasks
 
@@ -36,4 +40,4 @@ compact and consistent with Murph's normal dialogs.
 - [x] Simplify and test the homepage dialog.
 - [x] Update durable contracts and changelog copy.
 - [x] Run focused verification and browser proof.
-- [ ] Commit, push, review, and update PR #1630.
+- [ ] Complete physical provider-rendering proof, final review, and PR #1630.
