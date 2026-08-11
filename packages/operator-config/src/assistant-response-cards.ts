@@ -14,6 +14,7 @@ import {
   compactTableResponseCardV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
+  nutritionCardGoalStatusLabels,
   nutritionCardGoalStatusValues,
   workoutSessionCardStateValues,
   workoutSessionCardV1Bounds,
@@ -25,7 +26,6 @@ import {
   type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
   type NutritionCardGoalSnapshot,
-  type NutritionCardGoalStatus,
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
 } from '@murphai/contracts'
@@ -49,14 +49,6 @@ const NUTRITION_CARD_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3,
   useGrouping: true,
 })
-const NUTRITION_CARD_GOAL_STATUS_LABELS = {
-  far_over_target: 'far over target',
-  far_under_target: 'far under target',
-  on_target: 'on target',
-  over_target: 'over target',
-  unavailable: 'status unavailable',
-  under_target: 'under target',
-} as const satisfies Record<NutritionCardGoalStatus, string>
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
   'Ask Murph for this card in text'
 export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
@@ -462,7 +454,7 @@ function renderDailyNutritionGoals(
     goal === null
       ? `${label} target unavailable`
       : `${formatNutritionCardNumber(goal.target)}${unit} (${
-          NUTRITION_CARD_GOAL_STATUS_LABELS[goal.status]
+          nutritionCardGoalStatusLabels[goal.status]
         })`
   )
 }

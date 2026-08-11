@@ -1549,9 +1549,10 @@ Messages extension retains its native icon and interactive identity. The
 provider request omits the optional App Store id so app-absent static cards do
 not substitute square App Store artwork into the wider Messages icon slot.
 Their concise native caption keeps only the date and meal count instead of
-repeating visible totals or target amounts. A short subcaption appears only
-when some totals are partial or an assessed V2 goal needs its directional
-status preserved. Compact-table images retain the table grid or workout
+repeating visible totals or target amounts. Each assessed V2 goal keeps one
+concise directional label inside the image without relying on color alone;
+null and unavailable goals stay absent, and a short subcaption appears only
+when some totals are partial. Compact-table images retain the table grid or workout
 progress and exercise rows. Their provider chrome stays bounded to the title
 plus an optional generic subtitle or derived workout progress rather than
 repeating the raster's rows and sets. Complete semantic text remains available

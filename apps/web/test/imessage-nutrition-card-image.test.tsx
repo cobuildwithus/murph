@@ -206,6 +206,8 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.match(serialized, /24/u);
   assert.match(serialized, /data-calorie-progress="0\.8364"/u);
   assert.match(serialized, /data-goal-status="under_target"/u);
+  assert.match(serialized, /data-calorie-goal-status="under_target"/u);
+  assert.match(serialized, />UNDER</u);
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /data-goal-status="unavailable"/u);
   assert.match(serialized, /color:#666163/u);
@@ -213,8 +215,38 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.doesNotMatch(serialized, /box-shadow/u);
   assert.doesNotMatch(
     serialized,
-    /Jun 18|PARTIAL TOTALS|2 of 3 meals|2,200|Under target|Goal unavailable|Complete total/u,
+    /Jun 18|PARTIAL TOTALS|2 of 3 meals|2,200|Goal unavailable|Complete total/u,
   );
+});
+
+test("nutrition card image renders every assessed goal direction without target amounts", async () => {
+  const { NutritionCardImage } = await import(
+    "@/src/components/imessage/nutrition-card-image"
+  );
+  const directionalCard: DailyNutritionResponseCardV2 = {
+    ...CARD,
+    goals: {
+      calories: { target: 3_000, status: "far_under_target" },
+      proteinGrams: { target: 130, status: "under_target" },
+      carbsGrams: { target: 210, status: "on_target" },
+      fatGrams: { target: 50, status: "over_target" },
+      fiberGrams: { target: 10, status: "far_over_target" },
+    },
+  };
+  const serialized = renderToStaticMarkup(
+    <NutritionCardImage card={directionalCard} />,
+  );
+
+  for (const label of [
+    "FAR UNDER",
+    "UNDER",
+    "ON TARGET",
+    "OVER",
+    "FAR OVER",
+  ]) {
+    assert.match(serialized, new RegExp(`>${label}<`, "u"));
+  }
+  assert.doesNotMatch(serialized, /3,000|130g|210g|50g|10g/u);
 });
 
 test("nutrition card image route and component retain truthful V1 compatibility", async () => {

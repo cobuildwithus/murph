@@ -322,8 +322,8 @@ describe("changelog registry", () => {
     });
     expect(items.get("cleaner-workout-cards-in-messages")).toMatchObject({
       sourcePullRequests: [1588],
-      summary: expect.stringContaining("inside the card"),
-      details: expect.stringContaining("older sent cards remain readable"),
+      summary: expect.stringContaining("nutrition goal direction"),
+      details: expect.stringContaining("without repeating target amounts"),
     });
     expect(
       items.get("cleaner-workout-cards-in-messages")?.tryIt,

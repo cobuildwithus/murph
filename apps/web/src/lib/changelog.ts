@@ -139,12 +139,12 @@ const RAW_CHANGELOG_EDITIONS = [
         id: "cleaner-workout-cards-in-messages",
         kind: "improvement",
         priority: 4,
-        title: "Workout cards stay compact in Messages",
+        title: "Response cards stay compact in Messages",
         summary:
-          "Structured workout cards keep exercise and set detail inside the card instead of repeating the full workout beneath the static image.",
+          "Workout detail and nutrition goal direction now stay inside their cards instead of repeating a long summary beneath the static image.",
         details:
-          "The fallback shows the workout title and derived set progress without a duplicate badge or corner mask, older sent cards remain readable, and generic tables keep their optional subtitle.",
-        relevanceTags: ["workouts", "imessage", "cards", "design"],
+          "Fallback cards have no duplicate badge or corner mask. Nutrition goals use short in-card direction labels without repeating target amounts, older sent workout cards remain readable, and generic tables keep their optional subtitle.",
+        relevanceTags: ["workouts", "nutrition", "imessage", "cards", "design"],
         sourcePullRequests: [1588],
       },
       {
