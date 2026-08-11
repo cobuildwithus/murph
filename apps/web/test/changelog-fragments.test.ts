@@ -52,15 +52,20 @@ describe("changelog entry fragments", () => {
     const root = createContentRoot();
     writeEntry(root, "2026-08-12", "later-alpha", 100);
     writeEntry(root, "2026-08-12", "later-beta", 100);
+    writeEntry(root, "2026-08-12", "later-priority", 200);
     writeEntry(root, "2026-08-11", "older-entry", 900);
 
     expect(loadChangelogFragmentEditions(root)).toMatchObject([
       {
         id: "2026-08-12",
-        items: [{ id: "later-alpha" }, { id: "later-beta" }],
+        items: [
+          { id: "later-priority" },
+          { id: "later-alpha" },
+          { id: "later-beta" },
+        ],
         publishedOn: "2026-08-12",
-        summary: "Murph updates shipped on August 12, 2026.",
-        title: "August 12, 2026",
+        summary: "3 updates shipped in this edition.",
+        title: "What's new in Murph",
       },
       {
         id: "2026-08-11",

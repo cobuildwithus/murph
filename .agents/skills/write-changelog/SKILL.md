@@ -86,10 +86,10 @@ order matters. Do not renumber other fragments merely to insert one item.
 
 Edition title and summary are optional shared editorial metadata at
 `apps/web/changelog/editions/YYYY-MM-DD.json`. A date without metadata gets a
-stable date heading and summary, so a normal item PR does not need to add or
-edit the shared file. Edit metadata only when the edition-level copy materially
-improves the public archive; one curator should own that change when several
-PRs target the same date.
+stable fallback title and item-count summary, so a normal item PR does not need
+to add or edit the shared file. Edit metadata only when the edition-level copy
+materially improves the public archive; one curator should own that change when
+several PRs target the same date.
 
 The web preparation scripts group fragments into one dated `ChangelogEdition`
 in an ignored generated module. Preserve stable edition IDs, item IDs, cursor
@@ -230,8 +230,10 @@ For a truly internal-only change:
 
 The `updated` disposition must correspond to a change under
 `apps/web/changelog/entries/` or `apps/web/changelog/editions/`. The
-`not applicable` disposition must explain why members cannot experience a change.
-Never use a placeholder or a generic reason such as "not needed."
+`Items:` bullet names the affected stable item IDs; for a metadata-only edit,
+name the existing items in that edition. The `not applicable` disposition must
+explain why members cannot experience a change. Never use a placeholder or a
+generic reason such as "not needed."
 
 ## Final review checklist
 

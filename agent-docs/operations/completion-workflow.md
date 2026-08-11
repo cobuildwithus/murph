@@ -255,10 +255,11 @@ Required:
   body workflow checks the rendered section on every PR.
 - **Changelog.** Add one `## Changelog` section with exactly one disposition:
   `Changelog: updated` or `Changelog: not applicable`. For `updated`, change
-  one or more isolated files under `apps/web/changelog/entries/` (and optional
-  edition metadata) in the same PR and add one `Items:` bullet naming the
-  edition date and stable item IDs. For `not applicable`, add one concrete
-  `Reason:` bullet explaining why no member-visible behavior changed.
+  one or more isolated entry fragments and/or edition metadata files in the
+  same PR and add one `Items:` bullet naming the edition date and affected
+  stable item IDs. A metadata-only edit names the existing items in that
+  edition. For `not applicable`, add one concrete `Reason:` bullet explaining
+  why no member-visible behavior changed.
   Use `$write-changelog` to inventory source PRs, group related outcomes, add
   useful visuals, protect private or sensitive details, and update the focused
   archive proof. The pull-request body workflow validates this declaration on

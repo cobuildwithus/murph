@@ -32,6 +32,21 @@ test("accepts an updated declaration with a stable item reference", () => {
   );
 });
 
+test("accepts an edition-metadata-only update for an existing item", () => {
+  assert.deepEqual(
+    validatePrChangelog({
+      changedPaths: [
+        "apps/web/changelog/editions/2026-08-09.json",
+      ],
+      prBodyHtml: section(
+        "Changelog: updated",
+        "Items: 2026-08-09 · public-referral-home",
+      ),
+    }),
+    [],
+  );
+});
+
 test("accepts a concrete not-applicable reason", () => {
   assert.deepEqual(
     validatePrChangelog({

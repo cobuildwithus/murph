@@ -94,7 +94,7 @@ export function loadChangelogFragmentEditions(
     .sort(([left], [right]) => right.localeCompare(left))
     .map(([publishedOn, fragments]) => {
       const metadata = metadataByDate.get(publishedOn)
-        ?? defaultEditionMetadata(publishedOn);
+        ?? defaultEditionMetadata(publishedOn, fragments.length);
       return {
         id: publishedOn,
         items: fragments
@@ -235,17 +235,14 @@ function parseTryIt(value: unknown, label: string): ChangelogTryIt {
   };
 }
 
-function defaultEditionMetadata(publishedOn: string): ChangelogEditionMetadata {
-  const dateLabel = new Intl.DateTimeFormat("en-US", {
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-    year: "numeric",
-  }).format(new Date(`${publishedOn}T00:00:00.000Z`));
+function defaultEditionMetadata(
+  publishedOn: string,
+  itemCount: number,
+): ChangelogEditionMetadata {
   return {
     publishedOn,
-    summary: `Murph updates shipped on ${dateLabel}.`,
-    title: dateLabel,
+    summary: `${itemCount} ${itemCount === 1 ? "update" : "updates"} shipped in this edition.`,
+    title: "What's new in Murph",
   };
 }
 

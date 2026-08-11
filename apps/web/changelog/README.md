@@ -30,8 +30,9 @@ when order matters, and do not renumber unrelated entries.
 
 Optional edition-level title and summary live at
 `editions/YYYY-MM-DD.json`. They are not required: dates without metadata use a
-deterministic date heading and summary. Avoid editing shared edition metadata
-in ordinary item PRs when several changes are landing on the same date.
+stable fallback title and item-count summary. Avoid editing shared edition
+metadata in ordinary item PRs when several changes are landing on the same
+date.
 
 Historical editions in `src/lib/changelog.ts` are frozen. New entries must not
 edit that registry or a hand-maintained edition inventory test. Web development,
