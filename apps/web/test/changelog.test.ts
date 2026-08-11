@@ -75,7 +75,7 @@ describe("changelog registry", () => {
 
     expect(item).toMatchObject({
       editionId: "2026-08-10",
-      sourcePullRequests: [1616],
+      sourcePullRequests: [1616, 1674],
       summary: expect.stringContaining("Luna, Terra, and Sol"),
       details: expect.stringContaining("follow-up photos"),
     });
