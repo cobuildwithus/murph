@@ -1,6 +1,6 @@
 # Sync Oura tags through Junction
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -74,3 +74,4 @@ Updated: 2026-08-11
 - Expected outcomes: Oura tags reach canonical events without retaining note
   text or duplicate events. The history job runs once per source. Personal
   Patterns sees the repeated synthetic sauna factor.
+Completed: 2026-08-11
