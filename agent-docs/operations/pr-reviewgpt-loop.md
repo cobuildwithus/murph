@@ -60,8 +60,10 @@ This ownership rule is required because the managed browser lanes keep
 background response-polling timers reliable and ReviewGPT pins only the owned
 capture page lifecycle active, then releases emulated focus before retaining or
 closing that target. The Murph lanes use balanced background mode so Chromium
-can still deprioritize unrelated renderers and occluded windows; use the fully
-unthrottled fallback only for a browser version with a proven capture stall.
+can still deprioritize unrelated renderers and occluded windows. Balanced mode
+passes none of Chromium's background-timer, occluded-window, or renderer
+backgrounding opt-out flags; use the fully unthrottled fallback only for a
+browser version with a proven capture stall.
 Leaving completed waited targets open still accumulates active renderers across
 rounds even when ordinary browser history and site data have been cleared.
 
@@ -337,12 +339,15 @@ the current user explicitly asks for it.
    audit. Later delta rounds reuse the current conversation and pass its most
    recent full-snapshot head as `REVIEW_GPT_CONTEXT_ANCHOR_HEAD`.
 
-   The repo wrapper chooses one usable ReviewGPT browser lane per run:
-   `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`,
-   `Hercules.app` on `9444`, or `Mountain.app` on `9450`, always with profile `Default` and
+   The repo wrapper runs the current installed Brave binary with one usable
+   ReviewGPT browser lane per run: Eragon on CDP port `9448`, Phlebas on `9442`,
+   Hercules on `9444`, or Mountain on `9450`, always with profile `Default` and
    `app_connector=current` so review context comes from the guarded ZIP and
    not a ChatGPT connector. ReviewGPT attaches that snapshot as
    `codebase.zip`; Repomix is disabled by default and is not part of this flow.
+   Each lane's user-data directory and CDP port preserve its authentication and
+   process isolation; ignored copied app bundles are not browser-version
+   authority.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
    through four lanes and defaults to four. A local
