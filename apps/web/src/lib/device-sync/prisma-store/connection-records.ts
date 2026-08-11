@@ -35,6 +35,8 @@ export const hostedConnectionRecordArgs = {
     provider: true,
     providerAccountBlindIndex: true,
     providerConfigKey: true,
+    providerApplicationId: true,
+    providerApplicationRevision: true,
     refreshTokenEncrypted: true,
     refreshLeaseExpiresAt: true,
     refreshLeaseOwner: true,
@@ -78,6 +80,11 @@ export function mapHostedConnectionRecord(record: HostedConnectionRecord): Hoste
     nextReconcileAt: maybeIsoTimestamp(record.nextReconcileAt),
     provider: record.provider,
     providerConfigKey: normalizeNullableString(record.providerConfigKey),
+    providerApplicationId: normalizeNullableString(record.providerApplicationId),
+    providerApplicationRevision: normalizeProviderApplicationRevision(
+      record.providerApplicationId,
+      record.providerApplicationRevision,
+    ),
     scopes: readStoredScopes(record.scopesJson),
     setupExpiresAt: maybeIsoTimestamp(record.setupExpiresAt),
     setupPhase: normalizeHostedDeviceSyncSetupPhase(record.setupPhase),
@@ -85,6 +92,26 @@ export function mapHostedConnectionRecord(record: HostedConnectionRecord): Hoste
     updatedAt: record.updatedAt.toISOString(),
     userId: record.userId,
   } satisfies HostedStaticDeviceSyncConnectionRecord;
+}
+
+function normalizeProviderApplicationRevision(
+  applicationId: string | null | undefined,
+  revision: number | null | undefined,
+): number | null {
+  const normalizedApplicationId = normalizeNullableString(applicationId);
+  if (!normalizedApplicationId && revision == null) {
+    return null;
+  }
+  if (
+    !normalizedApplicationId
+    || !Number.isSafeInteger(revision)
+    || (revision as number) <= 0
+  ) {
+    throw new TypeError(
+      "Hosted device-sync provider application binding is invalid.",
+    );
+  }
+  return revision as number;
 }
 
 export function normalizeStoredScopes(value: readonly string[] | null | undefined): string[] {

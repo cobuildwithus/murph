@@ -18,6 +18,8 @@ export interface HostedStaticDeviceSyncConnectionRecord {
   id: string;
   userId: string;
   provider: string;
+  providerApplicationId: string | null;
+  providerApplicationRevision: number | null;
   displayName: string | null;
   externalAccountId: string | null;
   credentialKind: DeviceAccountCredentialKind;

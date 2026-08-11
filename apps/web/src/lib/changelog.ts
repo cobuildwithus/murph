@@ -149,6 +149,18 @@ const RAW_CHANGELOG_EDITIONS = [
         sourcePullRequests: [1587],
       },
       {
+        id: "cleaner-workout-cards-in-messages",
+        kind: "improvement",
+        priority: 4,
+        title: "Response cards stay compact in Messages",
+        summary:
+          "Workout detail and nutrition goal direction now stay inside their cards instead of repeating a long summary beneath the static image.",
+        details:
+          "Fallback cards have no duplicate badge or corner mask. Nutrition goals use short in-card direction labels without repeating target amounts, older sent workout cards remain readable, and generic tables keep their optional subtitle.",
+        relevanceTags: ["workouts", "nutrition", "imessage", "cards", "design"],
+        sourcePullRequests: [1588],
+      },
+      {
         id: "web-search-restored",
         kind: "improvement",
         priority: 5,
@@ -408,11 +420,11 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Nutrition cards fit Messages cleanly",
         summary:
-          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card.",
+          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card unless totals are partial.",
         details:
-          "Calories and nutrient totals stay visible in the card without a second Murph badge or a long repeat below it. Partial totals and assessed goals keep only their short status labels.",
+          "Calories, nutrient totals, and goal status stay inside the card without a second Murph badge or a long repeat below it. Provider chrome keeps only a short partial-data warning when needed.",
         relevanceTags: ["imessage", "cards", "nutrition", "design"],
-        sourcePullRequests: [1567],
+        sourcePullRequests: [1567, 1588],
       },
       {
         id: "typing-prewarms-private-chat",
