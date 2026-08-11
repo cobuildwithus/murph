@@ -1,6 +1,6 @@
 # Environment print loading state
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -88,3 +88,4 @@ Updated: 2026-08-10
   run because that model reported explicit credit exhaustion.
 - Remote result: the final plan-close push owns the exact-head CI rerun; its
   status is recorded on PR #1617 rather than in this archived snapshot.
+Completed: 2026-08-10
