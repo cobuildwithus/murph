@@ -797,7 +797,7 @@ test("Oura notes receive one full summary-history migration while dense timeseri
   const createScheduledJobs = requireValue(
     requireValue(provider.jobExecutor).createScheduledJobs,
   );
-  const sourceFirstSeenAt = NOW;
+  const sourceFirstSeenAt = "2026-01-01T12:00:00.000Z";
   const sources = [createSourceSummary(
     "oura",
     sourceFirstSeenAt,

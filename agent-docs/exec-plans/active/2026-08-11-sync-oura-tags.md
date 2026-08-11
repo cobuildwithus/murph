@@ -58,6 +58,8 @@ Updated: 2026-08-11
   continue through the existing optional-resource failure path.
 - Reuse the existing sparse-timeseries backfill owner. Track note coverage
   separately from blood-pressure coverage, per connected source.
+- Anchor note history to the current scheduler run. Existing sources need the
+  recent pre-rollout interval, not the interval before their first connection.
 - Derive UTC note dates from the ISO date prefix when the normal timestamp
   path has no local day key.
 

@@ -698,7 +698,12 @@ export function createJunctionDeviceSyncProvider(
       }
 
       return [...scheduledSources.entries()].map(([sourceProviderSlug, firstSeenAt]) => {
-        const window = buildExtendedTimeseriesBackfillWindow(firstSeenAt);
+        // Blood pressure existed before the member connected its source, so
+        // its history ends at first-seen. Notes became ingestible in a newer
+        // runtime, so existing sources need recent history ending now.
+        const window = buildExtendedTimeseriesBackfillWindow(
+          resource === "note" ? now : firstSeenAt,
+        );
         return buildExtendedTimeseriesBackfillJob({
           availableAt: now,
           historicalWindowStart: window.windowStart,
