@@ -2331,11 +2331,33 @@ async function collectProviderEvidenceWithCodex(input: {
   };
 }): Promise<ProviderEvidenceEnvelope> {
   throwIfAborted(input.signal);
-  const deterministic = await collectDeterministicProviderEvidence({
-    ...input,
-    env: input.codexRuntime?.env,
-  });
+  const [deterministic, cloudflare] = await Promise.all([
+    collectDeterministicProviderEvidence({
+      ...input,
+      env: input.codexRuntime?.env,
+    }),
+    collectCloudflareProviderEvidenceWithCodex(input),
+  ]);
   throwIfAborted(input.signal);
+  return combineProviderEvidence(
+    deterministic.sources,
+    cloudflare.source,
+    [...deterministic.failures, ...cloudflare.failures],
+  );
+}
+
+async function collectCloudflareProviderEvidenceWithCodex(input: {
+  previousStart: Date;
+  currentStart: Date;
+  end: Date;
+  timeoutMs: number;
+  signal?: AbortSignal;
+  codexRuntime?: {
+    executable: string;
+    profile: string;
+    env: NodeJS.ProcessEnv;
+  };
+}): Promise<{ source: AdapterEvidence; failures: CollectorFailure[] }> {
   const tempRoot = await createPrivateTempDirectory("provider");
   try {
     throwIfAborted(input.signal);
@@ -2413,22 +2435,21 @@ async function collectProviderEvidenceWithCodex(input: {
       if (cloudflare === undefined) {
         throw new Error("provider_cloudflare_evidence_missing");
       }
-      return combineProviderEvidence(
-        deterministic.sources,
-        cloudflare,
-        [
-          ...deterministic.failures,
-          ...childEnvelope.failures.filter((failure) => failure.source === "cloudflare"),
-        ],
-      );
+      return {
+        source: cloudflare,
+        failures: childEnvelope.failures.filter((failure) => failure.source === "cloudflare"),
+      };
     } catch (error) {
       throwIfAborted(input.signal);
       const failure = classifyProviderChildFailure(error);
-      return combineProviderEvidence(
-        deterministic.sources,
-        unavailableProviderEvidence("cloudflare", input.end, failure.class === "auth" ? "failed" : "unknown"),
-        [...deterministic.failures, { ...failure, source: "cloudflare" }],
-      );
+      return {
+        source: unavailableProviderEvidence(
+          "cloudflare",
+          input.end,
+          failure.class === "auth" ? "failed" : "unknown",
+        ),
+        failures: [{ ...failure, source: "cloudflare" }],
+      };
     }
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
