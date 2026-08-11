@@ -165,9 +165,15 @@ async function assertConnectPage(input: {
     exact: true,
     name: "Sync your biomarkers",
   }).waitFor({ state: "visible" });
-  await input.page.getByLabel("Search sources", { exact: true }).waitFor({
-    state: "visible",
-  });
+  const visibleSearch = input.page.locator(
+    'input[aria-label="Search sources"]:visible',
+  );
+  await visibleSearch.waitFor({ state: "visible" });
+  if (await visibleSearch.count() !== 1) {
+    throw new Error(
+      `Hosted browser ${input.caseName} rendered an ambiguous visible source search control.`,
+    );
+  }
   await input.page.getByText(/^\d+ of \d+ sources$/u).waitFor({
     state: "visible",
   });
