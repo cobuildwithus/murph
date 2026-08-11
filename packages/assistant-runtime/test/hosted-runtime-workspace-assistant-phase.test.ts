@@ -14251,6 +14251,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   ])("drains an exact $label through the causal-only fixed-route outbox once", async ({
     dedupeKey,
   }) => {
+    const deferredUsageRecords: AssistantUsageRecord[] = [];
+    const usageRecordPort: RuntimeUsageRecordPort = {
+      recordUsage: vi.fn(async (record) => ({
+        recorded: true,
+        usageId: record.usageId,
+      })),
+    };
     const completionItem = createExternalCompletionSystemMailboxItem({
       dedupeKey,
     });
@@ -14274,17 +14281,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        item: completionItem,
-        itemId: completionItem.itemId,
-        metrics: {
-          bootstrapResult: null,
-          conversationMetrics: null,
-          deliveryIntentIds: [deliveryIntentId],
-          mailboxLane: "assistant-notification",
-          redactedLogEntries: [],
-        },
-        status: "processed",
+      .mockImplementationOnce(async ({ executionContext }) => {
+        await executionContext.hosted?.usageRecorder?.recordUsage(
+          createAssistantUsageRecord(),
+        );
+        return {
+          item: completionItem,
+          itemId: completionItem.itemId,
+          metrics: {
+            bootstrapResult: null,
+            conversationMetrics: null,
+            deliveryIntentIds: [deliveryIntentId],
+            mailboxLane: "assistant-notification",
+            redactedLogEntries: [],
+          },
+          status: "processed",
+        };
       });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
@@ -14316,6 +14328,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       conversationImportedCount: 0,
       importedCount: 1,
       now: () => "2026-04-27T00:03:00.000Z",
+      recordDeferredUsage: (record) => {
+        deferredUsageRecords.push(record);
+      },
+      runtimeUsageRecordPort: usageRecordPort,
     });
     const result = await runHostedWorkspaceAssistantPhase(input);
 
@@ -14333,6 +14349,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           executionContext: {
             hosted: expect.objectContaining({
               memberId: "member_synthetic_phase",
+              usageRecorder: {
+                recordUsage: expect.any(Function),
+              },
               userEnvKeys: [],
             }),
           },
@@ -14349,6 +14368,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       checkpointReason: "outbox_sending",
       progressed: true,
     }));
+    expect(deferredUsageRecords).toEqual([
+      expect.objectContaining({
+        usageId: "turn_direct_usage.attempt-1",
+      }),
+    ]);
+    expect(usageRecordPort.recordUsage).not.toHaveBeenCalled();
 
     await result.afterCheckpoint?.();
 
@@ -14369,6 +14394,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const replay = await runHostedWorkspaceAssistantPhase(input);
     expect(replay.progressed).toBe(false);
+    expect(deferredUsageRecords).toHaveLength(1);
+    expect(usageRecordPort.recordUsage).not.toHaveBeenCalled();
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledTimes(1);
   });
 

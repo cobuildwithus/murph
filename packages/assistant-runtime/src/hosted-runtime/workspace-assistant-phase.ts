@@ -1880,12 +1880,27 @@ export async function runHostedWorkspaceAssistantPhase(
     triggerKind: "runtime_timer",
     userId: input.request.userId,
   });
+  const recordDeferredUsage = (
+    record: AssistantUsageRecord,
+    providerRequestAcceptedInputIds?: readonly string[],
+  ): Promise<void> => {
+    input.recordDeferredUsage?.(
+      record,
+      providerRequestAcceptedInputIds,
+    );
+    return Promise.resolve();
+  };
+  const usageRecorder =
+    input.runtime.platform.usageRecordPort && input.recordDeferredUsage
+      ? { recordUsage: recordDeferredUsage }
+      : null;
   if (input.foregroundCausalOnly === true) {
     try {
       const systemMailboxMaintenance = await runSystemMailboxMaintenancePhase({
         executionContext: {
           hosted: {
             memberId: input.request.userId,
+            ...(usageRecorder ? { usageRecorder } : {}),
             userEnvKeys: Object.keys(input.runtime.userEnv),
           },
         },
@@ -1928,16 +1943,6 @@ export async function runHostedWorkspaceAssistantPhase(
     string,
     HostedRuntimeProductFeedbackRecord
   >();
-  const recordDeferredUsage = (
-    record: AssistantUsageRecord,
-    providerRequestAcceptedInputIds?: readonly string[],
-  ): Promise<void> => {
-    input.recordDeferredUsage?.(
-      record,
-      providerRequestAcceptedInputIds,
-    );
-    return Promise.resolve();
-  };
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
     void writeHostedDeviceConnectRuntimeLog({
       deviceConnectProviders,
@@ -2142,13 +2147,7 @@ export async function runHostedWorkspaceAssistantPhase(
             threadIsDirect: authority.threadIsDirect,
           };
         },
-        ...(input.runtime.platform.usageRecordPort && input.recordDeferredUsage
-          ? {
-              usageRecorder: {
-                recordUsage: recordDeferredUsage,
-              },
-            }
-          : {}),
+        ...(usageRecorder ? { usageRecorder } : {}),
         userEnvKeys: Object.keys(input.runtime.userEnv),
       },
     },
