@@ -806,7 +806,7 @@ describe("buildClinicalImportPlan", () => {
     ]);
   });
 
-  it("requires trusted lab category and result status coding systems", async () => {
+  it("requires trusted result coding while retaining explicit text from unclassified final reports", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
         {
@@ -873,8 +873,8 @@ describe("buildClinicalImportPlan", () => {
           id: "report-local-conclusion-code",
           status: "final",
           issued: "2026-07-01T12:07:00.000Z",
-          code: { text: "Metabolic panel" },
-          conclusion: "Within range.",
+          code: { text: "Serum pregnancy test" },
+          conclusion: "Pregnancy test: positive",
           conclusionCode: [{ coding: [{ system: "urn:vendor-status", code: "N", display: "Normal" }] }],
         },
       },
@@ -911,6 +911,8 @@ describe("buildClinicalImportPlan", () => {
         candidate.kind === "test" && candidate.externalRef.resourceId === "report-local-conclusion-code",
     );
     expect(report?.resultStatus).toBe("unknown");
+    expect(report?.testName).toBe("Serum pregnancy test");
+    expect(report?.summary).toBe("Pregnancy test: positive");
   });
 
   it("preserves lab display units when quantity codes are local", async () => {

@@ -648,3 +648,20 @@ Updated: 2026-08-10
   7,734,484-byte static boot closure, and 9,626,336-byte runner total without a
   ratchet change. Round 13 must review the fresh pushed full patch while
   exact-head CI runs concurrently.
+- Current `main` then advanced across seven merged lanes. The ordinary merge
+  had five textual conflicts. Runner entrypoint policy keeps main's latest
+  measured baseline and ratchets only its total to the exact combined graph;
+  the focused policy file retains that same value. The changelog resolution
+  preserves generated group photos and main's selected-voice entry in both
+  production copy and page proof. The generated CLI skill hash was regenerated
+  from the merged built command tree rather than choosing either side.
+- The first exact combined assembly deliberately failed because the latest
+  main budget was 6,189 bytes below the measured 9,675,965-byte graph. After
+  ratcheting to that exact measurement plus the existing fixed allowance, 58
+  runner bundle-policy tests and fresh full assembly pass at an 8,716,121-byte
+  Vault CLI total, 1,599,840-byte runner entry, 7,753,694-byte static boot
+  closure, and 9,675,965-byte runner total. The two CLI skill-hash tests and
+  exact package-shape verification pass. On the settled merge, five adjacent
+  Assistant Engine files pass 149 tests, the changelog/design set passes 54
+  tests, and both Assistant Engine and Web typechecks pass. Round 13 must review
+  the final pushed merged head while its exact-head CI runs concurrently.

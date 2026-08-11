@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Generated group photos, Starter access, patterns, reminders, cards, and web search",
+      "Generated group photos, Starter access, patterns, reminders, cards, voices, and web search",
     summary:
-      "Murph can now reuse an image it made as a group photo after an explicit request, Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, and managed OpenAI web search can reach current information again.",
+      "Murph can now reuse an image it made as a group photo after an explicit request, Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "generated-image-group-photo",
@@ -135,6 +135,18 @@ const RAW_CHANGELOG_EDITIONS = [
           label: "Schedule a local-time reminder",
           prompt: "Remind me every day at 9 PM Central to wind down.",
         },
+      },
+      {
+        id: "voice-memos-use-your-voice",
+        kind: "improvement",
+        priority: 4,
+        title: "Voice memos keep your chosen voice",
+        summary:
+          "Ordinary voice memos now use the voice already selected for your Murph instead of switching voices on their own.",
+        details:
+          "A different named voice is used only when you explicitly ask to test it or request that voice for one memo. Saving a named voice and asking to hear it immediately still works as a one-time preview.",
+        relevanceTags: ["voice", "messaging", "personalization", "reliability"],
+        sourcePullRequests: [1587],
       },
       {
         id: "web-search-restored",

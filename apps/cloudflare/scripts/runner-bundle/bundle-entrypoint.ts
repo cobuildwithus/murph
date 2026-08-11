@@ -198,11 +198,17 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // deliverable-occurrence projection, exact local production assembly measured
 // a 1,674,361B entry, 8,046,334B static closure, and 10,024,188B total. The
 // later combined graph measured the same 1,674,361B entry, an 8,044,557B static
-// closure, and a 10,022,523B total. Adding generated-image continuity to that
-// merged graph measured a 1,674,361B entry, 8,059,710B static closure, and
-// 10,040,819B total. Ratchet the total to the exact combined graph and retain
-// the established entry and static cross-platform tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_040_819 + 32_768;
+// closure, and a 10,022,523B total. Retain the larger reviewed measurements and
+// established cross-platform tolerances.
+//
+// Preserving admitted identity and retry state for Junction blood-pressure
+// history extends the deferred provider's lazy output. After merging the later
+// mainline runtime boundaries and generated-image continuity, exact local
+// production assembly of the combined graph measured a 1,599,840B entry,
+// 7,753,694B static closure, and 9,675,965B total on 2026-08-10. Ratchet the
+// total while retaining the reviewed startup baselines and all fixed
+// cross-platform allowances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_675_965 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_019_079;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
