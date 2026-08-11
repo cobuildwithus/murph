@@ -35,7 +35,10 @@ describe('proactive product frustration feedback guidance', () => {
         'treat it as explicit product frustration rather than merely tone, banter, or missing input',
       )
       expect(prompt).toContain(
-        'silently call `murph.submit_product_feedback` exactly once with kind `frustration` when available',
+        'if no product-feedback candidate has already been submitted for that accepted request',
+      )
+      expect(prompt).toContain(
+        'silently call `murph.submit_product_feedback` once with kind `frustration` when available',
       )
       expect(prompt).toContain(
         'do not wait for the member to call it feedback, ask permission, or start a separate discovery interview',
