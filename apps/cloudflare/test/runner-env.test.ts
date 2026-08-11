@@ -1221,6 +1221,7 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",
+        "MURPH_ANDROID_APP_ENABLED",
         "WHOOP_SCOPES",
       ]),
     );
@@ -1290,5 +1291,18 @@ describe("hosted private-media platform env", () => {
       CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
       HOSTED_PHYSICAL_NOTES_ENABLED: "true",
     });
+  });
+
+  it("projects the Android rollout gate only from the exact enabled value", () => {
+    expect(buildHostedRunnerContainerPlatformEnv({
+      MURPH_ANDROID_APP_ENABLED: "1",
+    })).toEqual({
+      MURPH_ANDROID_APP_ENABLED: "1",
+    });
+    for (const disabledValue of ["", "0", "true", " 1 "]) {
+      expect(buildHostedRunnerContainerPlatformEnv({
+        MURPH_ANDROID_APP_ENABLED: disabledValue,
+      })).not.toHaveProperty("MURPH_ANDROID_APP_ENABLED");
+    }
   });
 });
