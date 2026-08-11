@@ -9,6 +9,7 @@ import {
   compareNullableStrings,
   firstString,
   firstStringArray,
+  parseFrontmatterDocument,
   type FrontmatterObject,
 } from './health/shared.ts'
 import {
@@ -65,6 +66,33 @@ export interface DerivedKnowledgeGraphReadResult {
 interface DerivedKnowledgeNodeParseResult {
   issue?: DerivedKnowledgeGraphIssue
   node?: DerivedKnowledgeNode
+}
+
+export function parseDerivedKnowledgeNodeMarkdown(
+  relativePath: string,
+  markdown: string,
+): DerivedKnowledgeNode {
+  let document: ReturnType<typeof parseFrontmatterDocument>
+  try {
+    document = parseFrontmatterDocument(markdown)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`Failed to parse frontmatter at ${relativePath}: ${reason}`)
+  }
+
+  const parsed = toDerivedKnowledgeNode(
+    relativePath,
+    document.body,
+    document.attributes,
+  )
+  if (parsed.node) {
+    return parsed.node
+  }
+
+  throw new Error(
+    parsed.issue?.reason
+      ?? `Markdown at ${relativePath} is not a derived knowledge page.`,
+  )
 }
 
 export async function readDerivedKnowledgeGraph(

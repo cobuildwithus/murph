@@ -515,6 +515,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
+  const groupChallengeResponseCardsAvailable =
+    authenticatedGroupChatRuntime &&
+    resolvedChannel?.trim().toLowerCase() === 'linq' &&
+    input.hostedToolContext?.groupSharedReader != null &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn' &&
+    (scheduledInvocationScope !== null ||
+      (ordinaryInboundTurn &&
+        input.input.scheduledInvocationAuthority == null))
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
@@ -924,6 +933,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
+        groupChallengeResponseCardsAvailable,
         physicalNotesAvailable:
           (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
           input.hostedToolContext?.physicalNotes != null &&
