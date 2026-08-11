@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 100,
+  "item": {
+    "id": "better-imessage-card-previews",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Response cards look like Murph in Messages",
+    "summary": "Static nutrition, workout, table, and challenge previews now match their iPhone layouts more closely and carry Murph's mark instead of a blank corner.",
+    "details": "Cards keep their full rows and progress states; incomplete nutrition progress stays neutral, and a readable text recovery remains available if a preview cannot load.",
+    "relevanceTags": ["imessage", "cards", "nutrition", "workouts", "challenges", "design"],
+    "sourcePullRequests": [1650]
+  }
+}
