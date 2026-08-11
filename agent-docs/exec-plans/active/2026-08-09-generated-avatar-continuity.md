@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — valid round 12 finding remediated; round 13 exact-head review and CI pending
+Status: active — valid round 13 finding remediated; round 14 exact-head review and CI pending
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -665,3 +665,27 @@ Updated: 2026-08-10
   Assistant Engine files pass 149 tests, the changelog/design set passes 54
   tests, and both Assistant Engine and Web typechecks pass. Round 13 must review
   the final pushed merged head while its exact-head CI runs concurrently.
+- Valid substantive round 13 reviewed exact pushed head `3fdf0b6cedda` with
+  ReviewGPT 0.5.124. The wrapper verified requested `gpt-5.6-sol`, response
+  `gpt-5-6-pro`, and response SHA-256
+  `683e8fc5f7f653f81715ab31d4a03aab1c14e1d24e08b8bf9a234f70ab77b4d0`.
+  Its one accepted original-PR finding showed that vault-wide count pruning can
+  delete otherwise recent generated-image delivery evidence after 100 newer
+  terminal intents even though the generated capture remains live for 14 days.
+- The required repeated-mechanism retrospective was recorded before source
+  remediation. The correction stays in the existing outbox pruning owner and
+  derives the narrow exception from existing singleton `gpt-image-2`
+  `vault_image` media under `raw/captures/**`. Such evidence is excluded only
+  from count eviction and retains the existing 14-day age cutoff. Ordinary
+  terminal intents remain capped at 100; transcript, provider continuity, and
+  capture lookup remain provenance only. No state, lookup, queue, lifecycle,
+  database, delivery owner, or alternate authority source was added.
+- The real pruning regression proves accepted generated delivery survives more
+  than 100 newer ordinary terminal intents, ordinary inventory remains capped,
+  and the generated evidence expires after the age cutoff. It passes with the
+  full outbox, response-media, and group-tool set: 199 tests. Assistant Engine
+  typecheck and 58 runner bundle-policy tests pass. Fresh full assembly passes
+  at an 8,716,582-byte Vault CLI total, 1,599,840-byte runner entry,
+  7,754,155-byte static boot closure, and 9,676,426-byte runner total without a
+  ratchet change. Round 14 must review the fresh pushed full patch while exact-
+  head CI runs concurrently.

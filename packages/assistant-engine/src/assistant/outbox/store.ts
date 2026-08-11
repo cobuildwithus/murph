@@ -174,8 +174,17 @@ export async function pruneAssistantTerminalOutboxIntents(input: {
   })
 
   let pruned = 0
-  for (const [index, entry] of terminalIntents.entries()) {
-    const pruneByCount = index >= ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT
+  let countPrunableIntentCount = 0
+  for (const entry of terminalIntents) {
+    const preserveUntilAgeCutoff = isGeneratedImageDeliveryEvidenceIntent(
+      entry.intent,
+    )
+    const pruneByCount =
+      !preserveUntilAgeCutoff
+      && countPrunableIntentCount >= ASSISTANT_TERMINAL_OUTBOX_RETENTION_LIMIT
+    if (!preserveUntilAgeCutoff) {
+      countPrunableIntentCount += 1
+    }
     const pruneByAge =
       Number.isFinite(entry.terminalAtMs) && entry.terminalAtMs < cutoffMs
     if (!pruneByCount && !pruneByAge) {
@@ -310,6 +319,20 @@ function isTerminalAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean
     intent.status === 'sent' ||
     intent.status === 'failed' ||
     intent.status === 'abandoned'
+  )
+}
+
+function isGeneratedImageDeliveryEvidenceIntent(
+  intent: AssistantOutboxIntent,
+): boolean {
+  if (intent.media.length !== 1) {
+    return false
+  }
+  const media = intent.media[0]
+  return (
+    media?.kind === 'vault_image'
+    && media.source === 'gpt-image-2'
+    && media.ref.startsWith('raw/captures/')
   )
 }
 
