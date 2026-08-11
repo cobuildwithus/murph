@@ -44,6 +44,7 @@ import {
   formatMetricLabel,
   formatMetricValue,
   formatProviderName,
+  hasDirectWearableProviderForSource,
   inferDefaultMetricFamily,
   isPreferredWearableProvider,
   resolveMetricTolerance,
@@ -271,6 +272,8 @@ test("shared and provider-policy helpers normalize and rank wearable evidence de
   assert.equal(ageInMilliseconds("2026-04-04T00:00:00Z", new Date("2026-04-03T00:00:00Z")), 0);
 
   assert.equal(formatProviderName("oura"), "Oura");
+  assert.equal(formatProviderName("google_health"), "Google Health");
+  assert.equal(hasDirectWearableProviderForSource("google_health"), true);
   assert.equal(formatProviderName("Example"), "Example");
   assert.equal(formatMetricLabel("sleepTotalMinutes"), "Sleep Total Minutes");
   assert.equal(formatMetricValue(14.4, "minutes"), "14 min");
@@ -316,6 +319,18 @@ test("shared and provider-policy helpers normalize and rank wearable evidence de
   assert.equal(resolveMetricTolerance("bmi"), 0.1);
   assert.equal(resolveMetricTolerance("dayStrain"), 0.5);
 
+  assert.equal(resolveWearablePublicSourceProvider({
+    dataOrigin: {
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "google_health",
+      version: 1,
+    },
+    externalRef: makeExternalRef({
+      resourceType: "junction-google-health-sleep",
+      system: "junction",
+    }),
+    provider: "junction",
+  }), "google-health");
   assert.equal(resolveWearablePublicSourceProvider({
     dataOrigin: {
       aggregatorProvider: "partner_hub",

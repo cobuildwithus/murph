@@ -52,12 +52,12 @@ vi.mock("@/src/components/ui/voice-memo-player", () => ({
     createElement("div", { "aria-label": accessibleLabel, "data-src": src }),
 }));
 
-test("Vital handoff leads with the connection and credits Vital underneath", async () => {
-  const { VitalConnectionDialog } = await import(
+test("Junction handoff leads with the connection and credits Junction underneath", async () => {
+  const { JunctionConnectionDialog } = await import(
     "../app/(dashboard)/connect/connect-page-dialogs"
   );
   const markup = renderToStaticMarkup(
-    createElement(VitalConnectionDialog, {
+    createElement(JunctionConnectionDialog, {
       onContinue: vi.fn(),
       onOpenChange: vi.fn(),
       source: {
@@ -74,26 +74,27 @@ test("Vital handoff leads with the connection and credits Vital underneath", asy
   );
 
   assert.match(markup, /Connect Fitbit to Murph/u);
+  assert.match(markup, /Google will ask you to authorize Fitbit and Pixel Watch health data\./u);
   assert.match(markup, /brand-logos\/connect\/fitbit\.svg/u);
   assert.match(markup, /icons\/murph-mark\.svg/u);
   assert.doesNotMatch(markup, /src="\/logo\.svg"/u);
   assert.match(
     markup,
-    /We use <a href="https:\/\/www\.junction\.com"[^>]*>Vital<\/a> to connect this health source to Murph\./u,
+    /We use <a href="https:\/\/www\.junction\.com"[^>]*>Junction<\/a> to connect this health source to Murph\./u,
   );
   assert.match(markup, /max-h-10/u);
   assert.match(markup, /max-w-24/u);
   assert.match(markup, /whitespace-normal/u);
-  assert.match(markup, />Continue to Fitbit<\/button>/u);
+  assert.match(markup, />Continue to Google<\/button>/u);
   assert.doesNotMatch(markup, /Turn on Historical Data/u);
 });
 
-test("Vital handoff preserves wide logos and lets long actions wrap", async () => {
-  const { VitalConnectionDialog } = await import(
+test("Junction handoff preserves wide logos and lets long actions wrap", async () => {
+  const { JunctionConnectionDialog } = await import(
     "../app/(dashboard)/connect/connect-page-dialogs"
   );
   const wideMarkup = renderToStaticMarkup(
-    createElement(VitalConnectionDialog, {
+    createElement(JunctionConnectionDialog, {
       onContinue: vi.fn(),
       onOpenChange: vi.fn(),
       source: {
@@ -110,7 +111,7 @@ test("Vital handoff preserves wide logos and lets long actions wrap", async () =
     }),
   );
   const longActionMarkup = renderToStaticMarkup(
-    createElement(VitalConnectionDialog, {
+    createElement(JunctionConnectionDialog, {
       onContinue: vi.fn(),
       onOpenChange: vi.fn(),
       source: {
@@ -136,12 +137,12 @@ test("Vital handoff preserves wide logos and lets long actions wrap", async () =
   );
 });
 
-test("Vital handoff keeps Garmin's first-connect Historical Data reminder", async () => {
-  const { VitalConnectionDialog } = await import(
+test("Junction handoff keeps Garmin's first-connect Historical Data reminder", async () => {
+  const { JunctionConnectionDialog } = await import(
     "../app/(dashboard)/connect/connect-page-dialogs"
   );
   const markup = renderToStaticMarkup(
-    createElement(VitalConnectionDialog, {
+    createElement(JunctionConnectionDialog, {
       onContinue: vi.fn(),
       onOpenChange: vi.fn(),
       source: {
@@ -168,12 +169,12 @@ test("Vital handoff keeps Garmin's first-connect Historical Data reminder", asyn
   assert.match(markup, />Continue to Garmin<\/button>/u);
 });
 
-test("Vital handoff omits Garmin's Historical Data reminder during reconnect", async () => {
-  const { VitalConnectionDialog } = await import(
+test("Junction handoff omits Garmin's Historical Data reminder during reconnect", async () => {
+  const { JunctionConnectionDialog } = await import(
     "../app/(dashboard)/connect/connect-page-dialogs"
   );
   const markup = renderToStaticMarkup(
-    createElement(VitalConnectionDialog, {
+    createElement(JunctionConnectionDialog, {
       onContinue: vi.fn(),
       onOpenChange: vi.fn(),
       source: {

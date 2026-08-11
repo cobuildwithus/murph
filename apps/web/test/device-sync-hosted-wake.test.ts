@@ -3096,6 +3096,65 @@ describe("hosted device-sync wakes", () => {
     }));
   });
 
+  it("prepares the Google Health successor without touching an active legacy Fitbit source", async () => {
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/connect-sources/fitbit/start", {
+        method: "POST",
+      }),
+    );
+    const connection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-established",
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    const storedConnection = buildProviderConfigStoredConnection(connection);
+    const legacySource = buildHostedConnectionSource(connection.id, "fitbit");
+    const revokeSourceAccess = vi.fn(async () => undefined);
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.listConnectionSources.mockImplementation(async (input) =>
+      input?.sourceProviderSlug === "google_health" ? [] : [legacySource]
+    );
+    mocks.registryGet.mockReturnValue({
+      connectionHandler: { revokeSourceAccess },
+    });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => ({
+      ...buildHostedConnectionSource(input.connectionId, input.sourceProviderSlug, {
+        lastSeenAt: input.lastSeenAt,
+        status: input.status,
+      }),
+      sourceInstanceKey: input.sourceInstanceKey,
+    }));
+
+    await expect(controlPlane.prepareConnectionStart("user-123", {
+      connectSourceId: "fitbit",
+      connectTarget: "fitbit",
+      label: "Fitbit",
+      provider: "junction",
+      sourceProviderSlug: "google_health",
+    })).resolves.toBeUndefined();
+
+    expect(revokeSourceAccess).toHaveBeenCalledOnce();
+    expect(revokeSourceAccess).toHaveBeenCalledWith(
+      storedConnection,
+      "google_health",
+    );
+    expect(revokeSourceAccess).not.toHaveBeenCalledWith(storedConnection, "fitbit");
+    expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionId: connection.id,
+        sourceProviderSlug: "google_health",
+        status: "disconnected",
+      }),
+    );
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sourceProviderSlug: "fitbit" }),
+    );
+  });
+
   it("does not issue a new Link while exact-source provider cleanup is in progress", async () => {
     const connection = buildHostedConnection({
       displayName: "Junction",

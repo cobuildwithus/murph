@@ -24,7 +24,7 @@ import type {
 
 const DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC = `/audio/garmin-historical-data-memos/${defaultAssistantVoiceOptionId}.mp3`;
 
-export function VitalConnectionDialog({
+export function JunctionConnectionDialog({
   onContinue,
   onOpenChange,
   source,
@@ -36,6 +36,7 @@ export function VitalConnectionDialog({
   voiceMemoSrc?: string | null;
 }) {
   const sourceName = source?.name ?? "your health source";
+  const usesGoogleHealthAuthorization = source?.id === "fitbit";
   const showGarminHistoricalData =
     source?.id === "garmin" && source.requiresReconnect !== true;
 
@@ -78,13 +79,16 @@ export function VitalConnectionDialog({
               Connect {sourceName} to Murph
             </DialogTitle>
             <DialogDescription className="leading-6">
+              {usesGoogleHealthAuthorization
+                ? "Google will ask you to authorize Fitbit and Pixel Watch health data. "
+                : null}
               We use{" "}
               <a
                 href="https://www.junction.com"
                 target="_blank"
                 rel="noreferrer"
               >
-                Vital
+                Junction
               </a>{" "}
               to connect this health source to Murph.
             </DialogDescription>
@@ -123,7 +127,7 @@ export function VitalConnectionDialog({
           className="h-auto min-h-14 w-full whitespace-normal py-3 text-center leading-tight"
           onClick={onContinue}
         >
-          Continue to {sourceName}
+          Continue to {usesGoogleHealthAuthorization ? "Google" : sourceName}
         </Button>
       </DialogContent>
     </Dialog>
@@ -176,7 +180,13 @@ export function ConnectDisconnectDialog({
             disabled={pending}
             className="w-full"
           >
-            {pending ? "Disconnecting..." : "Disconnect"}
+            {source?.migrationState === "cutover_ready"
+              ? pending
+                ? "Finishing..."
+                : "Finish migration"
+              : pending
+                ? "Disconnecting..."
+                : "Disconnect"}
           </Button>
           <Button
             type="button"
@@ -195,6 +205,9 @@ export function ConnectDisconnectDialog({
 }
 
 function resolveDisconnectDialogTitle(source: ConnectSource | null): string {
+  if (source?.migrationState === "cutover_ready") {
+    return "Confirm Fitbit migration?";
+  }
   if (source?.disconnectScope === "junction_account") {
     return "Disconnect account?";
   }
@@ -205,6 +218,9 @@ function resolveDisconnectDialogTitle(source: ConnectSource | null): string {
 function resolveDisconnectDialogDescription(
   source: ConnectSource | null,
 ): string {
+  if (source?.migrationState === "cutover_ready") {
+    return "Murph has confirmed a Google Health connection, supported resources, and a fresh update, but cannot prove historical completeness automatically. Only finish after you confirm representative recent Fitbit history. Murph will then stop the legacy Fitbit connection and admit only Google Health records after the cutover boundary; your existing Murph history is kept.";
+  }
   if (source?.disconnectScope === "junction_account") {
     return "Murph will stop syncing new data from every source in this connection. Your history is kept.";
   }

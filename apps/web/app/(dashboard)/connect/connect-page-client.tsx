@@ -22,7 +22,7 @@ import {
   ConnectDisconnectDialog,
   ConnectIntentRecoveryDialog,
   ConnectRedirectDialog,
-  VitalConnectionDialog,
+  JunctionConnectionDialog,
 } from "./connect-page-dialogs";
 import {
   createConnectCallbackNotice,
@@ -30,6 +30,7 @@ import {
   isHostedDeviceConnectIntentUnavailableError,
   isHostedWhoopDirectConnectCapReachedError,
   markCallbackConnectedSource,
+  markLocallyCompletedFitbitMigrations,
   markLocallyDisconnectedSources,
   readDeviceConnectIntentFromCurrentLocation,
   requestConnectionAuthorizationUrl,
@@ -57,11 +58,11 @@ interface HostedDeviceSyncDisconnectResponse {
 }
 
 type ConnectStartOptions = {
-  vitalDisclosureConfirmed?: boolean;
+  junctionDisclosureConfirmed?: boolean;
   intentClaim?: string;
 };
 
-type VitalConnectionRequest = {
+type JunctionConnectionRequest = {
   intentClaim?: string;
   source: ConnectSource;
 };
@@ -116,8 +117,8 @@ export function ConnectSourcesGrid({
   } | null>(null);
   const [connectIntentRecovery, setConnectIntentRecovery] =
     useState<ConnectIntentRecoveryRequest | null>(null);
-  const [vitalConnectionRequest, setVitalConnectionRequest] =
-    useState<VitalConnectionRequest | null>(null);
+  const [junctionConnectionRequest, setJunctionConnectionRequest] =
+    useState<JunctionConnectionRequest | null>(null);
   const [showWhoopAppleHealthSetupDialog, setShowWhoopAppleHealthSetupDialog] =
     useState(false);
   const [activeSetupGuideId, setActiveSetupGuideId] =
@@ -128,6 +129,9 @@ export function ConnectSourcesGrid({
     ReadonlySet<string>
   >(() => new Set());
   const [disconnectedSourceIds, setDisconnectedSourceIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const [completedMigrationSourceIds, setCompletedMigrationSourceIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
   const [locationConnectIntent] = useState<InitialDeviceConnectIntent>(() =>
@@ -145,10 +149,13 @@ export function ConnectSourcesGrid({
   const displaySources = useMemo(
     () =>
       sortConnectSourcesByConnectionState(
-        markLocallyDisconnectedSources(
-          markCallbackConnectedSource(sources, callbackConnectedSourceId),
-          disconnectedConnectionIds,
-          disconnectedSourceIds,
+        markLocallyCompletedFitbitMigrations(
+          markLocallyDisconnectedSources(
+            markCallbackConnectedSource(sources, callbackConnectedSourceId),
+            disconnectedConnectionIds,
+            disconnectedSourceIds,
+          ),
+          completedMigrationSourceIds,
         ).filter(
           (source) =>
             source.connectionAvailable !== false ||
@@ -162,6 +169,7 @@ export function ConnectSourcesGrid({
       ),
     [
       callbackConnectedSourceId,
+      completedMigrationSourceIds,
       disconnectedConnectionIds,
       disconnectedSourceIds,
       sources,
@@ -212,7 +220,7 @@ export function ConnectSourcesGrid({
       displaySources,
       authenticated,
     );
-    return source && !requiresVitalConnectionPreflight(
+    return source && !requiresJunctionConnectionPreflight(
       source,
       activeConnectIntent?.connectProvider,
     )
@@ -261,18 +269,18 @@ export function ConnectSourcesGrid({
       setActiveSetupGuideId(null);
 
       if (
-        requiresVitalConnectionPreflight(source) &&
-        !options.vitalDisclosureConfirmed
+        requiresJunctionConnectionPreflight(source) &&
+        !options.junctionDisclosureConfirmed
       ) {
         setPendingSourceId(null);
-        setVitalConnectionRequest({
+        setJunctionConnectionRequest({
           ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
           source,
         });
         return;
       }
 
-      setVitalConnectionRequest(null);
+      setJunctionConnectionRequest(null);
       setPendingSourceId(source.id);
       if (options.intentClaim) {
         setConnectIntentRedirectName(source.name);
@@ -346,7 +354,7 @@ export function ConnectSourcesGrid({
     }
 
     let cancelled = false;
-    if (requiresVitalConnectionPreflight(
+    if (requiresJunctionConnectionPreflight(
       source,
       activeConnectIntent.connectProvider,
     )) {
@@ -359,7 +367,7 @@ export function ConnectSourcesGrid({
         stripDeviceConnectIntentParams();
         setConnectIntentRedirectName(null);
         setInitialConnectIntentDismissed(true);
-        setVitalConnectionRequest({
+        setJunctionConnectionRequest({
           intentClaim: activeConnectIntent.claim,
           source,
         });
@@ -442,7 +450,11 @@ export function ConnectSourcesGrid({
           url: disconnectUrl,
         });
       setDisconnectSource(null);
-      if (sourceProviderSlug) {
+      if (source.migrationState === "cutover_ready") {
+        setCompletedMigrationSourceIds(
+          (current) => new Set([...current, source.id]),
+        );
+      } else if (sourceProviderSlug) {
         setDisconnectedSourceIds((current) => new Set([...current, source.id]));
       } else {
         setDisconnectedConnectionIds(
@@ -584,23 +596,23 @@ export function ConnectSourcesGrid({
         />
       ) : null}
 
-      <VitalConnectionDialog
-        source={vitalConnectionRequest?.source ?? null}
+      <JunctionConnectionDialog
+        source={junctionConnectionRequest?.source ?? null}
         voiceMemoSrc={garminHistoricalDataVoiceMemoSrc}
         onOpenChange={(open) => {
           if (!open) {
-            setVitalConnectionRequest(null);
+            setJunctionConnectionRequest(null);
           }
         }}
         onContinue={() => {
-          const request = vitalConnectionRequest;
+          const request = junctionConnectionRequest;
           if (!request) {
             return;
           }
 
-          setVitalConnectionRequest(null);
+          setJunctionConnectionRequest(null);
           void startConnection(request.source, {
-            vitalDisclosureConfirmed: true,
+            junctionDisclosureConfirmed: true,
             ...(request.intentClaim
               ? { intentClaim: request.intentClaim }
               : {}),
@@ -641,7 +653,7 @@ export function ConnectSourcesGrid({
   );
 }
 
-export function requiresVitalConnectionPreflight(
+export function requiresJunctionConnectionPreflight(
   source: ConnectSource,
   connectIntentProvider?: string | null,
 ): boolean {
@@ -653,16 +665,24 @@ export function requiresVitalConnectionPreflight(
     return source.connectProvider === "junction";
   }
 
-  return source.requiresVitalDisclosure === true;
+  return source.requiresJunctionDisclosure === true;
 }
 
 function resolveDisconnectSuccessMessage(source: ConnectSource): string {
+  if (source.migrationState === "cutover_ready") {
+    return "Fitbit now uses Google Health. Your history is still saved.";
+  }
+
   return source.disconnectScope === "junction_account"
     ? "Disconnected this connection. Your history is still saved."
     : `Disconnected ${source.name}. Your history is still saved.`;
 }
 
 function resolveDisconnectFailureMessage(source: ConnectSource): string {
+  if (source.migrationState === "cutover_ready") {
+    return "We could not finish the Fitbit migration right now. The legacy Fitbit connection was not changed.";
+  }
+
   return source.disconnectScope === "junction_account"
     ? "We could not disconnect this connection right now."
     : `We could not disconnect ${source.name} right now.`;

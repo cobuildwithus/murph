@@ -2,6 +2,9 @@ import type { ConfiguredDeviceSyncProviderKey } from "./provider-types.ts";
 
 export type DirectDeviceConnectProvider = Exclude<ConfiguredDeviceSyncProviderKey, "junction">;
 
+export const JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG = "fitbit";
+export const JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG = "google_health";
+
 export interface DeviceConnectSource {
   readonly connectSourceId: string;
   readonly label: string;
@@ -119,7 +122,17 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "fitbit",
     label: "Fitbit",
-    routes: [junctionLinkRoute("fitbit")],
+    routes: [
+      junctionLinkRoute(JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG, {
+        connectTarget: "fitbit",
+      }),
+      // Keep the retiring provider identity resolvable for status, provenance,
+      // and targeted disconnects, but never offer it for a fresh Link start.
+      junctionLinkRoute(JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG, {
+        connectTarget: "fitbit",
+        defaultEnabled: false,
+      }),
+    ],
   },
   {
     connectSourceId: "freestyle-libre",
@@ -381,7 +394,14 @@ export function normalizeJunctionLinkProviderFilter(value: readonly string[] | u
       continue;
     }
 
-    normalizedProviderSlugs.push(providerSlug);
+    // Existing deployments may still name the retiring Fitbit Web API slug.
+    // Treat that configuration as an opt-in to the Google Health successor,
+    // while retaining the legacy route above strictly as persisted identity.
+    normalizedProviderSlugs.push(
+      providerSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+        ? JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+        : providerSlug,
+    );
   }
 
   if (!usingDefault && unsupportedProviderSlugs.length > 0) {

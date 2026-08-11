@@ -138,6 +138,44 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     ]);
   });
 
+  it("maps a persisted legacy Fitbit source to the Google Health reconnect target", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [{
+        connectionId: "dspc_fitbit_legacy",
+        firstSeenAt: "2026-07-01T08:00:00.000Z",
+        lastDataAt: "2026-08-10T08:00:00.000Z",
+        lastSeenAt: "2026-08-10T08:00:00.000Z",
+        resourceCount: 4,
+        sourceProviderSlug: "fitbit",
+        status: "connected",
+      }],
+      connectTargets: [{
+        connectSourceId: "fitbit",
+        connectTarget: "fitbit",
+        provider: "junction",
+        sourceProviderSlug: "google_health",
+      }],
+      connections: [buildConnection({
+        id: "dspc_fitbit_legacy",
+        provider: "junction",
+      })],
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source?.upstreamSources).toEqual([{
+      connectProvider: "junction",
+      connectSourceId: "fitbit",
+      connectTarget: "fitbit",
+      firstSeenAt: "2026-07-01T08:00:00.000Z",
+      lastDataAt: "2026-08-10T08:00:00.000Z",
+      lastSeenAt: "2026-08-10T08:00:00.000Z",
+      providerLabel: "Fitbit",
+      resourceCount: 4,
+      sourceProviderSlug: "fitbit",
+      status: "connected",
+    }]);
+  });
+
   it("uses safe aggregate labels for multi-source intermediary connections", () => {
     const [source] = buildHostedDeviceSyncSettingsSources({
       connectionSources: [

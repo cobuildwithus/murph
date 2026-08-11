@@ -373,7 +373,7 @@ pnpm test:coverage
 ## Current reference providers
 
 Use the existing providers as concrete examples of different integration shapes:
-- Junction: shared OAuth/proxy target for configured sources such as Garmin and Fitbit
+- Junction: shared OAuth/proxy target for configured sources such as Garmin and Google Health-backed Fitbit/Pixel Watch; legacy `fitbit` remains provenance only during migration
 - Garmin: Junction-backed OAuth plus polling-first reconcile, activity detail descriptors, and women-health support
 - WHOOP: OAuth plus webhooks, recovery and workout payloads, and delete fan-in
 - Oura: OAuth plus polling-first reconcile, optional webhook verification and admin support, and rich daily readiness or sleep families

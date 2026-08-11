@@ -23,10 +23,14 @@ export type ConnectSource = {
   historicalResetIncomplete?: boolean;
   id: string;
   logo: LogoAsset;
+  migrationState?:
+    | "authorization_required"
+    | "verifying_successor"
+    | "cutover_ready";
   name: string;
   recoveryKind?: "connection_reset";
   requiresReconnect?: boolean;
-  requiresVitalDisclosure?: boolean;
+  requiresJunctionDisclosure?: boolean;
   setupGuideActionLabel?: string;
   setupGuideId?: ConnectSourceSetupGuideId;
   unavailableActionLabel?: string;

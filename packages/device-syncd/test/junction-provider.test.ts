@@ -55,6 +55,7 @@ import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
 import type {
   DeviceConnectionSourceRecord,
   DeviceSyncAccount,
+  DeviceSyncAccountSourceSummary,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   ProviderJobContext,
@@ -324,6 +325,23 @@ function createConnectionSource(
     updatedAt: "2026-04-03T00:00:00.000Z",
     ...sourceOverrides,
     firstSeenAt: firstSeenAt ?? "2026-04-03T00:00:00.000Z",
+  };
+}
+
+function summarizeConnectionSource(
+  source: DeviceConnectionSourceRecord,
+): DeviceSyncAccountSourceSummary {
+  return {
+    displayName: source.displayName,
+    firstSeenAt: source.firstSeenAt,
+    lastDataAt: source.lastDataAt,
+    lastErrorCode: source.lastErrorCode,
+    lastErrorMessage: source.lastErrorMessage,
+    lastSeenAt: source.lastSeenAt,
+    resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+    resourceCount: Object.values(source.resourceAvailabilitySummary).filter(Boolean).length,
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: source.status,
   };
 }
 
@@ -6723,7 +6741,12 @@ test("Junction beginConnection resolves or creates a user, returns Link URL, and
   assert.equal(requests.every((request) => request.headers.get("x-vital-api-key") === "sk_us_test_123"), true);
 });
 
-test("Junction beginConnection dispatches Link directly without mutating the requested source provider", async () => {
+test("Junction maps legacy Fitbit and Google Health status identities to one visible source", () => {
+  assert.equal(resolveDeviceConnectSourceIdForJunctionProviderSlug("fitbit"), "fitbit");
+  assert.equal(resolveDeviceConnectSourceIdForJunctionProviderSlug("google_health"), "fitbit");
+});
+
+test("Junction beginConnection dispatches Fitbit through Google Health", async () => {
   const requests: Array<{ body: unknown; method: string; url: string }> = [];
   const provider = createJunctionProvider(async (input, init) => {
     const url = readUrl(input);
@@ -6748,7 +6771,7 @@ test("Junction beginConnection dispatches Link directly without mutating the req
     now: "2026-04-03T00:00:00.000Z",
     scopes: [],
     ownerId: "owner-internal-id-123",
-    sourceProviderSlug: "fitbit",
+    sourceProviderSlug: "google_health",
   });
 
   const linkBody = requests.find((request) => request.url.endsWith("/v2/link/token"))?.body;
@@ -6756,7 +6779,7 @@ test("Junction beginConnection dispatches Link directly without mutating the req
     typeof linkBody === "object" && linkBody !== null && "provider" in linkBody
       ? linkBody.provider
       : null,
-    "fitbit",
+    "google_health",
   );
   assert.equal(
     typeof linkBody === "object" && linkBody !== null && "filter_on_providers" in linkBody,
@@ -11214,6 +11237,124 @@ test("Junction resource jobs import direct daily data webhook payloads without J
   assert.equal(snapshot.summaries?.activity?.[0]?.sourceProviderSlug, "garmin");
   assert.deepEqual(snapshot.timeseries, {});
   assert.doesNotMatch(JSON.stringify(snapshot), /junction-user-1/u);
+});
+
+test("Junction fences Google Health imports and legacy-era backfill until an explicit Fitbit cutover", async () => {
+  let fetchCalls = 0;
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async () => {
+    fetchCalls += 1;
+    throw new Error("Unexpected Junction request.");
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+  const cutoverAt = "2026-08-11T12:00:00.000Z";
+  const legacyFitbit = createConnectionSource({
+    id: "src-fitbit-legacy",
+    lastSeenAt: cutoverAt,
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "fitbit",
+    }), "Legacy Fitbit source key should be available."),
+    sourceProviderSlug: "fitbit",
+  });
+  const googleHealth = createConnectionSource({
+    id: "src-google-health",
+    lastSeenAt: "2026-08-11T12:05:00.000Z",
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "google_health",
+    }), "Google Health source key should be available."),
+    sourceProviderSlug: "google_health",
+  });
+  const buildJob = (observedAt: string) => createJob("resource", {
+    eventType: "daily.data.activity.created",
+    objectId: `google-health-activity-${observedAt}`,
+    occurredAt: observedAt,
+    resource: "activity",
+    resourceCategory: "summary",
+    sourceProviderSlug: "google_health",
+    webhookDataJson: JSON.stringify({
+      id: `google-health-activity-${observedAt}`,
+      observedAt,
+      sourceProviderSlug: "google_health",
+      steps: 1234,
+    }),
+    windowStart: "2026-08-10T00:00:00.000Z",
+    windowEnd: "2026-08-12T00:00:00.000Z",
+  });
+
+  const executeWithSources = (
+    sources: DeviceConnectionSourceRecord[],
+    observedAt = "2026-08-11T12:05:00.000Z",
+  ) => {
+    const sourceSummaries = sources.map(summarizeConnectionSource);
+    return executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ sources: sourceSummaries }),
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+        listConnectionSources: async () => sourceSummaries,
+      }),
+      buildJob(observedAt),
+    );
+  };
+
+  await executeWithSources([googleHealth]);
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(fetchCalls, 0);
+  importedSnapshots.length = 0;
+
+  await executeWithSources([legacyFitbit, googleHealth]);
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(fetchCalls, 0);
+
+  await executeWithSources([
+    {
+      ...legacyFitbit,
+      lastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+      lastErrorMessage: "Source disconnect is in progress.",
+    },
+    googleHealth,
+  ]);
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(fetchCalls, 0);
+
+  await executeWithSources([
+    {
+      ...legacyFitbit,
+      status: "disconnected",
+      lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+    },
+    googleHealth,
+  ]);
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(fetchCalls, 0);
+
+  const cutoverSources: DeviceConnectionSourceRecord[] = [
+    {
+      ...legacyFitbit,
+      status: "disconnected",
+      lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+    },
+    googleHealth,
+  ];
+  await executeWithSources(cutoverSources, "2026-08-11T11:59:59.000Z");
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(fetchCalls, 0);
+
+  await executeWithSources(cutoverSources, cutoverAt);
+  assert.equal(importedSnapshots.length, 0);
+  assert.equal(fetchCalls, 0);
+
+  await executeWithSources(cutoverSources, "2026-08-11T12:05:00.000Z");
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(fetchCalls, 0);
+  assert.match(JSON.stringify(importedSnapshots[0]), /google_health/u);
 });
 
 test("Junction imports multiple direct daily payloads via per-job execution without Junction HTTP requests", async () => {

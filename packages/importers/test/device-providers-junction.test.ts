@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -382,6 +382,26 @@ test("resolveJunctionOrigin accepts Junction attribution aliases", () => {
   assert.match(flatOrigin.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
   assert.equal(flatOrigin.sourceInstanceId?.includes("raw-scale-device"), false);
   assert.equal(flatOrigin.sourceInstanceId?.includes("raw-withings-app"), false);
+});
+
+test("Google Health synthetic sleep envelope preserves origin without inventing proprietary scores", async () => {
+  const fixture = JSON.parse(await readFile(
+    new URL("./device-providers/fixtures/google-health-sleep-summary.json", import.meta.url),
+    "utf8",
+  )) as Record<string, unknown>;
+  const payload = normalizeJunctionSnapshot(fixture);
+  const sleepSession = payload.events?.find((event) => event.kind === "sleep_session");
+
+  assert.equal(sleepSession?.dataOrigin?.sourceProviderSlug, "google-health");
+  assert.equal(sleepSession?.externalRef?.resourceType, "junction-google-health-sleep");
+  assert.equal(
+    payload.events?.some((event) =>
+      event.fields?.metric === "sleep-score" ||
+      event.fields?.metric === "readiness-score" ||
+      event.fields?.metric === "recovery-score"
+    ),
+    false,
+  );
 });
 
 test("Junction snapshot adapter preserves aggregator identity and upstream source provenance", async () => {

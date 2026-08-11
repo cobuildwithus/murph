@@ -94,7 +94,11 @@ import {
   type JunctionProviderConnection,
   type JunctionWindowInput,
 } from "./junction-client.ts";
-import { resolveJunctionDeviceConnectRouteByProviderSlug } from "../config/connect-routes.ts";
+import {
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+  resolveJunctionDeviceConnectRouteByProviderSlug,
+} from "../config/connect-routes.ts";
 import {
   buildJunctionProviderSourceInstanceKey,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
@@ -184,6 +188,7 @@ interface JunctionDirectSummaryImportResult {
 
 interface JunctionImportAdmissionSource {
   lastErrorCode?: string | null;
+  lastSeenAt?: string;
   sourceProviderSlug: string;
   status: DeviceConnectionSourceStatus;
 }
@@ -4746,12 +4751,20 @@ function isJunctionImportRecordAdmitted(
     resolveJunctionOrigin(record, fallback).sourceProviderSlug,
   );
   if (sourceProviderSlug) {
-    return isJunctionSourceAdmittedForImport(
+    if (!isJunctionSourceAdmittedForImport(
       sources,
       sourceProviderSlug,
       allowUnlistedSources,
       sourceStatusRequirement,
-    );
+    )) {
+      return false;
+    }
+
+    const googleHealthCutoverAt = sourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+      ? resolveJunctionGoogleHealthCutoverAt(sources)
+      : undefined;
+    return typeof googleHealthCutoverAt !== "string"
+      || isJunctionGoogleHealthRecordAfterCutover(record, googleHealthCutoverAt);
   }
 
   return !hasPendingSourceAdmission || !hasJunctionSourceReferenceIdentity(record);
@@ -7231,6 +7244,108 @@ async function projectJunctionSources(
   }
 }
 
+function resolveJunctionGoogleHealthCutoverAt(
+  sources: readonly JunctionImportAdmissionSource[],
+): string | null | undefined {
+  const legacySources = sources.filter((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug) === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+  );
+  if (legacySources.length === 0) {
+    return undefined;
+  }
+
+  let latestCutoverMs = Number.NEGATIVE_INFINITY;
+  for (const source of legacySources) {
+    if (
+      source.status !== "disconnected"
+      || source.lastErrorCode !== DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE
+    ) {
+      return null;
+    }
+
+    const lastSeenAt = normalizeString(source.lastSeenAt);
+    const lastSeenAtMs = lastSeenAt ? Date.parse(lastSeenAt) : NaN;
+    if (!Number.isFinite(lastSeenAtMs)) {
+      return null;
+    }
+    latestCutoverMs = Math.max(latestCutoverMs, lastSeenAtMs);
+  }
+
+  return new Date(latestCutoverMs).toISOString();
+}
+
+function isJunctionGoogleHealthRecordAfterCutover(
+  record: Record<string, unknown>,
+  cutoverAt: string,
+): boolean {
+  const recordTimestamp = resolveJunctionGoogleHealthRecordTimestamp(record);
+  if (!recordTimestamp) {
+    return false;
+  }
+
+  const recordTimestampMs = Date.parse(recordTimestamp);
+  const cutoverAtMs = Date.parse(cutoverAt);
+  return Number.isFinite(recordTimestampMs)
+    && Number.isFinite(cutoverAtMs)
+    && recordTimestampMs > cutoverAtMs;
+}
+
+function resolveJunctionGoogleHealthRecordTimestamp(
+  record: Record<string, unknown>,
+): string | null {
+  // Prefer the beginning of interval records so a sleep/workout that straddles
+  // the cutover stays on the legacy side instead of being duplicated by both
+  // provider identities. Date-only summaries on the cutover day also remain
+  // legacy-owned; the first unambiguous successor day is admitted.
+  for (const key of [
+    "observedAtRaw",
+    "observed_at_raw",
+    "observedAt",
+    "observed_at",
+    "timestamp",
+    "time",
+    "start",
+    "startAt",
+    "start_at",
+    "startTime",
+    "start_time",
+    "startTimestamp",
+    "start_timestamp",
+    "timeStart",
+    "time_start",
+    "bedtimeStart",
+    "bedtime_start",
+    "date",
+    "day",
+    "calendarDate",
+    "calendar_date",
+    "localDate",
+    "local_date",
+    "end",
+    "endAt",
+    "end_at",
+    "endTime",
+    "end_time",
+    "endTimestamp",
+    "end_timestamp",
+    "timeEnd",
+    "time_end",
+    "bedtimeStop",
+    "bedtime_stop",
+  ]) {
+    const value = normalizeString(record[key]);
+    if (!value) {
+      continue;
+    }
+    const timestamp = toIsoTimestampIfValid(value);
+    if (timestamp) {
+      return timestamp;
+    }
+  }
+
+  return null;
+}
+
 function isJunctionSourceAdmittedForImport(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string | null | undefined,
@@ -7240,6 +7355,18 @@ function isJunctionSourceAdmittedForImport(
   const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
   if (!normalizedSourceProviderSlug) {
     return true;
+  }
+
+  // Junction does not deduplicate equivalent Fitbit and Google Health records.
+  // During migration, keep legacy Fitbit as the sole canonical writer until its
+  // provider revoke succeeds and the source is durably marked user-disconnected.
+  // A disconnect-in-progress fence blocks both sides so a failed revoke cannot
+  // leave a brief dual-writer interval before the legacy row is restored.
+  if (
+    normalizedSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    && resolveJunctionGoogleHealthCutoverAt(sources) === null
+  ) {
+    return false;
   }
 
   const matchingSources = sources.filter((source) =>
@@ -7288,7 +7415,11 @@ async function resolveJunctionCurrentSourceAdmission(
   sourceProviderSlug: string,
 ): Promise<"admitted" | "fenced" | "pending"> {
   const sources = context.listConnectionSources
-    ? await context.listConnectionSources({ sourceProviderSlug })
+    ? await context.listConnectionSources(
+        normalizeProviderSlug(sourceProviderSlug) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+          ? {}
+          : { sourceProviderSlug },
+      )
     : context.account.sources ?? [];
   if (isJunctionSourceProjectionFenced(sources, sourceProviderSlug)) {
     return "fenced";

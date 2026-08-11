@@ -31,6 +31,8 @@ export {
 export {
   DEVICE_CONNECT_SOURCE_BY_ID,
   DEVICE_CONNECT_SOURCES,
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   listDefaultJunctionLinkProviderSlugs,
   listDirectDeviceConnectRouteEntries,
   listJunctionDeviceConnectRouteEntries,

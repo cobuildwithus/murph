@@ -1,7 +1,7 @@
 # Murph Terms of Service
 
 **Effective Date:** July 23, 2026
-**Last Updated:** July 23, 2026
+**Last Updated:** August 11, 2026
 **Company:** Just Cobuild, Co. ("**Murph**," "**we**," "**us**," or "**our**")
 
 These Terms of Service ("**Terms**") govern your access to and use of Murph's hosted websites, hosted applications, hosted onboarding flows, hosted settings pages, hosted APIs, hosted messaging features, hosted integrations, and related managed services that link to these Terms (collectively, the "**Hosted Service**").
@@ -165,7 +165,7 @@ You understand that:
 
 ## 9. Connected Services, Wearables, Imported Data, and Third-Party Dependencies
 
-Murph may let you connect or interact with third-party services, devices, accounts, APIs, applications, or data sources, including identity providers, messaging providers, wearable providers, payment processors, AI model providers, cloud providers, search providers, email providers, app stores, Apple Health, HealthKit, Google Health Connect, Oura, WHOOP, Garmin, Strava, Terra, labs, medical-record services, and similar providers (collectively, "**Connected Services**").
+Murph may let you connect or interact with third-party services, devices, accounts, APIs, applications, or data sources, including identity providers, messaging providers, wearable providers, payment processors, AI model providers, cloud providers, search providers, email providers, app stores, Apple Health, HealthKit, Google Health API, Google Fit, Android Health Connect, Oura, WHOOP, Garmin, Strava, Terra, labs, medical-record services, and similar providers (collectively, "**Connected Services**").
 
 If you enable a Connected Service:
 
@@ -180,7 +180,7 @@ Murph does not own or control Connected Services and is not responsible for thei
 
 References to third-party names, services, devices, integrations, or logos are for identification only and do not imply sponsorship, endorsement, or affiliation unless we expressly say so. We may disable, modify, or remove any integration at any time if required by law, provider terms, platform rules, security needs, product changes, or operational reasons.
 
-If you connect data from Apple Health, HealthKit, Google Health Connect, or similar platform health-data services, Murph will use that data only as described in our Privacy Policy and applicable consent flows, and not for advertising, data brokerage, employment, insurance, credit, housing, or other eligibility decisions.
+If you connect data from Apple Health, HealthKit, Google Health API, Google Fit, Android Health Connect, or similar health-data services, Murph will use that data only as described in our Privacy Policy and applicable consent flows, and not for advertising, data brokerage, employment, insurance, credit, housing, or other eligibility decisions.
 
 ## 10. User Content and Data Rights
 
@@ -271,7 +271,7 @@ Murph does not continuously review your messages, symptoms, wearable data, lab d
 
 ## 14. Platform Health Data
 
-Some features may depend on platform health-data services such as Apple Health, HealthKit, Google Health Connect, or similar services. Your use of those services is subject to the platform provider's rules and your device permissions. You can change many platform health-data permissions through your device or platform settings.
+Some features may depend on platform health-data services such as Apple Health, HealthKit, Google Health API, Google Fit, Android Health Connect, or similar services. Your use of those services is subject to the platform provider's rules and your device permissions. You can change many platform health-data permissions through your device or platform settings.
 
 We use platform health data only to provide and improve the health and wellness features you request or enable, as described in our Privacy Policy and consent flows. We do not use platform health data for advertising, data brokerage, employment, insurance, credit, housing, or other eligibility decisions, and we do not sell platform health data.
 

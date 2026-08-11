@@ -25,14 +25,14 @@ const DESIGN_LEGAL_DOCUMENTS: HostedConsentDocumentSnapshot[] = [
     id: "terms-of-service",
     pdfHref: "/legal/terms.pdf",
     title: "Murph Terms of Service",
-    version: "2026-07-23",
+    version: "2026-08-11",
   },
   {
     href: "/legal/privacy",
     id: "privacy-policy",
     pdfHref: "/legal/privacy.pdf",
     title: "Murph Privacy Policy",
-    version: "2026-07-23",
+    version: "2026-08-11",
   },
   {
     href: "/legal/health-ai-safety-disclosure",

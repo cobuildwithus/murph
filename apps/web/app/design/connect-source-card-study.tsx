@@ -77,7 +77,7 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     errorMessage: null,
     source: {
       connectTarget: "fitbit",
-      description: "Sleep, activity, heart rate, and daily readiness.",
+      description: "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
       id: "fitbit",
       logo: {
         className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
@@ -85,6 +85,64 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
         src: "/brand-logos/connect/fitbit.svg",
         width: 128,
       },
+      name: "Fitbit",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      connectProvider: "junction",
+      connectTarget: "fitbit",
+      description:
+        "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+      disconnectConnectionId: "design-fitbit-migration",
+      id: "fitbit-migration-authorization",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/fitbit.svg",
+        width: 128,
+      },
+      migrationState: "authorization_required",
+      name: "Fitbit",
+      requiresJunctionDisclosure: true,
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      description:
+        "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+      disconnectConnectionId: "design-fitbit-migration",
+      id: "fitbit-migration-verifying",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/fitbit.svg",
+        width: 128,
+      },
+      migrationState: "verifying_successor",
+      name: "Fitbit",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      description:
+        "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+      disconnectConnectionId: "design-fitbit-migration",
+      disconnectSourceProviderSlug: "fitbit",
+      id: "fitbit-migration-cutover",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/fitbit.svg",
+        width: 128,
+      },
+      migrationState: "cutover_ready",
       name: "Fitbit",
     },
   },

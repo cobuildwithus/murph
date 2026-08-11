@@ -1,3 +1,5 @@
+import { JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG } from "@murphai/device-syncd/connect-config";
+
 import { DEVICE_SYNC_CALLBACK_QUERY_PARAM_KEYS } from "@murphai/device-syncd/callback-redirect";
 
 import {
@@ -72,7 +74,39 @@ export function markCallbackConnectedSource(
     return sources;
   }
 
-  return sources.map((source) => source.id === sourceId ? { ...source, connected: true } : source);
+  return sources.map((source) => {
+    if (source.id !== sourceId) {
+      return source;
+    }
+
+    return source.migrationState === "authorization_required"
+      ? { ...source, connected: true, migrationState: "verifying_successor" as const }
+      : { ...source, connected: true };
+  });
+}
+
+export function markLocallyCompletedFitbitMigrations(
+  sources: readonly ConnectSource[],
+  completedSourceIds: ReadonlySet<string>,
+): readonly ConnectSource[] {
+  if (completedSourceIds.size === 0) {
+    return sources;
+  }
+
+  return sources.map((source) => {
+    if (!completedSourceIds.has(source.id) || source.migrationState !== "cutover_ready") {
+      return source;
+    }
+
+    const { migrationState, ...completedSource } = source;
+    void migrationState;
+
+    return {
+      ...completedSource,
+      connected: true,
+      disconnectSourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+    };
+  });
 }
 
 export function markLocallyDisconnectedSources(

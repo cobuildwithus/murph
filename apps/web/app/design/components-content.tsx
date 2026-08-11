@@ -164,7 +164,7 @@ import {
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
-import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
+import { JunctionConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
   EnvironmentCaptureCard,
   EnvironmentEmptyState,
@@ -347,14 +347,14 @@ const DESIGN_LEGAL_DOCUMENTS: HostedConsentStatus["documents"] = [
     id: "terms-of-service",
     pdfHref: "/legal/terms.pdf",
     title: "Murph Terms of Service",
-    version: "2026-07-23",
+    version: "2026-08-11",
   },
   {
     href: "/legal/privacy",
     id: "privacy-policy",
     pdfHref: "/legal/privacy.pdf",
     title: "Murph Privacy Policy",
-    version: "2026-07-23",
+    version: "2026-08-11",
   },
   {
     href: "/legal/health-ai-safety-disclosure",
@@ -605,7 +605,7 @@ export function ComponentsContent() {
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
   const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
-  const [vitalConnectionDialogSource, setVitalConnectionDialogSource] = useState<
+  const [junctionConnectionDialogSource, setJunctionConnectionDialogSource] = useState<
     Pick<ConnectSource, "id" | "logo" | "name" | "requiresReconnect"> | null
   >(null);
   const [assistantStylePickerStep, setAssistantStylePickerStep] =
@@ -1750,11 +1750,11 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Vital-backed health source handoff">
+        <Section title="Junction-backed health source handoff">
           <div className="flex flex-col items-start gap-3">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Reusable handoff shown before every Vital-backed authorization.
-              It leads with the connection, credits Vital underneath with a
+              Reusable handoff shown before every Junction-backed authorization.
+              It leads with the connection, credits Junction underneath with a
               link, and keeps Garmin&apos;s Historical Data reminder inside
               the same dialog.
             </p>
@@ -1820,19 +1820,19 @@ export function ComponentsContent() {
                 <Button
                   key={preview.source.id}
                   variant={preview.variant}
-                  onClick={() => setVitalConnectionDialogSource(preview.source)}
+                  onClick={() => setJunctionConnectionDialogSource(preview.source)}
                 >
                   {preview.label}
                 </Button>
               ))}
             </div>
           </div>
-          <VitalConnectionDialog
-            source={vitalConnectionDialogSource}
-            onContinue={() => setVitalConnectionDialogSource(null)}
+          <JunctionConnectionDialog
+            source={junctionConnectionDialogSource}
+            onContinue={() => setJunctionConnectionDialogSource(null)}
             onOpenChange={(open) => {
               if (!open) {
-                setVitalConnectionDialogSource(null);
+                setJunctionConnectionDialogSource(null);
               }
             }}
           />

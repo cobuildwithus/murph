@@ -16,6 +16,8 @@ test("formatDeviceSyncProviderLabel uses shared Junction source labels", () => {
   assert.equal(formatDeviceSyncProviderLabel("map_my_fitness"), "MapMyFitness");
   assert.equal(formatDeviceSyncProviderLabel("accuchek_ble"), "Accu-Chek");
   assert.equal(formatDeviceSyncProviderLabel("dexcom_v3"), "Dexcom");
+  assert.equal(formatDeviceSyncProviderLabel("google_health"), "Fitbit");
+  assert.equal(formatDeviceSyncProviderLabel("fitbit"), "Fitbit");
 });
 
 test("resolveJunctionConnectSourceLabel exposes only catalog-backed labels", () => {

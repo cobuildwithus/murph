@@ -745,6 +745,7 @@ export interface ProviderJobConnectionSource {
   displayName: string | null;
   firstSeenAt?: string;
   lastErrorCode: string | null;
+  lastSeenAt?: string;
   lastErrorMessage: string | null;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   sourceInstanceKey?: string;

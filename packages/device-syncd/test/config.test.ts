@@ -54,6 +54,7 @@ const JUNCTION_LINK_TOKEN_FILTER_PROVIDER_SLUGS = new Set([
   "freestyle_libre_ble",
   "garmin",
   "google_fit",
+  "google_health",
   "hammerhead",
   "health_connect",
   "ihealth",
@@ -195,7 +196,7 @@ test("connect targets expose direct providers plus Junction-backed sources", () 
         connectSourceId: "fitbit",
         connectTarget: "fitbit",
         provider: "junction",
-        sourceProviderSlug: "fitbit",
+        sourceProviderSlug: "google_health",
       },
       {
         connectSourceId: "mapmyfitness",
@@ -268,8 +269,11 @@ test("Junction default provider filter excludes non-Link connect routes", () => 
   });
 
   assert.deepEqual(
-    listConfiguredDeviceSyncConnectTargets(configs).map((target) => target.connectSourceId),
-    ["fitbit"],
+    listConfiguredDeviceSyncConnectTargets(configs).map((target) => ({
+      connectSourceId: target.connectSourceId,
+      sourceProviderSlug: target.sourceProviderSlug,
+    })),
+    [{ connectSourceId: "fitbit", sourceProviderSlug: "google_health" }],
   );
 
   const sdkOnlyConfigs = readConfiguredDeviceSyncProviderConfigs({
