@@ -39,10 +39,9 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
     return createAssistantOutboxAutomationAuthorityStaleError()
   }
 
-  const authorityNow = new Date()
   const current = await readAssistantOutboxAuthorizedAutomation({
     authority,
-    now: authorityNow,
+    now: new Date(),
     vault: input.vault,
   })
   if (!current) {
@@ -95,7 +94,7 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
   const lifecycleAuthority =
     await runExperimentLifecycleDeliveryAuthorityPrecondition({
       automationId: current.record.automationId,
-      now: authorityNow,
+      now: new Date(),
       tags: current.record.tags,
       vault: input.vault,
     })
@@ -105,7 +104,7 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
 
   const finalCurrent = await readAssistantOutboxAuthorizedAutomation({
     authority,
-    now: authorityNow,
+    now: new Date(),
     vault: input.vault,
   })
   return finalCurrent
