@@ -1638,7 +1638,7 @@ test("Environment keeps one refresh boundary through delayed checkpoint recovery
       replicaAad: null,
       replicaKeyEnvelope: null,
       replicaRef: currentRef,
-      refreshPending: true,
+      refreshPending: false,
       state: "not_modified",
     });
   });
@@ -1703,10 +1703,49 @@ test("Environment keeps one refresh boundary through delayed checkpoint recovery
   assert.equal(countForcedRefreshes(), 1);
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(120_000);
+    await vi.advanceTimersByTimeAsync(240_000);
   });
   await waitForText(rendered.container, "Murph is taking longer than usual");
   assert.equal(countForcedRefreshes(), 1);
+  const callsAtPollingBoundary = fetchMock.mock.calls.length;
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+  assert.equal(fetchMock.mock.calls.length, callsAtPollingBoundary);
+
+  const recoveryCheckAgain = Array.from(
+    rendered.window.document.querySelectorAll("button"),
+  ).find((button) => button.textContent?.includes("Check again"));
+  assert.ok(recoveryCheckAgain instanceof rendered.window.HTMLButtonElement);
+  const recoveryCallStart = fetchMock.mock.calls.length;
+  await act(async () => {
+    recoveryCheckAgain.click();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  assert.equal(countForcedRefreshes(), 2);
+  const recoveryBodies = fetchMock.mock.calls
+    .slice(recoveryCallStart)
+    .filter(([, init]) => init?.body)
+    .map(([, init]) => JSON.parse(String(init?.body)));
+  assert.equal(recoveryBodies.length, 2);
+  assert.equal(recoveryBodies[0]?.requestRefresh, undefined);
+  assert.equal(recoveryBodies[1]?.requestRefresh, true);
+
+  const repeatedCallStart = fetchMock.mock.calls.length;
+  await act(async () => {
+    recoveryCheckAgain.click();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  assert.equal(countForcedRefreshes(), 2);
+  const repeatedBodies = fetchMock.mock.calls
+    .slice(repeatedCallStart)
+    .filter(([, init]) => init?.body)
+    .map(([, init]) => JSON.parse(String(init?.body)));
+  assert.equal(repeatedBodies.length, 1);
+  assert.equal(repeatedBodies[0]?.requestRefresh, undefined);
 
   replacementPublished = true;
   const finalCheckAgain = Array.from(
@@ -1717,7 +1756,7 @@ test("Environment keeps one refresh boundary through delayed checkpoint recovery
     finalCheckAgain.click();
   });
   await waitForText(rendered.container, "The report was not updated");
-  assert.equal(countForcedRefreshes(), 1);
+  assert.equal(countForcedRefreshes(), 2);
 
   await rendered.cleanup();
 });

@@ -36,6 +36,7 @@ const BROWSER_VAULT_STALE_POLL_INTERVAL_MS = 1_500;
 const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 20_000;
 const BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS = 15_000;
 const BROWSER_VAULT_RUNTIME_REFRESH_TIMEOUT_MS = 60_000;
+const BROWSER_VAULT_POST_REQUEST_POLL_WINDOW_MS = 5 * 60 * 1_000;
 const EMPTY_BROWSER_VAULT_SESSION_METADATA: BrowserVaultSessionMetadata = {
   deviceSyncImportPending: false,
   freshness: "stale",
@@ -56,6 +57,11 @@ interface BrowserVaultRefreshOptions {
    * Only a later replica may run the completion predicate.
    */
   requestRuntimeRefreshUntilAfterRequest?: BrowserVaultRuntimeRefreshCompletion;
+  /**
+   * Observe the current replica, then re-signal an admitted post-request wait
+   * whose bounded polling window made no progress.
+   */
+  retryRuntimeRefreshAfterRequest?: boolean;
 }
 
 type BrowserVaultRuntimeRefreshAdmission =
@@ -150,6 +156,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const [freshness, setFreshness] = useState<BrowserVaultFreshness>("stale");
   const [sessionRefreshPending, setSessionRefreshPending] = useState(false);
   const [runtimeRefreshPending, setRuntimeRefreshPending] = useState(false);
+  const [runtimeRefreshPolling, setRuntimeRefreshPolling] = useState(false);
   const [workspaceVersion, setWorkspaceVersion] = useState<string | null>(null);
   const [client, setClient] = useState<BrowserVaultQueryClient | null>(null);
   const [deviceSyncImportPending, setDeviceSyncImportPending] = useState(false);
@@ -163,6 +170,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     useRef<BrowserVaultRuntimeRefreshCompletion | null>(null);
   const runtimeRefreshAdmissionRef =
     useRef<BrowserVaultRuntimeRefreshAdmission | null>(null);
+  const runtimeRefreshSignalSentRef = useRef(false);
   const runtimeRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -170,11 +178,42 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const clearRuntimeRefreshWait = useCallback(() => {
     runtimeRefreshCompletionRef.current = null;
     runtimeRefreshAdmissionRef.current = null;
+    runtimeRefreshSignalSentRef.current = false;
     if (runtimeRefreshTimeoutRef.current) {
       clearTimeout(runtimeRefreshTimeoutRef.current);
       runtimeRefreshTimeoutRef.current = null;
     }
     setRuntimeRefreshPending(false);
+    setRuntimeRefreshPolling(false);
+  }, []);
+
+  const armPostRequestPollingWindow = useCallback(() => {
+    if (runtimeRefreshTimeoutRef.current) {
+      clearTimeout(runtimeRefreshTimeoutRef.current);
+    }
+    runtimeRefreshSignalSentRef.current = true;
+    setRuntimeRefreshPending(true);
+    setRuntimeRefreshPolling(true);
+    runtimeRefreshTimeoutRef.current = setTimeout(() => {
+      runtimeRefreshTimeoutRef.current = null;
+      runtimeRefreshSignalSentRef.current = false;
+      abortBrowserVaultInFlightLoad();
+      providerStartedLoadRef.current = false;
+      if (mountedRef.current) {
+        setRuntimeRefreshPolling(false);
+      }
+    }, BROWSER_VAULT_POST_REQUEST_POLL_WINDOW_MS);
+  }, []);
+
+  const pausePostRequestPolling = useCallback(() => {
+    if (runtimeRefreshTimeoutRef.current) {
+      clearTimeout(runtimeRefreshTimeoutRef.current);
+      runtimeRefreshTimeoutRef.current = null;
+    }
+    runtimeRefreshSignalSentRef.current = false;
+    if (mountedRef.current) {
+      setRuntimeRefreshPolling(false);
+    }
   }, []);
 
   const beginRuntimeRefreshWait = useCallback(
@@ -193,23 +232,27 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       setRuntimeRefreshPending(true);
       if (requirePostRequestReplica) {
         // The hosted runtime publishes Browser Vault state only after its
-        // checkpoint floor. Keep this request-local admission boundary alive
-        // until that later replica arrives or the provider loses authority.
+        // checkpoint floor. Bound automatic observation without discarding the
+        // request-local admission boundary needed for explicit recovery.
+        armPostRequestPollingWindow();
         return;
       }
+      setRuntimeRefreshPolling(true);
       runtimeRefreshTimeoutRef.current = setTimeout(() => {
         runtimeRefreshCompletionRef.current = null;
         runtimeRefreshAdmissionRef.current = null;
+        runtimeRefreshSignalSentRef.current = false;
         runtimeRefreshTimeoutRef.current = null;
         abortBrowserVaultInFlightLoad();
         providerStartedLoadRef.current = false;
         if (mountedRef.current) {
           setSessionRefreshPending(false);
           setRuntimeRefreshPending(false);
+          setRuntimeRefreshPolling(false);
         }
       }, BROWSER_VAULT_RUNTIME_REFRESH_TIMEOUT_MS);
     },
-    [],
+    [armPostRequestPollingWindow],
   );
 
   const commitReady = useCallback((snapshot: BrowserVaultReadySnapshot) => {
@@ -336,6 +379,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const runProviderLoad = useCallback(
     async (options: BrowserVaultRefreshOptions & {
       authorityPathname?: string;
+      retryPostRequestRefresh?: boolean;
     } = {}) => {
       const background = options.background ?? false;
       const { authorityPathname } = options;
@@ -351,7 +395,8 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         ?? options.requestRuntimeRefreshUntilAfterRequest;
       const requirePostRequestReplica =
         options.requestRuntimeRefreshUntilAfterRequest !== undefined;
-      const requestRuntimeRefresh = runtimeRefreshCompletion !== undefined;
+      const requestRuntimeRefresh = runtimeRefreshCompletion !== undefined
+        || options.retryPostRequestRefresh === true;
       const authorityGeneration = authorityPathname === undefined
         ? authorityGenerationRef.current
         : authorityGenerationRef.current + 1;
@@ -380,7 +425,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
           !mountedRef.current
           || authorityGeneration !== authorityGenerationRef.current
         ) {
-          return;
+          return null;
         }
       }
 
@@ -413,7 +458,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         !mountedRef.current
         || authorityGeneration !== authorityGenerationRef.current
       ) {
-        return;
+        return null;
       }
 
       if (requirePostRequestReplica) {
@@ -437,18 +482,72 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         }
       }
 
+      if (
+        options.retryPostRequestRefresh
+        && outcome.status !== "ready"
+        && outcome.status !== "empty"
+      ) {
+        // Preserve the original causal boundary, but stop this failed recovery
+        // window so another explicit check can retry it.
+        pausePostRequestPolling();
+      }
+
       applyOutcome(outcome, { authorityPathname, background });
+      return outcome;
     },
     [
       applyOutcome,
       beginRuntimeRefreshWait,
       clearRuntimeRefreshWait,
       initialMemberId,
+      pausePostRequestPolling,
     ],
   );
 
+  const retryRuntimeRefreshAfterRequest = useCallback(async () => {
+    const observed = await runProviderLoad({ background: true });
+    const admission = runtimeRefreshAdmissionRef.current;
+    const stillAtAdmission = admission?.status === "admitted"
+      && (
+        admission.ref === null
+          ? observed?.status === "empty"
+          : observed?.status === "ready"
+            && browserVaultReplicaRefsMatch(
+              admission.ref,
+              observed.snapshot.ref,
+            )
+      );
+    if (
+      runtimeRefreshCompletionRef.current === null
+      || !stillAtAdmission
+      || runtimeRefreshSignalSentRef.current
+    ) {
+      return;
+    }
+
+    // Mark the signal before starting the request so concurrent or repeated
+    // clicks can observe but cannot create duplicate refresh pressure.
+    armPostRequestPollingWindow();
+    await runProviderLoad({
+      background: true,
+      retryPostRequestRefresh: true,
+    });
+  }, [armPostRequestPollingWindow, runProviderLoad]);
+
   const refresh = useCallback(
     async (options: BrowserVaultRefreshOptions = {}) => {
+      if (options.retryRuntimeRefreshAfterRequest) {
+        if (
+          options.requestRuntimeRefreshUntil
+          || options.requestRuntimeRefreshUntilAfterRequest
+        ) {
+          throw new TypeError(
+            "A Browser Vault runtime refresh retry cannot start a new completion wait.",
+          );
+        }
+        await retryRuntimeRefreshAfterRequest();
+        return;
+      }
       await runProviderLoad(
         options.background
           ? {
@@ -465,7 +564,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
             },
       );
     },
-    [pathname, runProviderLoad],
+    [pathname, retryRuntimeRefreshAfterRequest, runProviderLoad],
   );
 
   const pollStaleReplica = useCallback(async () => {
@@ -504,6 +603,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       const ownsRuntimeRefresh = runtimeRefreshCompletionRef.current !== null;
       runtimeRefreshCompletionRef.current = null;
       runtimeRefreshAdmissionRef.current = null;
+      runtimeRefreshSignalSentRef.current = false;
       if (runtimeRefreshTimeoutRef.current) {
         clearTimeout(runtimeRefreshTimeoutRef.current);
         runtimeRefreshTimeoutRef.current = null;
@@ -526,7 +626,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   }, [pathname, revalidateAuthority]);
 
   useEffect(() => {
-    const refreshPending = sessionRefreshPending || runtimeRefreshPending;
+    const refreshPending = sessionRefreshPending || runtimeRefreshPolling;
     if (status === "error" || !refreshPending) {
       return;
     }
@@ -558,7 +658,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         clearTimeout(timeoutId);
       }
     };
-  }, [freshness, pollStaleReplica, runtimeRefreshPending, sessionRefreshPending, status]);
+  }, [freshness, pollStaleReplica, runtimeRefreshPolling, sessionRefreshPending, status]);
 
   useEffect(() => {
     const onFocus = () => {

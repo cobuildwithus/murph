@@ -402,6 +402,7 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
     assert.equal(mocks.refresh.mock.calls.length, 2);
     assert.deepEqual(mocks.refresh.mock.calls[1]?.[0], {
       background: true,
+      retryRuntimeRefreshAfterRequest: true,
     });
     assert.equal(fetchMock.mock.calls.filter(
       ([input, init]) =>

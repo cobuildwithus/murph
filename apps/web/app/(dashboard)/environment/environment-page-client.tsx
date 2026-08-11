@@ -392,7 +392,10 @@ export default function EnvironmentPageClient({
             });
             return;
           }
-          void refresh({ background: true }).catch(() => undefined);
+          void refresh({
+            background: true,
+            retryRuntimeRefreshAfterRequest: true,
+          }).catch(() => undefined);
         }}
       />
       {hasEnvironmentData ? (

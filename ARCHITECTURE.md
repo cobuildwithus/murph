@@ -2193,10 +2193,14 @@ refresh response as the request-local admission boundary, and remains pending
 until a later replica ref is published; only then may the page distinguish
 changed Habitat facts from a completed recording with no clear new facts.
 The one-minute delayed notice is presentation-only: it does not retire that
-causal fence, and Check again performs an ordinary read against the same attempt
-instead of scheduling another forced refresh. Delayed and reload recovery reuse
-the same voice-processing and replica-refresh owners, with no second result
-store.
+causal fence. Automatic replica observation stops after a bounded five-minute
+window while retaining the original admission boundary. Check again first
+performs an ordinary read; if that read still returns the admitted replica, it
+opens another bounded window and sends at most one idempotent refresh signal for
+the same boundary. A newer replica completes without another signal, and
+repeated checks within one window cannot create duplicate refresh pressure.
+Delayed and reload recovery reuse the same voice-processing and replica-refresh
+owners, with no second result store.
 
 Hosted dynamic image generation launches as invocation-local background work so
 the current tool call returns immediately. Provider work stays detached, while

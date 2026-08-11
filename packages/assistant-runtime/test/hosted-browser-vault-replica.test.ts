@@ -660,6 +660,36 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 
+  it("does not publish a replica when refresh preparation times out", async () => {
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const publishRef = vi.fn();
+    const write = vi.fn(async () => await new Promise<HostedBrowserVaultReplicaRef>(() => {}));
+
+    try {
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        timeoutMs: 0,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+
+      expect(result).toMatchObject({ status: "deferred_timeout" });
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("does not publish when a runtime wake arrives during refresh", async () => {
     const { VAULT_LAYOUT } = await import("@murphai/contracts");
     const {
