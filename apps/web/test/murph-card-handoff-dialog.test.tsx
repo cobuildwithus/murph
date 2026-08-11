@@ -60,8 +60,14 @@ vi.mock("@/src/components/ui/dialog", () => ({
     children?: ReactNode;
     showCloseButton?: boolean;
   }) => {
-    void showCloseButton;
-    return createElement("div", props, children);
+    return createElement(
+      "div",
+      props,
+      showCloseButton === false
+        ? null
+        : createElement("button", { "aria-label": "Close" }),
+      children,
+    );
   },
 }));
 
@@ -112,6 +118,10 @@ test("opens the App Store handoff without exposing the opaque card value", async
     expect(appStoreLink?.textContent).toContain("Get Murph for iPhone");
     expect(appStoreLink?.getAttribute("target")).toBe("_blank");
     expect(appStoreLink?.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(
+      rendered.container.querySelector('button[aria-label="Close"]'),
+    ).toBeNull();
+    expect(rendered.container.querySelectorAll("button")).toHaveLength(1);
 
     const dismissButton = [...rendered.container.querySelectorAll("button")]
       .find((button) => button.textContent?.trim() === "Not now");

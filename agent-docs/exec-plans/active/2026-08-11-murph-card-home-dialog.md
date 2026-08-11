@@ -51,7 +51,14 @@ Updated: 2026-08-11
 - Keep `app_store_id` omitted because the provider's native install treatment conflicts with the intentionally edge-to-edge static card preview.
 - Use the canonical App Store page as the single primary action and a quiet dismiss action as the recovery path.
 - Leave the fragment in the address bar on dismissal; removing it would mutate the shared URL without improving the current session and would make browser navigation surprising.
+- Keep one explicit dismiss control in the dialog body. The preliminary specialist review found that the shared Dialog primitive also supplied its default close button, so the production instance disables that duplicate while retaining Escape and backdrop dismissal.
+- Bind the fragment-confidentiality claim at both owners: a focused telemetry regression proves URL canonicalization, and a production-faithful Playwright journey proves the synthetic fragment never reaches rendered content or observed request URLs, headers, or bodies.
 
 ## Verification
 
-- Pending.
+- Focused Vitest dialog and telemetry regressions: 14 tests passed after preliminary-review remediation.
+- Scoped ESLint for the remediated component, unit tests, telemetry test, and Playwright journey: passed.
+- Production-faithful Playwright journey at 1440×1000 and 390×844: passed; verified accessible dialog naming, focus containment, exactly two visible actions with one dismiss button, Escape and explicit dismissal, fragment preservation, ordinary-hash silence, no horizontal overflow, and no synthetic fragment in rendered content or observed requests.
+- Preliminary `completion-specialists` ReviewGPT pass on pushed head `17b22ffb0c4e88dc163a17a2e5e34239a823f868`: complete with product-experience, frontend-proof, and coverage findings; the code and coverage findings are remediated locally, and refreshed production captures remain to be uploaded.
+- Claude Code UI double-check: attempted with Fable and blocked by explicit usage-credit exhaustion, which the completion workflow treats as a non-blocking gap.
+- Full focused suite, typecheck, design-proof gate, refreshed screenshots, exact-head PR checks, and final parent review: pending.

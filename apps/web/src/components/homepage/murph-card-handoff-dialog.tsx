@@ -52,6 +52,7 @@ export function MurphCardHandoffDialog({
         aria-describedby={DESCRIPTION_ID}
         aria-labelledby={TITLE_ID}
         className="max-h-[calc(100dvh-2rem)] max-w-[calc(100%-2rem)] overflow-y-auto border border-[#c4a882]/25 bg-[#fffcf6] p-0 text-[#2d3436] ring-[#c4a882]/20 sm:max-w-md"
+        showCloseButton={false}
       >
         <MurphCardHandoffPanel onDismiss={() => onOpenChange(false)} />
       </DialogContent>
