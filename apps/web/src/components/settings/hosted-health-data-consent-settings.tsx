@@ -224,61 +224,55 @@ export function HostedHealthDataConsentControl({
   const unavailable = presentation === "unavailable";
 
   return (
-    <div
-      className={`grid grid-cols-1 items-start gap-4 border-b border-border pb-4 ${
-        active ? "" : "sm:grid-cols-[minmax(0,1fr)_auto]"
-      }`}
-    >
-      <div className="flex min-w-0 items-start gap-3">
-        {active ? (
-          <ShieldCheck
-            aria-hidden="true"
-            className="mt-0.5 size-[18px] shrink-0 text-muted-foreground"
-            strokeWidth={1.6}
-          />
-        ) : (
-          <ShieldOff
-            aria-hidden="true"
-            className="mt-0.5 size-[18px] shrink-0 text-muted-foreground"
-            strokeWidth={1.6}
-          />
-        )}
-        <div className="min-w-0">
-          <div className="font-serif text-base tracking-tight text-foreground">
-            Health data use
-          </div>
-          <p
-            aria-live="polite"
-            className={`mt-0.5 text-xs leading-5 ${
-              unavailable && errorMessage
-                ? "text-destructive"
-                : "text-muted-foreground"
-            }`}
-          >
-            {active
-              ? "Used to personalize Murph"
-              : paused
-                ? "Processing paused"
-                : presentation === "not-enabled"
-                  ? "Not enabled"
-                  : statusPending
-                    ? "Checking status..."
-                    : errorMessage ?? "Status unavailable"}
-          </p>
-          {paused ? (
-            <div className="mt-2">
-              <Link
-                className="relative inline-flex min-h-10 items-center self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:content-['']"
-                href="/connect"
-              >
-                Review source disconnections
-              </Link>
-            </div>
-          ) : null}
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-border pb-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+      {active ? (
+        <ShieldCheck
+          aria-hidden="true"
+          className="mt-0.5 size-[18px] shrink-0 self-start text-muted-foreground"
+          strokeWidth={1.6}
+        />
+      ) : (
+        <ShieldOff
+          aria-hidden="true"
+          className="mt-0.5 size-[18px] shrink-0 self-start text-muted-foreground"
+          strokeWidth={1.6}
+        />
+      )}
+      <div className="min-w-0">
+        <div className="font-serif text-base tracking-tight text-foreground">
+          Health data use
         </div>
+        <p
+          aria-live="polite"
+          className={`mt-0.5 text-xs leading-5 ${
+            unavailable && errorMessage
+              ? "text-destructive"
+              : "text-muted-foreground"
+          }`}
+        >
+          {active
+            ? "Used to personalize Murph"
+            : paused
+              ? "Processing paused"
+              : presentation === "not-enabled"
+                ? "Not enabled"
+                : statusPending
+                  ? "Checking status..."
+                  : errorMessage ?? "Status unavailable"}
+        </p>
+        {paused ? (
+          <div className="mt-2">
+            <Link
+              className="relative inline-flex min-h-10 items-center self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:content-['']"
+              href="/connect"
+            >
+              Review source disconnections
+            </Link>
+          </div>
+        ) : null}
       </div>
       {active ? (
-        <div className="ml-[30px] flex min-w-0 items-center gap-2 justify-self-stretch">
+        <div className="col-start-2 flex min-w-0 items-center gap-2 sm:col-start-3 sm:row-start-1 sm:justify-self-end">
           <Link
             className="relative inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:content-['']"
             href="/connect"
@@ -298,11 +292,7 @@ export function HostedHealthDataConsentControl({
         </div>
       ) : (
         <Button
-          className={
-            paused
-              ? "w-full sm:col-span-2"
-              : "w-full sm:w-auto sm:self-start"
-          }
+          className="col-start-2 justify-self-start sm:col-start-3 sm:row-start-1 sm:justify-self-end"
           disabled={pending}
           onClick={onAction}
           type="button"
