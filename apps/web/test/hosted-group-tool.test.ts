@@ -4379,7 +4379,32 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Sounds good. Like or heart this message to share your Murph profile name and recent running distance and session count with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+          "Sounds good. Like or heart this message to share your Murph profile name and recent running distance and session count (running distance and session count covers the last 7 days) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
+      }),
+    );
+  });
+
+  it("discloses the seven-day window in session-count join offer copy", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: {
+          messageTemplate:
+            "Like this to join. It shares {{share_scope}} with the group. Join page: {{join_url}}.",
+          projectionScopes: [RUNNING_SESSION_COUNT_SCOPE],
+        },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Sounds good. Like or heart this message to share your Murph profile name and recent running session count (running session count covers the last 7 days) with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });

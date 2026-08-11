@@ -54,7 +54,7 @@ Updated: 2026-08-11
    wake behavior with focused regression coverage.
 3. [x] Run focused verification, inspect the complete diff, and update durable
    contract documentation where needed.
-4. [ ] Commit, push, and open the PR; run preliminary specialist and final
+4. [x] Commit, push, and open the PR; run preliminary specialist and final
    ReviewGPT concurrently with exact-head CI.
 5. [ ] Resolve accepted findings, complete parent review, close this plan with
    `scripts/finish-task`, and prove current-base mergeability.
@@ -114,5 +114,21 @@ Updated: 2026-08-11
   typecheck pass locally after the correction.
 - The corrected preliminary-specialist ZIP was inspected directly before its
   retry and contains the PR body, full diff, changed-files and phase manifests,
-  plus both redacted rendered-evidence images. The retry resumes the prior
-  invalid thread on a different managed lane instead of duplicating the audit.
+  plus both redacted rendered-evidence images. Two attempts to resume the prior
+  invalid thread failed before send because the attachment target could not be
+  matched, so the corrected packet was sent once in a fresh managed thread.
+- The preliminary specialist pass and final ReviewGPT round 1 independently
+  found the same two defects: seven-day consent copy did not match the
+  eight-record producer, and a one-shot payload-free wake could leave pending
+  without a recovery owner. Both findings were accepted. The producer now caps
+  recent sleep and daily projections at seven records with a six-UTC-day age
+  cutoff, native selector consent names the same window, approval appends the
+  existing durable maintenance control row without caller-cancellation
+  suppression, and the scheduled mailbox handoff sweep includes unconsumed
+  maintenance rows.
+- Remediation proof passed: 235 focused Web tests, 101 projection-owner tests,
+  an additional 88-test durable-signal/recovery subset, the 154-test group-tool
+  file after native selector coverage, and Web plus Assistant Runtime
+  typechecks. New boundary cases prove eight eligible sleep-timing,
+  sleep-duration, selector-distance, and selector-session-count dates produce
+  no more than the seven dates disclosed by consent.

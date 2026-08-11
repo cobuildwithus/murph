@@ -9,7 +9,7 @@ import {
   readHostedPostCommitRemainingMs,
   waitForHostedPostCommitOperation,
 } from "../hosted-onboarding/bounded-post-commit";
-import { signalHostedRuntimeWakeRuntime } from "../hosted-orchestration/signal-runtime";
+import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
@@ -162,11 +162,10 @@ export async function acceptHostedGroupOfferAffirmation(input: {
       ? runHostedGroupOfferAffirmationPostCommitBestEffort({
           deadlineMs: postCommitDeadlineMs,
           operation: (abortSignal) =>
-            signalHostedRuntimeWakeRuntime({
+            signalHostedRuntimeMaintenanceRuntime({
               abortSignal,
               userId: input.memberId,
             }),
-          signal: input.signal,
         })
       : null;
     if (result.joinConfirmationSignal) {
@@ -198,13 +197,11 @@ export async function acceptHostedGroupOfferAffirmation(input: {
 async function runHostedGroupOfferAffirmationPostCommitBestEffort(input: {
   deadlineMs: number;
   operation: (signal: AbortSignal) => Promise<unknown>;
-  signal?: AbortSignal;
 }): Promise<void> {
   try {
     await waitForHostedPostCommitOperation({
       deadlineMs: input.deadlineMs,
       operation: input.operation,
-      signal: input.signal,
     });
   } catch {
     // The durable join, grants, and mailbox items remain available for a later wake.

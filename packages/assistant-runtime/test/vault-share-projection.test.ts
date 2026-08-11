@@ -612,6 +612,43 @@ describe("selectProjectableDailyMetricDays", () => {
     ).toEqual(sleepDurations);
   });
 
+  it("limits eight sleep-duration dates to the seven dates disclosed by consent", () => {
+    const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
+    const dates = [
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05",
+      "2026-07-06",
+      "2026-07-07",
+      "2026-07-08",
+    ];
+
+    const selected = selectProjectableDailyMetricDays(
+      dates.map((date) => ({
+        date,
+        grain: "day" as const,
+        metricKey: "total-sleep-minutes",
+        statistic: "value",
+        unit: "minutes",
+        value: 480,
+      })),
+      sleepDurationSpec,
+      boundaryNowMs,
+    );
+
+    expect(selected.map((record) => record.recordKey)).toEqual([
+      "2026-07-08",
+      "2026-07-07",
+      "2026-07-06",
+      "2026-07-05",
+      "2026-07-04",
+      "2026-07-03",
+      "2026-07-02",
+    ]);
+  });
+
   it("scores reported current member-local deep and REM sleep values immediately", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-sleep-stages-"));
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
@@ -1606,12 +1643,30 @@ describe("selectProjectableDailyMetricDays", () => {
     {
       label: "UTC+14 Monday",
       nowMs: Date.parse("2026-07-26T10:15:00.000Z"),
+      expectedDates: [
+        "2026-07-27",
+        "2026-07-26",
+        "2026-07-25",
+        "2026-07-24",
+        "2026-07-23",
+        "2026-07-22",
+        "2026-07-21",
+      ],
     },
     {
       label: "UTC-12 Monday",
       nowMs: Date.parse("2026-07-28T11:45:00.000Z"),
+      expectedDates: [
+        "2026-07-27",
+        "2026-07-26",
+        "2026-07-25",
+        "2026-07-24",
+        "2026-07-23",
+        "2026-07-22",
+      ],
     },
-  ])("retains the open date plus seven completed dates on $label", ({
+  ])("never crosses the seven-date UTC disclosure bound on $label", ({
+    expectedDates,
     nowMs: boundaryNowMs,
   }) => {
     const dates = [
@@ -1638,16 +1693,7 @@ describe("selectProjectableDailyMetricDays", () => {
       boundaryNowMs,
     );
 
-    expect(selected.map((record) => record.recordKey)).toEqual([
-      "2026-07-27",
-      "2026-07-26",
-      "2026-07-25",
-      "2026-07-24",
-      "2026-07-23",
-      "2026-07-22",
-      "2026-07-21",
-      "2026-07-20",
-    ]);
+    expect(selected.map((record) => record.recordKey)).toEqual(expectedDates);
   });
 
   it("shares selected day-grain activity-minutes rows through the scalar activity spec", () => {
@@ -1839,13 +1885,13 @@ describe("selectProjectableMealNutritionDays", () => {
     ], proteinSpec, nowMs)).toEqual([]);
   });
 
-  it("skips protein days older than the eight-date cutoff", () => {
+  it("skips protein days older than the seven-date cutoff", () => {
     expect(selectProjectableMealNutritionDays([
       mealNutritionDay({ date: "2026-06-25", proteinTotal: 55 }),
     ], proteinSpec, nowMs)).toEqual([]);
   });
 
-  it("keeps at most the eight newest complete protein days", () => {
+  it("keeps at most the seven newest complete protein days", () => {
     const selected = selectProjectableMealNutritionDays([
       "2026-07-04",
       "2026-06-30",
@@ -1860,7 +1906,7 @@ describe("selectProjectableMealNutritionDays", () => {
       proteinTotal: 40 + index,
     })), proteinSpec, nowMs);
 
-    expect(selected).toHaveLength(8);
+    expect(selected).toHaveLength(7);
     expect(selected.map((record) => record.recordKey)).toEqual([
       "2026-07-04",
       "2026-07-03",
@@ -1869,7 +1915,6 @@ describe("selectProjectableMealNutritionDays", () => {
       "2026-06-30",
       "2026-06-29",
       "2026-06-28",
-      "2026-06-27",
     ]);
   });
 
@@ -2175,7 +2220,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(8);
+    expect(selected).toHaveLength(7);
     expect(findWorkoutsRecord(selected, "2026-07-03")).toEqual({
       data: {
         calendarClosedThroughDate: "2026-07-03",
@@ -2507,7 +2552,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(8);
+    expect(selected).toHaveLength(7);
     expect(findWorkoutsRecord(selected, "2026-07-03")?.data.workouts)
       .toHaveLength(1);
     expect(findWorkoutsRecord(selected, "2026-07-05")).toBeUndefined();
@@ -2800,7 +2845,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toHaveLength(8);
+    expect(selected).toHaveLength(7);
     expect(findWorkoutsRecord(selected, "2026-07-03")?.data).toEqual({
       calendarClosedThroughDate: "2026-07-03",
       date: "2026-07-03",
@@ -3155,9 +3200,8 @@ describe("selectProjectableWorkoutsDays", () => {
         "2026-07-05",
         "2026-07-04",
         "2026-07-03",
-        "2026-07-02",
       ]);
-      expect(findWorkoutsRecord(advanced, "2026-07-02")).toBeDefined();
+      expect(findWorkoutsRecord(advanced, "2026-07-02")).toBeUndefined();
       expect(advanced.every((record) =>
         "calendarClosedThroughDate" in record.data
         && record.data.calendarClosedThroughDate === "2026-07-08"
@@ -3634,6 +3678,43 @@ describe("selectProjectableActivityDistanceDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
   const runningDistanceSpec = requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE);
 
+  it("limits an eight-date source set to the seven dates disclosed by consent", () => {
+    const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
+    const dates = [
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05",
+      "2026-07-06",
+      "2026-07-07",
+      "2026-07-08",
+    ];
+
+    const selected = selectProjectableActivityDistanceDays({
+      nowMs: boundaryNowMs,
+      rows: dates.map((date, index) => activitySessionRow({
+        activityKind: "running",
+        date,
+        distanceMeters: 1_000 + index,
+        durationMinutes: 30,
+        recordIds: [`evt_run_distance_${index}`],
+        startedAt: `${date}T07:00:00.000Z`,
+      })),
+      spec: runningDistanceSpec,
+    });
+
+    expect(selected.map((record) => record.recordKey)).toEqual([
+      "2026-07-08",
+      "2026-07-07",
+      "2026-07-06",
+      "2026-07-05",
+      "2026-07-04",
+      "2026-07-03",
+      "2026-07-02",
+    ]);
+  });
+
   it("maps activity-session distance to activity-specific daily distance records", () => {
     const selected = selectProjectableActivityDistanceDays({
       nowMs,
@@ -3823,6 +3904,42 @@ describe("selectProjectableActivitySessionCountDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
   const runningSessionCountSpec =
     requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE);
+
+  it("limits an eight-date source set to the seven dates disclosed by consent", () => {
+    const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
+    const dates = [
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05",
+      "2026-07-06",
+      "2026-07-07",
+      "2026-07-08",
+    ];
+
+    const selected = selectProjectableActivitySessionCountDays({
+      nowMs: boundaryNowMs,
+      rows: dates.map((date, index) => activitySessionRow({
+        activityKind: "running",
+        date,
+        durationMinutes: 30,
+        recordIds: [`evt_run_count_${index}`],
+        startedAt: `${date}T07:00:00.000Z`,
+      })),
+      spec: runningSessionCountSpec,
+    });
+
+    expect(selected.map((record) => record.recordKey)).toEqual([
+      "2026-07-08",
+      "2026-07-07",
+      "2026-07-06",
+      "2026-07-05",
+      "2026-07-04",
+      "2026-07-03",
+      "2026-07-02",
+    ]);
+  });
 
   it("maps activity sessions to activity-specific daily count records", () => {
     const selected = selectProjectableActivitySessionCountDays({
@@ -4140,6 +4257,31 @@ describe("selectProjectableSleepNights", () => {
     expect(selected).toEqual([RECORD]);
     expect(selected[0]?.recordKey).toBe(NIGHT.date);
     expect(selected[0]?.occurredAt).toBe(`${NIGHT.date}T00:00:00.000Z`);
+  });
+
+  it("limits an eight-night source set to the seven nights disclosed by consent", () => {
+    const boundaryNowMs = Date.parse("2026-07-08T12:00:00.000Z");
+    const dates = [
+      "2026-07-08",
+      "2026-07-07",
+      "2026-07-06",
+      "2026-07-05",
+      "2026-07-04",
+      "2026-07-03",
+      "2026-07-02",
+      "2026-07-01",
+    ];
+
+    const selected = selectProjectableSleepNights(
+      dates.map((date) => ({
+        date,
+        sleepEndAt: `${date}T06:00:00.000Z`,
+        sleepStartAt: `${date}T00:00:00.000Z`,
+      })),
+      boundaryNowMs,
+    );
+
+    expect(selected.map((record) => record.recordKey)).toEqual(dates.slice(0, 7));
   });
 
   it("emits records the hosted-execution deliver-request parser accepts unchanged", () => {

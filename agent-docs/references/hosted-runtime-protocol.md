@@ -464,15 +464,22 @@ materialization excludes the corresponding vault-relative subtrees. No
 foreground cleanup pass or revoke wake is part of the boundary.
 
 After a join or permission transaction creates a new projection grant, Web
-starts the existing payload-free `runtime_wake_requested` handoff immediately.
-That coalesced wake runs alongside join-confirmation recovery rather than after
-it, so either best-effort path can stall without starving the other. It adds no
-mailbox row or projection owner; a failed signal leaves the durable null
-snapshot visible as `pending` until a later runtime invocation materializes it.
-Deploy the Cloudflare runtime consumer with the additive `pending` parser and
-model status before Web begins emitting that value. Older Web remains compatible
-with the newer consumer because it emits only the prior status subset during
-that window.
+starts the existing durable `runtime.maintenance-requested` mailbox handoff
+immediately. The append ignores caller cancellation after the grant commits and
+runs alongside join-confirmation recovery rather than after it, so either
+best-effort path can stall without starving the other. The shared scheduled
+mailbox-handoff sweep also selects unconsumed maintenance rows, making a failed
+first Temporal signal recoverable without unrelated member activity. This adds
+no projection owner; the durable null snapshot remains visible as `pending`
+until the member runtime materializes it.
+
+Recent daily and sleep projection owners emit at most seven records and reject
+any record date older than six UTC calendar days, so sparse data cannot reach
+outside the seven-date disclosure bound. Deploy the
+Cloudflare runtime bundle with that producer bound and the additive `pending`
+parser/model status before Web begins emitting `pending` or the exact seven-day
+consent copy. Older Web remains compatible with the newer consumer because it
+emits only the prior status subset during that window.
 
 This protocol is a consumer-first hard cut:
 
@@ -1650,13 +1657,15 @@ insufficient.
 
 ### Hosted Runtime Maintenance Wake
 
-`runtime.maintenance-requested` is the explicit operator wake for one-time
-hosted runtime maintenance such as a vault format rollout. Web appends the
-runtime-control mailbox row and signals the normal hosted runtime workflow; the
-assistant runtime treats the row as a no-op control receipt, then runs the same
-restore, local runtime maintenance, idle checkpoint, and workspace-version CAS
-path as any other hosted invocation. The maintenance wake must not carry
-provider payloads, decrypted mailbox content, or migration-specific data.
+`runtime.maintenance-requested` is the durable no-payload wake for one-time
+hosted runtime maintenance such as a vault format rollout and for a committed
+group projection grant that needs its first private-runtime pass. Web appends
+the runtime-control mailbox row and signals the normal hosted runtime workflow;
+the assistant runtime treats the row as a no-op control receipt, then runs the
+same restore, local runtime maintenance, idle checkpoint, and workspace-version
+CAS path as any other hosted invocation. The maintenance wake must not carry
+provider payloads, decrypted mailbox content, migration-specific data, or
+projected health values.
 
 The production operator surface is the hosted app-session gated
 `/ops/runtime-maintenance` page and its same-origin

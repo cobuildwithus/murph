@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedAppSessionFromRequest: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
-  signalHostedRuntimeWakeRuntime: vi.fn(),
+  signalHostedRuntimeMaintenanceRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -46,7 +46,7 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
-  signalHostedRuntimeWakeRuntime: mocks.signalHostedRuntimeWakeRuntime,
+  signalHostedRuntimeMaintenanceRuntime: mocks.signalHostedRuntimeMaintenanceRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-web/public-url", () => ({
@@ -83,7 +83,7 @@ beforeEach(async () => {
     revokedVaultShareProjectionKinds: ["sleep-times.v0"],
   });
   mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
-  mocks.signalHostedRuntimeWakeRuntime.mockResolvedValue(undefined);
+  mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
   mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
 
   route = await import("../app/api/groups/join/[joinCode]/accept/route");
@@ -184,7 +184,7 @@ test("returns a group permission revocation without exposing internal metadata",
     selectedVaultShareProjectionScopes: [],
     tx: { tx: true },
   });
-  expect(mocks.signalHostedRuntimeWakeRuntime).not.toHaveBeenCalled();
+  expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
 });
 
 test("signals a first-join confirmation without exposing mailbox metadata", async () => {
@@ -250,7 +250,7 @@ test("starts a bounded projection wake without blocking confirmation recovery", 
       membershipId: "membership_created",
       revokedVaultShareProjectionKinds: [],
     });
-    mocks.signalHostedRuntimeWakeRuntime.mockReturnValueOnce(new Promise(() => {}));
+    mocks.signalHostedRuntimeMaintenanceRuntime.mockReturnValueOnce(new Promise(() => {}));
     const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
       body: JSON.stringify({
         expectedMembershipId: null,
@@ -270,10 +270,13 @@ test("starts a bounded projection wake without blocking confirmation recovery", 
 
     await expect(responsePromise).resolves.toMatchObject({ status: 200 });
     expect(
-      mocks.signalHostedRuntimeWakeRuntime.mock.invocationCallOrder[0],
+      mocks.signalHostedRuntimeMaintenanceRuntime.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
     );
+    expect(
+      mocks.signalHostedRuntimeMaintenanceRuntime.mock.calls[0]?.[0]?.abortSignal,
+    ).not.toBe(request.signal);
   } finally {
     vi.useRealTimers();
   }

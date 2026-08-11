@@ -130,8 +130,9 @@ Allowed Temporal state is tiny and pointer-only:
   that calls the existing Cloudflare processing adapter when facts are idle. It
   carries no provider value or credential, is discarded while facts are
   blocked, and is cleared after accepted processing only when no newer wake
-  arrived. Authenticated provider changes and newly committed hosted-group
-  projection grants are current Web producers of this payload-free signal.
+  arrived. Authenticated provider changes are the current Web producer of this
+  payload-free signal. Newly committed hosted-group projection grants instead
+  use the existing durable `runtime.maintenance-requested` system-mailbox row.
 - Global device-sync scheduled-wake Schedule id, interval, Workflow start options, and
   count-only due-reconcile sweep results. The reconciler may remember that a
   sweep ran and how many due-reconcile rows/wakes it touched; it must not

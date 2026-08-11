@@ -19,7 +19,7 @@ import {
   requireHostedInviteForAuthentication,
 } from "@/src/lib/hosted-onboarding/invite-service";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
-import { signalHostedRuntimeWakeRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
+import { signalHostedRuntimeMaintenanceRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
@@ -90,11 +90,10 @@ export const POST = withJsonError(async (
   const projectionWake = result.grantedVaultShareProjectionKinds.length > 0
     ? runHostedGroupJoinPostCommitBestEffort({
         deadlineMs: postCommitDeadlineMs,
-        operation: (abortSignal) => signalHostedRuntimeWakeRuntime({
+        operation: (abortSignal) => signalHostedRuntimeMaintenanceRuntime({
           abortSignal,
           userId: auth.member.id,
         }),
-        signal: request.signal,
       })
     : null;
   if (joinConfirmationSignal) {
@@ -134,13 +133,11 @@ function parseOptionalInviteCode(value: unknown): string | null {
 async function runHostedGroupJoinPostCommitBestEffort(input: {
   deadlineMs: number;
   operation: (signal: AbortSignal) => Promise<unknown>;
-  signal?: AbortSignal;
 }): Promise<void> {
   try {
     await waitForHostedPostCommitOperation({
       deadlineMs: input.deadlineMs,
       operation: input.operation,
-      signal: input.signal,
     });
   } catch {
     // The durable join, grants, and mailbox items remain available for a later wake.
