@@ -7133,68 +7133,113 @@ test("Junction reconcile keeps summaries current while compact timeseries stays 
   );
 });
 
-test("Junction date-only imports retain complete offset calendar days across UTC boundaries", async () => {
-  const provider = createJunctionProvider(async (input) => {
-    const url = new URL(readUrl(input));
-    if (url.pathname === "/v2/user/providers/junction-user-1") {
-      return createJsonResponse({ providers: [] });
-    }
-    if (url.pathname === "/v2/summary/activity/junction-user-1") {
-      return createJsonResponse({ data: [] });
-    }
-    if (url.pathname === "/v2/timeseries/junction-user-1/glucose/grouped") {
-      const requestedDate = url.searchParams.get("start_date");
-      const records = [
-        { id: "day-1-early", timestamp: "2026-04-01T00:30:00-04:00", value: 5 },
-        { id: "day-1-late", timestamp: "2026-04-01T23:30:00-04:00", value: 6 },
-        { id: "day-2-early", timestamp: "2026-04-02T00:30:00-04:00", value: 7 },
-        { id: "day-2-late", timestamp: "2026-04-02T23:30:00-04:00", value: 8 },
-      ];
-      return createJsonResponse({
-        groups: {
-          dexcom: [{
-            data: records.filter((record) => record.timestamp.startsWith(requestedDate ?? "")),
-            source: { provider: "dexcom", type: "cgm" },
-          }],
-        },
+test("Junction dense jobs retain complete offset days in either transport order", async () => {
+  for (const versioned of [false, true]) {
+    for (const order of [["resource", "reconcile"], ["reconcile", "resource"]] as const) {
+      const requests: URL[] = [];
+      const provider = createJunctionProvider(async (input) => {
+        const url = new URL(readUrl(input));
+        requests.push(url);
+        if (url.pathname === "/v2/user/providers/junction-user-1") {
+          return createJsonResponse({ providers: [] });
+        }
+        if (url.pathname === "/v2/summary/activity/junction-user-1") {
+          return createJsonResponse({ data: [] });
+        }
+        if (url.pathname === "/v2/timeseries/junction-user-1/glucose/grouped") {
+          const requestedDate = url.searchParams.get("start_date");
+          const revision = versioned ? { updatedAt: "2026-04-03T10:00:00.000Z" } : {};
+          const records = [
+            { id: "day-1-early", timestamp: "2026-04-01T00:30:00-04:00", value: 5, ...revision },
+            { id: "day-1-late", timestamp: "2026-04-01T23:30:00-04:00", value: 6, ...revision },
+            { id: "day-2-early", timestamp: "2026-04-02T00:30:00-04:00", value: 7, ...revision },
+            { id: "day-2-late", timestamp: "2026-04-02T23:30:00-04:00", value: 8, ...revision },
+          ];
+          return createJsonResponse({
+            groups: {
+              dexcom: [{
+                data: records.filter((record) => record.timestamp.startsWith(requestedDate ?? "")),
+                source: { provider: "dexcom", type: "cgm" },
+              }],
+            },
+          });
+        }
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      }, {
+        summaryResources: ["activity"],
+        timeseriesResources: ["glucose"],
       });
+      const importedSnapshots: unknown[] = [];
+      const context = createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+        now: "2026-04-03T12:00:00.000Z",
+      });
+      const jobs = {
+        reconcile: createJob("reconcile", {
+          windowStart: "2026-04-01T00:00:00.000Z",
+          windowEnd: "2026-04-03T00:00:00.000Z",
+        }),
+        resource: createJob("resource", {
+          resource: "glucose",
+          resourceCategory: "timeseries",
+          windowStart: "2026-04-01T12:00:00.000Z",
+          windowEnd: "2026-04-03T12:00:00.000Z",
+        }),
+      };
+
+      for (const kind of order) {
+        await executeJunctionJob(provider, context, jobs[kind]);
+      }
+
+      const glucoseSnapshots = importedSnapshots.flatMap((snapshot) => {
+        const entry = snapshot as {
+          timeseries?: Record<string, unknown[]>;
+          windowEnd?: string;
+          windowStart?: string;
+        };
+        const records = entry.timeseries?.glucose;
+        return records ? [{ records, windowEnd: entry.windowEnd, windowStart: entry.windowStart }] : [];
+      });
+      assert.deepEqual(
+        glucoseSnapshots.map(({ records, windowEnd, windowStart }) => ({
+          dates: records.map((record) => (record as { timestamp?: string }).timestamp?.slice(0, 10)),
+          windowEnd,
+          windowStart,
+        })),
+        [
+          {
+            dates: ["2026-04-01", "2026-04-01"],
+            windowEnd: "2026-04-02T00:00:00.000Z",
+            windowStart: "2026-04-01T00:00:00.000Z",
+          },
+          {
+            dates: ["2026-04-02", "2026-04-02"],
+            windowEnd: "2026-04-03T00:00:00.000Z",
+            windowStart: "2026-04-02T00:00:00.000Z",
+          },
+          {
+            dates: ["2026-04-01", "2026-04-01"],
+            windowEnd: "2026-04-02T00:00:00.000Z",
+            windowStart: "2026-04-01T00:00:00.000Z",
+          },
+          {
+            dates: ["2026-04-02", "2026-04-02"],
+            windowEnd: "2026-04-03T00:00:00.000Z",
+            windowStart: "2026-04-02T00:00:00.000Z",
+          },
+        ],
+      );
+      assert.equal(
+        requests
+          .filter((url) => url.pathname.includes("/v2/timeseries/"))
+          .every((url) => !url.searchParams.get("start_date")?.includes("T")),
+        true,
+      );
     }
-    throw new Error(`Unexpected request: ${url.toString()}`);
-  }, {
-    summaryResources: ["activity"],
-    timeseriesResources: ["glucose"],
-  });
-  const importedSnapshots: unknown[] = [];
-  const run = () => executeJunctionJob(
-    provider,
-    createJunctionJobContext({
-      importSnapshot: async (snapshot) => {
-        importedSnapshots.push(snapshot);
-        return { imported: true };
-      },
-      now: "2026-04-03T12:00:00.000Z",
-    }),
-    createJob("reconcile", {
-      windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-03T00:00:00.000Z",
-    }),
-  );
-
-  await run();
-  await run();
-
-  const importedDays = importedSnapshots.flatMap((snapshot) => {
-    const records = (snapshot as { timeseries?: Record<string, unknown[]> }).timeseries?.glucose;
-    return records ? [records.map((record) =>
-      (record as { timestamp?: string }).timestamp?.slice(0, 10)
-    )] : [];
-  });
-  assert.deepEqual(importedDays, [
-    ["2026-04-01", "2026-04-01"],
-    ["2026-04-02", "2026-04-02"],
-    ["2026-04-01", "2026-04-01"],
-    ["2026-04-02", "2026-04-02"],
-  ]);
+  }
   assert.equal(Date.parse("2026-04-01T23:30:00-04:00") >= Date.parse("2026-04-02T00:00:00Z"), true);
 });
 
@@ -7593,7 +7638,7 @@ test("Junction skips same closed-day timeseries after a completed reconcile", as
   assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
 });
 
-test("Junction code-owned compact defaults admit direct timeseries resource jobs", async () => {
+test("Junction direct dense resource jobs reuse closed calendar-day ownership", async () => {
   const requests: string[] = [];
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
@@ -7652,7 +7697,7 @@ test("Junction code-owned compact defaults admit direct timeseries resource jobs
       const entry = snapshot as { windowEnd?: string; windowStart?: string };
       return [entry.windowStart, entry.windowEnd];
     }),
-    [["2026-04-02T12:00:00.000Z", "2026-04-03T12:00:00.000Z"]],
+    [["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z"]],
   );
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, unknown[]>;
@@ -7666,12 +7711,71 @@ test("Junction code-owned compact defaults admit direct timeseries resource jobs
   );
   assertJunctionWindowQuery(
     timeseriesRequest,
+    "2026-04-02",
+    "2026-04-02",
+  );
+});
+
+test("Junction direct sparse fidelity jobs retain precise interval windows", async () => {
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/caffeine/grouped")) {
+      return createJsonResponse({
+        groups: {
+          apple_health_kit: [{
+            data: [{
+              id: "caffeine-reading-1",
+              start: "2026-04-02T14:30:00.000Z",
+              end: "2026-04-02T14:35:00.000Z",
+              unit: "mg",
+              value: 95,
+            }],
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, { timeseriesResources: ["caffeine"] });
+  const importedSnapshots: unknown[] = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      resource: "caffeine",
+      resourceCategory: "timeseries",
+      windowStart: "2026-04-02T12:00:00.000Z",
+      windowEnd: "2026-04-03T12:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(importedSnapshots.map((snapshot) => {
+    const entry = snapshot as { windowEnd?: string; windowStart?: string };
+    return [entry.windowStart, entry.windowEnd];
+  }), [["2026-04-02T12:00:00.000Z", "2026-04-03T12:00:00.000Z"]]);
+  const request = requireValue(
+    requests.find((url) => url.includes("/v2/timeseries/")),
+    "Junction sparse resource job should issue a precise request.",
+  );
+  assertJunctionWindowQuery(
+    request,
     "2026-04-02T12:00:00.000Z",
     "2026-04-03T12:00:00.000Z",
   );
 });
 
-test("Junction compact timeseries resource jobs yield with a precise ISO follow-up window", async () => {
+test("Junction dense resource jobs yield between closed calendar days", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -7725,14 +7829,14 @@ test("Junction compact timeseries resource jobs yield with a precise ISO follow-
       const entry = snapshot as { windowEnd?: string; windowStart?: string };
       return [entry.windowStart, entry.windowEnd];
     }),
-    [["2026-04-01T06:00:00.000Z", "2026-04-02T06:00:00.000Z"]],
+    [["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"]],
   );
   const timeseriesRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
   assert.equal(timeseriesRequests.length, 1);
   assertJunctionWindowQuery(
-    requireValue(timeseriesRequests[0], "Junction resource job should fetch its first precise chunk."),
-    "2026-04-01T06:00:00.000Z",
-    "2026-04-02T06:00:00.000Z",
+    requireValue(timeseriesRequests[0], "Junction resource job should fetch its first closed day."),
+    "2026-04-01",
+    "2026-04-01",
   );
   assert.deepEqual(result.scheduledJobs, [
     {
@@ -7741,13 +7845,13 @@ test("Junction compact timeseries resource jobs yield with a precise ISO follow-
         resource: "blood_oxygen",
         resourceCategory: "timeseries",
         windowEnd: "2026-04-03T00:00:00.000Z",
-        windowStart: "2026-04-02T06:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
       },
       priority: job.priority,
       dedupeKey: sha256ForTest(JSON.stringify([
         "junction",
         "yield-follow-up",
-        "2026-04-02T06:00:00.000Z",
+        "2026-04-02T00:00:00.000Z",
         "2026-04-03T00:00:00.000Z",
         null,
         null,

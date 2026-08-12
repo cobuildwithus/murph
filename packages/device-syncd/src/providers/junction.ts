@@ -12,6 +12,7 @@ import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
+  JUNCTION_DENSE_FIDELITY_RESOURCES,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
@@ -337,6 +338,9 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
 >);
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
+);
+const JUNCTION_DENSE_FIDELITY_RESOURCE_SET = new Set<string>(
+  JUNCTION_DENSE_FIDELITY_RESOURCES,
 );
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileIntervalMs;
@@ -1991,6 +1995,40 @@ export function createJunctionDeviceSyncProvider(
             result,
             window,
           });
+        }
+        if (JUNCTION_DENSE_FIDELITY_RESOURCE_SET.has(effectiveResource)) {
+          const dailyImport = await importTimeseriesDailySnapshots(
+            context,
+            sourceProviders,
+            window.windowStart,
+            window.windowEnd,
+            skippedOptionalResources,
+            [effectiveResource],
+            sourceProviderSlug,
+          );
+          if (dailyImport.yieldedAt) {
+            return withJunctionSkippedResourceMetadata(
+              context,
+              buildYieldedJunctionJobResult({
+                context,
+                job,
+                windowEnd: window.windowEnd,
+                windowStart: dailyImport.yieldedAt,
+              }),
+              skippedOptionalResources,
+            );
+          }
+
+          return withJunctionHistoricalCoverageVerification(
+            context,
+            job,
+            window,
+            withJunctionSkippedResourceMetadata(
+              context,
+              { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+              skippedOptionalResources,
+            ),
+          );
         }
         const timeseriesImport = await importTimeseriesPreciseSnapshots(
           context,

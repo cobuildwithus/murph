@@ -1692,10 +1692,24 @@ const JUNCTION_FIDELITY_RESOURCE_TYPE_SUFFIXES = [
   "-stress-level",
   "-water",
 ] as const;
+const JUNCTION_FIDELITY_FACETS = new Set([
+  "caffeine",
+  "features",
+  "glucose",
+  "highest-glucose",
+  "interval",
+  "lowest-glucose",
+  "lowest-spo2",
+  "mindfulness-minutes",
+  "spo2",
+  "stress-level",
+  "water",
+]);
 
 function isJunctionFidelityExternalRef(externalRef: ExternalRef): boolean {
   return externalRef.system === "junction"
-    && (externalRef.facet === "features" || externalRef.facet === "interval")
+    && externalRef.facet !== undefined
+    && JUNCTION_FIDELITY_FACETS.has(externalRef.facet)
     && JUNCTION_FIDELITY_RESOURCE_TYPE_SUFFIXES.some((suffix) =>
       externalRef.resourceType.endsWith(suffix)
     );
@@ -2832,12 +2846,19 @@ async function reconcileDeviceEventEntriesByExternalRef(
         externalRef,
       );
       if (sourceVersionComparison === null) {
-        throw new VaultError(
-          "EVENT_SOURCE_REVISION_UNORDERED",
-          "Changed Junction fidelity events require comparable explicit provider revisions; nothing was imported.",
-        );
+        const incomingVersion = externalRef.version;
+        const existingVersion = indexedProviderMatch.indexedExternalRef.version;
+        const replacesUnorderedBaseline = incomingVersion !== undefined
+          && isWritableIsoDateTime(incomingVersion)
+          && (existingVersion === undefined || !isWritableIsoDateTime(existingVersion));
+        if (!replacesUnorderedBaseline) {
+          throw new VaultError(
+            "EVENT_SOURCE_REVISION_UNORDERED",
+            "Changed Junction fidelity events require comparable explicit provider revisions; nothing was imported.",
+          );
+        }
       }
-      if (sourceVersionComparison < 0) {
+      if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
         skippedDuplicateCount += 1;
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);

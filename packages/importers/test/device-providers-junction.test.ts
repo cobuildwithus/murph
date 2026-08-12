@@ -952,8 +952,10 @@ test("Junction daily aggregates repair legacy calendar-date resource ids through
                 garmin: [{
                   data: [
                     {
+                      id: "stress-corrected-1",
                       calendar_date: "2026-06-25",
                       timestamp: "2026-06-24T23:30:00-04:00",
+                      updatedAt: "2026-06-25T12:00:00.000Z",
                       score: 44,
                     },
                   ],
@@ -1162,13 +1164,17 @@ test("Junction daily aggregates reserve proven legacy ids when adjacent primary 
         }],
       });
       const correctedSample = {
+        id: "stress-corrected-1",
         timestamp: "2026-06-25T00:30:00+02:00",
         timezone_offset: -14_400,
+        updatedAt: "2026-06-25T12:30:00.000Z",
         score: 44,
       };
       const adjacentSample = {
+        id: "stress-adjacent-1",
         timestamp: "2026-06-24T00:30:00+02:00",
         timezone_offset: -14_400,
+        updatedAt: "2026-06-25T12:30:00.000Z",
         score: 44,
       };
       const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
@@ -3849,6 +3855,8 @@ test("Junction sparse interval revisions keep the daily sum aligned with the tim
   assert.equal(dailyArtifact.sampleCount, 1);
   assert.equal(dailyArtifact.meanValue, 300);
   assert.equal(findJunctionIntervalReadingArtifacts(payload, "water").length, 1);
+  assert.equal(daily?.externalRef?.version, "2026-04-22T11:00:00.000Z");
+  assert.equal(daily?.externalRefUpdatePolicy, undefined);
   assert.equal(timed?.externalRef?.version, "2026-04-22T11:00:00.000Z");
   assert.equal(timed?.externalRefUpdatePolicy, undefined);
 });
@@ -3935,6 +3943,8 @@ test("Junction dense stable-ID revisions select one newest reading per payload",
   assert.equal(dailyArtifact.sampleCount, 1);
   assert.equal(dailyArtifact.meanValue, 126.1274);
   assert.equal(featureArtifact.sampleCount, 1);
+  assert.equal(daily?.externalRef?.version, "2026-04-22T10:00:00.000Z");
+  assert.equal(daily?.externalRefUpdatePolicy, undefined);
   assert.equal(featureEvent?.externalRef?.version, "2026-04-22T10:00:00.000Z");
   assert.equal(featureEvent?.externalRefUpdatePolicy, undefined);
 });

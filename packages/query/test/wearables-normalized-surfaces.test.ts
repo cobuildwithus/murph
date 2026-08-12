@@ -782,13 +782,24 @@ test("Junction timed and derived timeseries facts survive core replay and remain
     const correctedCaffeineInterval = correctedCaffeinePoints.find(
       (point) => point.source.kind === "measurement",
     );
+    const correctedCaffeineDaily = correctedCaffeinePoints.find(
+      (point) => point.source.kind === "observation",
+    );
+    const correctedGlucoseDailyValues = await Promise.all(
+      ["glucose", "lowest-glucose", "highest-glucose"].map(async (metricKey) => {
+        const points = await listMetricPointsRuntime(vaultRoot, { limit: null, metricKey });
+        return points.find((point) => point.source.kind === "observation")?.value;
+      }),
+    );
 
     assert.equal(correction.applied, true);
     assert.deepEqual(correctedTimeInRangePoints, []);
     assert.deepEqual(correctedRiseRatePoints, []);
     assert.equal(correctedCaffeineInterval?.value, 120);
+    assert.equal(correctedCaffeineDaily?.value, 120);
+    assert.deepEqual(correctedGlucoseDailyValues, [99.1001, 99.1001, 99.1001]);
 
-    await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    const staleReplay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       importInput,
       { corePort: coreRuntime },
     );
@@ -803,9 +814,21 @@ test("Junction timed and derived timeseries facts survive core replay and remain
     const staleReplayCaffeineInterval = staleReplayCaffeinePoints.find(
       (point) => point.source.kind === "measurement",
     );
+    const staleReplayCaffeineDaily = staleReplayCaffeinePoints.find(
+      (point) => point.source.kind === "observation",
+    );
+    const staleReplayGlucoseDailyValues = await Promise.all(
+      ["glucose", "lowest-glucose", "highest-glucose"].map(async (metricKey) => {
+        const points = await listMetricPointsRuntime(vaultRoot, { limit: null, metricKey });
+        return points.find((point) => point.source.kind === "observation")?.value;
+      }),
+    );
 
+    assert.equal(staleReplay.applied, false);
     assert.deepEqual(staleReplayTimeInRangePoints, []);
     assert.equal(staleReplayCaffeineInterval?.value, 120);
+    assert.equal(staleReplayCaffeineDaily?.value, 120);
+    assert.deepEqual(staleReplayGlucoseDailyValues, [99.1001, 99.1001, 99.1001]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

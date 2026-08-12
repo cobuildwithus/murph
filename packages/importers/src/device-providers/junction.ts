@@ -114,6 +114,10 @@ import type {
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export {
+  JUNCTION_DENSE_FIDELITY_RESOURCES,
+} from "./junction-timeseries-fidelity.ts";
+
+export {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
@@ -2480,6 +2484,10 @@ function pushJunctionDailyTimeseriesObservation(
     aggregate,
     observation.metric,
   );
+  const fidelityResource = isJunctionDenseFidelityResource(aggregate.resourceContext.resource)
+    || isJunctionSparseIntervalResource(aggregate.resourceContext.resource);
+  const externalRefUpdatePolicy: DeviceEventPayload["externalRefUpdatePolicy"] =
+    fidelityResource && !aggregate.sourceVersion ? "immutable" : undefined;
 
   context.events.push(stripUndefined({
     kind: "observation",
@@ -2495,7 +2503,9 @@ function pushJunctionDailyTimeseriesObservation(
       aggregate.entry,
       timestamp,
       observation.metric,
+      fidelityResource ? aggregate.sourceVersion : undefined,
     ),
+    externalRefUpdatePolicy,
     legacyExternalRefs: legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
@@ -2526,6 +2536,7 @@ function legacyJunctionDailyTimeseriesAggregateExternalRefs(
         observedAtRaw: `${legacyDayKey}:${aggregate.resourceContext.resource}:daily`,
       }),
       metric,
+      aggregate.sourceVersion,
     )
   );
 }

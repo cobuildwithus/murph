@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Purpose
 
@@ -140,6 +140,20 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    what makes invariants 2 and 3 safe, and it is why an import-vs-skip
    optimization is unnecessary: re-fetching is cheap and correct, not a
    correctness risk.
+
+   Compact Junction timeseries retain that same single-owner rule. Dense
+   `glucose`, `blood_oxygen`, and `stress_level` reconcile and direct-resource
+   jobs both use closed provider-calendar-date imports; a precise window must
+   not publish a partial day under the daily fact or 24-hour feature identity.
+   Sparse `caffeine`, `water`, and `mindfulness_minutes` direct-resource jobs
+   retain precise windows because each admitted interval has its own exact-start
+   identity. For all six resources, an explicit provider revision belongs to
+   both the existing daily fact and its feature or interval companion. One
+   versioned record may supersede a pre-versioning baseline; after that, only a
+   strictly newer revision may change either fact, while stale replay is a no-op
+   and conflicting equal or unversioned content fails closed. This keeps each
+   resource's compact resolutions mutually consistent without a second cursor,
+   watermark, or state owner.
 
 5. **Louder, never quieter.** Drops and skips surface as persisted
    `device-sync.job_failed`/skip metadata. But observability is not recovery:
