@@ -637,15 +637,19 @@ Last verified: 2026-08-12
   fail-soft to the completed personal import and foreground reply, but they do
   not consume the existing dirty or system-mailbox recording obligation; that
   owner reuses its bounded device-sync continuation before acknowledgement.
-  Active-scope resolution is network-only and receives the owning invocation's
-  abort signal. Once
+  Active-scope resolution is a side-effect-free network read and receives the
+  owning invocation's abort signal. Once
   scopes resolve, the runtime materializes all selected records before releasing
   its restored-vault ownership; a wake during those bounded local reads is
   observed after capture drains, and the capture is discarded without delivery.
-  Delivery remains owned by the same invocation. A foreground wake cancels the
-  actual active control-plane request, fully drains it, and only then releases
-  ownership or starts a retry. No projection stage continues detached. Every
-  delivery carries the committed source workspace version bound to those bytes. Web
+  Delivery remains owned by the same invocation. Once immutable delivery
+  starts, foreground conversation work may proceed without waiting for
+  publication, but the invocation starts no second projection and does not
+  release its runner ownership until the real proxy-to-Web response is
+  terminal. Abort and shutdown finalization join that same request before a
+  successor invocation or the existing continuation may retry. No projection
+  stage continues detached. Every delivery carries the committed source
+  workspace version bound to those bytes. Web
   encrypts first, then briefly locks that existing workspace row before the
   final share replacement; a delivery older than the current checkpoint becomes
   a no-op, so wake-raced work cannot finish last or read successor-owned
@@ -657,8 +661,9 @@ Last verified: 2026-08-12
   and at most 25 sequential share-replacement transactions per delivery under
   the existing grant cap: 2,450 replacement transactions at maximum admitted
   cardinality. There is at most one active scope-resolution or delivery request
-  per opportunity; an error or cancellation stops the remaining scopes, and the
-  existing continuation cannot retry until that request has drained. Each
+  per opportunity; an error stops the remaining scopes, and the existing
+  continuation cannot retry until that request is terminal. Repeated wakes may
+  admit conversation work but cannot start another projection. Each
   replacement adds one source-workspace row lock/check at its final write
   boundary. The runtime starts no concurrent per-scope or per-share transactions,
   and publication wakes no destination group runtime. Ordinary load is

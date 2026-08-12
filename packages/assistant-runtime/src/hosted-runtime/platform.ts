@@ -689,10 +689,7 @@ export interface HostedRuntimeVaultSharePort {
   listActiveProjectionScopes(
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedVaultShareProjectionScope[]>;
-  deliver(
-    request: HostedVaultShareDeliverRequest,
-    context?: { signal?: AbortSignal | null },
-  ): Promise<HostedVaultShareDeliverResponse>;
+  deliver(request: HostedVaultShareDeliverRequest): Promise<HostedVaultShareDeliverResponse>;
 }
 
 export interface HostedRuntimePlatform {

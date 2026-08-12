@@ -46,23 +46,16 @@ export function createHostedWebVaultSharePort(input: {
       request: Parameters<
         NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]
       >[0],
-      context?: Parameters<
-        NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]
-      >[1],
     ) {
-      const signal = context?.signal ?? null;
-      const payload = await runWithExactCallerAbort(signal, async () =>
-        await fetchHostedWebControlPlaneJson({
-          body: request,
-          boundUserId: input.boundUserId,
-          description: "Hosted vault share delivery",
-          fetchImpl: input.fetchImpl,
-          path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
-          signal,
-          timeoutMs: input.timeoutMs,
-          transport: input.transport,
-        })
-      );
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: request,
+        boundUserId: input.boundUserId,
+        description: "Hosted vault share delivery",
+        fetchImpl: input.fetchImpl,
+        path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
 
       return parseHostedVaultShareDeliverResponse(payload);
     },

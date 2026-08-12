@@ -64,7 +64,9 @@ Updated: 2026-08-12
    watermark or second retry loop.
 5. Risk: a wake-preempted older publication finishes after a newer checkpoint.
    Mitigation: materialize every selected record while the invocation owns the
-   restored vault, keep delivery owned and abortable, drain it before retry,
+   restored vault, keep delivery owned until the real Web response is terminal,
+   admit foreground conversation without starting a second projection, join the
+   request before retry,
    carry the committed source workspace version bound to those bytes, and
    serialize the final Web replacement against that existing row; stale work
    becomes a no-op.
@@ -95,11 +97,12 @@ Updated: 2026-08-12
   but cannot consume the existing acknowledgement obligation.
 - Fence final Web replacement with the committed workspace version instead of
   adding a share watermark, generation table, or projection-specific state.
-- Split the existing projector into Web-owned scope resolution, vault-owned
-  complete capture, and immutable delivery. Network phases receive the owning
-  abort signal; cancellation fully drains the active request before owner
-  release or retry, while capture drains before its result is delivered or
-  discarded.
+- Split the existing projector into abortable Web-owned scope resolution,
+  vault-owned complete capture, and immutable delivery. Foreground conversation
+  may proceed while delivery remains owned; invocation finalization joins the
+  real proxy-to-Web response before owner release or retry, and a pending owner
+  prohibits another projection. Capture drains before its result is delivered
+  or discarded.
 - Normalize Junction cadence once in its existing runtime-config owner and make
   the runtime descriptor report the same effective interval.
 
@@ -128,11 +131,15 @@ Updated: 2026-08-12
   proof is green.
 - ReviewGPT round 3 required a second retrospective because wake-detached
   immutable delivery could multiply across retries. The replacement deletes
-  detached publication, propagates cancellation into the actual Web-control
-  fetch, drains before retry, and stops later scopes after the first failure.
-  Focused proof covers system-mailbox wake cancellation, invocation abort,
-  graceful shutdown, repeated device/foreground wakes with peak one active
-  delivery, fail-fast scope delivery, and Cloudflare fetch cancellation.
+  detached publication and stops later scopes after the first failure.
+- ReviewGPT round 4 proved that aborting the runtime-to-proxy fetch did not prove
+  the proxy-to-Web request had stopped. The replacement retains one immutable
+  delivery under invocation ownership, admits a real foreground conversation
+  without waiting for it, prohibits a second projection, and joins the actual
+  forwarded Web response during abort/shutdown/finalization before release or
+  retry. Focused proof covers system-mailbox upgrade, invocation abort,
+  graceful shutdown, repeated wakes with peak one active delivery, fail-fast
+  scope delivery, cancellable scope reads, and proxy-to-Web completion.
 - Remaining proof: corrected exact-head preliminary specialists, ReviewGPT
-  round 4 PASS, required GitHub Actions, and current-base merge-tree
+  round 5 PASS, required GitHub Actions, and current-base merge-tree
   verification.

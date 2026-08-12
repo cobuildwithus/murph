@@ -286,7 +286,6 @@ type ProjectableRecordReader = (input: {
  */
 export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
   capture: HostedVaultShareProjectionCapture;
-  signal?: AbortSignal | null;
   vaultSharePort: HostedRuntimeVaultSharePort;
 }): Promise<HostedVaultShareProjectionOfferResult> {
   const outcomes: HostedVaultShareOfferOutcome[] = [];
@@ -298,9 +297,7 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
         records: snapshot.records,
         sourceWorkspaceVersion: input.capture.sourceWorkspaceVersion,
       };
-      const response = await (input.signal
-        ? input.vaultSharePort.deliver(request, { signal: input.signal })
-        : input.vaultSharePort.deliver(request));
+      const response = await input.vaultSharePort.deliver(request);
       outcomes.push(
         response.status === "delivered" ? "delivered" : "no-active-share",
       );

@@ -12051,8 +12051,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const projectionStarted = createDeferred<void>();
+    const projectionRelease = createDeferred<void>();
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:projection-interrupt-recording",
       id: "mailbox_item_system_mailbox_projection_interrupt_recording",
@@ -12146,7 +12148,7 @@ describe("hosted workspace runtime entrypoint", () => {
         platform: createPlatform({
           artifactBytesByHash,
           deviceSyncPort,
-          mailboxPort: createMailboxPort({ events, items: [] }),
+          mailboxPort: createMailboxPort({ events, fetchRequests, items: [] }),
           vaultSharePort: {
             async listActiveProjectionScopes() {
               return [
@@ -12154,7 +12156,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 { projectionKind: "time-zone.v0" as const },
               ];
             },
-            async deliver(request, context) {
+            async deliver(request) {
               projectionCalls += 1;
               projectedWorkspaceVersions.push(request.sourceWorkspaceVersion);
               events.push(`vault-share.deliver:start:${projectionCalls}`);
@@ -12165,20 +12167,8 @@ describe("hosted workspace runtime entrypoint", () => {
               );
               try {
                 if (projectionCalls === 1) {
-                  const signal = context?.signal;
-                  assert.ok(signal, "Projection delivery must receive an ownership signal.");
                   projectionStarted.resolve();
-                  await new Promise<never>((_resolve, reject) => {
-                    const rejectForAbort = () => {
-                      events.push("vault-share.deliver:aborted:1");
-                      reject(signal.reason);
-                    };
-                    if (signal.aborted) {
-                      rejectForAbort();
-                      return;
-                    }
-                    signal.addEventListener("abort", rejectForAbort, { once: true });
-                  });
+                  await projectionRelease.promise;
                 }
                 events.push(`vault-share.deliver:done:${projectionCalls}`);
                 return { status: "delivered" as const };
@@ -12195,7 +12185,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
         runtimeWakeSignal: wakeSignal,
         async runAssistantPhase() {
-          throw new Error("System mailbox recording must not enter assistant phase.");
+          throw new Error("An empty system-mailbox wake must not enter assistant phase.");
         },
         vaultRoot,
       });
@@ -12221,11 +12211,33 @@ describe("hosted workspace runtime entrypoint", () => {
         createRunOptions(runtimeWakeSignal, initialWorkspace),
       );
       await projectionStarted.promise;
+      let interruptedRunSettled = false;
+      void interruptedRun.then(
+        () => {
+          interruptedRunSettled = true;
+        },
+        () => {
+          interruptedRunSettled = true;
+        },
+      );
       runtimeWakeSignal.notify();
+      await withRealTimeout(
+        waitUntil(() => {
+          assert.ok(fetchRequests.some((request) =>
+            request.requestId.includes(":system-mailbox-foreground-upgrade")
+          ));
+        }),
+        5_000,
+        () => events.join(","),
+      );
+      assert.equal(interruptedRunSettled, false);
+      assert.equal(projectionCalls, 1);
+      assert.equal(activeProjectionCalls, 1);
+      projectionRelease.resolve();
       const interruptedResult = await withRealTimeout(
         interruptedRun,
-        1_000,
-        () => "System mailbox did not release promptly after a wake interrupted projection.",
+        5_000,
+        () => "System mailbox did not release after its owned projection completed.",
       );
 
       assert.equal(interruptedResult.immediateRecheckRequested, true);
@@ -12236,9 +12248,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(retainedItem?.status, "recording");
       assert.ok(retainedItem?.postCheckpointRecord);
       assert.equal(checkpointRequests.length, 1);
-      assert.equal(projectionCalls, 1);
+      assert.equal(projectionCalls, 2);
       assert.equal(activeProjectionCalls, 0);
-      assert.ok(events.includes("vault-share.deliver:aborted:1"), events.join(","));
+      assert.ok(events.includes("vault-share.deliver:done:2"), events.join(","));
       const durableRecordingCheckpoint = checkpointRequests[0];
       assert.ok(durableRecordingCheckpoint);
       const resumedWorkspace = createWorkspaceState({
@@ -12259,22 +12271,23 @@ describe("hosted workspace runtime entrypoint", () => {
         createRunOptions(createCoalescingRuntimeWakeSignal(), resumedWorkspace),
       );
 
-      assert.equal(projectionCalls, 3);
-      assert.deepEqual(projectedWorkspaceVersions, ["1", "2", "2"]);
+      assert.equal(projectionCalls, 4);
+      assert.deepEqual(projectedWorkspaceVersions, ["1", "1", "2", "2"]);
       assert.equal(peakActiveProjectionCalls, 1);
       assert.equal(dirtyAckCalls, 1);
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:aborted:1")
-          < requireEventIndex(events, "vault-share.deliver:start:2"),
+        requireEventIndex(events, "vault-share.deliver:done:2")
+          < requireEventIndex(events, "vault-share.deliver:start:3"),
         events.join(","),
       );
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:done:3")
+        requireEventIndex(events, "vault-share.deliver:done:4")
           < requireEventIndex(events, "device-sync.dirty-ack"),
         events.join(","),
       );
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
     } finally {
+      projectionRelease.resolve();
       mocks.summarizeWearableSleepRuntime.mockClear();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -23310,7 +23323,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("drains an aborted projection before the next invocation owns the model", async () => {
+  test("joins an aborted invocation projection before the next invocation owns the model", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-vault-share-abort-"));
     const events: string[] = [];
     const firstAbortController = new AbortController();
@@ -23318,6 +23331,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const secondAbortController = new AbortController();
     const secondAbortReason = new Error("synthetic second invocation abort");
     const offerStarted = createDeferred<void>();
+    const offerRelease = createDeferred<void>();
     const secondProviderStarted = createDeferred<void>();
     const originalAutomationPass =
       mocks.runAssistantAutomationPass.getMockImplementation();
@@ -23392,24 +23406,12 @@ describe("hosted workspace runtime entrypoint", () => {
               async listActiveProjectionScopes() {
                 return [{ projectionKind: "sleep-times.v0" }];
               },
-              async deliver(_request, context): Promise<never> {
-                const signal = context?.signal;
-                assert.ok(signal, "Projection delivery must receive an ownership signal.");
+              async deliver() {
                 events.push("vault-share.deliver:start");
                 offerStarted.resolve();
-                try {
-                  await new Promise<never>((_resolve, reject) => {
-                    const rejectForAbort = () => reject(signal.reason);
-                    if (signal.aborted) {
-                      rejectForAbort();
-                      return;
-                    }
-                    signal.addEventListener("abort", rejectForAbort, { once: true });
-                  });
-                } finally {
-                  events.push("vault-share.deliver:drained");
-                }
-                throw new Error("Aborted projection unexpectedly continued.");
+                await offerRelease.promise;
+                events.push("vault-share.deliver:done");
+                return { status: "delivered" as const };
               },
             },
             workspacePort: createWorkspacePort({
@@ -23433,13 +23435,26 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       await withRealTimeout(offerStarted.promise, 5_000, () => events.join(","));
+      let firstResultSettled = false;
+      void firstResult.then(
+        () => {
+          firstResultSettled = true;
+        },
+        () => {
+          firstResultSettled = true;
+        },
+      );
       firstAbortController.abort(firstAbortReason);
+      await Promise.resolve();
+      assert.equal(firstResultSettled, false);
+      assert.equal(events.includes("vault-share.deliver:done"), false);
+      offerRelease.resolve();
       await expect(withRealTimeout(
         firstResult,
         5_000,
         () => events.join(","),
       )).rejects.toBe(firstAbortReason);
-      assert.ok(events.includes("vault-share.deliver:drained"), events.join(","));
+      assert.ok(events.includes("vault-share.deliver:done"), events.join(","));
 
       const secondMailboxItem = createMailboxItem({
         id: "mailbox_item_entrypoint_after_stalled_vault_share_offer",
@@ -23498,7 +23513,7 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       );
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:drained")
+        requireEventIndex(events, "vault-share.deliver:done")
           < requireEventIndex(events, "provider.started:second"),
       );
 
@@ -23509,6 +23524,7 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       )).rejects.toBe(secondAbortReason);
     } finally {
+      offerRelease.resolve();
       firstAbortController.abort(firstAbortReason);
       secondAbortController.abort(secondAbortReason);
       mocks.runAssistantAutomationPass.mockImplementation(originalAutomationPass);
@@ -24616,6 +24632,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const classificationStarted = createDeferred<void>();
     const classificationRelease = createDeferred<void>();
     const offerStarted = createDeferred<void>();
+    const offerRelease = createDeferred<void>();
     const mailboxItems: HostedMailboxItem[] = [
       createMailboxItem({
         dedupeKey:
@@ -24693,25 +24710,13 @@ describe("hosted workspace runtime entrypoint", () => {
                   ? [{ projectionKind: "sleep-times.v0" }]
                   : [];
               },
-              async deliver(_request, context): Promise<never> {
-                const signal = context?.signal;
-                assert.ok(signal, "Projection delivery must receive an ownership signal.");
+              async deliver() {
                 vaultShareDeliverCalls += 1;
                 events.push("vault-share.deliver:start");
                 offerStarted.resolve();
-                try {
-                  await new Promise<never>((_resolve, reject) => {
-                    const rejectForAbort = () => reject(signal.reason);
-                    if (signal.aborted) {
-                      rejectForAbort();
-                      return;
-                    }
-                    signal.addEventListener("abort", rejectForAbort, { once: true });
-                  });
-                } finally {
-                  events.push("vault-share.deliver:drained");
-                }
-                throw new Error("Aborted projection unexpectedly continued.");
+                await offerRelease.promise;
+                events.push("vault-share.deliver:done");
+                return { status: "delivered" as const };
               },
             },
             workspacePort: createWorkspacePort({
@@ -24790,9 +24795,22 @@ describe("hosted workspace runtime entrypoint", () => {
         new DOMException("Synthetic container SIGTERM.", "AbortError"),
       );
       classificationRelease.resolve();
+      let resultSettled = false;
+      void resultPromise.then(
+        () => {
+          resultSettled = true;
+        },
+        () => {
+          resultSettled = true;
+        },
+      );
+      await Promise.resolve();
+      assert.equal(resultSettled, false);
+      assert.equal(events.includes("vault-share.deliver:done"), false);
+      offerRelease.resolve();
       const result = await withRealTimeout(resultPromise, 10_000, () => events.join(","));
 
-      assert.ok(events.includes("vault-share.deliver:drained"), events.join(","));
+      assert.ok(events.includes("vault-share.deliver:done"), events.join(","));
       assert.equal(
         events.includes("mailbox.importItem:mailbox_item_entrypoint_vault_share_device_shutdown_2"),
         false,
@@ -24808,6 +24826,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeReason, "mailbox");
     } finally {
       classificationRelease.resolve();
+      offerRelease.resolve();
       runtimeAbortController.abort();
       shutdownController.abort();
       await resultPromise?.catch(() => undefined);
@@ -24817,7 +24836,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("holds device-sync maintenance behind projection while conversation preempts", async () => {
+  test("keeps one projection owned while a conversation reaches the provider", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-vault-share-conversation-preempt-"),
     );
@@ -24827,6 +24846,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const offerStarted = createDeferred<void>();
+    const offerRelease = createDeferred<void>();
     const conversationAssistantStarted = createDeferred<void>();
     const mailboxItems: HostedMailboxItem[] = [
       createMailboxItem({
@@ -24907,9 +24927,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   ? [{ projectionKind: "sleep-times.v0" }]
                   : [];
               },
-              async deliver(_request, context): Promise<never> {
-                const signal = context?.signal;
-                assert.ok(signal, "Projection delivery must receive an ownership signal.");
+              async deliver() {
                 projectionDeliveryCalls += 1;
                 activeProjectionDeliveries += 1;
                 peakActiveProjectionDeliveries = Math.max(
@@ -24919,19 +24937,12 @@ describe("hosted workspace runtime entrypoint", () => {
                 events.push("vault-share.deliver:start");
                 offerStarted.resolve();
                 try {
-                  await new Promise<never>((_resolve, reject) => {
-                    const rejectForAbort = () => reject(signal.reason);
-                    if (signal.aborted) {
-                      rejectForAbort();
-                      return;
-                    }
-                    signal.addEventListener("abort", rejectForAbort, { once: true });
-                  });
+                  await offerRelease.promise;
                 } finally {
                   activeProjectionDeliveries -= 1;
-                  events.push("vault-share.deliver:drained");
+                  events.push("vault-share.deliver:done");
                 }
-                throw new Error("Aborted projection unexpectedly continued.");
+                return { status: "delivered" as const };
               },
             },
             workspacePort: createWorkspacePort({
@@ -25058,7 +25069,7 @@ describe("hosted workspace runtime entrypoint", () => {
           events.join(","),
         );
       }
-      assert.equal(events.includes("vault-share.deliver:drained"), false, events.join(","));
+      assert.equal(events.includes("vault-share.deliver:done"), false, events.join(","));
 
       mailboxItems.push(createMailboxItem({
         id: "mailbox_item_entrypoint_vault_share_preempt_conversation",
@@ -25072,8 +25083,8 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       );
 
-      assert.ok(events.includes("vault-share.deliver:drained"), events.join(","));
-      assert.equal(activeProjectionDeliveries, 0);
+      assert.equal(events.includes("vault-share.deliver:done"), false, events.join(","));
+      assert.equal(activeProjectionDeliveries, 1);
       assert.equal(peakActiveProjectionDeliveries, 1);
       assert.equal(projectionDeliveryCalls, 1);
       for (const command of explicitDeviceCommands) {
@@ -25088,25 +25099,22 @@ describe("hosted workspace runtime entrypoint", () => {
       const assistantPhaseEvent = conversationAssistantPhaseEvent;
       assert.ok(assistantPhaseEvent);
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:drained")
-          < requireEventIndex(
-            events,
-            "mailbox.importItem:mailbox_item_entrypoint_vault_share_preempt_conversation",
-          ),
-        events.join(","),
-      );
-      assert.ok(
         requireEventIndex(
           events,
           "mailbox.importItem:mailbox_item_entrypoint_vault_share_preempt_conversation",
         ) < requireEventIndex(events, assistantPhaseEvent),
         events.join(","),
       );
+      offerRelease.resolve();
 
       const result = await withRealTimeout(resultPromise, 15_000, () => events.join(","));
+      assert.ok(events.includes("vault-share.deliver:done"), events.join(","));
+      assert.equal(activeProjectionDeliveries, 0);
+      assert.equal(projectionDeliveryCalls, 1);
       assert.ok(["idle", "scheduled"].includes(result.status));
       assert.ok(checkpointRequests.length >= 1);
     } finally {
+      offerRelease.resolve();
       runtimeAbortController.abort();
       await resultPromise?.catch(() => undefined);
       mocks.summarizeWearableSleepRuntime.mockClear();

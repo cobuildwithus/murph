@@ -346,12 +346,15 @@ already-committed personal import and conversation path remain available.
 Each replacement request carries the committed grantor workspace version that
 produced its complete snapshot. Before delivery, the runtime
 resolves active scopes through the Web control plane and then captures every
-selected scope while it still owns the restored vault path. Scope resolution and
-delivery receive the owning invocation's abort signal. Capture performs only
-bounded local reads; a wake waits for the current capture to drain, discards it,
-and releases no lazy vault reader. A foreground wake aborts the actual active
-control-plane request and fully drains it before the invocation yields or its
-durable continuation retries. No projection work outlives that owner, and a
+selected scope while it still owns the restored vault path. Side-effect-free
+scope resolution receives the owning invocation's abort signal. Capture performs
+only bounded local reads; a wake waits for the current capture to drain,
+discards it, and releases no lazy vault reader. Once immutable delivery starts,
+a foreground conversation may enter the provider without waiting for
+publication, but that invocation starts no second projection and retains runner
+ownership until the forwarded Web request is terminal. Abort and shutdown
+finalization join the same end-to-end request before a successor invocation or
+durable continuation may retry. No projection work outlives that owner, and a
 failed scope terminates the remaining captured delivery chain. Web performs
 encryption before taking a short `hosted_workspace` row lock, then replaces the
 exact active share generation only when the locked version still matches. The
@@ -572,10 +575,13 @@ reply after its deadline.
 If a `system_mailbox` invocation owns the active fence when foreground/default
 work arrives, the runner wakes that exact child and leaves its fence intact.
 System-mailbox mode may import and run one bounded model-free device-sync item;
-it checkpoints any successfully applied unit, observes the wake, and returns
-before assistant admission. The foreground request then retries through the
-ordinary controller path and starts a default-mode child after the system child
-releases its fence. Operator maintenance receipts are not system-mode recovery
+it checkpoints any successfully applied unit, then observes the wake. When that
+wake contains a conversation while immutable projection delivery remains
+owned, the same invocation reuses the conversation prefetch and enters the
+ordinary foreground path without waiting for publication. Other wakes return
+before assistant admission, and the foreground request retries through the
+ordinary controller path after the system child releases its fence. Operator
+maintenance receipts are not system-mode recovery
 work and remain pending for their existing owner. A system-mailbox request
 behind an active default runtime remains deferred and cannot broaden that
 child's admission authority.

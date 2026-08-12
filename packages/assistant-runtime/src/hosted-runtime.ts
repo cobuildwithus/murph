@@ -1199,6 +1199,41 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     ...runtime,
     platform: guardedPlatform,
   };
+  let pendingOwnedVaultShareProjection:
+    Promise<Awaited<ReturnType<typeof offerCapturedHostedVaultShareProjectionBestEffort>>>
+    | null = null;
+  const startOwnedVaultShareProjection = (
+    offerInput: Parameters<typeof offerCapturedHostedVaultShareProjectionBestEffort>[0],
+  ): NonNullable<typeof pendingOwnedVaultShareProjection> => {
+    if (pendingOwnedVaultShareProjection) {
+      throw new Error("Hosted vault-share projection already has an invocation owner.");
+    }
+    const projection = offerCapturedHostedVaultShareProjectionBestEffort(offerInput);
+    pendingOwnedVaultShareProjection = projection;
+    void projection.then(
+      () => {
+        if (pendingOwnedVaultShareProjection === projection) {
+          pendingOwnedVaultShareProjection = null;
+        }
+      },
+      () => {
+        if (pendingOwnedVaultShareProjection === projection) {
+          pendingOwnedVaultShareProjection = null;
+        }
+      },
+    );
+    return projection;
+  };
+  const drainOwnedVaultShareProjection = async (): Promise<void> => {
+    const projection = pendingOwnedVaultShareProjection;
+    if (!projection) {
+      return;
+    }
+    await projection.catch(() => undefined);
+    if (pendingOwnedVaultShareProjection === projection) {
+      pendingOwnedVaultShareProjection = null;
+    }
+  };
   const guardedMailboxPort = guardedRuntime.platform.mailboxPort ?? mailboxPort;
   const guardedWorkspacePort = guardedRuntime.platform.workspacePort ?? workspacePort;
   let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
@@ -1738,7 +1773,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     let hostedCodexRuntime: Awaited<
       ReturnType<typeof prepareHostedCodexRuntimeEnvironment>
     > | null = null;
-    if (!systemMailboxProcessingMode) {
+    let invocationRuntimeEnv = projectHostedRuntimeProcessEnvironment({
+      runtimeEnv: baseRuntimeEnv,
+    });
+    const prepareInvocationCodexRuntime = async (): Promise<
+      NonNullable<typeof hostedCodexRuntime>
+    > => {
+      if (hostedCodexRuntime) {
+        return hostedCodexRuntime;
+      }
       emitPhaseLog({
         details: {
           runtimeEnvKeyCount: Object.keys(baseRuntimeEnv).length,
@@ -1754,34 +1797,36 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         stage: "codex.prepare",
         status: "start",
       });
-      hostedCodexRuntime = await prepareHostedCodexRuntimeEnvironment({
+      const preparedCodexRuntime = await prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot: restored.operatorHomeRoot,
         runtimeEnv: baseRuntimeEnv,
       });
+      hostedCodexRuntime = preparedCodexRuntime;
+      invocationRuntimeEnv = preparedCodexRuntime.runtimeEnv;
       emitPhaseLog({
         details: {
           codexEffectiveModelProviderId:
-            hostedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
+            preparedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
           ...HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
           ...HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
-          runtimeEnvKeyCount: Object.keys(hostedCodexRuntime.runtimeEnv).length,
+          runtimeEnvKeyCount: Object.keys(preparedCodexRuntime.runtimeEnv).length,
           voiceMemoElevenLabsApiKeyConfigured:
-            hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),
+            hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "ELEVENLABS_API_KEY"),
           voiceMemoElevenLabsModelConfigured:
-            hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
+            hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_MODEL_ID"),
           voiceMemoElevenLabsVoiceConfigured:
-            hasHostedRuntimeEnvValue(hostedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
+            hasHostedRuntimeEnvValue(preparedCodexRuntime.runtimeEnv, "MURPH_ELEVENLABS_VOICE_ID"),
         },
         input,
         requestId,
         stage: "codex.prepare",
         status: "done",
       });
+      return preparedCodexRuntime;
+    };
+    if (!systemMailboxProcessingMode) {
+      hostedCodexRuntime = await prepareInvocationCodexRuntime();
     }
-    const invocationRuntimeEnv = hostedCodexRuntime?.runtimeEnv
-      ?? projectHostedRuntimeProcessEnvironment({
-        runtimeEnv: baseRuntimeEnv,
-      });
     assertRuntimeNotAborted();
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
@@ -2299,6 +2344,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (!vaultSharePort) {
           return "completed";
         }
+        if (pendingOwnedVaultShareProjection) {
+          return "preempted";
+        }
 
         const workSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
@@ -2306,6 +2354,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
         const waitForOwnedProjectionStage = async <T,>(
           runStage: (signal: AbortSignal) => Promise<T>,
+          preemption: "cancel_and_drain" | "retain" = "cancel_and_drain",
         ): Promise<
           | { kind: "completed"; value: T }
           | { kind: "wake" }
@@ -2358,9 +2407,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
           if (result.kind === "wake") {
             foregroundWakeObserved = true;
-            await ownedStage.cancelAndDrain(
-              new Error("Hosted vault-share projection yielded to foreground work."),
-            );
+            if (preemption === "cancel_and_drain") {
+              await ownedStage.cancelAndDrain(
+                new Error("Hosted vault-share projection yielded to foreground work."),
+              );
+            }
             if (workSignal.aborted) {
               throw readHostedRuntimeAbortReason(workSignal);
             }
@@ -2410,11 +2461,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
 
         const offerResult = await waitForOwnedProjectionStage(
-          (signal) => offerCapturedHostedVaultShareProjectionBestEffort({
+          () => startOwnedVaultShareProjection({
             capture: capture.capture,
-            signal,
             vaultSharePort,
           }),
+          "retain",
         );
         if (offerResult.kind === "wake") {
           return "preempted";
@@ -2507,17 +2558,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             nextWakeAt: returnedWake.nextWakeAt,
           }),
         };
-        emitPhaseLog({
-          details: {
-            immediateRecheckRequested: foregroundWakeObserved,
-            invocationStatus: invocationResult.status,
-            nextWakeAtPresent: invocationResult.nextWakeAt !== null,
-          },
-          input,
-          requestId,
-          stage: "runtime.return",
-          status: "done",
-        });
         return invocationResult;
       };
       const runSystemMailboxLifecycleItem = async (inputItem: {
@@ -2736,8 +2776,46 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     if (initialMailboxImportResult.bootstrapPending) {
       return await returnInitialMailboxImportBeforeForeground();
     }
+    let systemMailboxForegroundWakePrefetch: HostedMailboxPrefixPrefetch | null = null;
+    let systemMailboxForegroundWakeResult: HostedWorkspaceInvocationResult | null = null;
     if (input.request.processingMode === "system_mailbox") {
-      return await returnSystemMailboxProcessingModeAfterInitialImport();
+      const systemMailboxResult =
+        await returnSystemMailboxProcessingModeAfterInitialImport();
+      const returnSystemMailboxResult = (): HostedWorkspaceInvocationResult => {
+        emitPhaseLog({
+          details: {
+            immediateRecheckRequested:
+              systemMailboxResult.immediateRecheckRequested === true,
+            invocationStatus: systemMailboxResult.status,
+            nextWakeAtPresent: systemMailboxResult.nextWakeAt !== null,
+          },
+          input,
+          requestId,
+          stage: "runtime.return",
+          status: "done",
+        });
+        return systemMailboxResult;
+      };
+      if (
+        systemMailboxResult.immediateRecheckRequested !== true
+        || runtimeAbortController.signal.aborted
+        || options.shutdownSignal?.aborted === true
+      ) {
+        return returnSystemMailboxResult();
+      }
+      const foregroundPrefetch = await createHostedForegroundMailboxPrefetch({
+        lanes: HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
+        limitPerLane: mailboxBudget.fetchLimitPerLane,
+        requestId: `${requestId}:system-mailbox-foreground-upgrade`,
+        runnerInput: baseRunnerInput,
+      });
+      const foregroundResponse = await foregroundPrefetch.response;
+      if (!foregroundResponse.items.some((item) => item.lane === "conversation")) {
+        return returnSystemMailboxResult();
+      }
+      systemMailboxForegroundWakePrefetch = foregroundPrefetch;
+      systemMailboxForegroundWakeResult = systemMailboxResult;
+      hostedCodexRuntime = await prepareInvocationCodexRuntime();
     }
     if (
       shouldCheckpointHostedReplayBudgetProgressBeforeForeground({
@@ -3116,7 +3194,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     let invocationLocalProjectedAssistantWakeKey: string | null = null;
     let hotProjectedAssistantWakeAttemptedKey: string | null = null;
     let durableCheckpointFollowUpPending = false;
-    let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> = {};
+    let redactedStatus: NonNullable<HostedWorkspaceInvocationResult["redactedStatus"]> =
+      systemMailboxForegroundWakeResult?.redactedStatus ?? {};
     let invocationStatus: HostedWorkspaceInvocationResult["status"] =
       resolveHostedWorkspaceInvocationStatus({
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
@@ -3637,6 +3716,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         | { kind: "stage"; value: T };
       const waitForOwnedProjectionStage = async <T,>(
         runStage: (signal: AbortSignal) => Promise<T>,
+        preemption: "cancel_and_drain" | "retain" = "cancel_and_drain",
       ): Promise<
         | { kind: "completed"; value: T }
         | { kind: "preempted"; wake: HostedVaultShareOfferWake | null }
@@ -3768,9 +3848,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             }
             const classification = await classifyWake(latencySeed);
             if (!classification.mayWaitForProjection) {
-              await ownedStage.cancelAndDrain(
-                new Error("Hosted vault-share projection yielded to foreground work."),
-              );
+              if (preemption === "cancel_and_drain") {
+                await ownedStage.cancelAndDrain(
+                  new Error("Hosted vault-share projection yielded to foreground work."),
+                );
+              }
               if (runtimeAbortController.signal.aborted) {
                 throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
               }
@@ -3817,6 +3899,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       if (shutdownWasSignaled()) {
         return { outcome: "preempted", wake: deferredDeviceSyncWake };
       }
+      if (pendingOwnedVaultShareProjection) {
+        return { outcome: "preempted", wake: deferredDeviceSyncWake };
+      }
 
       const scopeResolutionStage = await waitForOwnedProjectionStage(
         (signal) => resolveHostedVaultShareProjectionScopesBestEffort({
@@ -3859,11 +3944,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
 
       const offerStage = await waitForOwnedProjectionStage(
-        (signal) => offerCapturedHostedVaultShareProjectionBestEffort({
+        () => startOwnedVaultShareProjection({
           capture: capture.capture,
-          signal,
           vaultSharePort,
         }),
+        "retain",
       );
       if (offerStage.kind === "preempted") {
         return { outcome: "preempted", wake: offerStage.wake };
@@ -4740,9 +4825,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
 
       result = await runForegroundPass({
-        initialMailboxImport,
-        initialMailboxImportContext,
-        initialMailboxPrefetch: initialMailboxImportResult.prefetch,
+        ...(systemMailboxForegroundWakePrefetch
+          ? {
+              initialMailboxImportContext:
+                createHostedRuntimeWakeInitialImportContext(null),
+              initialMailboxImportLanes:
+                HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES,
+              initialMailboxPrefetch: systemMailboxForegroundWakePrefetch,
+            }
+          : {
+              initialMailboxImport,
+              initialMailboxImportContext,
+              initialMailboxPrefetch: initialMailboxImportResult.prefetch,
+            }),
         latencySeed: null,
         ...(initialProviderStartCriticalPath
           ? { providerStartCriticalPath: initialProviderStartCriticalPath }
@@ -5694,13 +5789,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
   } finally {
     try {
-      await settleCodexProcessPreparation();
+      await drainOwnedVaultShareProjection();
     } finally {
       try {
-        await imageGenerationController?.close();
-        await closeDetachedAssistantAskBeforeWorkspaceRelease();
+        await settleCodexProcessPreparation();
       } finally {
-        hostAbortSignal?.removeEventListener("abort", abortFromHost);
+        try {
+          await imageGenerationController?.close();
+          await closeDetachedAssistantAskBeforeWorkspaceRelease();
+        } finally {
+          hostAbortSignal?.removeEventListener("abort", abortFromHost);
+        }
       }
     }
   }
@@ -7104,8 +7203,8 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.vaultSharePort
       ? {
           vaultSharePort: {
-            deliver: (deliverInput, context) =>
-              guard(() => platform.vaultSharePort!.deliver(deliverInput, context)),
+            deliver: (deliverInput) =>
+              guard(() => platform.vaultSharePort!.deliver(deliverInput)),
             listActiveProjectionScopes: (context) =>
               guard(() => platform.vaultSharePort!.listActiveProjectionScopes(context)),
           },
