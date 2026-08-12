@@ -1,3 +1,5 @@
+import { JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES } from "@murphai/contracts";
+
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "./metadata.ts";
 
 export type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
@@ -54,10 +56,35 @@ export const JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
   "junctionNoteHistoryBackfillCoverage";
 const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX = "v";
 
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS = Object.freeze([
-  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
-  JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
-] as const);
+export function resolveJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataKey(
+  resource: string,
+): string | null {
+  if (!JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.some((candidate) => candidate === resource)) {
+    return null;
+  }
+  if (resource === "blood_pressure") {
+    return JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY;
+  }
+  if (resource === "note") {
+    return JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY;
+  }
+
+  const pascalResource = resource
+    .split("_")
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join("");
+  return `junction${pascalResource}HistoryBackfillCoverage`;
+}
+
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS = Object.freeze(
+  JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.map((resource) => {
+    const metadataKey = resolveJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataKey(resource);
+    if (!metadataKey) {
+      throw new TypeError(`Junction extended history resource ${resource} has no coverage metadata key.`);
+    }
+    return metadataKey;
+  }),
+);
 
 const JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS = Object.freeze([
   ...Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS),
