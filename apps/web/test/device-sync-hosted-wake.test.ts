@@ -2152,6 +2152,70 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("resolves the projected browser connection ID before retrying Fitbit cutover", async () => {
+    const connection = buildHostedConnection({
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_fitbit_browser_retry",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    const sources = [
+      buildHostedConnectionSource(connection.id, "fitbit", {
+        resourceAvailabilitySummary: {
+          canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+          sleep: true,
+        },
+      }),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-08-11T10:00:00.000Z",
+        lastDataAt: "2026-08-11T10:05:00.000Z",
+        resourceAvailabilitySummary: { sleep: true },
+      }),
+    ];
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockResolvedValue(sources);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/retry"),
+    );
+
+    await expect(controlPlane.completeBrowserGoogleHealthFitbitMigration(
+      "user-123",
+      buildPublicConnectionId(connection.id),
+    )).resolves.toEqual({
+      connectionId: connection.id,
+      status: "pending",
+    });
+
+    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
+      "user-123",
+      connection.id,
+      expect.any(Object),
+    );
+  });
+
+  it("rejects a Fitbit cutover retry for an unknown browser connection ID", async () => {
+    const connection = buildHostedConnection({
+      id: "dsc_junction_fitbit_owned",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/settings/device-sync/connections/retry"),
+    );
+
+    await expect(controlPlane.completeBrowserGoogleHealthFitbitMigration(
+      "user-123",
+      buildPublicConnectionId("dsc_junction_fitbit_other_member"),
+    )).rejects.toMatchObject({
+      code: "CONNECTION_NOT_FOUND",
+      httpStatus: 404,
+    });
+
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+  });
+
   it("leaves an in-progress Fitbit cutover claim with its current owner", async () => {
     const connection = buildHostedConnection({
       externalAccountId: "junction-user-established",

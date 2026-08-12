@@ -75,6 +75,13 @@ const FITBIT_MIGRATION_REFRESH_INTERVAL_MS = 15_000;
 const FITBIT_MIGRATION_REFRESH_ATTEMPT_LIMIT = 12;
 const FITBIT_MIGRATION_REFRESH_BACKOFF_MS = 60_000;
 
+function isFitbitMigrationNotice(
+  value: ConnectCallbackNotice,
+): value is NonNullable<ConnectCallbackNotice> {
+  return value?.title === FITBIT_MIGRATION_AUTHORIZED_NOTICE.title
+    || value?.title === FITBIT_MIGRATION_STILL_VERIFYING_NOTICE.title;
+}
+
 export type {
   ConnectCallbackInput,
   InitialDeviceConnectIntent,
@@ -258,6 +265,7 @@ export function ConnectSourcesGrid({
   useEffect(() => {
     if (!hasVerifyingFitbitMigration) {
       fitbitMigrationRefreshAttemptsRef.current = 0;
+      setNotice((current) => isFitbitMigrationNotice(current) ? null : current);
       return;
     }
 

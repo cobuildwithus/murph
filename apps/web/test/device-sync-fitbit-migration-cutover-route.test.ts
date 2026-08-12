@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  completeBrowserGoogleHealthFitbitMigration: vi.fn(),
   completeGoogleHealthFitbitMigration: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
@@ -46,7 +47,13 @@ describe("hosted Fitbit migration cutover route", () => {
       connectionId: "dsc_fitbit",
       status: "complete",
     });
+    mocks.completeBrowserGoogleHealthFitbitMigration.mockResolvedValue({
+      connectionId: "dsc_fitbit",
+      status: "complete",
+    });
     mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
+      completeBrowserGoogleHealthFitbitMigration:
+        mocks.completeBrowserGoogleHealthFitbitMigration,
       completeGoogleHealthFitbitMigration:
         mocks.completeGoogleHealthFitbitMigration,
     });
@@ -93,17 +100,18 @@ describe("hosted Fitbit migration cutover route", () => {
     });
   });
 
-  it("runs the same guarded cutover for an authenticated browser retry", async () => {
+  it("passes the projected connection ID through the browser-owned cutover boundary", async () => {
+    mocks.resolveDecodedRouteParam.mockResolvedValue("dspc_fitbit");
     const { POST } = await import(
       "../app/api/settings/device-sync/connections/[connectionId]/fitbit-migration/cutover/route"
     );
     const request = new Request(
-      "https://join.example.test/api/settings/device-sync/connections/dsc_fitbit/fitbit-migration/cutover",
+      "https://join.example.test/api/settings/device-sync/connections/dspc_fitbit/fitbit-migration/cutover",
       { method: "POST" },
     );
 
     const response = await POST(request, {
-      params: Promise.resolve({ connectionId: "dsc_fitbit" }),
+      params: Promise.resolve({ connectionId: "dspc_fitbit" }),
     });
 
     expect(response.status).toBe(200);
@@ -113,9 +121,10 @@ describe("hosted Fitbit migration cutover route", () => {
     expect(
       mocks.requireActiveHostedAppSessionFromRequest,
     ).toHaveBeenCalledWith(request);
-    expect(mocks.completeGoogleHealthFitbitMigration).toHaveBeenCalledWith(
+    expect(mocks.completeBrowserGoogleHealthFitbitMigration).toHaveBeenCalledWith(
       "member_123",
-      "dsc_fitbit",
+      "dspc_fitbit",
     );
+    expect(mocks.completeGoogleHealthFitbitMigration).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,6 @@ export const POST = withJsonError(async (
 
   return jsonOk(
     await createHostedDeviceSyncPublicIngressService(request)
-      .completeGoogleHealthFitbitMigration(auth.member.id, connectionId),
+      .completeBrowserGoogleHealthFitbitMigration(auth.member.id, connectionId),
   );
 });

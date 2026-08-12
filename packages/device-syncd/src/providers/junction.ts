@@ -12,6 +12,8 @@ import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
+  normalizeJunctionSnapshot,
+  type JunctionSnapshotInput,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
@@ -1106,7 +1108,7 @@ export function createJunctionDeviceSyncProvider(
       ? maxIsoTimestamp(baseTimeseriesWindowStart, timeseriesCursor)
       : baseTimeseriesWindowStart;
     if (job.kind !== "backfill" || summaryHasFetchedRecords) {
-      const receipt = await context.importSnapshot({
+      const snapshot = {
         provider: "junction",
         accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
@@ -1116,10 +1118,11 @@ export function createJunctionDeviceSyncProvider(
         connections: importConnections,
         summaries: importSummaries,
         timeseries: {},
-      });
+      };
+      const receipt = await context.importSnapshot(snapshot);
       await recordAcceptedJunctionFitbitCoverage(
         context,
-        preparedSummaryImport.snapshots,
+        snapshot,
         receipt,
       );
     }
@@ -2158,7 +2161,7 @@ export function createJunctionDeviceSyncProvider(
       summaries,
       sourceProviders,
     );
-    const receipt = await context.importSnapshot({
+    const snapshot = {
       provider: "junction",
       accountId: buildJunctionImportAccountId(context.account.externalAccountId),
       connectionId: context.account.id,
@@ -2168,10 +2171,11 @@ export function createJunctionDeviceSyncProvider(
       connections: preparedImport.connections,
       summaries: preparedImport.snapshots,
       timeseries: {},
-    });
+    };
+    const receipt = await context.importSnapshot(snapshot);
     await recordAcceptedJunctionFitbitCoverage(
       context,
-      preparedImport.snapshots,
+      snapshot,
       receipt,
     );
 
@@ -2862,7 +2866,7 @@ export function createJunctionDeviceSyncProvider(
           options.sourceStatusRequirement,
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-          const receipt = await context.importSnapshot({
+          const snapshot = {
             provider: "junction",
             accountId: buildJunctionImportAccountId(context.account.externalAccountId),
             connectionId: context.account.id,
@@ -2872,10 +2876,11 @@ export function createJunctionDeviceSyncProvider(
             connections: preparedImport.connections,
             summaries: {},
             timeseries: preparedImport.snapshots,
-          });
+          };
+          const receipt = await context.importSnapshot(snapshot);
           await recordAcceptedJunctionFitbitCoverage(
             context,
-            preparedImport.snapshots,
+            snapshot,
             receipt,
           );
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
@@ -2979,7 +2984,7 @@ export function createJunctionDeviceSyncProvider(
         sourceProviders,
       );
       if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-        const receipt = await context.importSnapshot({
+        const snapshot = {
           provider: "junction",
           accountId: buildJunctionImportAccountId(context.account.externalAccountId),
           connectionId: context.account.id,
@@ -2989,10 +2994,11 @@ export function createJunctionDeviceSyncProvider(
           connections: preparedImport.connections,
           summaries: {},
           timeseries: preparedImport.snapshots,
-        });
+        };
+        const receipt = await context.importSnapshot(snapshot);
         await recordAcceptedJunctionFitbitCoverage(
           context,
-          preparedImport.snapshots,
+          snapshot,
           receipt,
         );
       }
@@ -3037,7 +3043,7 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
-    const receipt = await context.importSnapshot({
+    const snapshot = {
       provider: "junction",
       accountId: buildJunctionImportAccountId(context.account.externalAccountId),
       connectionId: context.account.id,
@@ -3047,10 +3053,11 @@ export function createJunctionDeviceSyncProvider(
       connections,
       summaries,
       timeseries: {},
-    });
+    };
+    const receipt = await context.importSnapshot(snapshot);
     await recordAcceptedJunctionFitbitCoverage(
       context,
-      preparedImport.snapshots,
+      snapshot,
       receipt,
     );
     return {
@@ -4833,42 +4840,76 @@ function filterJunctionImportSnapshots(
 
 async function recordAcceptedJunctionFitbitCoverage(
   context: ProviderJobContext,
-  snapshots: Record<string, unknown[]>,
+  snapshot: JunctionSnapshotInput,
   receipt: unknown,
 ): Promise<void> {
+  const canonicalEventExternalRefResourceIds =
+    readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt);
   if (
     !readProviderSnapshotDurableDeliveryAccepted(receipt)
+    || canonicalEventExternalRefResourceIds === null
+    || canonicalEventExternalRefResourceIds.length === 0
     || !context.upsertConnectionSource
   ) {
     return;
   }
 
+  const canonicalEventIdentitySet = new Set(canonicalEventExternalRefResourceIds);
   const coverageByResource = new Map<string, string>();
-  for (const [resource, records] of Object.entries(snapshots)) {
-    if (!buildDeviceSyncSourceCanonicalCoverageThroughKey(resource)) {
-      continue;
-    }
-
-    for (const value of records) {
-      const record = readPlainObject(value);
+  for (const category of ["summaries", "timeseries"] as const) {
+    for (const [resource, values] of Object.entries(snapshot[category] ?? {})) {
       if (
-        !record
-        || normalizeProviderSlug(
-          resolveJunctionOrigin(record, {}).sourceProviderSlug,
-        ) !== JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+        !Array.isArray(values)
+        || !buildDeviceSyncSourceCanonicalCoverageThroughKey(resource)
       ) {
         continue;
       }
 
-      const coverageThrough = resolveJunctionRecordCoverageThrough(record);
-      if (!coverageThrough) {
-        continue;
+      for (const value of values) {
+        const record = readPlainObject(value);
+        if (
+          !record
+          || normalizeProviderSlug(
+            resolveJunctionOrigin(record, {}).sourceProviderSlug,
+          ) !== JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+        ) {
+          continue;
+        }
+
+        const normalized = normalizeJunctionSnapshot({
+          accountId: snapshot.accountId,
+          connections: snapshot.connections,
+          importedAt: snapshot.importedAt,
+          [category]: { [resource]: [value] },
+          windowEnd: snapshot.windowEnd,
+          windowStart: snapshot.windowStart,
+        });
+        const normalizedEvents = normalized.events ?? [];
+        const canonicalRecordIdentities = normalizedEvents.flatMap((event) =>
+          event.externalRef ? [event.externalRef.resourceId] : []
+        );
+        // Full-batch normalization can deliberately assign duplicate metrics to
+        // one summary owner. One matching receipt identity still proves this
+        // raw record has a canonical representative; no match leaves it raw-only.
+        if (
+          normalizedEvents.length === 0
+          || !canonicalRecordIdentities.some(
+            (identity) => canonicalEventIdentitySet.has(identity),
+          )
+        ) {
+          continue;
+        }
+
+        const coverageThrough = resolveJunctionRecordCoverageThrough(record);
+        if (!coverageThrough) {
+          continue;
+        }
+        const existing = coverageByResource.get(resource);
+        coverageByResource.set(
+          resource,
+          existing ? maxIsoTimestamp(existing, coverageThrough) : coverageThrough,
+        );
       }
-      const existing = coverageByResource.get(resource);
-      coverageByResource.set(
-        resource,
-        existing ? maxIsoTimestamp(existing, coverageThrough) : coverageThrough,
-      );
     }
   }
 

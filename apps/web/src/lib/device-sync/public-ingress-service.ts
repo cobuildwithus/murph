@@ -730,6 +730,17 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
+  async completeBrowserGoogleHealthFitbitMigration(
+    userId: string,
+    publicConnectionId: string,
+  ): Promise<{ connectionId: string; status: "complete" | "pending" }> {
+    const connection = await this.requireOwnedBrowserConnection(
+      userId,
+      publicConnectionId,
+    );
+    return this.completeGoogleHealthFitbitMigration(userId, connection.id);
+  }
+
   async disconnectAllConnections(userId: string): Promise<{
     attemptedCount: number;
     disconnectedCount: number;

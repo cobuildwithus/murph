@@ -102,9 +102,14 @@ Updated: 2026-08-12
    and immutable PDFs to July 23, retains exact disclosure on the connect card
    and independently versioned subprocessor register, and adds no compatibility
    owner or grant migration.
-10. In progress: push the retrospective correction, run final ReviewGPT round
-    3 concurrently with required CI, and inspect current-base mergeability
-    without spending a second base-update attempt.
+10. Completed: pushed the retrospective correction and ran final ReviewGPT
+    round 3 as a fresh full-snapshot audit. It found canonical coverage was
+    advancing from raw retention rather than exact canonical receipt identity,
+    the browser retry passed a projected connection ID into a raw-ID owner, and
+    completed cutover left a migration-owned notice mounted.
+11. In progress: push the round-three remediation, run final ReviewGPT round 4,
+    and inspect current-base mergeability without spending a second base-update
+    attempt.
 
 ## Decisions
 
@@ -151,13 +156,18 @@ Updated: 2026-08-12
   manifest, and legal-copy tests pass; the Web typecheck passes; generated
   current Terms and Privacy PDFs are byte-identical to their immutable July 23
   artifacts and match the manifest hashes.
+- Final round-three remediation proof: all 224 Junction provider tests and all
+  251 affected Connect, browser-ingress, signed-runtime, and cutover route tests
+  pass. Device Sync and Web typechecks pass. Coverage now advances only for raw
+  records represented by an exact canonical receipt identity; projected browser
+  IDs resolve through the existing ownership boundary; completed cutover clears
+  only migration-owned notices before and after polling backoff.
 
 ## Remaining handoff
 
 - Keep the pull request draft.
-- Complete the recorded legal scope shrink, push its exact head, and run final
-  ReviewGPT round 3 while required CI executes; resolve every accepted finding
-  before archiving this plan.
+- Push the round-three remediation and run final ReviewGPT round 4 against its
+  exact head; resolve every accepted finding before archiving this plan.
 - Recheck the current base with `git merge-tree`. The one permitted base update
   is already consumed, so retain the draft PR and report a moving-base conflict
   if the reviewed patch no longer merges cleanly.

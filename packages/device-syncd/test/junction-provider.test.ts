@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import {
+  normalizeJunctionSnapshot,
+  type JunctionSnapshotInput,
+} from "@murphai/importers/device-providers/junction";
+import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 } from "@murphai/importers/device-providers/junction-resources";
@@ -269,6 +273,27 @@ function executeJunctionJob(
   const executor = provider.jobExecutor;
   assert.ok(executor, "Junction provider should expose a job executor.");
   return executor.executeJob(context, job);
+}
+
+function createCanonicalImportReceipt(
+  snapshot: unknown,
+  durableDeliveryAccepted = true,
+) {
+  assertJunctionSnapshotInput(snapshot);
+  const events = normalizeJunctionSnapshot(snapshot).events ?? [];
+  return {
+    canonicalEventCount: events.length,
+    canonicalEventExternalRefResourceIds: events.flatMap((event) =>
+      event.externalRef ? [event.externalRef.resourceId] : []
+    ),
+    durableDeliveryAccepted,
+  };
+}
+
+function assertJunctionSnapshotInput(
+  value: unknown,
+): asserts value is JunctionSnapshotInput {
+  assert.ok(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): ProviderJobContext {
@@ -11686,10 +11711,16 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
   const upserts: Array<
     Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]
   > = [];
-  let durableDeliveryAccepted = false;
+  let acceptCanonicalEvents = false;
   const context = createJunctionJobContext({
       account: createAccount({ sources: sourceSummaries }),
-      importSnapshot: async () => ({ durableDeliveryAccepted }),
+      importSnapshot: async (snapshot) => acceptCanonicalEvents
+        ? createCanonicalImportReceipt(snapshot)
+        : {
+            canonicalEventCount: 0,
+            canonicalEventExternalRefResourceIds: [],
+            durableDeliveryAccepted: true,
+          },
       listConnectionSources: async () => sourceSummaries,
       now: "2026-08-12T01:00:00.000Z",
       upsertConnectionSource: (input) => {
@@ -11724,7 +11755,7 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
   );
 
   upserts.length = 0;
-  durableDeliveryAccepted = true;
+  acceptCanonicalEvents = true;
   await executeJunctionJob(provider, context, job);
 
   assert.equal(
@@ -11735,6 +11766,144 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
     upserts.at(-1)?.resourceAvailabilitySummary
       ?.canonicalCoverageThrough_activity,
     "2026-08-12T00:00:00.000Z",
+  );
+});
+
+test("Junction Fitbit coverage excludes a retained raw-only tail and replays monotonically", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-fitbit-coverage",
+          name: "Fitbit",
+          resource_availability: { activity: true },
+          slug: "fitbit",
+          status: "connected",
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({
+        data: [
+          {
+            connectionId: "provider-fitbit-coverage",
+            date: "2026-08-10",
+            id: "fitbit-activity-canonical",
+            sourceProviderSlug: "fitbit",
+            steps: 4321,
+          },
+          {
+            connectionId: "provider-fitbit-coverage",
+            date: "2026-08-12",
+            id: "fitbit-activity-raw-only",
+            sourceProviderSlug: "fitbit",
+          },
+        ],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+  let legacyFitbit = createConnectionSource({
+    id: "src-fitbit-mixed-coverage",
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "fitbit",
+    })),
+    sourceProviderSlug: "fitbit",
+    resourceAvailabilitySummary: { activity: true },
+  });
+  const recordedCoverage: string[] = [];
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [summarizeConnectionSource(legacyFitbit)] }),
+    importSnapshot: async (snapshot) => createCanonicalImportReceipt(snapshot),
+    listConnectionSources: async () => [summarizeConnectionSource(legacyFitbit)],
+    now: "2026-08-13T01:00:00.000Z",
+    upsertConnectionSource: (input) => {
+      const next = createConnectionSource({ ...legacyFitbit, ...input });
+      const coverage = next.resourceAvailabilitySummary
+        ?.canonicalCoverageThrough_activity;
+      if (typeof coverage === "string") {
+        recordedCoverage.push(coverage);
+      }
+      legacyFitbit = next;
+      return next;
+    },
+  });
+  const job = createJob("reconcile", {
+    windowEnd: "2026-08-13T00:00:00.000Z",
+    windowStart: "2026-08-10T00:00:00.000Z",
+  });
+
+  await executeJunctionJob(provider, context, job);
+  await executeJunctionJob(provider, context, job);
+
+  assert.deepEqual([...new Set(recordedCoverage)], ["2026-08-11T00:00:00.000Z"]);
+  assert.equal(
+    legacyFitbit.resourceAvailabilitySummary?.canonicalCoverageThrough_activity,
+    "2026-08-11T00:00:00.000Z",
+  );
+});
+
+test("Junction Fitbit sleep coverage advances through the accepted session end", async () => {
+  const provider = createJunctionProvider(async () => {
+    throw new Error("Unexpected Junction request.");
+  }, {
+    summaryResources: ["sleep"],
+    timeseriesResources: [],
+  });
+  const legacyFitbit = createConnectionSource({
+    id: "src-fitbit-sleep-coverage",
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "fitbit",
+    })),
+    sourceProviderSlug: "fitbit",
+    resourceAvailabilitySummary: { sleep: true },
+  });
+  const sourceSummaries = [summarizeConnectionSource(legacyFitbit)];
+  const upserts: Array<
+    Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]
+  > = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: sourceSummaries }),
+      importSnapshot: async (snapshot) => createCanonicalImportReceipt(snapshot),
+      listConnectionSources: async () => sourceSummaries,
+      now: "2026-08-12T12:00:00.000Z",
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.sleep.created",
+      objectId: "fitbit-sleep-coverage",
+      occurredAt: "2026-08-12T10:00:00.000Z",
+      resource: "sleep",
+      resourceCategory: "summary",
+      sourceProviderSlug: "fitbit",
+      webhookDataJson: JSON.stringify({
+        bedtime_start: "2026-08-12T02:00:00.000Z",
+        bedtime_stop: "2026-08-12T10:00:00.000Z",
+        duration: 28_800,
+        id: "fitbit-sleep-coverage",
+        sourceProviderSlug: "fitbit",
+        total: 25_200,
+      }),
+      windowEnd: "2026-08-13T00:00:00.000Z",
+      windowStart: "2026-08-12T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(
+    upserts.at(-1)?.resourceAvailabilitySummary?.canonicalCoverageThrough_sleep,
+    "2026-08-12T10:00:00.000Z",
   );
 });
 

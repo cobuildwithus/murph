@@ -6505,10 +6505,137 @@ test("ConnectSourcesGrid replaces Fitbit authorization success after prolonged v
     });
     assert.equal(mocks.routerRefresh.mock.calls.length, 13);
 
+    await rendered.rerender(createElement(ConnectSourcesGrid, {
+      initialCallback: {
+        connectSource: "fitbit",
+        connectTarget: "fitbit",
+        errorCode: null,
+        provider: "junction",
+        status: "connected",
+      },
+      sources: [{
+        connectTarget: "fitbit",
+        connected: true,
+        description: "Fitbit data through Google authorization.",
+        id: "fitbit",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/fitbit.svg",
+          width: 44,
+        },
+        name: "Fitbit",
+      }],
+    }));
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Fitbit migration is still verifying|Google Health authorized/u,
+    );
+
     await rendered.cleanup();
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("ConnectSourcesGrid clears the authorization notice when cutover finishes before backoff", async () => {
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const callback = {
+    connectSource: "fitbit",
+    connectTarget: "fitbit",
+    errorCode: null,
+    provider: "junction",
+    status: "connected" as const,
+  };
+  const logo = {
+    className: "size-11 object-contain",
+    height: 44,
+    src: "/brand-logos/connect/fitbit.svg",
+    width: 44,
+  };
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      initialCallback: callback,
+      sources: [{
+        connectTarget: "fitbit",
+        description: "Fitbit data through Google authorization.",
+        id: "fitbit",
+        logo,
+        migrationState: "authorization_required",
+        name: "Fitbit",
+      }],
+    }),
+    { requireButton: false },
+  );
+
+  assert.match(rendered.container.textContent ?? "", /Google Health authorized/u);
+
+  await rendered.rerender(createElement(ConnectSourcesGrid, {
+    initialCallback: callback,
+    sources: [{
+      connectTarget: "fitbit",
+      connected: true,
+      description: "Fitbit data through Google authorization.",
+      id: "fitbit",
+      logo,
+      name: "Fitbit",
+    }],
+  }));
+
+  assert.doesNotMatch(
+    rendered.container.textContent ?? "",
+    /Google Health authorized|Fitbit migration is still verifying/u,
+  );
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid preserves unrelated notices after Fitbit cutover", async () => {
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const logo = {
+    className: "size-11 object-contain",
+    height: 44,
+    src: "/brand-logos/connect/fitbit.svg",
+    width: 44,
+  };
+  const initialNoticeOverride = {
+    kind: "warning" as const,
+    message: "This notice belongs to another connection flow.",
+    title: "Another connection needs attention",
+  };
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      initialNoticeOverride,
+      sources: [{
+        description: "Fitbit data through Google authorization.",
+        id: "fitbit",
+        logo,
+        migrationState: "verifying_successor",
+        name: "Fitbit",
+      }],
+    }),
+    { requireButton: false },
+  );
+
+  await rendered.rerender(createElement(ConnectSourcesGrid, {
+    initialNoticeOverride,
+    sources: [{
+      connected: true,
+      description: "Fitbit data through Google authorization.",
+      id: "fitbit",
+      logo,
+      name: "Fitbit",
+    }],
+  }));
+
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Another connection needs attention/u,
+  );
+  await rendered.cleanup();
 });
 
 test("ConnectSourcesGrid shows inline Junction disclosure and starts Fitbit authorization in one click", async () => {
