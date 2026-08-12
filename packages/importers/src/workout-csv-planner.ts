@@ -36,17 +36,19 @@ const STRONG_HEADER_KEYS = [
 
 export type WorkoutCsvWeightUnit = "lb" | "kg";
 export type WorkoutCsvDistanceUnit = "m" | "km" | "mi";
+export type WorkoutCsvSource = "strong" | "hevy";
 
 export interface WorkoutCsvPlannerInput {
   text: string;
   timeZone: string;
-  source?: string;
+  source?: WorkoutCsvSource;
   delimiter?: string;
   weightUnit?: WorkoutCsvWeightUnit;
   distanceUnit?: WorkoutCsvDistanceUnit;
 }
 
 export interface PlannedWorkoutCsvSession {
+  sourceSessionKey: string;
   sourceWorkoutId: string;
   occurredAt: string;
   title: string;
@@ -62,8 +64,8 @@ export interface WorkoutCsvSkipReasonCount {
 }
 
 export interface WorkoutCsvImportPlan {
-  source: string;
-  detectedSource: string | null;
+  source: WorkoutCsvSource;
+  detectedSource: WorkoutCsvSource | null;
   delimiter: string;
   timeZone: string;
   headers: string[];
@@ -91,6 +93,7 @@ interface WorkoutCsvSessionExercise {
 }
 
 interface MutableWorkoutCsvSession {
+  sourceSessionKey: string;
   sourceWorkoutId: string;
   title: string;
   occurredAt: string;
@@ -117,16 +120,11 @@ function normalizeOptionalText(value: string | undefined): string | undefined {
   return normalized ? normalized : undefined;
 }
 
-function normalizeSource(value: string | undefined): string {
-  const normalized = value
-    ?.trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "-")
-    .replace(/^-+|-+$/gu, "");
-  return normalized || DEFAULT_SOURCE;
+function normalizeSource(value: WorkoutCsvSource | undefined): WorkoutCsvSource {
+  return value ?? DEFAULT_SOURCE;
 }
 
-function detectSource(headers: readonly string[]): string | null {
+function detectSource(headers: readonly string[]): WorkoutCsvSource | null {
   const normalizedHeaders = new Set(headers.map(normalizeHeaderName));
 
   if (
@@ -220,7 +218,7 @@ function incrementReason(reasons: Map<string, number>, reason: string): void {
 function normalizeRows(
   headers: readonly string[],
   rows: readonly string[][],
-  detectedSource: string | null,
+  detectedSource: WorkoutCsvSource | null,
 ): NormalizedCsvRows {
   const normalizedRows: string[][] = [];
   const skipReasons = new Map<string, number>();
@@ -462,7 +460,7 @@ function toKilograms(value: number, unit: WorkoutCsvWeightUnit): number {
   return unit === "lb" ? value * 0.45359237 : value;
 }
 
-function normalizeSetType(value: string | undefined, detectedSource: string | null): WorkoutSetType {
+function normalizeSetType(value: string | undefined, detectedSource: WorkoutCsvSource | null): WorkoutSetType {
   const normalized = normalizeOptionalText(value)?.toLowerCase();
   if (detectedSource === "strong") {
     if (normalized === "w") return "warmup";
@@ -476,9 +474,16 @@ function normalizeSetType(value: string | undefined, detectedSource: string | nu
   return "normal";
 }
 
-function stableWorkoutSourceId(source: string, rawTimestamp: string): string {
+function stableWorkoutSessionKey(rawTimestamp: string): string {
+  return createHash("sha256")
+    .update(rawTimestamp.trim())
+    .digest("hex")
+    .slice(0, 40);
+}
+
+function stableWorkoutSourceId(source: WorkoutCsvSource, sourceSessionKey: string): string {
   const digest = createHash("sha256")
-    .update(`${source}\0${rawTimestamp.trim()}`)
+    .update(`${source}\0${sourceSessionKey}`)
     .digest("hex")
     .slice(0, 40);
   return `${source}-workout-${digest}`;
@@ -500,7 +505,7 @@ function resolveExerciseMode(exercise: WorkoutCsvSessionExercise): WorkoutSessio
 }
 
 function toWarnings(input: {
-  detectedSource: string | null;
+  detectedSource: WorkoutCsvSource | null;
   requiresSourceSelection: boolean;
   repairedRowCount: number;
   ignoredRowCount: number;
@@ -543,8 +548,8 @@ function toWarnings(input: {
 function buildSessions(input: {
   headers: readonly string[];
   rows: readonly string[][];
-  source: string;
-  detectedSource: string | null;
+  source: WorkoutCsvSource;
+  detectedSource: WorkoutCsvSource | null;
   timeZone: string;
   weightUnit?: WorkoutCsvWeightUnit;
   distanceUnit?: WorkoutCsvDistanceUnit;
@@ -751,10 +756,12 @@ function buildSessions(input: {
     }
     titleByOccurredAt.set(occurredAt, title);
 
-    const sourceWorkoutId = stableWorkoutSourceId(input.source, rawTimestamp);
+    const sourceSessionKey = stableWorkoutSessionKey(rawTimestamp);
+    const sourceWorkoutId = stableWorkoutSourceId(input.source, sourceSessionKey);
     let session = sessions.get(sourceWorkoutId);
     if (!session) {
       session = {
+        sourceSessionKey,
         sourceWorkoutId,
         title,
         occurredAt,
@@ -857,6 +864,7 @@ function buildSessions(input: {
         };
       });
     return {
+      sourceSessionKey: session.sourceSessionKey,
       sourceWorkoutId: session.sourceWorkoutId,
       occurredAt: session.occurredAt,
       title: session.title,
@@ -918,10 +926,8 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
   }
 
   const inferredSource = detectSource(headers);
-  const explicitSource = input.source === undefined ? undefined : normalizeSource(input.source);
-  const explicitDialect = explicitSource === "strong" || explicitSource === "hevy"
-    ? explicitSource
-    : undefined;
+  const explicitSource = input.source;
+  const explicitDialect = explicitSource;
   const unambiguousSource = inferredSource;
   if (explicitDialect && unambiguousSource && explicitDialect !== unambiguousSource) {
     throw new TypeError(

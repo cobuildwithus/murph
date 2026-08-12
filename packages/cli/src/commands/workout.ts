@@ -902,9 +902,7 @@ export function registerWorkoutCommands(
     }),
     options: withBaseOptions({
       source: z
-        .string()
-        .min(1)
-        .max(80)
+        .enum(['strong', 'hevy'])
         .optional()
         .describe('Strong or Hevy dialect; required when the headers are shared by both apps.'),
       delimiter: z
@@ -942,9 +940,7 @@ export function registerWorkoutCommands(
     }),
     options: withBaseOptions({
       source: z
-        .string()
-        .min(1)
-        .max(80)
+        .enum(['strong', 'hevy'])
         .optional()
         .describe('Strong or Hevy dialect; required when the headers are shared by both apps.'),
       delimiter: z

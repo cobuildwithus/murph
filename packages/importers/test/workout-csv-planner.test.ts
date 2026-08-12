@@ -73,6 +73,14 @@ describe("planWorkoutCsvImport", () => {
       strong.sessions[0]?.workout.exercises[0]?.sets.map((set) => [set.order, set.type]),
       [[1, "normal"], [2, "normal"]],
     );
+    assert.equal(
+      hevy.sessions[0]?.sourceSessionKey,
+      strong.sessions[0]?.sourceSessionKey,
+    );
+    assert.notEqual(
+      hevy.sessions[0]?.sourceWorkoutId,
+      strong.sessions[0]?.sourceWorkoutId,
+    );
   });
 
   test("requires a source choice for headers shared by Strong and Hevy", () => {

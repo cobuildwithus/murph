@@ -542,6 +542,22 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
   assert.equal(inspected.headers.includes('Workout Name'), true)
   assert.deepEqual(inspected.warnings, [])
 
+  const unsupportedSource = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'inspect',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong-app',
+  ])
+  assert.equal(unsupportedSource.envelope.ok, false)
+  if (unsupportedSource.envelope.ok) {
+    throw new Error('Expected an unsupported workout source to fail validation.')
+  }
+  assert.equal(unsupportedSource.envelope.error.code, 'VALIDATION_ERROR')
+
   const imported = requireData(
     (
       await runWorkoutCli<{
@@ -785,6 +801,30 @@ test('Strong CSV import requires weight provenance, commits once, and returns bo
     throw new Error('Expected an unconfirmed unit change to fail closed.')
   }
   assert.equal(unconfirmedUnitChange.envelope.error.code, 'conflict')
+
+  const expandedUnitChangePath = path.join(parentRoot, 'strong-expanded-unit-change.csv')
+  await writeFile(
+    expandedUnitChangePath,
+    [header, ...rows, '2026-05-01 07:00:00,New Session,45m,Press,1,50,8,0,0,,,', ''].join('\n'),
+    'utf8',
+  )
+  const expandedUnitChange = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    expandedUnitChangePath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'kg',
+    '--distance-unit',
+    'km',
+  ])
+  assert.equal(expandedUnitChange.envelope.ok, false)
+  if (expandedUnitChange.envelope.ok) {
+    throw new Error('Expected an expanded snapshot with changed unit semantics to fail closed.')
+  }
+  assert.equal(expandedUnitChange.envelope.error.code, 'conflict')
 
   const corrected = requireData(
     (

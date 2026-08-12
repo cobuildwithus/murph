@@ -6775,8 +6775,10 @@
                                 "source": {
                                   "description": "Strong or Hevy dialect; required when the headers are shared by both apps.",
                                   "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 80
+                                  "enum": [
+                                    "strong",
+                                    "hevy"
+                                  ]
                                 },
                                 "delimiter": {
                                   "description": "Optional single-character CSV delimiter override.",
@@ -6822,8 +6824,10 @@
                                 "source": {
                                   "description": "Strong or Hevy dialect; required when the headers are shared by both apps.",
                                   "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 80
+                                  "enum": [
+                                    "strong",
+                                    "hevy"
+                                  ]
                                 },
                                 "delimiter": {
                                   "description": "Optional single-character CSV delimiter override.",

@@ -137,7 +137,11 @@ If the member says a previously confirmed unit was wrong, rerun the exact
 original CSV with the corrected unit option and `--correct-units`. Use that
 flag only after explicit confirmation; it supersedes the same imported workout
 identities, requires the exact prior raw evidence, and preserves the original
-workout timezone and other non-unit fields.
+workout timezone and other non-unit fields, including context added after the
+import. If both the provider and units were previously wrong, correct the
+provider first and the units second; do not combine the two recovery steps.
+If Murph reports overlapping exercise/set edits, stop instead of overwriting
+member changes.
 
 ## Strong
 

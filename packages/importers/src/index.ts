@@ -64,6 +64,7 @@ export {
   type WorkoutCsvDistanceUnit,
   type WorkoutCsvPlannerInput,
   type WorkoutCsvSkipReasonCount,
+  type WorkoutCsvSource,
   type WorkoutCsvWeightUnit,
 } from "./workout-csv-planner.ts";
 export {

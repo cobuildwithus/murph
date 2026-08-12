@@ -141,6 +141,18 @@ Updated: 2026-08-12
   guessed Strong. Shared Strong/Hevy shapes now require an explicit provider,
   while an exact prior batch mislabeled Strong can adopt explicit Hevy semantics
   in place through its existing raw attachment and authoritative event IDs.
+- Final ReviewGPT round 4 found that correction rebuilt current events from a
+  lossy CSV projection. Corrections now start from each latest attached event
+  and patch only explicitly unit- or dialect-owned fields; later tags, activity
+  classification, experiment context, evidence, attachments, workout media,
+  route/metrics, routine fields, and other canonical context survive by
+  construction. Overlapping exercise/set edits fail before mutation.
+- Final ReviewGPT round 4 also found that shipped-importer compatibility covered
+  only byte-identical files. The planner now emits a provider-neutral hashed
+  source-session key, and the usecase boundedly replans verified prior raw
+  snapshots and resolves their attached events in one core lookup. Refreshed
+  exports skip overlapping sessions, create only new sessions, and fail closed
+  on changed, partial, conflicting, ambiguous, or over-limit evidence.
 
 ## Verification
 
@@ -151,10 +163,10 @@ Updated: 2026-08-12
   export without row contents entering output; import blocks only on the
   explicit weight and distance unit choices; synthetic end-to-end import and
   replay are atomic and bounded; all required gates pass.
-- Latest focused remediation proof: importer planner 24 tests and vault workout
-  import 14 tests pass after round 3 remediation. Core event-batch 33 tests, CLI
-  workout command coverage 8 tests,
-  assistant guidance 3 tests, changelog 57 tests, scenario integrity (206
+- Latest focused remediation proof: importer planner 24 tests, vault workout
+  import 15 tests, and CLI workout command coverage 8 tests pass after round 4
+  remediation. Core event-batch 33 tests, assistant guidance 3 tests,
+  changelog 57 tests, scenario integrity (206
   scenarios / 12 sample inputs / 29 golden directories), all affected package
   typechecks, and affected package builds pass. The supplied export still plans
   7,521 rows into 915 sessions with 23 deterministic repairs, 23 ignored
