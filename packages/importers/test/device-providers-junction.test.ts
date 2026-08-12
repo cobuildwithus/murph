@@ -3375,6 +3375,127 @@ test("Junction normalizer compacts dense CGM glucose into daily facts and bounde
   assert.doesNotMatch(JSON.stringify(artifactContent), /"samples"|"data"\s*:/u);
 });
 
+test("Junction dense CGM import persists only one compact glucose aggregate and replays idempotently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-dense-cgm-import");
+  const nestedSentinel = "SENSITIVE_DENSE_CGM_NESTED_SENTINEL";
+  const samples = Array.from({ length: 288 }, (_, index) => ({
+    timestamp: new Date(Date.UTC(2026, 3, 22, 0, 0, 0) + index * 5 * 60_000).toISOString(),
+    unit: "mmol/L",
+    value: index % 2 === 0 ? 5 : 7,
+    ...(index === 137
+      ? { provider_private: { nested: [{ value: nestedSentinel }] } }
+      : {}),
+  }));
+  const snapshot = {
+    accountId: "junction-account-hash-dense-cgm",
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: samples,
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+    },
+  };
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+    assert.equal(first.applied, true);
+    assert.ok(first.ingestId);
+    assert.ok(first.ingestShardPath);
+    const ingest = await coreRuntime.readIntegrationIngestById(vaultRoot, first.ingestId);
+    assert.ok(ingest);
+    const aggregateParts = ingest.record.parts.filter((part) =>
+      part.role.startsWith("junction-timeseries-daily-glucose:")
+    );
+    const aggregatePart = aggregateParts[0];
+    assert.ok(aggregatePart);
+    const aggregateContent = JSON.parse(aggregatePart.content) as Record<string, unknown>;
+    const temporalShape = aggregateContent.temporalShape as Record<string, unknown>;
+    const hourlyBuckets = temporalShape.hourlyBuckets;
+    const eventRecords = (
+      await Promise.all(
+        first.eventShardPaths.map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+      )
+    ).flat();
+    const glucoseMetrics = new Set([
+      "glucose",
+      "lowest-glucose",
+      "highest-glucose",
+      "glucose-standard-deviation",
+      "glucose-coefficient-of-variation",
+    ]);
+    const glucoseRecords = latestLiveRecords(eventRecords).filter((record) =>
+      record.kind === "observation"
+      && typeof record.metric === "string"
+      && glucoseMetrics.has(record.metric)
+    );
+    const persistedText = JSON.stringify({
+      events: eventRecords,
+      ingest: ingest.record,
+    });
+
+    assert.equal(first.samples.length, 0);
+    assert.deepEqual(first.sampleShardPaths, []);
+    assert.equal(first.events.length, 5);
+    assert.equal(first.events.every((event) => event.kind === "observation"), true);
+    assert.equal(ingest.record.parts.length, 1);
+    assert.equal(aggregateParts.length, 1);
+    assert.match(
+      aggregatePart.role,
+      /^junction-timeseries-daily-glucose:2026-04-22:[a-f0-9]{16}$/u,
+    );
+    assert.equal(aggregateContent.schema, "junction.glucose_daily_aggregate.v2");
+    assert.equal(aggregateContent.sampleCount, 288);
+    assert.equal(Array.isArray(hourlyBuckets), true);
+    assert.ok(Array.isArray(hourlyBuckets) && hourlyBuckets.length <= 24);
+    assert.ok(Buffer.byteLength(JSON.stringify(temporalShape), "utf8") <= 4096);
+    assert.equal(ingest.record.parts.some((part) => part.role === "provider-snapshot"), false);
+    assert.equal(ingest.record.counts.sampleCount, 0);
+    assert.deepEqual(ingest.record.outputs.sampleIds, []);
+    assert.equal(ingest.record.counts.eventCount, 5);
+    assert.equal(ingest.record.outputs.events.length, 5);
+    assert.equal(glucoseRecords.length, 5);
+    assert.deepEqual(
+      ingest.record.outputs.events.map((output) => output.id).sort(),
+      first.events.map((event) => event.id).sort(),
+    );
+    assert.doesNotMatch(persistedText, /SENSITIVE_DENSE_CGM_NESTED_SENTINEL/u);
+    assert.doesNotMatch(persistedText, /"(?:data|samples)"\s*:/u);
+
+    assert.equal(replay.applied, false);
+    assert.equal(replay.ingestId, null);
+    assert.equal(replay.persistedEvidencePartCount, 0);
+    assert.deepEqual(replay.samples, []);
+    assert.deepEqual(
+      replay.events.map((event) => event.id).sort(),
+      first.events.map((event) => event.id).sort(),
+    );
+    assert.equal(
+      (await coreRuntime.readJsonlRecords({ vaultRoot, relativePath: first.ingestShardPath })).length,
+      1,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction glucose applies latest corrections and enforces the documented mmol/L contract", () => {
   const original = {
     id: "glucose-provider-row-old",
