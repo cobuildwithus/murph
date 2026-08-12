@@ -97,17 +97,13 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('GPT-5 execution bias:')
     expect(prompt).toContain('Lead the final reply with the result')
     expect(prompt).toContain(
-      'Cards replace text.',
+      'Complete cards replace text.',
     )
     expect(prompt).toContain(
-      'repeat or restyle routines with exercise cards',
-    )
-    expect(prompt).toContain('styling is not a Rich Message.')
-    expect(prompt).toContain(
-      'Pair media with brief cues and safety',
+      'Response media comes with concise text for order, dose, timing, cues, safety, and fallback',
     )
     expect(prompt).toContain(
-      '`murph.generate_image`: only if no card fits',
+      'Use `murph.generate_image` only if no card fits',
     )
     expect(prompt).toContain(
       'trim introductions, repetition, reassurance, and optional background first',
