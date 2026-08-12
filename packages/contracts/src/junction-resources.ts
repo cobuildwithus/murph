@@ -62,6 +62,7 @@ export type JunctionResourceName = (typeof JUNCTION_RESOURCE_INVENTORY)[number];
 export type JunctionResourceCategory = "summary" | "timeseries" | "dedicated_stream";
 export type JunctionResourceFrequency = "very_high" | "high" | "sparse";
 export type JunctionResourceAdmission = "default" | "known" | "opt_in" | "excluded" | "dedicated";
+export type JunctionResourceHistoryAnchor = "schedule_time" | "source_first_seen";
 export type JunctionResourceRetention =
   | "canonical_per_record"
   | "canonical_aggregate"
@@ -75,6 +76,7 @@ export interface JunctionResourcePolicy {
   category: JunctionResourceCategory;
   exclusionReason: string | null;
   frequency: JunctionResourceFrequency;
+  historyAnchor: JunctionResourceHistoryAnchor;
   historyChunkDays: number;
   initialHistoryDays: number;
   retention: JunctionResourceRetention;
@@ -97,6 +99,7 @@ function policy<
   initialHistoryDays: number,
   historyChunkDays: number,
   exclusionReason: string | null = null,
+  historyAnchor: JunctionResourceHistoryAnchor = "source_first_seen",
 ): Readonly<JunctionResourcePolicy & {
   admission: Admission;
   category: Category;
@@ -108,6 +111,7 @@ function policy<
     category,
     exclusionReason,
     frequency,
+    historyAnchor,
     historyChunkDays,
     initialHistoryDays,
     retention,
@@ -119,7 +123,16 @@ const summary = (retention: JunctionResourceRetention = "canonical_aggregate") =
 const daily = (frequency: JunctionResourceFrequency) =>
   policy("timeseries", frequency, "default", "canonical_aggregate", JUNCTION_DEFAULT_TIMESERIES_HISTORY_DAYS, 1);
 const sparseDaily = () =>
-  policy("timeseries", "sparse", "default", "canonical_aggregate", JUNCTION_LONG_HISTORY_DAYS, JUNCTION_SPARSE_HISTORY_CHUNK_DAYS);
+  policy(
+    "timeseries",
+    "sparse",
+    "default",
+    "canonical_aggregate",
+    JUNCTION_LONG_HISTORY_DAYS,
+    JUNCTION_SPARSE_HISTORY_CHUNK_DAYS,
+    null,
+    "schedule_time",
+  );
 const sparsePerRecord = () =>
   policy(
     "timeseries",
@@ -191,6 +204,8 @@ export const JUNCTION_RESOURCE_POLICIES = Object.freeze({
     "canonical_per_record",
     JUNCTION_LONG_HISTORY_DAYS,
     1,
+    null,
+    "schedule_time",
   ),
   body_mass_index: excluded("sparse", "No canonical per-reading importer is registered yet.", "canonical_per_record"),
   calories_basal: excluded("high", "No bounded aggregate importer is registered yet.", "feature_envelope"),

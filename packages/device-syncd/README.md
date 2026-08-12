@@ -50,6 +50,16 @@ Current providers:
   job, schedules at most eight resource/source pairs per reconcile pass, and
   retains only the existing compact daily facts. It never persists full
   provider timeseries arrays or emits canonical sample rows.
+- Extended source/resource completion has one writable owner:
+  `junctionExtendedHistoryCoverage`. Its `mN` prefix is the normalization
+  coverage-policy version; adding support for a previously noncanonical shape
+  must increment that version so exhausted history is reconsidered. The older
+  blood-pressure and note lists are read-only migration inputs and are removed
+  by the metadata merge once their bits are represented in the matrix.
+- Long-history anchoring is resource policy, not scheduler inference.
+  Rollout-added resources end their first scan at scheduling time so existing
+  connections receive recent history; resources whose history predates source
+  admission may explicitly use the source-first-seen anchor.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
