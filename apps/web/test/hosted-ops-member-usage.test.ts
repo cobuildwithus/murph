@@ -303,8 +303,8 @@ describe("hosted ops member usage", () => {
       members: 1_024n,
       totalAllTimeUsageUsdMicros: 9_223_372_036_854_775_808n,
     }));
-    const groupMessages = vi.fn(async (_input: unknown) => []);
-    const groupUsage = vi.fn(async (_input: unknown) => []);
+    const groupMessages = vi.fn(async () => []);
+    const groupUsage = vi.fn(async () => []);
     const findDeliveries = vi.fn(async () => []);
     const findMembers = createPagedMemberFindManyMock(memberCandidates);
     const prisma = asPrismaClientForHostedOpsTest({
@@ -371,12 +371,137 @@ describe("hosted ops member usage", () => {
     expect(findDeliveries).not.toHaveBeenCalled();
   });
 
-  test("keeps a previous-page recovery cursor when a forward page becomes empty", async () => {
+  test("recovers an empty forward boundary onto the final page without dropping the cursor member", async () => {
+    const fallbackCandidates = makeMemberCandidates({
+      count: 26,
+      descending: true,
+      start: 26,
+    });
+    const expectedPageDetails = makeMemberCandidates({ count: 25, start: 27 });
+    const expectedPageIds = expectedPageDetails.map((member) => member.id);
+    const findMembers = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(fallbackCandidates.map(({ id }) => ({ id })))
+      .mockResolvedValueOnce(expectedPageDetails);
+    const prisma = asPrismaClientForHostedOpsTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      hostedAiUsage: { groupBy: vi.fn(async () => []) },
+      hostedLinqDelivery: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { groupBy: vi.fn(async () => []) },
+      hostedMember: { findMany: findMembers },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage({
+      after: "hbm_051",
+      now: NOW,
+      prisma,
+    });
+
+    expect(dashboard.rows.map((row) => row.memberId)).toEqual(expectedPageIds);
+    expect(dashboard.rows.map((row) => row.memberId)).toContain("hbm_051");
+    expect(dashboard.rows.map((row) => row.memberId)).not.toContain("hbm_026");
+    expect(dashboard.pagination).toEqual({
+      nextCursor: null,
+      pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+      previousCursor: "hbm_027",
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(1, {
+      orderBy: { id: "asc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+      where: { id: { gt: "hbm_051" } },
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(2, {
+      orderBy: { id: "desc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+      where: { id: { lte: "hbm_051" } },
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        orderBy: { id: "asc" },
+        where: { id: { in: expectedPageIds } },
+      }),
+    );
+    expect(findMembers).toHaveBeenCalledTimes(3);
+    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+      .toHaveBeenCalledWith({
+        memberIds: expectedPageIds,
+        now: NOW,
+        prisma,
+      });
+  });
+
+  test("recovers an empty backward boundary onto the first page without dropping the cursor member", async () => {
+    const fallbackCandidates = makeMemberCandidates({ count: 26, start: 1 });
+    const expectedPageDetails = makeMemberCandidates({ count: 25, start: 1 });
+    const expectedPageIds = expectedPageDetails.map((member) => member.id);
+    const findMembers = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(fallbackCandidates.map(({ id }) => ({ id })))
+      .mockResolvedValueOnce(expectedPageDetails);
+    const prisma = asPrismaClientForHostedOpsTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      hostedAiUsage: { groupBy: vi.fn(async () => []) },
+      hostedLinqDelivery: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { groupBy: vi.fn(async () => []) },
+      hostedMember: { findMany: findMembers },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage({
+      before: "hbm_001",
+      now: NOW,
+      prisma,
+    });
+
+    expect(dashboard.rows.map((row) => row.memberId)).toEqual(expectedPageIds);
+    expect(dashboard.rows.map((row) => row.memberId)).toContain("hbm_001");
+    expect(dashboard.rows.map((row) => row.memberId)).not.toContain("hbm_026");
+    expect(dashboard.pagination).toEqual({
+      nextCursor: "hbm_025",
+      pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+      previousCursor: null,
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(1, {
+      orderBy: { id: "desc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+      where: { id: { lt: "hbm_001" } },
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(2, {
+      orderBy: { id: "asc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+      where: { id: { gte: "hbm_001" } },
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        orderBy: { id: "asc" },
+        where: { id: { in: expectedPageIds } },
+      }),
+    );
+    expect(findMembers).toHaveBeenCalledTimes(3);
+    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+      .toHaveBeenCalledWith({
+        memberIds: expectedPageIds,
+        now: NOW,
+        prisma,
+      });
+  });
+
+  test("returns an empty page only when both bounded boundary scans find no members", async () => {
     const findMembers = vi.fn(async () => []);
     const groupMessages = vi.fn();
     const groupUsage = vi.fn();
     const prisma = asPrismaClientForHostedOpsTest({
-      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      $queryRaw: vi.fn(async () => makeSummaryRows({
+        activeEntitiesLast7Days: 0n,
+        groupContainers: 0n,
+        members: 0n,
+        totalAllTimeUsageUsdMicros: 0n,
+      })),
       hostedAiUsage: { groupBy: groupUsage },
       hostedLinqDelivery: { findMany: vi.fn() },
       hostedMailboxItem: { groupBy: groupMessages },
@@ -393,9 +518,21 @@ describe("hosted ops member usage", () => {
     expect(dashboard.pagination).toEqual({
       nextCursor: null,
       pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
-      previousCursor: "hbm_999",
+      previousCursor: null,
     });
-    expect(findMembers).toHaveBeenCalledTimes(1);
+    expect(findMembers).toHaveBeenNthCalledWith(1, {
+      orderBy: { id: "asc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+      where: { id: { gt: "hbm_999" } },
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(2, {
+      orderBy: { id: "desc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+      where: { id: { lte: "hbm_999" } },
+    });
+    expect(findMembers).toHaveBeenCalledTimes(2);
     expect(groupMessages).not.toHaveBeenCalled();
     expect(groupUsage).not.toHaveBeenCalled();
     expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)

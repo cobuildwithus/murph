@@ -152,21 +152,38 @@ export async function readHostedOpsMemberUsage(
   const retentionWindowStart = new Date(
     now.getTime() - HOSTED_MESSAGE_RETENTION_DAYS * DAY_MS,
   );
-  const descending = before !== null;
+  const requestedDescending = before !== null;
   const cursor = before ?? after;
+  let pageDescending = requestedDescending;
+  let recoveredBoundaryPage = false;
 
-  const memberKeyCandidates = await prisma.hostedMember.findMany({
+  let memberKeyCandidates = await prisma.hostedMember.findMany({
     ...(cursor
       ? {
           where: {
-            id: descending ? { lt: cursor } : { gt: cursor },
+            id: requestedDescending ? { lt: cursor } : { gt: cursor },
           },
         }
       : {}),
-    orderBy: { id: descending ? "desc" : "asc" },
+    orderBy: { id: requestedDescending ? "desc" : "asc" },
     select: { id: true },
     take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
   });
+  // A strict cursor can become empty at a real endpoint or after deletions.
+  // Re-anchor with one opposite-direction inclusive cap-plus-one scan so the
+  // boundary member is not skipped when the operator navigates back.
+  if (cursor && memberKeyCandidates.length === 0) {
+    recoveredBoundaryPage = true;
+    pageDescending = !requestedDescending;
+    memberKeyCandidates = await prisma.hostedMember.findMany({
+      orderBy: { id: pageDescending ? "desc" : "asc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+      where: {
+        id: pageDescending ? { lte: cursor } : { gte: cursor },
+      },
+    });
+  }
   const hasMoreInReadDirection =
     memberKeyCandidates.length > HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE;
   const selectedMemberKeys = memberKeyCandidates.slice(
@@ -174,7 +191,7 @@ export async function readHostedOpsMemberUsage(
     HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
   );
   const pageMemberIds = (
-    descending ? selectedMemberKeys.reverse() : selectedMemberKeys
+    pageDescending ? selectedMemberKeys.reverse() : selectedMemberKeys
   ).map((member) => member.id);
   const members = pageMemberIds.length > 0
     ? await prisma.hostedMember.findMany({
@@ -404,24 +421,32 @@ export async function readHostedOpsMemberUsage(
 
   const firstMemberId = pageMemberIds[0] ?? null;
   const lastMemberId = pageMemberIds.at(-1) ?? null;
+  let nextCursor: string | null;
+  let previousCursor: string | null;
+  if (recoveredBoundaryPage) {
+    nextCursor = pageDescending
+      ? null
+      : hasMoreInReadDirection
+        ? lastMemberId
+        : null;
+    previousCursor = pageDescending && hasMoreInReadDirection
+      ? firstMemberId
+      : null;
+  } else if (requestedDescending) {
+    nextCursor = lastMemberId ?? before;
+    previousCursor = hasMoreInReadDirection ? firstMemberId : null;
+  } else {
+    nextCursor = hasMoreInReadDirection ? lastMemberId : null;
+    previousCursor = after ? firstMemberId ?? after : null;
+  }
 
   return {
     capturedAt: now.toISOString(),
     messageRetentionDays: HOSTED_MESSAGE_RETENTION_DAYS,
     pagination: {
-      nextCursor: descending
-        ? lastMemberId ?? before
-        : hasMoreInReadDirection
-          ? lastMemberId
-          : null,
+      nextCursor,
       pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
-      previousCursor: descending
-        ? hasMoreInReadDirection
-          ? firstMemberId
-          : null
-        : after
-          ? firstMemberId ?? after
-          : null,
+      previousCursor,
     },
     rows,
     summary,
