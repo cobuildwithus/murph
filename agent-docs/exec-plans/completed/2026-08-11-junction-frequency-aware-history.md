@@ -1,8 +1,8 @@
 # Make Junction historical sync frequency-aware
 
-Status: active
+Status: completed
 Created: 2026-08-11
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 ## Goal
 
@@ -16,8 +16,10 @@ Updated: 2026-08-11
 
 - Every configured sparse wellness resource receives the summary-history
   window only when a persisted admitted source advertises that resource.
-- Existing sources receive one rollout migration ending at the current day;
-  blood pressure retains its source-first-seen anchor and exact per-reading
+- Eligible existing sources receive one rollout migration ending at the
+  current day when exact coverage is retainable; saturated metadata remains
+  safely deferred until the existing scheduler observes available capacity.
+  Blood pressure retains its source-first-seen anchor and exact per-reading
   completion proof.
 - Daily-aggregate resources complete after a successful canonical import even
   when several upstream rows reduce to one observation; malformed/no-op rows
@@ -67,7 +69,7 @@ Updated: 2026-08-11
 4. [completed] Update owning behavior docs and add a concise public changelog item.
 5. [completed] Run focused verification and inspect the candidate diff for privacy and
    simplicity.
-6. [pending] Commit, push, open the PR, run CI and both ReviewGPT lanes, then apply and
+6. [completed] Commit, push, open the PR, run CI and both ReviewGPT lanes, then apply and
    verify accepted findings or returned patches.
 
 ## Decisions
@@ -98,3 +100,17 @@ Updated: 2026-08-11
   list passed to the mutable provider config. Copying that list resolved the
   boundary; the device-sync package typecheck and all 64 focused backfill tests
   pass afterward.
+- Final focused proof passed all seven affected device-sync Vitest files (579
+  tests), the device-sync typecheck, the Junction importer suite (150 tests),
+  CLI measurement parity (13 tests), four changelog suites (56 tests), and the
+  Web and importer typechecks.
+- Preliminary ReviewGPT found one provider-date terminal-classification issue;
+  the accepted correction passed. Final ReviewGPT reached `PASS` in round 11
+  after accepted corrections for provider-calendar ownership, live readiness
+  and catch-up derivation, canonical source matching, accepted-row accounting,
+  compact exact coverage retention, hydration compaction, and safe scheduler
+  deferral at metadata capacity.
+- Required GitHub checks passed on the final production-code head. The viewport
+  suite's first attempt lost a Playwright execution context during navigation;
+  its isolated rerun passed all cases without a code change.
+Completed: 2026-08-12
