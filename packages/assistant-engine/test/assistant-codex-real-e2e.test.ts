@@ -1137,7 +1137,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               totalSeconds: 60,
             })
             expect(result.responseMedia, `${scenario.label} media`).toEqual([])
-            expect(result.finalMessage.trim(), `${scenario.label} duplicate text`).toBe('')
+            expect(
+              result.finalMessage.trim(),
+              `${scenario.label} duplicate text`,
+            ).toBe('')
           } else {
             expect(
               actions.filter((action) =>
@@ -1154,7 +1157,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               }),
             ])
             expect(result.finalMessage, `${scenario.label} dose`).toMatch(/8/iu)
-            expect(result.finalMessage, `${scenario.label} time`).toMatch(/60|minute/iu)
+            expect(result.finalMessage, `${scenario.label} time`).toMatch(
+              /60|minute/iu,
+            )
             expect(result.finalMessage, `${scenario.label} safety`).toMatch(/pain/iu)
           }
         }
