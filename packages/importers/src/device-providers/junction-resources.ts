@@ -30,6 +30,10 @@ export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
   "stress_level",
   "vo2_max",
   "weight",
+  "fat",
+  "body_mass_index",
+  "lean_body_mass",
+  "waist_circumference",
   "body_temperature_delta",
   "body_temperature",
   "basal_body_temperature",
@@ -64,7 +68,16 @@ export type JunctionTimeseriesResource =
 // not accumulate giant raw timeseries dumps. Sleep-grain heart rate and
 // hypnogram detail already arrive through the `sleep`/`sleep_cycle` summary
 // resources.
-export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
+// Sparse body measurements are normalized as one compact canonical fact per
+// reading. The shared Junction resource-policy owner decides when they enter
+// default polling and historical backfill.
+export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
+  "weight",
+  "fat",
+  "body_mass_index",
+  "lean_body_mass",
+  "waist_circumference",
+] as const);
 
 export const JUNCTION_OPT_IN_SUMMARY_RESOURCES = Object.freeze([] as const);
 
@@ -495,6 +508,8 @@ export function normalizeJunctionResourceName(value: unknown): string | null {
       return "stress_level";
     case "body_weight":
       return "weight";
+    case "body_fat":
+      return "fat";
     case "sleep_cycle":
     case "hypnogram":
       return "sleep_cycle";

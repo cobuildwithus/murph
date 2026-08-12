@@ -57,9 +57,12 @@ function normalizeMetricValueForScope(
       return normalizeWeight(input.value, unit);
     case "waist-circumference":
       return normalizeLengthCentimeters(input.value, unit, definition.displayName);
+    case "bone-mass-percentage":
     case "body-fat-percentage":
+    case "body-water-percentage":
     case "hba1c":
     case "lymphocyte-percentage":
+    case "muscle-mass-percentage":
     case "red-cell-distribution-width":
       return normalizePercent(input.value, unit, definition.displayName);
     case "creatinine":

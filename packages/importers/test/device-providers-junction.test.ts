@@ -234,10 +234,18 @@ function findJunctionCompactTimeseriesArtifacts(
 function assertNoFullJunctionTimeseriesArtifacts(payload: DeviceBatchImportPayload): void {
   assert.equal(
     (payload.evidenceParts ?? []).some((artifact) =>
-      /^junction-timeseries-(?!daily-|reading-(?:blood-pressure|note):)/u.test(artifact.role)
+      /^junction-timeseries-(?!daily-|reading-)/u.test(artifact.role)
     ),
     false,
   );
+}
+
+function findJunctionBodyReadingArtifacts(
+  payload: DeviceBatchImportPayload,
+  resourceSlug: string,
+) {
+  return (payload.evidenceParts ?? [])
+    .filter((artifact) => artifact.role.startsWith(`junction-timeseries-reading-${resourceSlug}:`));
 }
 
 function findJunctionBloodPressureReadingArtifacts(payload: DeviceBatchImportPayload) {
@@ -3346,6 +3354,176 @@ test("Junction normalizer lands sparse paired blood pressure readings as measure
   assert.doesNotMatch(artifactText, /"value":350|"systolic":350|"diastolic":95/u);
 });
 
+test("Junction normalizer lands sparse body readings as compact sample-grain observations", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      body_weight: [{
+        source: { provider: "withings", type: "scale", id: "scale-primary" },
+        timestamp: "2026-04-22T08:05:00-05:00",
+        unit: "kg",
+        value: 81.2,
+      }],
+      body_fat: [{
+        source: { provider: "withings", type: "scale", id: "scale-primary" },
+        timestamp: "2026-04-22T08:05:00-05:00",
+        unit: "%",
+        value: 18.4,
+      }],
+      body_mass_index: [{
+        source: { provider: "withings", type: "scale", id: "scale-primary" },
+        start: "2026-04-22T08:05:00-05:00",
+        end: "2026-04-22T08:06:00-05:00",
+        unit: "index",
+        value: 23.7,
+      }],
+      lean_body_mass: [{
+        source: { provider: "withings", type: "scale", id: "scale-primary" },
+        start: "2026-04-22T08:05:00-05:00",
+        end: "2026-04-22T08:06:00-05:00",
+        unit: "kg",
+        value: 66.3,
+      }],
+      waist_circumference: [{
+        source: { provider: "withings", type: "scale", id: "scale-primary" },
+        start: "2026-04-22T08:05:00-05:00",
+        end: "2026-04-22T08:06:00-05:00",
+        unit: "cm",
+        value: 84.6,
+      }],
+    },
+  });
+
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+  const facts = observations.map((event) => ({
+    metric: event.fields?.metric,
+    occurredAt: event.occurredAt,
+    grain: event.fields?.observationGrain,
+    unit: event.fields?.unit,
+    value: event.fields?.value,
+  }));
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, [
+    "weight",
+    "fat",
+    "body_mass_index",
+    "lean_body_mass",
+    "waist_circumference",
+  ]);
+  assert.deepEqual(facts, [
+    { metric: "weight", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "kg", value: 81.2 },
+    { metric: "body-fat-percentage", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "%", value: 18.4 },
+    { metric: "bmi", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "kg_m2", value: 23.7 },
+    { metric: "lean-body-mass", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "kg", value: 66.3 },
+    { metric: "waist-circumference", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "cm", value: 84.6 },
+  ]);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+  assertEventRawArtifactRolesExist(payload);
+  for (const resourceSlug of ["weight", "fat", "body-mass-index", "lean-body-mass", "waist-circumference"]) {
+    const artifacts = findJunctionBodyReadingArtifacts(payload, resourceSlug);
+    assert.equal(artifacts.length, 1);
+    assert.ok(JSON.stringify(artifacts[0]?.content).length < 1024);
+    assert.equal(Array.isArray(artifacts[0]?.content), false);
+  }
+  const evidenceText = JSON.stringify(payload.evidenceParts);
+  assert.doesNotMatch(evidenceText, /"data"|"groups"|"samples"/u);
+  assert.match(evidenceText, /"schema":"junction\.body_measurement_reading\.v1"/u);
+});
+
+test("Junction sparse body readings keep stable identity across corrected values and reject invalid facts", () => {
+  const normalize = (value: number) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      body_fat: [{
+        sourceProviderSlug: "withings",
+        sourceType: "scale",
+        sourceInstanceId: "primary",
+        timestamp: "2026-04-22T08:05:00Z",
+        unit: "%",
+        value,
+      }],
+    },
+  });
+  const first = normalize(18.4);
+  const corrected = normalize(18.1);
+
+  assert.deepEqual(first.events?.[0]?.externalRef, corrected.events?.[0]?.externalRef);
+  assert.equal(
+    findJunctionBodyReadingArtifacts(first, "fat")[0]?.role,
+    findJunctionBodyReadingArtifacts(corrected, "fat")[0]?.role,
+  );
+
+  const invalid = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      body_weight: [{ sourceProviderSlug: "withings", timestamp: "2026-04-22T08:00:00Z", unit: "lb", value: 180 }],
+      body_fat: [{ sourceProviderSlug: "withings", timestamp: "2026-04-22T08:00:00Z", unit: "%", value: 101 }],
+      body_mass_index: [{ sourceProviderSlug: "withings", start: "2026-04-22", unit: "index", value: -1 }],
+      lean_body_mass: [{ sourceProviderSlug: "withings", timestamp: "2026-04-22T08:00:00Z", value: 60 }],
+      waist_circumference: [{ sourceProviderSlug: "withings", timestamp: "2026-04-22T08:00:00Z", unit: "in", value: 34 }],
+    },
+  });
+
+  assert.equal(invalid.events?.length ?? 0, 0);
+  assert.equal(invalid.samples?.length ?? 0, 0);
+  assert.doesNotMatch(JSON.stringify(invalid.evidenceParts), /"value":/u);
+});
+
+test("Junction sparse body readings pass the canonical device import contract", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-body-reading-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const snapshot = {
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        body_fat: [{
+          sourceProviderSlug: "withings",
+          sourceType: "scale",
+          sourceInstanceId: "primary",
+          timestamp: "2026-04-22T08:05:00Z",
+          unit: "%",
+          value: 18.4,
+        }],
+      },
+    };
+
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", snapshot, vaultRoot },
+      { corePort: coreRuntime },
+    );
+    const event = result.events.find((candidate) => candidate.kind === "observation");
+    if (result.ingestId === null) {
+      throw new Error("expected a persisted body-composition ingest");
+    }
+    const ingest = await coreRuntime.readIntegrationIngestById(vaultRoot, result.ingestId);
+
+    assert.ok(event);
+    assert.equal(event.kind, "observation");
+    if (event.kind !== "observation") {
+      throw new Error("expected a body-composition observation");
+    }
+    assert.equal(event.metric, "body-fat-percentage");
+    assert.equal(event.observationGrain, "sample");
+    assert.equal(event.unit, "%");
+    assert.equal(event.value, 18.4);
+    assert.equal(result.samples.length, 0);
+    assert.ok(ingest?.record.parts.some((part) =>
+      part.role.startsWith("junction-timeseries-reading-fat:")
+    ));
+    assert.equal(ingest?.record.parts.some((part) =>
+      part.role === "provider-snapshot"
+      || /^junction-timeseries-(?!reading-)/u.test(part.role)
+    ), false);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction normalizer lands Oura note tags without retaining note text", async () => {
   const snapshot = {
     importedAt: "2026-04-23T12:00:00.000Z",
@@ -3994,7 +4172,7 @@ test("Junction normalizer does not use source-specific floating timestamps as wi
   });
 
   assert.equal(payload.events?.some((event) => event.fields?.metric === "weight"), false);
-  assert.deepEqual(payload.provenance?.timeseriesResources, []);
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["weight"]);
   assertNoFullJunctionTimeseriesArtifacts(payload);
 });
 
@@ -4191,12 +4369,21 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "note",
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
-  assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
+  assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], [
+    "weight",
+    "fat",
+    "body_mass_index",
+    "lean_body_mass",
+    "waist_circumference",
+  ]);
   assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_ALLOWED_SUMMARY_RESOURCES], [
     ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   ]);
-  assert.deepEqual([...JUNCTION_ALLOWED_TIMESERIES_RESOURCES], [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]);
+  assert.deepEqual([...JUNCTION_ALLOWED_TIMESERIES_RESOURCES], [
+    ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+    ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  ]);
 
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
@@ -4948,7 +5135,7 @@ test("Junction normalizer canonicalizes documented resource aliases before allow
   const glucoseEvent = payload.events?.find((event) => event.fields?.metric === "glucose");
 
   assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
-  assert.deepEqual(payload.provenance?.timeseriesResources, ["glucose"]);
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["weight", "glucose"]);
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "glucose").length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
@@ -7747,7 +7934,7 @@ test("Junction normalizer merges canonical and alias resource payloads before im
   });
 
   assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
-  assert.deepEqual(payload.provenance?.timeseriesResources, []);
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["weight"]);
   assert.equal(
     payload.evidenceParts?.filter((artifact) => artifact.role === "junction-summary-sleep-cycle").length,
     1,
@@ -8307,9 +8494,13 @@ test("Junction normalizer maps documented activity and body summary scalar field
         id: "body-documented-fields",
         date: "2026-05-20T08:00:00+00:00",
         body_mass_index: 22.3,
+        bone_mass_percentage: 4.2,
         fat: 30,
         lean_body_mass_kilogram: 40.1,
+        muscle_mass_percentage: 63.4,
+        visceral_fat_index: 7,
         waist_circumference_centimeter: 86.36,
+        water_percentage: 51.8,
         body_temperature: 36.7,
         weight: 80,
       }],
@@ -8343,6 +8534,10 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("weight"), 80);
   assert.equal(metricValue("bmi"), 22.3);
   assert.equal(metricValue("body-fat-percentage"), 30);
+  assert.equal(metricValue("bone-mass-percentage"), 4.2);
+  assert.equal(metricValue("muscle-mass-percentage"), 63.4);
+  assert.equal(metricValue("visceral-fat-index"), 7);
+  assert.equal(metricValue("body-water-percentage"), 51.8);
   assert.equal(metricValue("waist-circumference"), 86.36);
   assert.equal(metricValue("lean-body-mass"), 40.1);
   assert.equal(metricValue("temperature"), 36.7);

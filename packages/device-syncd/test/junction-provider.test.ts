@@ -568,6 +568,100 @@ test("Junction omitted timeseries config defaults to compact resources only", as
   assert.equal(importedSnapshots.length, 1);
 });
 
+test("Junction explicitly configured sparse body resources fetch only documented endpoints", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const bodyResources = [
+    "weight",
+    "fat",
+    "body_mass_index",
+    "lean_body_mass",
+    "waist_circumference",
+  ];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: bodyResources,
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-withings-1",
+            slug: "withings",
+            name: "Withings",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+              body_weight: true,
+              body_fat: true,
+              body_mass_index: true,
+              lean_body_mass: true,
+              waist_circumference: true,
+            },
+          }],
+        });
+      }
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+        return createJsonResponse({ data: [] });
+      }
+      const bodyResource = new URL(url).pathname.match(
+        /^\/v2\/timeseries\/junction-user-1\/(body_weight|body_fat|body_mass_index|lean_body_mass|waist_circumference)\/grouped$/u,
+      )?.[1];
+      if (bodyResource) {
+        const unitByResource: Record<string, string> = {
+          body_fat: "%",
+          body_mass_index: "index",
+          body_weight: "kg",
+          lean_body_mass: "kg",
+          waist_circumference: "cm",
+        };
+        return createJsonResponse({
+          groups: {
+            withings: [{
+              data: [{
+                timestamp: "2026-04-02T12:00:00.000Z",
+                unit: unitByResource[bodyResource],
+                value: 20,
+              }],
+              source: { provider: "withings", type: "scale" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount(),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(
+    requests.flatMap((url) => {
+      const match = new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u);
+      return match?.[1] ? [match[1]] : [];
+    }).sort(),
+    ["body_fat", "body_mass_index", "body_weight", "lean_body_mass", "waist_circumference"],
+  );
+  assert.equal(importedSnapshots.length, 1);
+});
+
 test("Junction known dense programmatic timeseries config falls back to compact daily defaults", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
@@ -1898,13 +1992,16 @@ test("Junction REST diagnostics use date params for date-only summary resources"
   }
 });
 
-test("Junction maps the weight timeseries resource to the documented body_weight endpoint", async () => {
+test("Junction maps body timeseries resources to their documented endpoints", async () => {
   const seenUrls: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     seenUrls.push(url);
 
-    if (url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")) {
+    if (
+      url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")
+      || url.includes("/v2/timeseries/junction-user-1/body_fat/grouped")
+    ) {
       return createJsonResponse({ groups: {} });
     }
 
@@ -1915,23 +2012,31 @@ test("Junction maps the weight timeseries resource to the documented body_weight
   const probeRest = provider.diagnostics?.probeRest;
   assert.ok(probeRest);
 
-  await probeRest({
-    account: createAccount(),
-    endpoint: "timeseries",
-    now: "2026-04-03T12:00:00.000Z",
-    resource: "weight",
-    windowStart: "2026-04-02T00:00:00.000Z",
-    windowEnd: "2026-04-03T00:00:00.000Z",
-  });
+  for (const resource of ["weight", "fat"]) {
+    await probeRest({
+      account: createAccount(),
+      endpoint: "timeseries",
+      now: "2026-04-03T12:00:00.000Z",
+      resource,
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    });
+  }
 
-  assert.equal(seenUrls.length, 1);
-  const seenUrl = requireValue(seenUrls[0], "Junction diagnostic should issue one read request.");
-  assert.equal(new URL(seenUrl).pathname, "/v2/timeseries/junction-user-1/body_weight/grouped");
-  assertJunctionWindowQuery(
-    seenUrl,
-    "2026-04-02T00:00:00.000Z",
-    "2026-04-03T00:00:00.000Z",
+  assert.deepEqual(
+    seenUrls.map((seenUrl) => new URL(seenUrl).pathname),
+    [
+      "/v2/timeseries/junction-user-1/body_weight/grouped",
+      "/v2/timeseries/junction-user-1/body_fat/grouped",
+    ],
   );
+  for (const seenUrl of seenUrls) {
+    assertJunctionWindowQuery(
+      seenUrl,
+      "2026-04-02T00:00:00.000Z",
+      "2026-04-03T00:00:00.000Z",
+    );
+  }
 });
 
 test("Junction REST diagnostic can force a bounded user data refresh", async () => {

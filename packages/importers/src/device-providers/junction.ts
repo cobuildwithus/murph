@@ -272,6 +272,34 @@ const BODY_METRICS: readonly MetricDescriptor[] = [
   { metric: "body-fat-percentage", unit: "%", title: "Junction body fat", paths: ["bodyFatPercentage", "body_fat_percentage", "body_fat_percent", "bodyFat", "body_fat", "fat"] },
   { metric: "lean-body-mass", unit: "kg", title: "Junction lean body mass", paths: ["leanBodyMassKg", "lean_body_mass_kg", "leanBodyMassKilogram", "lean_body_mass_kilogram", "leanMassKg", "lean_mass_kg"] },
   { metric: "waist-circumference", unit: "cm", title: "Junction waist circumference", paths: ["waistCircumference", "waist_circumference", "waistCircumferenceCentimeter", "waist_circumference_centimeter", "waistCircumferenceCm", "waist_circumference_cm"] },
+  {
+    metric: "bone-mass-percentage",
+    unit: "%",
+    title: "Junction bone mass percentage",
+    paths: [],
+    value: (entry) => normalizeBodyCompositionPercent(firstNumberFromPaths(entry, ["boneMassPercentage", "bone_mass_percentage"])),
+  },
+  {
+    metric: "muscle-mass-percentage",
+    unit: "%",
+    title: "Junction muscle mass percentage",
+    paths: [],
+    value: (entry) => normalizeBodyCompositionPercent(firstNumberFromPaths(entry, ["muscleMassPercentage", "muscle_mass_percentage"])),
+  },
+  {
+    metric: "visceral-fat-index",
+    unit: "index",
+    title: "Junction visceral fat index",
+    paths: [],
+    value: (entry) => normalizeNonNegativeBodyIndex(firstNumberFromPaths(entry, ["visceralFatIndex", "visceral_fat_index"])),
+  },
+  {
+    metric: "body-water-percentage",
+    unit: "%",
+    title: "Junction body water percentage",
+    paths: [],
+    value: (entry) => normalizeBodyCompositionPercent(firstNumberFromPaths(entry, ["waterPercentage", "water_percentage"])),
+  },
   { metric: "temperature", unit: "celsius", title: "Junction body temperature", paths: ["temperature", "bodyTemperature", "body_temperature", "temperatureCelsius", "temperature_celsius", "skin_temperature"] },
 ];
 
@@ -1396,6 +1424,15 @@ interface JunctionDailyTimeseriesDescriptor {
   valuePaths: readonly string[];
 }
 
+interface JunctionSparseBodyTimeseriesDescriptor {
+  metric: string;
+  normalizeValue: (value: unknown) => number | undefined;
+  title: string;
+  unit: string;
+  upstreamUnits: ReadonlySet<string>;
+  valuePaths: readonly string[];
+}
+
 // Every default-enabled timeseries resource must appear here with a bounded
 // daily-aggregate mapping (or, for paired-shape `blood_pressure` only, the
 // dedicated sparse per-reading handler below); raw evidence stays one compact
@@ -1544,6 +1581,56 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
 const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTimeseriesDescriptor> =
   new Map(JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES);
 
+const JUNCTION_SPARSE_BODY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
+  JunctionTimeseriesResource,
+  JunctionSparseBodyTimeseriesDescriptor,
+])[] = [
+  ["weight", {
+    metric: "weight",
+    normalizeValue: normalizeBodyWeightKilograms,
+    title: "Junction body weight",
+    unit: "kg",
+    upstreamUnits: new Set(["kg", "kilogram", "kilograms"]),
+    valuePaths: ["value", "weight", "bodyWeight", "body_weight"],
+  }],
+  ["fat", {
+    metric: "body-fat-percentage",
+    normalizeValue: normalizeBodyCompositionPercent,
+    title: "Junction body fat percentage",
+    unit: "%",
+    upstreamUnits: new Set(["%", "percent", "percentage"]),
+    valuePaths: ["value", "fat", "bodyFat", "body_fat"],
+  }],
+  ["body_mass_index", {
+    metric: "bmi",
+    normalizeValue: normalizeBodyMassIndex,
+    title: "Junction BMI",
+    unit: "kg_m2",
+    upstreamUnits: new Set(["index", "kg_m2", "kg/m2", "kg/m^2"]),
+    valuePaths: ["value", "bmi", "bodyMassIndex", "body_mass_index"],
+  }],
+  ["lean_body_mass", {
+    metric: "lean-body-mass",
+    normalizeValue: normalizeLeanBodyMassKilograms,
+    title: "Junction lean body mass",
+    unit: "kg",
+    upstreamUnits: new Set(["kg", "kilogram", "kilograms"]),
+    valuePaths: ["value", "leanBodyMass", "lean_body_mass"],
+  }],
+  ["waist_circumference", {
+    metric: "waist-circumference",
+    normalizeValue: normalizeWaistCircumferenceCentimeters,
+    title: "Junction waist circumference",
+    unit: "cm",
+    upstreamUnits: new Set(["cm", "centimeter", "centimeters"]),
+    valuePaths: ["value", "waistCircumference", "waist_circumference"],
+  }],
+];
+
+const JUNCTION_SPARSE_BODY_TIMESERIES_DESCRIPTORS:
+  ReadonlyMap<string, JunctionSparseBodyTimeseriesDescriptor> =
+    new Map(JUNCTION_SPARSE_BODY_TIMESERIES_DESCRIPTOR_ENTRIES);
+
 // Junction's blood-pressure timeseries pairs `systolic`/`diastolic` per
 // reading (docs.junction.com/api-reference/data/timeseries/blood-pressure),
 // so it cannot reduce through the single-value daily-aggregate descriptors.
@@ -1552,9 +1639,9 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTi
 const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
 const JUNCTION_NOTE_RESOURCE = "note";
 
-// Derived from the descriptor entries (plus the sparse paired blood-pressure
-// resource) so the raw-snapshot sanitization allowlist cannot drift from the
-// bounded normalization set.
+// Only resources whose sanitized provider snapshot is itself bounded belong
+// here. Sparse body readings deliberately stay out: they are retained solely
+// as compact per-reading evidence, never as a provider response array.
 const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set([
   ...JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
   JUNCTION_BLOOD_PRESSURE_RESOURCE,
@@ -1576,11 +1663,184 @@ function normalizeTimeseries(
       continue;
     }
 
+    const sparseBodyDescriptor = JUNCTION_SPARSE_BODY_TIMESERIES_DESCRIPTORS.get(resource);
+    if (sparseBodyDescriptor) {
+      pushJunctionSparseBodyReadings(
+        payload,
+        resource,
+        slugify(resource, "timeseries"),
+        context,
+        sparseBodyDescriptor,
+      );
+      continue;
+    }
+
     const descriptor = JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource);
     if (descriptor) {
       pushJunctionDailyTimeseriesObservations(payload, resource, slugify(resource, "timeseries"), context, descriptor);
     }
   }
+}
+
+function pushJunctionSparseBodyReadings(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+  descriptor: JunctionSparseBodyTimeseriesDescriptor,
+): void {
+  const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
+  const seenReadingIdentities = new Set<string>();
+  let readingCount = 0;
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: baseArtifactRole,
+      context,
+    });
+    if (!resourceContext) {
+      continue;
+    }
+
+    const value = descriptor.normalizeValue(firstNumberFromPaths(entry, descriptor.valuePaths));
+    const upstreamUnit = firstStringFromPaths(entry, ["unit"]);
+    const timestamp = resolveJunctionSparseBodyReadingTimestamp(
+      entry,
+      context,
+      resourceContext.sourceProviderSlug,
+    );
+    const occurredAt = timestamp.observedAtRaw ? timestamp.occurredAt : undefined;
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(
+      entry,
+      timestamp,
+      occurredAt,
+      context.defaultTimeZone,
+    );
+    if (
+      value === undefined
+      || !upstreamUnit
+      || !descriptor.upstreamUnits.has(upstreamUnit.trim().toLowerCase())
+      || !occurredAt
+      || !dayKey
+    ) {
+      continue;
+    }
+
+    const externalRef = makeJunctionExternalRef(
+      resourceContext,
+      entry,
+      timestamp,
+      descriptor.metric,
+    );
+    const readingIdentity = shortHash([
+      resourceContext.resourceSlug,
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType ?? "",
+      resourceContext.origin.sourceInstanceId ?? "",
+      timestamp.observedAtRaw,
+    ]);
+    if (seenReadingIdentities.has(readingIdentity)) {
+      continue;
+    }
+    seenReadingIdentities.add(readingIdentity);
+    readingCount += 1;
+
+    const role = `${baseArtifactRole}:${dayKey}:${readingIdentity}`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          stripUndefined({
+            schema: "junction.body_measurement_reading.v1",
+            provider: "junction",
+            resource,
+            dayKey,
+            sourceProviderSlug: resourceContext.sourceProviderSlug,
+            sourceType: resourceContext.origin.sourceType,
+            sourceInstanceId: resourceContext.origin.sourceInstanceId,
+            occurredAt,
+            recordedAt: timestamp.recordedAt,
+            metric: descriptor.metric,
+            value,
+            unit: descriptor.unit,
+          }),
+        ),
+        "timeseries_reading",
+      ),
+    );
+
+    context.events.push(stripUndefined({
+      kind: "observation",
+      occurredAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey,
+      timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+      source: "device",
+      title: descriptor.title,
+      evidenceRoles: [role],
+      externalRef,
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      fields: {
+        metric: descriptor.metric,
+        observationGrain: "sample",
+        value,
+        unit: descriptor.unit,
+      },
+    }));
+  }
+
+  if (readingCount === 0) {
+    const role = `${baseArtifactRole}:no-valid-samples`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          {
+            schema: "junction.body_measurement_reading.v1",
+            provider: "junction",
+            resource,
+            readingCount: 0,
+            status: "no_valid_samples",
+          },
+        ),
+        "timeseries_reading",
+      ),
+    );
+  }
+}
+
+function resolveJunctionSparseBodyReadingTimestamp(
+  entry: PlainObject,
+  context: NormalizationContext,
+  sourceProviderSlug: string,
+): ReturnType<typeof resolveRecordTimestamp> {
+  const observedAtRaw = firstStringFromPaths(entry, [
+    "timestamp",
+    "time",
+    "start",
+    "startAt",
+    "start_at",
+    "end",
+    "endAt",
+    "end_at",
+  ]);
+  return resolveRecordTimestamp(
+    observedAtRaw ? { ...entry, observedAtRaw } : entry,
+    context,
+    sourceProviderSlug,
+  );
 }
 
 function pushJunctionNoteTags(
@@ -5853,6 +6113,43 @@ function normalizePercentRatio(value: unknown): number | undefined {
   }
 
   return numeric >= 0 && numeric <= 1 ? numeric * 100 : numeric;
+}
+
+function normalizeBodyCompositionPercent(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+  return numeric !== undefined && numeric >= 0 && numeric <= 100
+    ? roundJunctionDailyAggregateValue(numeric)
+    : undefined;
+}
+
+function normalizeNonNegativeBodyIndex(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+  return numeric !== undefined && numeric >= 0
+    ? roundJunctionDailyAggregateValue(numeric)
+    : undefined;
+}
+
+function normalizeBodyWeightKilograms(value: unknown): number | undefined {
+  return normalizePositiveBodyMeasurement(value, 1_000);
+}
+
+function normalizeBodyMassIndex(value: unknown): number | undefined {
+  return normalizePositiveBodyMeasurement(value, 150);
+}
+
+function normalizeLeanBodyMassKilograms(value: unknown): number | undefined {
+  return normalizePositiveBodyMeasurement(value, 1_000);
+}
+
+function normalizeWaistCircumferenceCentimeters(value: unknown): number | undefined {
+  return normalizePositiveBodyMeasurement(value, 500);
+}
+
+function normalizePositiveBodyMeasurement(value: unknown, maximum: number): number | undefined {
+  const numeric = finiteNumber(value);
+  return numeric !== undefined && numeric > 0 && numeric <= maximum
+    ? roundJunctionDailyAggregateValue(numeric)
+    : undefined;
 }
 
 function normalizeBloodOxygenPercent(value: unknown): number | undefined {
