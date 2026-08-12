@@ -2840,6 +2840,10 @@ async function reconcileDeviceEventEntriesByExternalRef(
       indexedProviderMatch
       && isJunctionFidelityExternalRef(indexedProviderMatch.indexedExternalRef)
       && isJunctionFidelityExternalRef(externalRef)
+      && (
+        indexedProviderMatch.indexedExternalRef.version !== undefined
+        || externalRef.version !== undefined
+      )
     ) {
       const sourceVersionComparison = compareIncomingExternalRefVersion(
         indexedProviderMatch.indexedExternalRef,
