@@ -181,6 +181,41 @@ in reverse order.
 
 ## Existing canonical shapes to prefer
 
+### Junction resource policy and history
+
+`@murphai/contracts` owns a checked-in inventory of the 57 resources in the
+current Junction wearable audit scope and one static policy for each. Importer
+allowlists, runtime configuration, webhook recognition, and extended-history
+selection derive from that table. Updating the inventory without making an
+explicit admission, frequency, retention, and history decision fails the
+contract test; this is a build-time contract, not a runtime registry or
+persisted state owner.
+
+`workout_stream` is classified as a dedicated fetch surface and is not admitted
+through generic summary or timeseries fetching. `electrocardiogram_voltage` is
+explicitly excluded from normal sync: full ECG waveforms must not enter the
+vault, and any future support requires bounded derived features linked to the
+existing ECG recording summary.
+
+The ordinary timeseries backfill remains 14 days. Currently supported sparse
+VO2 max, temperature, basal temperature, caffeine, one-minute heart-rate
+recovery, sleep-breathing-disturbance, and AFib-burden facts receive 180 days
+through the existing per-source resource-job owner. Each continuation fetches
+at most one 30-day provider window and still normalizes into the existing daily
+compact facts; it does not retain provider sample arrays or emit canonical
+samples. Scheduling offers at most eight extended-history resource/source jobs
+per reconcile pass and rotates deterministic pages across the bounded Junction
+connect-source catalog. Blood pressure and note keep their existing daily
+history chunks and coverage semantics.
+
+The checked-in inventory is guarded against the runtime enums exported by the
+pinned `@junction-api/sdk` package. The test has explicit exclusions for
+Junction's lab, order, scheduling, internal-device, sleep-stream, and hypnogram
+surfaces, plus explicit `body_fat`/`body_weight` aliases. An SDK upgrade that
+adds or renames either a client-facing or timeseries resource therefore fails
+the build until the resource is deliberately admitted, dedicated, excluded, or
+added to the documented non-wearable exclusion set.
+
 When adding a provider, prefer these existing shapes before inventing new ones.
 
 ### Event kinds
@@ -200,7 +235,7 @@ When adding a provider, prefer these existing shapes before inventing new ones.
 
 These streams are reserved for explicit CSV/import/debug sample ledgers. Provider adapters should prefer bounded integration-ingest evidence parts plus compact observation metrics and should not emit high-frequency wearable telemetry as normal canonical samples; core rejects oversized device-provider sample batches. Provider adapters also must not mark observations with `queryVisibility`, `visibility`, or `canonicalFact`; display promotion belongs in deliberate projection code.
 
-Junction timeseries are the concrete model for this boundary. Normal sync may fetch only compact product-needed timeseries, currently blood oxygen and stress level, and must aggregate them before persistence. For these two resources, the importer may add one `junction.timeseries_temporal_features.v1` envelope to the existing daily artifact and fixed summary observations: SpO2 sample burden/run shape below the repository-owned 90% oxygen-screening threshold, and mechanical stress shape above that day's mean, successive variation, and evening-minus-morning score in provider/vault local time. SpO2 output deliberately reports sample percentages and consecutive-sample counts rather than inferring continuous duration from sparse measurements. These are descriptive summaries, not alerts or diagnoses. Fewer than two distinct-time valid samples emit no temporal feature, and input above 5,000 samples per resource/source/day or 25,000 per resource/import suppresses the whole temporal enhancement while preserving the ordinary daily facts. Output is capped at ten feature observations per local day and a 1 KiB feature envelope; suppression never creates another artifact. The vault may keep tiny aggregate evidence such as `junction-timeseries-daily-*`, but it must not persist full `junction-timeseries-*` sample arrays, raw timestamp arrays, hourly rows, or generic provider snapshots for dropped dense resources. Dense/debug streams such as steps, distance, heart rate, HRV, respiratory rate, and sparse resources such as weight stay out of default sync unless a current product observation needs them. Provider workout/session metrics belong under `activity_session.workout.metrics` unless an explicit projector promotes derived daily facts; the closed companion Strain observation is the documented exception because its redacted identity cannot be joined safely to Junction's workout session. Wearable summaries require compact display-grade facts such as daily activity, sleep, or body observations.
+Junction timeseries are the concrete model for this boundary. Normal sync may fetch only policy-admitted, product-needed timeseries and must aggregate them before persistence. Blood oxygen and stress level additionally use one `junction.timeseries_temporal_features.v1` envelope in the existing daily artifact plus fixed summary observations: SpO2 sample burden/run shape below the repository-owned 90% oxygen-screening threshold, and mechanical stress shape above that day's mean, successive variation, and evening-minus-morning score in provider/vault local time. SpO2 output deliberately reports sample percentages and consecutive-sample counts rather than inferring continuous duration from sparse measurements. These are descriptive summaries, not alerts or diagnoses. Fewer than two distinct-time valid samples emit no temporal feature, and input above 5,000 samples per resource/source/day or 25,000 per resource/import suppresses the whole temporal enhancement while preserving the ordinary daily facts. Output is capped at ten feature observations per local day and a 1 KiB feature envelope; suppression never creates another artifact. The vault may keep tiny aggregate evidence such as `junction-timeseries-daily-*`, but it must not persist full `junction-timeseries-*` sample arrays, raw timestamp arrays, hourly rows, or generic provider snapshots for dropped dense resources. Dense/debug streams such as steps, distance, and heart rate, plus sparse resources such as weight, stay out of default sync unless a current product observation needs them. Provider workout/session metrics belong under `activity_session.workout.metrics` unless an explicit projector promotes derived daily facts; the closed companion Strain observation is the documented exception because its redacted identity cannot be joined safely to Junction's workout session. Wearable summaries require compact display-grade facts such as daily activity, sleep, or body observations.
 
 ### Observation metrics already in active use
 

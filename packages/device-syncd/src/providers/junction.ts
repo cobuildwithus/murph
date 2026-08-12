@@ -4,6 +4,11 @@ import type { Junction } from "@junction-api/sdk";
 import type * as JunctionSerialization from "@junction-api/sdk/serialization";
 import {
   COMPANION_HRV_RMSSD_RESOURCE,
+  getJunctionResourcePolicy,
+  JUNCTION_DEFAULT_TIMESERIES_HISTORY_DAYS,
+  JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
+  JUNCTION_KNOWN_WEBHOOK_RESOURCES,
+  JUNCTION_TIMESERIES_RESOURCES,
   parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
@@ -20,7 +25,6 @@ import {
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   isJunctionRawDirectIdentityContainerKey,
   isJunctionRawDirectIdentityKey,
   normalizeJunctionResourceName,
@@ -45,12 +49,11 @@ import {
   encodeJunctionHistoricalBackfillStatus,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionHistoricalBackfillEvidence,
-  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
-  JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
+  resolveJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataKey,
   type JunctionHistoricalBackfillEvidence,
   type JunctionHistoricalBackfillEvidenceResource,
   type JunctionHistoricalBackfillStatus,
@@ -98,6 +101,7 @@ import {
 import { resolveJunctionDeviceConnectRouteByProviderSlug } from "../config/connect-routes.ts";
 import {
   buildJunctionProviderSourceInstanceKey,
+  JUNCTION_CONNECT_SOURCE_TARGETS,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   normalizeJunctionProviderFilter,
 } from "../config/junction-connect-sources.ts";
@@ -174,6 +178,7 @@ interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImport
 
 interface JunctionPreciseTimeseriesImportOptions {
   historicalProviderRecordsSeen?: boolean;
+  historyChunkDays?: number;
   preservePartialRetryableFailure?: boolean;
   sourceStatusRequirement?: JunctionImportSourceStatusRequirement;
 }
@@ -245,6 +250,7 @@ const JUNCTION_WEBHOOK_ROOT_FIELDS = Object.freeze({
 const JUNCTION_SDK_ISO_8601_DATE_PATTERN = /^([+-]?\d{4}(?!\d{2}\b))((-?)((0[1-9]|1[0-2])(\3([12]\d|0[1-9]|3[01]))?|W([0-4]\d|5[0-2])(-?[1-7])?|(00[1-9]|0[1-9]\d|[12]\d{2}|3([0-5]\d|6[1-6])))([T\s]((([01]\d|2[0-3])((:?)[0-5]\d)?|24:?00)([.,]\d+(?!:))?)?(\17[0-5]\d([.,]\d+)?)?([zZ]|([+-])([01]\d|2[0-3]):?([0-5]\d)?)?)?)?$/;
 
 interface JunctionWindowFetchOptions {
+  chunkDays?: number;
   dateQueryFormat?: JunctionDateQueryFormat;
 }
 
@@ -306,38 +312,34 @@ const JUNCTION_WEBHOOK_NESTED_RECORD_KEYS = Object.freeze([
   "records",
 ] as const);
 const JUNCTION_TIMESERIES_RESOURCE_NAMES = new Set<string>([
-  ...JUNCTION_KNOWN_TIMESERIES_RESOURCES,
+  ...JUNCTION_TIMESERIES_RESOURCES,
 ]);
 const JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES = new Set<string>([
-  ...JUNCTION_ALLOWED_SUMMARY_RESOURCES,
-  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
-  ...JUNCTION_TIMESERIES_RESOURCE_NAMES,
+  ...JUNCTION_KNOWN_WEBHOOK_RESOURCES,
 ]);
 const DEFAULT_SUMMARY_BACKFILL_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays;
-const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
-// Sparse readings are cheap enough to backfill across the full summary-history
-// window. Dense timeseries retain the bounded default
-// below, and an explicit timeseriesBackfillDays override still wins.
-const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES = Object.freeze([
-  "blood_pressure",
-  "note",
-] as const);
-const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
-  blood_pressure: {
-    metadataKey: JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
-    version: 1,
-  },
-  note: {
-    metadataKey: JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
-    version: 1,
-  },
-} as const satisfies Record<
-  (typeof JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES)[number],
-  { metadataKey: string; version: number }
->);
+const DEFAULT_TIMESERIES_BACKFILL_DAYS = JUNCTION_DEFAULT_TIMESERIES_HISTORY_DAYS;
+const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = new Map(
+  JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.map((resource) => {
+    const metadataKey =
+      resolveJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataKey(resource);
+    const resourcePolicy = getJunctionResourcePolicy(resource);
+    if (!metadataKey || !resourcePolicy) {
+      throw new TypeError(`Junction extended history resource ${resource} has no policy.`);
+    }
+    return [resource, Object.freeze({
+      historyChunkDays: resourcePolicy.historyChunkDays,
+      initialHistoryDays: resourcePolicy.initialHistoryDays,
+      metadataKey,
+      version: 1,
+    })] as const;
+  }),
+);
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
 );
+const JUNCTION_MAX_EXTENDED_HISTORY_SOURCES_PER_RESOURCE = JUNCTION_CONNECT_SOURCE_TARGETS.length;
+const JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE = 8;
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileIntervalMs;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
@@ -368,7 +370,6 @@ export function createJunctionDeviceSyncProvider(
   const { providerFilter, summaryResources, timeseriesResources } = runtimeConfig;
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
-  const extendedTimeseriesBackfillDays = config.timeseriesBackfillDays ?? summaryBackfillDays;
   const extendedBackfillTimeseriesResources = timeseriesResources.filter(
     (resource) => JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET.has(resource),
   );
@@ -661,7 +662,7 @@ export function createJunctionDeviceSyncProvider(
     account: StoredDeviceSyncAccount,
     now: string,
   ): DeviceSyncJobInput[] {
-    return extendedBackfillTimeseriesResources.flatMap((resource) => {
+    const candidates = extendedBackfillTimeseriesResources.flatMap((resource) => {
       const policy = resolveJunctionExtendedTimeseriesBackfillPolicy(resource);
       if (!policy) {
         return [];
@@ -697,23 +698,55 @@ export function createJunctionDeviceSyncProvider(
         }
       }
 
-      return [...scheduledSources.entries()].map(([sourceProviderSlug, firstSeenAt]) => {
-        // Blood pressure existed before the member connected its source, so
-        // its history ends at first-seen. Notes became ingestible in a newer
-        // runtime, so existing sources need recent history ending now.
-        const window = buildExtendedTimeseriesBackfillWindow(
-          resource === "note" ? now : firstSeenAt,
-        );
-        return buildExtendedTimeseriesBackfillJob({
-          availableAt: now,
-          historicalWindowStart: window.windowStart,
-          resource,
-          sourceProviderSlug,
-          windowEnd: window.windowEnd,
-          windowStart: window.windowStart,
+      return [...scheduledSources.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .slice(0, JUNCTION_MAX_EXTENDED_HISTORY_SOURCES_PER_RESOURCE)
+        .map(([sourceProviderSlug, firstSeenAt]) => {
+          // Blood pressure existed before the member connected its source, so
+          // its history ends at first-seen. Notes became ingestible in a newer
+          // runtime, so existing sources need recent history ending now.
+          const window = buildExtendedTimeseriesBackfillWindow(
+            resource,
+            resource === "note" ? now : firstSeenAt,
+          );
+          return buildExtendedTimeseriesBackfillJob({
+            availableAt: now,
+            historicalWindowStart: window.windowStart,
+            resource,
+            sourceProviderSlug,
+            windowEnd: window.windowEnd,
+            windowStart: window.windowStart,
+          });
         });
-      });
     });
+
+    candidates.sort((left, right) => {
+      const resourceComparison = normalizeString(left.payload?.resource)?.localeCompare(
+        normalizeString(right.payload?.resource) ?? "",
+      ) ?? 0;
+      return resourceComparison || (
+        normalizeString(left.payload?.sourceProviderSlug)?.localeCompare(
+          normalizeString(right.payload?.sourceProviderSlug) ?? "",
+        ) ?? 0
+      );
+    });
+    if (candidates.length <= JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE) {
+      return candidates;
+    }
+
+    // Scheduling owns no cursor. Rotate deterministic fixed-size pages by the
+    // existing reconcile cadence so every resource/source pair is eventually
+    // offered without adding metadata or flooding the durable job queue.
+    const pageCount = Math.ceil(
+      candidates.length / JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE,
+    );
+    const scheduleSlot = Math.floor(Date.parse(now) / reconcileIntervalMs);
+    const pageIndex = scheduleSlot % pageCount;
+    const pageStart = pageIndex * JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE;
+    return candidates.slice(
+      pageStart,
+      pageStart + JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE,
+    );
   }
 
   /**
@@ -2003,6 +2036,10 @@ export function createJunctionDeviceSyncProvider(
           {
             historicalProviderRecordsSeen:
               job.payload.historicalProviderRecordsSeen === true,
+            historyChunkDays: extendedHistoricalBackfill
+              ? resolveJunctionExtendedTimeseriesBackfillPolicy(effectiveResource)
+                ?.historyChunkDays
+              : undefined,
             preservePartialRetryableFailure: extendedHistoricalBackfill,
             sourceStatusRequirement: extendedHistoricalBackfill
               ? "connected"
@@ -2615,10 +2652,12 @@ export function createJunctionDeviceSyncProvider(
     const records: unknown[] = [];
     let chunkStart = Date.parse(windowStart);
     const end = Date.parse(windowEnd);
+    const chunkDays = Math.max(1, Math.min(options.chunkDays ?? 1, 30));
+    const chunkMs = chunkDays * TIMESERIES_CHUNK_MS;
     let optionalFailureLogged = false;
 
     while (chunkStart < end) {
-      const chunkEnd = Math.min(chunkStart + TIMESERIES_CHUNK_MS, end);
+      const chunkEnd = Math.min(chunkStart + chunkMs, end);
       const chunkWindowStart = new Date(chunkStart).toISOString();
       const chunkWindowEnd = new Date(chunkEnd).toISOString();
       try {
@@ -2688,7 +2727,11 @@ export function createJunctionDeviceSyncProvider(
     let canonicalEventCount = 0;
     let postFetchSourceAdmission: JunctionCurrentSourceAdmission | undefined;
 
-    const preciseWindows = buildPreciseTimeseriesWindows(windowStart, windowEnd);
+    const preciseWindows = buildPreciseTimeseriesWindows(
+      windowStart,
+      windowEnd,
+      options.historyChunkDays,
+    );
     for (const [index, window] of preciseWindows.entries()) {
       if (context.shouldYield?.()) {
         fetchComplete = false;
@@ -2706,7 +2749,10 @@ export function createJunctionDeviceSyncProvider(
           skippedOptionalResources,
           resources,
           sourceProviderSlug,
-          { dateQueryFormat: "datetime" },
+          {
+            chunkDays: options.historyChunkDays,
+            dateQueryFormat: "datetime",
+          },
         );
       } catch (error) {
         if (
@@ -3194,32 +3240,40 @@ export function createJunctionDeviceSyncProvider(
   }
 
   function buildExtendedTimeseriesBackfillWindow(
+    resource: string,
     anchorAt: string,
   ): { windowEnd: string; windowStart: string } {
+    const historyDays = config.timeseriesBackfillDays
+      ?? (
+        resource === "blood_pressure" || resource === "note"
+          ? summaryBackfillDays
+          : undefined
+      )
+      ?? resolveJunctionExtendedTimeseriesBackfillPolicy(resource)?.initialHistoryDays
+      ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
     const windowEnd = floorUtcDayTimestamp(anchorAt);
     return {
       windowEnd,
       windowStart: floorUtcDayTimestamp(
-        subtractDays(windowEnd, extendedTimeseriesBackfillDays),
+        subtractDays(windowEnd, historyDays),
       ),
     };
   }
 
   function resolveJunctionExtendedTimeseriesBackfillPolicy(
     resource: string,
-  ): { metadataKey: string; version: number } | null {
-    if (
-      !Object.prototype.hasOwnProperty.call(
-        JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES,
-        resource,
-      )
-    ) {
-      return null;
+  ): {
+    historyChunkDays: number;
+    initialHistoryDays: number;
+    metadataKey: string;
+    version: number;
+  } | null {
+    for (const [candidate, policy] of JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES) {
+      if (candidate === resource) {
+        return policy;
+      }
     }
-
-    return JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES[
-      resource as keyof typeof JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES
-    ];
+    return null;
   }
 
   function buildInitialJobs(
@@ -5347,6 +5401,7 @@ function buildClosedDailyWindows(
 function buildPreciseTimeseriesWindows(
   windowStart: string,
   windowEnd: string,
+  requestedChunkDays = 1,
 ): Array<{ windowStart: string; windowEnd: string }> {
   const startMs = Date.parse(windowStart);
   const endMs = Date.parse(windowEnd);
@@ -5354,10 +5409,12 @@ function buildPreciseTimeseriesWindows(
     return [];
   }
 
+  const chunkDays = Math.max(1, Math.min(requestedChunkDays, 30));
+  const chunkMs = chunkDays * TIMESERIES_CHUNK_MS;
   const windows: Array<{ windowStart: string; windowEnd: string }> = [];
   let chunkStartMs = startMs;
   while (chunkStartMs < endMs) {
-    const chunkEndMs = Math.min(chunkStartMs + TIMESERIES_CHUNK_MS, endMs);
+    const chunkEndMs = Math.min(chunkStartMs + chunkMs, endMs);
     if (chunkEndMs <= chunkStartMs) {
       break;
     }
@@ -6063,7 +6120,7 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
       "extended-timeseries-backfill",
       normalizeProviderSlug(payload.sourceProviderSlug),
       resource,
-      JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES.note.version,
+      JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES.get(resource)?.version ?? 1,
     ]));
   }
 
