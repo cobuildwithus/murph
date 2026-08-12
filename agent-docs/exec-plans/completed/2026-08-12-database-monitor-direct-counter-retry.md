@@ -1,6 +1,6 @@
 # Reduce direct-counter telemetry flapping
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -64,5 +64,18 @@ Updated: 2026-08-12
 - The real Workers-runtime database-health suite passed: 1 file, 3 tests.
 - Cloudflare typecheck, log-payload guard, documentation drift check,
   `git diff --check`, and the changed-file identifier scan passed.
-- Preliminary specialists, final ReviewGPT, and exact-head CI remain pending on
-  the pushed PR candidate.
+- The preliminary specialist pass accepted the operator-experience shape and
+  identified one coverage-only gap. Its inspected test patch added the two
+  missing family-shape boundary cases; the final Node slice passed 3 files and
+  84 tests, and the Workers-runtime suite still passed 1 file and 3 tests.
+- Final ReviewGPT round 1 returned `ROUND_OUTCOME: PASS` with no findings after
+  verifying the bounded retry, immediate unsafe-signal path, recovered delta,
+  persistent-gap page, and unchanged state and delivery contracts.
+- The changed Cloudflare app's full verification passed locally: 141 Node files
+  with 2,414 passing tests and 2 skips, plus 5 Workers files with 12 passing
+  tests. Cloudflare also passed its exact-head CI tests. The umbrella app shard
+  failed only in the unchanged Web Next.js build while resolving an internal
+  Google-font module; the failed target is outside this patch.
+
+Completed: 2026-08-12
+Completed: 2026-08-12
