@@ -88,6 +88,11 @@ export interface FindEventByExternalRefInput {
   facet?: string;
 }
 
+export interface FindEventsByExternalRefsInput {
+  vaultRoot: string;
+  externalRefs: readonly Omit<FindEventByExternalRefInput, "vaultRoot">[];
+}
+
 export interface UpsertEventResult {
   eventId: string;
   ledgerFile: string;
@@ -315,13 +320,34 @@ function externalRefMatches(record: EventRecord, input: FindEventByExternalRefIn
     (input.facet === undefined || externalRef.facet === input.facet);
 }
 
-export async function findEventByExternalRef(
-  input: FindEventByExternalRefInput,
-): Promise<EventRecord | null> {
+function externalRefLookupKey(input: Pick<
+  FindEventByExternalRefInput,
+  "system" | "resourceType" | "resourceId"
+>): string {
+  return JSON.stringify([input.system, input.resourceType, input.resourceId]);
+}
+
+export async function findEventsByExternalRefs(
+  input: FindEventsByExternalRefsInput,
+): Promise<Array<EventRecord | null>> {
+  if (input.externalRefs.length > 10_000) {
+    throw new TypeError("Event external-reference lookup is limited to 10,000 references.");
+  }
+  if (input.externalRefs.length === 0) {
+    return [];
+  }
+
   const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
     extension: ".jsonl",
   });
-  const candidateIds = new Set<string>();
+  const refIndexesByKey = new Map<string, number[]>();
+  const candidateIdsByRefIndex = input.externalRefs.map(() => new Set<string>());
+  input.externalRefs.forEach((externalRef, index) => {
+    const key = externalRefLookupKey(externalRef);
+    const indexes = refIndexesByKey.get(key) ?? [];
+    indexes.push(index);
+    refIndexesByKey.set(key, indexes);
+  });
 
   for (const relativePath of relativePaths) {
     const records = await readJsonlRecords({
@@ -331,15 +357,22 @@ export async function findEventByExternalRef(
 
     for (const rawRecord of records) {
       const record = validateStoredEventRecord(rawRecord as JsonObject);
-
-      if (externalRefMatches(record, input)) {
-        candidateIds.add(record.id);
+      const externalRef = record.externalRef;
+      if (!externalRef) {
+        continue;
+      }
+      for (const refIndex of refIndexesByKey.get(externalRefLookupKey(externalRef)) ?? []) {
+        const requestedRef = input.externalRefs[refIndex];
+        if (requestedRef && externalRefMatches(record, { vaultRoot: input.vaultRoot, ...requestedRef })) {
+          candidateIdsByRefIndex[refIndex]?.add(record.id);
+        }
       }
     }
   }
 
+  const candidateIds = new Set(candidateIdsByRefIndex.flatMap((ids) => [...ids]));
   if (candidateIds.size === 0) {
-    return null;
+    return input.externalRefs.map(() => null);
   }
 
   const latestByCandidateId = new Map<string, MatchedEventRecord>();
@@ -363,20 +396,34 @@ export async function findEventByExternalRef(
     }
   }
 
-  const matchingLatestEntries = [...latestByCandidateId.values()].filter((entry) =>
-    externalRefMatches(entry.record, input)
-  );
-  const liveMatchingLatestEntries = matchingLatestEntries.filter((entry) =>
-    !isDeletedEventSpineRecord(entry.record)
-  );
-  const latest = selectLatestEventSpineEntry(
-    liveMatchingLatestEntries.length > 0 ? liveMatchingLatestEntries : matchingLatestEntries,
-  );
-  if (!latest || isDeletedEventSpineRecord(latest.record)) {
-    return null;
-  }
+  return input.externalRefs.map((externalRef, refIndex) => {
+    const matchingLatestEntries = [...(candidateIdsByRefIndex[refIndex] ?? [])]
+      .map((candidateId) => latestByCandidateId.get(candidateId))
+      .filter((entry): entry is MatchedEventRecord =>
+        entry !== undefined
+        && externalRefMatches(entry.record, { vaultRoot: input.vaultRoot, ...externalRef }));
+    const liveMatchingLatestEntries = matchingLatestEntries.filter((entry) =>
+      !isDeletedEventSpineRecord(entry.record));
+    const latest = selectLatestEventSpineEntry(
+      liveMatchingLatestEntries.length > 0 ? liveMatchingLatestEntries : matchingLatestEntries,
+    );
+    return !latest || isDeletedEventSpineRecord(latest.record) ? null : latest.record;
+  });
+}
 
-  return latest.record;
+export async function findEventByExternalRef(
+  input: FindEventByExternalRefInput,
+): Promise<EventRecord | null> {
+  return (await findEventsByExternalRefs({
+    vaultRoot: input.vaultRoot,
+    externalRefs: [{
+      system: input.system,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      ...(input.version ? { version: input.version } : {}),
+      ...(input.facet ? { facet: input.facet } : {}),
+    }],
+  }))[0] ?? null;
 }
 
 function flattenMatchedEventRecords(

@@ -5,10 +5,10 @@ import type {
 } from '@murphai/importers'
 
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import path, { basename, extname } from 'node:path'
 
-import { ID_PREFIXES, type JsonObject } from '@murphai/contracts'
+import { ID_PREFIXES, type EventRecord, type JsonObject } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { loadRuntimeModule } from '../runtime-import.js'
@@ -18,7 +18,9 @@ import { buildStructuredWorkoutActivitySessionDraft } from './workout.js'
 const DEFAULT_SOURCE = 'strong'
 const DEFAULT_DELIMITER = ','
 const RESULT_LIST_LIMIT = 10
-const WORKOUT_CSV_SOURCE_REVISION = '1970-01-01T00:00:00.000Z'
+// This version orders importer mapping semantics, not the revisionless CSV.
+// Bump it only when a corrected mapping must supersede prior canonical output.
+const WORKOUT_CSV_MAPPING_REVISION = '2026-08-12T00:00:00.000Z'
 
 interface WorkoutImportBatchResult {
   applied: boolean
@@ -56,6 +58,14 @@ interface WorkoutImportCoreRuntime {
     decisions: JsonObject[]
     apply?: boolean
   }): Promise<WorkoutImportBatchResult>
+  findEventsByExternalRefs(input: {
+    vaultRoot: string
+    externalRefs: Array<{
+      system: string
+      resourceType: string
+      resourceId: string
+    }>
+  }): Promise<Array<EventRecord | null>>
   loadVault(input: { vaultRoot: string }): Promise<{
     metadata: { timezone: string }
   }>
@@ -67,6 +77,9 @@ interface WorkoutImportCoreRuntime {
     }
     occurredAt: string
   }): string
+  resolveVaultPath(vaultRoot: string, relativePath: string): {
+    absolutePath: string
+  }
 }
 
 interface WorkoutImportersRuntime {
@@ -123,8 +136,9 @@ function sanitizeFileName(fileName: string): string {
 function buildWorkoutEventDecisions(
   plan: WorkoutCsvImportPlan,
   rawFile: string,
+  externalResourceIds?: readonly string[],
 ): JsonObject[] {
-  return plan.sessions.map((session) => {
+  return plan.sessions.map((session, index) => {
     const draft = buildStructuredWorkoutActivitySessionDraft({
       payload: compactObject({
         title: session.title,
@@ -133,13 +147,14 @@ function buildWorkoutEventDecisions(
         source: 'import',
         activityType: 'strength-training',
         durationMinutes: session.durationMinutes,
+        distanceKm: session.distanceKm,
         note: session.note,
         rawRefs: [rawFile],
         externalRef: {
           system: sanitizePathSegment(plan.source, DEFAULT_SOURCE),
           resourceType: 'workout-session',
-          resourceId: session.sourceWorkoutId,
-          version: WORKOUT_CSV_SOURCE_REVISION,
+          resourceId: externalResourceIds?.[index] ?? session.sourceWorkoutId,
+          version: WORKOUT_CSV_MAPPING_REVISION,
         },
         workout: session.workout,
       }) as JsonObject,
@@ -311,6 +326,76 @@ function capList(values: readonly string[]): { values: string[], truncated: bool
   }
 }
 
+async function findReusableRawWorkoutFile(input: {
+  core: WorkoutImportCoreRuntime
+  vault: string
+  text: string
+  legacyRecords: readonly (EventRecord | null)[]
+}): Promise<string | undefined> {
+  const matchedRecords = input.legacyRecords.filter(
+    (record): record is EventRecord => record !== null,
+  )
+  if (matchedRecords.length === 0) {
+    return undefined
+  }
+
+  const referenceCounts = new Map<string, number>()
+  for (const record of matchedRecords) {
+    const rawRefs = new Set((record.rawRefs ?? []).filter((rawRef) =>
+      rawRef.startsWith('raw/workouts/')))
+    for (const rawRef of rawRefs) {
+      referenceCounts.set(rawRef, (referenceCounts.get(rawRef) ?? 0) + 1)
+    }
+  }
+
+  const expectedBytes = new TextEncoder().encode(input.text).byteLength
+  const expectedHash = createHash('sha256').update(input.text).digest('hex')
+  const candidates = [...referenceCounts]
+    .filter(([, count]) => count === matchedRecords.length)
+    .map(([rawRef]) => rawRef)
+    .sort()
+  for (const rawRef of candidates) {
+    try {
+      const absolutePath = input.core.resolveVaultPath(input.vault, rawRef).absolutePath
+      if ((await stat(absolutePath)).size !== expectedBytes) {
+        continue
+      }
+      const existingHash = createHash('sha256').update(await readFile(absolutePath)).digest('hex')
+      if (existingHash === expectedHash) {
+        return rawRef
+      }
+    } catch {
+      // Missing or unreadable legacy evidence is not reusable; the import will
+      // retain a fresh raw batch before applying canonical changes.
+    }
+  }
+  return undefined
+}
+
+async function resolveWorkoutExternalResourceIds(input: {
+  core: WorkoutImportCoreRuntime
+  vault: string
+  plan: WorkoutCsvImportPlan
+}): Promise<{
+  resourceIds: string[]
+  legacyRecords: Array<EventRecord | null>
+}> {
+  const system = sanitizePathSegment(input.plan.source, DEFAULT_SOURCE)
+  const legacyRecords = await input.core.findEventsByExternalRefs({
+    vaultRoot: input.vault,
+    externalRefs: input.plan.sessions.map((session) => ({
+      system,
+      resourceType: 'workout-session',
+      resourceId: session.legacySourceWorkoutId,
+    })),
+  })
+  return {
+    resourceIds: input.plan.sessions.map((session, index) =>
+      legacyRecords[index] ? session.legacySourceWorkoutId : session.sourceWorkoutId),
+    legacyRecords,
+  }
+}
+
 function mapBatchError(error: unknown): unknown {
   return toVaultCliError(error, {
     EVENT_BATCH_INVALID: { code: 'contract_invalid' },
@@ -362,17 +447,17 @@ export async function importWorkoutCsv(input: {
   storeRawOnly?: boolean
 }) {
   const { text, plan, core } = await loadWorkoutCsvPlan(input)
-  const { generateUlid } = await loadWorkoutImportStateRuntime()
-  const batch = prepareRawWorkoutBatch({
-    core,
-    file: input.file,
-    text,
-    plan,
-    importId: `${ID_PREFIXES.transform}_${generateUlid()}`,
-    importedAt: new Date().toISOString(),
-  })
 
   if (input.storeRawOnly) {
+    const { generateUlid } = await loadWorkoutImportStateRuntime()
+    const batch = prepareRawWorkoutBatch({
+      core,
+      file: input.file,
+      text,
+      plan,
+      importId: `${ID_PREFIXES.transform}_${generateUlid()}`,
+      importedAt: new Date().toISOString(),
+    })
     await storeRawWorkoutBatch({
       core,
       vault: input.vault,
@@ -409,7 +494,22 @@ export async function importWorkoutCsv(input: {
   }
 
   assertStructuredPlanImportable(plan)
-  const decisions = buildWorkoutEventDecisions(plan, batch.rawFile)
+  const externalIdentity = await resolveWorkoutExternalResourceIds({
+    core,
+    vault: input.vault,
+    plan,
+  })
+  const { generateUlid } = await loadWorkoutImportStateRuntime()
+  const batch = prepareRawWorkoutBatch({
+    core,
+    file: input.file,
+    text,
+    plan,
+    importId: `${ID_PREFIXES.transform}_${generateUlid()}`,
+    importedAt: new Date().toISOString(),
+  })
+  let rawFile = batch.rawFile
+  let decisions = buildWorkoutEventDecisions(plan, rawFile, externalIdentity.resourceIds)
   let preview: WorkoutImportBatchResult
   try {
     preview = await core.importEventBatch({
@@ -452,13 +552,41 @@ export async function importWorkoutCsv(input: {
     }
   }
 
-  await storeRawWorkoutBatch({
-    core,
-    vault: input.vault,
-    sourceFile: input.file,
-    text,
-    batch,
-  })
+  let rawStored = true
+  let manifestFile: string | null = batch.manifestFile
+  if (preview.supersededCount > 0) {
+    const reusableRawFile = await findReusableRawWorkoutFile({
+      core,
+      vault: input.vault,
+      text,
+      legacyRecords: externalIdentity.legacyRecords,
+    })
+    if (reusableRawFile) {
+      rawFile = reusableRawFile
+      decisions = buildWorkoutEventDecisions(plan, rawFile, externalIdentity.resourceIds)
+      try {
+        preview = await core.importEventBatch({
+          vaultRoot: input.vault,
+          decisions,
+          apply: false,
+        })
+      } catch (error) {
+        throw mapBatchError(error)
+      }
+      rawStored = false
+      manifestFile = null
+    }
+  }
+
+  if (rawStored) {
+    await storeRawWorkoutBatch({
+      core,
+      vault: input.vault,
+      sourceFile: input.file,
+      text,
+      batch,
+    })
+  }
   let applied: WorkoutImportBatchResult
   try {
     applied = await core.importEventBatch({
@@ -475,9 +603,9 @@ export async function importWorkoutCsv(input: {
   return {
     vault: input.vault,
     sourceFile: input.file,
-    rawFile: batch.rawFile,
-    manifestFile: batch.manifestFile,
-    rawStored: true,
+    rawFile,
+    manifestFile,
+    rawStored,
     source: plan.source,
     timeZone: plan.timeZone,
     weightUnit: plan.weightUnit,

@@ -140,7 +140,47 @@ describe("planWorkoutCsvImport", () => {
 
     const planned = planWorkoutCsvImport({ text, timeZone: "UTC", distanceUnit: "km" });
     assert.equal(planned.importable, true);
+    assert.equal(planned.sessions[0]?.distanceKm, 1.5);
     assert.equal(planned.sessions[0]?.workout.exercises[0]?.sets[0]?.distanceMeters, 1500);
+  });
+
+  test("backfills later session and exercise metadata", () => {
+    const plan = planWorkoutCsvImport({
+      text: [
+        "Workout Name,Date,Start Time,End Time,Duration,Exercise Name,Set Order,Weight,Weight Unit,Reps,Notes,Workout Notes,Group",
+        "Morning,2026-03-12,07:00:00,,,Press,1,45,kg,8,, ,",
+        "Morning,2026-03-12,07:00:00,08:00:00,60,Press,2,40,kg,10,Controlled,Session context,A",
+      ].join("\n"),
+      timeZone: "America/Los_Angeles",
+    });
+
+    assert.equal(plan.sessions[0]?.durationMinutes, 60);
+    assert.equal(plan.sessions[0]?.workout.endedAt, "2026-03-12T15:00:00.000Z");
+    assert.equal(plan.sessions[0]?.workout.sessionNote, "Session context");
+    assert.equal(plan.sessions[0]?.workout.exercises[0]?.note, "Controlled");
+    assert.equal(plan.sessions[0]?.workout.exercises[0]?.groupId, "A");
+  });
+
+  test("preserves unit-bearing legacy distance headers and session projection", () => {
+    for (const fixture of [
+      { header: "Distance Km", value: "1.5", expectedMeters: 1500, expectedKm: 1.5 },
+      { header: "Distance Meters", value: "750", expectedMeters: 750, expectedKm: 0.75 },
+    ]) {
+      const plan = planWorkoutCsvImport({
+        text: [
+          `Workout Name,Date,Start Time,Duration,Exercise Name,Set Order,${fixture.header},Seconds`,
+          `Morning,2026-03-12,07:00:00,30,Run,1,${fixture.value},600`,
+        ].join("\n"),
+        timeZone: "UTC",
+      });
+
+      assert.equal(plan.importable, true);
+      assert.equal(plan.sessions[0]?.distanceKm, fixture.expectedKm);
+      assert.equal(
+        plan.sessions[0]?.workout.exercises[0]?.sets[0]?.distanceMeters,
+        fixture.expectedMeters,
+      );
+    }
   });
 
   test("combines separate date and start-time columns in the vault timezone", () => {
@@ -230,7 +270,7 @@ describe("planWorkoutCsvImport", () => {
     assert.match(plan.warnings.join(" "), /rest-timer metadata/u);
   });
 
-  test("uses privacy-safe stable source identities and preserves repeated exercise blocks", () => {
+  test("keeps source identities private while retaining the shipped reconciliation key", () => {
     const plan = planWorkoutCsvImport({
       text: [
         STRONG_HEADER,
@@ -245,6 +285,10 @@ describe("planWorkoutCsvImport", () => {
     assert.match(sourceWorkoutId, /^strong-workout-[a-f0-9]{40}$/u);
     assert.equal(sourceWorkoutId.includes("Full Body"), false);
     assert.equal(sourceWorkoutId.includes("2026-05-01"), false);
+    assert.equal(
+      plan.sessions[0]?.legacySourceWorkoutId,
+      "2026-05-01T08:00:00.000Z::Full Body",
+    );
     assert.deepEqual(
       plan.sessions[0]?.workout.exercises.map((exercise) => exercise.name),
       ["Press", "Row", "Press"],

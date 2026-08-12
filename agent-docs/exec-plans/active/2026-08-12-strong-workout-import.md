@@ -58,7 +58,8 @@ Updated: 2026-08-12
    persistence, then apply the canonical batch once.
 3. Risk: replay duplicates history or floods model context with event ids.
    Mitigation: stable privacy-safe external identities, equal-version semantic
-   reconciliation, replay no-op handling, and capped identifier/path arrays.
+   reconciliation, bounded lookup of the shipped legacy identity, exact-hash
+   raw-evidence reuse, replay no-op handling, and capped identifier/path arrays.
 4. Risk: Strong's unitless `Weight` and `Distance` columns are interpreted
    incorrectly. Mitigation: require explicit `--weight-unit` and
    `--distance-unit` values when positive values are present.
@@ -83,6 +84,25 @@ Updated: 2026-08-12
   raw batch for an unchanged replay identified by a full-batch dry run.
 - Keep existing command names; harden the dormant path instead of adding a
   competing importer.
+- Use a dated importer-mapping revision rather than treating a revisionless CSV
+  as permanently fixed. Bump it only when a corrected mapping must supersede
+  prior canonical output.
+- New imports keep the privacy-safe timestamp hash. Before preview, resolve the
+  shipped legacy timestamp-and-title identity in one bounded core lookup; when
+  found, update that event in place and reuse its raw export only after exact
+  byte-length and SHA-256 verification.
+
+## Review findings
+
+- Final ReviewGPT round 1 found that the candidate would duplicate workouts
+  previously written by the shipped importer. The remediation preserves the
+  new private identity for new imports while resolving the legacy external
+  reference in one batch and proving exact existing raw evidence before reuse.
+- Final ReviewGPT round 1 also found that later-row session/exercise metadata,
+  unit-bearing distance aliases, and session distance projection had regressed,
+  and that a fixed epoch mapping revision prevented future parser corrections.
+  The planner now accumulates first non-empty metadata across the session,
+  restores the distance surfaces, and uses the explicit mapping revision above.
 
 ## Verification
 
@@ -93,3 +113,11 @@ Updated: 2026-08-12
   export without row contents entering output; import blocks only on the
   explicit weight and distance unit choices; synthetic end-to-end import and
   replay are atomic and bounded; all required gates pass.
+- Focused remediation proof: importer planner 17 tests, core event-batch 33
+  tests, vault workout/loader 16 tests, CLI workout behavior 23 tests, CLI
+  command coverage 8 tests, assistant guidance 3 tests, changelog 57 tests,
+  scenario integrity 206 scenarios / 12 sample inputs / 29 golden directories,
+  affected typechecks, and affected package builds pass. The supplied export
+  still plans 7,521 rows into 915 sessions with 23 deterministic repairs, 23
+  ignored rest-timer rows, zero skipped rows, and explicit unit gates; no import
+  was performed.

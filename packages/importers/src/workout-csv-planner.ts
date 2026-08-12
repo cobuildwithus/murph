@@ -48,9 +48,11 @@ export interface WorkoutCsvPlannerInput {
 
 export interface PlannedWorkoutCsvSession {
   sourceWorkoutId: string;
+  legacySourceWorkoutId: string;
   occurredAt: string;
   title: string;
   durationMinutes?: number;
+  distanceKm?: number;
   note?: string;
   workout: WorkoutSession;
 }
@@ -91,10 +93,12 @@ interface WorkoutCsvSessionExercise {
 
 interface MutableWorkoutCsvSession {
   sourceWorkoutId: string;
+  legacySourceWorkoutId: string;
   title: string;
   occurredAt: string;
   endedAt?: string;
   durationMinutes?: number;
+  distanceKm?: number;
   note?: string;
   exercises: WorkoutCsvSessionExercise[];
 }
@@ -471,6 +475,10 @@ function stableWorkoutSourceId(source: string, rawTimestamp: string): string {
   return `${source}-workout-${digest}`;
 }
 
+function legacyWorkoutSourceId(occurredAt: string, title: string): string {
+  return `${occurredAt}::${title}`.slice(0, 200);
+}
+
 function resolveExerciseMode(exercise: WorkoutCsvSessionExercise): WorkoutSession["exercises"][number]["mode"] {
   if (exercise.sets.some((set) => typeof set.assistanceKg === "number")) return "assisted_bodyweight";
   if (exercise.sets.some((set) => typeof set.addedWeightKg === "number")) return "weighted_bodyweight";
@@ -558,7 +566,15 @@ function buildSessions(input: {
   const repsIndex = findHeaderIndex(headers, ["reps", "rep"]);
   const weightIndex = findHeaderIndex(headers, ["weight", "load"]);
   const weightUnitIndex = findHeaderIndex(headers, ["weight unit", "load unit"]);
-  const distanceIndex = findHeaderIndex(headers, ["distance"]);
+  const distanceIndex = findHeaderIndex(headers, [
+    "distance",
+    "distance km",
+    "distance mi",
+    "distance miles",
+    "distance meters",
+    "distance metres",
+    "set distance",
+  ]);
   const secondsIndex = findHeaderIndex(headers, ["seconds", "duration seconds"]);
   const rpeIndex = findHeaderIndex(headers, ["rpe"]);
   const setTypeIndex = findHeaderIndex(headers, ["set type", "type"]);
@@ -571,9 +587,10 @@ function buildSessions(input: {
   const failureIndex = findHeaderIndex(headers, ["failure"]);
 
   const sessions = new Map<string, MutableWorkoutCsvSession>();
+  const titleByOccurredAt = new Map<string, string>();
+  const invalidDurationSessionIds = new Set<string>();
   let skippedRowCount = 0;
   let ignoredRowCount = 0;
-  let invalidDurationCount = 0;
   let hasUnitlessPositiveWeight = false;
   let hasUnitlessPositiveDistance = false;
   const headerDistanceUnit = distanceIndex === undefined
@@ -658,33 +675,48 @@ function buildSessions(input: {
       hasUnitlessPositiveDistance = true;
     }
 
-    const sourceWorkoutId = stableWorkoutSourceId(input.source, rawTimestamp);
-    let session = sessions.get(sourceWorkoutId);
-    if (session && session.title !== title) {
+    const distanceMeters = distance !== undefined && distance > 0 && resolvedDistanceUnit
+      ? toDistanceMeters(distance, resolvedDistanceUnit)
+      : undefined;
+    const priorTitle = titleByOccurredAt.get(occurredAt);
+    if (priorTitle && priorTitle !== title) {
       skippedRowCount += 1;
       incrementReason(input.skipReasons, "ambiguous workout identity at the same timestamp");
       continue;
     }
+    titleByOccurredAt.set(occurredAt, title);
+
+    const sourceWorkoutId = stableWorkoutSourceId(input.source, rawTimestamp);
+    const legacySourceWorkoutId = legacyWorkoutSourceId(occurredAt, title);
+    let session = sessions.get(sourceWorkoutId);
     if (!session) {
-      const rawDuration = valueAt(row, durationIndex);
-      const durationMinutes = parseDurationMinutes(rawDuration);
-      const rawEndTime = valueAt(row, endTimeIndex);
-      if (rawDuration !== undefined && durationMinutes === undefined) {
-        invalidDurationCount += 1;
-      }
       session = {
         sourceWorkoutId,
+        legacySourceWorkoutId,
         title,
         occurredAt,
-        endedAt: rawEndTime
-          ? normalizeWorkoutTimestamp(rawDate, rawEndTime, input.timeZone)
-          : undefined,
-        durationMinutes,
-        note: valueAt(row, workoutNoteIndex),
         exercises: [],
       };
       sessions.set(sourceWorkoutId, session);
     }
+    const rawDuration = valueAt(row, durationIndex);
+    const durationMinutes = parseDurationMinutes(rawDuration);
+    if (session.durationMinutes === undefined && rawDuration !== undefined) {
+      if (durationMinutes === undefined) {
+        invalidDurationSessionIds.add(sourceWorkoutId);
+      } else {
+        session.durationMinutes = durationMinutes;
+        invalidDurationSessionIds.delete(sourceWorkoutId);
+      }
+    }
+    const rawEndTime = valueAt(row, endTimeIndex);
+    session.endedAt = session.endedAt ?? (rawEndTime
+      ? normalizeWorkoutTimestamp(rawDate, rawEndTime, input.timeZone)
+      : undefined);
+    session.distanceKm = session.distanceKm ?? (distanceMeters !== undefined
+      ? distanceMeters / 1000
+      : undefined);
+    session.note = session.note ?? valueAt(row, workoutNoteIndex);
 
     let exercise = session.exercises.at(-1);
     if (!exercise || exercise.name !== exerciseName) {
@@ -697,6 +729,8 @@ function buildSessions(input: {
       };
       session.exercises.push(exercise);
     }
+    exercise.groupId = exercise.groupId ?? valueAt(row, groupIndex);
+    exercise.note = exercise.note ?? valueAt(row, exerciseNoteIndex);
 
     const normalizedGenericType = normalizeSetType(valueAt(row, setTypeIndex), input.detectedSource);
     const type = input.detectedSource === "strong"
@@ -722,8 +756,8 @@ function buildSessions(input: {
         ? { weightUnit: resolvedWeightUnit }
         : {}),
       ...(durationSeconds !== undefined ? { durationSeconds: Math.round(durationSeconds) } : {}),
-      ...(distance !== undefined && distance > 0 && resolvedDistanceUnit
-        ? { distanceMeters: toDistanceMeters(distance, resolvedDistanceUnit) }
+      ...(distanceMeters !== undefined
+        ? { distanceMeters }
         : {}),
       ...(rpe !== undefined ? { rpe } : {}),
       ...(bodyweightKg !== undefined ? { bodyweightKg } : {}),
@@ -761,9 +795,11 @@ function buildSessions(input: {
       });
     return {
       sourceWorkoutId: session.sourceWorkoutId,
+      legacySourceWorkoutId: session.legacySourceWorkoutId,
       occurredAt: session.occurredAt,
       title: session.title,
       ...(session.durationMinutes ? { durationMinutes: session.durationMinutes } : {}),
+      ...(session.distanceKm ? { distanceKm: session.distanceKm } : {}),
       ...(session.note ? { note: session.note } : {}),
       workout: {
         sourceApp: input.source,
@@ -781,7 +817,7 @@ function buildSessions(input: {
     sessions: planned,
     skippedRowCount,
     ignoredRowCount,
-    invalidDurationCount,
+    invalidDurationCount: invalidDurationSessionIds.size,
     requiresWeightUnit: hasUnitlessPositiveWeight && !input.weightUnit,
     requiresDistanceUnit: hasUnitlessPositiveDistance && !input.distanceUnit && !headerDistanceUnit,
   };

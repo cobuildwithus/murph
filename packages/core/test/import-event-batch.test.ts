@@ -8,6 +8,7 @@ import type { AuditRecord, EventRecord } from "@murphai/contracts";
 
 import {
   findEventByExternalRef,
+  findEventsByExternalRefs,
   importEventBatch,
   initializeVault,
   listHistoryEvents,
@@ -88,6 +89,46 @@ function buildClinicalMeasurementPayload(version: string, value = 72) {
     },
   };
 }
+
+test("findEventsByExternalRefs resolves a bounded lookup set in caller order", async () => {
+  const vaultRoot = await makeVault("event-external-ref-batch");
+  await importEventBatch({
+    vaultRoot,
+    payloads: [
+      buildObservationPayload(1, "efficiency", 90),
+      buildObservationPayload(2, "efficiency", 91),
+    ],
+    apply: true,
+  });
+
+  const records = await findEventsByExternalRefs({
+    vaultRoot,
+    externalRefs: [
+      {
+        system: "whoop",
+        resourceType: "sleep",
+        resourceId: "sleep-2026-03-02",
+        facet: "efficiency",
+      },
+      {
+        system: "whoop",
+        resourceType: "sleep",
+        resourceId: "missing",
+        facet: "efficiency",
+      },
+      {
+        system: "whoop",
+        resourceType: "sleep",
+        resourceId: "sleep-2026-03-01",
+        facet: "efficiency",
+      },
+    ],
+  });
+
+  assert.equal(records[0]?.externalRef?.resourceId, "sleep-2026-03-02");
+  assert.equal(records[1], null);
+  assert.equal(records[2]?.externalRef?.resourceId, "sleep-2026-03-01");
+});
 
 function buildClinicalTestPayload(version: string) {
   return {
