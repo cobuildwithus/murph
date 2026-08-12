@@ -59,7 +59,8 @@ vault path. Scope resolution receives the invocation's abort signal, so a
 foreground wake cancels and drains that read. An already-started immutable
 delivery instead remains owned and
 finishes its current scope. A foreground wake, exact host abort, or shutdown
-prevents admission of every later captured scope, and that offer reports
+prevents admission of every undispatched captured scope, including the first,
+and that offer reports
 preempted instead of treating its successful prefix as complete. Foreground's
 stop bit belongs only to the active delivery owner, so
 a later opportunity begins fresh and can retry every scope before the existing

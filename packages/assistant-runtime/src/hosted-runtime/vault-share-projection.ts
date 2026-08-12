@@ -291,8 +291,8 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
   vaultSharePort: HostedRuntimeVaultSharePort;
 }): Promise<HostedVaultShareProjectionOfferResult> {
   const outcomes: HostedVaultShareOfferOutcome[] = [];
-  for (const [index, snapshot] of input.capture.snapshots.entries()) {
-    if (index > 0 && input.shouldStop?.()) {
+  for (const snapshot of input.capture.snapshots) {
+    if (input.shouldStop?.()) {
       return { outcome: "preempted" };
     }
     try {

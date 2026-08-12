@@ -355,7 +355,8 @@ publication, but that invocation starts no second projection and retains runner
 ownership until the forwarded Web request is terminal. Abort and shutdown
 finalization join the same end-to-end request before a successor invocation or
 durable continuation may retry, but their between-scope stop condition prevents
-the captured suffix from starting after the active request drains. Foreground
+every undispatched scope, including the first, from starting; an active request
+still drains to its terminal boundary. Foreground
 preemption is local to that active delivery owner. If any owner-ending condition
 skips later captured scopes, the offer reports preempted;
 the next opportunity starts with a fresh stop state and cannot acknowledge the

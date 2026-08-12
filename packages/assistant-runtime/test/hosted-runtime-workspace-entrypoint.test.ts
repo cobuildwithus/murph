@@ -11740,12 +11740,19 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("exact host abort drains only the active system projection scope before replacement", async () => {
+  test.each([
+    "before-delivery",
+    "active-delivery",
+  ] as const)("exact host abort at %s stops system projection admission before replacement", async (
+    abortAt,
+  ) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const hostAbortController = new AbortController();
     const hostAbortReason = new Error("synthetic host abort during system projection");
+    const scopeResolutionStarted = createDeferred<void>();
+    const scopeResolutionRelease = createDeferred<void>();
     const projectionStarted = createDeferred<void>();
     const projectionRelease = createDeferred<void>();
     const deviceItem = createMailboxItem({
@@ -11776,6 +11783,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const deliveredProjectionKinds: string[] = [];
     let activeProjectionCalls = 0;
     let peakActiveProjectionCalls = 0;
+    let scopeResolutionBlocked = false;
 
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -11834,6 +11842,11 @@ describe("hosted workspace runtime entrypoint", () => {
           mailboxPort: createMailboxPort({ events, items: [] }),
           vaultSharePort: {
             async listActiveProjectionScopes() {
+              if (abortAt === "before-delivery" && !scopeResolutionBlocked) {
+                scopeResolutionBlocked = true;
+                scopeResolutionStarted.resolve();
+                await scopeResolutionRelease.promise;
+              }
               return [
                 { projectionKind: "profile-name.v0" as const },
                 { projectionKind: "time-zone.v0" as const },
@@ -11849,7 +11862,10 @@ describe("hosted workspace runtime entrypoint", () => {
               );
               events.push(`vault-share.deliver:start:${request.projectionKind}`);
               try {
-                if (deliveredProjectionKinds.length === 1) {
+                if (
+                  abortAt === "active-delivery"
+                  && deliveredProjectionKinds.length === 1
+                ) {
                   projectionStarted.resolve();
                   await projectionRelease.promise;
                 }
@@ -11893,7 +11909,19 @@ describe("hosted workspace runtime entrypoint", () => {
         ),
         createRunOptions(initialWorkspace, hostAbortController.signal),
       );
-      await projectionStarted.promise;
+      if (abortAt === "before-delivery") {
+        await withRealTimeout(
+          scopeResolutionStarted.promise,
+          5_000,
+          () => events.join(","),
+        );
+      } else {
+        await withRealTimeout(
+          projectionStarted.promise,
+          5_000,
+          () => events.join(","),
+        );
+      }
       let interruptedRunSettled = false;
       void interruptedRun.then(
         () => {
@@ -11906,15 +11934,23 @@ describe("hosted workspace runtime entrypoint", () => {
       hostAbortController.abort(hostAbortReason);
       await Promise.resolve();
       assert.equal(interruptedRunSettled, false);
-      assert.deepEqual(deliveredProjectionKinds, ["profile-name.v0"]);
-      projectionRelease.resolve();
+      if (abortAt === "before-delivery") {
+        assert.deepEqual(deliveredProjectionKinds, []);
+        scopeResolutionRelease.resolve();
+      } else {
+        assert.deepEqual(deliveredProjectionKinds, ["profile-name.v0"]);
+        projectionRelease.resolve();
+      }
       await expect(withRealTimeout(
         interruptedRun,
         5_000,
         () => events.join(","),
       )).rejects.toBe(hostAbortReason);
 
-      assert.deepEqual(deliveredProjectionKinds, ["profile-name.v0"]);
+      assert.deepEqual(
+        deliveredProjectionKinds,
+        abortAt === "before-delivery" ? [] : ["profile-name.v0"],
+      );
       assert.equal(dirtyAckCalls, 0);
       assert.equal(activeProjectionCalls, 0);
       assert.equal(checkpointRequests.length, 1);
@@ -11935,27 +11971,33 @@ describe("hosted workspace runtime entrypoint", () => {
         version: "1",
       });
 
-      await runHostedWorkspaceRuntimeJobInProcess(
-        createRuntimeInput(
-          "attempt_synthetic_system_mailbox_host_abort_projection_replacement",
-          "1",
+      await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createRuntimeInput(
+            "attempt_synthetic_system_mailbox_host_abort_projection_replacement",
+            "1",
+          ),
+          createRunOptions(resumedWorkspace),
         ),
-        createRunOptions(resumedWorkspace),
+        5_000,
+        () => events.join(","),
       );
 
       assert.deepEqual(deliveredProjectionKinds, [
-        "profile-name.v0",
+        ...(abortAt === "active-delivery" ? ["profile-name.v0"] : []),
         "profile-name.v0",
         "time-zone.v0",
         "sleep-times.v0",
       ]);
       assert.equal(peakActiveProjectionCalls, 1);
       assert.equal(dirtyAckCalls, 1);
-      assert.ok(
-        requireEventIndex(events, "vault-share.deliver:done:profile-name.v0")
-          < events.lastIndexOf("vault-share.deliver:start:profile-name.v0"),
-        events.join(","),
-      );
+      if (abortAt === "active-delivery") {
+        assert.ok(
+          requireEventIndex(events, "vault-share.deliver:done:profile-name.v0")
+            < events.lastIndexOf("vault-share.deliver:start:profile-name.v0"),
+          events.join(","),
+        );
+      }
       assert.ok(
         requireEventIndex(events, "vault-share.deliver:done:sleep-times.v0")
           < requireEventIndex(events, "device-sync.dirty-ack"),
@@ -11963,6 +12005,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
     } finally {
+      scopeResolutionRelease.resolve();
       projectionRelease.resolve();
       hostAbortController.abort(hostAbortReason);
       mocks.summarizeWearableSleepRuntime.mockClear();

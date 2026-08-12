@@ -210,3 +210,12 @@ Updated: 2026-08-12
   no owner or retry path is added. Stable three-scope proof covers ordinary host
   abort followed by foreground provider admission, shutdown, and deferred system-
   mailbox host abort followed by complete replacement projection and dirty ack.
+- ReviewGPT round 9 found that the shared stop predicate was checked only after
+  scope zero. An exact host abort observed during system-mailbox scope resolution
+  could therefore finish capture and start a new Web request after its owner had
+  ended. Immutable delivery now checks the same predicate before every scope,
+  including the first. Direct proof returns preempted with zero delivery calls;
+  the system-mailbox regression now covers abort both before delivery and during
+  active scope A, with complete A/B/C replacement before dirty acknowledgement.
+  The projection suite passes 102 tests, the focused owner-ending suite passes
+  four tests, and the full assistant-runtime suite passes 2,216 with four skipped.

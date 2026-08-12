@@ -651,8 +651,8 @@ Last verified: 2026-08-12
   delivery promise; after it settles, a later opportunity starts unpreempted and
   the existing dirty or recording owner retries every undispatched scope before
   acknowledgement. The same between-scope predicate observes exact host abort
-  and shutdown, so those owner-ending conditions drain the active request but
-  never admit its captured suffix. The invocation starts no second projection
+  and shutdown before every scope, so those owner-ending conditions drain an
+  active request but never admit a request that has not started. The invocation starts no second projection
   and does not release its
   runner ownership until the real proxy-to-Web response is terminal. Web owns a
   finite effect deadline for each delivery, stops admitting destination

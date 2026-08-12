@@ -8,7 +8,7 @@ This index is the table of contents for the current canonical docs in this repos
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
 Personal-to-group projection convergence, including attempt-local foreground
-preemption, abort/shutdown suffix admission, its single forwarded deadline, and
+preemption, abort/shutdown admission before every scope, its single forwarded deadline, and
 authoritative Web-response ownership plus deterministic maximum-cardinality
 proof, is specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and

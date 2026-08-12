@@ -639,6 +639,30 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     });
   });
 
+  it("starts no delivery when its owner ended before the first scope", async () => {
+    const deliver = vi.fn();
+
+    const result = await offerCapturedHostedVaultShareProjectionBestEffort({
+      capture: {
+        snapshots: [{
+          projectionScope: PROFILE_SCOPE,
+          records: [],
+        }],
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      },
+      shouldStop: () => true,
+      vaultSharePort: {
+        deliver,
+        async listActiveProjectionScopes() {
+          throw new Error("Immutable delivery must not resolve scopes again.");
+        },
+      },
+    });
+
+    expect(result).toEqual({ outcome: "preempted" });
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it("delivers the maximum projectable registry sequentially", async () => {
     const projectableScopes = HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.filter(
       ({ projectionKind }) =>
