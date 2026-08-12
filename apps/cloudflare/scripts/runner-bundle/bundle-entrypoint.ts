@@ -232,7 +232,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // history and provider additions extend existing lazy outputs without adding a
 // forbidden boot input. Exact merged local assembly measured 9,808,583B total
 // on 2026-08-11, so ratchet the total only and retain the 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_808_583 + 32_768;
+//
+// Bounded Junction sparse-resource policies, canonicalizers, and activation
+// coverage extend those same deferred provider/importer chunks without adding
+// a forbidden boot input. Exact local production assembly measured 9,898,262B
+// total on 2026-08-12, so ratchet the total only and retain the 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_898_262 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
