@@ -133,3 +133,33 @@ Updated: 2026-08-12
   changelog timing. All three are accepted and addressed on the remediation
   candidate. iOS ReviewGPT round 1 passed the exact screenshot-bearing head with
   no source-level finding.
+
+## ReviewGPT round 2 retrospective
+
+- Trigger: round 2 found the same presentation-authority mechanism at the exact
+  scheduled-notification owner. The line-count threshold is not the trigger:
+  first-reviewed source was +5/-4, while the round-2 candidate was +231/-16.
+- Original requirement: every retained private route that can attach the workout
+  card must deliver the complete verified workout in that occurrence—interactive
+  when the measured envelope fits, trusted text when it does not.
+- Root architectural mismatch: the provider result already distinguishes the
+  provider-authored scheduled JSON envelope from runtime-owned final response
+  and transcript presentations, but the notification owner consumed the final
+  presentation only when `responseCard` was non-null. A cardless overflow thus
+  succeeded inside the provider turn and was discarded downstream.
+- Product decision: retain scheduled card eligibility. The durable provider
+  invariant requires a scheduled occurrence to use the ordinary planner and
+  dynamic-tool eligibility, and fitting scheduled cards already have production
+  behavior and regression coverage. Removing eligibility would degrade that
+  existing flow.
+- Architecture decision: make the existing notification owner consume the
+  existing provider result's final `response` whenever it differs from the
+  provider-authored delivery envelope, and persist its existing
+  `transcriptResponse`. The structured decision continues to own send/skip,
+  subject, and private summary only. A runtime-owned presentation paired with a
+  provider skip remains invalid, matching the existing fitting-card guard.
+- Complexity decision: delete the notification owner's duplicate card renderer;
+  add no schema, queue, durable field, lifecycle, compatibility path, or new
+  state owner. Focused notification tests cover fitting-card send, cardless
+  overflow send, transcript authority, and rejection of a cardless-overflow
+  skip so cron cannot terminalize it as a no-op.

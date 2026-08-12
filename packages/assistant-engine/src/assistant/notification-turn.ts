@@ -12,10 +12,7 @@ import type {
 import type { AutomationScheduleKind } from '@murphai/contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
-import {
-  renderAssistantResponseCardText,
-  type AssistantResponseCard,
-} from '@murphai/operator-config/assistant-response-cards'
+import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   shouldSkipAutomationOccurrenceForAvailability,
@@ -594,6 +591,14 @@ export async function sendAssistantNotificationLocal(
           assistantNotificationProviderNonReplayableWork:
             nonReplayableProviderWork,
         }
+        const providerAuthoredResponse =
+          providerResult.providerAuthoredResponse ?? providerResult.response
+        const runtimeOwnsFinalPresentation =
+          providerResult.responseCard !== null &&
+            providerResult.responseCard !== undefined ||
+          providerResult.providerAuthoredResponse !== null &&
+            providerResult.providerAuthoredResponse !== undefined &&
+            providerResult.response !== providerResult.providerAuthoredResponse
         let decision: AssistantNotificationDecision
         try {
           decision = providerResult.finalAction?.kind === 'none' && groupEmailSendResult
@@ -602,12 +607,12 @@ export async function sendAssistantNotificationLocal(
                 privateSummary: 'Group email effect completed.',
               }
             : parseAssistantNotificationDecision(
-                providerResult.providerAuthoredResponse ?? providerResult.response,
+                providerAuthoredResponse,
               )
-          if (providerResult.responseCard && decision.kind !== 'send_message') {
+          if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
             throw new VaultCliError(
               'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
-              'A notification response card requires a send_message decision.',
+              'A runtime-owned notification presentation requires a send_message decision.',
             )
           }
         } catch (error) {
@@ -672,9 +677,18 @@ export async function sendAssistantNotificationLocal(
             providerValidationErrorDetails,
           )
         }
-        const responseText = providerResult.responseCard
-          ? renderAssistantResponseCardText(providerResult.responseCard)
+        const responseText = runtimeOwnsFinalPresentation
+          ? normalizeRequiredText(
+              providerResult.response,
+              'runtime-owned notification response',
+            )
           : normalizeRequiredText(decision.text, 'notification response')
+        const transcriptText = runtimeOwnsFinalPresentation
+          ? normalizeRequiredText(
+              providerResult.transcriptResponse ?? responseText,
+              'runtime-owned notification transcript',
+            )
+          : responseText
         throwIfAssistantNotificationAborted(messageInput.abortSignal)
         await runAssistantNotificationBeforeDelivery(input, {
           decision: {
@@ -703,7 +717,7 @@ export async function sendAssistantNotificationLocal(
         if (input.deferCommitUntilDeliveryAccepted !== true) {
           await createNotificationReceipt(providerResult.session)
           const savedSession = await persistAssistantTurnAndSession({
-            assistantTranscriptText: responseText,
+            assistantTranscriptText: transcriptText,
             input: messageInput,
             plan: sharedPlan,
             persistUserPromptToTranscript: false,
@@ -812,7 +826,7 @@ export async function sendAssistantNotificationLocal(
             }
             await createNotificationReceipt(deliveryOutcome.session)
             const savedSession = await persistAssistantTurnAndSession({
-              assistantTranscriptText: responseText,
+              assistantTranscriptText: transcriptText,
               input: messageInput,
               plan: sharedPlan,
               persistUserPromptToTranscript: false,

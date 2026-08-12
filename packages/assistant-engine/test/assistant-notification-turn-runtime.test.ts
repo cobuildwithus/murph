@@ -15,6 +15,9 @@ import { serializeAssistantProviderSessionOptions } from '@murphai/operator-conf
 import {
   renderAssistantResponseCardText,
   type AssistantResponseCard,
+  renderAssistantWorkoutResponseCardText,
+  renderAssistantWorkoutResponseCardTranscriptText,
+  type CompactTableWorkoutResponseCardV1,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -101,6 +104,31 @@ const DAILY_NUTRITION_CARD: AssistantResponseCard = {
     proteinGrams: { total: 94.5, mealCount: 3 },
     carbsGrams: { total: null, mealCount: 0 },
     fatGrams: { total: 34.75, mealCount: 2 },
+  },
+}
+
+const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Full workout recovery',
+  subtitle: null,
+  footer: 'Reply with the exercise, set, and result to log or correct it.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: Array.from({ length: 16 }, (_, exerciseIndex) => ({
+      name: `Capacity exercise ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 16 }, (_, setIndex) => ({
+        status: 'pending',
+        target: `Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        actual: null,
+      })),
+    })),
   },
 }
 
@@ -3350,6 +3378,107 @@ test('sendAssistantNotificationLocal preserves a card decision and delivers dete
 })
 
 test.each([
+  { responsePolicy: undefined },
+  { responsePolicy: { kind: 'require_send' } as const },
+])(
+  'sendAssistantNotificationLocal delivers a cardless runtime-owned workout overflow with $responsePolicy',
+  async ({ responsePolicy }) => {
+    const providerAuthoredResponse = JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Completed the scheduled workout update.',
+      text: 'Workout card attached.',
+    })
+    const renderedText = renderAssistantWorkoutResponseCardText(
+      OVERSIZED_WORKOUT_CARD,
+    )
+    const transcriptText = renderAssistantWorkoutResponseCardTranscriptText(
+      OVERSIZED_WORKOUT_CARD,
+    )
+    const providerResult = createProviderResult({
+      providerAuthoredResponse,
+      response: renderedText,
+      transcriptResponse: transcriptText,
+    })
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+      await loadNotificationTurnHarness({
+        providerResult,
+        turnId: 'turn-scheduled-workout-overflow',
+      })
+
+    const result = await sendAssistantNotificationLocal({
+      channel: 'linq',
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryTarget: 'direct-workout-overflow',
+      instructions: 'Send the complete current tracked workout.',
+      ...(responsePolicy === undefined ? {} : { responsePolicy }),
+      scheduledInvocationAuthority: {
+        automationId: 'scheduled-workout-summary',
+        occurrenceAt: '2026-08-09T19:45:00.000-04:00',
+      },
+      threadIsDirect: true,
+      vault: '/vaults/scheduled-workout-overflow',
+    })
+
+    expect(result).toMatchObject({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Completed the scheduled workout update.',
+        text: renderedText,
+      },
+      response: renderedText,
+    })
+    expect(result.response).toContain('Capacity exercise 1:')
+    expect(result.response).toContain('Capacity exercise 16:')
+    expect(result.response).toContain(
+      `set 16: pending; target Exercise 16 set 16 target ${'x'.repeat(12)}`,
+    )
+    expect(result.response).not.toContain('evt_')
+    expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+      card: null,
+      message: renderedText,
+    }))
+    expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+      expect.objectContaining({ assistantTranscriptText: transcriptText }),
+    )
+    expect(JSON.stringify(deliverMessage.mock.calls)).not.toContain(
+      'Workout card attached.',
+    )
+  },
+)
+
+test('sendAssistantNotificationLocal rejects skip after cardless runtime-owned recovery', async () => {
+  const providerResult = createProviderResult({
+    providerAuthoredResponse: JSON.stringify({
+      kind: 'skip',
+      privateSummary: 'Nothing to send.',
+    }),
+    response: 'Full workout recovery\n\nFirst exercise\nLast exercise',
+    transcriptResponse:
+      'Full workout recovery\n\nFirst exercise\nLast exercise\n\n' +
+      '[Murph tracked workout source: evt_test; snapshot: 2026-08-09T19:45:00.000Z]',
+  })
+  const { deliverMessage, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-scheduled-workout-overflow-skip',
+    })
+
+  await expect(sendAssistantNotificationLocal({
+    channel: 'linq',
+    instructions: 'Send the complete current tracked workout.',
+    scheduledInvocationAuthority: {
+      automationId: 'scheduled-workout-summary',
+      occurrenceAt: '2026-08-09T19:45:00.000-04:00',
+    },
+    threadIsDirect: true,
+    vault: '/vaults/scheduled-workout-overflow-skip',
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
+test.each([
   {
     expectedToolProfile: 'provider-turn',
     profile: 'creative-response' as const,
@@ -5433,6 +5562,7 @@ function createProviderResult(input?: {
   responseCard?: ExecutedAssistantProviderTurnResult['responseCard']
   responseMedia?: ExecutedAssistantProviderTurnResult['responseMedia']
   response?: string
+  transcriptResponse?: string | null
   route?: CodexThreadIdentity
   session?: AssistantSession
   usage?: AssistantProviderUsage | null
@@ -5476,7 +5606,10 @@ function createProviderResult(input?: {
     session,
     stderr: '',
     stdout: '',
-    transcriptResponse: input?.response ?? 'provider response',
+    transcriptResponse:
+      input?.transcriptResponse === undefined
+        ? input?.response ?? 'provider response'
+        : input.transcriptResponse,
     usage:
       input?.usage === undefined
         ? defaultUsage
