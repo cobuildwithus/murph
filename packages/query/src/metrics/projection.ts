@@ -64,7 +64,10 @@ export function buildMetricProjection(
   });
   return {
     dailySampleSummaries,
-    metricPoints: applyWearableSummaryMetricPrecedence(metricPoints, wearableMetricEvidence.suppressionEvidence),
+    metricPoints: applyWearableSummaryMetricPrecedence(
+      applyJunctionPreciseBodyObservationPrecedence(metricPoints),
+      wearableMetricEvidence.suppressionEvidence,
+    ),
     wearableMetricRows,
   };
 }
@@ -282,6 +285,107 @@ function heartRateZoneMetricEvidence(summary: WearableActivitySummary): Wearable
       },
     }];
   });
+}
+
+const JUNCTION_PRECISE_BODY_RESOURCE_BY_METRIC = new Map<string, string>([
+  [resolveMetricInputKey("bmi"), "body-mass-index"],
+  [resolveMetricInputKey("body-fat-percentage"), "fat"],
+  [resolveMetricInputKey("lean-body-mass"), "lean-body-mass"],
+  [resolveMetricInputKey("waist-circumference"), "waist-circumference"],
+]);
+
+interface JunctionBodyObservationIdentity {
+  kind: "precise" | "summary";
+  key: string;
+}
+
+function applyJunctionPreciseBodyObservationPrecedence(
+  points: readonly MetricPoint[],
+): MetricPoint[] {
+  const preciseIdentities = new Set(
+    points.flatMap((point) => {
+      const identity = resolveJunctionBodyObservationIdentity(point);
+      return identity?.kind === "precise" ? [identity.key] : [];
+    }),
+  );
+
+  if (preciseIdentities.size === 0) {
+    return [...points];
+  }
+
+  return points.filter((point) => {
+    const identity = resolveJunctionBodyObservationIdentity(point);
+    return identity?.kind !== "summary" || !preciseIdentities.has(identity.key);
+  });
+}
+
+function resolveJunctionBodyObservationIdentity(
+  point: MetricPoint,
+): JunctionBodyObservationIdentity | null {
+  const metricKey = resolveMetricInputKey(point.metricKey);
+  const preciseResource = JUNCTION_PRECISE_BODY_RESOURCE_BY_METRIC.get(metricKey);
+  if (!preciseResource) {
+    return null;
+  }
+
+  const externalRef = readPlainRecord(point.provenance.externalRef);
+  if (readPlainString(externalRef?.system) !== "junction") {
+    return null;
+  }
+  const dataOrigin = readPlainRecord(point.provenance.dataOrigin);
+  const sourceProviderSlug = normalizeJunctionIdentitySlug(
+    readPlainString(dataOrigin?.sourceProviderSlug),
+  );
+  const sourceInstanceId = readPlainString(dataOrigin?.sourceInstanceId);
+  const observedAtRaw = readPlainString(dataOrigin?.observedAtRaw);
+  if (!sourceProviderSlug || !sourceInstanceId || !observedAtRaw) {
+    return null;
+  }
+
+  const resourceType = readPlainString(externalRef?.resourceType);
+  const resourcePrefix = `junction-${sourceProviderSlug}-`;
+  const kind = resourceType === `${resourcePrefix}body`
+    ? "summary"
+    : resourceType === `${resourcePrefix}${preciseResource}`
+      ? "precise"
+      : null;
+  if (!kind) {
+    return null;
+  }
+
+  return {
+    kind,
+    key: [
+      metricKey,
+      sourceProviderSlug,
+      sourceInstanceId,
+      readPlainString(dataOrigin?.sourceType) ?? "",
+      observedAtRaw,
+    ].join("\0"),
+  };
+}
+
+function normalizeJunctionIdentitySlug(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "");
+  return normalized || null;
+}
+
+function readPlainRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readPlainString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function applyWearableSummaryMetricPrecedence(

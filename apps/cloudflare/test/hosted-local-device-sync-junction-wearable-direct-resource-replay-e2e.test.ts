@@ -138,8 +138,9 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
         JUNCTION_PROVIDER_FILTER: "oura,whoop_v2,garmin",
         JUNCTION_REGION: "us",
         JUNCTION_SUMMARY_RESOURCES: [
-          ...new Set([...JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES, "sleep_cycle"]),
+          ...new Set([...JUNCTION_WEARABLE_FIXTURE_SUMMARY_RESOURCES, "body", "sleep_cycle"]),
         ].join(","),
+        JUNCTION_TIMESERIES_RESOURCES: "fat",
         JUNCTION_WEBHOOK_SECRET: junctionWebhookSecret,
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: linqApiToken,
@@ -447,6 +448,8 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     const replayPlan = requirePlan();
     const activeScenario = requireScenario();
     const seededAt = new Date().toISOString();
+    const fatOverlapProof = buildJunctionFatOverlapDirtyResources(seededAt);
+    const dirtyResources = [...replayPlan.dirtyResources, ...fatOverlapProof.dirtyResources];
 
     await activeScenario.seedActiveHostedMember({ memberId: userId });
     await activeScenario.runWake(buildMemberActivatedWake(seededAt), userId, {
@@ -465,14 +468,14 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     const seed = await activeScenario.seedJunctionDeviceSyncReplay({
       connectedAt: seededAt,
       dirtyAt: seededAt,
-      dirtyResources: replayPlan.dirtyResources,
+      dirtyResources,
       displayName: replayPlan.connection.displayName,
       externalAccountId: replayPlan.connection.externalAccountId,
       memberId: userId,
       sources: replayPlan.sources,
     });
 
-    expect(seed.dirtyResourceCount).toBe(replayPlan.dirtyResources.length);
+    expect(seed.dirtyResourceCount).toBe(dirtyResources.length);
     expect(seed.sourceCount).toBe(3);
     const systemImportedSeqBeforeDeviceSync = await readHostedSystemImportedSeq({
       scenario: activeScenario,
@@ -553,6 +556,23 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
         })}`,
       ]));
     }
+    const bodyFatRows = readBrowserVaultRows(replica, "metricRows")
+      .filter((row) => row.metricKey === "body-fat-percentage");
+    expect(bodyFatRows.filter((row) => row.observedAt === fatOverlapProof.overlapObservedAt))
+      .toEqual([
+        expect.objectContaining({
+          unit: "%",
+          value: 18.5,
+        }),
+      ]);
+    expect(bodyFatRows.filter((row) => row.observedAt === fatOverlapProof.fallbackObservedAt))
+      .toEqual([
+        expect.objectContaining({
+          unit: "%",
+          value: 25,
+        }),
+      ]);
+
     const ouraSourceHealth = requireSourceHealth("oura");
     const whoopSourceHealth = requireSourceHealth("whoop_v2");
     const garminSourceHealth = requireSourceHealth("garmin");
@@ -577,6 +597,92 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     expect(collectUnsafeHostedStatusFailureKeys(failureStatus)).toEqual([]);
   }, 540_000);
 });
+
+interface JunctionFatOverlapProof {
+  dirtyResources: JunctionWearableHostedReplayDirtyResource[];
+  fallbackObservedAt: string;
+  overlapObservedAt: string;
+}
+
+function buildJunctionFatOverlapDirtyResources(seededAt: string): JunctionFatOverlapProof {
+  const anchor = Date.parse(seededAt);
+  if (!Number.isFinite(anchor)) {
+    throw new TypeError("Junction fat overlap proof requires a valid seeded timestamp.");
+  }
+  const overlapObservedAt = new Date(anchor - (3 * 24 * 60 * 60_000)).toISOString();
+  const fallbackObservedAt = new Date(anchor - (2 * 24 * 60 * 60_000)).toISOString();
+  const sourceInstanceId = "source-0f0e0d0c0b0a090807060504";
+  const buildDirtyResource = (input: {
+    id: string;
+    observedAt: string;
+    record: Record<string, unknown>;
+    resource: "body" | "fat";
+    resourceCategory: "summary" | "timeseries";
+  }): JunctionWearableHostedReplayDirtyResource => ({
+    count: 1,
+    jobKind: "resource",
+    payload: {
+      eventType: `daily.data.${input.resource}.created`,
+      objectId: input.id,
+      occurredAt: input.observedAt,
+      resource: input.resource,
+      resourceCategory: input.resourceCategory,
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        ...input.record,
+        id: input.id,
+        sourceInstanceId,
+        sourceProviderSlug: "garmin",
+        sourceType: "scale",
+      }),
+      windowEnd: input.observedAt,
+      windowStart: input.observedAt,
+    },
+    resource: input.resource,
+    resourceCategory: input.resourceCategory,
+    sourceProviderSlug: "garmin",
+    windowEnd: input.observedAt,
+    windowStart: input.observedAt,
+  });
+
+  return {
+    dirtyResources: [
+      buildDirtyResource({
+        id: `fat-summary-overlap-${runId}`,
+        observedAt: overlapObservedAt,
+        record: {
+          body_fat_percentage: 21,
+          date: overlapObservedAt,
+        },
+        resource: "body",
+        resourceCategory: "summary",
+      }),
+      buildDirtyResource({
+        id: `fat-precise-overlap-${runId}`,
+        observedAt: overlapObservedAt,
+        record: {
+          timestamp: overlapObservedAt,
+          unit: "%",
+          value: 18.5,
+        },
+        resource: "fat",
+        resourceCategory: "timeseries",
+      }),
+      buildDirtyResource({
+        id: `fat-summary-fallback-${runId}`,
+        observedAt: fallbackObservedAt,
+        record: {
+          body_fat_percentage: 25,
+          date: fallbackObservedAt,
+        },
+        resource: "body",
+        resourceCategory: "summary",
+      }),
+    ],
+    fallbackObservedAt,
+    overlapObservedAt,
+  };
+}
 
 interface ExperimentAdherenceActivityPlan {
   baselineEnd: string;

@@ -14106,6 +14106,223 @@ test("Junction opt-in sparse resources use bounded 30-day extended-history windo
   }));
 });
 
+test("Junction existing connections receive one bounded retryable fat activation catch-up after terminal global coverage", async () => {
+  const now = "2026-07-01T12:00:00.000Z";
+  const requests: URL[] = [];
+  let fatRecordAvailable = false;
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { body_fat: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/body_fat/grouped") {
+      requests.push(url);
+      const windowStart = Date.parse(requireValue(
+        url.searchParams.get("start_date"),
+        "fat activation start_date",
+      ));
+      const windowEnd = Date.parse(requireValue(
+        url.searchParams.get("end_date"),
+        "fat activation end_date",
+      ));
+      const observedAt = Date.parse("2026-06-15T08:00:00.000Z");
+      const includeRecord = fatRecordAvailable
+        && observedAt >= windowStart
+        && observedAt < windowEnd;
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: includeRecord
+              ? [{
+                  id: "fat-activation-row-1",
+                  timestamp: "2026-06-15T08:00:00.000Z",
+                  unit: "%",
+                  value: 18.5,
+                }]
+              : [],
+            source: { provider: "garmin", type: "scale" },
+          }],
+        },
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    providerFilter: ["garmin"],
+    summaryBackfillDays: 180,
+    timeseriesResources: ["fat"],
+  });
+  const source = createConnectionSource({
+    resourceAvailabilitySummary: { body_fat: true },
+  });
+  const sourceSummary = {
+    displayName: source.displayName,
+    firstSeenAt: source.firstSeenAt,
+    lastDataAt: source.lastDataAt,
+    lastErrorCode: source.lastErrorCode,
+    lastErrorMessage: source.lastErrorMessage,
+    lastSeenAt: source.lastSeenAt,
+    resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+    resourceCount: Object.keys(source.resourceAvailabilitySummary).length,
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: source.status,
+  };
+  const terminalMetadata = {
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+    junctionHistoricalBackfillWindowStart: "2025-10-05T00:00:00.000Z",
+  };
+  const schedulerAccount = createStoredAccount({
+    metadata: terminalMetadata,
+    nextReconcileAt: now,
+    sources: [sourceSummary],
+  });
+  const executor = requireValue(provider.jobExecutor);
+
+  const nonTerminalJobs = executor.createScheduledJobs?.(
+    createStoredAccount({
+      metadata: {
+        ...terminalMetadata,
+        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      },
+      nextReconcileAt: now,
+      sources: [sourceSummary],
+    }),
+    now,
+  ).jobs ?? [];
+  assert.equal(nonTerminalJobs.some((job) =>
+    job.kind === "resource" && job.payload?.resource === "fat"
+  ), false);
+
+  const scheduled = requireValue(executor.createScheduledJobs?.(schedulerAccount, now));
+  const activationJobs = scheduled.jobs.filter((job) =>
+    job.kind === "resource"
+    && job.payload?.resource === "fat"
+    && job.payload?.sourceProviderSlug === "garmin"
+  );
+  assert.equal(activationJobs.length, 1);
+  assert.deepEqual(activationJobs[0]?.payload, {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-01-02T00:00:00.000Z",
+    resource: "fat",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "garmin",
+    windowEnd: "2026-07-01T00:00:00.000Z",
+    windowStart: "2026-01-02T00:00:00.000Z",
+  });
+
+  const toJobRecord = (input: DeviceSyncJobInput): DeviceSyncJobRecord => ({
+    ...createJob(input.kind, input.payload ?? {}),
+    availableAt: input.availableAt ?? now,
+    dedupeKey: input.dedupeKey ?? null,
+    priority: input.priority ?? 50,
+  });
+  let currentJob = toJobRecord(requireValue(activationJobs[0]));
+  let result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ metadata: terminalMetadata, sources: [sourceSummary] }),
+      importSnapshot: async () => ({
+        canonicalEventCount: 1,
+        durableDeliveryAccepted: true,
+      }),
+      now,
+    }),
+    currentJob,
+  );
+
+  for (let chunk = 1; chunk < 6; chunk += 1) {
+    currentJob = toJobRecord(requireValue(
+      result.scheduledJobs?.find((job) => job.kind === "resource"),
+      `Expected empty fat continuation ${chunk}.`,
+    ));
+    assert.equal(currentJob.availableAt, now);
+    result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ metadata: terminalMetadata, sources: [sourceSummary] }),
+        importSnapshot: async () => ({
+          canonicalEventCount: 1,
+          durableDeliveryAccepted: true,
+        }),
+        now,
+      }),
+      currentJob,
+    );
+  }
+
+  const retryJob = toJobRecord(requireValue(
+    result.scheduledJobs?.find((job) => job.kind === "resource"),
+    "Expected one delayed fat activation retry after the empty 180-day pass.",
+  ));
+  assert.equal(retryJob.payload.historicalWindowStart, "2026-01-02T00:00:00.000Z");
+  assert.equal(retryJob.payload.windowStart, "2026-01-02T00:00:00.000Z");
+  assert.equal(retryJob.payload.emptyBackfillAttempts, 1);
+  assert.notEqual(retryJob.availableAt, now);
+  assert.equal(retryJob.dedupeKey, activationJobs[0]?.dedupeKey);
+
+  fatRecordAvailable = true;
+  currentJob = retryJob;
+  for (let chunk = 0; chunk < 6; chunk += 1) {
+    result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ metadata: terminalMetadata, sources: [sourceSummary] }),
+        importSnapshot: async () => ({
+          canonicalEventCount: 1,
+          durableDeliveryAccepted: true,
+        }),
+        now: chunk === 0 ? retryJob.availableAt : now,
+      }),
+      currentJob,
+    );
+    if (chunk < 5) {
+      currentJob = toJobRecord(requireValue(
+        result.scheduledJobs?.find((job) => job.kind === "resource"),
+        `Expected populated fat continuation ${chunk + 1}.`,
+      ));
+    }
+  }
+
+  assert.equal(result.metadataPatch?.junctionExtendedTimeseriesHistoryBackfillCoverage, "v1|garmin:4");
+  assert.equal(result.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+  const windows = requests.map((url) => ({
+    end: requireValue(url.searchParams.get("end_date"), "fat activation end_date"),
+    start: requireValue(url.searchParams.get("start_date"), "fat activation start_date"),
+  }));
+  assert.equal(windows.length, 12);
+  assert.equal(new Set(windows.map(({ end, start }) => `${start}|${end}`)).size, 6);
+  assert.ok(windows.every(({ end, start }) =>
+    Date.parse(end) > Date.parse(start)
+    && Date.parse(end) - Date.parse(start) <= 30 * 24 * 60 * 60_000
+  ));
+  assert.equal(requests.every((url) =>
+    url.pathname === "/v2/timeseries/junction-user-1/body_fat/grouped"
+  ), true);
+
+  const completedAccount = createStoredAccount({
+    metadata: {
+      ...terminalMetadata,
+      ...result.metadataPatch,
+    },
+    nextReconcileAt: now,
+    sources: [sourceSummary],
+  });
+  const afterCompletion = requireValue(executor.createScheduledJobs?.(completedAccount, now));
+  assert.equal(afterCompletion.jobs.some((job) =>
+    job.kind === "resource" && job.payload?.resource === "fat"
+  ), false);
+});
+
 test("Junction mixed sparse and dense backfills resume the longest history before advancing the shared cursor", async () => {
   const ownerWindowStart = "2026-01-01T00:00:00.000Z";
   const ownerWindowEnd = "2026-03-02T00:00:00.000Z";
