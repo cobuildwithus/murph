@@ -672,6 +672,44 @@ Web-owned exact-text, member, expiry, and direct-route assertion at every
 provider attempt; non-idempotent transport work remains checkpoint-gated. Fresh
 conversation input continues to preempt this pass.
 
+An authenticated current-sender private exact completion does not mutate the
+member's ordinary conversation when the notification is queued. After the
+live-authorized same-channel delivery reaches the durable outbox's canonical
+`sent` state, the hosted runtime uses its intent as the recovery journal. Partial or ambiguous
+provider receipts remain retryable or abandoned and never participate, even
+when they retain message metadata. If queue-time resolution found an
+existing ordinary direct session, the intent binds the exact ID returned by the
+hosted-default continuity lookup before the notification target is projected
+read-only. Supported model or reasoning changes do not erase that causal
+binding; only fallback resolution without an ordinary session stays unbound
+until the first attended direct turn. If that turn starts before delivery
+finishes, it atomically binds the current intent to its exact session without
+importing text, advancing the turn count, or clearing resume state; those
+effects remain gated on canonical `sent`. An omitted binding identifies a
+pre-rollout intent and fails closed; only an explicit current-writer null may
+wait for that first session. No route-sibling heuristic may choose the owner.
+A canonically sent field-present obligation is exempt from ordinary terminal outbox
+pruning until its journal reaches `applied`, after which ordinary retention
+resumes. The import appends the exact reviewed assistant text once,
+advances the session once, and clears both stale native provider-resume aliases.
+An interrupted import converges from that journal, and canonical direct
+attended resolution repairs it before provider-resume selection. An ordinary
+direct scheduled occurrence repairs only an obligation already bound to its
+exact session before provider-resume selection; it cannot claim explicit-null
+unbound work. The direct output-only Assistant Ask continuation applies the
+same bound-only rule before provider planning because it can be the next
+same-session history consumer. Hosted text turns use their nested
+direct-conversation route plus accepted assistant-input authority; multimodal
+payload shape is irrelevant. A direct exact notification that resolves the
+ordinary session also applies bound-only repair before it can append newer
+history; it cannot claim explicit-null work, and a genuinely detached session
+cannot import an obligation bound to another session.
+The runtime recognizes this
+exception only from the complete queue-only, exact-text, one-mailbox-item,
+direct Linq-or-Telegram private-completion proof plus its matching durable
+delivery. Rejected completions, an expiry marker alone, and all generic
+detached notification sessions remain isolated.
+
 A legacy usage-referral notification can be authority-less even after Web has
 repaired its producer, because the local system mailbox may already have
 persisted the old wake and advanced the import watermark. The bounded Web scan
@@ -1616,8 +1654,10 @@ adds no image-specific sender, durable image job, mailbox kind, scheduler,
 reservation, allowance implementation, or usage lifecycle. Runner loss may
 drop unfinished provider work.
 
-Detached `assistant.notification.requested` work remains output-only and cannot
-mutate resident conversation history or native provider resume state. A completed phone
+Generic model-backed `assistant.notification.requested` work remains
+output-only and cannot mutate resident conversation history or native provider
+resume state. The authenticated deterministic current-sender private exact
+completion above is the sole conversation-bound exception. A completed phone
 call is delivered as an ordinary `assistant.notification.requested` system-mailbox
 event: Murph composes the result in its own voice and proactively messages the
 member's resolved messaging route, and may skip a non-meaningful call
