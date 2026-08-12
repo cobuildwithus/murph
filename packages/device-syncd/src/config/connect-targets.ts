@@ -27,7 +27,7 @@ type DeviceSyncConnectTargetProviderConfigs = ConfiguredDeviceSyncProviderPresen
 const JUNCTION_PREFERRED_CONNECT_SOURCE_IDS = new Set(["whoop"]);
 // Keep provider ingestion configured for existing accounts while this product
 // gate controls whether a fresh user-facing connection can be started.
-const DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set(["strava"]);
+const DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set(["strava", "dexcom"]);
 
 export function normalizeDeviceSyncConnectTargetKey(value: string): string | null {
   const normalized = value

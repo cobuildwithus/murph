@@ -2953,6 +2953,10 @@ test('linq runtime records safe request and response diagnostics for provider ht
         {
           chatId: 'sample-chat-route-value',
           idempotencyKey: 'reply-key-safe-diagnostics',
+          media: [
+            { url: 'https://cdn.example.test/private-diagnostic-image.png' },
+            { attachmentId: 'attachment-safe-diagnostics' },
+          ],
           message: 'hello reminder',
           replyToMessageId: 'reply-sample-message-id',
         },
@@ -2964,11 +2968,13 @@ test('linq runtime records safe request and response diagnostics for provider ht
             createJsonResponse(
               {
                 'sample-chat-route-value': 'dynamic key should stay private',
-                errors: [
-                  {
-                    message: 'chat sample-chat-route-value rejected message',
-                  },
-                ],
+                error: {
+                  code: 1004,
+                  doc_url: 'https://docs.linqapp.com/error/codes/1xxx/1004/',
+                  message: 'chat sample-chat-route-value rejected message',
+                  status: 400,
+                },
+                success: false,
                 trace_id: 'trace-sample-response-value',
               },
               {
@@ -2991,20 +2997,61 @@ test('linq runtime records safe request and response diagnostics for provider ht
         error.context?.requestBodyShape ===
           'object:message|message:idempotency_key,parts' &&
         error.context?.requestMessageLength === 'hello reminder'.length &&
-        error.context?.requestMessagePartCount === 1 &&
+        error.context?.requestMessagePartCount === 3 &&
+        error.context?.requestTextPartCount === 1 &&
+        error.context?.requestMediaPartCount === 2 &&
+        error.context?.requestPublicUrlMediaPartCount === 1 &&
+        error.context?.requestAttachmentMediaPartCount === 1 &&
+        error.context?.providerErrorCode === '1004' &&
+        error.context?.providerRequestId === 'trace-sample-response-value' &&
         error.context?.responseBodyKind === 'json_object' &&
-        error.context?.responseBodyKeyCount === 3 &&
+        error.context?.responseBodyKeyCount === 4 &&
+        error.context?.responseBodyKeySummary === 'error,trace_id' &&
         JSON.stringify(error.context?.responseBodyKeys) ===
-          JSON.stringify(['errors', 'trace_id']) &&
+          JSON.stringify(['error', 'trace_id']) &&
         error.context?.responseBodyStringFieldCount === 2 &&
+        error.context?.responseBodyStringFieldSummary === 'trace_id' &&
         JSON.stringify(error.context?.responseBodyStringFields) ===
           JSON.stringify(['trace_id']) &&
+        typeof error.context?.responseBodySha256 === 'string' &&
+        /^[a-f0-9]{64}$/u.test(error.context.responseBodySha256) &&
         !contextJson.includes('hello reminder') &&
         !contextJson.includes('sample-chat-route-value') &&
-        !contextJson.includes('trace-sample-response-value')
+        !contextJson.includes('private-diagnostic-image.png') &&
+        !contextJson.includes('chat sample-chat-route-value rejected message')
       )
     },
   )
+})
+
+test('linq runtime rejects oversized rendered text before provider entry', async () => {
+  const fetchImplementation = vi.fn(async () => createJsonResponse({}))
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-oversized-text',
+        media: [{ url: 'https://cdn.example.test/frame.png' }],
+        message: 'x'.repeat(10_001),
+      },
+      {
+        env: { LINQ_API_TOKEN: '<REDACTED_TOKEN>' },
+        fetchImplementation,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_INVALID_INPUT' &&
+      error.context?.failureStage === 'configuration' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.requestMessageLength === 10_001 &&
+      error.context?.requestMessagePartCount === 2 &&
+      error.context?.requestMediaPartCount === 1 &&
+      error.context?.retryable === false &&
+      'deliveryMayHaveSucceeded' in error &&
+      error.deliveryMayHaveSucceeded === false,
+  )
+  expect(fetchImplementation).not.toHaveBeenCalled()
 })
 
 test('linq runtime does not surface top-level provider error text or transport cause text', async () => {
@@ -3026,6 +3073,10 @@ test('linq runtime does not surface top-level provider error text or transport c
                   'chat sample-chat-route rejected sample reminder text',
               },
               {
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Trace-ID': 'trace-header-only',
+                },
                 status: 400,
               },
             ),
@@ -3044,6 +3095,7 @@ test('linq runtime does not surface top-level provider error text or transport c
         error.code === 'LINQ_API_REQUEST_FAILED' &&
         error.message ===
           'Linq request POST /chats/[chat]/messages failed with HTTP 400.' &&
+        error.context?.providerRequestId === 'trace-header-only' &&
         error.context?.responseBodyKind === 'json_object' &&
         JSON.stringify(error.context?.responseBodyKeys) ===
           JSON.stringify(['message']) &&

@@ -50,6 +50,7 @@ import {
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  persistAssistantPrivateCompletionContinuityAfterDelivery,
   readAssistantAutomationState,
   readAssistantOutboxIntent,
   readAssistantVaultFileMedia,
@@ -3802,6 +3803,32 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         userId: input.userId,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
+      });
+    }
+    try {
+      await persistAssistantPrivateCompletionContinuityAfterDelivery({
+        intent: dispatched.intent,
+        vault: input.vaultRoot,
+      });
+    } catch (error) {
+      // Provider delivery and required transport confirmation are already
+      // durable. The attended direct-turn owner repairs optional continuity.
+      emitHostedExecutionStructuredLog({
+        component: "assistant-delivery",
+        details: buildHostedAssistantDeliveryDetails({
+          effectFingerprint: input.assistantDeliveryEffect.fingerprint,
+          effectId: input.assistantDeliveryEffect.effectId,
+          extra: {
+            failureDomain: "private-continuity",
+          },
+          userId: input.userId,
+        }),
+        wake: input.wake,
+        error,
+        level: "warn",
+        message: "Hosted private completion continuity persistence failed.",
+        phase: "outbox",
+        userId: input.userId,
       });
     }
     assertHostedDeliveryLiveness(input.signal);
