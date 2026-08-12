@@ -1,4 +1,6 @@
 import {
+  HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   hostedVaultShareProjectionKindToScope,
 } from "@murphai/hosted-execution/vault-share";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -85,7 +87,7 @@ describe("createHostedWebVaultSharePort", () => {
     });
     const environment = readHostedExecutionEnvironment(
       createHostedExecutionTestEnv({
-        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "30000",
+        HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "2000",
         HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
     );
@@ -119,7 +121,7 @@ describe("createHostedWebVaultSharePort", () => {
     const vaultSharePort = createHostedWebVaultSharePort({
       boundUserId: "member_projection_proxy",
       fetchImpl: fetchImpl as typeof fetch,
-      timeoutMs: 30_000,
+      timeoutMs: 1_000,
       transport: { mode: "proxy" },
     });
 
@@ -144,9 +146,64 @@ describe("createHostedWebVaultSharePort", () => {
     expect(deliverySettled).toBe(false);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeoutMs: HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS
+          + HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
+      }),
+    );
 
     releaseWebRequest(Response.json({ status: "delivered" }));
     await expect(delivery).resolves.toEqual({ status: "delivered" });
     expect(deliverySettled).toBe(true);
+  });
+
+  it("retains delivery ownership through the conservative settlement window after transport ambiguity", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(() => new Promise<Response>((_resolve, reject) => {
+        setTimeout(() => {
+          reject(new Error("synthetic proxy transport failure"));
+        }, 5_000);
+      }));
+      const vaultSharePort = createHostedWebVaultSharePort({
+        boundUserId: "member_projection_ambiguous",
+        fetchImpl: fetchImpl as typeof fetch,
+        timeoutMs: 1_000,
+        transport: { mode: "proxy" },
+      });
+      let deliverySettled = false;
+
+      const delivery = vaultSharePort.deliver({
+        projectionKind: "profile-name.v0",
+        projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
+        records: [],
+        sourceWorkspaceVersion: "7",
+      });
+      void delivery.then(
+        () => {
+          deliverySettled = true;
+        },
+        () => {
+          deliverySettled = true;
+        },
+      );
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(deliverySettled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(
+        HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS
+          + HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS
+          - 5_001,
+      );
+      expect(deliverySettled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(delivery).rejects.toThrow("Hosted vault share delivery request failed.");
+      expect(deliverySettled).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -644,11 +644,21 @@ Last verified: 2026-08-12
   observed after capture drains, and the capture is discarded without delivery.
   Delivery remains owned by the same invocation. Once immutable delivery
   starts, foreground conversation work may proceed without waiting for
-  publication, but the invocation starts no second projection and does not
-  release its runner ownership until the real proxy-to-Web response is
-  terminal. Abort and shutdown finalization join that same request before a
-  successor invocation or the existing continuation may retry. No projection
-  stage continues detached. Every delivery carries the committed source
+  publication. The first foreground preemption marks the remaining captured
+  scopes deferred: the current scope reaches a terminal boundary, no later scope
+  starts, and the existing dirty or recording owner retries the undispatched
+  scopes. The invocation starts no second projection and does not release its
+  runner ownership until the real proxy-to-Web response is terminal. Web owns a
+  finite effect deadline for each delivery, stops admitting destination
+  replacements on deadline or request cancellation, and gives the final
+  database transaction only the remaining deadline. Runtime-to-proxy and
+  proxy-to-Web transport timeouts exceed that effect deadline by a fixed margin.
+  A response-less transport failure remains ambiguous, so invocation ownership
+  stays occupied until the absolute effect-deadline-plus-margin boundary; an
+  authoritative HTTP response settles immediately. Abort, shutdown, and normal
+  finalization join that same owner before a successor invocation or the
+  existing continuation may retry. No projection stage continues detached.
+  Every delivery carries the committed source
   workspace version bound to those bytes. Web
   encrypts first, then briefly locks that existing workspace row before the
   final share replacement; a delivery older than the current checkpoint becomes
@@ -661,9 +671,10 @@ Last verified: 2026-08-12
   and at most 25 sequential share-replacement transactions per delivery under
   the existing grant cap: 2,450 replacement transactions at maximum admitted
   cardinality. There is at most one active scope-resolution or delivery request
-  per opportunity; an error stops the remaining scopes, and the existing
-  continuation cannot retry until that request is terminal. Repeated wakes may
-  admit conversation work but cannot start another projection. Each
+  per opportunity. An error stops the remaining scopes; a foreground wake
+  finishes only the already-started scope; and the existing continuation cannot
+  retry until that request reaches its server-owned terminal boundary. Repeated
+  wakes may admit conversation work but cannot start another projection. Each
   replacement adds one source-workspace row lock/check at its final write
   boundary. The runtime starts no concurrent per-scope or per-share transactions,
   and publication wakes no destination group runtime. Ordinary load is

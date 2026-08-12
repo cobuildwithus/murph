@@ -15,6 +15,10 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
+} from "@murphai/hosted-execution/vault-share";
+import {
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
@@ -126,6 +130,9 @@ export async function handleRunnerWebControlRequest(input: {
   const isDeviceSyncRuntimeSnapshotRequest =
     input.url.pathname === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
     && input.request.method === "POST";
+  const isVaultShareDeliveryRequest =
+    policy.operation === "vault_share_deliver"
+    && input.request.method === "POST";
   const isClinicalRecordsRequest = (
     policy.operation === "clinical_records_connect_link"
     || policy.operation === "clinical_records_fetch_page"
@@ -223,6 +230,12 @@ export async function handleRunnerWebControlRequest(input: {
       ? Math.max(
         input.environment.webControlTimeoutMs,
         HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS,
+      )
+      : isVaultShareDeliveryRequest
+      ? Math.max(
+        input.environment.webControlTimeoutMs,
+        HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS
+          + HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
       )
       : input.environment.webControlTimeoutMs,
   });

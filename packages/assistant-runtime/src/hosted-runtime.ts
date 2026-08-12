@@ -1202,6 +1202,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   let pendingOwnedVaultShareProjection:
     Promise<Awaited<ReturnType<typeof offerCapturedHostedVaultShareProjectionBestEffort>>>
     | null = null;
+  let vaultShareProjectionForegroundPreempted = false;
   const startOwnedVaultShareProjection = (
     offerInput: Parameters<typeof offerCapturedHostedVaultShareProjectionBestEffort>[0],
   ): NonNullable<typeof pendingOwnedVaultShareProjection> => {
@@ -2411,6 +2412,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               await ownedStage.cancelAndDrain(
                 new Error("Hosted vault-share projection yielded to foreground work."),
               );
+            } else {
+              vaultShareProjectionForegroundPreempted = true;
             }
             if (workSignal.aborted) {
               throw readHostedRuntimeAbortReason(workSignal);
@@ -2463,6 +2466,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const offerResult = await waitForOwnedProjectionStage(
           () => startOwnedVaultShareProjection({
             capture: capture.capture,
+            shouldStop: () => vaultShareProjectionForegroundPreempted,
             vaultSharePort,
           }),
           "retain",
@@ -3852,6 +3856,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 await ownedStage.cancelAndDrain(
                   new Error("Hosted vault-share projection yielded to foreground work."),
                 );
+              } else {
+                vaultShareProjectionForegroundPreempted = true;
               }
               if (runtimeAbortController.signal.aborted) {
                 throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
@@ -3946,6 +3952,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const offerStage = await waitForOwnedProjectionStage(
         () => startOwnedVaultShareProjection({
           capture: capture.capture,
+          shouldStop: () => vaultShareProjectionForegroundPreempted,
           vaultSharePort,
         }),
         "retain",

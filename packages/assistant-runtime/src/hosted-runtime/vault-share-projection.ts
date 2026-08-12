@@ -286,10 +286,14 @@ type ProjectableRecordReader = (input: {
  */
 export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
   capture: HostedVaultShareProjectionCapture;
+  shouldStop?: () => boolean;
   vaultSharePort: HostedRuntimeVaultSharePort;
 }): Promise<HostedVaultShareProjectionOfferResult> {
   const outcomes: HostedVaultShareOfferOutcome[] = [];
-  for (const snapshot of input.capture.snapshots) {
+  for (const [index, snapshot] of input.capture.snapshots.entries()) {
+    if (index > 0 && input.shouldStop?.()) {
+      break;
+    }
     try {
       const request = {
         projectionKind: snapshot.projectionScope.projectionKind,

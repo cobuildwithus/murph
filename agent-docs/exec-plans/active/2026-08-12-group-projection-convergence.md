@@ -65,8 +65,9 @@ Updated: 2026-08-12
 5. Risk: a wake-preempted older publication finishes after a newer checkpoint.
    Mitigation: materialize every selected record while the invocation owns the
    restored vault, keep delivery owned until the real Web response is terminal,
-   admit foreground conversation without starting a second projection, join the
-   request before retry,
+   admit foreground conversation without starting a second projection, stop
+   before the next captured scope, bound the current Web effect and its
+   transport-settlement margin, join the request before retry,
    carry the committed source workspace version bound to those bytes, and
    serialize the final Web replacement against that existing row; stale work
    becomes a no-op.
@@ -140,6 +141,17 @@ Updated: 2026-08-12
   retry. Focused proof covers system-mailbox upgrade, invocation abort,
   graceful shutdown, repeated wakes with peak one active delivery, fail-fast
   scope delivery, cancellable scope reads, and proxy-to-Web completion.
+- ReviewGPT round 5 proved that a response-less transport failure could still
+  release invocation ownership while Web continued crypto or database work, and
+  that a later conversation could wait behind every remaining captured scope.
+  The correction gives Web one finite effect deadline, bounds transaction
+  admission by its remainder, extends both transport layers by a fixed margin,
+  retains ambiguous failures until that absolute settlement boundary, and stops
+  the capture before its next scope after foreground preemption. Focused proof
+  covers delayed transport ambiguity, proxy timeout propagation, request
+  cancellation after one destination begins, deadline-bounded transaction
+  admission, three-scope ordinary preemption with a second conversation, and
+  system-mailbox dirty-owner retry of undispatched scopes.
 - Remaining proof: corrected exact-head preliminary specialists, ReviewGPT
-  round 5 PASS, required GitHub Actions, and current-base merge-tree
+  round 6 PASS, required GitHub Actions, and current-base merge-tree
   verification.

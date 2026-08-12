@@ -55,16 +55,25 @@ current Web-owned snapshot on demand, so publication adds no per-group wake,
 cache invalidation, fanout, or second projection owner.
 The runtime resolves active Web-owned scopes without touching the vault, then
 materializes every selected record while the invocation still owns the restored
-vault path. Scope resolution and delivery both receive the invocation's abort
-signal. A foreground wake cancels the active control-plane request and the
-runtime drains that request before releasing ownership or retrying; projection
-work never outlives its invocation. Local capture is bounded and likewise drains
-before its result is either delivered or discarded. Every captured offer names
+vault path. Scope resolution receives the invocation's abort signal, so a
+foreground wake cancels and drains that read. An already-started immutable
+delivery instead remains owned and
+finishes its current scope. The wake prevents admission of every later captured
+scope, leaving the existing dirty or recording obligation to retry them. Web
+owns a finite effect deadline for that current scope, stops admitting destination
+replacements on deadline or request cancellation, and bounds the final database
+transaction by the remaining deadline. Runtime and proxy transport deadlines
+include a fixed settlement margin; an ambiguous transport failure retains the
+invocation owner until that absolute boundary. Finalization drains that owner
+before release or retry, so projection work never overlaps a successor
+invocation. Local capture is bounded and likewise drains before its result is
+either delivered or discarded. Every captured offer names
 the committed personal-workspace version that produced those bytes. Web
 serializes only the final replacement against that existing workspace row; an
 older in-flight offer becomes a no-op after a newer checkpoint instead of
 overwriting the newer group snapshot. One opportunity has at most one active
-request, and a failed scope terminates the remaining delivery chain. Projection
+request; a failed scope or foreground preemption terminates the remaining
+delivery chain. Projection
 failure retains the existing dirty or recording obligation and its bounded
 continuation rather than creating a projection-specific queue or watermark.
 After an authenticated group join or sharing save, the page reuses the

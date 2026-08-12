@@ -108,13 +108,16 @@ function createPrisma(events?: string[]) {
     version: BigInt(SOURCE_WORKSPACE_VERSION),
   }]);
   const tx = { $queryRaw: queryRaw, hostedVaultShare: { updateMany } };
-  const prisma = createPrismaClientTestDouble({
-    $transaction: vi.fn(async (callback: (value: typeof tx) => Promise<unknown>) => {
+  const transaction = vi.fn(
+    async (callback: (value: typeof tx) => Promise<unknown>) => {
       events?.push("transaction");
       return callback(tx);
-    }),
+    },
+  );
+  const prisma = createPrismaClientTestDouble({
+    $transaction: transaction,
   });
-  return { prisma, queryRaw, updateMany };
+  return { prisma, queryRaw, transaction, updateMany };
 }
 
 describe("replaceHostedVaultShareProjectionSnapshot", () => {
@@ -179,6 +182,45 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
       prisma,
     });
     expect(records).toEqual([]);
+  });
+
+  it("bounds replacement transaction admission to the remaining delivery deadline", async () => {
+    createSnapshotTestCodec();
+    const now = vi.spyOn(Date, "now").mockReturnValue(10_000);
+    const { prisma, transaction } = createPrisma();
+
+    try {
+      await expect(replaceHostedVaultShareProjectionSnapshot({
+        deadlineAtEpochMs: 15_000,
+        prisma,
+        records: [RECORD],
+        share: SHARE,
+        sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+      })).resolves.toBe("replaced");
+
+      expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+        maxWait: 1_000,
+        timeout: 4_000,
+      });
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("starts no replacement transaction after the delivery deadline", async () => {
+    createSnapshotTestCodec();
+    const { prisma, transaction, updateMany } = createPrisma();
+
+    await expect(replaceHostedVaultShareProjectionSnapshot({
+      deadlineAtEpochMs: Date.now() - 1,
+      prisma,
+      records: [RECORD],
+      share: SHARE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    })).rejects.toMatchObject({ name: "TimeoutError" });
+
+    expect(transaction).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("uses the exact active row as the stale-writer compare-and-set boundary", async () => {

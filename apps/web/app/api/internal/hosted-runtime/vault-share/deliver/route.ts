@@ -1,5 +1,6 @@
 import {
   isHostedVaultShareCurrentStateProjectionKind,
+  HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   parseHostedVaultShareDeliverRequest,
   type HostedVaultShareDeliverResponse,
   type HostedVaultShareDeliveryRecord,
@@ -48,6 +49,12 @@ const DELIVERED_RESPONSE: HostedVaultShareDeliverResponse = {
  * `delivered`, so the grantor runtime learns nothing beyond "an active share exists".
  */
 export const POST = withJsonError(async (request: Request) => {
+  const effectDeadlineAtEpochMs = Date.now()
+    + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS;
+  const effectTimeoutSignal = AbortSignal.timeout(
+    HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  );
+  const effectSignal = AbortSignal.any([request.signal, effectTimeoutSignal]);
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
   });
@@ -69,10 +76,16 @@ export const POST = withJsonError(async (request: Request) => {
   let deliveryFailed = false;
 
   for (const share of shares) {
+    if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
+      deliveryFailed = true;
+      break;
+    }
     try {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
+        deadlineAtEpochMs: effectDeadlineAtEpochMs,
         records,
         share,
+        signal: effectSignal,
         sourceWorkspaceVersion: body.sourceWorkspaceVersion,
       });
       delivered ||= outcome === "replaced";

@@ -74,6 +74,7 @@ function parseHostedVaultShareDeliverRequest(value: Record<string, unknown>) {
 }
 
 async function offerHostedVaultShareProjectionBestEffort(input: {
+  shouldStop?: () => boolean;
   vaultRoot: string;
   vaultSharePort:
     | Parameters<
@@ -100,6 +101,7 @@ async function offerHostedVaultShareProjectionBestEffort(input: {
   }
   return await offerCapturedHostedVaultShareProjectionBestEffort({
     capture: capture.capture,
+    ...(input.shouldStop ? { shouldStop: input.shouldStop } : {}),
     vaultSharePort: input.vaultSharePort,
   });
 }
@@ -599,6 +601,34 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     });
 
     expect(result).toEqual({ outcome: "error" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]?.[0]).toMatchObject({
+      projectionKind: "profile-name.v0",
+    });
+  });
+
+  it("finishes only the active scope after foreground work preempts delivery", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    let foregroundPreempted = false;
+    const deliver = vi.fn().mockImplementation(async () => {
+      foregroundPreempted = true;
+      return { status: "delivered" as const };
+    });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      shouldStop: () => foregroundPreempted,
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => [
+          PROFILE_SCOPE,
+          TIME_ZONE_SCOPE,
+          SLEEP_SCOPE,
+        ],
+      },
+    });
+
+    expect(result).toEqual({ outcome: "delivered" });
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver.mock.calls[0]?.[0]).toMatchObject({
       projectionKind: "profile-name.v0",

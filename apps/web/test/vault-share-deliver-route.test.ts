@@ -134,7 +134,7 @@ const SECOND_SHARE = {
   projectionScopeKey: SLEEP_SCOPE_KEY,
 };
 
-function buildRequest(body: unknown): Request {
+function buildRequest(body: unknown, signal?: AbortSignal): Request {
   const versionedBody = body !== null && typeof body === "object" && !Array.isArray(body)
     ? { sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion, ...body }
     : body;
@@ -142,7 +142,15 @@ function buildRequest(body: unknown): Request {
     body: JSON.stringify(versionedBody),
     headers: { "content-type": "application/json" },
     method: "POST",
+    ...(signal ? { signal } : {}),
   });
+}
+
+function deliveryEffectControls() {
+  return {
+    deadlineAtEpochMs: expect.any(Number),
+    signal: expect.any(AbortSignal),
+  };
 }
 
 function workoutsDeliveryBody(workoutsPerDay: number): HostedVaultShareDeliverRequest {
@@ -240,7 +248,7 @@ describe("vault-share deliver route", () => {
   });
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_grantor");
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
 		mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("replaced");
@@ -313,6 +321,7 @@ describe("vault-share deliver route", () => {
       projectionScope: SLEEP_SCOPE,
     });
 		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+			...deliveryEffectControls(),
 			records: VALID_BODY.records,
 			share: ACTIVE_SHARE,
 			sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
@@ -341,6 +350,7 @@ describe("vault-share deliver route", () => {
       projectionScope: ACTIVITY_SCOPE,
     });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+      ...deliveryEffectControls(),
       records: [record],
       share: activityShare,
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
@@ -378,6 +388,7 @@ describe("vault-share deliver route", () => {
       projectionScope: WORKOUT_SCOPE,
     });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+      ...deliveryEffectControls(),
       records: [record],
       share: workoutShare,
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
@@ -428,6 +439,51 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(2);
   });
 
+  it("awaits the active replacement but admits no later share after cancellation", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const controller = new AbortController();
+    let releaseFirstReplacement = (): void => {
+      throw new Error("First replacement did not start.");
+    };
+    const firstReplacementStarted = new Promise<void>((resolveStarted) => {
+      mocks.replaceHostedVaultShareProjectionSnapshot
+        .mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+          expect(signal.aborted).toBe(false);
+          resolveStarted();
+          return new Promise<"replaced">((resolveReplacement) => {
+            releaseFirstReplacement = () => resolveReplacement("replaced");
+          });
+        })
+        .mockResolvedValueOnce("replaced");
+    });
+    mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE, SECOND_SHARE]);
+
+    try {
+      let responseSettled = false;
+      const responsePromise = deliverRoute.POST(buildRequest(VALID_BODY, controller.signal));
+      void responsePromise.finally(() => {
+        responseSettled = true;
+      });
+
+      await firstReplacementStarted;
+      controller.abort(new DOMException("Caller disconnected.", "AbortError"));
+      await Promise.resolve();
+      expect(responseSettled).toBe(false);
+
+      releaseFirstReplacement();
+      const response = await responsePromise;
+
+      expect(response.status).toBe(503);
+      expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
+      expect(
+        mocks.replaceHostedVaultShareProjectionSnapshot.mock.calls[0]?.[0].signal.aborted,
+      ).toBe(true);
+    } finally {
+      releaseFirstReplacement();
+      consoleError.mockRestore();
+    }
+  });
+
 	it("replaces an all-stale offer with an empty snapshot", async () => {
 		const response = await deliverRoute.POST(
 			buildRequest({
@@ -439,6 +495,7 @@ describe("vault-share deliver route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+      ...deliveryEffectControls(),
       records: [],
       share: ACTIVE_SHARE,
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
@@ -460,6 +517,7 @@ describe("vault-share deliver route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "no-active-share" });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+      ...deliveryEffectControls(),
       records: [],
       share: ACTIVE_SHARE,
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
@@ -479,6 +537,7 @@ describe("vault-share deliver route", () => {
     expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+      ...deliveryEffectControls(),
       records: [freshRecord],
       share: ACTIVE_SHARE,
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
@@ -509,6 +568,7 @@ describe("vault-share deliver route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+      ...deliveryEffectControls(),
       records: [record],
       share: profileShare,
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
@@ -539,6 +599,7 @@ describe("vault-share deliver route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+      ...deliveryEffectControls(),
       records: [],
       share: expect.objectContaining({ projectionKind: "profile-name.v0" }),
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,

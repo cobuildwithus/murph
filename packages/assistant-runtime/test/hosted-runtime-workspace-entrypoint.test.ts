@@ -12248,9 +12248,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(retainedItem?.status, "recording");
       assert.ok(retainedItem?.postCheckpointRecord);
       assert.equal(checkpointRequests.length, 1);
-      assert.equal(projectionCalls, 2);
+      assert.equal(projectionCalls, 1);
       assert.equal(activeProjectionCalls, 0);
-      assert.ok(events.includes("vault-share.deliver:done:2"), events.join(","));
+      assert.ok(events.includes("vault-share.deliver:done:1"), events.join(","));
       const durableRecordingCheckpoint = checkpointRequests[0];
       assert.ok(durableRecordingCheckpoint);
       const resumedWorkspace = createWorkspaceState({
@@ -12271,17 +12271,17 @@ describe("hosted workspace runtime entrypoint", () => {
         createRunOptions(createCoalescingRuntimeWakeSignal(), resumedWorkspace),
       );
 
-      assert.equal(projectionCalls, 4);
-      assert.deepEqual(projectedWorkspaceVersions, ["1", "1", "2", "2"]);
+      assert.equal(projectionCalls, 3);
+      assert.deepEqual(projectedWorkspaceVersions, ["1", "2", "2"]);
       assert.equal(peakActiveProjectionCalls, 1);
       assert.equal(dirtyAckCalls, 1);
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:done:2")
-          < requireEventIndex(events, "vault-share.deliver:start:3"),
+        requireEventIndex(events, "vault-share.deliver:done:1")
+          < requireEventIndex(events, "vault-share.deliver:start:2"),
         events.join(","),
       );
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:done:4")
+        requireEventIndex(events, "vault-share.deliver:done:3")
           < requireEventIndex(events, "device-sync.dirty-ack"),
         events.join(","),
       );
@@ -24848,6 +24848,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const offerStarted = createDeferred<void>();
     const offerRelease = createDeferred<void>();
     const conversationAssistantStarted = createDeferred<void>();
+    const secondConversationAssistantStarted = createDeferred<void>();
     const mailboxItems: HostedMailboxItem[] = [
       createMailboxItem({
         dedupeKey:
@@ -24866,6 +24867,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let conversationAssistantPhaseEvent: string | null = null;
     let peakActiveProjectionDeliveries = 0;
     let projectionDeliveryCalls = 0;
+    let processedConversationInputs = 0;
     let pendingInputId: string | null = null;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
@@ -24924,7 +24926,11 @@ describe("hosted workspace runtime entrypoint", () => {
               async listActiveProjectionScopes() {
                 activeScopeReads += 1;
                 return activeScopeReads === 1
-                  ? [{ projectionKind: "sleep-times.v0" }]
+                  ? [
+                      { projectionKind: "sleep-times.v0" },
+                      { projectionKind: "profile-name.v0" },
+                      { projectionKind: "time-zone.v0" },
+                    ]
                   : [];
               },
               async deliver() {
@@ -24996,8 +25002,13 @@ describe("hosted workspace runtime entrypoint", () => {
               inputId,
               vaultRoot,
             });
-            conversationAssistantPhaseEvent = assistantPhaseEvent;
-            conversationAssistantStarted.resolve();
+            processedConversationInputs += 1;
+            if (processedConversationInputs === 1) {
+              conversationAssistantPhaseEvent = assistantPhaseEvent;
+              conversationAssistantStarted.resolve();
+            } else if (processedConversationInputs === 2) {
+              secondConversationAssistantStarted.resolve();
+            }
             return {
               checkpointReason: "assistant_runtime_commit" as const,
               nextWakeAt: null,
@@ -25105,7 +25116,20 @@ describe("hosted workspace runtime entrypoint", () => {
         ) < requireEventIndex(events, assistantPhaseEvent),
         events.join(","),
       );
+
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_vault_share_preempt_conversation_2",
+        laneSeq: "2",
+        occurredAt: "2026-04-27T00:00:08.000Z",
+      }));
+      runtimeWakeSignal.notify();
       offerRelease.resolve();
+
+      await withRealTimeout(
+        secondConversationAssistantStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
 
       const result = await withRealTimeout(resultPromise, 15_000, () => events.join(","));
       assert.ok(events.includes("vault-share.deliver:done"), events.join(","));

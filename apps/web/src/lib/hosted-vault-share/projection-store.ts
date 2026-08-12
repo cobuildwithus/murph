@@ -110,9 +110,11 @@ export async function readDeliverableHostedVaultShareProjectionScopes(input: {
  * encryption finish before the short database-only replacement transaction starts.
  */
 export async function replaceHostedVaultShareProjectionSnapshot(input: {
+  deadlineAtEpochMs?: number;
   prisma?: PrismaClient;
   records: readonly HostedVaultShareDeliveryRecord[];
   share: ActiveHostedVaultShare;
+  signal?: AbortSignal;
   sourceWorkspaceVersion: string;
 }): Promise<"replaced" | "no-active-share"> {
   const prisma = input.prisma ?? getPrisma();
@@ -121,8 +123,13 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
       prisma,
       records: input.records,
       share: input.share,
+      signal: input.signal,
     });
 
+  input.signal?.throwIfAborted();
+  const transactionOptions = resolveHostedVaultShareProjectionTransactionOptions(
+    input.deadlineAtEpochMs,
+  );
   return prisma.$transaction(async (tx) => {
     if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
       input.share.grantorMemberId,
@@ -157,7 +164,24 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
       },
     });
     return replaced.count === 1 ? "replaced" : "no-active-share";
-  });
+  }, transactionOptions);
+}
+
+function resolveHostedVaultShareProjectionTransactionOptions(
+  deadlineAtEpochMs: number | undefined,
+): { maxWait: number; timeout: number } | undefined {
+  if (deadlineAtEpochMs === undefined) {
+    return undefined;
+  }
+  const remainingMs = deadlineAtEpochMs - Date.now();
+  if (remainingMs < 2) {
+    throw new DOMException("Hosted vault-share delivery deadline elapsed.", "TimeoutError");
+  }
+  const maxWait = Math.min(1_000, remainingMs - 1);
+  return {
+    maxWait,
+    timeout: remainingMs - maxWait,
+  };
 }
 
 async function lockCurrentHostedVaultShareSourceWorkspaceTx(input: {
