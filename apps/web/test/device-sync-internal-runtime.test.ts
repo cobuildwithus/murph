@@ -291,6 +291,7 @@ describe("device-sync hosted runtime helpers", () => {
         lastErrorMessage: errorText,
         metadata: {},
         nextReconcileAt: null,
+        nextRuntimeWakeAt: null,
         provider: "oura",
         scopes: [],
         status: "active",

@@ -892,6 +892,17 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   the app-local Vercel OIDC adapter remains for browser/session/status/deletion
   calls into Cloudflare.
 
+  Hosted device-sync scheduling has two explicit connection timestamps. Web's
+  `nextReconcileAt` is the provider cadence and the only timestamp the global
+  due-reconcile sweep may consume. `nextRuntimeWakeAt` is a nullable recovery
+  projection of the machine-local runner job store; it exists only to re-admit
+  scheduled provider work after a cold runner replacement because hosted
+  snapshots intentionally exclude the device-sync SQLite store. A warm runner
+  remains the timing owner through workspace `nextWakeAt`, clears the recovery
+  projection when local work drains, and capability-gates the split so an older
+  Web deployment retains the legacy minimum projection instead of stranding a
+  continuation. This adds no scheduler or queue.
+
   Member-owned device provider applications are also Web-owned control facts.
   Web stores one encrypted, revisioned application per personal member and
   provider, binds OAuth state and each resulting connection to the exact

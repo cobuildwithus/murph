@@ -1784,10 +1784,15 @@ checkpointed local device-sync job store, not that upstream provider sync
 succeeded. Connection-established and disconnect lifecycle commands may still
 use coarse device-sync mailbox wakes because they are explicit lifecycle events,
 not high-cardinality freshness hints.
-The checkpointed local job store projects its earliest queued-job continuation
-only through the runtime-owned workspace `nextWakeAt`. It must not shorten the
-Web-owned provider `nextReconcileAt`, because that canonical field is input to
-the global due-reconcile sweep rather than a generic local-work timer.
+The machine-local job store projects its earliest queued-job continuation
+through the runtime-owned workspace `nextWakeAt` while the runner is warm. Web
+also persists that timestamp in the separate `nextRuntimeWakeAt` recovery field
+so a cold replacement, whose snapshot intentionally excludes the device-sync
+SQLite store, can re-admit scheduled provider work. The global due-reconcile
+sweep must ignore this recovery projection and consume only the Web-owned
+provider `nextReconcileAt`. Web advertises `runtimeJobWakeProjection` when this
+split is available; runners talking to an older Web retain the legacy minimum
+projection into `nextReconcileAt` so mixed-version restores cannot strand work.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally

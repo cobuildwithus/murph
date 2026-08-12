@@ -8,8 +8,9 @@ This index is the table of contents for the current canonical docs in this repos
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical
-`nextReconcileAt`, while checkpointed queued-job continuation reaches Temporal
-only through the runtime-owned workspace `nextWakeAt`. The contract is jointly
+`nextReconcileAt`, while queued-job continuation reaches Temporal through the
+runtime-owned workspace `nextWakeAt` and uses Web's separate
+`nextRuntimeWakeAt` only for cold-replacement recovery. The contract is jointly
 specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 

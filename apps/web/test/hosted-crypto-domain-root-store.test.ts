@@ -2495,6 +2495,7 @@ function createHostedRuntimeDeviceSecretRecord(input: {
     lastWebhookAt: null,
     metadataJson: {},
     nextReconcileAt: null,
+    nextRuntimeWakeAt: null,
     provider: "junction",
     providerAccountBlindIndex: `blind-${input.connectionId}`,
     providerApplicationId: null,

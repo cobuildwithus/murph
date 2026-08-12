@@ -267,6 +267,7 @@ function buildRuntimeSnapshot(input: {
     lastSyncStartedAt?: string | null;
     lastWebhookAt?: string | null;
     nextReconcileAt?: string | null;
+    nextRuntimeWakeAt?: string | null;
   };
   metadata?: Record<string, unknown>;
   provider?: string;
@@ -336,6 +337,9 @@ function buildRuntimeSnapshot(input: {
           lastSyncStartedAt: input.localState?.lastSyncStartedAt ?? null,
           lastWebhookAt: input.localState?.lastWebhookAt ?? null,
           nextReconcileAt: input.localState?.nextReconcileAt ?? null,
+          ...(input.localState?.nextRuntimeWakeAt === undefined
+            ? {}
+            : { nextRuntimeWakeAt: input.localState.nextRuntimeWakeAt }),
         },
         ...(input.sources === undefined ? {} : { sources: input.sources }),
         credential,
@@ -8656,14 +8660,19 @@ describe("hosted device-sync runtime", () => {
         throw new Error("createConnectLink should not be called during reconciliation");
       },
       async fetchSnapshot() {
-        return buildRuntimeSnapshot({
-          connectionId: "hosted_conn_schedule_owner",
-          externalAccountId: "demo-schedule-owner",
-          hostedUpdatedAt: "2026-04-04T09:05:00.000Z",
-          localState: {
-            nextReconcileAt: "2026-04-04T13:00:00.000Z",
+        return {
+          ...buildRuntimeSnapshot({
+            connectionId: "hosted_conn_schedule_owner",
+            externalAccountId: "demo-schedule-owner",
+            hostedUpdatedAt: "2026-04-04T09:05:00.000Z",
+            localState: {
+              nextReconcileAt: "2026-04-04T13:00:00.000Z",
+            },
+          }),
+          capabilities: {
+            runtimeJobWakeProjection: true,
           },
-        });
+        };
       },
     };
 
@@ -8706,7 +8715,60 @@ describe("hosted device-sync runtime", () => {
       assert.equal(request.updates.length, 1);
       assert.deepEqual(request.updates[0]?.localState, {
         nextReconcileAt: providerReconcileAt,
+        nextRuntimeWakeAt: localJobWakeAt,
       });
+
+      const restoredWorkspace = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-schedule-owner-restored-",
+      );
+      await mkdir(restoredWorkspace.vaultRoot, { recursive: true });
+      const restoredService = createDeviceSyncServiceForVault(restoredWorkspace.vaultRoot);
+      const restoredPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        applyUpdates: vi.fn(),
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during restoration");
+        },
+        async fetchSnapshot() {
+          return {
+            ...buildRuntimeSnapshot({
+              connectionId: "hosted_conn_schedule_owner",
+              externalAccountId: "demo-schedule-owner",
+              hostedUpdatedAt: "2026-04-04T09:11:01.000Z",
+              localState: {
+                nextReconcileAt: providerReconcileAt,
+                nextRuntimeWakeAt: localJobWakeAt,
+              },
+            }),
+            capabilities: {
+              runtimeJobWakeProjection: true,
+            },
+          };
+        },
+      };
+
+      try {
+        const restoredState = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: restoredPort,
+          wake: buildCronWake(localJobWakeAt),
+          secret: DEVICE_SYNC_SECRET,
+          service: restoredService,
+        });
+        const restoredAccountId = restoredState.hostedToLocalAccountIds.get(
+          "hosted_conn_schedule_owner",
+        );
+        assert.ok(restoredAccountId);
+        assert.equal(restoredService.getNextWakeAt(), localJobWakeAt);
+        assert.equal(
+          readJobsForAccount(restoredService, restoredAccountId).filter(
+            (job) => job.status === "queued",
+          ).length,
+          1,
+        );
+      } finally {
+        closeHostedRuntimeDeviceSyncService(restoredService);
+        await restoredWorkspace.cleanup();
+      }
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

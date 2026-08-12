@@ -255,6 +255,7 @@ export async function readHostedDeviceSyncRuntimeState(input: {
   return {
     capabilities: {
       connectionSourceApply: true,
+      runtimeJobWakeProjection: true,
     },
     connections: sortHostedRuntimeConnectionSnapshots(connections),
     generatedAt: new Date().toISOString(),
@@ -403,7 +404,10 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
             provider: record.provider,
           });
         }
-        const nextAccount = buildPublicConnectionFromRuntimeSnapshot(baseline);
+        const nextAccount = {
+          ...buildPublicConnectionFromRuntimeSnapshot(baseline),
+          nextRuntimeWakeAt: baseline.localState.nextRuntimeWakeAt ?? null,
+        };
         let tokenBundleToPersist: HostedExecutionDeviceSyncRuntimeTokenBundle | null | undefined;
         let tokenBundlePersistenceRequested = false;
         let credentialToPersist:
@@ -453,6 +457,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
             if (Object.prototype.hasOwnProperty.call(update.localState, field)) {
               nextAccount[field] = update.localState[field] ?? null;
             }
+          }
+          if (Object.prototype.hasOwnProperty.call(update.localState, "nextRuntimeWakeAt")) {
+            nextAccount.nextRuntimeWakeAt = update.localState.nextRuntimeWakeAt ?? null;
           }
         }
 
@@ -984,6 +991,7 @@ function buildHostedRuntimeConnectionSnapshotFromMaterial(
       lastSyncStartedAt: publicConnection.lastSyncStartedAt,
       lastWebhookAt: publicConnection.lastWebhookAt,
       nextReconcileAt: publicConnection.nextReconcileAt,
+      nextRuntimeWakeAt: record.nextRuntimeWakeAt?.toISOString() ?? null,
     },
     sources,
     credential,

@@ -326,7 +326,10 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionRecordForUser(userId, connectionId, tx);
   }
 
-  async syncDurableConnectionState(account: PublicDeviceSyncAccount, tx?: HostedPrismaTransactionClient): Promise<void> {
+  async syncDurableConnectionState(
+    account: PublicDeviceSyncAccount & { nextRuntimeWakeAt?: string | null },
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<void> {
     return this.connections.syncDurableConnectionState(account, tx);
   }
 

@@ -38,6 +38,7 @@ export interface HostedStaticDeviceSyncConnectionRecord {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   nextReconcileAt: string | null;
+  nextRuntimeWakeAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

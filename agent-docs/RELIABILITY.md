@@ -632,10 +632,14 @@ Last verified: 2026-08-12
   errors remain terminal; the runtime must not create a second artifact retry queue.
 - Hosted device-sync provider cadence and local job continuation are separate
   wake domains. Web's canonical `nextReconcileAt` carries only the provider
-  schedule consumed by the global due-reconcile sweep. An earlier queued-job
-  wake stays in the checkpointed runtime and reaches Temporal through the
-  existing workspace `nextWakeAt`; it must not be copied into the provider
-  deadline or create another system-mailbox wake.
+  schedule consumed by the global due-reconcile sweep. While a runner is warm,
+  an earlier queued-job wake remains owned by its machine-local job store and
+  reaches Temporal through the existing workspace `nextWakeAt`. Web persists
+  that time separately as `nextRuntimeWakeAt` only so a replacement runner can
+  re-admit scheduled provider work after the machine-local store is lost; the
+  global due-reconcile sweep must never read that recovery projection. A
+  capability bit gates the split so older Web versions retain the legacy
+  minimum projection and cannot strand a cold-restore continuation.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;

@@ -131,6 +131,30 @@ export function readNextDeviceSyncJobWakeAt(database: DatabaseSync): string | nu
   return row?.wake_at ?? null;
 }
 
+export function readNextDeviceSyncJobWakeAtForAccount(
+  database: DatabaseSync,
+  accountId: string,
+): string | null {
+  const row = database.prepare(`
+    select wake_at
+    from (
+      select available_at as wake_at
+      from device_job
+      where account_id = ?
+        and status = 'queued'
+      union all
+      select lease_expires_at as wake_at
+      from device_job
+      where account_id = ?
+        and status = 'running'
+        and lease_expires_at is not null
+    )
+    order by wake_at asc
+    limit 1
+  `).get(accountId, accountId) as { wake_at?: string | null } | undefined;
+  return row?.wake_at ?? null;
+}
+
 export function claimDueDeviceSyncJob(
   database: DatabaseSync,
   workerId: string,

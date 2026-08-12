@@ -46,6 +46,7 @@ import {
   markPendingDeviceSyncJobsDeadForAccount,
   markPendingDeviceSyncJobsDeadForAccountIfCurrent,
   readNextDeviceSyncJobWakeAt,
+  readNextDeviceSyncJobWakeAtForAccount,
   releaseDeviceSyncJobIfOwned,
 } from "./store/jobs.ts";
 import {
@@ -480,6 +481,10 @@ export class SqliteDeviceSyncStore {
 
   readNextJobWakeAt(): string | null {
     return readNextDeviceSyncJobWakeAt(this.database);
+  }
+
+  readNextJobWakeAtForAccount(accountId: string): string | null {
+    return readNextDeviceSyncJobWakeAtForAccount(this.database, accountId);
   }
 
   claimDueJob(workerId: string, now: string, leaseMs: number): DeviceSyncJobRecord | null {

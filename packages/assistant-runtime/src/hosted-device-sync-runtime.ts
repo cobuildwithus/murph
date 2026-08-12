@@ -275,6 +275,18 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       });
     }
 
+    if (
+      !terminalStatus
+      && snapshot.capabilities?.runtimeJobWakeProjection === true
+      && entry.localState.nextRuntimeWakeAt
+      && store.readNextJobWakeAtForAccount(stored.id) === null
+    ) {
+      input.service.queueScheduledReconcileAt(
+        stored.id,
+        entry.localState.nextRuntimeWakeAt,
+      );
+    }
+
     state.hostedToLocalAccountIds.set(entry.connection.id, stored.id);
     state.localToHostedAccountIds.set(stored.id, entry.connection.id);
     state.observedTokenVersions.set(entry.connection.id, stored.hostedObservedTokenVersion ?? null);
@@ -418,13 +430,19 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       continue;
     }
 
+    const nextRuntimeWakeAt = store.readNextJobWakeAtForAccount(account.id);
+    const runtimeJobWakeProjectionEnabled =
+      input.state.snapshot?.capabilities?.runtimeJobWakeProjection === true;
     const update = buildHostedDeviceSyncRuntimeConnectionUpdate({
       account,
       baseline: snapshotByConnectionId.get(hostedConnectionId) ?? null,
       codec,
       failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
-      nextReconcileAt: account.nextReconcileAt ?? null,
+      nextReconcileAt: runtimeJobWakeProjectionEnabled
+        ? account.nextReconcileAt ?? null
+        : earliestIsoTimestamp(account.nextReconcileAt ?? null, nextRuntimeWakeAt),
+      nextRuntimeWakeAt: runtimeJobWakeProjectionEnabled ? nextRuntimeWakeAt : undefined,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -1140,6 +1158,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
   hostedConnectionId: string;
   nextReconcileAt: string | null;
+  nextRuntimeWakeAt?: string | null;
   observedTokenVersion: number | null;
   sourceApplyEnabled: boolean;
   sources: readonly StoredDeviceConnectionSource[];
@@ -1212,6 +1231,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
       input.nextReconcileAt,
       baselineLocalState?.nextReconcileAt ?? null,
     );
+    assignNextRuntimeWakeAtUpdate(
+      update,
+      input.nextRuntimeWakeAt,
+      baselineLocalState?.nextRuntimeWakeAt,
+    );
     assignFailureDiagnosticUpdate(
       update,
       input.account.lastSyncErrorAt ?? null,
@@ -1269,6 +1293,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     input.account.status,
     input.nextReconcileAt,
     baselineLocalState?.nextReconcileAt ?? null,
+  );
+  assignNextRuntimeWakeAtUpdate(
+    update,
+    input.nextRuntimeWakeAt,
+    baselineLocalState?.nextRuntimeWakeAt,
   );
 
   if (!equalHostedDeviceSyncRuntimeCredentials(credential, baselineCredential)) {
@@ -2303,6 +2332,21 @@ function assignNextReconcileAtUpdate(
   update.localState = {
     ...(update.localState ?? {}),
     nextReconcileAt: localValue,
+  } satisfies HostedDeviceSyncRuntimeLocalStateUpdate;
+}
+
+function assignNextRuntimeWakeAtUpdate(
+  update: HostedDeviceSyncRuntimeConnectionUpdate,
+  localValue: string | null | undefined,
+  baselineValue: string | null | undefined,
+): void {
+  if (localValue === undefined || localValue === (baselineValue ?? null)) {
+    return;
+  }
+
+  update.localState = {
+    ...(update.localState ?? {}),
+    nextRuntimeWakeAt: localValue,
   } satisfies HostedDeviceSyncRuntimeLocalStateUpdate;
 }
 

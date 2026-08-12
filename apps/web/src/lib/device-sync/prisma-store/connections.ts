@@ -348,6 +348,7 @@ export class PrismaHostedConnectionStore {
             lastSyncErrorAt: null,
             metadataJson: toPrismaJsonObject(metadata),
             nextReconcileAt: maybeDate(input.nextReconcileAt),
+            nextRuntimeWakeAt: null,
             refreshLeaseExpiresAt: null,
             refreshLeaseOwner: null,
             refreshLeaseTokenVersion: null,
@@ -544,6 +545,7 @@ export class PrismaHostedConnectionStore {
           lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(input.message),
           lastSyncErrorAt: new Date(input.now),
           nextReconcileAt: null,
+          nextRuntimeWakeAt: null,
           refreshLeaseExpiresAt: null,
           refreshLeaseOwner: null,
           refreshLeaseTokenVersion: null,
@@ -565,7 +567,7 @@ export class PrismaHostedConnectionStore {
   }
 
   async syncDurableConnectionState(
-    account: PublicDeviceSyncAccount,
+    account: PublicDeviceSyncAccount & { nextRuntimeWakeAt?: string | null },
     tx?: HostedPrismaTransactionClient,
   ): Promise<void> {
     const prisma = tx ?? this.prisma;
@@ -587,6 +589,11 @@ export class PrismaHostedConnectionStore {
         lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(account.lastErrorMessage),
         metadataJson: toPrismaJsonObject(sanitizeHostedDeviceSyncConnectionMetadata(account.metadata ?? {})),
         nextReconcileAt: maybeDate(account.nextReconcileAt),
+        ...(account.status !== "active"
+          ? { nextRuntimeWakeAt: null }
+          : Object.prototype.hasOwnProperty.call(account, "nextRuntimeWakeAt")
+            ? { nextRuntimeWakeAt: maybeDate(account.nextRuntimeWakeAt ?? null) }
+            : {}),
         scopesJson: normalizeStoredScopes(account.scopes),
         setupExpiresAt: maybeDate(account.setupExpiresAt ?? null),
         setupPhase: normalizeHostedDeviceSyncSetupPhase(account.setupPhase ?? null),
