@@ -424,12 +424,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       codec,
       failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
-      nextReconcileAt: account.status === "active"
-        ? earliestIsoTimestamp(
-            account.nextReconcileAt ?? null,
-            store.readNextJobWakeAtForAccount(account.id),
-          )
-        : account.nextReconcileAt ?? null,
+      nextReconcileAt: account.nextReconcileAt ?? null,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({

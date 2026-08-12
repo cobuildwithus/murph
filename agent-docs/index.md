@@ -1,11 +1,17 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Purpose
 
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
+
+Hosted device-sync wake ownership keeps provider cadence in Web's canonical
+`nextReconcileAt`, while checkpointed queued-job continuation reaches Temporal
+only through the runtime-owned workspace `nextWakeAt`. The contract is jointly
+specified by `agent-docs/RELIABILITY.md` and
+`agent-docs/references/hosted-runtime-protocol.md`.
 
 The lower-level hosted browser assertion first-invalid boundary, single-use
 nonce persisted horizon, mixed-version cleanup safety, and opt-in PostgreSQL

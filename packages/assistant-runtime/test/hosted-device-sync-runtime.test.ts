@@ -8626,6 +8626,93 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("reconciliation keeps queued-job continuation in the runtime wake projection", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-schedule-owner-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+    const localJobWakeAt = "2026-04-04T12:15:00.000Z";
+    const providerReconcileAt = "2026-04-04T14:00:00.000Z";
+    let appliedRequest: ApplyUpdatesRequest | null = null;
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+        appliedRequest = input;
+        return {
+          appliedAt: "2026-04-04T09:11:01.000Z",
+          updates: input.updates.map((update) => ({
+            connection: null,
+            connectionId: update.connectionId,
+            status: "updated",
+            tokenUpdate: "unchanged",
+            writeUpdate: "applied",
+          })),
+          userId: "member_123",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during reconciliation");
+      },
+      async fetchSnapshot() {
+        return buildRuntimeSnapshot({
+          connectionId: "hosted_conn_schedule_owner",
+          externalAccountId: "demo-schedule-owner",
+          hostedUpdatedAt: "2026-04-04T09:05:00.000Z",
+          localState: {
+            nextReconcileAt: "2026-04-04T13:00:00.000Z",
+          },
+        });
+      },
+    };
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T09:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(
+        "hosted_conn_schedule_owner",
+      );
+      assert.ok(localAccountId);
+
+      getStore(service).patchAccount(localAccountId, {
+        nextReconcileAt: providerReconcileAt,
+      });
+      getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: localJobWakeAt,
+        dedupeKey: "queued-continuation",
+        kind: "resource",
+        payload: {},
+        priority: 30,
+        provider: "demo",
+      });
+
+      assert.equal(service.getNextWakeAt(), localJobWakeAt);
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T09:11:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      const request = requireApplyUpdatesRequest(appliedRequest);
+      assert.equal(request.updates.length, 1);
+      assert.deepEqual(request.updates[0]?.localState, {
+        nextReconcileAt: providerReconcileAt,
+      });
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("sync preserves unpublished Junction retry progress after hosted version mismatch", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",

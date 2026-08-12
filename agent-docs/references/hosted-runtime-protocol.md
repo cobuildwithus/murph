@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Decision
 
@@ -1784,6 +1784,10 @@ checkpointed local device-sync job store, not that upstream provider sync
 succeeded. Connection-established and disconnect lifecycle commands may still
 use coarse device-sync mailbox wakes because they are explicit lifecycle events,
 not high-cardinality freshness hints.
+The checkpointed local job store projects its earliest queued-job continuation
+only through the runtime-owned workspace `nextWakeAt`. It must not shorten the
+Web-owned provider `nextReconcileAt`, because that canonical field is input to
+the global due-reconcile sweep rather than a generic local-work timer.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally

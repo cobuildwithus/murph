@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Current Guardrails
 
@@ -630,6 +630,12 @@ Last verified: 2026-08-11
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
   and authority failures, other HTTP responses, malformed data, and unclassified
   errors remain terminal; the runtime must not create a second artifact retry queue.
+- Hosted device-sync provider cadence and local job continuation are separate
+  wake domains. Web's canonical `nextReconcileAt` carries only the provider
+  schedule consumed by the global due-reconcile sweep. An earlier queued-job
+  wake stays in the checkpointed runtime and reaches Temporal through the
+  existing workspace `nextWakeAt`; it must not be copied into the provider
+  deadline or create another system-mailbox wake.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;
