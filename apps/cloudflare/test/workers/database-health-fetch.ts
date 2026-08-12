@@ -14,6 +14,7 @@ const recordedDatabaseHealthMessageRequests:
 let databaseHealthClientWaitSeconds = 8;
 let databaseHealthDiscoveryRequestCount = 0;
 let databaseHealthMetricsRequestCount = 0;
+let databaseHealthMissingDirectErrorScrapesRemaining = 0;
 let databaseHealthNowMs = Date.now();
 let databaseHealthZeroEvidenceScrapesRemaining = 0;
 
@@ -40,6 +41,7 @@ export function resetDatabaseHealthMessageRequests(): void {
   databaseHealthClientWaitSeconds = 8;
   databaseHealthDiscoveryRequestCount = 0;
   databaseHealthMetricsRequestCount = 0;
+  databaseHealthMissingDirectErrorScrapesRemaining = 0;
   databaseHealthNowMs = Date.now();
   databaseHealthZeroEvidenceScrapesRemaining = 0;
 }
@@ -50,6 +52,12 @@ export function readDatabaseHealthNowMs(): number {
 
 export function setDatabaseHealthClientWaitSeconds(value: number): void {
   databaseHealthClientWaitSeconds = value;
+}
+
+export function setDatabaseHealthMissingDirectErrorScrapesRemaining(
+  value: number,
+): void {
+  databaseHealthMissingDirectErrorScrapesRemaining = value;
 }
 
 export function setDatabaseHealthZeroEvidenceScrapesRemaining(
@@ -112,10 +120,18 @@ export async function handleDatabaseHealthEgress(
       databaseHealthZeroEvidenceScrapesRemaining -= 1;
       return new Response("", { status: 200 });
     }
-    return new Response(buildMetricsBody({
+    const metricsBody = buildMetricsBody({
       branchId: "branch_worker_test",
       clientWaitSeconds: databaseHealthClientWaitSeconds,
-    }));
+    });
+    if (databaseHealthMissingDirectErrorScrapesRemaining > 0) {
+      databaseHealthMissingDirectErrorScrapesRemaining -= 1;
+      return new Response(metricsBody.replace(
+        /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
+        "",
+      ));
+    }
+    return new Response(metricsBody);
   }
   if (
     method === "GET"

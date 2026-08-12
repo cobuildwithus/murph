@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Current Guardrails
 
@@ -219,9 +219,16 @@ Last verified: 2026-08-11
   A collection that fails before producing a usable observation, including a
   scrape with every required family absent, receives one bounded retry after one
   second, outside any storage transaction. Only an exhausted two-attempt
-  collection increments the consecutive-failure state; partial observations
-  with any usable family remain single-pass so their available unsafe evidence
-  is evaluated without delay.
+  collection increments the consecutive-failure state. A usable partial
+  observation remains single-pass when any available signal is unsafe, so
+  concrete evidence is evaluated without delay. When the only absent family is
+  the direct-error counter and every available signal is safe, the monitor uses
+  that same bounded retry as a confirmation scrape. Every available confirmation
+  signal is evaluated; a recovered direct counter is merged with the original
+  complete gauge evidence, while a failed or still-incomplete confirmation
+  retains the original partial observation. This makes transient counter-family
+  omission less noisy without converting unknown to zero or weakening the
+  two-check telemetry fallback.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
   consecutive runs before paging the monitoring condition. Crossing that
   threshold persists one bounded telemetry-page obligation in the existing

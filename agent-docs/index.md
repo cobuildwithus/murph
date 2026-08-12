@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Purpose
 
@@ -72,8 +72,9 @@ provider-no-replay recovery, are jointly specified by
 `agent-docs/references/hosted-runtime-protocol.md`.
 
 Independent partial PlanetScale metric normalization, explicit unknown-family
-evidence, continued evaluation of available database signals, and one-shot
-telemetry-only operator paging with unresolved-window coalescing, current-pressure
+evidence, continued evaluation of available database signals, bounded safe
+direct-counter-only confirmation without suppressing unsafe observations, and
+one-shot telemetry-only operator paging with unresolved-window coalescing, current-pressure
 priority including direct errors in one combined pre-first-page incident,
 post-ack recurrence suppression, durable owed-page preservation inside
 non-replayable direct-error admission, truthful direct-error and mixed telemetry

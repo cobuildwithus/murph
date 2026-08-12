@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Accepted-Message Targeting
 
@@ -1194,7 +1194,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   admission state. Metric families normalize independently: an unavailable
   family stays null and its canonical allowlisted name is retained, while
   available families continue to drive their own conditions. Missing data is
-  never treated as zero. A telemetry-only notification opens after two
+  never treated as zero. Unusable collections receive one bounded confirmation
+  attempt. Usable partial collections stay single-pass whenever available
+  evidence is unsafe; a safe observation missing only the direct-error counter
+  uses the same confirmation budget. The confirmation's available signals are
+  evaluated, a recovered counter joins the original complete gauge evidence,
+  and failure or continued absence retains the original incomplete observation.
+  A telemetry-only notification opens after two
   consecutive incomplete or failed collections. The first two-check threshold
   window counts incomplete versus unavailable observations, unions only
   canonical missing families observed on partial checks, and uses the threshold
