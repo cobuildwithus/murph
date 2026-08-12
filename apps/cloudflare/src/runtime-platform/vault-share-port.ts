@@ -21,33 +21,66 @@ export function createHostedWebVaultSharePort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
-    async listActiveProjectionScopes() {
-      const payload = await fetchHostedWebControlPlaneJson({
-        boundUserId: input.boundUserId,
-        description: "Hosted vault share active projection scopes",
-        fetchImpl: input.fetchImpl,
-        method: "GET",
-        path: buildHostedVaultShareActiveKindsPath(),
-        timeoutMs: input.timeoutMs,
-        transport: input.transport,
-      });
+    async listActiveProjectionScopes(
+      context?: Parameters<
+        NonNullable<HostedRuntimePlatform["vaultSharePort"]>["listActiveProjectionScopes"]
+      >[0],
+    ) {
+      const signal = context?.signal ?? null;
+      const payload = await runWithExactCallerAbort(signal, async () =>
+        await fetchHostedWebControlPlaneJson({
+          boundUserId: input.boundUserId,
+          description: "Hosted vault share active projection scopes",
+          fetchImpl: input.fetchImpl,
+          method: "GET",
+          path: buildHostedVaultShareActiveKindsPath(),
+          signal,
+          timeoutMs: input.timeoutMs,
+          transport: input.transport,
+        })
+      );
 
       return parseHostedVaultShareActiveProjectionKindsResponse(payload).projectionScopes;
     },
-    async deliver(request: Parameters<NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]>[0]) {
-      const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
-        boundUserId: input.boundUserId,
-        description: "Hosted vault share delivery",
-        fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
-        timeoutMs: input.timeoutMs,
-        transport: input.transport,
-      });
+    async deliver(
+      request: Parameters<
+        NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]
+      >[0],
+      context?: Parameters<
+        NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]
+      >[1],
+    ) {
+      const signal = context?.signal ?? null;
+      const payload = await runWithExactCallerAbort(signal, async () =>
+        await fetchHostedWebControlPlaneJson({
+          body: request,
+          boundUserId: input.boundUserId,
+          description: "Hosted vault share delivery",
+          fetchImpl: input.fetchImpl,
+          path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
+          signal,
+          timeoutMs: input.timeoutMs,
+          transport: input.transport,
+        })
+      );
 
       return parseHostedVaultShareDeliverResponse(payload);
     },
   };
+}
+
+async function runWithExactCallerAbort<T>(
+  signal: AbortSignal | null,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (signal?.aborted) {
+      throw signal.reason;
+    }
+    throw error;
+  }
 }
 
 function buildHostedVaultShareActiveKindsPath(): string {

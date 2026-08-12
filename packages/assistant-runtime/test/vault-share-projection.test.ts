@@ -586,6 +586,25 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     });
   });
 
+  it("stops the captured delivery chain after the first failed scope", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    const deliver = vi.fn().mockRejectedValue(new Error("synthetic delivery failure"));
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => [PROFILE_SCOPE, TIME_ZONE_SCOPE],
+      },
+    });
+
+    expect(result).toEqual({ outcome: "error" });
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver.mock.calls[0]?.[0]).toMatchObject({
+      projectionKind: "profile-name.v0",
+    });
+  });
+
   it("does not read or deliver payloads when the control plane reports no active kinds", async () => {
     const deliver = vi.fn();
     const result = await offerHostedVaultShareProjectionBestEffort({

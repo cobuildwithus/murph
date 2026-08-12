@@ -198,14 +198,18 @@ export type HostedVaultShareProjectionCaptureResult =
 
 /**
  * Resolve Web-owned active share scopes without retaining access to the member vault.
- * This network-only phase is safe for the runtime to abandon when foreground work wakes.
+ * The caller may cancel this network-only phase when foreground work wakes.
  */
 export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
+  signal?: AbortSignal | null;
   vaultSharePort: HostedRuntimeVaultSharePort;
 }): Promise<HostedVaultShareProjectionScopeResolution> {
   try {
+    const projectionScopesPromise = input.signal
+      ? input.vaultSharePort.listActiveProjectionScopes({ signal: input.signal })
+      : input.vaultSharePort.listActiveProjectionScopes();
     const projectionScopes = uniqueHostedVaultShareProjectionScopes(
-      await input.vaultSharePort.listActiveProjectionScopes(),
+      await projectionScopesPromise,
     );
     return projectionScopes.length === 0
       ? { outcome: "no-active-share" }
@@ -282,22 +286,26 @@ type ProjectableRecordReader = (input: {
  */
 export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
   capture: HostedVaultShareProjectionCapture;
+  signal?: AbortSignal | null;
   vaultSharePort: HostedRuntimeVaultSharePort;
 }): Promise<HostedVaultShareProjectionOfferResult> {
   const outcomes: HostedVaultShareOfferOutcome[] = [];
   for (const snapshot of input.capture.snapshots) {
     try {
-      const response = await input.vaultSharePort.deliver({
+      const request = {
         projectionKind: snapshot.projectionScope.projectionKind,
         projectionScope: snapshot.projectionScope,
         records: snapshot.records,
         sourceWorkspaceVersion: input.capture.sourceWorkspaceVersion,
-      });
+      };
+      const response = await (input.signal
+        ? input.vaultSharePort.deliver(request, { signal: input.signal })
+        : input.vaultSharePort.deliver(request));
       outcomes.push(
         response.status === "delivered" ? "delivered" : "no-active-share",
       );
     } catch {
-      outcomes.push("error");
+      return { outcome: "error" };
     }
   }
   return { outcome: combineHostedVaultShareOfferOutcomes(outcomes) };

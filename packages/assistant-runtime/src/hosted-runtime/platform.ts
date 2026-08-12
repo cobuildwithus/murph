@@ -686,9 +686,12 @@ export interface HostedRuntimeActionApprovalPort {
 }
 
 export interface HostedRuntimeVaultSharePort {
-  listActiveProjectionScopes(): Promise<HostedVaultShareProjectionScope[]>;
+  listActiveProjectionScopes(
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedVaultShareProjectionScope[]>;
   deliver(
     request: HostedVaultShareDeliverRequest,
+    context?: { signal?: AbortSignal | null },
   ): Promise<HostedVaultShareDeliverResponse>;
 }
 

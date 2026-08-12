@@ -2304,15 +2304,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
         const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
-        const waitForDetachableProjectionStage = async <T,>(
-          stage: Promise<T>,
+        const waitForOwnedProjectionStage = async <T,>(
+          runStage: (signal: AbortSignal) => Promise<T>,
         ): Promise<
           | { kind: "completed"; value: T }
           | { kind: "wake" }
         > => {
-          const stageWithAbort = raceHostedRuntimeCancellation(stage, workSignal);
+          const ownedStage = startOwnedHostedProjectionStage({
+            ownerSignals: [workSignal],
+            runStage,
+          });
+          const stage = ownedStage.promise;
           if (!runtimeWakeSignal) {
-            return { kind: "completed", value: await stageWithAbort };
+            const value = await stage;
+            if (workSignal.aborted) {
+              throw readHostedRuntimeAbortReason(workSignal);
+            }
+            return { kind: "completed", value };
           }
 
           const wakeAbortController = new AbortController();
@@ -2323,7 +2331,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (workSignal.aborted) {
             abortWake();
           }
-          const stageResult = stageWithAbort.then((value) => ({
+          const stageResult = stage.then((value) => ({
             kind: "completed" as const,
             value,
           }));
@@ -2332,13 +2340,30 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           let result: Awaited<typeof stageResult> | Awaited<typeof wakeResult>;
           try {
             result = await Promise.race([stageResult, wakeResult]);
+          } catch (error) {
+            await ownedStage.cancelAndDrain(
+              workSignal.aborted
+                ? readHostedRuntimeAbortReason(workSignal)
+                : error instanceof Error
+                  ? error
+                  : new Error("Hosted vault-share projection stage failed."),
+            );
+            if (workSignal.aborted) {
+              throw readHostedRuntimeAbortReason(workSignal);
+            }
+            throw error;
           } finally {
             workSignal.removeEventListener("abort", abortWake);
           }
 
           if (result.kind === "wake") {
             foregroundWakeObserved = true;
-            void stageWithAbort.catch(() => undefined);
+            await ownedStage.cancelAndDrain(
+              new Error("Hosted vault-share projection yielded to foreground work."),
+            );
+            if (workSignal.aborted) {
+              throw readHostedRuntimeAbortReason(workSignal);
+            }
             return result;
           }
           if (!wakeAbortController.signal.aborted) {
@@ -2347,8 +2372,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           return result;
         };
 
-        const scopeResolutionResult = await waitForDetachableProjectionStage(
-          resolveHostedVaultShareProjectionScopesBestEffort({ vaultSharePort }),
+        const scopeResolutionResult = await waitForOwnedProjectionStage(
+          (signal) => resolveHostedVaultShareProjectionScopesBestEffort({
+            signal,
+            vaultSharePort,
+          }),
         );
         if (scopeResolutionResult.kind === "wake") {
           return "preempted";
@@ -2381,9 +2409,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           return "completed";
         }
 
-        const offerResult = await waitForDetachableProjectionStage(
-          offerCapturedHostedVaultShareProjectionBestEffort({
+        const offerResult = await waitForOwnedProjectionStage(
+          (signal) => offerCapturedHostedVaultShareProjectionBestEffort({
             capture: capture.capture,
+            signal,
             vaultSharePort,
           }),
         );
@@ -3602,45 +3631,71 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         rememberDeferredDeviceSyncWake(classification.wake);
         return null;
       };
-      type VaultShareDetachableStageWaitResult<T> =
+      type VaultShareOwnedStageWaitResult<T> =
         | { kind: "external_wake"; notification: RuntimeWakeNotification }
         | { kind: "finished" }
         | { kind: "stage"; value: T };
-      const waitForDetachableProjectionStage = async <T,>(
-        stage: Promise<T>,
+      const waitForOwnedProjectionStage = async <T,>(
+        runStage: (signal: AbortSignal) => Promise<T>,
       ): Promise<
         | { kind: "completed"; value: T }
         | { kind: "preempted"; wake: HostedVaultShareOfferWake | null }
       > => {
+        const ownedStage = startOwnedHostedProjectionStage({
+          ownerSignals: [
+            runtimeAbortController.signal,
+            ...(options.shutdownSignal ? [options.shutdownSignal] : []),
+          ],
+          runStage,
+        });
+        const stage = ownedStage.promise;
+        const finishAfterCancellation = async (): Promise<
+          { kind: "preempted"; wake: HostedVaultShareOfferWake | null }
+        > => {
+          await ownedStage.cancelAndDrain(
+            options.shutdownSignal?.reason instanceof Error
+              ? options.shutdownSignal.reason
+              : new Error("Hosted vault-share projection stage was cancelled."),
+          );
+          if (runtimeAbortController.signal.aborted) {
+            throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
+          }
+          return { kind: "preempted", wake: deferredDeviceSyncWake };
+        };
         if (!runtimeWakeSignal) {
-          const stageSignal = options.shutdownSignal
-            ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
-            : runtimeAbortController.signal;
           try {
+            const value = await stage;
+            if (runtimeAbortController.signal.aborted) {
+              throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
+            }
+            if (shutdownWasSignaled()) {
+              return await finishAfterCancellation();
+            }
             return {
               kind: "completed",
-              value: await raceHostedRuntimeCancellation(stage, stageSignal),
+              value,
             };
           } catch (error) {
             if (shutdownWasSignaled() && !runtimeAbortController.signal.aborted) {
-              return { kind: "preempted", wake: deferredDeviceSyncWake };
+              return await finishAfterCancellation();
             }
             throw error;
           }
         }
 
-        const stageWithAbort = raceHostedRuntimeCancellation(
-          stage,
-          runtimeAbortController.signal,
-        );
-        const stageResult = stageWithAbort.then((value) => ({
+        const stageResult = stage.then((value) => ({
           kind: "stage" as const,
           value,
         }));
         while (true) {
           if (shutdownWasSignaled()) {
-            void stageWithAbort.catch(() => undefined);
-            return { kind: "preempted", wake: deferredDeviceSyncWake };
+            return await finishAfterCancellation();
+          }
+          if (runtimeAbortController.signal.aborted) {
+            await ownedStage.cancelAndDrain(
+              readHostedRuntimeAbortReason(runtimeAbortController.signal),
+            );
+            throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
           }
 
           const wakeAbortController = new AbortController();
@@ -3661,8 +3716,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (shutdownWasSignaled()) {
             abortWakeAfterShutdown();
           }
-          let waitResult: VaultShareDetachableStageWaitResult<T> = { kind: "finished" };
-          let wake: Promise<VaultShareDetachableStageWaitResult<T>> = Promise.resolve({
+          let waitResult: VaultShareOwnedStageWaitResult<T> = { kind: "finished" };
+          let wake: Promise<VaultShareOwnedStageWaitResult<T>> = Promise.resolve({
             kind: "finished",
           });
           try {
@@ -3680,7 +3735,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 }
                 throw error;
               });
-            waitResult = await Promise.race([stageResult, wake]);
+            try {
+              waitResult = await Promise.race([stageResult, wake]);
+            } catch (error) {
+              await ownedStage.cancelAndDrain(
+                runtimeAbortController.signal.aborted
+                  ? readHostedRuntimeAbortReason(runtimeAbortController.signal)
+                  : error instanceof Error
+                    ? error
+                    : new Error("Hosted vault-share projection stage failed."),
+              );
+              if (runtimeAbortController.signal.aborted) {
+                throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
+              }
+              if (shutdownWasSignaled()) {
+                return { kind: "preempted", wake: deferredDeviceSyncWake };
+              }
+              throw error;
+            }
           } finally {
             runtimeAbortController.signal.removeEventListener("abort", abortWake);
             options.shutdownSignal?.removeEventListener("abort", abortWakeAfterShutdown);
@@ -3696,7 +3768,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             }
             const classification = await classifyWake(latencySeed);
             if (!classification.mayWaitForProjection) {
-              void stageWithAbort.catch(() => undefined);
+              await ownedStage.cancelAndDrain(
+                new Error("Hosted vault-share projection yielded to foreground work."),
+              );
+              if (runtimeAbortController.signal.aborted) {
+                throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
+              }
               return { kind: "preempted", wake: classification.wake };
             }
             rememberDeferredDeviceSyncWake(classification.wake);
@@ -3718,7 +3795,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
 
           if (waitResult.kind !== "stage") {
-            void stageWithAbort.catch(() => undefined);
+            return await finishAfterCancellation();
+          }
+          if (runtimeAbortController.signal.aborted) {
+            throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
+          }
+          if (shutdownWasSignaled()) {
             return { kind: "preempted", wake: deferredDeviceSyncWake };
           }
           const pendingWake = await consumePendingProjectionWake();
@@ -3736,8 +3818,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return { outcome: "preempted", wake: deferredDeviceSyncWake };
       }
 
-      const scopeResolutionStage = await waitForDetachableProjectionStage(
-        resolveHostedVaultShareProjectionScopesBestEffort({ vaultSharePort }),
+      const scopeResolutionStage = await waitForOwnedProjectionStage(
+        (signal) => resolveHostedVaultShareProjectionScopesBestEffort({
+          signal,
+          vaultSharePort,
+        }),
       );
       if (scopeResolutionStage.kind === "preempted") {
         return { outcome: "preempted", wake: scopeResolutionStage.wake };
@@ -3773,9 +3858,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return { outcome: capture.outcome, wake: deferredDeviceSyncWake };
       }
 
-      const offerStage = await waitForDetachableProjectionStage(
-        offerCapturedHostedVaultShareProjectionBestEffort({
+      const offerStage = await waitForOwnedProjectionStage(
+        (signal) => offerCapturedHostedVaultShareProjectionBestEffort({
           capture: capture.capture,
+          signal,
           vaultSharePort,
         }),
       );
@@ -6798,6 +6884,29 @@ function raceHostedRuntimeCancellation<T>(
   });
 }
 
+function startOwnedHostedProjectionStage<T>(input: {
+  ownerSignals: readonly AbortSignal[];
+  runStage: (signal: AbortSignal) => Promise<T>;
+}): {
+  cancelAndDrain(reason: unknown): Promise<void>;
+  promise: Promise<T>;
+} {
+  const stageAbortController = new AbortController();
+  const promise = input.runStage(AbortSignal.any([
+    ...input.ownerSignals,
+    stageAbortController.signal,
+  ]));
+  return {
+    async cancelAndDrain(reason) {
+      if (!stageAbortController.signal.aborted) {
+        stageAbortController.abort(reason);
+      }
+      await promise.catch(() => undefined);
+    },
+    promise,
+  };
+}
+
 function readHostedRuntimeAbortReason(signal: AbortSignal): unknown {
   return signal.reason instanceof Error
     ? signal.reason
@@ -6995,10 +7104,10 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.vaultSharePort
       ? {
           vaultSharePort: {
-            deliver: (deliverInput) =>
-              guard(() => platform.vaultSharePort!.deliver(deliverInput)),
-            listActiveProjectionScopes: () =>
-              guard(() => platform.vaultSharePort!.listActiveProjectionScopes()),
+            deliver: (deliverInput, context) =>
+              guard(() => platform.vaultSharePort!.deliver(deliverInput, context)),
+            listActiveProjectionScopes: (context) =>
+              guard(() => platform.vaultSharePort!.listActiveProjectionScopes(context)),
           },
         }
       : {}),

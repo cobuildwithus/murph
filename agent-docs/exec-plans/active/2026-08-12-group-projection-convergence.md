@@ -64,9 +64,10 @@ Updated: 2026-08-12
    watermark or second retry loop.
 5. Risk: a wake-preempted older publication finishes after a newer checkpoint.
    Mitigation: materialize every selected record while the invocation owns the
-   restored vault, detach only immutable delivery, carry the committed source
-   workspace version bound to those bytes, and serialize the final Web
-   replacement against that existing row; stale work becomes a no-op.
+   restored vault, keep delivery owned and abortable, drain it before retry,
+   carry the committed source workspace version bound to those bytes, and
+   serialize the final Web replacement against that existing row; stale work
+   becomes a no-op.
 
 ## Tasks
 
@@ -95,8 +96,10 @@ Updated: 2026-08-12
 - Fence final Web replacement with the committed workspace version instead of
   adding a share watermark, generation table, or projection-specific state.
 - Split the existing projector into Web-owned scope resolution, vault-owned
-  complete capture, and immutable delivery. Only the two phases without vault
-  access may be wake-detached; capture drains before owner release.
+  complete capture, and immutable delivery. Network phases receive the owning
+  abort signal; cancellation fully drains the active request before owner
+  release or retry, while capture drains before its result is delivered or
+  discarded.
 - Normalize Junction cadence once in its existing runtime-config owner and make
   the runtime descriptor report the same effective interval.
 
@@ -123,6 +126,13 @@ Updated: 2026-08-12
   correction retained lazy mutable-vault reads after invocation release. The PR
   records the accepted owner-boundary redesign; the local capture/delivery race
   proof is green.
+- ReviewGPT round 3 required a second retrospective because wake-detached
+  immutable delivery could multiply across retries. The replacement deletes
+  detached publication, propagates cancellation into the actual Web-control
+  fetch, drains before retry, and stops later scopes after the first failure.
+  Focused proof covers system-mailbox wake cancellation, invocation abort,
+  graceful shutdown, repeated device/foreground wakes with peak one active
+  delivery, fail-fast scope delivery, and Cloudflare fetch cancellation.
 - Remaining proof: corrected exact-head preliminary specialists, ReviewGPT
-  round 3 PASS, required GitHub Actions, and current-base merge-tree
+  round 4 PASS, required GitHub Actions, and current-base merge-tree
   verification.

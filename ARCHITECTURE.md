@@ -55,15 +55,18 @@ current Web-owned snapshot on demand, so publication adds no per-group wake,
 cache invalidation, fanout, or second projection owner.
 The runtime resolves active Web-owned scopes without touching the vault, then
 materializes every selected record while the invocation still owns the restored
-vault path. A wake may abandon scope resolution or immutable delivery, but local
-capture drains before ownership is released; detached work therefore retains no
-vault path or lazy read. Every captured offer names the committed
-personal-workspace version that produced those bytes. Web serializes only the
-final replacement against that existing workspace row; an older in-flight offer
-becomes a no-op after a newer checkpoint instead of overwriting the newer group
-snapshot. Projection failure retains the existing dirty or recording obligation
-and its bounded continuation rather than creating a projection-specific queue or
-watermark.
+vault path. Scope resolution and delivery both receive the invocation's abort
+signal. A foreground wake cancels the active control-plane request and the
+runtime drains that request before releasing ownership or retrying; projection
+work never outlives its invocation. Local capture is bounded and likewise drains
+before its result is either delivered or discarded. Every captured offer names
+the committed personal-workspace version that produced those bytes. Web
+serializes only the final replacement against that existing workspace row; an
+older in-flight offer becomes a no-op after a newer checkpoint instead of
+overwriting the newer group snapshot. One opportunity has at most one active
+request, and a failed scope terminates the remaining delivery chain. Projection
+failure retains the existing dirty or recording obligation and its bounded
+continuation rather than creating a projection-specific queue or watermark.
 After an authenticated group join or sharing save, the page reuses the
 dashboard auth owner's first-checkout decision: a member who still requires
 checkout continues directly to `/join`, while an accessible member retains the

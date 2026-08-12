@@ -637,15 +637,18 @@ Last verified: 2026-08-12
   fail-soft to the completed personal import and foreground reply, but they do
   not consume the existing dirty or system-mailbox recording obligation; that
   owner reuses its bounded device-sync continuation before acknowledgement.
-  Active-scope resolution is network-only and may be abandoned on a wake. Once
+  Active-scope resolution is network-only and receives the owning invocation's
+  abort signal. Once
   scopes resolve, the runtime materializes all selected records before releasing
   its restored-vault ownership; a wake during those bounded local reads is
   observed after capture drains, and the capture is discarded without delivery.
-  Only the immutable captured payload may continue detached. Every delivery
-  carries the committed source workspace version bound to those bytes. Web
+  Delivery remains owned by the same invocation. A foreground wake cancels the
+  actual active control-plane request, fully drains it, and only then releases
+  ownership or starts a retry. No projection stage continues detached. Every
+  delivery carries the committed source workspace version bound to those bytes. Web
   encrypts first, then briefly locks that existing workspace row before the
   final share replacement; a delivery older than the current checkpoint becomes
-  a no-op, so detached wake-raced work cannot finish last or read successor-owned
+  a no-op, so wake-raced work cannot finish last or read successor-owned
   vault state.
   This ordering adds no projection retry queue, group wake fanout, persisted
   projection watermark, or second freshness owner.
@@ -653,10 +656,13 @@ Last verified: 2026-08-12
   at most 98 sequential projectable-scope deliveries from the closed registry,
   and at most 25 sequential share-replacement transactions per delivery under
   the existing grant cap: 2,450 replacement transactions at maximum admitted
-  cardinality. Each replacement adds one source-workspace row lock/check at its
-  final write boundary. The runtime starts no concurrent per-scope or per-share
-  transactions, and publication wakes no destination group runtime. Ordinary
-  load is proportional only to scopes and destinations with active grants.
+  cardinality. There is at most one active scope-resolution or delivery request
+  per opportunity; an error or cancellation stops the remaining scopes, and the
+  existing continuation cannot retry until that request has drained. Each
+  replacement adds one source-workspace row lock/check at its final write
+  boundary. The runtime starts no concurrent per-scope or per-share transactions,
+  and publication wakes no destination group runtime. Ordinary load is
+  proportional only to scopes and destinations with active grants.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;
