@@ -324,12 +324,6 @@ const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
 // Sparse summary-history resources are cheap enough to backfill across the
 // summary window. The contracts registry owns membership; the three legacy
 // resources retain their established per-resource coverage keys and override.
-const JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES = new Set<string>([
-  "steps",
-  "distance",
-  "calories_active",
-  "heartrate",
-]);
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileIntervalMs;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
@@ -2145,7 +2139,11 @@ export function createJunctionDeviceSyncProvider(
             window,
           });
         }
-        if (JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES.has(effectiveResource)) {
+        const timeseriesPolicy = resolveJunctionTimeseriesResourcePolicy(effectiveResource);
+        if (
+          timeseriesPolicy?.enabledByDefault === false
+          && timeseriesPolicy.historyWindow === "dense_timeseries"
+        ) {
           const dailyImport = await importTimeseriesDailySnapshots(
             context,
             sourceProviders,

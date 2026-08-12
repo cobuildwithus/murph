@@ -14514,3 +14514,124 @@ test("Junction mixed sparse and dense backfills resume the longest history befor
     return start !== null && start === end;
   }));
 });
+
+test("Junction opt-in dense webhooks wait for a closed UTC day before importing", async () => {
+  for (const resource of ["calories_basal", "handwashing"] as const) {
+    const requests: URL[] = [];
+    const importedSnapshots: unknown[] = [];
+    const provider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+      requests.push(url);
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-1",
+            slug: "garmin",
+            status: "connected",
+            resource_availability: { [resource]: true },
+          }],
+        });
+      }
+      if (url.pathname === `/v2/timeseries/junction-user-1/${resource}/grouped`) {
+        const requestedDay = url.searchParams.get("start_date");
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: requestedDay === "2026-04-02"
+                ? [{
+                    timestamp: "2026-04-02T12:00:00.000Z",
+                    unit: resource === "calories_basal" ? "kcal" : "count",
+                    value: 1,
+                  }]
+                : [],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }, {
+      summaryResources: [],
+      timeseriesResources: [resource],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    });
+    const source = createConnectionSource({
+      resourceAvailabilitySummary: { [resource]: true },
+    });
+    const sourceSummary = {
+      displayName: source.displayName,
+      firstSeenAt: source.firstSeenAt,
+      lastDataAt: source.lastDataAt,
+      lastErrorCode: source.lastErrorCode,
+      lastErrorMessage: source.lastErrorMessage,
+      lastSeenAt: source.lastSeenAt,
+      resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+      resourceCount: Object.keys(source.resourceAvailabilitySummary).length,
+      sourceProviderSlug: source.sourceProviderSlug,
+      status: source.status,
+    };
+    const parseWebhookJob = async (now: string, messageId: string) => {
+      const webhook = createJunctionSvixWebhook({
+        body: {
+          event_type: `daily.data.${resource}.created`,
+          user_id: "junction-user-1",
+          data: {
+            date: "2026-04-02",
+            resource,
+            source: { provider: "garmin" },
+          },
+        },
+        messageId,
+        timestamp: String(Math.floor(Date.parse(now) / 1_000)),
+      });
+      const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+        headers: webhook.headers,
+        rawBody: webhook.rawBody,
+        now,
+      });
+      return requireValue(parsed.jobs[0], `${resource} webhook resource job`);
+    };
+    const execute = (now: string, job: DeviceSyncJobInput) => executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ sources: [sourceSummary] }),
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { durableDeliveryAccepted: true };
+        },
+        now,
+      }),
+      {
+        ...createJob(job.kind, job.payload ?? {}),
+        dedupeKey: job.dedupeKey ?? null,
+        priority: job.priority ?? 50,
+      },
+    );
+
+    await execute(
+      "2026-04-02T15:00:00.000Z",
+      await parseWebhookJob("2026-04-02T15:00:00.000Z", `msg_${resource}_open`),
+    );
+    const openDayRequests = requests.filter((url) =>
+      url.pathname === `/v2/timeseries/junction-user-1/${resource}/grouped`
+    );
+    assert.deepEqual(
+      openDayRequests.map((url) => url.searchParams.get("start_date")),
+      ["2026-04-01"],
+      resource,
+    );
+    assert.equal(importedSnapshots.length, 0, resource);
+
+    await execute(
+      "2026-04-03T00:05:00.000Z",
+      await parseWebhookJob("2026-04-03T00:05:00.000Z", `msg_${resource}_closed`),
+    );
+    const resourceRequests = requests.filter((url) =>
+      url.pathname === `/v2/timeseries/junction-user-1/${resource}/grouped`
+    );
+    assert.equal(resourceRequests.length, 3, resource);
+    assert.equal(resourceRequests[2]?.searchParams.get("start_date"), "2026-04-02", resource);
+    assert.equal(resourceRequests[2]?.searchParams.get("end_date"), "2026-04-02", resource);
+    assert.equal(importedSnapshots.length, 1, resource);
+  }
+});
