@@ -7388,6 +7388,176 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("admits a full visible safe-system prefix before checkpoint despite a later lane high-water", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    let assistantPhaseCalls = 0;
+    let mailboxFetchesInFlight = 0;
+    let peakMailboxFetchesInFlight = 0;
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+      const foregroundConversationInputId =
+        await stagePendingLinqAssistantInputForMailboxItem({
+          item: createMailboxItem({
+            id: "mailbox_item_safe_prefix_foreground_conversation",
+            laneSeq: "1",
+          }),
+          threadId: "thread_maximum_safe_prefix",
+          vaultRoot,
+        });
+      const baseMailboxPort = createMailboxPort({
+        events,
+        fetchRequests,
+        items: mailboxItems,
+      });
+      const mailboxPort: HostedRuntimeMailboxPort = {
+        ...baseMailboxPort,
+        async fetch(request) {
+          mailboxFetchesInFlight += 1;
+          peakMailboxFetchesInFlight = Math.max(
+            peakMailboxFetchesInFlight,
+            mailboxFetchesInFlight,
+          );
+          try {
+            const response = await baseMailboxPort.fetch(request);
+            return response;
+          } finally {
+            mailboxFetchesInFlight -= 1;
+          }
+        },
+      };
+      const enqueueMaximumSafePrefix = () => {
+        for (let revision = 1; revision <= 51; revision += 1) {
+          mailboxItems.push(createMailboxItem({
+            id: `mailbox_item_safe_prefix_system_${revision}`,
+            kind: revision === 1
+              ? "assistant.ask.completed"
+              : "runtime.pending-effects-reconcile-requested",
+            lane: "system",
+            laneSeq: String(revision),
+          }));
+        }
+        mailboxItems.push(createMailboxItem({
+          dedupeKey:
+            "assistant.notification.requested:generic:safe_prefix_later_row",
+          id: "mailbox_item_safe_prefix_later_unsafe",
+          kind: "assistant.notification.requested",
+          lane: "system",
+          laneSeq: "52",
+        }));
+      };
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_maximum_safe_prefix",
+            budget: { maxMailboxItems: 50 },
+            idleCheckpointDelayMs: 1_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/maximum-safe-prefix.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: foregroundConversationInputId,
+                vaultRoot,
+              });
+              setTimeout(() => {
+                enqueueMaximumSafePrefix();
+                runtimeWakeSignal.notify();
+              }, 0);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+      const result = await withRealTimeout(
+        resultPromise,
+        5_000,
+        () => events.join(","),
+      );
+
+      const exactCompletionImport =
+        "mailbox.importItem:mailbox_item_safe_prefix_system_1";
+      const laterUnsafeImport =
+        "mailbox.importItem:mailbox_item_safe_prefix_later_unsafe";
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:1")
+          < requireEventIndex(events, exactCompletionImport),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(events, exactCompletionImport)
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.equal(events.includes(laterUnsafeImport), false, events.join(","));
+      assert.equal(result.status, "budget_exhausted");
+      const preCheckpointFetches = fetchRequests.filter((request) =>
+        request.requestId.includes(
+          ":checkpoint-interrupt-foreground-prefetch:",
+        )
+      );
+      assert.equal(
+        preCheckpointFetches.length,
+        1,
+        fetchRequests.map((request) =>
+          `${request.requestId}:${request.limitPerLane}`
+        ).join(","),
+      );
+      assert.ok(preCheckpointFetches.every((request) => request.limitPerLane === 51));
+      assert.equal(
+        fetchRequests.length,
+        4,
+        fetchRequests.map((request) => request.requestId).join(","),
+      );
+
+      assert.equal(result.nextWakeReason, "mailbox");
+      assert.ok(result.nextWakeAt);
+      assert.equal(peakMailboxFetchesInFlight, 1);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   for (const completion of [
     {
       dedupeKey:
@@ -7839,7 +8009,17 @@ describe("hosted workspace runtime entrypoint", () => {
                 },
                 async assertLinqRecentInboundEngagement(request) {
                   assert.equal(request.target, transport.target);
-                  return { providerDispatchClaimed: true };
+                  return {
+                    providerDispatchClaimed: true,
+                    resolvedRoute: {
+                      conversationThreadId: null,
+                      directRecipientPhoneNumber: null,
+                      fromPhoneNumber: null,
+                      target: transport.target,
+                      targetKind: "thread",
+                      threadIsDirect: transport.threadIsDirect,
+                    },
+                  };
                 },
                 async readRawEmailMessage() {
                   return null;
@@ -22259,7 +22439,14 @@ describe("hosted workspace runtime entrypoint", () => {
             );
             return {
               providerDispatchClaimed: true,
-              threadIsDirect: false,
+              resolvedRoute: {
+                conversationThreadId: null,
+                directRecipientPhoneNumber: null,
+                fromPhoneNumber: null,
+                target: "thread_image_edit_failure_route",
+                targetKind: "thread",
+                threadIsDirect: false,
+              },
             };
           },
           async readRawEmailMessage() {
@@ -23071,6 +23258,1419 @@ describe("hosted workspace runtime entrypoint", () => {
         );
       }
       mocks.runAssistantAutomationPass.mockImplementation(originalAutomationPass);
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("offers checkpointed vault-share before servicing repeated device-sync wakes", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-vault-share-device-pressure-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const offerStarted = createDeferred<void>();
+    const offerRelease = createDeferred<void>();
+    const mailboxItems: HostedMailboxItem[] = [
+      createMailboxItem({
+        dedupeKey:
+          "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:1",
+        id: "mailbox_item_entrypoint_vault_share_device_pressure_1",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+        occurredAt: "2026-04-27T00:00:01.000Z",
+      }),
+    ];
+    let activeScopeReads = 0;
+    let assistantPhaseCalls = 0;
+    let checkpointCount = 0;
+    let mailboxFetchesInFlight = 0;
+    let peakMailboxFetchesInFlight = 0;
+    let vaultShareDeliverCalls = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([{
+        date: "2026-04-26",
+        sleepEndAt: "2026-04-27T06:31:00.000Z",
+        sleepStartAt: "2026-04-26T22:04:00.000Z",
+      }]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const baseMailboxPort = createMailboxPort({
+        events,
+        fetchRequests,
+        items: mailboxItems,
+      });
+      const mailboxPort: HostedRuntimeMailboxPort = {
+        ...baseMailboxPort,
+        async fetch(request) {
+          mailboxFetchesInFlight += 1;
+          peakMailboxFetchesInFlight = Math.max(
+            peakMailboxFetchesInFlight,
+            mailboxFetchesInFlight,
+          );
+          try {
+            return await baseMailboxPort.fetch(request);
+          } finally {
+            mailboxFetchesInFlight -= 1;
+          }
+        },
+      };
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_vault_share_device_pressure",
+            budget: { maxMailboxItems: 3 },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-vault-share-device-pressure.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            vaultSharePort: {
+              async listActiveProjectionScopes() {
+                activeScopeReads += 1;
+                return activeScopeReads === 1
+                  ? [{ projectionKind: "sleep-times.v0" }]
+                  : [];
+              },
+              async deliver() {
+                vaultShareDeliverCalls += 1;
+                events.push("vault-share.deliver:start");
+                offerStarted.resolve();
+                await offerRelease.promise;
+                events.push("vault-share.deliver:done");
+                return { status: "delivered" };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace(request) {
+                checkpointCount += 1;
+                events.push(`workspace.checkpoint.committed:${checkpointCount}`);
+                if (checkpointCount === 1) {
+                  for (const revision of [2, 3, 4] as const) {
+                    mailboxItems.push(createMailboxItem({
+                      dedupeKey:
+                        `device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:${revision}`,
+                      id: `mailbox_item_entrypoint_vault_share_device_pressure_${revision}`,
+                      kind: "device-sync.wake",
+                      lane: "system",
+                      laneSeq: String(revision),
+                      occurredAt: `2026-04-27T00:00:0${revision}.000Z`,
+                    }));
+                  }
+                  runtimeWakeSignal.notify();
+                }
+                return createWorkspaceState({
+                  inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+              },
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            return {
+              nextWakeAt: null,
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(offerStarted.promise, 5_000, () => events.join(","));
+      assert.equal(checkpointRequests.length, 1, events.join(","));
+      assert.ok(
+        requireEventIndex(events, "workspace.checkpoint.committed:1")
+          < requireEventIndex(events, "vault-share.deliver:start"),
+        events.join(","),
+      );
+      assert.equal(
+        events.includes("mailbox.importItem:mailbox_item_entrypoint_vault_share_device_pressure_2"),
+        false,
+        events.join(","),
+      );
+
+      mailboxItems.push(createMailboxItem({
+        dedupeKey:
+          "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:5",
+        id: "mailbox_item_entrypoint_vault_share_device_pressure_5",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "5",
+        occurredAt: "2026-04-27T00:00:05.000Z",
+      }));
+      runtimeWakeSignal.notify();
+      await withRealTimeout(
+        waitUntil(() => {
+          assert.ok(fetchRequests.some((request) =>
+            request.requestId.includes(":vault-share-wake-classify:")
+          ));
+        }),
+        5_000,
+        () => events.join(","),
+      );
+
+      assert.equal(vaultShareDeliverCalls, 1);
+      assert.equal(
+        events.includes("mailbox.importItem:mailbox_item_entrypoint_vault_share_device_pressure_2"),
+        false,
+        events.join(","),
+      );
+      assert.equal(
+        events.includes("mailbox.importItem:mailbox_item_entrypoint_vault_share_device_pressure_3"),
+        false,
+        events.join(","),
+      );
+
+      offerRelease.resolve();
+      const result = await withRealTimeout(resultPromise, 15_000, () => events.join(","));
+
+      for (const laneSeq of ["2", "3"] as const) {
+        assert.ok(
+          requireEventIndex(events, "vault-share.deliver:done")
+            < requireEventIndex(
+              events,
+              `mailbox.importItem:mailbox_item_entrypoint_vault_share_device_pressure_${laneSeq}`,
+            ),
+          events.join(","),
+        );
+      }
+      assert.equal(vaultShareDeliverCalls, 1);
+      assert.ok(checkpointRequests.length >= 2);
+      assert.equal(
+        fetchRequests.filter((request) =>
+          request.requestId.includes(":checkpoint-wake-classify:")
+        ).length,
+        1,
+      );
+      assert.equal(
+        fetchRequests.filter((request) =>
+          request.requestId.includes(":vault-share-wake-classify:")
+        ).length,
+        1,
+      );
+      assert.equal(
+        fetchRequests.some((request) =>
+          request.requestId.includes(":idle-wake-foreground-prefetch:")
+        ),
+        false,
+      );
+      assert.equal(peakMailboxFetchesInFlight, 1);
+      assert.ok(fetchRequests.every((request) => request.limitPerLane === 4));
+      assert.equal(result.status, "budget_exhausted");
+    } finally {
+      offerRelease.resolve();
+      runtimeAbortController.abort();
+      await resultPromise?.catch(() => undefined);
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("keeps an explicit device command beyond a full dirty prefix ahead of projection", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-vault-share-hidden-command-"),
+    );
+    const events: string[] = [];
+    const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems: HostedMailboxItem[] = [
+      createMailboxItem({
+        dedupeKey:
+          "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:1",
+        id: "mailbox_item_entrypoint_vault_share_hidden_command_1",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    let checkpointCount = 0;
+    let mailboxFetchesInFlight = 0;
+    let peakMailboxFetchesInFlight = 0;
+    let vaultShareDeliverCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([{
+        date: "2026-04-26",
+        sleepEndAt: "2026-04-27T06:31:00.000Z",
+        sleepStartAt: "2026-04-26T22:04:00.000Z",
+      }]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const baseMailboxPort = createMailboxPort({
+        events,
+        fetchRequests,
+        items: mailboxItems,
+      });
+      const mailboxPort: HostedRuntimeMailboxPort = {
+        ...baseMailboxPort,
+        async fetch(request) {
+          mailboxFetchesInFlight += 1;
+          peakMailboxFetchesInFlight = Math.max(
+            peakMailboxFetchesInFlight,
+            mailboxFetchesInFlight,
+          );
+          try {
+            return await baseMailboxPort.fetch(request);
+          } finally {
+            mailboxFetchesInFlight -= 1;
+          }
+        },
+      };
+      const vaultSharePort: NonNullable<HostedRuntimePlatform["vaultSharePort"]> = {
+        async listActiveProjectionScopes() {
+          return [{ projectionKind: "sleep-times.v0" }];
+        },
+        async deliver() {
+          vaultShareDeliverCalls += 1;
+          events.push("vault-share.deliver:start");
+          events.push("vault-share.deliver:done");
+          return { status: "delivered" };
+        },
+      };
+
+      const firstResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_vault_share_hidden_command",
+            budget: { maxMailboxItems: 3 },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-vault-share-hidden-command.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            vaultSharePort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests: firstCheckpointRequests,
+              checkpointWorkspace(request) {
+                checkpointCount += 1;
+                if (checkpointCount === 1) {
+                  for (const revision of [2, 3, 4, 5] as const) {
+                    mailboxItems.push(createMailboxItem({
+                      dedupeKey:
+                        `device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:${revision}`,
+                      id: `mailbox_item_entrypoint_vault_share_hidden_command_${revision}`,
+                      kind: "device-sync.wake",
+                      lane: "system",
+                      laneSeq: String(revision),
+                    }));
+                  }
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey:
+                      "device-sync:disconnect:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:2026-04-27T00:00:06.000Z",
+                    id: "mailbox_item_entrypoint_vault_share_hidden_command_disconnect",
+                    kind: "device-sync.wake",
+                    lane: "system",
+                    laneSeq: "6",
+                  }));
+                  runtimeWakeSignal.notify();
+                }
+                return createWorkspaceState({
+                  inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+              },
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            return {
+              nextWakeAt: null,
+              progressed: false,
+              redactedStatus: { hostedAssistantProgressed: false },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(vaultShareDeliverCalls, 0, events.join(","));
+      assert.equal(firstResult.status, "budget_exhausted");
+      assert.match(firstResult.nextWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.equal(firstResult.nextWakeReason, "mailbox");
+      assert.equal(
+        fetchRequests.filter((request) =>
+          request.requestId.includes(":checkpoint-wake-classify:")
+        ).length,
+        1,
+      );
+      assert.equal(
+        fetchRequests.some((request) =>
+          request.requestId.includes(":idle-wake-foreground-prefetch:")
+        ),
+        false,
+      );
+
+      const firstCheckpoint = firstCheckpointRequests.at(-1);
+      assert.ok(firstCheckpoint);
+      const secondCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const secondWorkspace = createWorkspaceState({
+        nextWakeAt: firstResult.nextWakeAt,
+        nextWakeReason: firstResult.nextWakeReason,
+        redactedStatus: firstResult.redactedStatus,
+        version: String(BigInt(firstCheckpoint.expectedWorkspaceVersion) + 1n),
+      });
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId:
+              "attempt_synthetic_runtime_vault_share_hidden_command_continuation",
+            budget: { maxMailboxItems: 8 },
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "10",
+            userId: TEST_USER_ID,
+            workspaceVersion: secondWorkspace.version,
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key:
+                  "users/bundles/member-synthetic/runtime-vault-share-hidden-command-continuation.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            vaultSharePort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests: secondCheckpointRequests,
+              events,
+              workspace: secondWorkspace,
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              nextWakeAt: null,
+              progressed: false,
+              redactedStatus: { hostedAssistantProgressed: false },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      const explicitCommandImport =
+        "mailbox.importItem:mailbox_item_entrypoint_vault_share_hidden_command_disconnect";
+      assert.ok(events.includes(explicitCommandImport), events.join(","));
+      if (events.includes("vault-share.deliver:start")) {
+        assert.ok(
+          requireEventIndex(events, explicitCommandImport)
+            < requireEventIndex(events, "vault-share.deliver:start"),
+          events.join(","),
+        );
+      }
+      assert.equal(peakMailboxFetchesInFlight, 1);
+    } finally {
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("falls back to a foreground refetch when checkpoint wake classification fails", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-vault-share-classifier-fallback-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems: HostedMailboxItem[] = [
+      createMailboxItem({
+        dedupeKey:
+          "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:1",
+        id: "mailbox_item_entrypoint_vault_share_classifier_fallback_device",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    let admittedConversationInputId: string | null = null;
+    let checkpointCount = 0;
+    let classifierFailures = 0;
+    let pendingConversationInputId: string | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const baseMailboxPort = createMailboxPort({
+        events,
+        items: mailboxItems,
+      });
+      const mailboxPort: HostedRuntimeMailboxPort = {
+        ...baseMailboxPort,
+        async fetch(request) {
+          fetchRequests.push(request);
+          if (
+            classifierFailures === 0
+            && request.requestId.includes(":checkpoint-wake-classify:")
+          ) {
+            classifierFailures += 1;
+            events.push("mailbox.fetch:classifier-failed");
+            throw new Error("Synthetic checkpoint classifier fetch failure.");
+          }
+          return await baseMailboxPort.fetch(request);
+        },
+      };
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_vault_share_classifier_fallback",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-vault-share-classifier-fallback.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+            pendingConversationInputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            return {
+              assistantInputId: pendingConversationInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            vaultSharePort: {
+              async listActiveProjectionScopes() {
+                return [{ projectionKind: "sleep-times.v0" }];
+              },
+              async deliver() {
+                events.push("vault-share.deliver:start");
+                return { status: "delivered" };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace(request) {
+                checkpointCount += 1;
+                events.push(`workspace.checkpoint.committed:${checkpointCount}`);
+                if (checkpointCount === 1) {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_vault_share_classifier_fallback_conversation",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:02.000Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                }
+                return createWorkspaceState({
+                  inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+              },
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            if (pendingConversationInputId) {
+              admittedConversationInputId = pendingConversationInputId;
+              pendingConversationInputId = null;
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: admittedConversationInputId,
+                vaultRoot,
+              });
+              events.push("assistant.admitted:fallback-conversation");
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                progressed: true,
+                redactedStatus: { hostedAssistantProgressed: true },
+              };
+            }
+            return {
+              nextWakeAt: null,
+              progressed: false,
+              redactedStatus: { hostedAssistantProgressed: false },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      const fallbackItemEvent =
+        "mailbox.importItem:mailbox_item_entrypoint_vault_share_classifier_fallback_conversation";
+      assert.equal(classifierFailures, 1);
+      assert.ok(events.includes(fallbackItemEvent), events.join(","));
+      assert.ok(admittedConversationInputId);
+      assert.ok(events.includes("assistant.admitted:fallback-conversation"));
+      assert.ok(
+        requireEventIndex(events, "mailbox.fetch:classifier-failed")
+          < requireEventIndex(events, fallbackItemEvent),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(events, fallbackItemEvent)
+          < requireEventIndex(events, "vault-share.deliver:start"),
+        events.join(","),
+      );
+      assert.equal(
+        fetchRequests.filter((request) =>
+          request.requestId.includes(":checkpoint-wake-classify:")
+        ).length,
+        1,
+      );
+      assert.equal(
+        fetchRequests.filter((request) =>
+          request.requestId.includes(":checkpoint-wake-foreground-prefetch:")
+        ).length,
+        1,
+      );
+      assert.ok(checkpointRequests.length >= 2);
+      assert.ok(["idle", "scheduled"].includes(result.status));
+    } finally {
+      runtimeAbortController.abort();
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("hands checkpoint wake classification to a replacement runtime on shutdown", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-checkpoint-classifier-shutdown-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const shutdownController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const classificationStarted = createDeferred<void>();
+    const classificationRelease = createDeferred<void>();
+    const mailboxItems: HostedMailboxItem[] = [
+      createMailboxItem({
+        dedupeKey:
+          "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:1",
+        id: "mailbox_item_entrypoint_checkpoint_classifier_shutdown_device",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    let checkpointCount = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const baseMailboxPort = createMailboxPort({ events, items: mailboxItems });
+      const mailboxPort: HostedRuntimeMailboxPort = {
+        ...baseMailboxPort,
+        async fetch(request) {
+          const response = await baseMailboxPort.fetch(request);
+          if (request.requestId.includes(":checkpoint-wake-classify:")) {
+            classificationStarted.resolve();
+            await classificationRelease.promise;
+          }
+          return response;
+        },
+      };
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_checkpoint_classifier_shutdown",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-checkpoint-classifier-shutdown.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace(request) {
+                checkpointCount += 1;
+                if (checkpointCount === 1) {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_checkpoint_classifier_shutdown_conversation",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:02.000Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                }
+                return createWorkspaceState({
+                  inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+              },
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            return {
+              nextWakeAt: null,
+              progressed: false,
+              redactedStatus: { hostedAssistantProgressed: false },
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        classificationStarted.promise,
+        5_000,
+        () => events.join(","),
+      );
+      shutdownController.abort(
+        new DOMException("Synthetic container SIGTERM.", "AbortError"),
+      );
+      classificationRelease.resolve();
+      const result = await withRealTimeout(resultPromise, 10_000, () => events.join(","));
+
+      assert.equal(
+        events.includes(
+          "mailbox.importItem:mailbox_item_entrypoint_checkpoint_classifier_shutdown_conversation",
+        ),
+        false,
+        events.join(","),
+      );
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, "mailbox");
+    } finally {
+      classificationRelease.resolve();
+      runtimeAbortController.abort();
+      shutdownController.abort();
+      await resultPromise?.catch(() => undefined);
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("hands a failed checkpoint classifier fallback to a replacement runtime on shutdown", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-checkpoint-fallback-shutdown-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const shutdownController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const fallbackStarted = createDeferred<void>();
+    const fallbackRelease = createDeferred<void>();
+    const mailboxItems: HostedMailboxItem[] = [
+      createMailboxItem({
+        dedupeKey:
+          "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:1",
+        id: "mailbox_item_entrypoint_checkpoint_fallback_shutdown_device",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+      }),
+    ];
+    let checkpointCount = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const baseMailboxPort = createMailboxPort({ events, items: mailboxItems });
+      const mailboxPort: HostedRuntimeMailboxPort = {
+        ...baseMailboxPort,
+        async fetch(request) {
+          if (request.requestId.includes(":checkpoint-wake-classify:")) {
+            throw new Error("Synthetic checkpoint classifier fetch failure.");
+          }
+          const response = await baseMailboxPort.fetch(request);
+          if (request.requestId.includes(":checkpoint-wake-foreground-prefetch:")) {
+            fallbackStarted.resolve();
+            await fallbackRelease.promise;
+          }
+          return response;
+        },
+      };
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_checkpoint_fallback_shutdown",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "0".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-checkpoint-fallback-shutdown.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace(request) {
+                checkpointCount += 1;
+                if (checkpointCount === 1) {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_entrypoint_checkpoint_fallback_shutdown_conversation",
+                    laneSeq: "1",
+                    occurredAt: "2026-04-27T00:00:02.000Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                }
+                return createWorkspaceState({
+                  inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+              },
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            return {
+              nextWakeAt: null,
+              progressed: false,
+              redactedStatus: { hostedAssistantProgressed: false },
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(fallbackStarted.promise, 5_000, () => events.join(","));
+      shutdownController.abort(
+        new DOMException("Synthetic container SIGTERM.", "AbortError"),
+      );
+      fallbackRelease.resolve();
+      const result = await withRealTimeout(resultPromise, 10_000, () => events.join(","));
+
+      assert.equal(
+        events.includes(
+          "mailbox.importItem:mailbox_item_entrypoint_checkpoint_fallback_shutdown_conversation",
+        ),
+        false,
+        events.join(","),
+      );
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, "mailbox");
+    } finally {
+      fallbackRelease.resolve();
+      runtimeAbortController.abort();
+      shutdownController.abort();
+      await resultPromise?.catch(() => undefined);
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("returns mailbox wake when shutdown interrupts vault-share after deferring device-sync wake", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-vault-share-device-shutdown-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const shutdownController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const classificationStarted = createDeferred<void>();
+    const classificationRelease = createDeferred<void>();
+    const offerStarted = createDeferred<void>();
+    const offerRelease = createDeferred<void>();
+    const mailboxItems: HostedMailboxItem[] = [
+      createMailboxItem({
+        dedupeKey:
+          "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:1",
+        id: "mailbox_item_entrypoint_vault_share_device_shutdown_1",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+        occurredAt: "2026-04-27T00:00:01.000Z",
+      }),
+    ];
+    let activeScopeReads = 0;
+    let assistantPhaseCalls = 0;
+    let checkpointCount = 0;
+    let vaultShareDeliverCalls = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([{
+        date: "2026-04-26",
+        sleepEndAt: "2026-04-27T06:31:00.000Z",
+        sleepStartAt: "2026-04-26T22:04:00.000Z",
+      }]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const baseMailboxPort = createMailboxPort({
+        events,
+        fetchRequests,
+        items: mailboxItems,
+      });
+      const mailboxPort: HostedRuntimeMailboxPort = {
+        ...baseMailboxPort,
+        async fetch(request) {
+          const response = await baseMailboxPort.fetch(request);
+          if (request.requestId.includes(":vault-share-wake-classify:")) {
+            classificationStarted.resolve();
+            await classificationRelease.promise;
+          }
+          return response;
+        },
+      };
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_vault_share_device_shutdown",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-vault-share-device-shutdown.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            vaultSharePort: {
+              async listActiveProjectionScopes() {
+                activeScopeReads += 1;
+                return activeScopeReads === 1
+                  ? [{ projectionKind: "sleep-times.v0" }]
+                  : [];
+              },
+              async deliver() {
+                vaultShareDeliverCalls += 1;
+                events.push("vault-share.deliver:start");
+                offerStarted.resolve();
+                await offerRelease.promise;
+                events.push("vault-share.deliver:done");
+                return { status: "delivered" };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace(request) {
+                checkpointCount += 1;
+                events.push(`workspace.checkpoint.committed:${checkpointCount}`);
+                if (checkpointCount === 1) {
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey:
+                      "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:2",
+                    id: "mailbox_item_entrypoint_vault_share_device_shutdown_2",
+                    kind: "device-sync.wake",
+                    lane: "system",
+                    laneSeq: "2",
+                    occurredAt: "2026-04-27T00:00:02.000Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                }
+                return createWorkspaceState({
+                  inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+              },
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            return {
+              nextWakeAt: null,
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(offerStarted.promise, 5_000, () => events.join(","));
+      assert.equal(checkpointRequests.length, 1, events.join(","));
+      assert.equal(vaultShareDeliverCalls, 1);
+      assert.equal(
+        events.includes("mailbox.importItem:mailbox_item_entrypoint_vault_share_device_shutdown_2"),
+        false,
+        events.join(","),
+      );
+
+      mailboxItems.push(createMailboxItem({
+        dedupeKey:
+          "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:3",
+        id: "mailbox_item_entrypoint_vault_share_device_shutdown_3",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "3",
+        occurredAt: "2026-04-27T00:00:03.000Z",
+      }));
+      runtimeWakeSignal.notify();
+      await withRealTimeout(
+        classificationStarted.promise,
+        5_000,
+        () => events.join(","),
+      );
+      shutdownController.abort(
+        new DOMException("Synthetic container SIGTERM.", "AbortError"),
+      );
+      classificationRelease.resolve();
+      const result = await withRealTimeout(resultPromise, 10_000, () => events.join(","));
+
+      assert.equal(events.includes("vault-share.deliver:done"), false, events.join(","));
+      assert.equal(
+        events.includes("mailbox.importItem:mailbox_item_entrypoint_vault_share_device_shutdown_2"),
+        false,
+        events.join(","),
+      );
+      assert.equal(
+        events.includes("mailbox.importItem:mailbox_item_entrypoint_vault_share_device_shutdown_3"),
+        false,
+        events.join(","),
+      );
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, "mailbox");
+    } finally {
+      classificationRelease.resolve();
+      offerRelease.resolve();
+      runtimeAbortController.abort();
+      shutdownController.abort();
+      await resultPromise?.catch(() => undefined);
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("lets explicit device commands and fresh conversation preempt a stalled vault-share offer", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-vault-share-conversation-preempt-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const offerStarted = createDeferred<void>();
+    const offerRelease = createDeferred<void>();
+    const conversationAssistantStarted = createDeferred<void>();
+    const mailboxItems: HostedMailboxItem[] = [
+      createMailboxItem({
+        dedupeKey:
+          "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:1",
+        id: "mailbox_item_entrypoint_vault_share_preempt_device_1",
+        kind: "device-sync.wake",
+        lane: "system",
+        laneSeq: "1",
+        occurredAt: "2026-04-27T00:00:01.000Z",
+      }),
+    ];
+    let activeScopeReads = 0;
+    let assistantPhaseCalls = 0;
+    let checkpointCount = 0;
+    let conversationAssistantPhaseEvent: string | null = null;
+    let pendingInputId: string | null = null;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([{
+        date: "2026-04-26",
+        sleepEndAt: "2026-04-27T06:31:00.000Z",
+        sleepStartAt: "2026-04-26T22:04:00.000Z",
+      }]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_vault_share_conversation_preempt",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-vault-share-conversation-preempt.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+            pendingInputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            return {
+              assistantInputId: pendingInputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            vaultSharePort: {
+              async listActiveProjectionScopes() {
+                activeScopeReads += 1;
+                return activeScopeReads === 1
+                  ? [{ projectionKind: "sleep-times.v0" }]
+                  : [];
+              },
+              async deliver() {
+                events.push("vault-share.deliver:start");
+                offerStarted.resolve();
+                await offerRelease.promise;
+                events.push("vault-share.deliver:done");
+                return { status: "delivered" };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace(request) {
+                checkpointCount += 1;
+                events.push(`workspace.checkpoint.committed:${checkpointCount}`);
+                if (checkpointCount === 1) {
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey:
+                      "device-sync:dirty:v1:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:2",
+                    id: "mailbox_item_entrypoint_vault_share_preempt_device_2",
+                    kind: "device-sync.wake",
+                    lane: "system",
+                    laneSeq: "2",
+                    occurredAt: "2026-04-27T00:00:02.000Z",
+                  }));
+                  runtimeWakeSignal.notify();
+                }
+                return createWorkspaceState({
+                  inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                  nextWakeAt: request.nextWakeAt ?? null,
+                  nextWakeReason: request.nextWakeReason ?? null,
+                  redactedStatus: request.redactedStatus ?? null,
+                  snapshotRef: request.snapshotRef,
+                  version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                });
+              },
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            const assistantPhaseEvent = `assistant.phase:${assistantPhaseCalls}`;
+            events.push(assistantPhaseEvent);
+            if (!pendingInputId) {
+              return {
+                nextWakeAt: null,
+                progressed: false,
+                redactedStatus: {
+                  hostedAssistantProgressed: false,
+                },
+              };
+            }
+
+            const inputId = pendingInputId;
+            pendingInputId = null;
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId,
+              vaultRoot,
+            });
+            conversationAssistantPhaseEvent = assistantPhaseEvent;
+            conversationAssistantStarted.resolve();
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(offerStarted.promise, 5_000, () => events.join(","));
+      assert.equal(checkpointRequests.length, 1, events.join(","));
+      assert.ok(
+        requireEventIndex(events, "workspace.checkpoint.committed:1")
+          < requireEventIndex(events, "vault-share.deliver:start"),
+        events.join(","),
+      );
+      const explicitDeviceCommands = [
+        {
+          dedupeKey:
+            "device-sync:connection-established:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:2026-04-27T00:00:03.000Z",
+          id: "mailbox_item_entrypoint_vault_share_preempt_connection",
+        },
+        {
+          dedupeKey:
+            "device-sync:disconnect:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:2026-04-27T00:00:04.000Z",
+          id: "mailbox_item_entrypoint_vault_share_preempt_disconnect",
+        },
+        {
+          dedupeKey:
+            "device-sync:manual-reconcile:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:2026-04-27T00:00:05.000Z",
+          id: "mailbox_item_entrypoint_vault_share_preempt_manual",
+        },
+        {
+          dedupeKey:
+            "device-sync:scheduled-reconcile:member-synthetic:provider-synthetic:connection-synthetic:2026-04-01T00:00:00.000Z:2026-04-27T00:00:06.000Z",
+          id: "mailbox_item_entrypoint_vault_share_preempt_scheduled",
+        },
+      ] as const;
+      explicitDeviceCommands.forEach((command, index) => {
+        mailboxItems.push(createMailboxItem({
+          dedupeKey: command.dedupeKey,
+          id: command.id,
+          kind: "device-sync.wake",
+          lane: "system",
+          laneSeq: String(index + 3),
+          occurredAt: `2026-04-27T00:00:0${index + 3}.000Z`,
+        }));
+      });
+      runtimeWakeSignal.notify();
+      await withRealTimeout(
+        waitUntil(() => {
+          assert.ok(fetchRequests.some((request) =>
+            request.requestId.includes(":vault-share-wake-classify:")
+          ));
+        }),
+        5_000,
+        () => events.join(","),
+      );
+      await withRealTimeout(
+        waitUntil(() => {
+          for (const command of explicitDeviceCommands) {
+            assert.ok(
+              events.includes(`mailbox.importItem:${command.id}`),
+              events.join(","),
+            );
+          }
+        }),
+        5_000,
+        () => events.join(","),
+      );
+      assert.equal(events.includes("vault-share.deliver:done"), false, events.join(","));
+
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_vault_share_preempt_conversation",
+        laneSeq: "1",
+        occurredAt: "2026-04-27T00:00:07.000Z",
+      }));
+      runtimeWakeSignal.notify();
+      await withRealTimeout(
+        conversationAssistantStarted.promise,
+        10_000,
+        () => events.join(","),
+      );
+
+      assert.equal(events.includes("vault-share.deliver:done"), false, events.join(","));
+      assert.ok(events.includes(
+        "mailbox.importItem:mailbox_item_entrypoint_vault_share_preempt_conversation",
+      ));
+      const assistantPhaseEvent = conversationAssistantPhaseEvent;
+      assert.ok(assistantPhaseEvent);
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_vault_share_preempt_conversation",
+        ) < requireEventIndex(events, assistantPhaseEvent),
+        events.join(","),
+      );
+
+      offerRelease.resolve();
+      const result = await withRealTimeout(resultPromise, 15_000, () => events.join(","));
+      assert.ok(["idle", "scheduled"].includes(result.status));
+      assert.ok(checkpointRequests.length >= 1);
+    } finally {
+      offerRelease.resolve();
+      runtimeAbortController.abort();
+      await resultPromise?.catch(() => undefined);
       mocks.summarizeWearableSleepRuntime.mockClear();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
@@ -31607,13 +33207,14 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("forces browser-vault refresh maintenance from assistant phase refresh intent", async () => {
+  test("does not schedule a continuation when forced browser-vault refresh maintenance times out", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
 
     mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
     mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockResolvedValueOnce({
-      status: "skipped_no_port",
+      source: { fileCount: 0, totalBytes: 0 },
+      status: "deferred_timeout",
     });
 
     try {
@@ -31662,6 +33263,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
       );
       expect(result.status).toBe("idle");
+      expect(result.nextWakeAt).toBeNull();
     } finally {
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await removeTempRoot(vaultRoot);
@@ -35638,7 +37240,7 @@ describe("hosted runtime shutdown signal", () => {
     }
   }, 30_000);
 
-  test("shutdown after a no-work post-checkpoint conversation import does not resnapshot", async () => {
+  test("shutdown after a no-work post-checkpoint fetch schedules replacement without resnapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -35779,7 +37381,9 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(checkpointRequests.length, 1);
       assert.deepEqual(checkpointSnapshotTriggers, ["idle_window"]);
-      assert.equal(result.status, "idle");
+      assert.equal(result.status, "scheduled");
+      assert.match(result.nextWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.equal(result.nextWakeReason, "mailbox");
     } finally {
       shutdownController.abort(new Error("Test cleanup."));
       await removeTempRoot(vaultRoot);
@@ -35919,7 +37523,7 @@ describe("hosted runtime shutdown signal", () => {
     }
   }, 30_000);
 
-  test("shutdown after a consumed post-checkpoint replay import checkpoints only imported state", async () => {
+  test("shutdown after a consumed post-checkpoint replay fetch leaves the row to replacement", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -36060,7 +37664,7 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         events.filter((event) => event.startsWith("mailbox.importItem:")),
-        ["mailbox.importItem:mailbox_item_shutdown_after_consumed_replay"],
+        [],
       );
       assert.equal(
         events.includes("mailbox.importItem:mailbox_item_shutdown_after_consumed_replay_system"),
@@ -36068,19 +37672,80 @@ describe("hosted runtime shutdown signal", () => {
       );
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.equal(checkpointRequests[0]?.idleCheckpointTrigger, "idle_window");
-      assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[1]?.idleCheckpointTrigger, "shutdown_signal");
-      assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedMailboxConversationImportedSeq,
-        "1",
+      assert.equal(checkpointRequests.length, 1);
+      assert.deepEqual(checkpointSnapshotTriggers, ["idle_window"]);
+      assert.equal(result.status, "scheduled");
+      assert.match(result.nextWakeAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.equal(result.nextWakeReason, "mailbox");
+
+      const mailboxStateBeforeReplacement = await readHostedMailboxImportState({
+        vaultRoot,
+      });
+      assert.equal(mailboxStateBeforeReplacement.watermarks.conversation, "0");
+      assert.equal(mailboxStateBeforeReplacement.watermarks.system, "0");
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+
+      const replacementCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const replacementImportedIds: string[] = [];
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_shutdown_after_consumed_replay_replacement",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "8",
+            userId: TEST_USER_ID,
+            workspaceVersion: "1",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key:
+                  "users/bundles/member-synthetic/shutdown-after-consumed-replay-replacement.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            replacementImportedIds.push(item.item.id);
+            if (item.item.id === "mailbox_item_shutdown_after_consumed_replay") {
+              assert.equal(item.durablyConsumed, true);
+            }
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems.filter((item) => item.lane === "conversation"),
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: replacementCheckpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: result.nextWakeAt ?? null,
+                nextWakeReason: result.nextWakeReason ?? null,
+                version: "1",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              nextWakeAt: null,
+              progressed: false,
+              redactedStatus: { hostedAssistantProgressed: false },
+            };
+          },
+          vaultRoot,
+        },
       );
-      assert.equal(checkpointRequests[1]?.nextWakeAt, null);
-      assert.equal(checkpointRequests[1]?.nextWakeReason, null);
-      assert.deepEqual(checkpointSnapshotTriggers, [
-        "idle_window",
-        "shutdown_signal",
-      ]);
-      assert.equal(result.status, "idle");
+      assert.ok(
+        replacementImportedIds.includes(
+          "mailbox_item_shutdown_after_consumed_replay",
+        ),
+        events.join(","),
+      );
     } finally {
       shutdownController.abort(new Error("Test cleanup."));
       await removeTempRoot(vaultRoot);

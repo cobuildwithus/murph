@@ -45,6 +45,13 @@ const pendingSetup = {
     },
   },
 };
+const preparedPendingSetupClaim = {
+  id: pendingSetup.id,
+  ownerMemberId: pendingSetup.ownerMemberId,
+  payloadEncrypted: "prepared-pending-ciphertext",
+  payloadRootKeyId: "root_pending",
+  recipientPhoneLookupKey: pendingSetup.recipientPhoneLookupKey,
+};
 describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -70,6 +77,7 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
       mailboxDedupeKey: "event_group",
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner"],
+      preparedPendingSetupClaim,
       recipientPhoneLookupKeys: ["hplk_recovered_line", "hplk_line"],
       requiredPendingSetupCandidateId: pendingSetup.id,
       senderMemberId: "member_first_sender",
@@ -85,6 +93,7 @@ describe("ensureHostedPreparedLinqThreadContainerRouteTx", () => {
     expect(mocks.claimPendingSetup).toHaveBeenCalledExactlyOnceWith({
       occurredAt: new Date("2026-07-29T18:01:00.000Z"),
       participantMemberIds: ["member_prepared_owner"],
+      preparedClaim: preparedPendingSetupClaim,
       recipientPhoneLookupKeys: ["hplk_recovered_line", "hplk_line"],
       requiredCandidateId: pendingSetup.id,
       senderMemberId: "member_first_sender",

@@ -1,7 +1,6 @@
 import type { AssistantChatProvider } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   normalizeAssistantProviderConfig,
-  resolveAssistantChatProviderFromConfig,
   type AssistantProviderConfig,
   type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -134,7 +133,7 @@ export function resolveCodexModelCatalog(input: {
     capabilities,
     modelOptions,
     models,
-    provider: resolveAssistantChatProviderFromConfig(profile),
+    provider: 'codex-cli',
     providerLabel: profile.providerLabel,
     reasoningOptions: capabilities.supportsReasoningEffort
       ? DEFAULT_CODEX_REASONING_OPTIONS

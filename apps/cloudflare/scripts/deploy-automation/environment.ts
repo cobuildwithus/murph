@@ -1,5 +1,3 @@
-import { Buffer } from "node:buffer";
-
 import {
   isMurphAndroidAppEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
@@ -44,22 +42,13 @@ export type HostedContainerInstanceType =
   | NamedContainerInstanceType
   | HostedContainerCustomInstanceType;
 
-export interface HostedContainerSshKey {
-  name: string;
-  public_key: string;
-}
-
 const DEFAULT_CONTAINER_INSTANCE_TYPE: HostedContainerInstanceType = {
   disk_mb: 6000,
   memory_mib: 6144,
   vcpu: 2,
 };
 const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
-const DEFAULT_CONTAINER_SSH_KEY_NAME = "local-debug";
 const RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
-const CONTAINER_SSH_KEY_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/u;
-const SSH_ED25519_KEY_TYPE = "ssh-ed25519";
-const SSH_ED25519_PUBLIC_KEY_LENGTH = 32;
 
 export interface HostedDeployAutomationEnvironment {
   allowedRunnerSecretKeys: string | null;
@@ -68,7 +57,6 @@ export interface HostedDeployAutomationEnvironment {
   compatibilityDate: string;
   containerInstanceType: HostedContainerInstanceType;
   containerMaxInstances: number;
-  containerSshKey: HostedContainerSshKey | null;
   logHeadSamplingRate: number;
   maxEventAttempts: string;
   retryDelayMs: string;
@@ -143,10 +131,6 @@ export function readHostedDeployAutomationEnvironment(
       DEFAULT_CONTAINER_MAX_INSTANCES,
       "CF_CONTAINER_MAX_INSTANCES",
     ),
-    containerSshKey: normalizeContainerSshKey(
-      source.CF_CONTAINER_SSH_PUBLIC_KEY,
-      source.CF_CONTAINER_SSH_KEY_NAME,
-    ),
     logHeadSamplingRate: normalizeSamplingRate(
       source.CF_LOG_HEAD_SAMPLING_RATE,
       DEFAULT_LOG_HEAD_SAMPLING_RATE,
@@ -210,80 +194,6 @@ function readHostedWorkerVars(source: EnvSource): Record<string, string> {
       ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
       : {}),
   };
-}
-
-function normalizeContainerSshKey(
-  publicKey: string | undefined,
-  name: string | undefined,
-): HostedContainerSshKey | null {
-  const normalizedPublicKey = normalizeOptionalString(publicKey);
-
-  if (!normalizedPublicKey) {
-    return null;
-  }
-
-  const parts = normalizedPublicKey.split(/\s+/u);
-  const [keyType, keyBody] = parts;
-
-  if (keyType !== SSH_ED25519_KEY_TYPE || !isValidOpenSshEd25519PublicKeyBody(keyBody)) {
-    throw new Error("CF_CONTAINER_SSH_PUBLIC_KEY must be an ssh-ed25519 public key.");
-  }
-
-  return {
-    name: normalizeContainerSshKeyName(name),
-    public_key: `${SSH_ED25519_KEY_TYPE} ${keyBody}`,
-  };
-}
-
-function isValidOpenSshEd25519PublicKeyBody(keyBody: string): boolean {
-  if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(keyBody)) {
-    return false;
-  }
-
-  let decoded: Buffer;
-  try {
-    decoded = Buffer.from(keyBody, "base64");
-  } catch {
-    return false;
-  }
-
-  let offset = 0;
-  const readField = (): Buffer | null => {
-    if (offset + 4 > decoded.length) {
-      return null;
-    }
-
-    const fieldLength = decoded.readUInt32BE(offset);
-    offset += 4;
-    if (fieldLength > decoded.length - offset) {
-      return null;
-    }
-
-    const field = decoded.subarray(offset, offset + fieldLength);
-    offset += fieldLength;
-    return field;
-  };
-
-  const type = readField();
-  const publicKey = readField();
-
-  return Boolean(
-    type?.equals(Buffer.from(SSH_ED25519_KEY_TYPE))
-      && publicKey?.length === SSH_ED25519_PUBLIC_KEY_LENGTH
-      && offset === decoded.length,
-  );
-}
-
-function normalizeContainerSshKeyName(name: string | undefined): string {
-  const normalized = normalizeOptionalString(name) ?? DEFAULT_CONTAINER_SSH_KEY_NAME;
-
-  if (!CONTAINER_SSH_KEY_NAME_PATTERN.test(normalized)) {
-    throw new Error(
-      "CF_CONTAINER_SSH_KEY_NAME must be a neutral lowercase slug up to 32 characters.",
-    );
-  }
-
-  return normalized;
 }
 
 function normalizePositiveInteger(

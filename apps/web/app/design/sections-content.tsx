@@ -112,7 +112,7 @@ export function SectionsContent() {
         <div
           id="homepage-solo-first-hero"
           data-design-section="homepage-solo-first-hero"
-          data-design-state="soft-topic-labels"
+          data-design-state="soft-topic-labels-mobile-narrow-phone"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
@@ -249,7 +249,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings retained data export">
+      <StudySection title="Settings retained export while newer data is processing">
         <DataExportFlowStudy />
       </StudySection>
 
@@ -616,7 +616,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status">
+      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status, plus Family draft recovery">
         <GroupMemberPlanStudy />
       </StudySection>
 

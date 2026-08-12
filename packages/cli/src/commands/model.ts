@@ -470,7 +470,7 @@ function buildModelSetupAssistantOptionsFromDefaults(
   defaults: AssistantOperatorDefaults | null | undefined,
 ): Partial<SetupCommandOptions> {
   const backend = resolveAssistantBackendTarget(defaults)
-  if (!backend || backend.adapter !== 'codex-cli') {
+  if (!backend) {
     return {}
   }
 
@@ -521,7 +521,7 @@ function buildAssistantBackendNotes(
   defaults: AssistantOperatorDefaults | null | undefined,
 ): string[] {
   const backend = defaults?.backend
-  if (backend?.adapter === 'codex-cli' && backend.codexHome) {
+  if (backend?.codexHome) {
     return ['A saved Codex home is configured; path redacted in CLI output.']
   }
 
@@ -556,13 +556,9 @@ function buildSetupAssistantWizardInputFromDefaults(
     return {}
   }
 
-  switch (backend.adapter) {
-    case 'codex-cli':
-    default:
-      return {
-        initialAssistantPreset: 'codex',
-        initialAssistantModelProvider: backend.modelProvider ?? null,
-        initialAssistantOss: backend.oss === true ? true : undefined,
-      }
+  return {
+    initialAssistantPreset: 'codex',
+    initialAssistantModelProvider: backend.modelProvider ?? null,
+    initialAssistantOss: backend.oss === true ? true : undefined,
   }
 }

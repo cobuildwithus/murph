@@ -1999,7 +1999,12 @@ export async function runHostedWorkspaceAssistantPhase(
             target,
             targetKind,
           }, { signal });
-          if (typeof authority?.threadIsDirect !== "boolean") {
+          const resolvedRoute = authority?.resolvedRoute;
+          if (
+            !resolvedRoute
+            || resolvedRoute.targetKind !== "thread"
+            || typeof resolvedRoute.threadIsDirect !== "boolean"
+          ) {
             throw new VaultCliError(
               "ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE",
               "Hosted Linq delivery requires direct or group authority before provider work.",
@@ -2007,7 +2012,7 @@ export async function runHostedWorkspaceAssistantPhase(
             );
           }
           const conversationThreadId =
-            authority.targetOverride?.conversationThreadId?.trim() ?? "";
+            resolvedRoute.conversationThreadId?.trim() ?? "";
           return {
             ...(conversationThreadId ? { conversationThreadId } : {}),
             ...(authority.deliveryBlockCode
@@ -2016,8 +2021,8 @@ export async function runHostedWorkspaceAssistantPhase(
             ...(authority.deliveryPosture
               ? { deliveryPosture: authority.deliveryPosture }
               : {}),
-            target: authority.targetOverride?.target ?? target,
-            threadIsDirect: authority.threadIsDirect,
+            target: resolvedRoute.target,
+            threadIsDirect: resolvedRoute.threadIsDirect,
           };
         },
         ...(usageRecorder ? { usageRecorder } : {}),

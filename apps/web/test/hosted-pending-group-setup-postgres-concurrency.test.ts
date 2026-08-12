@@ -206,20 +206,22 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           prisma: observer,
         })).resolves.toMatchObject({ id: rearmedSetup.id });
 
-        const corruptSetup = await observer.$transaction((tx) =>
+        const malformedSetup = await observer.$transaction((tx) =>
           armHostedPendingGroupSetupTx({
             now: new Date("2026-07-29T18:05:00.000Z"),
             ownerMemberId,
             setup: {
-              roomContextMarkdown: "This encrypted payload will be corrupted.",
+              roomContextMarkdown: "This authenticated payload will be malformed.",
             },
             tx,
           })
         );
         await observer.$executeRaw(Prisma.sql`
           UPDATE "hosted_pending_group_setup"
-          SET "payload_encrypted" = ${"not-an-encrypted-payload"}
-          WHERE "id" = ${corruptSetup.id}
+          SET "payload_encrypted" = ${
+            `sealed:${Buffer.from("{", "utf8").toString("base64url")}`
+          }
+          WHERE "id" = ${malformedSetup.id}
         `);
         await expect(observer.$transaction((tx) =>
           claimHostedPendingGroupSetupForParticipantsTx({
@@ -237,6 +239,42 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(await observer.hostedPendingGroupSetup.count({
           where: { ownerMemberId },
         })).toBe(0);
+
+        await observer.$transaction((tx) => armHostedPendingGroupSetupTx({
+          now: new Date("2026-07-29T18:05:40.000Z"),
+          ownerMemberId,
+          setup: {
+            roomContextMarkdown: "Authentication failure must preserve this row.",
+          },
+          tx,
+        }));
+        const authenticationFailure = new Error("test secure-box auth failure");
+        setHostedSecureBoxStringTestCodecForTests({
+          decrypt: () => {
+            throw authenticationFailure;
+          },
+          encrypt: ({ value }) =>
+            `sealed:${Buffer.from(value, "utf8").toString("base64url")}`,
+        });
+        await expect(observer.$transaction((tx) =>
+          claimHostedPendingGroupSetupForParticipantsTx({
+            now: new Date("2026-07-29T18:05:50.000Z"),
+            occurredAt: new Date("2026-07-29T18:05:45.000Z"),
+            participantMemberIds: [ownerMemberId],
+            recipientPhoneLookupKeys: [recipientPhoneLookupKey],
+            senderMemberId: "member_first_speaker",
+            tx,
+          })
+        )).rejects.toBe(authenticationFailure);
+        expect(await observer.hostedPendingGroupSetup.count({
+          where: { ownerMemberId },
+        })).toBe(1);
+        setHostedSecureBoxStringTestCodecForTests({
+          decrypt: ({ value }) =>
+            Buffer.from(value.slice("sealed:".length), "base64url").toString("utf8"),
+          encrypt: ({ value }) =>
+            `sealed:${Buffer.from(value, "utf8").toString("base64url")}`,
+        });
 
         await observer.$transaction((tx) => armHostedPendingGroupSetupTx({
           now: new Date("2026-07-29T18:06:00.000Z"),

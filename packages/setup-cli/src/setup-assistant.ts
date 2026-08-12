@@ -282,7 +282,7 @@ function shouldDetectSetupAssistantAccount(
 ): boolean {
   return (
     assistant.enabled &&
-    assistant.provider === 'codex-cli' &&
+    assistant.provider !== null &&
     assistant.modelProvider === null &&
     assistant.oss !== true
   )

@@ -81,6 +81,24 @@ describe("ChangelogPage", () => {
       expect(markup).not.toContain(`id="edition-${edition.id}"`);
     }
 
+    const correctedEdition = firstPage.editions.find(
+      (edition) => edition.id === "2026-08-10",
+    );
+    expect(correctedEdition).toBeDefined();
+    if (!correctedEdition) {
+      throw new TypeError(
+        "The current archive must include the corrected edition.",
+      );
+    }
+    expect(markup).toContain(
+      renderToStaticMarkup(<>{correctedEdition.summary}</>),
+    );
+    expect(correctedEdition.summary).toContain("Training shows saved workouts");
+    expect(correctedEdition.summary).toContain("group photos on request");
+    expect(correctedEdition.summary).toContain("Luna, Terra, and Sol on OpenAI");
+    expect(correctedEdition.summary).toContain("one first photo");
+    expect(correctedEdition.summary).toContain("wearable recovery");
+    expect(correctedEdition.summary).not.toContain("original detail");
 
     expect(markup).toContain('aria-label="Changelog pages"');
     expect(markup).toContain(`href="${buildChangelogPagePath(2)}"`);
@@ -218,14 +236,11 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Live storage maintenance");
   });
 
-  it("renders the latest production edition and synthetic archive studies", () => {
+  it("renders the synthetic archive study without production-entry coupling", () => {
     const markup = renderToStaticMarkup(<ChangelogArchiveStudy />);
 
     expect(markup).toContain('data-design-study="changelog-archive"');
-    expect(markup).toContain('data-design-state="latest-production-edition"');
-    expect(markup).toContain("Managed OpenAI web search works again");
-    expect(markup).toContain("Blood-pressure history waits for the whole sync");
-    expect(markup).not.toContain("Ask Murph to search");
+    expect(markup).toContain('data-design-state="synthetic-edition"');
     expect(markup).toContain("A week of follow-through");
     expect(markup).toContain("Generated images can become group photos");
     expect(markup).toContain("Confirmed appointments come with a reminder");
@@ -241,8 +256,8 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Private conversation");
     expect(markup).toContain("Compact response");
     expect(markup).toContain("70 mg/dL");
+    expect(markup).toContain('href="#design-appointment-reminder"');
     expect(markup).toContain('href="#design-generated-group-photo"');
-    expect(markup).toContain('href="#appointment-reminders-by-default"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");
   });

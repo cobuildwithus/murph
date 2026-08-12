@@ -24,16 +24,11 @@ import {
   assistantProviderConfigsEqual,
   compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigs,
-  mergeAssistantProviderConfigsForProvider,
   normalizeAssistantHeaders,
   normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
-  resolveAssistantChatProviderFromConfig,
-  resolveAssistantProvider,
-  resolveAssistantProviderRuntimeTarget,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
-  supportsAssistantReasoningEffort,
 } from '../src/assistant/provider-config.ts'
 import {
   splitAssistantHeadersForPersistence,
@@ -157,7 +152,6 @@ test('assistant backend helpers cover Codex persistence branches and legacy fail
 })
 
 test('assistant provider helpers cover Codex inference and serialization branches', () => {
-  assert.equal(resolveAssistantProvider(null), 'codex-cli')
   assert.equal(compactAssistantProviderConfigInput(null), null)
   assert.equal(compactAssistantProviderConfigInput({ provider: null }), null)
   assert.deepEqual(normalizeAssistantHeaders({ ' --- ': 'value', 'x-empty': '   ' }), {
@@ -181,7 +175,6 @@ test('assistant provider helpers cover Codex inference and serialization branche
       sandbox: null,
     },
     target: {
-      kind: 'codex-cli',
       codexCommand: null,
       codexHome: null,
       model: 'gpt-5.6-terra',
@@ -190,13 +183,9 @@ test('assistant provider helpers cover Codex inference and serialization branche
       profile: null,
     },
   })
-  assert.equal(resolveAssistantChatProviderFromConfig(mergedCodex), 'codex-cli')
   assert.deepEqual(
-    mergeAssistantProviderConfigsForProvider('codex-cli', null, {
-      profile: ' hosted ',
-    }).target,
+    mergeAssistantProviderConfigs(null, { profile: ' hosted ' }).target,
     {
-      kind: 'codex-cli',
       codexCommand: null,
       codexHome: null,
       model: null,
@@ -206,8 +195,8 @@ test('assistant provider helpers cover Codex inference and serialization branche
     },
   )
   assert.deepEqual(serializeAssistantProviderSessionOptions(mergedCodex), {
-    continuityFingerprint: resolveAssistantProviderRuntimeTarget(mergedCodex)
-      .continuityFingerprint,
+    continuityFingerprint:
+      'sha256:92dd8f385e880361ece3d37db9e95db805e54e9f23e12cb7f5c2960ea52eaea8',
     executionDriver: 'codex-app-server',
     approvalPolicy: null,
     model: 'gpt-5.6-terra',
@@ -234,7 +223,6 @@ test('assistant provider helpers cover Codex inference and serialization branche
     assistantProviderConfigsEqual({ provider: 'codex-cli', model: 'gpt-5' }, null),
     false,
   )
-  assert.equal(supportsAssistantReasoningEffort(mergedCodex), true)
   assert.throws(
     () =>
       normalizeAssistantProviderConfig({
@@ -280,7 +268,7 @@ test('hosted assistant config helpers normalize Codex profiles and sparse fallba
 
   assert.deepEqual(resolveHostedAssistantActiveProfile(hostedConfig), codexProfile)
   assert.equal(resolveHostedAssistantActiveProfile(emptyHostedConfig), null)
-  assert.equal(resolveHostedAssistantProfileLabel({ provider: 'codex-cli' }), 'Codex App Server')
+  assert.equal(resolveHostedAssistantProfileLabel({}), 'Codex App Server')
   assert.equal(hostedAssistantProfilesEqual(codexProfile, null), false)
   assert.equal(hostedAssistantProfilesEqual(null, null), true)
   assert.equal(resolveHostedAssistantActiveProfile(null), null)

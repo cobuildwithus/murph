@@ -85,10 +85,29 @@ function buildLinqRouteAuthority(threadId: string) {
 
 function buildClaimedLinqEngagementResult(request: {
   authorityCheckOnly: boolean;
+  directRecipientPhoneNumber?: string | null;
+  fromPhoneNumber?: string | null;
+  target: string | null;
+  targetKind?: string | null;
 }) {
-  return request.authorityCheckOnly === true
-    ? {}
-    : { providerDispatchClaimed: true };
+  const target = request.target ?? "linq-thread";
+  const targetKind = request.targetKind === "participant"
+    ? "participant"
+    : "thread";
+  return {
+    ...(request.authorityCheckOnly === true
+      ? {}
+      : { providerDispatchClaimed: true }),
+    resolvedRoute: {
+      conversationThreadId: null,
+      directRecipientPhoneNumber:
+        request.directRecipientPhoneNumber ?? null,
+      fromPhoneNumber: request.fromPhoneNumber ?? null,
+      target,
+      targetKind,
+      threadIsDirect: true,
+    },
+  } as const;
 }
 
 test("hosted Linq typing uses the hosted env after target context validation", async () => {

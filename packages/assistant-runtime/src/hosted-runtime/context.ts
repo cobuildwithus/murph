@@ -540,7 +540,6 @@ function applyHostedCodexRuntimeCommandTarget(input: {
 }): AssistantModelTarget | null {
   if (
     !input.target ||
-    input.target.adapter !== "codex-cli" ||
     !input.codexCommand
   ) {
     return input.target;
@@ -560,7 +559,7 @@ function applyHostedCodexRuntimeModelProviderTarget(input: {
   modelProviderId?: string | null;
   target: AssistantModelTarget | null;
 }): AssistantModelTarget | null {
-  if (!input.target || input.target.adapter !== "codex-cli") {
+  if (!input.target) {
     return input.target;
   }
 

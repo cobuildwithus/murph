@@ -4,6 +4,7 @@ import type {
 import type { LinqFetch } from '@murphai/operator-config/linq-runtime'
 import type {
   AssistantResponseCard,
+  TelegramRichMessage,
 } from '@murphai/operator-config/assistant-response-cards'
 import type { TelegramFetchImplementation } from '@murphai/operator-config/telegram-runtime'
 import {
@@ -100,6 +101,25 @@ export interface AssistantChannelDependencies {
     idempotencyKey?: string | null
     message: string
     replyToMessageId?: string | null
+    signal?: AbortSignal
+    target: string
+  }) => Promise<
+    | {
+        cleanupMessages?: Array<{ messageId: string; target: string }> | null
+        cleanupTargetAliases?: string[] | null
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerThreadId?: string | null
+        target?: string | null
+        targetKind?: AssistantChannelDeliveryTargetKind | null
+      }
+    | void
+  >
+  sendTelegramRich?: (input: {
+    fallbackMessage: string
+    idempotencyKey?: string | null
+    replyToMessageId?: string | null
+    richMessage: TelegramRichMessage
     signal?: AbortSignal
     target: string
   }) => Promise<
