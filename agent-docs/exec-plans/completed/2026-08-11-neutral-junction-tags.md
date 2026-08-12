@@ -1,6 +1,6 @@
 # Store Junction tags neutrally
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -135,8 +135,17 @@ Updated: 2026-08-11
 - Focused Web changelog tests: passed, 56 tests.
 - Contracts, importers, query, vault-usecases, device-syncd,
   hosted-execution, and full Web typechecks: passed.
-- Remaining: exact-head GitHub Actions; preliminary `completion-specialists`
-  and final `pr-review` ReviewGPT passes; current-base merge-tree proof.
+- Preliminary `completion-specialists` ReviewGPT returned one accepted
+  existing-member history finding; no patch artifact was returned. Final
+  ReviewGPT round one accepted history and source-identity findings, round two
+  required the documented deploy-generation retrospective, and round three
+  passed the remediated exact head with no qualifying findings.
+- Exact-head GitHub Actions passed. One repo-tool attempt received an unrelated
+  GitHub Markdown-rendering 403; rerunning the failed release build/typecheck
+  job on the unchanged head passed.
+- Remaining at close: current-base merge-tree proof after the docs-only plan
+  archive commit.
 - Expected outcomes: neutral canonical notes retain tags/provenance but not
   free text; only allowlisted Oura actions appear in Personal Patterns; replay
   and remediation are idempotent; no accepted review finding remains.
+Completed: 2026-08-11
