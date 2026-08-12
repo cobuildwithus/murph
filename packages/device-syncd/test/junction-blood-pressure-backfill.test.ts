@@ -885,7 +885,7 @@ test("Oura notes receive one full summary-history migration while dense timeseri
   );
   assert.equal(
     requests.filter((request) => request.resource === "stress_level").length,
-    7,
+    1,
   );
 
   const completed = createScheduledJobs(

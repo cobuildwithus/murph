@@ -150,9 +150,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    and omitted facets use the existing canonical event retraction seam. Thus a
    later insufficient or capped day removes stale derived facts, and retries
    converge without another queue, merge store, or lifecycle owner. Date-only
-   provider responses are filtered with the importer's source-local day
-   semantics rather than UTC bounds, so an offset day's evening rows are not
-   truncated. These rules do not relax the no-full-timeseries retention
+   and floating provider responses are filtered by raw calendar day only under
+   that complete local-day authority; absolute timestamps use the exact UTC
+   bounds, and precise partial windows do not manufacture instants with the
+   worker process timezone. Generic account completion does not satisfy this
+   resource-specific proof, so a scheduled reconcile always checks at most the
+   newest eligible day for each temporal resource while retaining the ordinary
+   completion optimization for non-temporal resources. These rules do not relax
+   the no-full-timeseries retention
    boundary; base daily observations and compact evidence remain the only
    non-temporal outputs.
 

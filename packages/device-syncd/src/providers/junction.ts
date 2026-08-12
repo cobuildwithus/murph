@@ -253,8 +253,17 @@ const JUNCTION_WEBHOOK_ROOT_FIELDS = Object.freeze({
 const JUNCTION_SDK_ISO_8601_DATE_PATTERN = /^([+-]?\d{4}(?!\d{2}\b))((-?)((0[1-9]|1[0-2])(\3([12]\d|0[1-9]|3[01]))?|W([0-4]\d|5[0-2])(-?[1-7])?|(00[1-9]|0[1-9]\d|[12]\d{2}|3([0-5]\d|6[1-6])))([T\s]((([01]\d|2[0-3])((:?)[0-5]\d)?|24:?00)([.,]\d+(?!:))?)?(\17[0-5]\d([.,]\d+)?)?([zZ]|([+-])([01]\d|2[0-3]):?([0-5]\d)?)?)?)?$/;
 
 interface JunctionWindowFetchOptions {
+  authorizedLocalDay?: {
+    dayKey: string;
+    timeZone: string;
+  };
   chunkDays?: number;
   dateQueryFormat?: JunctionDateQueryFormat;
+}
+
+interface JunctionDailyTimeseriesImportOptions {
+  newestAuthoritativeDayOnly?: boolean;
+  remainingSparseClinicalReadingsByDay?: Map<string, number>;
 }
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
@@ -1164,41 +1173,61 @@ export function createJunctionDeviceSyncProvider(
         : null,
       window,
     );
-    if (
-      jobTimeseriesResources.length > 0
-      && (
-        job.kind === "backfill"
-        || shouldImportClosedTimeseriesForReconcile(
-          context.account.lastSyncCompletedAt,
-          context.now,
-          context.vaultTimeZone,
-        )
-      )
-    ) {
-      const timeseriesImport = await importTimeseriesDailySnapshots(
+    let yieldedTimeseriesAt: string | null = null;
+    if (jobTimeseriesResources.length > 0 && job.kind === "backfill") {
+      yieldedTimeseriesAt = (await importTimeseriesDailySnapshots(
         context,
         sourceProviders,
         timeseriesWindowStart,
         window.windowEnd,
         skippedOptionalResources,
         jobTimeseriesResources,
+      )).yieldedAt;
+    } else if (jobTimeseriesResources.length > 0) {
+      const importNonTemporalResources = shouldImportClosedTimeseriesForReconcile(
+        context.account.lastSyncCompletedAt,
+        context.now,
+        context.vaultTimeZone,
       );
-      if (timeseriesImport.yieldedAt) {
-        return withJunctionSkippedResourceMetadata(
+      const remainingSparseClinicalReadingsByDay = new Map<string, number>();
+      for (const resource of jobTimeseriesResources) {
+        const temporalResource = JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource);
+        if (!temporalResource && !importNonTemporalResources) {
+          continue;
+        }
+        yieldedTimeseriesAt = (await importTimeseriesDailySnapshots(
           context,
-          withJunctionMetadataPatch(
-            buildYieldedJunctionJobResult({
-              context,
-              job,
-              windowEnd: window.windowEnd,
-              windowStart: job.kind === "backfill" ? window.windowStart : timeseriesImport.yieldedAt,
-              timeseriesCursor: job.kind === "backfill" ? timeseriesImport.yieldedAt : null,
-            }),
-            profileMetadataPatch,
-          ),
+          sourceProviders,
+          timeseriesWindowStart,
+          window.windowEnd,
           skippedOptionalResources,
-        );
+          [resource],
+          undefined,
+          {
+            newestAuthoritativeDayOnly: temporalResource,
+            remainingSparseClinicalReadingsByDay,
+          },
+        )).yieldedAt;
+        if (yieldedTimeseriesAt) {
+          break;
+        }
       }
+    }
+    if (yieldedTimeseriesAt) {
+      return withJunctionSkippedResourceMetadata(
+        context,
+        withJunctionMetadataPatch(
+          buildYieldedJunctionJobResult({
+            context,
+            job,
+            windowEnd: window.windowEnd,
+            windowStart: job.kind === "backfill" ? window.windowStart : yieldedTimeseriesAt,
+            timeseriesCursor: job.kind === "backfill" ? yieldedTimeseriesAt : null,
+          }),
+          profileMetadataPatch,
+        ),
+        skippedOptionalResources,
+      );
     }
 
     const backfillFollowUp = job.kind === "backfill"
@@ -2693,12 +2722,14 @@ export function createJunctionDeviceSyncProvider(
           request.dateQueryFormat = options.dateQueryFormat;
         }
         const chunkRecords = await client.listTimeseries(request);
-        // The caller supplies an exact half-open UTC window. Keep filtering
-        // local so provider pagination overlap cannot leak adjacent-day rows.
+        // Absolute instants use the exact half-open UTC window. Floating and
+        // date-only values have no instant until the importer applies the vault
+        // timezone, so only complete-day authority may filter them by raw day.
         const retainedChunkRecords = filterJunctionTimeseriesRecordsToWindow(
           chunkRecords,
           chunkWindowStart,
           chunkWindowEnd,
+          options.authorizedLocalDay,
         );
         records.push(
           ...retainedChunkRecords,
@@ -2971,15 +3002,22 @@ export function createJunctionDeviceSyncProvider(
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     resources?: readonly string[],
     sourceProviderSlug?: string | null,
+    options: JunctionDailyTimeseriesImportOptions = {},
   ): Promise<JunctionTimeseriesImportResult> {
     const authorityTimeZone = context.vaultTimeZone;
-    for (const window of buildClosedDailyWindows(
+    const dailyWindows = buildClosedDailyWindows(
       windowStart,
       windowEnd,
       authorityTimeZone ?? "UTC",
       context.now,
-    )) {
-      let remainingSparseClinicalReadings = JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_DAY;
+    );
+    const selectedWindows = options.newestAuthoritativeDayOnly
+      ? dailyWindows.filter((window) => window.authoritative).slice(-1)
+      : dailyWindows;
+    for (const window of selectedWindows) {
+      let remainingSparseClinicalReadings =
+        options.remainingSparseClinicalReadingsByDay?.get(window.dayKey)
+        ?? JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_DAY;
       for (const resource of resources ?? timeseriesResources) {
         const sparseClinicalResource =
           JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCE_SET.has(resource);
@@ -2992,6 +3030,7 @@ export function createJunctionDeviceSyncProvider(
           };
         }
         const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
+        const temporalResource = JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource);
         const timeseries = await fetchTimeseriesSnapshots(
           context,
           window.windowStart,
@@ -2999,6 +3038,18 @@ export function createJunctionDeviceSyncProvider(
           skippedOptionalResources,
           [resource],
           sourceProviderSlug,
+          temporalResource
+            ? {
+                ...(authorityTimeZone && window.authoritative
+                  ? {
+                      authorizedLocalDay: {
+                        dayKey: window.dayKey,
+                        timeZone: authorityTimeZone,
+                      },
+                    }
+                  : {}),
+              }
+            : { dateQueryFormat: "date" },
         );
         if (skippedOptionalResources.length > skippedResourceCountBeforeFetch) {
           continue;
@@ -3007,7 +3058,7 @@ export function createJunctionDeviceSyncProvider(
         const completeSourceDay = (
           authorityTimeZone
           && window.authoritative
-          && JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+          && temporalResource
         )
           ? {
               connectionId: context.account.id,
@@ -3053,6 +3104,10 @@ export function createJunctionDeviceSyncProvider(
               });
             }
             remainingSparseClinicalReadings -= admittedReadingCount;
+            options.remainingSparseClinicalReadingsByDay?.set(
+              window.dayKey,
+              remainingSparseClinicalReadings,
+            );
           }
         }
       }
@@ -5160,6 +5215,7 @@ function filterJunctionTimeseriesRecordsToWindow(
   records: readonly unknown[],
   windowStart: string,
   windowEnd: string,
+  authorizedLocalDay?: { dayKey: string; timeZone: string },
 ): unknown[] {
   const startMs = Date.parse(windowStart);
   const endMs = Date.parse(windowEnd);
@@ -5172,9 +5228,13 @@ function filterJunctionTimeseriesRecordsToWindow(
     if (!entry) {
       return true;
     }
-    const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry);
+    const timestamp = resolveRawJunctionTimeseriesRecordTimestamp(entry);
     if (!timestamp) {
       return true;
+    }
+    if (!hasAbsoluteJunctionTimeseriesTimestamp(timestamp, entry)) {
+      const rawDayKey = /^\d{4}-\d{2}-\d{2}/u.exec(timestamp)?.[0];
+      return !authorizedLocalDay || rawDayKey === authorizedLocalDay.dayKey;
     }
     const recordedMs = Date.parse(timestamp);
     if (!Number.isFinite(recordedMs)) {
@@ -5296,6 +5356,16 @@ function firstJunctionTimeseriesIdentityValue(
 }
 
 function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {
+  const timestamp = resolveRawJunctionTimeseriesRecordTimestamp(record);
+  if (!timestamp || !hasAbsoluteJunctionTimeseriesTimestamp(timestamp, record)) {
+    return timestamp;
+  }
+  return toIsoTimestampIfValid(timestamp) ?? timestamp;
+}
+
+function resolveRawJunctionTimeseriesRecordTimestamp(
+  record: Record<string, unknown>,
+): string | null {
   for (const key of [
     "observedAt",
     "observed_at",
@@ -5316,10 +5386,26 @@ function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown
       continue;
     }
 
-    return toIsoTimestampIfValid(normalized) ?? normalized;
+    return normalized;
   }
 
   return null;
+}
+
+function hasAbsoluteJunctionTimeseriesTimestamp(
+  timestamp: string,
+  record: Record<string, unknown>,
+): boolean {
+  const explicitSemantics = normalizeString(
+    record.timestampSemantics ?? record.timestamp_semantics,
+  );
+  if (explicitSemantics === "floating") {
+    return false;
+  }
+  if (explicitSemantics === "utc" || explicitSemantics === "offset") {
+    return true;
+  }
+  return /(?:z|[+-]\d{2}:?\d{2})$/iu.test(timestamp.trim());
 }
 
 function buildJunctionRedirectUrl(callbackUrl: string, state: string): string {
@@ -7045,7 +7131,10 @@ function readJunctionWebhookDataTimestampRange(
   const record = data ? readPlainObject(data) : null;
   const timestamps = record
     ? expandJunctionWebhookTimeseriesDataRecords(record).slice(1).flatMap((entry) => {
-        const timestamp = toIsoTimestampIfValid(resolveJunctionTimeseriesRecordTimestamp(entry));
+        const rawTimestamp = resolveRawJunctionTimeseriesRecordTimestamp(entry);
+        const timestamp = rawTimestamp && hasAbsoluteJunctionTimeseriesTimestamp(rawTimestamp, entry)
+          ? toIsoTimestampIfValid(rawTimestamp)
+          : null;
         return timestamp ? [timestamp] : [];
       })
     : [];
