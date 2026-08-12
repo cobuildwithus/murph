@@ -5,10 +5,10 @@
     "id": "sharper-single-photo-review",
     "kind": "improvement",
     "priority": 3,
-    "title": "Terra keeps lone first photos at original detail",
-    "summary": "When Murph uses Terra, one initial photo is now sent at its original detail for closer visual review.",
-    "details": "Requests that start with multiple photos, use another model, add follow-up photos while Murph is working, or use custom inference stay at high detail to keep visual input cost and compatibility bounded.",
+    "title": "Luna, Terra, and Sol get a closer look at one first photo",
+    "summary": "Across Luna, Terra, and Sol on OpenAI, Murph now reviews one available initial photo with more detail.",
+    "details": "Multiple available initial photos, follow-up photos added while Murph is working, Venice, and custom inference stay at high detail to keep visual input cost and compatibility bounded.",
     "relevanceTags": ["assistant", "images", "messaging", "reliability"],
-    "sourcePullRequests": [1616]
+    "sourcePullRequests": [1616, 1674]
   }
 }

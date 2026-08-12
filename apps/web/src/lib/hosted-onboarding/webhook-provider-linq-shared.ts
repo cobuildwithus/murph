@@ -353,6 +353,33 @@ export function buildFamilyInviteAcceptedResponse(input: {
   });
 }
 
+export function buildFamilyInviteDraftRecoveryResponse(input: {
+  chatId: string;
+  memberId: string;
+  message: string;
+  messageId: string;
+  occurredAt: string;
+  sourceEventId: string;
+}): HostedOnboardingLinqDirectPlan {
+  return buildActiveMemberDirectPlan({
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        chatId: input.chatId,
+        memberId: input.memberId,
+        message: input.message,
+        occurredAt: input.occurredAt,
+        replyToMessageId: input.messageId,
+        sourceEventId: input.sourceEventId,
+        template: "family_invite_reply",
+      }),
+    ],
+    response: {
+      ok: true,
+      reason: "family-invite-draft-recovery-required",
+    },
+  });
+}
+
 export function buildActiveMemberDirectPlan(
   plan: HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect>,
 ): HostedOnboardingLinqDirectPlan {

@@ -64,10 +64,15 @@ import { hasHostedRecoverableBilling } from "@/src/lib/hosted-onboarding/lifecyc
 import {
   isHostedFamilyBillingPortalManageable,
   readHostedFamilyAccessForMember,
+  readHostedFamilyDraftRecoveryStateForOwner,
   readHostedFamilyOwnerSnapshotForMember,
   type HostedFamilyOwnerMemberRow,
   type HostedFamilyOwnerSnapshot,
 } from "@/src/lib/hosted-onboarding/family-plan";
+import {
+  HOSTED_FAMILY_INVITE_RETURN_PARAM,
+  parseHostedFamilyInviteReturnPath,
+} from "@/src/lib/hosted-onboarding/app-routes";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
@@ -106,6 +111,7 @@ type SettingsSearchParams = {
   accountDeletion?: string | string[] | undefined;
   addEmail?: string | string[] | undefined;
   addUsage?: string | string[] | undefined;
+  familyInviteReturn?: string | string[] | undefined;
   startGroup?: string | string[] | undefined;
   planUpdate?: string | string[] | undefined;
   usageCheckout?: string | string[] | undefined;
@@ -125,6 +131,11 @@ export default async function SettingsPage({
   const resolvedSearchParams = await searchParams;
   const accountDeletionRetry =
     readFirstSearchParamValue(resolvedSearchParams.accountDeletion) === "retry";
+  const familyInviteReturnPath = parseHostedFamilyInviteReturnPath(
+    readOnlySearchParamValue(
+      resolvedSearchParams[HOSTED_FAMILY_INVITE_RETURN_PARAM],
+    ),
+  );
   const openEmailLink =
     readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true";
   const addUsageTarget = readOnlySearchParamValue(resolvedSearchParams.addUsage);
@@ -146,7 +157,8 @@ export default async function SettingsPage({
     await getHostedDashboardPageAuthSnapshot();
   if (!authenticated) {
     if (
-      !groupPaymentMethodSaved
+      familyInviteReturnPath === null
+      && !groupPaymentMethodSaved
       && planChangeReturn === null
       && usageTopUpPurchaseReturn === null
     ) {
@@ -172,6 +184,7 @@ export default async function SettingsPage({
   const consentStatus = settingsData?.consentStatus ?? null;
   const freshPrivySession = settingsData?.freshPrivySession ?? null;
   const familyOwner = settingsData?.familyOwner ?? null;
+  const familyDraftRecovery = settingsData?.familyDraftRecovery ?? null;
   const familyAccess = settingsData?.familyAccess ?? null;
   const secureApprovalStatus =
     settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const);
@@ -523,6 +536,8 @@ export default async function SettingsPage({
           canSwitchToEdge={canSwitchToEdge}
           canSwitchToGroup={canSwitchToGroup}
           familyBillingOwner={familyBillingOwner}
+          familyDraftRecovery={familyDraftRecovery}
+          familyInviteReturnPath={familyInviteReturnPath}
           familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
           groupPaymentMethodSaved={groupPaymentMethodSaved}
           planChangePending={planChangePending}
@@ -765,6 +780,13 @@ async function readSettingsPageData(input: {
     memberId,
     prisma,
   });
+  const familyDraftRecovery =
+    familyOwner?.billingStatus === "not_started"
+      ? await readHostedFamilyDraftRecoveryStateForOwner({
+          ownerMemberId: memberId,
+          prisma,
+        })
+      : null;
   const familyAccess = await readHostedFamilyAccessForMember({
     memberId,
     prisma,
@@ -825,6 +847,7 @@ async function readSettingsPageData(input: {
   return {
     consentStatus,
     familyAccess,
+    familyDraftRecovery,
     familyOwner,
     groupPlanAvailable,
     hasConfirmedGroupMembership,

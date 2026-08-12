@@ -1,6 +1,6 @@
 # Personal Patterns
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Product boundary
 
@@ -39,15 +39,30 @@ new collection window when the feature ships.
 
 ## Inputs and comparison
 
-Eligible factors come from completed activity and intervention sessions.
-Missed and skipped intervention sessions do not count.
+Eligible factors come from completed activity and intervention sessions, plus
+one narrow query-owned wearable-tag rule. A neutral Junction wearable-tag note
+counts only when its canonical note type, external reference, and data origin all
+prove Oura, and only the exact product-owned `sauna` tag is admitted. The same
+tag from another Junction source, unknown/custom Oura tags, and symptom, context,
+or outcome tags remain neutral notes. Legacy Junction `tag-*` intervention rows
+are excluded from factor derivation. Junction note-history coverage version 2
+performs one bounded semantic reimport for sources covered by the legacy
+normalizer so neutral replacement notes restore eligible Oura sauna history
+without rewriting old event kinds. Missed and skipped intervention sessions do
+not count.
 
 Activity days use the existing canonical activity-evidence date. Intervention
 days use the existing scheduled/session local date before the generic event
-date. This keeps retroactively logged sessions on their intended day.
+date. Eligible Oura sauna notes use their canonical provider date. This keeps
+retroactively logged sessions on their intended day without assigning action
+semantics in canonical storage.
 
 Sleep outcomes use the sleep-analysis date and eligibility policy. Explicit
 naps do not count as next-day sleep outcomes.
+
+Recovery outcomes first use the canonical wearable summary. When a provider's
+normalized recovery values exist only as metric samples, the query uses the
+same canonical metric-selection policy in Browser Vault and `vault-cli`.
 
 Names that describe an outcome rather than an action are not eligible factors.
 This includes sleep, sleep score, sleep efficiency, HRV, resting heart rate,
@@ -112,10 +127,10 @@ stored state or member configuration.
 
 ## Ownership
 
-`@murphai/query` owns the calculation. Browser Vault stores only the derived
-report. Overview presents that report. `vault-cli` exposes the same query to
-the assistant runtime. The existing Weekly health insight owns message timing
-and deduplication.
+`@murphai/query` owns the calculation and canonical metric selection. Browser
+Vault stores only the derived report. Overview presents that report. `vault-cli`
+exposes the same query to the assistant runtime. The existing Weekly health
+insight owns message timing and deduplication.
 
 Do not add a database table, API, cron, dependency, statistical service, or
 second calculation in React or an assistant prompt for this feature.

@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import {
+  CURRENT_VAULT_FORMAT_VERSION,
+  JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+  JUNCTION_WEARABLE_TAG_NOTE_TYPE,
+} from "@murphai/contracts";
 import { test } from "vitest";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
@@ -14,8 +18,11 @@ import {
 } from "../src/browser.ts";
 import { buildPersonalPatternReport } from "../src/personal-patterns.ts";
 import { createVaultReadModel } from "../src/read-model.ts";
+import type { MetricPoint } from "../src/metrics/index.ts";
 import {
   buildPersonalPatternReportRuntime,
+  listMetricPointsRuntime,
+  loadProjectedVaultSource,
   rebuildQueryProjection,
 } from "../src/query-projection.ts";
 
@@ -85,6 +92,172 @@ test("Browser Vault parsing preserves a missing legacy Personal Patterns project
   const parsed = parseBrowserVaultReplica(replica);
 
   assert.equal(parsed.personalPatterns, undefined);
+});
+
+test("Personal Patterns reuses the canonical provider activity-kind resolver", () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities: [
+      ...runningDates.map((date, index) => event(`provider_run_${index}`, date, "activity_session", {
+        workout: { sportName: "Run" },
+      })),
+      ...Array.from({ length: 112 }, (_, index) => {
+        const date = addDays(start, index);
+        return observation(
+          `provider_hrv_${index}`,
+          date,
+          "hrv",
+          runningDates.includes(addDays(date, -1)) ? 70 : 50,
+          "ms",
+        );
+      }),
+    ],
+    vaultRoot: "test://personal-pattern-provider-activity",
+  }), {
+    asOf: "2026-04-27T12:00:00.000Z",
+  });
+
+  assert.equal(report.factors[0]?.id, "running");
+  assert.equal(report.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+});
+
+test("Personal Patterns admits only the product-owned Oura sauna tag from neutral notes", () => {
+  const start = "2026-01-05";
+  const ouraDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const garminDates = ouraDates.map((date) => addDays(date, 7));
+  const legacyDates = ouraDates.map((date) => addDays(date, 3));
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities: [
+      ...ouraDates.map((date, index) => junctionWearableTagNote(
+        `oura_tags_${index}`,
+        date,
+        "oura",
+        ["sauna", "headache", "late-meal", "recovery", "custom-tag"],
+      )),
+      ...garminDates.map((date, index) => junctionWearableTagNote(
+        `garmin_tags_${index}`,
+        date,
+        "garmin",
+        ["sauna"],
+      )),
+      ...legacyDates.map((date, index) => legacyJunctionNoteTagIntervention(
+        `legacy_oura_tag_${index}`,
+        date,
+        "sauna",
+      )),
+      ...Array.from({ length: 112 }, (_, index) => {
+        const date = addDays(start, index);
+        return observation(
+          `oura_tag_hrv_${index}`,
+          date,
+          "hrv",
+          ouraDates.includes(addDays(date, -1)) ? 70 : 50,
+          "ms",
+        );
+      }),
+    ],
+    vaultRoot: "test://personal-pattern-oura-tags",
+  }), {
+    asOf: "2026-04-27T12:00:00.000Z",
+  });
+
+  assert.deepEqual(report.factors, [{
+    id: "sauna",
+    kind: "intervention",
+    label: "Sauna",
+    observedDays: 8,
+  }]);
+  assert.equal(report.cells.find((cell) => cell.factorId === "sauna" && cell.outcomeId === "hrv")?.stage, "seen_again");
+  assert.equal(report.factors.some((factor) => factor.id === "headache"), false);
+  assert.equal(report.factors.some((factor) => factor.id === "late-meal"), false);
+  assert.equal(report.factors.some((factor) => factor.id === "recovery"), false);
+  assert.equal(report.factors.some((factor) => factor.id === "custom-tag"), false);
+});
+
+test("Browser Vault Personal Patterns falls back to its selected metric rows", async () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const vault = createVaultReadModel({
+    entities: runningDates.map((date, index) => event(`metric_run_${index}`, date, "activity_session", {
+      activityType: "running",
+    })),
+    vaultRoot: "test://personal-pattern-metric-rows",
+  });
+  const metricPoints = Array.from({ length: 112 }, (_, index) => {
+    const date = addDays(start, index);
+    return metricPoint(
+      `metric_hrv_${index}`,
+      date,
+      "hrv-rmssd",
+      runningDates.includes(addDays(date, -1)) ? 70 : 50,
+      "ms",
+    );
+  });
+  const duplicate = {
+    ...metricPoints[1]!,
+    confidence: "low" as const,
+    id: "metric_hrv_duplicate",
+    value: 999,
+  };
+
+  assert.deepEqual(buildPersonalPatternReport(vault, {
+    asOf: "2026-04-27T12:00:00.000Z",
+  }).factors, []);
+
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-27T12:00:00.000Z",
+    metricPoints: [duplicate, ...metricPoints],
+    sourceBundleHash: "m".repeat(64),
+    vault,
+  });
+  const report = parseBrowserVaultReplica(replica).personalPatterns;
+
+  assert.equal(report?.factors[0]?.id, "running");
+  assert.equal(report?.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+  assert.equal(report?.testedCellCount, 1);
+  assert.equal(report?.cells.find((cell) => cell.outcomeId === "hrv")?.exposedMean, 70);
+
+  const reversedReplica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-27T12:00:00.000Z",
+    metricPoints: [...metricPoints, duplicate],
+    sourceBundleHash: "n".repeat(64),
+    vault,
+  });
+  assert.deepEqual(parseBrowserVaultReplica(reversedReplica).personalPatterns, report);
+});
+
+test("Personal Patterns does not duplicate the canonical readiness metric as recovery", async () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const vault = createVaultReadModel({
+    entities: runningDates.map((date, index) => event(`readiness_run_${index}`, date, "activity_session", {
+      activityType: "running",
+    })),
+    vaultRoot: "test://personal-pattern-readiness-alias",
+  });
+  const metricPoints = Array.from({ length: 112 }, (_, index) => {
+    const date = addDays(start, index);
+    return metricPoint(
+      `metric_readiness_${index}`,
+      date,
+      "readiness-score",
+      runningDates.includes(addDays(date, -1)) ? 90 : 70,
+      "score",
+    );
+  });
+
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-27T12:00:00.000Z",
+    metricPoints,
+    sourceBundleHash: "q".repeat(64),
+    vault,
+  });
+  const report = parseBrowserVaultReplica(replica).personalPatterns;
+
+  assert.deepEqual(report?.outcomes.map((outcome) => outcome.id), ["readiness-score"]);
+  assert.deepEqual(report?.cells.map((cell) => cell.outcomeId), ["readiness-score"]);
+  assert.equal(report?.cells[0]?.stage, "seen_again");
 });
 
 test("Personal Patterns qualifies factors before applying the six-row display cap", () => {
@@ -498,47 +671,38 @@ test("Personal Patterns suppresses outcome-like activity and intervention factor
   assert.equal(report.testedCellCount, 0);
 });
 
-test("Personal Patterns runtime reuses projected wearable summaries without exposing raw observations", async () => {
+test("Personal Patterns runtime and Browser Vault reuse the same projected metric samples", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-personal-pattern-runtime-"));
   const start = "2026-01-05";
   const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
-  const events = [
-    ...runningDates.map((date, index) => ({
-      activityType: "running",
+  const events = runningDates.map((date, index) => ({
+    activityType: "running",
+    dayKey: date,
+    id: `evt_runtime_run_${index}`,
+    kind: "activity_session",
+    occurredAt: `${date}T12:00:00.000Z`,
+    schemaVersion: "murph.event.v1",
+    source: "manual",
+    title: "Running",
+  }));
+  const metricSamples = Array.from({ length: 112 }, (_, index) => {
+    const date = addDays(start, index);
+    return {
       dayKey: date,
-      id: `evt_runtime_run_${index}`,
-      kind: "activity_session",
-      occurredAt: `${date}T12:00:00.000Z`,
-      schemaVersion: "murph.event.v1",
-      source: "manual",
-      title: "Running",
-    })),
-    ...Array.from({ length: 112 }, (_, index) => {
-      const date = addDays(start, index);
-      return {
-        dayKey: date,
-        externalRef: {
-          resourceId: `runtime-hrv-${date}`,
-          resourceType: "daily-summary",
-          system: "whoop",
-        },
-        id: `evt_runtime_hrv_${index}`,
-        kind: "observation",
-        metric: "hrv",
-        observationGrain: "summary",
-        occurredAt: `${date}T07:00:00.000Z`,
-        recordedAt: `${date}T07:05:00.000Z`,
-        schemaVersion: "murph.event.v1",
-        source: "device",
-        title: "Daily HRV",
-        unit: "ms",
-        value: runningDates.includes(addDays(date, -1)) ? 70 : 50,
-      };
-    }),
-  ];
+      id: `smp_runtime_hrv_${index}`,
+      metric: "hrv-rmssd",
+      quality: "derived",
+      recordedAt: `${date}T07:00:00.000Z`,
+      schemaVersion: "murph.metric-sample.v1",
+      source: "device",
+      unit: "ms",
+      value: runningDates.includes(addDays(date, -1)) ? 70 : 50,
+    };
+  });
 
   try {
     await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+    await mkdir(path.join(vaultRoot, "ledger/metric-samples/hrv-rmssd/2026"), { recursive: true });
     await writeFile(path.join(vaultRoot, "vault.json"), `${JSON.stringify({
       createdAt: "2026-01-01T00:00:00.000Z",
       formatVersion: CURRENT_VAULT_FORMAT_VERSION,
@@ -551,14 +715,38 @@ test("Personal Patterns runtime reuses projected wearable summaries without expo
       `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
       "utf8",
     );
+    for (const month of ["01", "02", "03", "04"]) {
+      const monthSamples = metricSamples.filter((sample) => sample.dayKey.startsWith(`2026-${month}`));
+      await writeFile(
+        path.join(vaultRoot, `ledger/metric-samples/hrv-rmssd/2026/2026-${month}.jsonl`),
+        `${monthSamples.map((sample) => JSON.stringify(sample)).join("\n")}\n`,
+        "utf8",
+      );
+    }
 
     await rebuildQueryProjection(vaultRoot);
-    const report = await buildPersonalPatternReportRuntime(vaultRoot, {
+    const runtimeReport = await buildPersonalPatternReportRuntime(vaultRoot, {
       asOf: "2026-04-27",
     });
+    const snapshot = await loadProjectedVaultSource(vaultRoot);
+    const metricPoints = await listMetricPointsRuntime(vaultRoot, { limit: null });
+    assert.equal(metricPoints.length, 112);
+    assert.ok(metricPoints.every((point) => point.metricKey === "hrv-rmssd"));
+    const replica = await createBrowserVaultReplica({
+      generatedAt: "2026-04-27T12:00:00.000Z",
+      metricPoints,
+      sourceBundleHash: "r".repeat(64),
+      vault: createVaultReadModel({
+        entities: snapshot.entities,
+        metadata: snapshot.metadata,
+        vaultRoot,
+      }),
+    });
+    const browserReport = parseBrowserVaultReplica(replica).personalPatterns;
 
-    assert.equal(report.factors[0]?.id, "running");
-    assert.equal(report.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+    assert.equal(runtimeReport.factors[0]?.id, "running");
+    assert.equal(runtimeReport.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+    assert.deepEqual(browserReport, runtimeReport);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
@@ -575,6 +763,51 @@ function event(
     date,
     kind,
     occurredAt: `${date}T12:00:00.000Z`,
+  });
+}
+
+function junctionWearableTagNote(
+  id: string,
+  date: string,
+  sourceProviderSlug: string,
+  tags: string[],
+): CanonicalEntity {
+  return entity("event", id, {
+    attributes: {
+      dataOrigin: { sourceProviderSlug },
+      externalRef: {
+        facet: JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+        resourceId: id,
+        resourceType: `junction-${sourceProviderSlug}-note`,
+        system: "junction",
+      },
+      note: "Wearable tags",
+      noteType: JUNCTION_WEARABLE_TAG_NOTE_TYPE,
+      source: "device",
+    },
+    date,
+    kind: "note",
+    occurredAt: `${date}T12:00:00.000Z`,
+    tags,
+  });
+}
+
+function legacyJunctionNoteTagIntervention(
+  id: string,
+  date: string,
+  tag: string,
+): CanonicalEntity {
+  return event(id, date, "intervention_session", {
+    dataOrigin: { sourceProviderSlug: "oura" },
+    externalRef: {
+      facet: `tag-${tag}`,
+      resourceId: id,
+      resourceType: "junction-oura-note",
+      system: "junction",
+    },
+    interventionType: tag,
+    sessionStatus: "completed",
+    source: "device",
   });
 }
 
@@ -622,6 +855,50 @@ function observation(
     unit,
     value,
   });
+}
+
+function metricPoint(
+  id: string,
+  date: string,
+  metricKey: string,
+  value: number,
+  unit: string,
+): MetricPoint {
+  return {
+    biomarkerKey: null,
+    canonicalUnit: unit,
+    canonicalValue: value,
+    comparator: null,
+    confidence: "high",
+    context: {},
+    effectiveDate: date,
+    grain: "day",
+    id,
+    metricKey,
+    observedAt: `${date}T00:00:00.000Z`,
+    provenance: {
+      dataOrigin: null,
+      externalRef: null,
+      labName: null,
+      provider: "whoop",
+      rawRefs: [],
+      sourceLabel: "Wearable summary",
+    },
+    recordedAt: null,
+    reportedAt: null,
+    schemaVersion: "murph.metric-point.v1",
+    source: {
+      family: "derived",
+      kind: "wearable-summary",
+      path: "",
+      recordId: `record:${id}`,
+      resultIndex: null,
+    },
+    statistic: "value",
+    textValue: null,
+    unit,
+    value,
+  };
 }
 
 function entity(

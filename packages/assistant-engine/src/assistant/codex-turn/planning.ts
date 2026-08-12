@@ -519,6 +519,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
+  const exerciseRoutineResponseCardsAvailable =
+    responseCardsAvailable &&
+    resolvedChannel?.trim().toLowerCase() === 'telegram'
   const groupChallengeResponseCardsAvailable =
     authenticatedGroupChatRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
@@ -956,6 +959,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
+        exerciseRoutineResponseCardsAvailable,
         groupChallengeResponseCardsAvailable,
         physicalNotesAvailable:
           (privateInteractiveAudience || authenticatedGroupChatRuntime) &&

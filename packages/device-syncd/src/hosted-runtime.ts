@@ -523,6 +523,7 @@ export interface HostedExecutionDeviceSyncDirtyResource {
   resource: string | null;
   resourceCategory: string | null;
   sourceProviderSlug: string | null;
+  timingSourceProviderSlug?: string | null;
   windowEnd: string | null;
   windowStart: string | null;
 }
@@ -703,6 +704,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   emptyBackfillAttempts: "number",
   eventType: "string",
   historicalBackfill: "boolean",
+  historicalBackfillVersion: "number",
   historicalProviderRecordsSeen: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
@@ -1507,6 +1509,14 @@ function parseHostedExecutionDeviceSyncDirtyResource(
     resource: readNullableStringValue(record.resource, `${label}.resource`),
     resourceCategory: readNullableStringValue(record.resourceCategory, `${label}.resourceCategory`),
     sourceProviderSlug: readNullableStringValue(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
+    ...(record.timingSourceProviderSlug === undefined
+      ? {}
+      : {
+          timingSourceProviderSlug: readNullableStringValue(
+            record.timingSourceProviderSlug,
+            `${label}.timingSourceProviderSlug`,
+          ),
+        }),
     windowEnd: readNullableIsoTimestamp(record.windowEnd, `${label}.windowEnd`),
     windowStart: readNullableIsoTimestamp(record.windowStart, `${label}.windowStart`),
   };

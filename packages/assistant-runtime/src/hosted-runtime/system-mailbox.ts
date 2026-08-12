@@ -77,6 +77,7 @@ export type HostedSystemMailboxCheckpointPreparation =
       legacyUsageReferralAuthorityClassification:
         HostedLegacyUsageReferralAuthorityClassification | null;
       nextWakeAt: string;
+      nextWakeReason: string | null;
       routeAction: HostedSystemMailboxRouteAction;
       status: "retryable_failed";
       wakeKind: HostedExecutionSystemWake["kind"];
@@ -255,6 +256,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
+  retainProcessedItemUntilRecorded?: boolean;
   signal?: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
@@ -310,20 +312,27 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         };
       }
 
+      const collapsed = collapseConsecutiveHostedBrowserVaultRefreshItems({
+        pending: state.pending,
+        selected: pending,
+      });
+
       const nextItem: HostedSystemMailboxPendingItem = {
-        ...pending,
-        attemptCount: pending.attemptCount + 1,
+        ...collapsed.selected,
+        attemptCount: collapsed.selected.attemptCount + 1,
         lastAttemptAt: startedAt,
         lastErrorCode: null,
         lastErrorMessage: null,
         nextAttemptAt: null,
-        status: pending.status === "recording" ? "recording" : "sending",
+        status: collapsed.selected.status === "recording"
+          ? "recording"
+          : "sending",
       };
       return {
         result: nextItem,
         state: {
-          pending: state.pending.map((item) =>
-            item.itemId === pending.itemId ? nextItem : item
+          pending: collapsed.pending.map((item) =>
+            item.itemId === collapsed.selected.itemId ? nextItem : item
           ),
         },
       };
@@ -342,6 +351,12 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   }
 
   try {
+    if (shouldPreemptHostedDeviceSyncSystemMailboxItem(input, prepared)) {
+      return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
+        prepared,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     const metrics = await executePendingHostedSystemMailboxItem({
       executionContext: input.executionContext ?? null,
       operatorHomeRoot: input.operatorHomeRoot ?? undefined,
@@ -352,8 +367,14 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
-    const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
-    if (postCheckpointRecord) {
+    const postCheckpointRecord =
+      metrics.postCheckpointRecord
+      ?? createRetainedHostedSystemMailboxPostCheckpointRecord({
+        item: prepared,
+        metrics,
+        retainProcessedItemUntilRecorded: input.retainProcessedItemUntilRecorded === true,
+      });
+    if (postCheckpointRecord || input.retainProcessedItemUntilRecorded === true) {
       const processedItem: HostedSystemMailboxPendingItem = {
         ...prepared,
         postCheckpointRecord,
@@ -386,22 +407,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       isHostedAssistantAskCompletionPreemptedError(error)
       && input.shouldYieldBackgroundMaintenance?.() === true
     ) {
-      const retainedItem: HostedSystemMailboxPendingItem = {
-        ...prepared,
-        lastErrorCode: null,
-        lastErrorMessage: null,
-        nextAttemptAt: null,
-        status: "pending",
-      };
-      await retainHostedSystemMailboxItemAfterForegroundPreemption({
-        item: retainedItem,
+      return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
+        prepared,
         vaultRoot: input.vaultRoot,
       });
-      return {
-        item: retainedItem,
-        itemId: prepared.itemId,
-        status: "preempted",
-      };
     }
     const normalized = normalizeHostedSystemMailboxError(error);
     const nextWakeAt = new Date(Date.parse(startedAt) + 60_000).toISOString();
@@ -436,11 +445,151 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       itemId: prepared.itemId,
       legacyUsageReferralAuthorityClassification,
       nextWakeAt,
+      nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(prepared),
       routeAction: prepared.routeAction,
       status: "retryable_failed",
       wakeKind: prepared.wake.kind,
     };
   }
+}
+
+function resolveHostedSystemMailboxPreparedItemRetryWakeReason(
+  item: HostedSystemMailboxPendingItem,
+): string | null {
+  return item.routeAction === "run-device-sync-wake"
+    ? HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+    : null;
+}
+
+function createRetainedHostedSystemMailboxPostCheckpointRecord(input: {
+  item: HostedSystemMailboxPendingItem;
+  metrics: HostedMailboxExecutionMetrics;
+  retainProcessedItemUntilRecorded: boolean;
+}): HostedSystemMailboxPostCheckpointRecord | null {
+  if (
+    !input.retainProcessedItemUntilRecorded
+    || input.item.routeAction !== "run-device-sync-wake"
+    || !input.metrics.nextWakeAt
+  ) {
+    return null;
+  }
+  return {
+    kind: "device-sync.dirty-processed-batch",
+    nextWakeAt: input.metrics.nextWakeAt,
+    records: [],
+  };
+}
+
+function shouldPreemptHostedDeviceSyncSystemMailboxItem(
+  input: { shouldYieldBackgroundMaintenance?: (() => boolean) | null },
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  return item.routeAction === "run-device-sync-wake"
+    && input.shouldYieldBackgroundMaintenance?.() === true;
+}
+
+async function retainHostedSystemMailboxPreparedItemAfterForegroundPreemption(input: {
+  prepared: HostedSystemMailboxPendingItem;
+  vaultRoot: string;
+}): Promise<Extract<HostedSystemMailboxCheckpointPreparation, { status: "preempted" }>> {
+  const retainedItem: HostedSystemMailboxPendingItem = {
+    ...input.prepared,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    nextAttemptAt: null,
+    status: "pending",
+  };
+  await retainHostedSystemMailboxItemAfterForegroundPreemption({
+    item: retainedItem,
+    vaultRoot: input.vaultRoot,
+  });
+  return {
+    item: retainedItem,
+    itemId: input.prepared.itemId,
+    status: "preempted",
+  };
+}
+
+function collapseConsecutiveHostedBrowserVaultRefreshItems(input: {
+  pending: readonly HostedSystemMailboxPendingItem[];
+  selected: HostedSystemMailboxPendingItem;
+}): {
+  pending: HostedSystemMailboxPendingItem[];
+  selected: HostedSystemMailboxPendingItem;
+} {
+  // Each Browser Vault refresh control row requests the same invocation-local
+  // idempotent intent. Compact only the pristine sequence-adjacent suffix that
+  // ordinary mailbox selection already admitted. The last row remains as the
+  // representative, so handled-through stays at representative - 1 until the
+  // intent is durably consumed; retries and foreground preemption retain it.
+  const selectedIndex = input.pending.findIndex((item) =>
+    item.itemId === input.selected.itemId
+  );
+  const selectedSeq = readCollapsibleHostedBrowserVaultRefreshSeq(
+    input.selected,
+  );
+  if (selectedIndex < 0 || selectedSeq === null) {
+    return {
+      pending: [...input.pending],
+      selected: input.selected,
+    };
+  }
+
+  let lastIndex = selectedIndex;
+  let lastSeq = selectedSeq;
+  while (lastIndex + 1 < input.pending.length) {
+    const candidate = input.pending[lastIndex + 1];
+    if (!candidate) {
+      break;
+    }
+    const candidateSeq = readCollapsibleHostedBrowserVaultRefreshSeq(candidate);
+    if (candidateSeq === null || candidateSeq !== lastSeq + 1n) {
+      break;
+    }
+    lastIndex += 1;
+    lastSeq = candidateSeq;
+  }
+
+  if (lastIndex === selectedIndex) {
+    return {
+      pending: [...input.pending],
+      selected: input.selected,
+    };
+  }
+
+  const representative = input.pending[lastIndex];
+  if (!representative) {
+    throw new Error("Collapsed Browser Vault refresh representative is missing.");
+  }
+  return {
+    pending: [
+      ...input.pending.slice(0, selectedIndex),
+      representative,
+      ...input.pending.slice(lastIndex + 1),
+    ],
+    selected: representative,
+  };
+}
+
+function readCollapsibleHostedBrowserVaultRefreshSeq(
+  item: HostedSystemMailboxPendingItem,
+): bigint | null {
+  if (
+    item.wake.kind !== "runtime.browser-vault-refresh-requested"
+    || item.routeAction !== "apply-runtime-control-request"
+    || item.status !== "pending"
+    || item.attemptCount !== 0
+    || item.lastAttemptAt !== null
+    || item.lastErrorCode !== null
+    || item.lastErrorMessage !== null
+    || item.nextAttemptAt !== null
+    || item.postCheckpointRecord !== null
+    || item.mailboxLaneSeq === null
+    || !/^[1-9]\d*$/u.test(item.mailboxLaneSeq)
+  ) {
+    return null;
+  }
+  return BigInt(item.mailboxLaneSeq);
 }
 
 function hostedSystemMailboxTimestampPrecedes(
@@ -507,9 +656,17 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   recorded: number;
 }> {
   if (!input.item.postCheckpointRecord) {
+    await removeHostedSystemMailboxPendingItemIfCurrent({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+    });
+    const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({
+      vaultRoot: input.vaultRoot,
+    });
     return {
       failed: 0,
-      nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
+      nextWakeAt: nextWake.at,
+      ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       recorded: 0,
     };
   }
@@ -535,12 +692,16 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     return {
       failed: 0,
       nextWakeAt: nextWake.at,
-      ...(nextWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
-        ? { nextWakeReason: nextWake.reason }
-        : {}),
+      ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       recorded: recordResult.recorded,
     };
   } catch (error) {
+    if (
+      input.signal?.aborted
+      && isHostedDeviceSyncDirtyPostCheckpointRecord(input.item.postCheckpointRecord)
+    ) {
+      throw input.signal.reason instanceof Error ? input.signal.reason : error;
+    }
     const normalized = normalizeHostedSystemMailboxError(error);
     const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
     await updateHostedSystemMailboxPendingItem({
@@ -556,9 +717,17 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     return {
       failed: 1,
       nextWakeAt,
+      nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
       recorded: 0,
     };
   }
+}
+
+function isHostedDeviceSyncDirtyPostCheckpointRecord(
+  record: HostedSystemMailboxPostCheckpointRecord,
+): boolean {
+  return record.kind === "device-sync.dirty-processed"
+    || record.kind === "device-sync.dirty-processed-batch";
 }
 
 export async function readHostedSystemMailboxCheckpointRollbackState(input: {
@@ -798,12 +967,14 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
       return await recordHostedDeviceSyncDirtyProcessedRecords({
         records: [input.record],
         runtime: input.runtime,
+        signal: input.signal ?? null,
       });
     case "device-sync.dirty-processed-batch":
       return await recordHostedDeviceSyncDirtyProcessedRecords({
         nextWakeAt: input.record.nextWakeAt ?? null,
         records: input.record.records,
         runtime: input.runtime,
+        signal: input.signal ?? null,
       });
   }
 }
@@ -824,6 +995,7 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
   nextWakeAt?: string | null;
   records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
   runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   const port = input.runtime.platform.deviceSyncPort;
   if (!port) {
@@ -844,6 +1016,7 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
         ? { processedDirtyPayloadIds: record.processedDirtyPayloadIds }
         : {}),
       processedRevision: record.processedRevision,
+      ...(input.signal ? { signal: input.signal } : {}),
       ...(stagedDirtyAcks.length > 0 ? { stagedDirtyAcks } : {}),
     });
     if (response.recorded) {

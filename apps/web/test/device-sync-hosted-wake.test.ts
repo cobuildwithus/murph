@@ -462,6 +462,7 @@ import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-r
 import { getPrisma } from "@/src/lib/prisma";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
+  buildHostedDeviceSyncScheduledReconcileWakeEventId,
   cleanupRejectedHostedDeviceSyncConnectionSource,
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncWebhookAccepted,
@@ -1158,6 +1159,16 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
+  });
+
+  it("versions scheduled wake identity past legacy unhashed envelopes", () => {
+    expect(buildHostedDeviceSyncScheduledReconcileWakeEventId({
+      connectionId: "dsc_123",
+      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
+      nextReconcileAt: "2026-03-26T12:30:00.000Z",
+    })).toBe(
+      "device-sync:scheduled-reconcile:v2:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:30:00.000Z",
+    );
   });
 
   it("does not append scheduled reconcile work after explicit consent withdrawal", async () => {
@@ -4228,6 +4239,7 @@ describe("hosted device-sync wakes", () => {
           resource: null,
           resourceCategory: null,
           sourceProviderSlug: null,
+          timingSourceProviderSlug: "oura",
           windowEnd: "2026-03-26T00:00:00.000Z",
           windowStart: "2026-03-19T00:00:00.000Z",
         },
@@ -4545,6 +4557,7 @@ describe("hosted device-sync wakes", () => {
         resource: "companion_hrv_rmssd",
         resourceCategory: "derived",
         sourceProviderSlug: "whoop",
+        timingSourceProviderSlug: "whoop",
         windowEnd: null,
         windowStart: null,
       }],
@@ -5525,6 +5538,7 @@ describe("hosted device-sync wakes", () => {
         resource: null,
         resourceCategory: null,
         sourceProviderSlug: null,
+        timingSourceProviderSlug: "oura",
         windowEnd: null,
         windowStart: "2026-03-19T00:00:00.000Z",
       },
@@ -5652,12 +5666,80 @@ describe("hosted device-sync wakes", () => {
         resource: "steps",
         resourceCategory: "timeseries",
         sourceProviderSlug: "garmin",
+        timingSourceProviderSlug: "garmin",
         windowEnd: "2026-05-27T00:00:00.000Z",
         windowStart: "2026-05-26T00:00:00.000Z",
       },
     ]);
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("retains a verified Junction source for timing-only reconcile work", async () => {
+    mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
+      hooks?: {
+        onWebhookAccepted?: (value: unknown) => Promise<void> | void;
+      };
+    }) => ({
+      describeProviders: vi.fn(() => []),
+      handleOAuthCallback: vi.fn(),
+      handleWebhook: vi.fn(async () => {
+        await input.hooks?.onWebhookAccepted?.({
+          account: {
+            connectedAt: "2026-03-26T12:00:00.000Z",
+            id: "dsc_123",
+            provider: "junction",
+          },
+          now: "2026-03-26T12:00:00.000Z",
+          provider: { provider: "junction" },
+          traceId: "trace_fitbit_timing",
+          webhook: {
+            acceptanceMode: "durable_webhook_work",
+            eventType: "connection.updated",
+            jobs: [{
+              kind: "reconcile",
+              payload: {
+                windowStart: "2026-03-19T00:00:00.000Z",
+              },
+            }],
+            occurredAt: "2026-03-26T11:59:00.000Z",
+            providerSentAt: "2026-03-26T11:59:30.000Z",
+            sourceProviderSlug: "fitbit",
+          },
+        });
+        return { accepted: true };
+      }),
+      startConnection: vi.fn(),
+    }));
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
+        body: JSON.stringify({ event_type: "connection.updated" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    await controlPlane.handleWebhook("junction");
+
+    expect(mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources).toEqual([{
+      count: 1,
+      eventToProviderSendBucket: "under_5_minutes",
+      firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
+      providerSendToWebhookMs: 30_000,
+      jobKind: "reconcile",
+      payload: {
+        windowStart: "2026-03-19T00:00:00.000Z",
+      },
+      resource: null,
+      resourceCategory: null,
+      sourceProviderSlug: null,
+      timingSourceProviderSlug: "fitbit",
+      windowEnd: null,
+      windowStart: "2026-03-19T00:00:00.000Z",
+    }]);
   });
 
   it("accepts durable Junction payload webhooks under the connection acceptance lock", async () => {
@@ -5966,6 +6048,7 @@ describe("hosted device-sync wakes", () => {
         resource: null,
         resourceCategory: null,
         sourceProviderSlug: null,
+        timingSourceProviderSlug: "whoop",
         windowEnd: null,
         windowStart: null,
       },
@@ -5984,6 +6067,7 @@ describe("hosted device-sync wakes", () => {
         resource: null,
         resourceCategory: null,
         sourceProviderSlug: null,
+        timingSourceProviderSlug: "whoop",
         windowEnd: null,
         windowStart: null,
       },
@@ -6119,6 +6203,7 @@ describe("hosted device-sync wakes", () => {
         resource: null,
         resourceCategory: null,
         sourceProviderSlug: null,
+        timingSourceProviderSlug: "oura",
         windowEnd: null,
         windowStart: null,
       },

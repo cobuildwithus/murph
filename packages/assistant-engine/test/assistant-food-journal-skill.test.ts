@@ -47,10 +47,20 @@ describe('assistant food journal skill', () => {
 
   it('keeps observation runs bounded and composed from existing surfaces', async () => {
     const skillsRoot = resolveAssistantSkillsRoot()
-    const [skill, onboarding] = await Promise.all([
+    const [skill, onboarding, cardGoals] = await Promise.all([
       readFile(path.join(skillsRoot, 'food-journal', 'SKILL.md'), 'utf8'),
       readFile(path.join(skillsRoot, 'murph-onboarding', 'SKILL.md'), 'utf8'),
+      readFile(
+        path.join(
+          skillsRoot,
+          'nutrition-strategy',
+          'references',
+          'daily-nutrition-card-goals.md',
+        ),
+        'utf8',
+      ),
     ])
+    const compactCardGoals = cardGoals.replace(/\s+/gu, ' ').trim()
 
     expect(skill).toContain(
       'Do not create a new food-journal store, observation entity, scoring model, streak, or CLI family.',
@@ -69,6 +79,36 @@ describe('assistant food journal skill', () => {
     )
     expect(skill).toContain(
       'Provide calorie and macro estimates by default when logging a meal',
+    )
+    expect(skill).toContain(
+      'After every verified private meal mutation',
+    )
+    expect(skill).toContain(
+      'default attachment intent for its eligible daily nutrition card',
+    )
+    expect(skill).toContain(
+      'the card alone completely answers the turn',
+    )
+    expect(skill).toContain(
+      'attach that card as the complete response with no companion prose',
+    )
+    expect(skill).toContain(
+      'this is not an explicit numeric-card request and does not authorize target derivation, a paused proposal, or any Goal mutation',
+    )
+    expect(skill).toContain(
+      'Without an already accepted complete bundle',
+    )
+    expect(skill).not.toContain(
+      'Do not turn every meal confirmation into analysis or a nutrition report.',
+    )
+    expect(compactCardGoals).toContain(
+      'An ordinary verified private meal log carries default attachment intent only.',
+    )
+    expect(compactCardGoals).toContain(
+      'it does not authorize this proposal workflow, target setting, or any Goal mutation.',
+    )
+    expect(compactCardGoals).toContain(
+      "When that accepted bundle is absent or any card gate fails, return the owning food-journal skill's short truthful fallback.",
     )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
@@ -105,7 +145,7 @@ describe('assistant food journal skill', () => {
       'before deciding that the five canonical daily goals are complete',
     )
     expect(skill).toContain(
-      'Use its\nproposal workflow only if a target is genuinely missing after that read.',
+      'Use its\nproposal workflow only if a target is genuinely missing after that read and the\nmember made an explicit numeric-card or target-setting request. Default meal-card\nintent never invokes it.',
     )
     expect(skill).toContain(
       'first setup response explains a paused canonical proposal in ordinary text',

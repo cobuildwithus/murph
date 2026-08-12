@@ -210,33 +210,47 @@ Render the macOS and app-absent fallback as the compact default state of the
 shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
 cream field, large calorie value, calorie progress ring, and one-row protein,
 carbohydrates, fat, and fiber readings visually aligned with the Messages
-extension. The bitmap stays rectangular and badge-free because Messages owns
-the outer corner mask. Installed extensions retain their native icon;
-app-absent cards may show the provider-owned App Store install affordance from
-Murph's canonical app identity, while the bitmap never imitates that chrome. Status
-color may tint nutrient values, but
-the ring draws quantitative progress only for a complete calorie total with an
+extension, with a clear pause between the calorie row and macro grid. The
+bitmap stays rectangular because Messages owns the outer corner
+mask, but the bitmap itself embeds the canonical Murph mark in the same 36×27pt
+upper-left badge footprint as the native balloon. Installed extensions retain
+their native icon; app-absent static cards omit the optional square App Store
+artwork because the provider request has no App Store id. Status color may tint
+nutrient values, while the safe text recovery preserves the complete status
+outside the bitmap. The ring
+draws quantitative progress only for a complete calorie total with an
 assessed goal; V1, partial, null-goal, and unavailable-status cards keep only
 the neutral track. The static image does not expose the native card's
 tap-to-reveal target state. The provider caption retains only the date and meal
 count; visible totals and goals are not repeated beneath the image. V1 renders
 an unavailable fiber dash in the image without adding a fiber caption claim.
 
-Compact-table and workout fallback images use the same provider-owned chrome
-contract: keep the bitmap rectangular and badge-free, reserve empty upper-left
-clearance for the icon that Messages overlays, and let Messages supply that icon
-and the outer corner mask. Keep structural rounding only where it communicates
-an inner state, such as a progress track or set-status marker.
+Compact-table and workout fallback images use the same chrome contract: keep
+the bitmap rectangular, embed the canonical Murph mark in the native badge
+footprint, place the title beside that mark in one shared header, and let
+Messages supply only the outer corner mask and caption. The badge and title use
+one optically centered row with a measured gap; optional supporting text uses
+the card content inset below that row rather than participating in its
+centering. Do not reserve a larger empty icon gutter. Keep structural rounding
+only where it communicates an inner state, such as a progress track or
+set-status marker.
+When a generic table uses stacked fields, keep each measured header above its
+full-width measured value so every contract-valid token remains contained. The
+exact intrinsic width of the row-header, column-header, and value tracks plus
+their gutters is the sole layout selector: use the single shared table header
+whenever those tracks fit, including four-column cards, and repeat field labels
+only for genuinely overwide content.
 
 ### iMessage Challenge Standings Card Image
 Render the app-absent standings fallback as the static counterpart to the
 shipping SwiftUI balloon. Keep the cream field, title, rank or collective
 progress, and score hierarchy aligned with the native card. The bitmap remains
-rectangular and badge-free because Messages owns the outer chrome. Reserve the
-upper-left title gutter for its provider-owned logo without drawing that logo
-into the bitmap. Preserve
-scorer-owned order, scores, progress, and coverage while using the identity-free
-public presentation defined by the challenge standings delivery contract.
+rectangular because Messages owns the outer chrome, while the canonical Murph
+mark is embedded in the native upper-left badge footprint. Reuse the same
+optically centered badge-and-title row as workout and compact-table cards, with
+optional supporting text directly under the title. Preserve scorer-owned order,
+scores, progress, and coverage while using the identity-free public
+presentation defined by the challenge standings delivery contract.
 
 ### Shared iMessage Card Handoff
 When a shared response-card URL reaches the public homepage instead of the
@@ -623,7 +637,7 @@ View Transitions API (`<ViewTransition>` from `next/navigation`). No Framer Moti
 - Logo (dark): `apps/web/public/logo-dark.svg`
 - Favicon (auto dark mode): `apps/web/app/icon.svg`
 - Dynamic OG image: `apps/web/app/opengraph-image.tsx` (1200×630, Fraunces + DM Sans, hero.jpg background)
-- Static iMessage response-card image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200px wide, content-sized, DM Sans, immutable bounded V1-V4 snapshot)
+- Static iMessage response-card image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200px wide, content-sized, DM Sans, canonical Murph badge, immutable bounded V1-V5 snapshot)
 - Canonical hero image: `apps/web/public/hero.jpg` (3583×2000)
 - Supporting texture: `apps/web/public/warmglow.png` (1376×768)
 - Live brand + component reference: `/design` (`?tab=brand`, `?tab=components`; nutrition and compact-table image studies live on the components tab)

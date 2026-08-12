@@ -26,6 +26,9 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
+import type {
+  HostedExecutionResolvedLinqDeliveryRoute,
+} from "@murphai/hosted-execution/contracts";
 
 const HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES = 8 * 1024;
 const HOSTED_LINQ_ENGAGEMENT_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
@@ -54,6 +57,9 @@ export const POST = withJsonError(async (request: Request) => {
   const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
   const idempotencyKey = readOptionalBodyString(body.idempotencyKey);
   const intentId = readOptionalBodyString(body.intentId);
+  const expectedResolvedRoute = parseOptionalResolvedLinqDeliveryRoute(
+    body.expectedResolvedRoute,
+  );
   const replyToMessageId = readOptionalBodyString(body.replyToMessageId);
   const target = readOptionalBodyString(body.target);
   const targetKind = readOptionalBodyString(body.targetKind);
@@ -77,6 +83,7 @@ export const POST = withJsonError(async (request: Request) => {
       answeredMailboxItemIds,
       authorityCheckOnly,
       directRecipientPhoneNumber,
+      expectedResolvedRoute,
       fromPhoneNumber,
       homeRouteFallbackAllowed: body.homeRouteFallbackAllowed === true,
       idempotencyKey,
@@ -86,8 +93,8 @@ export const POST = withJsonError(async (request: Request) => {
       target,
       targetKind,
     });
-    const providerTarget = asserted.targetOverride?.target ?? target;
-    const providerTargetKind = asserted.targetOverride?.targetKind ?? targetKind;
+    const providerTarget = asserted.resolvedRoute.target;
+    const providerTargetKind = asserted.resolvedRoute.targetKind;
     let finalAuthority = asserted;
     if (
       providerTargetKind !== "participant"
@@ -100,32 +107,48 @@ export const POST = withJsonError(async (request: Request) => {
       });
       finalAuthority =
         await assertHostedLinqRecentInboundEngagementForRuntime({
-        answeredMailboxItemIds,
-        authorityCheckOnly,
-        directRecipientPhoneNumber,
-        fromPhoneNumber,
-        homeRouteFallbackAllowed: false,
-        idempotencyKey,
-        memberId: userId,
-        prisma: tx,
-        replyToMessageId,
-        target: providerTarget,
-        targetKind: providerTargetKind,
+          answeredMailboxItemIds,
+          authorityCheckOnly,
+          directRecipientPhoneNumber,
+          expectedResolvedRoute: asserted.resolvedRoute,
+          fromPhoneNumber,
+          homeRouteFallbackAllowed: false,
+          idempotencyKey,
+          memberId: userId,
+          prisma: tx,
+          replyToMessageId,
+          target: providerTarget,
+          targetKind: providerTargetKind,
+        });
+    }
+
+    if (
+      expectedResolvedRoute
+      && !resolvedLinqDeliveryRoutesEqual(
+        finalAuthority.resolvedRoute,
+        expectedResolvedRoute,
+      )
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_MISMATCH",
+        httpStatus: 403,
+        message: "Hosted Linq send-time route authority changed before provider entry.",
+        retryable: false,
       });
     }
 
     const health = await resolveHostedLinqEgressPolicyForRuntime({
-      fromPhoneNumber,
+      fromPhoneNumber: finalAuthority.resolvedRoute.fromPhoneNumber,
       linePhoneNumberLookupKey:
         finalAuthority.linePhoneNumberLookupKey,
       prisma: tx,
-      target: providerTarget,
-      targetKind: providerTargetKind,
+      target: finalAuthority.resolvedRoute.target,
+      targetKind: finalAuthority.resolvedRoute.targetKind,
     });
     if (health.policy.kind === "block") {
       return {
         assistantAskFallbackRequired: false,
-        asserted,
+        asserted: finalAuthority,
         deliveryBlockCode: health.policy.code,
         deliveryPosture: null,
         providerDispatchClaimed: null,
@@ -157,11 +180,13 @@ export const POST = withJsonError(async (request: Request) => {
       }
       const claim = await recordHostedLinqRuntimeProviderDispatchFenceTx({
         idempotencyKey,
-        linqChatId: providerTargetKind === "participant" ? null : providerTarget,
-        phoneNumber: fromPhoneNumber,
+        linqChatId: finalAuthority.resolvedRoute.targetKind === "participant"
+          ? null
+          : finalAuthority.resolvedRoute.target,
+        phoneNumber: finalAuthority.resolvedRoute.fromPhoneNumber,
         prisma: tx,
         sourceRef: intentId ?? idempotencyKey,
-        targetKind: providerTargetKind,
+        targetKind: finalAuthority.resolvedRoute.targetKind,
       });
       if (!claim.claimed) {
         throw hostedOnboardingError({
@@ -176,7 +201,7 @@ export const POST = withJsonError(async (request: Request) => {
     return {
       assistantAskFallbackRequired:
         assistantAskAuthority?.assistantAskFallbackRequired === true,
-      asserted,
+      asserted: finalAuthority,
       deliveryBlockCode: null,
       deliveryPosture: health.policy.posture === "normal"
         ? null
@@ -185,14 +210,27 @@ export const POST = withJsonError(async (request: Request) => {
     };
   });
 
+  const resolvedRoute = assertion.asserted.resolvedRoute;
   return jsonOk({
     ok: true,
     ...(assertion.assistantAskFallbackRequired
       ? { assistantAskFallbackRequired: true }
       : {}),
-    threadIsDirect: assertion.asserted.threadIsDirect,
-    ...(assertion.asserted.targetOverride
-      ? { targetOverride: assertion.asserted.targetOverride }
+    resolvedRoute,
+    // Keep the pre-canonical-route response shape during the Web-first rollout.
+    // The old runtime ignores `resolvedRoute`; the new runtime ignores these
+    // legacy fields and requires the complete route above.
+    threadIsDirect: resolvedRoute.threadIsDirect,
+    ...(resolvedRoute.targetKind === "thread" && resolvedRoute.target !== target
+      ? {
+          targetOverride: {
+            ...(resolvedRoute.conversationThreadId
+              ? { conversationThreadId: resolvedRoute.conversationThreadId }
+              : {}),
+            target: resolvedRoute.target,
+            targetKind: resolvedRoute.targetKind,
+          },
+        }
       : {}),
     ...(assertion.deliveryBlockCode
       ? { deliveryBlockCode: assertion.deliveryBlockCode }
@@ -209,6 +247,86 @@ export const POST = withJsonError(async (request: Request) => {
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function parseOptionalResolvedLinqDeliveryRoute(
+  value: unknown,
+): HostedExecutionResolvedLinqDeliveryRoute | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throwResolvedLinqDeliveryRouteInvalid();
+  }
+  const record = value as Record<string, unknown>;
+  const target = readOptionalBodyString(record.target);
+  const targetKind = readOptionalBodyString(record.targetKind);
+  const conversationThreadId = readRequiredNullableBodyString(
+    record,
+    "conversationThreadId",
+  );
+  const directRecipientPhoneNumber = readRequiredNullableBodyString(
+    record,
+    "directRecipientPhoneNumber",
+  );
+  const fromPhoneNumber = readRequiredNullableBodyString(
+    record,
+    "fromPhoneNumber",
+  );
+  if (
+    !target
+    || (targetKind !== "participant" && targetKind !== "thread")
+    || conversationThreadId === undefined
+    || directRecipientPhoneNumber === undefined
+    || fromPhoneNumber === undefined
+    || typeof record.threadIsDirect !== "boolean"
+  ) {
+    throwResolvedLinqDeliveryRouteInvalid();
+  }
+  return {
+    conversationThreadId,
+    directRecipientPhoneNumber,
+    fromPhoneNumber,
+    target,
+    targetKind,
+    threadIsDirect: record.threadIsDirect,
+  };
+}
+
+function readRequiredNullableBodyString(
+  record: Record<string, unknown>,
+  field: string,
+): string | null | undefined {
+  if (!(field in record)) {
+    return undefined;
+  }
+  const value = record[field];
+  if (value === null) {
+    return null;
+  }
+  const normalized = readOptionalBodyString(value);
+  return normalized ?? undefined;
+}
+
+function throwResolvedLinqDeliveryRouteInvalid(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_INVALID",
+    httpStatus: 400,
+    message: "Hosted Linq expected resolved route is invalid.",
+    retryable: false,
+  });
+}
+
+function resolvedLinqDeliveryRoutesEqual(
+  left: HostedExecutionResolvedLinqDeliveryRoute,
+  right: HostedExecutionResolvedLinqDeliveryRoute,
+): boolean {
+  return left.conversationThreadId === right.conversationThreadId
+    && left.directRecipientPhoneNumber === right.directRecipientPhoneNumber
+    && left.fromPhoneNumber === right.fromPhoneNumber
+    && left.target === right.target
+    && left.targetKind === right.targetKind
+    && left.threadIsDirect === right.threadIsDirect;
 }
 
 function parseRequiredAuthorityCheckOnly(value: unknown): boolean {

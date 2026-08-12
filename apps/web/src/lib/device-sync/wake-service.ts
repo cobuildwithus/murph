@@ -82,7 +82,8 @@ import {
   toIsoTimestamp,
 } from "./shared";
 
-const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
+const HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA = "v1";
+const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v2";
 const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
@@ -1682,6 +1683,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     jobs: input.webhook.jobs ?? [],
     provider: input.account.provider,
     providerSentAt: input.webhook.providerSentAt ?? null,
+    sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     webhookReceivedAt: input.now,
   });
   await persistHostedDeviceSyncWebhookAccepted({
@@ -2057,7 +2059,7 @@ export function buildHostedDeviceSyncScheduledReconcileWakeEventId(input: {
   return [
     "device-sync",
     "scheduled-reconcile",
-    HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
+    HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA,
     input.connectionId,
     input.expectedConnectedAt,
     input.nextReconcileAt,
@@ -2385,7 +2387,7 @@ function buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {
   return [
     "device-sync",
     "dirty",
-    HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
+    HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA,
     input.userId,
     input.provider,
     input.connectionId,
@@ -2510,12 +2512,20 @@ function buildHostedWebhookDirtyResources(input: {
   jobs: readonly DeviceSyncJobInput[];
   provider: string;
   providerSentAt?: string | null;
+  sourceProviderSlug?: string | null;
   webhookReceivedAt?: string | null;
 }): HostedDeviceSyncDirtyResource[] {
   const resources: HostedDeviceSyncDirtyResource[] = [];
+  const webhookSourceProviderSlug = readHostedDirtyResourceString(
+    input.sourceProviderSlug,
+  );
+  const providerSlug = readHostedDirtyResourceString(input.provider);
 
   for (const job of input.jobs) {
     const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);
+    const payloadSourceProviderSlug = readHostedDirtyResourceString(
+      payload.sourceProviderSlug,
+    );
     resources.push({
       count: 1,
       ...buildHostedWebhookDirtyResourceTiming(input),
@@ -2523,7 +2533,13 @@ function buildHostedWebhookDirtyResources(input: {
       payload: readHostedDirtyResourcePayload(payload),
       resource: readHostedDirtyResourceString(payload.resource),
       resourceCategory: readHostedDirtyResourceString(payload.resourceCategory),
-      sourceProviderSlug: readHostedDirtyResourceString(payload.sourceProviderSlug),
+      // This field participates in resource execution identity and can be
+      // promoted back into provider input, so only provider-owned payload data
+      // may populate it. Timing attribution remains metadata-only below.
+      sourceProviderSlug: payloadSourceProviderSlug,
+      timingSourceProviderSlug: payloadSourceProviderSlug
+        ?? webhookSourceProviderSlug
+        ?? providerSlug,
       windowEnd: readHostedDirtyResourceString(payload.windowEnd),
       windowStart: readHostedDirtyResourceString(payload.windowStart),
     });
@@ -2537,6 +2553,7 @@ function buildHostedWebhookDirtyResources(input: {
       resource: null,
       resourceCategory: null,
       sourceProviderSlug: null,
+      timingSourceProviderSlug: webhookSourceProviderSlug ?? providerSlug,
       windowEnd: null,
       windowStart: null,
     });

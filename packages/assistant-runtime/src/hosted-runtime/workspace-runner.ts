@@ -372,6 +372,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   initialMailboxImportLanes?: readonly ("conversation" | "system")[];
+  initialMailboxFetchSignal?: AbortSignal | null;
   initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
@@ -733,6 +734,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         input,
         lanes: input.initialMailboxImportLanes
           ?? (input.runAssistantPhase ? ["conversation"] : undefined),
+        mailboxFetchSignal: input.initialMailboxFetchSignal ?? null,
         prefetch: input.initialMailboxPrefetch ?? null,
         requestId: input.requestId,
         signal: input.signal ?? null,
@@ -2085,6 +2087,7 @@ type HostedMailboxForWorkspaceRunnerImportInput = {
   input: HostedWorkspaceRunnerInput;
   lanes?: readonly ("conversation" | "system")[];
   limitPerLane?: number | null;
+  mailboxFetchSignal?: AbortSignal | null;
   prefetch?: HostedMailboxPrefixPrefetch | null;
   requestId: string;
   signal?: AbortSignal | null;
@@ -2140,6 +2143,7 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
     deferConversationUntil: input.deferConversationUntil ?? null,
     deferCheckpoint: input.deferCheckpoint === true,
     expectedUserId: input.input.expectedUserId,
+    fetchSignal: input.mailboxFetchSignal ?? null,
     importItem: (item) => importItem(item, importItemContext ?? undefined),
     lanes: input.lanes,
     limitPerLane: input.limitPerLane ?? input.input.limitPerLane,

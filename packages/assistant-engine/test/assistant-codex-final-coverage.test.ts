@@ -27,6 +27,19 @@ const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
   'memories.use_memories': false,
   web_search: 'disabled',
 } as const
+const EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
+  include_apps_instructions: false,
+  include_collaboration_mode_instructions: false,
+  include_environment_context: false,
+  include_permissions_instructions: false,
+  project_doc_max_bytes: 0,
+  'features.request_permissions_tool': false,
+  'skills.include_instructions': false,
+} as const
+const EXPECTED_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+  ...EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
+  ...EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+} as const
 const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
   'features.shell_tool=true',
   'features.apps=true',
@@ -1255,6 +1268,10 @@ describe('Codex model catalog', () => {
 
     expect(outcome.kind).toBe('succeeded')
     expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).toEqual(EXPECTED_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG)
+    expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
       dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
@@ -1366,6 +1383,29 @@ describe('Codex model catalog', () => {
     })
 
     expect(outcome.kind).toBe('succeeded')
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).toEqual(EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG)
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexThreadConfig,
+    ).not.toHaveProperty('features.shell_tool')
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexConfigOverrides,
+    ).toEqual(
+      expect.arrayContaining([
+        'features.apps=false',
+        'features.multi_agent=false',
+        'features.plugins=false',
+        'web_search="disabled"',
+      ]),
+    )
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.codexConfigOverrides,
+    ).not.toContain('features.shell_tool=false')
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
@@ -1502,6 +1542,12 @@ describe('Codex model catalog', () => {
     )
     expect(providerInput?.codexConfigOverrides).not.toContain(
       'features.shell_tool=false',
+    )
+    expect(providerInput?.codexThreadConfig).toEqual(
+      EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+    )
+    expect(providerInput?.codexThreadConfig).not.toHaveProperty(
+      'features.shell_tool',
     )
     expect(providerInput).toMatchObject({
       dynamicTools: [],
