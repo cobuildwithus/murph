@@ -28,6 +28,7 @@ import {
   JUNCTION_WORKOUT_STREAM_MAX_POINTS,
   JunctionWorkoutStreamLimitError,
   classifyJunctionSummaryNormalizationEvidence,
+  classifyJunctionWorkoutDurationCompanionCoverage,
   identifyJunctionBloodPressureProviderRecords,
   importDeviceProviderSnapshot,
   normalizeJunctionSnapshot,
@@ -39,6 +40,63 @@ import {
 } from "../src/index.ts";
 
 type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
+
+test("Junction workout-duration companion coverage uses normalizable canonical workout identities", () => {
+  const shared = {
+    connections: [{ sourceProviderSlug: "garmin" }],
+    importedAt: "2026-08-11T12:00:00.000Z",
+    windowStart: "2026-02-12T00:00:00.000Z",
+    windowEnd: "2026-03-14T00:00:00.000Z",
+  };
+  const exactDuration = (workoutId: string) => ({
+    workout_id: workoutId,
+    sourceProviderSlug: "garmin",
+    start: "2026-02-13T10:00:00.000Z",
+    end: "2026-02-13T10:30:00.000Z",
+    unit: "minutes",
+    value: 30,
+  });
+  const validSummary = (id: string) => ({
+    id,
+    sourceProviderSlug: "garmin",
+    time_start: "2026-02-13T10:00:00.000Z",
+    time_end: "2026-02-13T10:30:00.000Z",
+  });
+
+  assert.deepEqual(classifyJunctionWorkoutDurationCompanionCoverage({
+    ...shared,
+    summaries: { workouts: [validSummary("matched"), { id: "not-normalizable", sourceProviderSlug: "garmin" }] },
+    timeseries: { workout_duration: [exactDuration("matched"), exactDuration("not-normalizable")] },
+  }), {
+    complete: false,
+    exactLinkedDurationCount: 2,
+    matchedExactLinkedDurationCount: 1,
+  });
+  assert.deepEqual(classifyJunctionWorkoutDurationCompanionCoverage({
+    ...shared,
+    summaries: { workouts: [validSummary("matched")] },
+    timeseries: { workout_duration: [exactDuration("matched")] },
+  }), {
+    complete: true,
+    exactLinkedDurationCount: 1,
+    matchedExactLinkedDurationCount: 1,
+  });
+  assert.deepEqual(classifyJunctionWorkoutDurationCompanionCoverage({
+    ...shared,
+    summaries: { workouts: [] },
+    timeseries: { workout_duration: [{
+      sourceProviderSlug: "garmin",
+      start: "2026-02-13T10:00:00.000Z",
+      end: "2026-02-13T10:30:00.000Z",
+      unit: "minutes",
+      value: 30,
+    }] },
+  }), {
+    complete: true,
+    exactLinkedDurationCount: 0,
+    matchedExactLinkedDurationCount: 0,
+  });
+});
 
 test("Junction sleep normalization preserves explicit session identity without guessing unknown types", () => {
   const sleep = [

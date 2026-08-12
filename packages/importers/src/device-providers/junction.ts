@@ -164,6 +164,12 @@ export interface JunctionSummaryNormalizationEvidenceWindow {
   readonly windowStart: string;
 }
 
+export interface JunctionWorkoutDurationCompanionCoverage {
+  readonly complete: boolean;
+  readonly exactLinkedDurationCount: number;
+  readonly matchedExactLinkedDurationCount: number;
+}
+
 export interface JunctionBloodPressureProviderRecordIdentityEvidence {
   readonly providerRecordCount: number;
   readonly repairStableExternalRefResourceIds: readonly (string | null)[];
@@ -1047,6 +1053,58 @@ export function classifyJunctionSummaryNormalizationEvidence(
     left.resource.localeCompare(right.resource)
     || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
   );
+}
+
+export function classifyJunctionWorkoutDurationCompanionCoverage(
+  snapshot: Pick<
+    JunctionSnapshotInput,
+    "connections" | "importedAt" | "summaries" | "timeseries" | "windowEnd" | "windowStart"
+  >,
+): JunctionWorkoutDurationCompanionCoverage {
+  const events = normalizeJunctionSnapshot(snapshot).events ?? [];
+  const sessionIdentities = new Set(events.flatMap((event) => {
+    const identity = event.kind === "activity_session"
+      ? junctionWorkoutExternalIdentity(event)
+      : undefined;
+    return identity ? [identity] : [];
+  }));
+  const exactLinkedDurationIdentities = new Set(events.flatMap((event) => {
+    if (!isJunctionWorkoutDurationMeasurement(event)) {
+      return [];
+    }
+    const identity = junctionWorkoutExternalIdentity(event);
+    return identity ? [identity] : [];
+  }));
+  const matchedExactLinkedDurationCount = [...exactLinkedDurationIdentities]
+    .filter((identity) => sessionIdentities.has(identity))
+    .length;
+
+  return {
+    complete: matchedExactLinkedDurationCount === exactLinkedDurationIdentities.size,
+    exactLinkedDurationCount: exactLinkedDurationIdentities.size,
+    matchedExactLinkedDurationCount,
+  };
+}
+
+function isJunctionWorkoutDurationMeasurement(event: DeviceEventPayload): boolean {
+  if (event.kind !== "measurement") {
+    return false;
+  }
+  return asArray(event.fields?.measurements).some((measurement) =>
+    asPlainObject(measurement)?.metric === "workout-duration"
+  );
+}
+
+function junctionWorkoutExternalIdentity(event: DeviceEventPayload): string | undefined {
+  const externalRef = event.externalRef;
+  if (
+    !externalRef
+    || externalRef.system !== "junction"
+    || !externalRef.resourceType.endsWith("-workouts")
+  ) {
+    return undefined;
+  }
+  return [externalRef.system, externalRef.resourceType, externalRef.resourceId].join("\u0000");
 }
 
 export function identifyJunctionBloodPressureProviderRecords(

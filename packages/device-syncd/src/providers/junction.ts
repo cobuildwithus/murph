@@ -17,6 +17,7 @@ import {
 import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
+  classifyJunctionWorkoutDurationCompanionCoverage,
   identifyJunctionBloodPressureProviderRecords,
   JunctionWorkoutStreamLimitError,
   reduceJunctionWorkoutStream,
@@ -172,6 +173,8 @@ interface JunctionTimeseriesImportResult {
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
   canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
+  companionCoverageIncomplete?: boolean;
+  companionSummaryUnavailable?: boolean;
   fetchComplete: boolean;
   postFetchSourceAdmission?: JunctionCurrentSourceAdmission;
   providerRecordCount: number;
@@ -701,6 +704,13 @@ export function createJunctionDeviceSyncProvider(
           || !isJunctionResourceAdvertisedAvailableInSummary(
             source.resourceAvailabilitySummary,
             resource,
+          )
+          || (
+            resource === JUNCTION_WORKOUT_DURATION_TIMESERIES_RESOURCE
+            && !isJunctionResourceAdvertisedAvailableInSummary(
+              source.resourceAvailabilitySummary,
+              "workouts",
+            )
           )
           || hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
             account.metadata,
@@ -2135,6 +2145,15 @@ export function createJunctionDeviceSyncProvider(
               resource: effectiveResource,
               sourceProviderSlug,
             })
+            || (
+              effectiveResource === JUNCTION_WORKOUT_DURATION_TIMESERIES_RESOURCE
+              && !isJunctionSourceResourceCurrentlyAvailable({
+                connectionId: context.account.id,
+                providers: sourceProviders,
+                resource: "workouts",
+                sourceProviderSlug,
+              })
+            )
           )
         ) {
           const result = {
@@ -2407,6 +2426,48 @@ export function createJunctionDeviceSyncProvider(
     const unresolvedProviderRecordIdentitiesJson =
       encodeJunctionHistoricalUnresolvedProviderRecords(unresolvedProviderRecords);
     const unresolvedProviderRecordsSeen = unresolvedProviderRecordCount > 0;
+
+    if (input.importResult.companionSummaryUnavailable === true) {
+      return input.result;
+    }
+
+    if (input.importResult.companionCoverageIncomplete === true) {
+      const emptyBackfillAttempts = readHistoricalBackfillJobEmptyAttempts(input.job) + 1;
+      const retryDelayMs =
+        EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyBackfillAttempts - 1]
+        ?? null;
+      if (retryDelayMs === null) {
+        return withJunctionSkippedResourceMetadata(
+          input.context,
+          input.result,
+          [{
+            reason: "ambiguous",
+            resource: "workouts",
+            resourceCategory: "summary",
+            responseDetail: "workout duration companion coverage incomplete",
+            responseStatus: 0,
+          }],
+        );
+      }
+      return {
+        ...input.result,
+        scheduledJobs: [
+          ...(input.result.scheduledJobs ?? []),
+          buildExtendedTimeseriesBackfillJob({
+            availableAt: addMilliseconds(input.context.now, retryDelayMs),
+            dedupeKey: input.job.dedupeKey,
+            emptyBackfillAttempts,
+            historicalProviderRecordsSeen: input.job.payload.historicalProviderRecordsSeen === true,
+            historicalRecordsSeen: input.job.payload.historicalRecordsSeen === true,
+            historicalWindowStart,
+            resource: input.resource,
+            sourceProviderSlug,
+            windowEnd: input.window.windowEnd,
+            windowStart: input.window.windowStart,
+          }),
+        ],
+      };
+    }
 
     // A note without usable tags is an intentional importer no-op, not a
     // canonical repair obligation. A complete note scan can therefore close
@@ -2903,6 +2964,8 @@ export function createJunctionDeviceSyncProvider(
     let yieldedAt: string | null = null;
     let canonicalProviderRecordIdentities: readonly string[] = [];
     let canonicalEventCount = 0;
+    let companionCoverageIncomplete = false;
+    let companionSummaryUnavailable = false;
     let postFetchSourceAdmission: JunctionCurrentSourceAdmission | undefined;
 
     const preciseWindows = buildPreciseTimeseriesWindows(
@@ -2933,6 +2996,11 @@ export function createJunctionDeviceSyncProvider(
               { dateQueryFormat: "datetime" },
             ),
           };
+          if (skippedOptionalResources.length > skippedResourceCountBeforeFetch) {
+            companionSummaryUnavailable = true;
+            fetchComplete = false;
+            break;
+          }
         }
         timeseries = await fetchTimeseriesSnapshots(
           context,
@@ -3079,38 +3147,54 @@ export function createJunctionDeviceSyncProvider(
                   preparedImport.snapshots[options.companionSummaryResource] ?? [],
               }
             : {};
-          const receipt = await context.importSnapshot({
-            provider: "junction",
-            accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-            connectionId: context.account.id,
-            importedAt: executionWindowEnd,
-            windowStart: executionWindowStart,
-            windowEnd: executionWindowEnd,
-            connections: preparedImport.connections,
-            summaries: preparedSummaries,
-            timeseries: preparedTimeseries,
-          });
-          canonicalEventCount = options.companionSummaryResource
-            ? readProviderSnapshotCanonicalEventKindCount(receipt, "measurement")
-            : readProviderSnapshotCanonicalEventCount(receipt);
-          if (fetchedProviderRecordIdentityEvidence) {
-            const resolutionEvidence =
-              resolveJunctionBloodPressureProviderRecordResolutionEvidence({
-                canonicalEventCount,
-                canonicalEventExternalRefResourceIds:
-                  readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt),
-                providerRecordCount,
-                providerRecordIdentityEvidence: fetchedProviderRecordIdentityEvidence,
-              });
-            canonicalProviderRecordIdentities =
-              resolutionEvidence.canonicalProviderRecordIdentities;
-            unresolvedProviderRecordIdentities =
-              resolutionEvidence.unresolvedProviderRecordIdentities;
-            unresolvedProviderRecordsWithoutStableIdentity =
-              resolutionEvidence.unresolvedProviderRecordsWithoutStableIdentity;
-            unresolvedProviderRecordCount =
-              unresolvedProviderRecordIdentities.length
-              + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
+          const companionCoverage = options.companionSummaryResource
+            ? classifyJunctionWorkoutDurationCompanionCoverage({
+                connections: preparedImport.connections,
+                importedAt: executionWindowEnd,
+                summaries: preparedSummaries,
+                timeseries: preparedTimeseries,
+                windowStart: executionWindowStart,
+                windowEnd: executionWindowEnd,
+              })
+            : null;
+          if (companionCoverage && !companionCoverage.complete) {
+            companionCoverageIncomplete = true;
+            fetchComplete = false;
+            yieldedAt = null;
+          } else {
+            const receipt = await context.importSnapshot({
+              provider: "junction",
+              accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+              connectionId: context.account.id,
+              importedAt: executionWindowEnd,
+              windowStart: executionWindowStart,
+              windowEnd: executionWindowEnd,
+              connections: preparedImport.connections,
+              summaries: preparedSummaries,
+              timeseries: preparedTimeseries,
+            });
+            canonicalEventCount = options.companionSummaryResource
+              ? readProviderSnapshotCanonicalEventKindCount(receipt, "measurement")
+              : readProviderSnapshotCanonicalEventCount(receipt);
+            if (fetchedProviderRecordIdentityEvidence) {
+              const resolutionEvidence =
+                resolveJunctionBloodPressureProviderRecordResolutionEvidence({
+                  canonicalEventCount,
+                  canonicalEventExternalRefResourceIds:
+                    readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt),
+                  providerRecordCount,
+                  providerRecordIdentityEvidence: fetchedProviderRecordIdentityEvidence,
+                });
+              canonicalProviderRecordIdentities =
+                resolutionEvidence.canonicalProviderRecordIdentities;
+              unresolvedProviderRecordIdentities =
+                resolutionEvidence.unresolvedProviderRecordIdentities;
+              unresolvedProviderRecordsWithoutStableIdentity =
+                resolutionEvidence.unresolvedProviderRecordsWithoutStableIdentity;
+              unresolvedProviderRecordCount =
+                unresolvedProviderRecordIdentities.length
+                + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
+            }
           }
         }
       } catch (error) {
@@ -3143,6 +3227,8 @@ export function createJunctionDeviceSyncProvider(
     return {
       canonicalProviderRecordIdentities,
       canonicalEventCount,
+      ...(companionCoverageIncomplete ? { companionCoverageIncomplete: true } : {}),
+      ...(companionSummaryUnavailable ? { companionSummaryUnavailable: true } : {}),
       fetchComplete,
       ...(postFetchSourceAdmission === undefined
         ? {}
