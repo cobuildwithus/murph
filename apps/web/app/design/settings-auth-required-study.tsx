@@ -1,6 +1,6 @@
 import { FamilySetupAuthRequiredView } from "@/src/components/family/family-setup-auth-required";
 import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
-import { SettingsDataPrivacyAuthRequiredView } from "../(dashboard)/settings/data-privacy/settings-data-privacy-auth-required";
+import { SettingsDataPrivacyAuthRequiredView } from "../settings/data-privacy/settings-data-privacy-auth-required";
 import { SettingsAuthRequiredView } from "../(dashboard)/settings/settings-auth-required";
 
 export function SettingsAuthRequiredStudy() {

@@ -3,14 +3,15 @@
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
 
+import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import {
-  HostedAuthRequiredScreen,
   HostedAuthRequiredScreenView,
 } from "@/src/components/hosted-onboarding/hosted-auth-required-screen";
 
 const DATA_PRIVACY_HANDOFF_COPY = {
   description:
     "You can request deletion on the web even if you no longer have the Murph Android app.",
+  detailsCompact: true,
   details: (
     <>
       <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-foreground">
@@ -22,23 +23,32 @@ const DATA_PRIVACY_HANDOFF_COPY = {
         <li>Choose Delete account, review the details, and confirm.</li>
       </ol>
 
-      <div className="mt-5 border-t border-border pt-5">
+      <div className="mt-4 border-t border-border pt-4">
         <p className="font-medium text-foreground">What deletion covers</p>
         <p className="mt-1">
-          The request covers your Murph account, login, subscription, health
-          and user-submitted content, derived health context,
-          connected-service credentials, and other account-associated hosted
-          data.
+          Murph deletes hosted account/profile data, health and user-submitted
+          content, derived health context, connected credentials, local billing
+          references, and subscription access. Copies delivered to external
+          carrier, Telegram, Linq, or email systems cannot be recalled.
         </p>
 
-        <p className="mt-4 font-medium text-foreground">
+        <p className="mt-3 font-medium text-foreground">
           Timing and limited retention
         </p>
-        <p className="mt-1">
-          Active hosted systems target removal within 30 days and backups
-          within 90 days. Limited billing, tax, security, fraud-prevention,
-          dispute, or legally required records may be kept longer.
-        </p>
+        <ul className="mt-1 list-disc space-y-1 pl-5">
+          <li>
+            Health content, memories, and assistant history: active hosted
+            systems within 30 days; backups within 90 days.
+          </li>
+          <li>
+            Account/profile, wearable sync, webhook, and routing records: up
+            to 90 days; credentials: normally 7–30 days.
+          </li>
+          <li>
+            Support: up to 3 years; security logs: 90–365 days; billing or tax
+            records: as legally required.
+          </li>
+        </ul>
       </div>
     </>
   ),
@@ -60,11 +70,19 @@ const DATA_PRIVACY_HANDOFF_COPY = {
       .
     </>
   ),
+  loginLabel: "Log in",
   title: "Sign in to manage your data",
 } as const;
 
 export function SettingsDataPrivacyAuthRequired() {
-  return <HostedAuthRequiredScreen {...DATA_PRIVACY_HANDOFF_COPY} />;
+  const { openAuthDialog, openDataPrivacyAuthDialog } = useAuth();
+
+  return (
+    <HostedAuthRequiredScreenView
+      {...DATA_PRIVACY_HANDOFF_COPY}
+      onLogin={openDataPrivacyAuthDialog ?? openAuthDialog}
+    />
+  );
 }
 
 export function SettingsDataPrivacyAuthRequiredView() {

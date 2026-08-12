@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "Clearer account deletion on the web",
     "summary": "Murph's web deletion page now explains how to remove an account even when the Android app is no longer installed.",
-    "details": "The page names what the request covers, the usual active-system and backup deletion targets, limited reasons records may remain longer, and where to request help or partial deletion.",
+    "details": "The page keeps deletion controls available without an active subscription or renewed health-data consent, and names what the request covers, category-specific retention targets, external-delivery limits, longer-lived support, security, billing and tax records, and where to request help or partial deletion.",
     "relevanceTags": ["settings", "privacy", "account"],
     "sourcePullRequests": [1717],
     "tryIt": {
