@@ -3143,6 +3143,71 @@ test("Junction importer reports committed Fitbit daily coverage at the vault-loc
   }
 });
 
+test("Junction importer reports date-only Fitbit activity coverage without rewriting its floating event", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-fitbit-floating-activity-coverage");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-08-11T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    type JunctionImportResult = Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>> & {
+      junctionCanonicalCoverage: readonly JunctionCanonicalCoverageEvidence[];
+    };
+    const input = {
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-account-hash-fitbit-floating-activity",
+        importedAt: "2026-08-12T00:00:00.000Z",
+        summaries: {
+          activity: [{
+            date: "2026-08-11",
+            id: "fitbit-floating-activity",
+            sourceProviderSlug: "fitbit",
+            steps: 4321,
+          }],
+        },
+      },
+    };
+
+    const first = await importDeviceProviderSnapshot<JunctionImportResult>(input, {
+      corePort: coreRuntime,
+    });
+    const activity = first.events.find((event) =>
+      event.kind === "observation" && event.metric === "daily-steps"
+    );
+
+    assert.equal(activity?.dayKey, "2026-08-11");
+    assert.equal(activity?.timeZone, undefined);
+    assert.deepEqual(first.junctionCanonicalCoverage, [{
+      coverageThrough: "2026-08-12T04:00:00.000Z",
+      resource: "activity",
+      sourceProviderSlug: "fitbit",
+    }]);
+
+    await coreRuntime.updateVaultSummary({ vaultRoot, timezone: "UTC" });
+    const replay = await importDeviceProviderSnapshot<JunctionImportResult>(input, {
+      corePort: coreRuntime,
+    });
+    const replayedActivity = replay.events.find((event) =>
+      event.kind === "observation" && event.metric === "daily-steps"
+    );
+
+    assert.equal(replay.applied, false);
+    assert.equal(replayedActivity?.id, activity?.id);
+    assert.equal(replayedActivity?.dayKey, "2026-08-11");
+    assert.equal(replayedActivity?.timeZone, undefined);
+    assert.deepEqual(replay.junctionCanonicalCoverage, [{
+      coverageThrough: "2026-08-12T00:00:00.000Z",
+      resource: "activity",
+      sourceProviderSlug: "fitbit",
+    }]);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
 test("Junction canonical fence suppresses same-day Google Health facts east of UTC", () => {
   const payload = normalizeJunctionSnapshot({
     canonicalCoverageFence: {
@@ -3294,6 +3359,62 @@ test("Junction canonical fence compares sleep sessions by accepted interval end"
 
   const sessions = payload.events?.filter((event) => event.kind === "sleep_session") ?? [];
   assert.deepEqual(sessions.map((event) => event.fields?.endAt), [
+    "2026-08-13T10:00:00.000Z",
+  ]);
+});
+
+test("Junction canonical fence applies mixed daily and interval boundaries together", () => {
+  const payload = normalizeJunctionSnapshot({
+    canonicalCoverageFence: {
+      coverageThroughByResource: {
+        activity: "2026-08-12T04:00:00.000Z",
+        sleep: "2026-08-12T10:00:00.000Z",
+      },
+      sourceProviderSlug: "google_health",
+    },
+    importedAt: "2026-08-13T12:00:00.000Z",
+    summaries: {
+      activity: [
+        {
+          date: "2026-08-11",
+          id: "google-health-same-day-activity",
+          sourceProviderSlug: "google_health",
+          steps: 1000,
+        },
+        {
+          date: "2026-08-12",
+          id: "google-health-next-day-activity",
+          sourceProviderSlug: "google_health",
+          steps: 2000,
+        },
+      ],
+      sleep: [
+        {
+          bedtime_start: "2026-08-12T02:00:00.000Z",
+          bedtime_stop: "2026-08-12T10:00:00.000Z",
+          duration: 28_800,
+          id: "google-health-same-sleep",
+          sourceProviderSlug: "google_health",
+          total: 25_200,
+        },
+        {
+          bedtime_start: "2026-08-13T02:00:00.000Z",
+          bedtime_stop: "2026-08-13T10:00:00.000Z",
+          duration: 28_800,
+          id: "google-health-next-sleep",
+          sourceProviderSlug: "google_health",
+          total: 25_200,
+        },
+      ],
+    },
+  }, { defaultTimeZone: "America/New_York" });
+
+  const activities = payload.events?.filter((event) =>
+    event.fields?.metric === "daily-steps"
+  ) ?? [];
+  const sleeps = payload.events?.filter((event) => event.kind === "sleep_session") ?? [];
+  assert.deepEqual(activities.map((event) => event.dayKey), ["2026-08-12"]);
+  assert.deepEqual(sleeps.map((event) => event.fields?.endAt), [
     "2026-08-13T10:00:00.000Z",
   ]);
 });

@@ -119,6 +119,13 @@ Updated: 2026-08-12
 13. In progress: push the requirement-level round-five remediation, rerun final
     ReviewGPT against the exact head with all rendered evidence attached, and
     inspect current-base mergeability without spending a second base update.
+14. In progress: final ReviewGPT round 6 accepted one review-induced receipt
+    gap: the importer resolved the vault timezone for normalization but did not
+    pass it into committed daily-coverage derivation. Apply the existing
+    resolved timezone at that owner boundary, remove the test helper's invented
+    UTC fallback, prove floating date-only event identity plus monotonic durable
+    coverage and mixed daily/interval obligations, then run round 7 at the
+    ReviewGPT hard cap.
 
 ## Decisions
 
@@ -194,14 +201,24 @@ Updated: 2026-08-12
   positive-offset and DST local-day boundaries, interval-ended sleep, the real
   vault-writer boundary, stale pre-revoke recovery, concurrent retries with one
   provider mutation, and both absent and still-active ambiguous revoke results.
+- Final round-six remediation proof: the production-shaped real-importer test
+  first failed with an empty receipt for a committed date-only Fitbit activity
+  event in a non-UTC vault, then passed after forwarding the importer's existing
+  resolved vault timezone into receipt derivation. All 156 focused Junction
+  importer tests and 231 focused Junction provider/public-account tests pass,
+  with importer and device-sync typechecks. The committed floating event stays
+  timezone-free and replay-stable; durable coverage remains monotonic across a
+  vault-timezone update; mixed activity/sleep obligations and successor fencing
+  are covered together.
 
 ## Remaining handoff
 
 - Keep the pull request draft.
-- Push the round-five retrospective remediation and rerun final ReviewGPT against its exact
-  head with the eight authorization, verification, cutover, and retry captures
-  packaged as rendered evidence; resolve every accepted finding before
-  archiving this plan.
+- Push the round-six receipt correction and run final ReviewGPT round 7 against
+  its exact head with the eight authorization, verification, cutover, and retry
+  captures packaged as rendered evidence. Round 7 is the normal hard cap;
+  resolve any accepted finding but do not start round 8 without an explicit
+  continuation decision.
 - Recheck the current base with `git merge-tree`. The one permitted base update
   is already consumed, so retain the draft PR and report a moving-base conflict
   if the reviewed patch no longer merges cleanly.

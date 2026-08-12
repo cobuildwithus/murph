@@ -294,8 +294,8 @@ function createCanonicalImportReceipt(
         ...event,
         ...event.fields,
         dayKey: event.dayKey ?? event.occurredAt?.slice(0, 10) ?? "2000-01-01",
-        timeZone: event.timeZone ?? "UTC",
       })),
+      defaultTimeZone,
     ),
   };
 }
@@ -11769,7 +11769,7 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
   const context = createJunctionJobContext({
       account: createAccount({ sources: sourceSummaries }),
       importSnapshot: async (snapshot) => acceptCanonicalEvents
-        ? createCanonicalImportReceipt(snapshot)
+        ? createCanonicalImportReceipt(snapshot, true, "America/New_York")
         : {
             canonicalEventCount: 0,
             canonicalEventExternalRefResourceIds: [],
@@ -11819,7 +11819,7 @@ test("Junction records per-resource Fitbit coverage only after canonical import 
   assert.equal(
     upserts.at(-1)?.resourceAvailabilitySummary
       ?.canonicalCoverageThrough_activity,
-    "2026-08-12T00:00:00.000Z",
+    "2026-08-12T04:00:00.000Z",
   );
 });
 
@@ -11871,9 +11871,17 @@ test("Junction Fitbit coverage excludes a retained raw-only tail and replays mon
     resourceAvailabilitySummary: { activity: true },
   });
   const recordedCoverage: string[] = [];
+  let importCount = 0;
   const context = createJunctionJobContext({
     account: createAccount({ sources: [summarizeConnectionSource(legacyFitbit)] }),
-    importSnapshot: async (snapshot) => createCanonicalImportReceipt(snapshot),
+    importSnapshot: async (snapshot) => {
+      importCount += 1;
+      return createCanonicalImportReceipt(
+        snapshot,
+        true,
+        importCount === 1 ? "America/New_York" : "UTC",
+      );
+    },
     listConnectionSources: async () => [summarizeConnectionSource(legacyFitbit)],
     now: "2026-08-13T01:00:00.000Z",
     upsertConnectionSource: (input) => {
@@ -11895,10 +11903,10 @@ test("Junction Fitbit coverage excludes a retained raw-only tail and replays mon
   await executeJunctionJob(provider, context, job);
   await executeJunctionJob(provider, context, job);
 
-  assert.deepEqual([...new Set(recordedCoverage)], ["2026-08-11T00:00:00.000Z"]);
+  assert.deepEqual([...new Set(recordedCoverage)], ["2026-08-11T04:00:00.000Z"]);
   assert.equal(
     legacyFitbit.resourceAvailabilitySummary?.canonicalCoverageThrough_activity,
-    "2026-08-11T00:00:00.000Z",
+    "2026-08-11T04:00:00.000Z",
   );
 });
 

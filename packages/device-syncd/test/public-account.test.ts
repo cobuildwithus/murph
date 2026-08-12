@@ -213,6 +213,15 @@ test("Google Health Fitbit cutover requires strict successor availability for ea
       activity: true,
       sleep: true,
       canonicalCoverageThrough_activity: "2026-08-11T11:00:00.000Z",
+      canonicalCoverageThrough_sleep: "2026-08-11T12:00:00.000Z",
+    },
+    successorSummary: { activity: true, sleep: false },
+  }), false);
+  assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
+    legacySummary: {
+      activity: true,
+      sleep: true,
+      canonicalCoverageThrough_activity: "2026-08-11T11:00:00.000Z",
     },
     successorSummary,
   }), true);
