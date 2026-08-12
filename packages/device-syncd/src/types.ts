@@ -756,6 +756,8 @@ export interface ProviderJobConnectionSource {
 export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
+  /** Vault-local IANA timezone used by closed-day schedulers and importers. */
+  vaultTimeZone?: string;
   signal?: AbortSignal;
   // Standalone sync discovers provider sub-sources from the provider API.
   // Hosted sync must treat the Web projection as the admission authority.
@@ -1010,6 +1012,9 @@ export interface DeviceSyncImporterPort {
     snapshot: unknown;
     vaultRoot?: string;
   }): Promise<unknown>;
+  resolveDeviceProviderSnapshotDefaultTimeZone?(input: {
+    vaultRoot?: string;
+  }): Promise<string | undefined>;
 }
 
 export interface NodeServerHandle {

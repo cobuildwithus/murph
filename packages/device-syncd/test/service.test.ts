@@ -1338,8 +1338,11 @@ test("device sync service reports canonical counts separately from durable deliv
           { provider: "demo" },
           {
             completeSourceDay: {
+              connectionId: "demo-connection",
               dayKey: "2026-03-16",
+              resources: ["demo-resource"],
               revisionAt: "2026-03-17T12:00:00.000Z",
+              timeZone: "UTC",
             },
           },
         ));
@@ -1374,8 +1377,11 @@ test("device sync service reports canonical counts separately from durable deliv
     assert.deepEqual(importerInputs, [
       {
         completeSourceDay: {
+          connectionId: "demo-connection",
           dayKey: "2026-03-16",
+          resources: ["demo-resource"],
           revisionAt: "2026-03-17T12:00:00.000Z",
+          timeZone: "UTC",
         },
         provider: "demo",
         snapshot: { provider: "demo" },
@@ -1383,14 +1389,67 @@ test("device sync service reports canonical counts separately from durable deliv
       },
       {
         completeSourceDay: {
+          connectionId: "demo-connection",
           dayKey: "2026-03-16",
+          resources: ["demo-resource"],
           revisionAt: "2026-03-17T12:00:00.000Z",
+          timeZone: "UTC",
         },
         provider: "demo",
         snapshot: { provider: "demo" },
         vaultRoot,
       },
     ]);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service supplies the vault timezone to Junction jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-timezone");
+  const observedTimeZones: Array<string | undefined> = [];
+  const demoDescriptor = createFakeProvider().descriptor;
+  const provider = createFakeProvider({
+    provider: "junction",
+    descriptor: {
+      ...demoDescriptor,
+      provider: "junction",
+      oauth: demoDescriptor.oauth
+        ? { ...demoDescriptor.oauth, callbackPath: "/oauth/junction/callback" }
+        : undefined,
+    },
+    async executeJob(context) {
+      observedTimeZones.push(context.vaultTimeZone);
+      return {};
+    },
+  });
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        return { events: [] };
+      },
+      async resolveDeviceProviderSnapshotDefaultTimeZone() {
+        return "America/Los_Angeles";
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "junction" });
+    await service.handleOAuthCallback({
+      provider: "junction",
+      state: begin.state,
+      code: "timezone",
+    });
+    await service.runWorkerOnce();
+    assert.deepEqual(observedTimeZones, ["America/Los_Angeles"]);
   } finally {
     close();
   }

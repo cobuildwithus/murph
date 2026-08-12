@@ -215,6 +215,7 @@ Strong recommendations:
 - Retain unsupported-but-useful upstream sections as `snapshot-section:*` evidence parts instead of silently discarding them.
 - Prefer existing event kinds such as `observation`, `sleep_session`, and `activity_session`.
 - Do not retain high-frequency provider timeseries as full sample-array evidence by default. Fetch only product-needed timeseries, reduce them to compact facts in memory, and persist only tiny evidence parts unless an explicit debug/deep-inspection feature proves the need for full-fidelity retention. Core rejects oversized provider sample batches; do the reduction in the adapter before canonical import.
+- A closed-day derived fact must use one explicit vault timezone from scheduling through fetch and normalization. Request an exact half-open datetime window, wait for any documented safety lag, and grant `authoritativeEventSets` replacement only for resources whose fetch succeeded. Successful empty responses may replace an owned facet set; failed, aborted, or yielded responses must not.
 - Do not set `queryVisibility`, `visibility`, or `canonicalFact` from provider adapter fields. Device imports keep provider observations out of default query/search promotion unless a separate read/projector path intentionally promotes a derived product fact.
 - If you need a new metric family or raw/debug stream, update the compatibility matrix in the same patch.
 

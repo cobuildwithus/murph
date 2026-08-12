@@ -1,7 +1,4 @@
-import type {
-  DeviceBatchImportPayload,
-  DeviceEventRetractionPayload,
-} from "../core-port.ts";
+import type { DeviceBatchImportPayload } from "../core-port.ts";
 import type { DeviceProviderDescriptor } from "./provider-descriptors.ts";
 import type {
   WearableRawIngestDeliveryMode,
@@ -9,14 +6,15 @@ import type {
   WearableRawIngestSourceKind,
 } from "./raw-ingest-receipt.ts";
 
-export interface NormalizedDeviceBatch extends Omit<DeviceBatchImportPayload, "vaultRoot"> {
-  eventRetractions?: DeviceEventRetractionPayload[];
-}
+export type NormalizedDeviceBatch = Omit<DeviceBatchImportPayload, "vaultRoot">;
 
-/** Transient authority from a fetch that covered one closed provider-local date. */
+/** Transient authority from successful fetches for one closed vault-local date. */
 export interface CompleteDeviceProviderSourceDay {
+  connectionId: string;
   dayKey: string;
+  resources: readonly string[];
   revisionAt: string;
+  timeZone: string;
 }
 
 export interface DeviceProviderNormalizationContext {

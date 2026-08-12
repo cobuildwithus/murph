@@ -1,6 +1,7 @@
 export {
   importDeviceProviderSnapshot,
   prepareDeviceProviderSnapshotImport,
+  resolveDeviceProviderSnapshotDefaultTimeZone,
   type DeviceProviderImporterExecutionOptions,
   type DeviceProviderSnapshotImportInput,
 } from "./import-device-provider-snapshot.ts";

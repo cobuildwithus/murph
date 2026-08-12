@@ -277,6 +277,7 @@ function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): 
   return {
     account,
     now: "2026-04-03T00:00:00.000Z",
+    vaultTimeZone: "UTC",
     importSnapshot: async () => ({ imported: true }),
     upsertConnectionSource: (input) => ({
       id: "src-1",
@@ -3069,8 +3070,10 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
-  assert.equal(importedSnapshots.length, 1);
-  const timeseriesSnapshot = importedSnapshots[0] as { summaries?: Record<string, unknown[]>; timeseries?: Record<string, unknown[]> };
+  assert.equal(importedSnapshots.length, 2);
+  const timeseriesSnapshot = importedSnapshots.find((snapshot) =>
+    ((snapshot as { timeseries?: { blood_oxygen?: unknown[] } }).timeseries?.blood_oxygen?.length ?? 0) > 0
+  ) as { summaries?: Record<string, unknown[]>; timeseries?: Record<string, unknown[]> };
   assert.deepEqual(timeseriesSnapshot.summaries, {});
   assert.equal(timeseriesSnapshot.timeseries?.blood_oxygen?.length, 1);
 });
@@ -3166,7 +3169,7 @@ test("Junction yielded connect-window backfills keep owner window and resume wit
         const searchParams = new URL(url).searchParams;
         return [searchParams.get("start_date"), searchParams.get("end_date")];
       }),
-    [["2026-04-01", "2026-04-01"]],
+    [["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"]],
   );
 
   const secondRequests: string[] = [];
@@ -3196,7 +3199,7 @@ test("Junction yielded connect-window backfills keep owner window and resume wit
         const searchParams = new URL(url).searchParams;
         return [searchParams.get("start_date"), searchParams.get("end_date")];
       }),
-    [["2026-04-02", "2026-04-02"]],
+    [["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z"]],
   );
   assert.deepEqual(secondResult.metadataPatch, {
     junctionHistoricalBackfillStatus: "coverage_v3_complete",
@@ -7134,13 +7137,13 @@ test("Junction reconcile keeps summaries current while compact timeseries stays 
         return [searchParams.get("start_date"), searchParams.get("end_date")];
       }),
     [
-      ["2026-03-27", "2026-03-27"],
-      ["2026-03-28", "2026-03-28"],
-      ["2026-03-29", "2026-03-29"],
-      ["2026-03-30", "2026-03-30"],
-      ["2026-03-31", "2026-03-31"],
-      ["2026-04-01", "2026-04-01"],
-      ["2026-04-02", "2026-04-02"],
+      ["2026-03-27T00:00:00.000Z", "2026-03-28T00:00:00.000Z"],
+      ["2026-03-28T00:00:00.000Z", "2026-03-29T00:00:00.000Z"],
+      ["2026-03-29T00:00:00.000Z", "2026-03-30T00:00:00.000Z"],
+      ["2026-03-30T00:00:00.000Z", "2026-03-31T00:00:00.000Z"],
+      ["2026-03-31T00:00:00.000Z", "2026-04-01T00:00:00.000Z"],
+      ["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"],
+      ["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z"],
     ],
   );
 });
@@ -7155,7 +7158,8 @@ test("Junction closed daily timeseries imports carry the exclusive temporal sour
       return createJsonResponse({ data: [] });
     }
     if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
-      assert.equal(url.searchParams.get("start_date"), "2026-04-22");
+      assert.equal(url.searchParams.get("start_date"), "2026-04-22T00:00:00.000Z");
+      assert.equal(url.searchParams.get("end_date"), "2026-04-23T00:00:00.000Z");
       return createJsonResponse({
         groups: {
           garmin: [{
@@ -7205,17 +7209,97 @@ test("Junction closed daily timeseries imports carry the exclusive temporal sour
   assert.deepEqual(
     (importOptions[dailySnapshotIndex] as { completeSourceDay?: unknown })?.completeSourceDay,
     {
+      connectionId: "acct-junction-1",
       dayKey: "2026-04-22",
+      resources: ["stress_level"],
       revisionAt: "2026-04-24T12:00:00.000Z",
+      timeZone: "UTC",
     },
   );
   const dailySnapshot = importedSnapshots[dailySnapshotIndex] as {
     timeseries?: { stress_level?: Array<{ start?: string }> };
   };
-  assert.equal(dailySnapshot.timeseries?.stress_level?.length, 2);
+  assert.equal(dailySnapshot.timeseries?.stress_level?.length, 1);
+  assert.equal(dailySnapshot.timeseries?.stress_level?.[0]?.start, "2026-04-22T12:00:00.000Z");
+});
+
+test("Junction temporal authority waits for a closed vault-local day plus the safety lag", async () => {
+  const requestedWindows: Array<[string | null, string | null]> = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      const requestWindow: [string | null, string | null] = [
+        url.searchParams.get("start_date"),
+        url.searchParams.get("end_date"),
+      ];
+      requestedWindows.push(requestWindow);
+      return requestWindow[0] === "2026-04-22T07:00:00.000Z"
+        ? createJsonResponse({
+            groups: {
+              garmin: [{
+                data: [
+                  { start: "2026-04-23T01:00:00.000Z", value: 20 },
+                  { start: "2026-04-23T01:05:00.000Z", value: 80 },
+                ],
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          })
+        : createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+  const imports: Array<{ options: unknown; snapshot: unknown }> = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-25T06:00:00.000Z",
+      vaultTimeZone: "America/Los_Angeles",
+      importSnapshot: async (snapshot, options) => {
+        imports.push({ options, snapshot });
+        return { imported: true };
+      },
+    }),
+    createJob("backfill", {
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-25T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(requestedWindows.some(([start, end]) =>
+    start === "2026-04-22T07:00:00.000Z" && end === "2026-04-23T07:00:00.000Z"
+  ), true);
+  const target = imports.find(({ snapshot }) =>
+    (snapshot as { windowStart?: string }).windowStart === "2026-04-22T07:00:00.000Z"
+  );
+  assert.deepEqual(
+    (target?.options as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "acct-junction-1",
+      dayKey: "2026-04-22",
+      resources: ["stress_level"],
+      revisionAt: "2026-04-25T06:00:00.000Z",
+      timeZone: "America/Los_Angeles",
+    },
+  );
   assert.equal(
-    dailySnapshot.timeseries?.stress_level?.[1]?.start,
-    "2026-04-23T00:05:00.000Z",
+    ((target?.snapshot as { timeseries?: { stress_level?: unknown[] } })
+      .timeseries?.stress_level?.length ?? 0),
+    2,
+  );
+  const stillInsideLag = imports.find(({ snapshot }) =>
+    (snapshot as { windowStart?: string }).windowStart === "2026-04-23T07:00:00.000Z"
+  );
+  assert.equal(
+    (stillInsideLag?.options as { completeSourceDay?: unknown })?.completeSourceDay,
+    undefined,
   );
 });
 

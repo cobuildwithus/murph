@@ -54,16 +54,22 @@ describe("prepareDeviceProviderSnapshotImport", () => {
 
     await expect(prepareDeviceProviderSnapshotImport({
       completeSourceDay: {
+        connectionId: "connection-test",
         dayKey: "2026-02-30",
+        resources: ["stress_level"],
         revisionAt: "2026-04-08T00:00:00.000Z",
+        timeZone: "UTC",
       },
       provider: "whoop",
       snapshot,
     })).rejects.toBeInstanceOf(TypeError);
     await expect(prepareDeviceProviderSnapshotImport({
       completeSourceDay: {
+        connectionId: "connection-test",
         dayKey: "2026-04-08",
+        resources: ["stress_level"],
         revisionAt: "2026-04-08T00:00:00",
+        timeZone: "UTC",
       },
       provider: "whoop",
       snapshot,

@@ -4,7 +4,6 @@ import * as z from "@murphai/contracts/zod-runtime";
 import { assertCanonicalWritePort } from "../core-port.ts";
 import type {
   DeviceBatchImportPayload,
-  DeviceEventRetractionPayload,
   DeviceEvidencePartPayload,
 } from "../core-port.ts";
 import {
@@ -50,19 +49,30 @@ export interface DeviceProviderSnapshotImportInput {
   normalizerVersion?: string;
 }
 
-export interface PreparedDeviceProviderSnapshotImport extends DeviceBatchImportPayload {
-  eventRetractions?: DeviceEventRetractionPayload[];
-}
+export type PreparedDeviceProviderSnapshotImport = DeviceBatchImportPayload;
 
 const rawIngestSourceKindSchema = z.enum(["poll", "webhook", "sdk", "xml", "manual"]);
 const rawIngestDeliveryModeSchema = z.enum(["full_payload", "notification_only", "scheduled_reconcile"]);
 const rawIngestEventTypeSchema = z.enum(["create", "update", "delete", "deauthorize"]);
 
+function isSupportedTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const deviceProviderSnapshotImportSchema = z
   .object({
     completeSourceDay: z.object({
+      connectionId: requiredTrimmedStringSchema("completeSourceDay connectionId"),
       dayKey: z.string().refine(isStrictIsoDate),
+      resources: z.array(requiredTrimmedStringSchema("completeSourceDay resource")).min(1),
       revisionAt: z.string().refine(isWritableIsoDateTime),
+      timeZone: requiredTrimmedStringSchema("completeSourceDay timeZone")
+        .refine(isSupportedTimeZone),
     }).strict().optional(),
     provider: requiredTrimmedStringSchema("provider"),
     snapshot: z.unknown(),
@@ -107,6 +117,15 @@ export async function prepareDeviceProviderSnapshotImport(
   const registry = resolveRegistry(providerRegistry);
   const adapter = registry.get(request.provider);
 
+  if (
+    request.completeSourceDay
+    && request.completeSourceDay.timeZone !== defaultTimeZone
+  ) {
+    throw new TypeError(
+      "Complete device source-day authority must use the vault import timezone.",
+    );
+  }
+
   if (!adapter) {
     throw new TypeError(`device provider "${request.provider}" is not registered`);
   }
@@ -130,7 +149,6 @@ export async function prepareDeviceProviderSnapshotImport(
     source: normalized.source,
     dataOrigin: normalized.dataOrigin,
     events: normalized.events,
-    eventRetractions: normalized.eventRetractions,
     samples: normalized.samples,
     evidenceParts: normalized.evidenceParts,
     authoritativeEventSets: normalized.authoritativeEventSets,
@@ -188,17 +206,26 @@ function isVaultMetadataReadPort(value: unknown): value is VaultMetadataReadPort
   );
 }
 
+export async function resolveDeviceProviderSnapshotDefaultTimeZone(
+  input: { vaultRoot?: string },
+  corePort: unknown,
+): Promise<string | undefined> {
+  if (!input.vaultRoot || !isVaultMetadataReadPort(corePort)) {
+    return undefined;
+  }
+
+  const vault = await corePort.loadVault({ vaultRoot: input.vaultRoot });
+  return vault.metadata.timezone;
+}
+
 async function resolveSnapshotImportDefaultTimeZone(
   input: unknown,
   corePort: unknown,
 ): Promise<string | undefined> {
   const request = deviceProviderSnapshotImportSchema.safeParse(input);
-  if (!request.success || !request.data.vaultRoot || !isVaultMetadataReadPort(corePort)) {
-    return undefined;
-  }
-
-  const vault = await corePort.loadVault({ vaultRoot: request.data.vaultRoot });
-  return vault.metadata.timezone;
+  return request.success
+    ? resolveDeviceProviderSnapshotDefaultTimeZone(request.data, corePort)
+    : undefined;
 }
 
 function attachSingleEvidenceRole(
@@ -318,27 +345,5 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
     defaultTimeZone: resolvedDefaultTimeZone,
     providerRegistry,
   });
-  const { eventRetractions = [], ...deviceBatchPayload } = payload;
-  const retractionWriter = eventRetractions.length > 0
-    ? assertCanonicalWritePort(corePort, ["importEventBatch"])
-    : undefined;
-  if (retractionWriter && !payload.vaultRoot) {
-    throw new TypeError("Device event retractions require vaultRoot.");
-  }
-
-  // The device batch remains the canonical upsert owner. Retractions follow it
-  // so an interrupted attempt is safe to replay and converges without another
-  // lifecycle store or reconciler.
-  const result = await writer.importDeviceBatch(deviceBatchPayload);
-  if (retractionWriter && payload.vaultRoot) {
-    await retractionWriter.importEventBatch({
-      apply: true,
-      decisions: eventRetractions.map((retraction) => ({
-        action: "retract",
-        ...retraction,
-      })),
-      vaultRoot: payload.vaultRoot,
-    });
-  }
-  return result as TResult;
+  return await writer.importDeviceBatch(payload) as TResult;
 }

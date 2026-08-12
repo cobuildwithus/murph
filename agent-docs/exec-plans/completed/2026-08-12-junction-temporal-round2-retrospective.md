@@ -1,6 +1,6 @@
 # Junction temporal round-two ownership retrospective
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -99,3 +99,4 @@ Updated: 2026-08-12
   boundary checks, docs checks, diff/privacy scans, and exact-base merge proof.
 - Preserve the immutable ReviewGPT first-reviewed marker and do not launch
   ReviewGPT from this remediation.
+Completed: 2026-08-12

@@ -12,12 +12,12 @@ import {
   parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
+  toLocalDayKey,
 } from "@murphai/contracts";
 import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
-  resolveJunctionTimeseriesSourceDayKey,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
@@ -351,6 +351,11 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SETUP_TTL_MS = 30 * 60_000;
 const DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
+const JUNCTION_TEMPORAL_AUTHORITY_LAG_MS = TIMESERIES_CHUNK_MS;
+const JUNCTION_TEMPORAL_AUTHORITY_RESOURCES = new Set([
+  "blood_oxygen",
+  "stress_level",
+]);
 const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
 const JUNCTION_DIAGNOSTIC_SHAPE_KEY_LIMIT = 24;
 const JUNCTION_DIAGNOSTIC_RESOURCE_NAME_LIMIT = 64;
@@ -1159,7 +1164,11 @@ export function createJunctionDeviceSyncProvider(
       jobTimeseriesResources.length > 0
       && (
         job.kind === "backfill"
-        || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
+        || shouldImportClosedTimeseriesForReconcile(
+          context.account.lastSyncCompletedAt,
+          context.now,
+          context.vaultTimeZone,
+        )
       )
     ) {
       const timeseriesImport = await importTimeseriesDailySnapshots(
@@ -2713,19 +2722,13 @@ export function createJunctionDeviceSyncProvider(
           request.dateQueryFormat = options.dateQueryFormat;
         }
         const chunkRecords = await client.listTimeseries(request);
-        // Date-only Junction requests are bounded by provider calendar dates.
-        // Reuse the importer's source-day semantics so offset evening rows are
-        // retained without admitting duplicate rows returned for another day.
-        const retainedChunkRecords = options.dateQueryFormat === "date"
-          ? filterJunctionTimeseriesRecordsToSourceDay(
-              chunkRecords,
-              chunkWindowStart.slice(0, 10),
-            )
-          : filterJunctionTimeseriesRecordsToWindow(
-              chunkRecords,
-              chunkWindowStart,
-              chunkWindowEnd,
-            );
+        // The caller supplies an exact half-open UTC window. Keep filtering
+        // local so provider pagination overlap cannot leak adjacent-day rows.
+        const retainedChunkRecords = filterJunctionTimeseriesRecordsToWindow(
+          chunkRecords,
+          chunkWindowStart,
+          chunkWindowEnd,
+        );
         records.push(
           ...retainedChunkRecords,
         );
@@ -2998,7 +3001,13 @@ export function createJunctionDeviceSyncProvider(
     resources?: readonly string[],
     sourceProviderSlug?: string | null,
   ): Promise<JunctionTimeseriesImportResult> {
-    for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
+    const authorityTimeZone = context.vaultTimeZone;
+    for (const window of buildClosedDailyWindows(
+      windowStart,
+      windowEnd,
+      authorityTimeZone ?? "UTC",
+      context.now,
+    )) {
       if (context.shouldYield?.()) {
         return {
           yieldedAt: window.windowStart,
@@ -3011,10 +3020,15 @@ export function createJunctionDeviceSyncProvider(
         skippedOptionalResources,
         resources,
         sourceProviderSlug,
-        { dateQueryFormat: "date" },
+        {},
       );
       const timeseries = fetchResult.snapshots;
-      if (!hasJunctionSnapshotRecords(timeseries)) {
+      const authoritativeResources = authorityTimeZone && window.authoritative
+        ? Object.keys(timeseries).filter((resource) =>
+            JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+          )
+        : [];
+      if (!hasJunctionSnapshotRecords(timeseries) && authoritativeResources.length === 0) {
         if (fetchResult.firstRetryableError !== null) {
           throw fetchResult.firstRetryableError;
         }
@@ -3026,7 +3040,10 @@ export function createJunctionDeviceSyncProvider(
         timeseries,
         sourceProviders,
       );
-      if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+      if (
+        hasJunctionSnapshotRecords(preparedImport.snapshots)
+        || authoritativeResources.length > 0
+      ) {
         await context.importSnapshot({
           provider: "junction",
           accountId: buildJunctionImportAccountId(context.account.externalAccountId),
@@ -3037,12 +3054,17 @@ export function createJunctionDeviceSyncProvider(
           connections: preparedImport.connections,
           summaries: {},
           timeseries: preparedImport.snapshots,
-        }, {
-          completeSourceDay: {
-            dayKey: window.windowStart.slice(0, 10),
-            revisionAt: context.now,
-          },
-        });
+        }, authorityTimeZone && authoritativeResources.length > 0
+          ? {
+              completeSourceDay: {
+                connectionId: context.account.id,
+                dayKey: window.dayKey,
+                resources: authoritativeResources,
+                revisionAt: context.now,
+                timeZone: authorityTimeZone,
+              },
+            }
+          : undefined);
       }
       if (fetchResult.firstRetryableError !== null) {
         throw fetchResult.firstRetryableError;
@@ -5175,20 +5197,6 @@ function filterJunctionTimeseriesRecordsToWindow(
   });
 }
 
-function filterJunctionTimeseriesRecordsToSourceDay(
-  records: readonly unknown[],
-  sourceDayKey: string,
-): unknown[] {
-  return records.filter((record) => {
-    const entry = readPlainObject(record);
-    if (!entry) {
-      return true;
-    }
-    const recordSourceDayKey = resolveJunctionTimeseriesSourceDayKey(entry);
-    return recordSourceDayKey === undefined || recordSourceDayKey === sourceDayKey;
-  });
-}
-
 function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): string | null {
   const entry = readPlainObject(record);
   if (!entry) {
@@ -5221,17 +5229,51 @@ function junctionTimeseriesRecordValueIdentity(
   resource: string,
   entry: Record<string, unknown>,
 ): string[] {
-  if (resource !== "blood_pressure" && resource !== "note") {
+  if (
+    resource !== "blood_pressure"
+    && resource !== "note"
+    && !JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+  ) {
     return [];
   }
 
+  let rowId = "";
   // Same stable-id alias list as the importer's reading identity: rows
   // distinguished only by a provider id must survive fetch-side dedupe.
   for (const key of ["id", "resourceId", "resource_id", "externalId", "external_id"]) {
-    const rowId = normalizeString(entry[key]);
+    rowId = normalizeString(entry[key]) ?? "";
     if (rowId) {
-      return [rowId];
+      break;
     }
+  }
+
+  if (JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)) {
+    const value = resource === "blood_oxygen"
+      ? firstJunctionTimeseriesIdentityValue(entry, [
+          "value",
+          "spo2",
+          "spO2",
+          "bloodOxygen",
+          "blood_oxygen",
+          "oxygenSaturation",
+          "oxygen_saturation",
+        ])
+      : firstJunctionTimeseriesIdentityValue(entry, [
+          "value",
+          "stressLevel",
+          "stress_level",
+          "averageStressLevel",
+          "average_stress_level",
+          "stress.average",
+          "stressLevelValue",
+          "stress_level_value",
+          "score",
+        ]);
+    return [rowId, value];
+  }
+
+  if (rowId) {
+    return [rowId];
   }
 
   if (resource === "note") {
@@ -5247,6 +5289,23 @@ function junctionTimeseriesRecordValueIdentity(
 
   // Field names mirror the importer's blood-pressure value paths.
   return [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
+}
+
+function firstJunctionTimeseriesIdentityValue(
+  entry: Record<string, unknown>,
+  paths: readonly string[],
+): string {
+  for (const path of paths) {
+    let value: unknown = entry;
+    for (const segment of path.split(".")) {
+      value = readPlainObject(value)?.[segment];
+    }
+    const numericValue = typeof value === "number" ? value : Number(normalizeString(value));
+    if (Number.isFinite(numericValue)) {
+      return String(numericValue);
+    }
+  }
+  return "";
 }
 
 function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {
@@ -5421,55 +5480,133 @@ function isFullUtcDayWindow(window: { windowStart: string; windowEnd: string }):
 
 function shouldImportClosedTimeseriesForReconcile(
   lastSyncCompletedAt: string | null | undefined,
-  windowEnd: string,
+  now: string,
+  timeZone: string | undefined,
 ): boolean {
-  if (!lastSyncCompletedAt) {
+  if (!lastSyncCompletedAt || !timeZone) {
     return true;
   }
-  const lastCompletedClosedDayMs = Date.parse(floorUtcDayTimestamp(lastSyncCompletedAt));
-  const windowEndMs = Date.parse(windowEnd);
-  return !Number.isFinite(lastCompletedClosedDayMs)
-    || !Number.isFinite(windowEndMs)
-    || lastCompletedClosedDayMs < windowEndMs;
+  return latestAuthoritativeVaultDayKey(lastSyncCompletedAt, timeZone)
+    !== latestAuthoritativeVaultDayKey(now, timeZone);
 }
 
 function buildClosedDailyWindows(
   windowStart: string,
   windowEnd: string,
-): Array<{ windowStart: string; windowEnd: string }> {
+  timeZone: string,
+  now: string,
+): Array<{ authoritative: boolean; dayKey: string; windowStart: string; windowEnd: string }> {
   const startMs = Date.parse(windowStart);
   const endMs = Date.parse(windowEnd);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+  const nowMs = Date.parse(now);
+  if (
+    !Number.isFinite(startMs)
+    || !Number.isFinite(endMs)
+    || !Number.isFinite(nowMs)
+    || startMs >= endMs
+  ) {
     return [];
   }
 
-  const closedEndMs = Date.parse(floorUtcDayTimestamp(windowEnd));
-  const flooredStartMs = Date.parse(floorUtcDayTimestamp(windowStart));
-  if (flooredStartMs >= closedEndMs) {
-    return [];
-  }
-
-  const windows: Array<{ windowStart: string; windowEnd: string }> = [];
-  let chunkStartMs = flooredStartMs;
-  while (chunkStartMs < closedEndMs) {
-    const nextDayMs = Date.parse(
-      addMilliseconds(
-        floorUtcDayTimestamp(new Date(chunkStartMs).toISOString()),
-        TIMESERIES_CHUNK_MS,
-      ),
-    );
-    const chunkEndMs = Math.min(nextDayMs, closedEndMs);
-    if (chunkEndMs <= chunkStartMs) {
-      break;
+  const windows: Array<{
+    authoritative: boolean;
+    dayKey: string;
+    windowStart: string;
+    windowEnd: string;
+  }> = [];
+  let dayKey = toLocalDayKey(
+    new Date(startMs - TIMESERIES_CHUNK_MS).toISOString(),
+    timeZone,
+  );
+  const finalDayKey = toLocalDayKey(new Date(endMs).toISOString(), timeZone);
+  for (let dayCount = 0; dayCount < 10_000 && dayKey <= finalDayKey; dayCount += 1) {
+    const localWindow = resolveVaultLocalDayWindow(dayKey, timeZone);
+    if (
+      localWindow
+      && Date.parse(localWindow.windowStart) >= startMs
+      && Date.parse(localWindow.windowEnd) <= endMs
+      && Date.parse(localWindow.windowEnd) <= nowMs
+    ) {
+      windows.push({
+        authoritative:
+          Date.parse(localWindow.windowEnd) + JUNCTION_TEMPORAL_AUTHORITY_LAG_MS <= nowMs,
+        dayKey,
+        ...localWindow,
+      });
     }
-    windows.push({
-      windowStart: new Date(chunkStartMs).toISOString(),
-      windowEnd: new Date(chunkEndMs).toISOString(),
-    });
-    chunkStartMs = chunkEndMs;
+    dayKey = addIsoDateDays(dayKey, 1);
   }
 
   return windows;
+}
+
+function latestAuthoritativeVaultDayKey(at: string, timeZone: string): string | null {
+  const atMs = Date.parse(at);
+  if (!Number.isFinite(atMs)) {
+    return null;
+  }
+  let candidateDayKey = toLocalDayKey(at, timeZone);
+  for (let offset = 0; offset < 4; offset += 1) {
+    const candidate = resolveVaultLocalDayWindow(candidateDayKey, timeZone);
+    if (
+      candidate
+      && Date.parse(candidate.windowEnd) + JUNCTION_TEMPORAL_AUTHORITY_LAG_MS <= atMs
+    ) {
+      return candidateDayKey;
+    }
+    candidateDayKey = addIsoDateDays(candidateDayKey, -1);
+  }
+  return null;
+}
+
+function resolveVaultLocalDayWindow(
+  dayKey: string,
+  timeZone: string,
+): { windowStart: string; windowEnd: string } | null {
+  const startMs = findVaultLocalDayStartMs(dayKey, timeZone);
+  const endMs = findVaultLocalDayStartMs(addIsoDateDays(dayKey, 1), timeZone);
+  return startMs === null || endMs === null || startMs >= endMs
+    ? null
+    : {
+        windowStart: new Date(startMs).toISOString(),
+        windowEnd: new Date(endMs).toISOString(),
+      };
+}
+
+function findVaultLocalDayStartMs(dayKey: string, timeZone: string): number | null {
+  const anchorMs = Date.parse(`${dayKey}T00:00:00.000Z`);
+  if (!Number.isFinite(anchorMs)) {
+    return null;
+  }
+  const searchStartMs = anchorMs - 2 * TIMESERIES_CHUNK_MS;
+  const searchEndMs = anchorMs + 2 * TIMESERIES_CHUNK_MS;
+  let matchingMs: number | null = null;
+  for (let candidateMs = searchStartMs; candidateMs <= searchEndMs; candidateMs += 60 * 60_000) {
+    if (toLocalDayKey(new Date(candidateMs).toISOString(), timeZone) === dayKey) {
+      matchingMs = candidateMs;
+      break;
+    }
+  }
+  if (matchingMs === null) {
+    return null;
+  }
+
+  let lowerMs = matchingMs - 60 * 60_000;
+  let upperMs = matchingMs;
+  while (upperMs - lowerMs > 1) {
+    const middleMs = Math.floor((lowerMs + upperMs) / 2);
+    if (toLocalDayKey(new Date(middleMs).toISOString(), timeZone) < dayKey) {
+      lowerMs = middleMs;
+    } else {
+      upperMs = middleMs;
+    }
+  }
+  return upperMs;
+}
+
+function addIsoDateDays(dayKey: string, days: number): string {
+  const value = Date.parse(`${dayKey}T00:00:00.000Z`);
+  return new Date(value + days * TIMESERIES_CHUNK_MS).toISOString().slice(0, 10);
 }
 
 function buildPreciseTimeseriesWindows(

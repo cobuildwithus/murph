@@ -246,7 +246,6 @@ export function makeNormalizedDeviceBatch(
     importedAt: options.importedAt,
     source: "device",
     events: options.events,
-    eventRetractions: options.eventRetractions,
     samples: options.samples,
     evidenceParts: options.evidenceParts,
     authoritativeEventSets: options.authoritativeEventSets,
