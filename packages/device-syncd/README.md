@@ -29,6 +29,17 @@ What it does:
 - treats `DEVICE_SYNC_WORKER_BATCH_SIZE` as a durable job-row budget per tick; one provider batch may complete multiple rows, and each row counts against that budget
 - imports provider snapshots through `@murphai/importers`
 
+Canonical imports fail atomically when a newer connected-source fact conflicts
+with a live member correction. `device-syncd` exposes that condition only as
+the provider-neutral `DEVICE_DATA_MEMBER_EDIT_CONFLICT`; raw fact identities,
+values, and provider error text do not cross the job/status boundary. The
+existing manual-reconcile job accepts one explicit resolution:
+`keep_member` advances the provider baseline in the event spine and reasserts
+the member revision as live, while `use_provider` makes the current connected
+source revision live. Both choices are one-shot job payloads, not a second
+queue or persisted policy, and an exact retry is a no-op after the atomic vault
+commit succeeds.
+
 Current providers:
 - Direct runtime providers: Oura, Strava, and WHOOP.
 - Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`

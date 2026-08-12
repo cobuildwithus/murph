@@ -8685,6 +8685,9 @@ function resolveHostedWorkspaceDeviceTool(input: {
         }
         const result = await deviceSyncPort.reconcileAccount({
           connectionId: request.accountId,
+          ...(request.resolution
+            ? { memberEditConflictResolution: request.resolution }
+            : {}),
           signal: context?.signal ?? null,
         });
         return {

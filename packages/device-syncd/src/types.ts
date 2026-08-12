@@ -435,6 +435,8 @@ export interface DeviceSyncJobInput {
   dedupeKey?: string;
 }
 
+export type DeviceMemberEditConflictResolution = "keep_member" | "use_provider";
+
 export interface ProviderCallbackContext {
   callbackUrl: string;
   state: string;
@@ -776,6 +778,7 @@ export interface ProviderJobContext {
   connectionSourceAdmissionMode?: "discover_unlisted" | "listed_only";
   shouldYield?(): boolean;
   throwIfAborted?(): void;
+  memberEditConflictResolution?: DeviceMemberEditConflictResolution;
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.
   importSnapshot(snapshot: unknown): Promise<unknown>;
@@ -1023,6 +1026,7 @@ export interface DeviceSyncImporterPort {
     provider: string;
     snapshot: unknown;
     vaultRoot?: string;
+    memberEditConflictResolution?: DeviceMemberEditConflictResolution;
   }): Promise<unknown>;
 }
 

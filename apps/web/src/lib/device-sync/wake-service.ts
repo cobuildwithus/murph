@@ -2115,6 +2115,7 @@ export interface HostedDeviceSyncReconcileWakeResult {
 export async function appendHostedDeviceSyncManualReconcileWake(input: {
   connectionId: string;
   expectedConnectedAt: string;
+  memberEditConflictResolution?: "keep_member" | "use_provider";
   occurredAt: string;
   provider: string;
   userId: string;
@@ -2126,6 +2127,9 @@ export async function appendHostedDeviceSyncManualReconcileWake(input: {
     connectionId: input.connectionId,
     expectedConnectedAt: input.expectedConnectedAt,
     hint: {
+      ...(input.memberEditConflictResolution
+        ? { memberEditConflictResolution: input.memberEditConflictResolution }
+        : {}),
       occurredAt: input.occurredAt,
       reason: "manual_reconcile",
     },

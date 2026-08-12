@@ -5499,13 +5499,15 @@ function pushProfileSummary(
   // Profile entries carry no observed-at timestamp, so the generic resolver
   // falls back to the sync window. Pin the FULL event time (occurredAt,
   // recordedAt, dayKey) plus the identity-bearing observedAtRaw to the
-  // provider's updated/created timestamps: a window-drifting occurredAt
-  // would revise the event spine on every reconcile and duplicate the
-  // profile across month shards (cross-shard reconcile only indexes the
-  // target shard). Junction documents created_at/updated_at as REQUIRED on
+  // provider's stable creation timestamp (falling back to updated-at for
+  // legacy rows that omit it): a window-drifting or mutable updated-at
+  // occurredAt would revise the event spine on every reconcile and duplicate
+  // the profile across month shards. Version ordering remains updated-at-first
+  // in junctionAuthoritativeSummaryVersion below.
+  // Junction documents created_at/updated_at as REQUIRED on
   // ClientFacingProfile, so a row without them is malformed input and
   // deliberately stays raw-only rather than getting an invented time.
-  const providerTimestampRaw = firstValueFromPaths(entry, ["updatedAt", "updated_at", "createdAt", "created_at"]);
+  const providerTimestampRaw = firstValueFromPaths(entry, ["createdAt", "created_at", "updatedAt", "updated_at"]);
   const providerTimestamp = resolveSafeTimestamp(providerTimestampRaw, resourceContext.sourceProviderSlug);
   const pinnedOccurredAt = baseTimestamp.observedAtRaw ? baseTimestamp.occurredAt : providerTimestamp;
   if (!pinnedOccurredAt) {
@@ -6016,13 +6018,16 @@ function pushMenstrualCycleSummary(
   const periodStart = firstStrictIsoDateFromPaths(entry, ["periodStart", "period_start"]);
   const periodEnd = firstStrictIsoDateFromPaths(entry, ["periodEnd", "period_end"]);
   const cycleEnd = firstStrictIsoDateFromPaths(entry, ["cycleEnd", "cycle_end"]);
-  const facetCounts = new Map<string, number>();
-  const nextDailyFacet = (prefix: string, date: string): string => {
-    const key = `${prefix}\u0000${date}`;
-    const ordinal = (facetCounts.get(key) ?? 0) + 1;
-    facetCounts.set(key, ordinal);
-    return `${prefix}-${date}-${ordinal}`;
-  };
+  const dailyFactFacet = (
+    prefix: string,
+    fact: JunctionMenstrualEvidenceFact,
+  ): string => `${prefix}-${fact.date}-${shortHash([
+    "menstrual-fact",
+    prefix,
+    fact.date,
+    fact.kind,
+    fact.value ?? null,
+  ])}`;
 
   if (periodStart) {
     const cycleTimestamp = junctionDateOnlyTimestamp(baseTimestamp, periodStart);

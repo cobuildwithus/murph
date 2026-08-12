@@ -40,6 +40,7 @@ export async function requestHostedDeviceSyncReconcile(input: {
   const wake = await appendHostedDeviceSyncManualReconcileWake({
     connectionId: connection.id,
     expectedConnectedAt: connection.connectedAt,
+    memberEditConflictResolution: parsed.memberEditConflictResolution,
     occurredAt,
     provider: connection.provider,
     userId: input.trustedUserId,

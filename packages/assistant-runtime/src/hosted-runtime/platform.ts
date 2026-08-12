@@ -439,6 +439,7 @@ export interface HostedRuntimeDeviceSyncPort {
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
   reconcileAccount?(input: {
     connectionId: string;
+    memberEditConflictResolution?: "keep_member" | "use_provider";
     signal?: AbortSignal | null;
   }): Promise<HostedExecutionDeviceSyncReconcileResponse>;
   fetchSnapshot(input?: {

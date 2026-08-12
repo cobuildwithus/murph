@@ -1816,6 +1816,13 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-growth/usage-referral/cron`
 - `GET /api/internal/hosted-runtime/latency-alert/cron`
 
+The signed device-sync reconcile request always includes `connectionId` and
+may include `memberEditConflictResolution: "keep_member" | "use_provider"`
+after the authenticated member explicitly resolves a
+`DEVICE_DATA_MEMBER_EDIT_CONFLICT`. Web places that one-shot choice on the
+existing manual-reconcile wake; it does not store a standing overwrite policy
+or expose canonical health-event identities to the control plane.
+
 The old staged-payload and deleted import completion/release callback routes
 are gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
 deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
