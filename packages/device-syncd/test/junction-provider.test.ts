@@ -14166,3 +14166,109 @@ test("Junction sparse-history continuation fetches one bounded 30-day window", a
   assert.equal(continuation.payload?.windowStart, requestEnd);
   assert.equal(continuation.payload?.windowEnd, job.payload?.windowEnd);
 });
+
+test.each([
+  { canonicalEventCount: 1, label: "same-day aggregate rows", malformed: false },
+  { canonicalEventCount: 0, label: "malformed aggregate rows", malformed: true },
+])("Junction $label complete sparse history after bounded chunking", async ({
+  canonicalEventCount,
+  malformed,
+}) => {
+  let timeseriesRequestCount = 0;
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: ["caffeine"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-policy",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true },
+        }] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/caffeine/grouped") {
+        timeseriesRequestCount += 1;
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: malformed
+                ? [{ start: url.searchParams.get("start_date"), value: "not-a-number" }]
+                : [
+                  { start: url.searchParams.get("start_date"), value: 0.095 },
+                  { start: url.searchParams.get("start_date"), value: 0.063 },
+                ],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    },
+  });
+  const source = {
+    sourceProviderSlug: "garmin",
+    displayName: null,
+    status: "connected" as const,
+    resourceCount: 1,
+    resourceAvailabilitySummary: { caffeine: true },
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    firstSeenAt: "2026-08-11T00:00:00.000Z",
+    lastSeenAt: "2026-08-11T00:00:00.000Z",
+    lastDataAt: null,
+  };
+  const executor = requireValue(provider.jobExecutor);
+  const initialJob = requireValue(executor.createScheduledJobs?.(
+    createStoredAccount({ sources: [source] }),
+    "2026-08-11T12:00:00.000Z",
+  ).jobs.find((candidate) => candidate.payload?.resource === "caffeine"));
+  let job: DeviceSyncJobRecord = {
+    ...createJob("resource", initialJob.payload ?? {}),
+    dedupeKey: initialJob.dedupeKey ?? null,
+  };
+  let metadata: Record<string, unknown> = {};
+
+  for (let chunkIndex = 0; chunkIndex < 6; chunkIndex += 1) {
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ metadata, sources: [source] }),
+        importSnapshot: async () => ({
+          canonicalEventCount,
+          durableDeliveryAccepted: true,
+        }),
+        now: `2026-08-${(11 + chunkIndex).toString().padStart(2, "0")}T12:00:00.000Z`,
+      }),
+      job,
+    );
+    metadata = mergeStoredDeviceSyncMetadataPatch(metadata, result.metadataPatch);
+    const continuation = result.scheduledJobs?.find((candidate) =>
+      candidate.payload?.resource === "caffeine"
+    );
+    if (chunkIndex < 5) {
+      const requiredContinuation = requireValue(continuation);
+      job = {
+        ...createJob("resource", requiredContinuation.payload ?? {}),
+        dedupeKey: requiredContinuation.dedupeKey ?? null,
+      };
+    } else {
+      assert.equal(continuation, undefined);
+    }
+  }
+
+  assert.equal(timeseriesRequestCount, 6);
+  assert.equal(
+    executor.createScheduledJobs?.(
+      createStoredAccount({ metadata, sources: [source] }),
+      "2026-08-20T12:00:00.000Z",
+    ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"),
+    false,
+  );
+});
