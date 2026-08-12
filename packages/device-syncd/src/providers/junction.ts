@@ -51,6 +51,7 @@ import {
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionHistoricalBackfillEvidence,
   isJunctionExtendedTimeseriesHistoryBackfillCoverageCoordinate,
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   readJunctionHistoricalBackfillEvidence,
@@ -166,10 +167,14 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
+interface JunctionTimeseriesSnapshotFetchResult {
+  firstRetryableError: unknown | null;
+  snapshots: Record<string, unknown[]>;
+}
+
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
   canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
-  durableDeliveryAccepted: boolean;
   fetchComplete: boolean;
   postFetchSourceAdmission?: JunctionCurrentSourceAdmission;
   providerRecordCount: number;
@@ -328,9 +333,10 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = new Map(
       throw new TypeError(`Junction extended history resource ${resource} has no policy.`);
     }
     return [resource, Object.freeze({
+      historyAnchor: resourcePolicy.historyAnchor,
       historyChunkDays: resourcePolicy.historyChunkDays,
       initialHistoryDays: resourcePolicy.initialHistoryDays,
-      version: 1,
+      version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     })] as const;
   }),
 );
@@ -684,8 +690,9 @@ export function createJunctionDeviceSyncProvider(
             sourceProviderSlug,
           )
           || !isDeviceSyncSourceAdmitted(account.sources ?? [], sourceProviderSlug)
-          || !isJunctionResourceAdvertisedAvailable(
-            source.resourceAvailabilitySummary?.[resource],
+          || !isJunctionResourceAdvertisedAvailableInSummary(
+            source.resourceAvailabilitySummary,
+            resource,
           )
           || hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
             account.metadata,
@@ -706,12 +713,9 @@ export function createJunctionDeviceSyncProvider(
         .sort(([left], [right]) => left.localeCompare(right))
         .slice(0, JUNCTION_MAX_EXTENDED_HISTORY_SOURCES_PER_RESOURCE)
         .map(([sourceProviderSlug, firstSeenAt]) => {
-          // Blood pressure existed before the member connected its source, so
-          // its history ends at first-seen. Notes became ingestible in a newer
-          // runtime, so existing sources need recent history ending now.
           const window = buildExtendedTimeseriesBackfillWindow(
             resource,
-            resource === "note" ? now : firstSeenAt,
+            policy.historyAnchor === "schedule_time" ? now : firstSeenAt,
           );
           return buildExtendedTimeseriesBackfillJob({
             availableAt: now,
@@ -1970,7 +1974,6 @@ export function createJunctionDeviceSyncProvider(
               importResult: {
                 canonicalProviderRecordIdentities: [],
                 canonicalEventCount: 0,
-                durableDeliveryAccepted: false,
                 fetchComplete: false,
                 providerRecordCount: 0,
                 unresolvedProviderRecordIdentities: [],
@@ -2017,7 +2020,6 @@ export function createJunctionDeviceSyncProvider(
             importResult: {
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
-              durableDeliveryAccepted: false,
               fetchComplete: false,
               providerRecordCount: 0,
               unresolvedProviderRecordIdentities: [],
@@ -2076,10 +2078,6 @@ export function createJunctionDeviceSyncProvider(
         const historicalRecordsSeen = extendedHistoricalBackfill
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
-            || didJunctionAggregateTimeseriesImportAcceptProviderRecords(
-              effectiveResource,
-              timeseriesImport,
-            )
           : undefined;
         const historicalUnresolvedProviderRecords = extendedHistoricalBackfill
           ? resolveJunctionHistoricalUnresolvedProviderRecords(
@@ -2262,11 +2260,7 @@ export function createJunctionDeviceSyncProvider(
       ?? input.window.windowStart;
     const recordsSeen =
       input.job.payload.historicalRecordsSeen === true
-      || input.importResult.canonicalEventCount > 0
-      || didJunctionAggregateTimeseriesImportAcceptProviderRecords(
-        input.resource,
-        input.importResult,
-      );
+      || input.importResult.canonicalEventCount > 0;
     const unresolvedProviderRecords =
       resolveJunctionHistoricalUnresolvedProviderRecords(
         input.job,
@@ -2637,21 +2631,53 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug?: string | null,
     options: JunctionWindowFetchOptions = {},
   ): Promise<Record<string, unknown[]>> {
+    const result = await fetchTimeseriesSnapshotsPreservingResourceFailures(
+      context,
+      windowStart,
+      windowEnd,
+      skippedOptionalResources,
+      resources,
+      sourceProviderSlug,
+      options,
+    );
+    if (result.firstRetryableError !== null) {
+      throw result.firstRetryableError;
+    }
+    return result.snapshots;
+  }
+
+  async function fetchTimeseriesSnapshotsPreservingResourceFailures(
+    context: ProviderJobContext,
+    windowStart: string,
+    windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    resources: readonly string[] = timeseriesResources,
+    sourceProviderSlug?: string | null,
+    options: JunctionWindowFetchOptions = {},
+  ): Promise<JunctionTimeseriesSnapshotFetchResult> {
     const snapshots: Record<string, unknown[]> = {};
+    let firstRetryableError: unknown | null = null;
 
     for (const resource of resources) {
-      snapshots[resource] = await fetchTimeseriesResourceInChunks(
-        context,
-        resource,
-        windowStart,
-        windowEnd,
-        skippedOptionalResources,
-        sourceProviderSlug,
-        options,
-      );
+      try {
+        snapshots[resource] = await fetchTimeseriesResourceInChunks(
+          context,
+          resource,
+          windowStart,
+          windowEnd,
+          skippedOptionalResources,
+          sourceProviderSlug,
+          options,
+        );
+      } catch (error) {
+        if (!isRetryableDeviceSyncFailure(error)) {
+          throw error;
+        }
+        firstRetryableError ??= error;
+      }
     }
 
-    return snapshots;
+    return { firstRetryableError, snapshots };
   }
 
   async function fetchTimeseriesResourceInChunks(
@@ -2820,11 +2846,13 @@ export function createJunctionDeviceSyncProvider(
 
     const dedupedTimeseries = dedupeJunctionTimeseriesSnapshotRecords(accumulatedTimeseries);
     const providerRecordCount = countJunctionSnapshotRecords(dedupedTimeseries);
-    let durableDeliveryAccepted = false;
-    let unresolvedProviderRecordIdentities: readonly string[] = [];
-    let unresolvedProviderRecordCount = providerRecordCount;
-    let unresolvedProviderRecordsWithoutStableIdentity = providerRecordCount > 0;
     const requiresBloodPressureRecordResolution = resources.includes("blood_pressure");
+    let unresolvedProviderRecordIdentities: readonly string[] = [];
+    let unresolvedProviderRecordCount = requiresBloodPressureRecordResolution
+      ? providerRecordCount
+      : 0;
+    let unresolvedProviderRecordsWithoutStableIdentity =
+      requiresBloodPressureRecordResolution && providerRecordCount > 0;
     const fetchedProviderRecordIdentityEvidence =
       requiresBloodPressureRecordResolution
         && executionWindowStart
@@ -2869,7 +2897,6 @@ export function createJunctionDeviceSyncProvider(
             return {
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
-              durableDeliveryAccepted: false,
               fetchComplete: false,
               postFetchSourceAdmission,
               providerRecordCount,
@@ -2900,7 +2927,6 @@ export function createJunctionDeviceSyncProvider(
             timeseries: preparedImport.snapshots,
           });
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
-          durableDeliveryAccepted = readProviderSnapshotDurableDeliveryAccepted(receipt);
           if (fetchedProviderRecordIdentityEvidence) {
             const resolutionEvidence =
               resolveJunctionBloodPressureProviderRecordResolutionEvidence({
@@ -2919,14 +2945,6 @@ export function createJunctionDeviceSyncProvider(
             unresolvedProviderRecordCount =
               unresolvedProviderRecordIdentities.length
               + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
-          } else {
-            // Sparse aggregate resources intentionally compact multiple provider
-            // rows into fewer canonical events. The importer's durable receipt,
-            // not a row-count comparison, is the completion boundary.
-            if (durableDeliveryAccepted) {
-              unresolvedProviderRecordCount = 0;
-              unresolvedProviderRecordsWithoutStableIdentity = false;
-            }
           }
         }
       } catch (error) {
@@ -2944,7 +2962,6 @@ export function createJunctionDeviceSyncProvider(
           return {
             canonicalProviderRecordIdentities: [],
             canonicalEventCount: 0,
-            durableDeliveryAccepted: false,
             fetchComplete: false,
             providerRecordCount,
             unresolvedProviderRecordIdentities,
@@ -2960,7 +2977,6 @@ export function createJunctionDeviceSyncProvider(
     return {
       canonicalProviderRecordIdentities,
       canonicalEventCount,
-      durableDeliveryAccepted,
       fetchComplete,
       ...(postFetchSourceAdmission === undefined
         ? {}
@@ -2988,7 +3004,7 @@ export function createJunctionDeviceSyncProvider(
           yieldedAt: window.windowStart,
         };
       }
-      const timeseries = await fetchTimeseriesSnapshots(
+      const fetchResult = await fetchTimeseriesSnapshotsPreservingResourceFailures(
         context,
         window.windowStart,
         window.windowEnd,
@@ -2997,7 +3013,11 @@ export function createJunctionDeviceSyncProvider(
         sourceProviderSlug,
         { dateQueryFormat: "date" },
       );
+      const timeseries = fetchResult.snapshots;
       if (!hasJunctionSnapshotRecords(timeseries)) {
+        if (fetchResult.firstRetryableError !== null) {
+          throw fetchResult.firstRetryableError;
+        }
         continue;
       }
 
@@ -3023,6 +3043,9 @@ export function createJunctionDeviceSyncProvider(
             revisionAt: context.now,
           },
         });
+      }
+      if (fetchResult.firstRetryableError !== null) {
+        throw fetchResult.firstRetryableError;
       }
     }
     return {
@@ -3300,6 +3323,7 @@ export function createJunctionDeviceSyncProvider(
   function resolveJunctionExtendedTimeseriesBackfillPolicy(
     resource: string,
   ): {
+    historyAnchor: "schedule_time" | "source_first_seen";
     historyChunkDays: number;
     initialHistoryDays: number;
     version: number;
@@ -5746,6 +5770,19 @@ function isJunctionResourceAdvertisedAvailable(value: unknown): boolean {
     || normalizeString(record.status)?.toLowerCase() === "available";
 }
 
+function isJunctionResourceAdvertisedAvailableInSummary(
+  summary: Record<string, unknown> | null | undefined,
+  resource: string,
+): boolean {
+  if (!summary) {
+    return false;
+  }
+  return Object.entries(summary).some(([rawResource, availability]) =>
+    normalizeJunctionResourceName(rawResource) === resource
+    && isJunctionResourceAdvertisedAvailable(availability)
+  );
+}
+
 function isJunctionSourceResourceCurrentlyAvailable(input: {
   connectionId: string;
   providers: readonly JunctionProviderConnection[];
@@ -5762,8 +5799,9 @@ function isJunctionSourceResourceCurrentlyAvailable(input: {
   ).some((source) =>
     source.sourceProviderSlug === input.sourceProviderSlug
     && source.status === "connected"
-    && isJunctionResourceAdvertisedAvailable(
-      source.resourceAvailabilitySummary[input.resource],
+    && isJunctionResourceAdvertisedAvailableInSummary(
+      source.resourceAvailabilitySummary,
+      input.resource,
     )
   );
 }
@@ -7789,15 +7827,6 @@ function readPlainObject(value: unknown): Record<string, unknown> | null {
 
 function readProviderSnapshotDurableDeliveryAccepted(value: unknown): boolean {
   return readPlainObject(value)?.durableDeliveryAccepted === true;
-}
-
-function didJunctionAggregateTimeseriesImportAcceptProviderRecords(
-  resource: string,
-  result: JunctionPreciseTimeseriesImportResult,
-): boolean {
-  return resource !== "blood_pressure"
-    && result.providerRecordCount > 0
-    && result.durableDeliveryAccepted;
 }
 
 function readProviderSnapshotCanonicalEventCount(value: unknown): number {
