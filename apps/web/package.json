@@ -50,6 +50,7 @@
   },
   "dependencies": {
     "@base-ui/react": "1.4.1",
+    "@composio/client": "0.1.0-alpha.76",
     "@murphai/clinical-records": "workspace:*",
     "@murphai/cloudflare-hosted-control": "workspace:*",
     "@murphai/contracts": "workspace:*",
