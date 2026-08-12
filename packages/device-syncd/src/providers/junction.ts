@@ -2076,14 +2076,27 @@ export function createJunctionDeviceSyncProvider(
             sourceProviderSlug,
           });
           if (historicalPullReadiness === "no_obligation") {
-            return withJunctionMetadataPatch(
-              { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
-              buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
-                context,
-                effectiveResource,
-                sourceProviderSlug,
-              ),
-            );
+            return withJunctionExtendedTimeseriesBackfillFollowUp({
+              context,
+              historicalPullReadiness,
+              importResult: {
+                acceptedProviderRecordCount: 0,
+                canonicalProviderRecordIdentities: [],
+                canonicalEventCount: 0,
+                fetchComplete: true,
+                providerRecordCount: 0,
+                unresolvedProviderRecordIdentities: [],
+                unresolvedProviderRecordCount: 0,
+                unresolvedProviderRecordsWithoutStableIdentity: false,
+                yieldedAt: null,
+              },
+              job,
+              resource: effectiveResource,
+              result: {
+                nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+              },
+              window,
+            });
           }
           if (historicalPullReadiness === "pending") {
             const retryDelayMs =
@@ -2404,19 +2417,6 @@ export function createJunctionDeviceSyncProvider(
       const currentReconcileWindowStart = floorUtcDayTimestamp(
         subtractDays(floorUtcDayTimestamp(input.context.now), reconcileDays),
       );
-      if (historicalPullReadiness === "no_obligation") {
-        return withJunctionMetadataPatch(
-          input.result,
-          buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
-            input.context,
-            input.resource,
-            sourceProviderSlug,
-          ),
-        );
-      }
-      if (historicalPullReadiness === "terminal_failure") {
-        return input.result;
-      }
       if (
         historicalPullReadiness === "pending"
         || (
@@ -2463,6 +2463,19 @@ export function createJunctionDeviceSyncProvider(
             }),
           ],
         };
+      }
+      if (historicalPullReadiness === "no_obligation") {
+        return withJunctionMetadataPatch(
+          input.result,
+          buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
+            input.context,
+            input.resource,
+            sourceProviderSlug,
+          ),
+        );
+      }
+      if (historicalPullReadiness === "terminal_failure") {
+        return input.result;
       }
       return withJunctionMetadataPatch(
         input.result,

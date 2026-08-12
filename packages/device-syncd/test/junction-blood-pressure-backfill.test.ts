@@ -1630,12 +1630,12 @@ test("a persistently malformed sparse day exhausts only its bounded day retry", 
   );
 });
 
-test("a queued sparse migration keeps its frozen payload and catches up to current reconcile", async () => {
+test("not_pulled skips frozen history but catches a queued migration up to current reconcile", async () => {
   const tempDir = await makeTempDirectory("murph-junction-sparse-history-catch-up");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
-    historicalPullState: { resource: "caffeine", status: "success" },
+    historicalPullState: { notPulled: true, resource: "caffeine" },
     providerState: {
       resourceAvailability: { caffeine: true },
       status: "connected",
@@ -1720,24 +1720,11 @@ test("a queued sparse migration keeps its frozen payload and catches up to curre
       firstResult.metadataPatch?.junctionSparseDailyTimeseriesHistoryBackfillCoverage,
       undefined,
     );
-    const frozenWindowContinuation = findResourceJob(
+    const catchUp = findResourceJob(
       firstResult.scheduledJobs ?? [],
       "caffeine",
     );
-    const frozenWindowResult = await requireValue(provider.jobExecutor).executeJob(
-      context,
-      toJobRecord(frozenWindowContinuation, 2),
-    );
-    const catchUp = findResourceJob(
-      frozenWindowResult.scheduledJobs ?? [],
-      "caffeine",
-    );
-
-    assert.equal(
-      frozenWindowResult.metadataPatch
-        ?.junctionSparseDailyTimeseriesHistoryBackfillCoverage,
-      undefined,
-    );
+    assert.equal(requests.length, 0);
     assert.equal(catchUp.payload?.windowStart, "2026-06-11T00:00:00.000Z");
     assert.equal(catchUp.payload?.windowEnd, "2026-07-04T00:00:00.000Z");
 
@@ -1746,15 +1733,15 @@ test("a queued sparse migration keeps its frozen payload and catches up to curre
         account: createAccount({ now: "2026-07-22T12:00:00.000Z", sources }),
         now: "2026-07-22T12:00:00.000Z",
       }),
-      job: toJobRecord(catchUp, 3),
+      job: toJobRecord(catchUp, 2),
       provider,
       resource: "caffeine",
-      startingIndex: 4,
+      startingIndex: 3,
     });
 
     assert.equal(completed.executionCount, 34);
-    assert.equal(requests.length, 36);
-    assert.equal(requests[0]?.start, "2026-06-09");
+    assert.equal(requests.length, 34);
+    assert.equal(requests[0]?.start, "2026-06-11");
     assert.equal(requests.at(-1)?.end, "2026-07-14");
     assert.equal(
       completed.results.slice(0, -1).some((result) =>
