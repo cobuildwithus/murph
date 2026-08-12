@@ -693,6 +693,17 @@ const JUNCTION_BLOOD_PRESSURE_SYSTOLIC_PATHS = [
 const JUNCTION_BLOOD_PRESSURE_DIASTOLIC_PATHS = [
   "diastolic",
 ] as const;
+const JUNCTION_SPARSE_CLINICAL_VALUE_PATHS = [
+  "value",
+] as const;
+const JUNCTION_SPARSE_CLINICAL_UNIT_PATHS = [
+  "unit",
+] as const;
+const JUNCTION_HEART_RATE_ALERT_TYPE_PATHS = [
+  "type",
+  "alertType",
+  "alert_type",
+] as const;
 const JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS = [
   "timeZoneOffsetMinutes",
   "time_zone_offset_minutes",
@@ -1544,6 +1555,80 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
 const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTimeseriesDescriptor> =
   new Map(JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES);
 
+interface JunctionSparseClinicalTimeseriesDescriptor {
+  expectedProviderUnit: string;
+  metric: string;
+  normalizeValue: (value: unknown) => number | undefined;
+  title: string;
+  unit: string;
+}
+
+// device-syncd fetches timeseries in one-day chunks, where Junction documents
+// these resources at <=5 readings/day. This defensive import-boundary cap
+// limits persisted output from malformed direct/webhook payloads without
+// constraining normal provider history.
+const JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_IMPORT = 100;
+
+const JUNCTION_SPARSE_CLINICAL_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
+  JunctionTimeseriesResource,
+  JunctionSparseClinicalTimeseriesDescriptor,
+])[] = [
+  ["heart_rate_alert", {
+    expectedProviderUnit: "count",
+    metric: "heart-rate-alert",
+    normalizeValue: normalizeSparseClinicalCount,
+    title: "Junction heart rate alert",
+    unit: "count",
+  }],
+  ["sleep_apnea_alert", {
+    expectedProviderUnit: "count",
+    metric: "sleep-apnea-alert",
+    normalizeValue: normalizeSparseClinicalCount,
+    title: "Junction sleep apnea alert",
+    unit: "count",
+  }],
+  ["fall", {
+    expectedProviderUnit: "count",
+    metric: "fall",
+    normalizeValue: normalizeSparseClinicalCount,
+    title: "Junction fall",
+    unit: "count",
+  }],
+  ["forced_expiratory_volume_1", {
+    expectedProviderUnit: "l",
+    metric: "forced-expiratory-volume-1",
+    normalizeValue: normalizeSparseClinicalLungVolumeLiters,
+    title: "Junction forced expiratory volume (1 second)",
+    unit: "L",
+  }],
+  ["forced_vital_capacity", {
+    expectedProviderUnit: "l",
+    metric: "forced-vital-capacity",
+    normalizeValue: normalizeSparseClinicalLungVolumeLiters,
+    title: "Junction forced vital capacity",
+    unit: "L",
+  }],
+  ["peak_expiratory_flow_rate", {
+    expectedProviderUnit: "l/min",
+    metric: "peak-expiratory-flow-rate",
+    normalizeValue: normalizeSparseClinicalPeakFlowLitersPerMinute,
+    title: "Junction peak expiratory flow rate",
+    unit: "L/min",
+  }],
+  ["inhaler_usage", {
+    expectedProviderUnit: "count",
+    metric: "inhaler-usage",
+    normalizeValue: normalizeSparseClinicalCount,
+    title: "Junction inhaler usage",
+    unit: "count",
+  }],
+];
+
+const JUNCTION_SPARSE_CLINICAL_TIMESERIES_DESCRIPTORS: ReadonlyMap<
+  string,
+  JunctionSparseClinicalTimeseriesDescriptor
+> = new Map(JUNCTION_SPARSE_CLINICAL_TIMESERIES_DESCRIPTOR_ENTRIES);
+
 // Junction's blood-pressure timeseries pairs `systolic`/`diastolic` per
 // reading (docs.junction.com/api-reference/data/timeseries/blood-pressure),
 // so it cannot reduce through the single-value daily-aggregate descriptors.
@@ -1557,6 +1642,7 @@ const JUNCTION_NOTE_RESOURCE = "note";
 // bounded normalization set.
 const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set([
   ...JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
+  ...JUNCTION_SPARSE_CLINICAL_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
   JUNCTION_BLOOD_PRESSURE_RESOURCE,
   JUNCTION_NOTE_RESOURCE,
 ]);
@@ -1573,6 +1659,18 @@ function normalizeTimeseries(
 
     if (resource === JUNCTION_BLOOD_PRESSURE_RESOURCE) {
       pushJunctionBloodPressureReadings(payload, resource, slugify(resource, "timeseries"), context);
+      continue;
+    }
+
+    const sparseClinicalDescriptor = JUNCTION_SPARSE_CLINICAL_TIMESERIES_DESCRIPTORS.get(resource);
+    if (sparseClinicalDescriptor) {
+      pushJunctionSparseClinicalReadings(
+        payload,
+        resource,
+        slugify(resource, "timeseries"),
+        context,
+        sparseClinicalDescriptor,
+      );
       continue;
     }
 
@@ -2159,6 +2257,232 @@ function pushJunctionBloodPressureReadings(
       ),
     );
   }
+}
+
+// Junction classifies these resources as sparse (normally no more than five
+// records/day). Preserve each clinically meaningful occurrence, but retain
+// only the normalized value, interval, and source provenance: provider
+// payloads and timeseries arrays never cross the vault boundary.
+function pushJunctionSparseClinicalReadings(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+  descriptor: JunctionSparseClinicalTimeseriesDescriptor,
+): void {
+  const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
+  const seenReadingIdentityHashes = new Set<string>();
+  let readingCount = 0;
+  const resourceEntries = timeseriesResourceEntries(payload);
+
+  for (const [index, { entry, originFallback }] of resourceEntries
+    .slice(0, JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_IMPORT)
+    .entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: baseArtifactRole,
+      context,
+    });
+    if (!resourceContext) {
+      continue;
+    }
+
+    const value = descriptor.normalizeValue(
+      firstNumberFromPaths(entry, JUNCTION_SPARSE_CLINICAL_VALUE_PATHS),
+    );
+    const providerUnit = normalizeJunctionSparseClinicalUnit(
+      firstStringFromPaths(entry, JUNCTION_SPARSE_CLINICAL_UNIT_PATHS),
+    );
+    const startRaw = firstStringFromPaths(entry, ["start", "startAt", "start_at"]);
+    const startAt = resolveSafeTimestamp(startRaw, resourceContext.sourceProviderSlug);
+    const timestamp = resolveRecordTimestamp(
+      startRaw ? { ...entry, observedAtRaw: startRaw } : entry,
+      context,
+      resourceContext.sourceProviderSlug,
+    );
+    const occurredAt = timestamp.occurredAt ?? timestamp.recordedAt;
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(
+      entry,
+      timestamp,
+      occurredAt,
+      context.defaultTimeZone,
+    );
+    const endAt = resolveSafeTimestamp(
+      firstValueFromPaths(entry, ["end", "endAt", "end_at"]),
+      resourceContext.sourceProviderSlug,
+    );
+    const alertType = resource === "heart_rate_alert"
+      ? normalizeJunctionHeartRateAlertType(
+          firstStringFromPaths(entry, JUNCTION_HEART_RATE_ALERT_TYPE_PATHS),
+        )
+      : undefined;
+
+    if (
+      value === undefined
+      || !providerUnit
+      || providerUnit !== descriptor.expectedProviderUnit
+      || !startAt
+      || !endAt
+      || !occurredAt
+      || !dayKey
+      || Date.parse(endAt) < Date.parse(startAt)
+    ) {
+      continue;
+    }
+
+    const readingIdentityHash = buildJunctionSparseClinicalReadingIdentityHash({
+      alertType,
+      endAt,
+      entry,
+      occurredAt,
+      resourceContext,
+      resourceSlug,
+      unit: descriptor.unit,
+      value,
+    });
+    if (seenReadingIdentityHashes.has(readingIdentityHash)) {
+      continue;
+    }
+    seenReadingIdentityHashes.add(readingIdentityHash);
+    readingCount += 1;
+
+    const role = `${baseArtifactRole}:${dayKey}:${readingIdentityHash}`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          stripUndefined({
+            schema: "junction.sparse_clinical_reading.v1",
+            provider: "junction",
+            resource,
+            dayKey,
+            sourceProviderSlug: resourceContext.sourceProviderSlug,
+            sourceType: resourceContext.origin.sourceType,
+            sourceInstanceId: resourceContext.origin.sourceInstanceId,
+            occurredAt,
+            recordedAt: timestamp.recordedAt,
+            startAt,
+            endAt,
+            alertType,
+            value,
+            unit: descriptor.unit,
+          }),
+        ),
+        "timeseries_reading",
+      ),
+    );
+
+    context.events.push(stripUndefined({
+      kind: "measurement",
+      occurredAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey,
+      timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+      source: "device",
+      title: descriptor.title,
+      evidenceRoles: [role],
+      externalRef: makeProviderExternalRef(
+        "junction",
+        resourceContext.externalRefResourceType,
+        `${resourceSlug}-${readingIdentityHash}`,
+        undefined,
+        descriptor.metric,
+      ),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      fields: {
+        measurements: [stripUndefined({
+          metric: descriptor.metric,
+          value,
+          unit: descriptor.unit,
+          qualifiers: alertType ? { "alert-type": alertType } : undefined,
+        })],
+      },
+    }));
+  }
+
+  if (resourceEntries.length > JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_IMPORT) {
+    const role = `${baseArtifactRole}:bounded-overflow`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          {
+            schema: "junction.sparse_clinical_reading_overflow.v1",
+            provider: "junction",
+            resource,
+            inputRecordCount: resourceEntries.length,
+            persistedReadingCount: readingCount,
+            status: "bounded_overflow",
+          },
+        ),
+        "timeseries_reading",
+      ),
+    );
+  }
+
+  if (readingCount === 0) {
+    const role = `${baseArtifactRole}:no-valid-samples`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          {
+            schema: "junction.sparse_clinical_reading.v1",
+            provider: "junction",
+            resource,
+            readingCount: 0,
+            status: "no_valid_samples",
+          },
+        ),
+        "timeseries_reading",
+      ),
+    );
+  }
+}
+
+function buildJunctionSparseClinicalReadingIdentityHash(input: {
+  alertType?: string;
+  endAt?: string;
+  entry: PlainObject;
+  occurredAt: string;
+  resourceContext: ResourceContext;
+  resourceSlug: string;
+  unit: string;
+  value: number;
+}): string {
+  const providerRecordId = firstStringFromPaths(input.entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+
+  return shortHash(providerRecordId ? [
+    input.resourceSlug,
+    input.resourceContext.sourceProviderSlug,
+    input.resourceContext.origin.sourceType ?? "",
+    input.resourceContext.origin.sourceInstanceId ?? "",
+    providerRecordId,
+  ] : [
+    input.resourceSlug,
+    input.resourceContext.sourceProviderSlug,
+    input.resourceContext.origin.sourceType ?? "",
+    input.resourceContext.origin.sourceInstanceId ?? "",
+    input.occurredAt,
+    input.endAt ?? "",
+    input.value,
+    input.unit,
+    input.alertType ?? "",
+  ]);
 }
 
 function buildJunctionBloodPressureRepairStableExternalRefResourceId(
@@ -6006,6 +6330,48 @@ function normalizeGlucoseMilligramsPerDeciliter(value: unknown): number | undefi
   }
 
   return roundJunctionDailyAggregateValue(numeric * 18.0182);
+}
+
+function normalizeJunctionSparseClinicalUnit(value: string | undefined): string | undefined {
+  return value?.trim().toLowerCase().replace(/\s+/gu, "") || undefined;
+}
+
+function normalizeJunctionHeartRateAlertType(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return trimSlugToLength(slugify(value, "alert"), 80);
+}
+
+function normalizeSparseClinicalCount(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || !Number.isSafeInteger(numeric) || numeric <= 0 || numeric > 1000) {
+    return undefined;
+  }
+
+  return numeric;
+}
+
+function normalizeSparseClinicalLungVolumeLiters(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric <= 0 || numeric > 20) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+function normalizeSparseClinicalPeakFlowLitersPerMinute(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric <= 0 || numeric > 1500) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
 }
 
 function normalizeSystolicMmHg(value: unknown): number | undefined {

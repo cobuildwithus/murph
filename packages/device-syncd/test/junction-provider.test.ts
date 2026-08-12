@@ -7282,7 +7282,7 @@ test("Junction skips same closed-day timeseries after a completed reconcile", as
   assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
 });
 
-test("Junction code-owned compact defaults admit direct timeseries resource jobs", async () => {
+test("Junction code-owned sparse clinical defaults admit direct timeseries resource jobs", async () => {
   const requests: string[] = [];
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
@@ -7297,13 +7297,16 @@ test("Junction code-owned compact defaults admit direct timeseries resource jobs
       if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
         return createJsonResponse({ providers: [] });
       }
-      if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/heart_rate_alert/grouped")) {
         return createJsonResponse({
           groups: {
             garmin: [{
               data: [{
                 start: "2026-04-02T14:30:00.000Z",
-                value: 97,
+                end: "2026-04-02T14:30:10.000Z",
+                type: "irregular_rhythm",
+                unit: "count",
+                value: 1,
               }],
               source: { provider: "garmin", type: "watch" },
             }],
@@ -7329,7 +7332,7 @@ test("Junction code-owned compact defaults admit direct timeseries resource jobs
       refreshAccountTokens: async () => createAccount(),
     },
     createJob("resource", {
-      resource: "blood_oxygen",
+      resource: "heart_rate_alert",
       resourceCategory: "timeseries",
       windowStart: "2026-04-02T12:00:00.000Z",
       windowEnd: "2026-04-03T12:00:00.000Z",
@@ -7348,7 +7351,7 @@ test("Junction code-owned compact defaults admit direct timeseries resource jobs
     timeseries?: Record<string, unknown[]>;
   };
   assert.deepEqual(snapshot.summaries, {});
-  assert.equal(snapshot.timeseries?.blood_oxygen?.length, 1);
+  assert.equal(snapshot.timeseries?.heart_rate_alert?.length, 1);
   const timeseriesRequest = requireValue(
     requests.find((url) => url.includes("/v2/timeseries/")),
     "Junction resource job should fetch the hinted timeseries resource.",

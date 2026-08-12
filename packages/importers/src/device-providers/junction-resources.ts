@@ -42,6 +42,13 @@ export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
   "glucose",
   "blood_pressure",
   "note",
+  "heart_rate_alert",
+  "sleep_apnea_alert",
+  "fall",
+  "forced_expiratory_volume_1",
+  "forced_vital_capacity",
+  "peak_expiratory_flow_rate",
+  "inhaler_usage",
 ] as const);
 
 export type JunctionTimeseriesResource =
@@ -53,12 +60,11 @@ export type JunctionTimeseriesResource =
 // artifacts), so each default costs roughly 160 KB of raw evidence per
 // member-year regardless of intraday sample density: glucose (CGM, up to
 // 288 samples/day, ~10-15 MB/yr raw) is the canonical example of a stream
-// that must only land through this aggregate seam. `blood_pressure` is the
-// paired-shape exception: readings are sparse (10s-100s/yr), so each reading
-// lands as one `measurement` event plus one compact ~350-byte
-// `junction.blood_pressure_reading.v1` artifact. `note` is another sparse
-// exception: each tag lands as a completed intervention, while free text is
-// dropped. Intraday `heartrate` and
+// that must only land through this aggregate seam. Sparse clinical readings
+// (`blood_pressure`, alerts, falls, spirometry, and inhaler usage) each land
+// as one `measurement` event plus one compact per-reading artifact. `note` is
+// another sparse exception: each tag lands as a completed intervention, while
+// free text is dropped. Intraday `heartrate` and
 // `hypnogram` stay deliberately excluded from defaults: their raw sample
 // streams are unbounded (thousands of samples per day) and the vault must
 // not accumulate giant raw timeseries dumps. Sleep-grain heart rate and

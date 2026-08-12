@@ -234,7 +234,7 @@ function findJunctionCompactTimeseriesArtifacts(
 function assertNoFullJunctionTimeseriesArtifacts(payload: DeviceBatchImportPayload): void {
   assert.equal(
     (payload.evidenceParts ?? []).some((artifact) =>
-      /^junction-timeseries-(?!daily-|reading-(?:blood-pressure|note):)/u.test(artifact.role)
+      /^junction-timeseries-(?!daily-|reading-)/u.test(artifact.role)
     ),
     false,
   );
@@ -248,6 +248,14 @@ function findJunctionBloodPressureReadingArtifacts(payload: DeviceBatchImportPay
 function findJunctionNoteArtifacts(payload: DeviceBatchImportPayload) {
   return (payload.evidenceParts ?? [])
     .filter((artifact) => artifact.role.startsWith("junction-timeseries-reading-note:"));
+}
+
+function findJunctionSparseClinicalReadingArtifacts(
+  payload: DeviceBatchImportPayload,
+  resourceSlug: string,
+) {
+  return (payload.evidenceParts ?? [])
+    .filter((artifact) => artifact.role.startsWith(`junction-timeseries-reading-${resourceSlug}:`));
 }
 
 function makeJunctionDefaultTimeseriesSample(resource: string): Record<string, unknown> {
@@ -264,6 +272,47 @@ function makeJunctionDefaultTimeseriesSample(resource: string): Record<string, u
       end: base.timestamp,
       tags: ["sauna"],
       value: "SENSITIVE_VALUE_SENTINEL",
+    };
+  }
+
+  if (resource === "heart_rate_alert") {
+    return {
+      ...base,
+      start: base.timestamp,
+      end: "2026-04-22T12:00:10Z",
+      type: "irregular_rhythm",
+      unit: "count",
+      value: 1,
+    };
+  }
+
+  if (["sleep_apnea_alert", "fall", "inhaler_usage"].includes(resource)) {
+    return {
+      ...base,
+      start: base.timestamp,
+      end: "2026-04-22T12:00:10Z",
+      unit: "count",
+      value: 1,
+    };
+  }
+
+  if (["forced_expiratory_volume_1", "forced_vital_capacity"].includes(resource)) {
+    return {
+      ...base,
+      start: base.timestamp,
+      end: "2026-04-22T12:00:10Z",
+      unit: "L",
+      value: 3.5,
+    };
+  }
+
+  if (resource === "peak_expiratory_flow_rate") {
+    return {
+      ...base,
+      start: base.timestamp,
+      end: "2026-04-22T12:00:10Z",
+      unit: "L/min",
+      value: 450,
     };
   }
 
@@ -3510,6 +3559,320 @@ test("Junction normalizer keeps compact evidence when every blood pressure readi
   assert.doesNotMatch(JSON.stringify(artifacts), /"systolic":80|"diastolic":95/u);
 });
 
+test("Junction normalizer lands sparse clinical and safety readings as compact measurement events", () => {
+  const cases: readonly {
+    extra?: Record<string, unknown>;
+    metric: string;
+    providerUnit: string;
+    resource: string;
+    resourceSlug: string;
+    unit: string;
+    value: number;
+  }[] = [
+    {
+      resource: "heart_rate_alert",
+      resourceSlug: "heart-rate-alert",
+      metric: "heart-rate-alert",
+      value: 1,
+      providerUnit: "count",
+      unit: "count",
+      extra: { type: "irregular_rhythm" },
+    },
+    {
+      resource: "sleep_apnea_alert",
+      resourceSlug: "sleep-apnea-alert",
+      metric: "sleep-apnea-alert",
+      value: 2,
+      providerUnit: "count",
+      unit: "count",
+    },
+    {
+      resource: "fall",
+      resourceSlug: "fall",
+      metric: "fall",
+      value: 1,
+      providerUnit: "count",
+      unit: "count",
+    },
+    {
+      resource: "forced_expiratory_volume_1",
+      resourceSlug: "forced-expiratory-volume-1",
+      metric: "forced-expiratory-volume-1",
+      value: 3.42,
+      providerUnit: "L",
+      unit: "L",
+    },
+    {
+      resource: "forced_vital_capacity",
+      resourceSlug: "forced-vital-capacity",
+      metric: "forced-vital-capacity",
+      value: 4.81,
+      providerUnit: "L",
+      unit: "L",
+    },
+    {
+      resource: "peak_expiratory_flow_rate",
+      resourceSlug: "peak-expiratory-flow-rate",
+      metric: "peak-expiratory-flow-rate",
+      value: 480,
+      providerUnit: "L/min",
+      unit: "L/min",
+    },
+    {
+      resource: "inhaler_usage",
+      resourceSlug: "inhaler-usage",
+      metric: "inhaler-usage",
+      value: 2,
+      providerUnit: "count",
+      unit: "count",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const payload = normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        [testCase.resource]: {
+          groups: {
+            "apple-health-kit": [{
+              data: [{
+                id: `${testCase.resource}-row-1`,
+                start: "2026-04-22T08:05:00-05:00",
+                end: "2026-04-22T08:05:10-05:00",
+                unit: testCase.providerUnit,
+                value: testCase.value,
+                ...testCase.extra,
+              }],
+              source: { provider: "apple_health_kit", type: "watch" },
+            }],
+          },
+        },
+      },
+    });
+    const readings = (payload.events ?? []).filter((event) => event.kind === "measurement");
+    const measurements = readings[0]?.fields?.measurements as
+      | Array<Record<string, unknown>>
+      | undefined;
+    const measurement = measurements?.[0];
+    const artifacts = findJunctionSparseClinicalReadingArtifacts(payload, testCase.resourceSlug);
+    const artifactContent = artifacts[0]?.content as Record<string, unknown>;
+
+    assert.deepEqual(payload.provenance?.timeseriesResources, [testCase.resource]);
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.equal(readings.length, 1, testCase.resource);
+    assert.deepEqual(measurement, {
+      metric: testCase.metric,
+      value: testCase.value,
+      unit: testCase.unit,
+      ...(testCase.resource === "heart_rate_alert"
+        ? { qualifiers: { "alert-type": "irregular-rhythm" } }
+        : {}),
+    });
+    assert.equal(readings[0]?.occurredAt, "2026-04-22T13:05:00.000Z");
+    assert.equal(readings[0]?.dayKey, "2026-04-22");
+    assert.equal(readings[0]?.dataOrigin?.sourceProviderSlug, "apple-health-kit");
+    assert.equal(artifacts.length, 1);
+    assert.equal(artifactContent.schema, "junction.sparse_clinical_reading.v1");
+    assert.equal(artifactContent.startAt, "2026-04-22T13:05:00.000Z");
+    assert.equal(artifactContent.endAt, "2026-04-22T13:05:10.000Z");
+    assert.equal(artifactContent.value, testCase.value);
+    assert.equal(artifactContent.unit, testCase.unit);
+    assert.ok(JSON.stringify(artifactContent).length < 1024);
+    assertNoFullJunctionTimeseriesArtifacts(payload);
+    assertEventRawArtifactRolesExist(payload);
+  }
+});
+
+test("Junction sparse clinical readings reject malformed units and values without raw fallback", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn-junction-clinical-invalid",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        forced_expiratory_volume_1: [{
+          start: "2026-04-22T08:05:00Z",
+          end: "2026-04-22T08:05:10Z",
+          sourceProviderSlug: "spirometer",
+          unit: "count",
+          value: 4.2,
+          privateNote: "SENSITIVE_CLINICAL_TIMESERIES_SENTINEL",
+        }],
+        peak_expiratory_flow_rate: [{
+          start: "2026-04-22T08:10:00Z",
+          end: "2026-04-22T08:10:10Z",
+          sourceProviderSlug: "spirometer",
+          unit: "L/min",
+          value: 2000,
+          privateNote: "SENSITIVE_CLINICAL_TIMESERIES_SENTINEL",
+        }],
+        inhaler_usage: [{
+          start: "2026-04-22T08:15:00Z",
+          end: "2026-04-22T08:15:10Z",
+          sourceProviderSlug: "inhaler",
+          unit: "count",
+          value: 1.5,
+          privateNote: "SENSITIVE_CLINICAL_TIMESERIES_SENTINEL",
+        }],
+        fall: [{
+          start: "2026-04-22T08:20:10Z",
+          end: "2026-04-22T08:20:00Z",
+          sourceProviderSlug: "watch",
+          unit: "count",
+          value: 1,
+          privateNote: "SENSITIVE_CLINICAL_TIMESERIES_SENTINEL",
+        }],
+      },
+    },
+  });
+
+  assert.equal(payload.events?.length ?? 0, 0);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  for (const resourceSlug of [
+    "forced-expiratory-volume-1",
+    "peak-expiratory-flow-rate",
+    "inhaler-usage",
+    "fall",
+  ]) {
+    const artifacts = findJunctionSparseClinicalReadingArtifacts(payload, resourceSlug);
+    assert.equal(artifacts.length, 1);
+    assert.match(artifacts[0]?.role ?? "", /:no-valid-samples$/u);
+  }
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+  assert.doesNotMatch(JSON.stringify(payload), /SENSITIVE_CLINICAL_TIMESERIES_SENTINEL/u);
+  assert.equal(
+    payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"),
+    false,
+  );
+});
+
+test("Junction sparse clinical persistence stays bounded for oversized provider arrays", async () => {
+  const records = Array.from({ length: 150 }, (_, index) => ({
+    id: `fall-row-${index}`,
+    start: "2026-04-22T08:05:00Z",
+    end: "2026-04-22T08:05:10Z",
+    unit: "count",
+    value: 1,
+    privateNote: "SENSITIVE_OVERSIZED_CLINICAL_ARRAY_SENTINEL",
+  }));
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn-junction-clinical-oversized",
+    sourceKind: "webhook",
+    deliveryMode: "full_payload",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        fall: {
+          groups: {
+            "apple-health-kit": [{
+              data: records,
+              source: { provider: "apple_health_kit", type: "watch" },
+            }],
+          },
+        },
+      },
+    },
+  });
+  const artifacts = findJunctionSparseClinicalReadingArtifacts(payload, "fall");
+  const overflow = artifacts.find((artifact) => artifact.role.endsWith(":bounded-overflow"));
+
+  assert.equal(payload.events?.length, 100);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(artifacts.length, 101);
+  assert.deepEqual(overflow?.content, {
+    schema: "junction.sparse_clinical_reading_overflow.v1",
+    provider: "junction",
+    resource: "fall",
+    inputRecordCount: 150,
+    persistedReadingCount: 100,
+    status: "bounded_overflow",
+  });
+  assert.ok(artifacts.every((artifact) => JSON.stringify(artifact.content).length < 1024));
+  assert.equal(
+    payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"),
+    false,
+  );
+  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /"groups"|"data"|fall-row-|SENSITIVE_OVERSIZED/u);
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+  assertEventRawArtifactRolesExist(payload);
+});
+
+test("Junction sparse clinical evidence is replay- and order-idempotent", () => {
+  const reading = (end: string) => ({
+    start: "2026-04-22T08:05:00Z",
+    end,
+    sourceProviderSlug: "spirometer",
+    unit: "L",
+    value: 4.2,
+  });
+  const snapshot = (entries: object[]) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: { forced_vital_capacity: entries },
+  });
+  const first = reading("2026-04-22T08:05:10Z");
+  const second = reading("2026-04-22T08:05:20Z");
+  const withDuplicate = snapshot([first, { ...first }, second]);
+  const ordered = snapshot([first, second]);
+  const reversed = snapshot([second, first]);
+  const roles = (payload: ReturnType<typeof normalizeJunctionSnapshot>) =>
+    findJunctionSparseClinicalReadingArtifacts(payload, "forced-vital-capacity")
+      .map((artifact) => artifact.role)
+      .sort();
+
+  assert.equal(
+    (withDuplicate.events ?? []).filter((event) => event.kind === "measurement").length,
+    2,
+  );
+  assert.equal(findJunctionSparseClinicalReadingArtifacts(withDuplicate, "forced-vital-capacity").length, 2);
+  // The interval end participates in the fallback identity, so two distinct
+  // measurements with the same start/value are retained independently.
+  assert.deepEqual(roles(ordered), roles(reversed));
+});
+
+test("Junction sparse clinical readings pass the canonical device import contract", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-sparse-clinical-import");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const snapshot = {
+      importedAt: "2026-04-22T12:00:00.000Z",
+      timeseries: {
+        forced_expiratory_volume_1: [{
+          id: "fev1-row-1",
+          start: "2026-04-22T08:05:00Z",
+          end: "2026-04-22T08:05:10Z",
+          sourceProviderSlug: "spirometer",
+          unit: "L",
+          value: 3.42,
+        }],
+      },
+    };
+
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+    const reading = result.events.find((event) => event.kind === "measurement");
+
+    assert.equal(reading?.kind, "measurement");
+    assert.deepEqual(reading?.measurements, [
+      { metric: "forced-expiratory-volume-1", value: 3.42, unit: "L" },
+    ]);
+    assert.ok(result.evidencePartCount >= 1);
+    assert.notEqual(result.ingestShardPath, "");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction normalizer derives display-grade blood oxygen facts from timeseries unit aliases", async () => {
   const bloodOxygenUnits = [
     undefined,
@@ -4189,6 +4552,13 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "glucose",
     "blood_pressure",
     "note",
+    "heart_rate_alert",
+    "sleep_apnea_alert",
+    "fall",
+    "forced_expiratory_volume_1",
+    "forced_vital_capacity",
+    "peak_expiratory_flow_rate",
+    "inhaler_usage",
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
@@ -4243,6 +4613,21 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     assert.equal(findJunctionCompactTimeseriesArtifacts(payload, dailyResourceSlug).length, 1, dailyResourceSlug);
   }
   assert.equal(findJunctionBloodPressureReadingArtifacts(payload).length, 1);
+  for (const sparseResourceSlug of [
+    "heart-rate-alert",
+    "sleep-apnea-alert",
+    "fall",
+    "forced-expiratory-volume-1",
+    "forced-vital-capacity",
+    "peak-expiratory-flow-rate",
+    "inhaler-usage",
+  ]) {
+    assert.equal(
+      findJunctionSparseClinicalReadingArtifacts(payload, sparseResourceSlug).length,
+      1,
+      sparseResourceSlug,
+    );
+  }
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
   assert.ok(payload.events?.every((event) => event.externalRef?.system === "junction"));

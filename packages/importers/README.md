@@ -22,6 +22,14 @@ The wearable raw ingest envelope is only a receipt: it stores the payload hash a
 
 If a provider adapter returns a non-empty snapshot without any provider-owned raw artifacts, the import bridge adds one fallback `provider-snapshot` raw artifact before building the receipt. Adapters that intentionally drop dense provider payloads must sanitize those dropped sections or emit a tiny compact artifact first, so the fallback never re-stores the firehose under a generic role.
 
+Junction's sparse clinical and safety resources (heart-rate and sleep-apnea
+alerts, falls, FEV1, forced vital capacity, peak expiratory flow, and inhaler
+usage) land as one canonical `measurement` event and one compact evidence part
+per provider record. Units, interval timing, source provenance, and optional
+heart-rate alert type are retained; response arrays and unrelated provider
+fields are not. Inhaler usage remains a measured count because Junction does
+not provide enough medication or dose identity to assert an intervention.
+
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.
 
 The iOS companion's direct WHOOP overnight-HRV path is a deliberately narrower

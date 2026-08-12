@@ -37,6 +37,10 @@ Current providers:
 - Junction fetches the sparse `note` timeseries by default. Oura note tags become
   completed intervention events for Personal Patterns. Free-text note values are
   dropped before raw snapshot and compact evidence retention.
+- Junction also fetches sparse clinical and safety timeseries for heart-rate and
+  sleep-apnea alerts, falls, FEV1, forced vital capacity, peak expiratory flow,
+  and inhaler usage. Each provider record becomes a compact measurement fact;
+  no provider response array or canonical sample stream is retained.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
