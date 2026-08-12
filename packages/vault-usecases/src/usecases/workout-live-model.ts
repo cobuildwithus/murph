@@ -1,4 +1,5 @@
 import {
+  type WorkoutLiveApplyMemberActionV1,
   type WorkoutExercise,
   type WorkoutSession,
   type WorkoutSet,
@@ -72,6 +73,22 @@ export interface ClearLiveWorkoutSetInput
 export interface FinishLiveWorkoutInput extends LiveWorkoutLookupInput {
   endedAt?: string
 }
+
+export interface ApplyLiveWorkoutMemberActionInput {
+  acceptedAt: string
+  action: WorkoutLiveApplyMemberActionV1
+  vault: string
+}
+
+export type ApplyLiveWorkoutMemberActionResult =
+  | { status: 'applied' | 'unchanged' }
+  | {
+      reason:
+        | 'multiple_active_workouts'
+        | 'no_active_workout'
+        | 'workout_changed'
+      status: 'rejected'
+    }
 
 export function isActiveLiveWorkout(workout: WorkoutSession): boolean {
   return (

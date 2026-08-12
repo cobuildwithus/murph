@@ -1,5 +1,7 @@
 import {
+  type WorkoutLiveApplyMemberActionV1,
   type WorkoutExercise,
+  type WorkoutSession,
   type WorkoutSet,
   workoutSessionSchema,
   workoutTemplateSchema,
@@ -10,6 +12,8 @@ import { showWorkoutFormat } from './workout-format.js'
 import { addStructuredWorkoutRecord, editWorkoutRecord } from './workout.js'
 import {
   LIVE_WORKOUT_SOURCE_APP,
+  type ApplyLiveWorkoutMemberActionInput,
+  type ApplyLiveWorkoutMemberActionResult,
   type AddLiveWorkoutExerciseInput,
   type ClearLiveWorkoutSetInput,
   type FinishLiveWorkoutInput,
@@ -42,6 +46,241 @@ export * from './workout-live-model.js'
 
 const MAX_LIVE_WORKOUT_EXERCISES = 100
 const MAX_LIVE_WORKOUT_SETS_PER_EXERCISE = 150
+
+export async function applyLiveWorkoutMemberAction(
+  input: ApplyLiveWorkoutMemberActionInput,
+): Promise<ApplyLiveWorkoutMemberActionResult> {
+  return withLiveWorkoutMutationLock(input.vault, () =>
+    applyLiveWorkoutMemberActionWithLockHeld(input),
+  )
+}
+
+async function applyLiveWorkoutMemberActionWithLockHeld(
+  input: ApplyLiveWorkoutMemberActionInput,
+): Promise<ApplyLiveWorkoutMemberActionResult> {
+  const active = await findActiveLiveWorkouts(input.vault)
+  if (active.length === 0) {
+    return { reason: 'no_active_workout', status: 'rejected' }
+  }
+  if (active.length > 1) {
+    return { reason: 'multiple_active_workouts', status: 'rejected' }
+  }
+
+  const shown = active[0]!
+  let workout: WorkoutSession
+  try {
+    workout = parseShownWorkout(shown)
+    assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  } catch {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  const acceptedAtMs = Date.parse(input.acceptedAt)
+  if (
+    !Number.isFinite(acceptedAtMs)
+    || typeof workout.startedAt !== 'string'
+    || Date.parse(workout.startedAt) > acceptedAtMs
+  ) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+
+  const exercises = structuredClone(workout.exercises)
+    .sort((left, right) => left.order - right.order)
+  if (memberActionAlreadyApplied(exercises, input.action.mutations)) {
+    return { status: 'unchanged' }
+  }
+  if (!memberActionExpectedWorkoutMatches(exercises, input.action)) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+
+  const appendMutations = input.action.mutations.filter(
+    (mutation) => mutation.kind === 'exercise.append',
+  )
+  const setMutations = input.action.mutations.filter(
+    (mutation) => mutation.kind === 'set.put',
+  )
+
+  for (const mutation of appendMutations) {
+    const existing = exercises[mutation.exercisePosition - 1]
+    if (existing) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
+    if (mutation.exercisePosition !== exercises.length + 1) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
+
+    const order = exercises.reduce(
+      (maximum, exercise) => Math.max(maximum, exercise.order),
+      0,
+    ) + 1
+    exercises.push({
+      name: mutation.name,
+      order,
+      ...(mutation.mode ? { mode: mutation.mode } : {}),
+      ...(mutation.unitOverride
+        ? { unitOverride: mutation.unitOverride }
+        : {}),
+      sets: Array.from({ length: mutation.setCount }, (_, index) => ({
+        order: index + 1,
+      })),
+    })
+  }
+
+  for (const mutation of setMutations) {
+    const exercise = exercises[mutation.exercisePosition - 1]
+    if (!exercise || exercise.name !== mutation.exerciseName) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
+
+    exercise.sets.sort((left, right) => left.order - right.order)
+    const existing = exercise.sets[mutation.setPosition - 1]
+    if (!existing) {
+      if (
+        mutation.requiresExistingSet
+        || mutation.setPosition !== exercise.sets.length + 1
+      ) {
+        return { reason: 'workout_changed', status: 'rejected' }
+      }
+      const order = exercise.sets.reduce(
+        (maximum, set) => Math.max(maximum, set.order),
+        0,
+      ) + 1
+      exercise.sets.push(buildMemberActionWorkoutSet({
+        order,
+        result: mutation.result,
+      }))
+      continue
+    }
+
+    if (memberActionWorkoutSetMatches(existing, mutation.result)) {
+      continue
+    }
+    if (
+      mutation.requiresExistingSet
+      && !memberActionWorkoutSetMatches(existing, mutation.expectedResult)
+    ) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
+    if (!mutation.requiresExistingSet && hasLoggedWorkoutSet(existing)) {
+      return { reason: 'workout_changed', status: 'rejected' }
+    }
+
+    exercise.sets[mutation.setPosition - 1] = buildMemberActionWorkoutSet({
+      order: existing.order,
+      result: mutation.result,
+      type: existing.type,
+    })
+  }
+
+  const parsed = workoutSessionSchema.safeParse({
+    ...workout,
+    exercises,
+  })
+  if (!parsed.success) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+  if (JSON.stringify(parsed.data.exercises) === JSON.stringify(workout.exercises)) {
+    return { status: 'unchanged' }
+  }
+
+  await updateLiveWorkoutExercises(shown, workout, parsed.data.exercises)
+  return { status: 'applied' }
+}
+
+function memberActionAlreadyApplied(
+  exercises: WorkoutExercise[],
+  mutations: WorkoutLiveApplyMemberActionV1['mutations'],
+): boolean {
+  return mutations.every((mutation) => {
+    const exercise = exercises[mutation.exercisePosition - 1]
+    if (mutation.kind === 'exercise.append') {
+      return exercise !== undefined && matchesAppendedExercise(exercise, mutation)
+    }
+    if (!exercise || exercise.name !== mutation.exerciseName) {
+      return false
+    }
+    const set = exercise.sets
+      .slice()
+      .sort((left, right) => left.order - right.order)[mutation.setPosition - 1]
+    return set !== undefined
+      && memberActionWorkoutSetMatches(set, mutation.result)
+  })
+}
+
+function memberActionExpectedWorkoutMatches(
+  exercises: WorkoutExercise[],
+  action: WorkoutLiveApplyMemberActionV1,
+): boolean {
+  const expected = action.expectedWorkout.exercises
+  if (exercises.length !== expected.length) {
+    return false
+  }
+
+  return expected.every((expectedExercise, exerciseIndex) => {
+    const exercise = exercises[exerciseIndex]
+    if (
+      !exercise
+      || exercise.name !== expectedExercise.name
+      || exercise.sets.length !== expectedExercise.sets.length
+    ) {
+      return false
+    }
+    const sets = exercise.sets.slice().sort((left, right) => left.order - right.order)
+    return expectedExercise.sets.every(
+      (expectedSet, setIndex) =>
+        expectedSet.logged === hasLoggedWorkoutSet(sets[setIndex]!),
+    )
+  })
+}
+
+function matchesAppendedExercise(
+  exercise: WorkoutExercise,
+  mutation: Extract<
+    WorkoutLiveApplyMemberActionV1['mutations'][number],
+    { kind: 'exercise.append' }
+  >,
+): boolean {
+  return exercise.name === mutation.name
+    && (exercise.mode ?? null) === mutation.mode
+    && (exercise.unitOverride ?? null) === mutation.unitOverride
+    && exercise.sets.length >= mutation.setCount
+}
+
+function buildMemberActionWorkoutSet(input: {
+  order: number
+  result: Extract<
+    WorkoutLiveApplyMemberActionV1['mutations'][number],
+    { kind: 'set.put' }
+  >['result']
+  type?: WorkoutSet['type']
+}): WorkoutSet {
+  return {
+    order: input.order,
+    ...(input.type ? { type: input.type } : {}),
+    ...(input.result?.kind === 'note' ? { note: input.result.note } : {}),
+    ...(input.result?.kind === 'reps' ? { reps: input.result.reps } : {}),
+    ...(input.result?.kind === 'weight_reps'
+      ? {
+          reps: input.result.reps,
+          weight: input.result.weight,
+          weightUnit: input.result.weightUnit,
+        }
+      : {}),
+  }
+}
+
+function memberActionWorkoutSetMatches(
+  set: WorkoutSet,
+  result: Extract<
+    WorkoutLiveApplyMemberActionV1['mutations'][number],
+    { kind: 'set.put' }
+  >['result'],
+): boolean {
+  return JSON.stringify(buildMemberActionWorkoutSet({
+    order: set.order,
+    result,
+    type: set.type,
+  })) === JSON.stringify(set)
+}
 
 export async function startLiveWorkout(input: StartLiveWorkoutInput) {
   return withLiveWorkoutMutationLock(input.vault, () =>

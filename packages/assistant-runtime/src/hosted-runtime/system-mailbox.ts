@@ -861,6 +861,7 @@ function readHostedSystemMailboxRouteAction(
     item.route.action === "apply-member-activation"
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "apply-member-preferences"
+    || item.route.action === "apply-member-action"
     || item.route.action === "dispatch-assistant-notification"
     || item.route.action === "run-assistant-ask"
     || item.route.action === "continue-assistant-ask"

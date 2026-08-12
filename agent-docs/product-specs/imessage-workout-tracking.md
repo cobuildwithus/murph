@@ -6,7 +6,7 @@ A private member can run a strength workout from the Murph conversation:
 
 - see today's ordered exercises and completed/remaining set counts;
 - open an exercise to see each set's target and recorded result;
-- compose an explicit command to log, correct, or finish the workout;
+- edit sets and add exercises directly inside the expanded Messages app;
 - receive a refreshed immutable workout card after every verified free-form gym mutation.
 
 The experience borrows the useful workout-tracker loop—plan, log sets, correct, finish—without introducing a second workout product or data store.
@@ -16,8 +16,12 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
 - A saved workout format owns planned exercises, stable exercise identity, planned sets, and target values.
 - One canonical `activity_session` workout event owns session timing, unlogged set coordinates, and actual completed-set values. Planned targets are not copied into those placeholders.
 - A response card is an immutable snapshot. It never owns workout state.
-- The Messages extension has no vault credentials, shared authentication state, network client, cache, or persistence.
-- Every card action inserts a command into the Messages composer. The member sends it through the normal Murph conversation path, which remains the sole mutation owner.
+- The Messages extension has no vault credential, Privy dependency, cache, or
+  canonical persistence. It may read only the narrow Messages-scoped credential
+  enrolled by the containing app.
+- An active workout editor submits a closed, bounded member action directly.
+  The existing hosted mailbox delivers it to the canonical workout owner with
+  no assistant turn; the immutable card remains presentation, not authority.
 
 ## Response-card contract
 
@@ -94,19 +98,32 @@ Targets and actual results must remain distinct:
 
 An active workout may have zero pending sets after the final result is logged; it remains active until the member explicitly finishes it.
 
-## Command loop
+## Direct action loop
 
-The native app composes explicit one-based commands such as:
+The expanded native editor derives one bounded expected shape from the visible
+V4 workout snapshot and emits only closed `exercise.append` and `set.put`
+mutations. Positions are one-based presentation coordinates. The action carries
+no member id or canonical workout id; the server derives the member from the
+scoped credential and the workout owner requires exactly one active workout
+whose ordered exercise names, set counts, and logged states still match. Each
+edit to an existing set also carries the bounded previous result visible in the
+card; the canonical owner rejects the batch when that target changed instead of
+overwriting a newer correction.
 
-- `Log workout exercise 2 set 1: `
-- `Correct workout exercise 2 set 1: `
-- `Finish this tracked workout.`
+Web validates the whole envelope, re-checks active access and historical launch
+consent under the existing member locks, and durably appends the action before
+returning `202 Accepted`. The UI says the updates were sent, not saved. Runtime
+applies the complete batch under the existing live-workout mutation lock with
+one canonical write and no model call. Exact retries converge; a missing,
+completed, ambiguous, or changed workout is rejected without retargeting. The
+server admission time is part of that guard: delayed work cannot target a
+different workout that started after the action was durably accepted, even if
+its visible shape happens to match.
 
-The assistant resolves the command only when one tracked workout is unambiguous in the same private conversation. It may prefer the latest verified snapshot only when no second session is plausible; the inserted text itself is never identity or write authority. This keeps the common path to one tap and one sent reply. An ambiguous older card deliberately requires one narrow clarification instead of carrying a native correlation token, canonical event id, or write authority.
-
-The command numbers are one-based presentation positions, not canonical workout-order values. For set commands, the assistant resolves the exact active event, checks that the card's ordered exercise names and set counts still map unambiguously to it, and translates each display position to the current canonical `exercise.order` and `set.order`. It invokes the targeted `workout set log` or `workout set clear` command with the canonical workout id, exact displayed exercise name, and mapped orders. The card never offers a generic “complete at target” shortcut because range, AMRAP, null, and qualitative targets are not concrete actual performance. Card-driven set logging requires the mapped set to exist, so a stale name, order, or position fails instead of appending a new set.
-
-Finish branches before the active-only set preflight. The assistant invokes the exact event's idempotent `workout finish` command and accepts an already-completed return as convergence, allowing a refreshed completed card after an earlier response or delivery failure. The command owner preserves unrelated state and returns the verified canonical event; only that success permits a refreshed immutable card.
+This is the first family on the generic member-action delivery primitive. A
+future direct editor adds another explicit action variant and delegates to its
+existing domain use case. It does not gain arbitrary JSON paths, database
+operations, assistant tools, or a new queue.
 
 ## Rollout
 

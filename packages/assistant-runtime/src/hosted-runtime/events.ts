@@ -229,6 +229,15 @@ async function executeHostedSystemWake(input: {
         conversationMetrics: null,
         mailboxLane: "member-preferences-updated",
       });
+    case "member.action.requested": {
+      const { executeHostedMemberActionWake } = await import(
+        "./events/member-action.ts"
+      );
+      return executeHostedMemberActionWake({
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+    }
     case "assistant.notification.requested": {
       const { executeHostedAssistantNotificationWake } = await import(
         "./events/assistant-notification.ts"

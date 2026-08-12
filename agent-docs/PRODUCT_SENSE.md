@@ -196,6 +196,10 @@ default destination for every goal or the definition of activation.
   cards, provider-owned static card layouts, and ordered response media. The
   current routine path uses response media rather than pretending Telegram's
   table, details, or slideshow UI exists in Messages.
+- An active workout card may open a direct native editor. It submits a bounded,
+  typed action through the Messages-scoped credential and existing mailbox;
+  it does not ask the member to translate structured sets into chat text or
+  invoke a model for deterministic data entry.
 - Share the product meaning across channels: exercise steps, nutrition facts,
   progress, summaries, tables, and safety context should stay consistent.
   Adapt the visible UI to each platform's current capabilities. Telegram and

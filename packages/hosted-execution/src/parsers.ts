@@ -14,6 +14,7 @@ import {
   isAssistantVoiceOptionId,
   normalizeStoredAssistantPersonaId,
   normalizeIanaTimeZone,
+  parseMemberActionRequestV1,
 } from "@murphai/contracts";
 
 import {
@@ -54,6 +55,7 @@ import type {
   HostedExecutionMemberPreferencesUpdatedEvent,
   HostedExecutionEnvironmentVoiceCapturedPayload,
   HostedExecutionMealPhotoCapturedPayload,
+  HostedExecutionMemberActionRequestedEvent,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDirectRoute,
   HostedExecutionWake,
@@ -94,6 +96,7 @@ import {
   buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionMealPhotoCapturedWake,
+  buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionConversationMessageWake,
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDeviceSyncWake,
@@ -366,6 +369,20 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         runId: parseHostedClinicalRecordsIdentifier(record.runId),
         userId: wireUserId,
       };
+    case "member.action.requested":
+      assertExactHostedExecutionKeys(record, [
+        "eventId",
+        "kind",
+        "occurredAt",
+        "request",
+        "userId",
+      ], "Hosted execution member.action.requested wake");
+      return buildHostedExecutionMemberActionRequestedWake({
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
+        request: parseMemberActionRequestV1(record.request),
+      });
     case "device-sync.wake":
       return buildHostedExecutionDeviceSyncWake({
         ...(record.connectionId === undefined
@@ -1390,6 +1407,17 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         runId: parseHostedClinicalRecordsIdentifier(record.runId),
         userId,
       } satisfies HostedExecutionClinicalRecordsSyncRequestedEvent;
+    case "member.action.requested":
+      assertExactHostedExecutionKeys(record, [
+        "kind",
+        "request",
+        "userId",
+      ], "Hosted execution member.action.requested event");
+      return {
+        kind,
+        request: parseMemberActionRequestV1(record.request),
+        userId,
+      } satisfies HostedExecutionMemberActionRequestedEvent;
     case "device-sync.wake":
       return {
         ...(record.connectionId === undefined

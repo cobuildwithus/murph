@@ -2098,13 +2098,29 @@ deletion-first enrollment fails closed, while enrollment-first deletion removes
 the committed session. Only the credential's Messages-domain-separated lookup
 hash enters the existing short-lived session store, so a rollback to the
 historical unscoped device-agent hash reader cannot resolve it; current
-device-agent authority also rejects its `hbds_imessage_` prefix. Every proof
-action re-checks active access plus launch consent. Authenticated self-revocation
+device-agent authority also rejects its `hbds_imessage_` prefix. Every member
+action re-checks active access plus historical launch consent. Authenticated self-revocation
 remains available after access or consent is lost. The containing app may share
 only this derived credential through an explicitly addressed Keychain group;
 Privy tokens remain host-private and never enter the extension or capability-less
-message URL. The proof action is non-durable and does not create a second poll
-source of truth.
+message URL.
+
+The Messages bridge submits one generic, versioned `MemberActionRequestV1`
+envelope whose `action` is a closed discriminated union. The first action family,
+`workout.live.apply`, contains only bounded workout snapshot preconditions and
+typed exercise/set mutations; it is not an arbitrary path, patch, database, or
+tool-call surface. Web authenticates and validates the request, locks and
+re-checks member access and consent, then appends one encrypted
+`member.action.requested:<actionId>` item to the existing system mailbox before
+signaling the existing Temporal runtime. Runtime dispatches the action directly
+to the canonical vault use case without starting an assistant turn. The workout
+owner takes the existing live-workout mutation lock, requires exactly one active
+workout matching the authority-free visible shape and accepted before any
+replacement workout started, applies the complete batch in one canonical write,
+converges exact retries, and rejects stale or ambiguous state. A future data
+editor extends the closed action union and delegates to its
+existing domain owner; it reuses this auth, idempotency, mailbox, and wake path
+instead of adding another queue, state store, or generic mutation engine.
 
 Production companion auth diagnostics remain hidden until `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`; operators must install the exact-path Vercel WAF fixed-window limit before enabling that route in production.
 The authenticated companion overnight PRV ingress is one strict derived-data
@@ -2888,10 +2904,13 @@ contract applies the tighter of the fragment and image-path bounds before
 delivery. Compact-table provider chrome uses only bounded title, optional
 generic subtitle, and derived workout-progress fields; complete detail remains
 owned by the semantic text renderer. Nutrition V1 and V2 cards use the
-same bounded fragment and image-path family without a tracking field. The
-Messages extension remains offline and read-only. This adds no card API,
-database, background synchronization owner, authentication surface, or mutable
-message state.
+same bounded fragment and image-path family without a tracking field. The card
+remains offline, read-only presentation. For an active V4 workout only, the
+Messages extension may use the separately enrolled Messages-scoped credential
+to submit a bounded member action derived from the visible snapshot. The URL
+still carries no identity, canonical id, credential, or authority, and all other
+card kinds remain local presentation. This adds no mutable card state, card
+database, background synchronization owner, queue, or model turn.
 
 ## Scheduled assistant tool authority
 

@@ -12,6 +12,7 @@ import type {
   AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
+  MemberActionRequestV1,
 } from "@murphai/contracts";
 import type {
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -67,6 +68,7 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
+  "member.action.requested",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -90,6 +92,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "device-sync.wake",
   "environment-voice.captured",
   "meal-photo.captured",
+  "member.action.requested",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -482,6 +485,12 @@ export interface HostedExecutionClinicalRecordsSyncRequestedEvent
   runId: string;
 }
 
+export interface HostedExecutionMemberActionRequestedEvent
+  extends HostedExecutionBaseEvent {
+  kind: "member.action.requested";
+  request: MemberActionRequestV1;
+}
+
 export type HostedExecutionDirectRoute =
   | {
       channel: "linq" | "telegram";
@@ -527,6 +536,7 @@ export type HostedExecutionEvent =
   | HostedExecutionAssistantAskCompletedEvent
   | HostedExecutionClinicalRecordsSyncRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
+  | HostedExecutionMemberActionRequestedEvent
   | HostedExecutionRuntimeControlRequestedEvent;
 
 export interface HostedExecutionBaseWake {
@@ -821,6 +831,12 @@ export interface HostedExecutionMealPhotoCapturedWake extends HostedExecutionBas
   mealPhoto: HostedExecutionMealPhotoCapturedPayload;
 }
 
+export interface HostedExecutionMemberActionRequestedWake
+  extends HostedExecutionBaseWake {
+  kind: "member.action.requested";
+  request: MemberActionRequestV1;
+}
+
 export interface HostedExecutionPlainRuntimeControlWake extends HostedExecutionBaseWake {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
 }
@@ -859,6 +875,7 @@ export type HostedExecutionWake =
   | HostedExecutionDeviceSyncWake
   | HostedExecutionEnvironmentVoiceCapturedWake
   | HostedExecutionMealPhotoCapturedWake
+  | HostedExecutionMemberActionRequestedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake
   | HostedExecutionRuntimeControlWake;

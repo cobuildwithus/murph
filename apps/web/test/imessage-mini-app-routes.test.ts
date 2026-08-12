@@ -21,6 +21,7 @@ const ACTIVE_SESSION = {
 const MESSAGES_TOKEN = `hbds_imessage_${"a".repeat(43)}`;
 
 const mocks = vi.hoisted(() => ({
+  appendHostedMailboxEnvelopeTx: vi.fn(),
   assertActiveHostedMemberAccessAllowed: vi.fn(),
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   readJsonObject: vi.fn(async (request: Request) => await request.json()),
   requirePrivyMemberAuthFromBearerToken: vi.fn(),
   revokeAgentSession: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
   transaction: vi.fn(),
   transactionQuery: vi.fn(async () => []),
   upsertAgentSession: vi.fn(),
@@ -71,12 +73,18 @@ vi.mock("@/src/lib/device-sync/prisma-store/agent-sessions", () => ({
     revokeAgentSession = mocks.revokeAgentSession;
   },
 }));
+vi.mock("@/src/lib/hosted-mailbox/store", () => ({
+  appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+}));
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+}));
 
 type EnrollmentRoute = typeof import("../app/api/device-sync/companion/imessage-mini-app/enrollment/route");
-type ProofActionRoute = typeof import("../app/api/device-sync/companion/imessage-mini-app/proof-action/route");
+type MemberActionRoute = typeof import("../app/api/device-sync/companion/imessage-mini-app/member-actions/route");
 
 let enrollmentRoute: EnrollmentRoute;
-let proofActionRoute: ProofActionRoute;
+let memberActionRoute: MemberActionRoute;
 
 function jsonRequest(url: string, token: string, method: "POST" | "DELETE", body?: unknown) {
   return createBearerRequest(url, token, {
@@ -89,7 +97,7 @@ function jsonRequest(url: string, token: string, method: "POST" | "DELETE", body
 describe("iMessage mini-app routes", () => {
   beforeAll(async () => {
     enrollmentRoute = await import("../app/api/device-sync/companion/imessage-mini-app/enrollment/route");
-    proofActionRoute = await import("../app/api/device-sync/companion/imessage-mini-app/proof-action/route");
+    memberActionRoute = await import("../app/api/device-sync/companion/imessage-mini-app/member-actions/route");
   });
 
   beforeEach(() => {
@@ -109,6 +117,20 @@ describe("iMessage mini-app routes", () => {
     mocks.authenticateAgentSessionByTokenHash.mockResolvedValue({
       status: "active",
       session: ACTIVE_SESSION,
+    });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: {
+        id: "mailbox-action-1",
+        lane: "system",
+        laneSeq: "7",
+      },
+    });
+    mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member-1",
     });
     mocks.revokeAgentSession.mockResolvedValue({
       ...ACTIVE_SESSION,
@@ -298,36 +320,52 @@ describe("iMessage mini-app routes", () => {
     expect(mocks.upsertAgentSession).not.toHaveBeenCalled();
   });
 
-  it("re-checks account access and consent before accepting a proof choice", async () => {
+  it("durably accepts a typed member action before signaling the runtime", async () => {
     const request = jsonRequest(
-      "https://example.test/api/device-sync/companion/imessage-mini-app/proof-action",
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
       MESSAGES_TOKEN,
       "POST",
-      {
-        schemaVersion: 1,
-        cardId: "privy-proof-v1",
-        choice: "morning",
-        idempotencyKey: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
-      },
+      validMemberActionRequest(),
     );
 
-    const response = await proofActionRoute.POST(request);
+    const response = await memberActionRoute.POST(request);
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({
       memberId: "member-1",
-      prisma,
+      prisma: transactionClient,
     });
     expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
       memberId: "member-1",
-      prisma,
+      prisma: transactionClient,
     });
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "member.action.requested:2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+        kind: "member.action.requested",
+        userId: "member-1",
+      }),
+      tx: transactionClient,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member-1",
+      knownCheckpoint: {
+        lane: "system",
+        laneSeq: "7",
+        userId: "member-1",
+      },
+      mailboxItemId: "mailbox-action-1",
+      prisma,
+    });
+    expect(invocationOrder(mocks.appendHostedMailboxEnvelopeTx)).toBeLessThan(
+      invocationOrder(mocks.signalHostedMailboxAppendRuntime),
+    );
     await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+      duplicate: false,
       schemaVersion: 1,
-      authenticated: true,
-      cardId: "privy-proof-v1",
-      choice: "morning",
     });
   });
 
@@ -338,16 +376,11 @@ describe("iMessage mini-app routes", () => {
       message: "An active Murph plan is required.",
     }));
 
-    const response = await proofActionRoute.POST(jsonRequest(
-      "https://example.test/api/device-sync/companion/imessage-mini-app/proof-action",
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
       MESSAGES_TOKEN,
       "POST",
-      {
-        schemaVersion: 1,
-        cardId: "privy-proof-v1",
-        choice: "morning",
-        idempotencyKey: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
-      },
+      validMemberActionRequest(),
     ));
 
     expect(response.status).toBe(403);
@@ -355,6 +388,7 @@ describe("iMessage mini-app routes", () => {
       error: { code: "HOSTED_ACCESS_REQUIRED" },
     });
     expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("fails closed when launch consent was never granted", async () => {
@@ -364,16 +398,11 @@ describe("iMessage mini-app routes", () => {
       message: "Accept the Murph legal consent before continuing.",
     }));
 
-    const response = await proofActionRoute.POST(jsonRequest(
-      "https://example.test/api/device-sync/companion/imessage-mini-app/proof-action",
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
       MESSAGES_TOKEN,
       "POST",
-      {
-        schemaVersion: 1,
-        cardId: "privy-proof-v1",
-        choice: "evening",
-        idempotencyKey: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
-      },
+      validMemberActionRequest(),
     ));
 
     expect(response.status).toBe(403);
@@ -383,16 +412,39 @@ describe("iMessage mini-app routes", () => {
   });
 
   it("rejects a device-agent token before account gates or action parsing", async () => {
-    const response = await proofActionRoute.POST(jsonRequest(
-      "https://example.test/api/device-sync/companion/imessage-mini-app/proof-action",
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
       "hbds_agent_active",
       "POST",
-      { schemaVersion: 1 },
+      validMemberActionRequest(),
     ));
 
     expect(response.status).toBe(401);
     expect(mocks.authenticateAgentSessionByTokenHash).not.toHaveBeenCalled();
     expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+  });
+
+  it("rejects an action-id collision without signaling the runtime", async () => {
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      dedupeConflict: true,
+      duplicate: true,
+      inserted: false,
+      item: {
+        id: "mailbox-action-1",
+        lane: "system",
+        laneSeq: "7",
+      },
+    });
+
+    const response = await memberActionRoute.POST(jsonRequest(
+      "https://example.test/api/device-sync/companion/imessage-mini-app/member-actions",
+      MESSAGES_TOKEN,
+      "POST",
+      validMemberActionRequest(),
+    ));
+
+    expect(response.status).toBe(409);
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("revokes the derived credential without requiring the member to remain active", async () => {
@@ -418,6 +470,30 @@ function deferred<T>() {
     resolve = promiseResolve;
   });
   return { promise, resolve };
+}
+
+function validMemberActionRequest() {
+  return {
+    action: {
+      expectedWorkout: {
+        exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+      },
+      kind: "workout.live.apply",
+      mutations: [{
+        exerciseName: "Leg press",
+        exercisePosition: 1,
+        expectedResult: null,
+        kind: "set.put",
+        requiresExistingSet: true,
+        result: { kind: "weight_reps", reps: 8, weight: 180, weightUnit: "lb" },
+        setPosition: 1,
+      }],
+      version: 1,
+    },
+    actionId: "2f1c1fdc-c7b0-4d90-b902-8e6295959243",
+    requestedAt: new Date().toISOString(),
+    schemaVersion: 1,
+  };
 }
 
 function readCredentialToken(body: unknown): string {

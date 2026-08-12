@@ -165,6 +165,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "device-sync.wake",
   "environment-voice.captured",
   "meal-photo.captured",
+  "member.action.requested",
   "vault-share.delivery",
   "vault-share.revoke",
   ...HOSTED_RETIRED_MAILBOX_KINDS,
