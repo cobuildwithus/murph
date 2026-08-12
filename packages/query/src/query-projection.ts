@@ -4,6 +4,8 @@ import {
 import {
   selectMetricGoalProgress,
   selectMetricValue,
+  resolveMetricDefinition,
+  resolveWearableCanonicalMetricKey,
   type MetricGoalProgress,
   type MetricPoint,
   type MetricSelection,
@@ -24,7 +26,9 @@ import {
   summarizeWearableDayFromBundle,
   summarizeWearableLatestFromBundle,
   summarizeWearableMetricLatestFromBundle,
+  summarizeWearableMetricLatestFromBundleAndPoints,
   summarizeWearableMetricTrendFromBundle,
+  summarizeWearableMetricTrendFromBundleAndPoints,
   summarizeWearableRecoveryFromBundle,
   summarizeWearableSleepFromBundle,
   summarizeWearableSleepPatternFromBundle,
@@ -250,7 +254,19 @@ export async function summarizeWearableMetricLatestRuntime(
 ): Promise<ProjectedWearableMetricLatestSummary | null> {
   const location = await ensureFreshQueryProjection(vaultRoot);
   const bundle = readStoredPublicWearableSummaryBundle(location, filters);
-  return summarizeWearableMetricLatestFromBundle(bundle, metric, filters);
+  const summary = summarizeWearableMetricLatestFromBundle(bundle, metric, filters);
+  if (summary?.value !== null && summary !== null) {
+    return summary;
+  }
+
+  const metricPoints = listStoredWearableFallbackMetricPoints(location, metric, filters);
+  const fallback = summarizeWearableMetricLatestFromBundleAndPoints(
+    bundle,
+    metric,
+    metricPoints,
+    filters,
+  );
+  return fallback ? projectWearableMetricLatestSummary(fallback) : null;
 }
 
 export async function summarizeWearableMetricTrendRuntime(
@@ -260,7 +276,64 @@ export async function summarizeWearableMetricTrendRuntime(
 ): Promise<ProjectedWearableMetricTrendSummary | null> {
   const location = await ensureFreshQueryProjection(vaultRoot);
   const bundle = readStoredPublicWearableSummaryBundle(location, filters);
-  return summarizeWearableMetricTrendFromBundle(bundle, metric, filters);
+  const summary = summarizeWearableMetricTrendFromBundle(bundle, metric, filters);
+  if (summary?.value !== null && summary !== null) {
+    return summary;
+  }
+
+  const metricPoints = listStoredWearableFallbackMetricPoints(location, metric, filters);
+  const fallback = summarizeWearableMetricTrendFromBundleAndPoints(
+    bundle,
+    metric,
+    metricPoints,
+    filters,
+  );
+  return fallback ? projectWearableMetricTrendSummary(fallback) : null;
+}
+
+function listStoredWearableFallbackMetricPoints(
+  location: QueryProjectionLocation,
+  metric: string,
+  filters: WearableMetricSummaryFilters,
+): MetricPoint[] {
+  const wearableMetric = resolveWearableCanonicalMetricKey(metric);
+  const metricKey = wearableMetric ? resolveMetricDefinition(wearableMetric)?.key : null;
+  if (!metricKey) {
+    return [];
+  }
+
+  const windowDays = Number.isInteger(filters.windowDays) && (filters.windowDays ?? 0) > 0
+    ? filters.windowDays as number
+    : 7;
+  return listStoredMetricPoints(location, normalizeMetricPointFilters({
+    from: filters.date ?? filters.from,
+    limit: Math.min(10_000, Math.max(100, windowDays * 20)),
+    metricKey,
+    to: filters.date ?? filters.to,
+  }));
+}
+
+function projectWearableMetricLatestSummary(
+  summary: ReturnType<typeof summarizeWearableMetricLatestFromBundleAndPoints> & {},
+): ProjectedWearableMetricLatestSummary {
+  return {
+    ...summary,
+    paths: [],
+    recordIds: [],
+  };
+}
+
+function projectWearableMetricTrendSummary(
+  summary: ReturnType<typeof summarizeWearableMetricTrendFromBundleAndPoints> & {},
+): ProjectedWearableMetricTrendSummary {
+  return {
+    ...projectWearableMetricLatestSummary(summary),
+    points: summary.points.map((point) => ({
+      ...point,
+      paths: [],
+      recordIds: [],
+    })),
+  };
 }
 
 export async function explainWearableDriftRuntime(

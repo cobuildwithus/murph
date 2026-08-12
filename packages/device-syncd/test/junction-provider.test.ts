@@ -2586,7 +2586,7 @@ test("Junction REST diagnostic probes a compact resource without returning raw r
   const result = await probeRest({
     account: createAccount(),
     endpoint: "timeseries",
-    now: "2026-04-03T12:00:00.000Z",
+    now: "2026-04-03T00:00:00.000Z",
     resource: "blood_oxygen",
     sourceProviderSlug: "garmin",
     windowStart: "2026-04-02T10:15:30.000Z",
@@ -9686,6 +9686,65 @@ test("Junction webhook jobs dedupe by resource window instead of Svix trace", as
   assert.notEqual(first.traceId, second.traceId);
   assert.equal(first.jobs[0]?.kind, "resource");
   assert.equal(first.jobs[0]?.dedupeKey, second.jobs[0]?.dedupeKey);
+});
+
+test.each([
+  {
+    data: {
+      end: "2026-04-03T00:10:00.000Z",
+      observedAt: "2026-04-01T12:00:00.000Z",
+      resource: "body_mass_index",
+      source: { provider: "withings" },
+      start: "2026-04-02T23:50:00.000Z",
+      timestamp: "2026-04-01T13:00:00.000Z",
+    },
+    eventType: "daily.data.body_mass_index.created",
+    label: "interval start",
+  },
+  {
+    data: {
+      observedAt: "2026-04-01T12:00:00.000Z",
+      resource: "weight",
+      source: { provider: "withings" },
+      timestamp: "2026-04-02T08:00:00.000Z",
+    },
+    eventType: "daily.data.weight.created",
+    label: "instant timestamp",
+  },
+])("Junction webhook body range uses canonical $label instead of aliases", async ({
+  data,
+  eventType,
+  label,
+}) => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: eventType,
+      user_id: "junction-user-1",
+      data,
+    },
+    messageId: `msg_body_range_${label.replaceAll(" ", "_")}`,
+    timestamp: "1775174400",
+  });
+
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+
+  assert.equal(parsed.occurredAt, label === "interval start"
+    ? "2026-04-02T23:50:00.000Z"
+    : "2026-04-02T08:00:00.000Z");
+  assert.equal(parsed.jobs[0]?.payload?.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(parsed.jobs[0]?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 });
 
 test("Junction webhook source-provider extraction covers documented payload shapes", async () => {

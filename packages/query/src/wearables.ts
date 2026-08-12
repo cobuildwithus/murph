@@ -1,5 +1,17 @@
 import type { VaultReadModel } from "./read-model.ts";
-import { resolveWearableCanonicalMetricKey } from "@murphai/health-metrics";
+import {
+  canonicalizeWearableProviderSlug,
+  resolveComparableMetricPointValue,
+  resolveMetricDefinition,
+  resolveWearableCanonicalMetricKey,
+  type MetricPoint,
+} from "@murphai/health-metrics";
+import {
+  deviceDataOriginSchema,
+  externalRefSchema,
+} from "@murphai/contracts";
+
+import { extractMetricPointsFromCanonicalEntities } from "./metrics/index.ts";
 
 import {
   buildActivitySessionMetricCandidate,
@@ -1219,6 +1231,9 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
     const waistCircumference = resolveMetric("waistCircumference", selectMetricCandidates(dateCandidates, "waistCircumference"), {
       metricFamily: "body",
     });
+    const visceralFatIndex = resolveMetric("visceralFatIndex", selectMetricCandidates(dateCandidates, "visceralFatIndex"), {
+      metricFamily: "body",
+    });
     const summaryConfidence = summarizeMetricsConfidence([
       ["weightKg", weightKg],
       ["bodyFatPercentage", bodyFatPercentage],
@@ -1462,6 +1477,8 @@ function listWearableMetricObservations(
   bundle: WearableSummaryBundle,
   metric: WearableMetricKey,
   summaryKind: WearableMetricSummaryKind,
+  metricPoints: readonly MetricPoint[] = [],
+  filters: WearableMetricSummaryFilters = {},
 ): WearableMetricObservation[] {
   const summaries =
     summaryKind === "activity"
@@ -1472,7 +1489,7 @@ function listWearableMetricObservations(
           ? bundle.recoveryDays
           : bundle.sleepNights;
 
-  return summaries.flatMap((summary) => {
+  const curatedObservations = summaries.flatMap((summary) => {
     const resolved = Reflect.get(summary, metric);
 
     if (!isWearableResolvedMetric(resolved) || resolved.selection.value === null) {
@@ -1486,6 +1503,110 @@ function listWearableMetricObservations(
       summaryKind,
     }];
   });
+
+  return curatedObservations.length > 0
+    ? curatedObservations
+    : listCanonicalMetricPointWearableObservations(metric, summaryKind, metricPoints, filters);
+}
+
+function listCanonicalMetricPointWearableObservations(
+  metric: WearableMetricKey,
+  summaryKind: WearableMetricSummaryKind,
+  metricPoints: readonly MetricPoint[],
+  filters: WearableMetricSummaryFilters,
+): WearableMetricObservation[] {
+  if (!SPARSE_BODY_METRIC_KEYS.has(metric)) {
+    return [];
+  }
+  const definition = resolveMetricDefinition(metric);
+  if (!definition) {
+    return [];
+  }
+
+  const providerSet = filters.providers
+    ? new Set(filters.providers.map((provider) => canonicalizeWearableProviderSlug(provider)).filter(Boolean))
+    : null;
+  const candidatesByDate = new Map<string, WearableMetricCandidate[]>();
+
+  for (const point of metricPoints) {
+    if (
+      point.metricKey !== definition.key
+      || (filters.date !== undefined && point.effectiveDate !== filters.date)
+      || (filters.from !== undefined && point.effectiveDate < filters.from)
+      || (filters.to !== undefined && point.effectiveDate > filters.to)
+    ) {
+      continue;
+    }
+
+    const comparable = resolveComparableMetricPointValue(point, definition);
+    if (!comparable) {
+      continue;
+    }
+
+    const parsedOrigin = deviceDataOriginSchema.safeParse(point.provenance.dataOrigin);
+    const parsedExternalRef = externalRefSchema.safeParse(point.provenance.externalRef);
+    const externalRef: WearableExternalRef | null = parsedExternalRef.success
+      ? {
+          facet: parsedExternalRef.data.facet ?? null,
+          resourceId: parsedExternalRef.data.resourceId,
+          resourceType: parsedExternalRef.data.resourceType,
+          system: parsedExternalRef.data.system,
+          version: parsedExternalRef.data.version ?? null,
+        }
+      : null;
+    const contextSourceProviderSlug = typeof point.context.sourceProviderSlug === "string"
+      ? point.context.sourceProviderSlug
+      : null;
+    const dataOrigin = parsedOrigin.success
+      ? parsedOrigin.data
+      : contextSourceProviderSlug
+        ? { version: 1 as const, sourceProviderSlug: contextSourceProviderSlug }
+        : null;
+    const provider = resolveWearablePublicSourceProvider({
+      dataOrigin,
+      externalRef,
+      provider: point.provenance.provider,
+    }, {
+      suppressJunctionSourceInstanceFallback: true,
+    });
+    if (providerSet && !providerSet.has(provider)) {
+      continue;
+    }
+
+    const candidate: WearableMetricCandidate = {
+      candidateId: point.id,
+      dataOrigin,
+      date: point.effectiveDate,
+      externalRef,
+      metric,
+      occurredAt: point.observedAt,
+      paths: point.source.path ? [point.source.path] : [],
+      provider,
+      recordedAt: point.recordedAt,
+      recordIds: [point.source.recordId],
+      sourceFamily: point.source.family,
+      sourceKind: point.source.kind,
+      title: point.provenance.sourceLabel,
+      unit: comparable.unit,
+      value: comparable.value,
+    };
+    const dateCandidates = candidatesByDate.get(candidate.date) ?? [];
+    dateCandidates.push(candidate);
+    candidatesByDate.set(candidate.date, dateCandidates);
+  }
+
+  return [...candidatesByDate.entries()]
+    .sort(([left], [right]) => right.localeCompare(left))
+    .map(([date, candidates]) => ({
+      date,
+      notes: [
+        "Used canonical metric-point history because no curated wearable summary value was available.",
+      ],
+      resolved: resolveMetric(metric, candidates, {
+        metricFamily: inferDefaultMetricFamily(metric),
+      }),
+      summaryKind,
+    }));
 }
 
 function buildWearableMetricWindowStats(
@@ -1531,6 +1652,7 @@ function summarizeWearableMetricFromBundle(
   requestedMetric: string,
   filters: WearableMetricSummaryFilters = {},
   summaryKind?: WearableMetricSummaryKind,
+  metricPoints: readonly MetricPoint[] = [],
 ): WearableMetricLatestSummary | null {
   const resolvedRequest = resolveWearableMetricRequest(requestedMetric, summaryKind);
 
@@ -1538,7 +1660,13 @@ function summarizeWearableMetricFromBundle(
     return null;
   }
 
-  const observations = listWearableMetricObservations(bundle, resolvedRequest.metric, resolvedRequest.summaryKind);
+  const observations = listWearableMetricObservations(
+    bundle,
+    resolvedRequest.metric,
+    resolvedRequest.summaryKind,
+    metricPoints,
+    filters,
+  );
   const windowDays = resolveWearableMetricWindowDays(filters.windowDays);
   const recentObservations = observations.slice(0, windowDays);
   const priorObservations = observations.slice(windowDays, windowDays * 2);
@@ -1694,11 +1822,21 @@ export function summarizeWearableMetricLatest(
   metric: string,
   filters: WearableMetricSummaryFilters = {},
 ): WearableMetricLatestSummary | null {
-  return summarizeWearableMetricFromBundle(
+  return summarizeWearableMetricLatestFromBundleAndPoints(
     buildWearableSummaryBundle(vault, filters),
     metric,
+    extractMetricPointsFromCanonicalEntities(vault.entities),
     filters,
   );
+}
+
+export function summarizeWearableMetricLatestFromBundleAndPoints(
+  bundle: WearableSummaryBundle,
+  metric: string,
+  metricPoints: readonly MetricPoint[],
+  filters: WearableMetricSummaryFilters = {},
+): WearableMetricLatestSummary | null {
+  return summarizeWearableMetricFromBundle(bundle, metric, filters, undefined, metricPoints);
 }
 
 export function summarizeWearableMetricLatestFromBundle(
@@ -1724,7 +1862,46 @@ export function summarizeWearableMetricTrend(
   metric: string,
   filters: WearableMetricSummaryFilters = {},
 ): WearableMetricTrendSummary | null {
-  return summarizeWearableMetricTrendFromBundle(buildWearableSummaryBundle(vault, filters), metric, filters);
+  return summarizeWearableMetricTrendFromBundleAndPoints(
+    buildWearableSummaryBundle(vault, filters),
+    metric,
+    extractMetricPointsFromCanonicalEntities(vault.entities),
+    filters,
+  );
+}
+
+export function summarizeWearableMetricTrendFromBundleAndPoints(
+  bundle: WearableSummaryBundle,
+  metric: string,
+  metricPoints: readonly MetricPoint[],
+  filters: WearableMetricSummaryFilters = {},
+): WearableMetricTrendSummary | null {
+  const metricSummary = summarizeWearableMetricFromBundle(
+    bundle,
+    metric,
+    filters,
+    undefined,
+    metricPoints,
+  );
+
+  if (!metricSummary) {
+    return null;
+  }
+
+  const points = listWearableMetricObservations(
+    bundle,
+    metricSummary.metric,
+    metricSummary.summaryKind,
+    metricPoints,
+    filters,
+  )
+    .slice(0, metricSummary.windowDays)
+    .map(buildWearableMetricTrendPoint);
+
+  return {
+    ...metricSummary,
+    points,
+  };
 }
 
 export function summarizeWearableMetricTrendFromBundle(

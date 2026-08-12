@@ -359,6 +359,10 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
   const explicitObservationGrain = readString(entity.attributes.observationGrain);
   const observationGrain = explicitObservationGrain ?? inferWearableObservationGrain(entity);
   const effectiveDate = resolveObservationEffectiveDate(entity, observationGrain);
+  const sourceProviderSlug = observationGrain === "sample"
+    && resolveMetricDefinition(metric)?.category === "body"
+    ? readString(readRecord(entity.attributes.dataOrigin)?.sourceProviderSlug)
+    : null;
 
   return [scalarMetricPoint({
     confidence: eventConfidence(entity),
@@ -366,6 +370,7 @@ function observationMetricPoints(entity: CanonicalEntity): MetricPoint[] {
       measurementMethodKey: eventMeasurementMethodKey(entity),
       observationGrain: observationGrain ?? undefined,
       qualifiers: readQualifiers(entity.attributes.qualifiers),
+      ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
       timeZone: readString(entity.attributes.timeZone) ?? undefined,
     },
     grain: isDayGrainObservation(observationGrain) ? "day" : undefined,
