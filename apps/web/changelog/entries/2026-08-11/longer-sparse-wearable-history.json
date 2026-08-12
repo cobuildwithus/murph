@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 200,
+  "item": {
+    "id": "longer-sparse-wearable-history",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Bring more wearable history into Murph",
+    "summary": "Connected wearables can now bring up to six months of supported low-frequency history, including AFib burden, VO2 max, temperature, breathing disturbance, recovery, hydration, caffeine, and mindfulness.",
+    "details": "Dense streams stay bounded to recent data, and the longer import runs in the existing background sync only for data the connected source says it provides.",
+    "relevanceTags": ["wearables", "history", "recovery"],
+    "sourcePullRequests": [1693]
+  }
+}

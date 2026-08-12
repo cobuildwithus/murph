@@ -22,34 +22,58 @@ import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
+interface HostedFamilyCheckoutConfirmation {
+  cancelLabel: string;
+  confirmLabel: string;
+  description: string | null;
+  title: string;
+}
+
 export function HostedFamilyStartButton(props: {
   block?: boolean;
-  trialConversionConfirmation?: {
-    cancelLabel: string;
-    confirmLabel: string;
-    description: string;
-    title: string;
-  };
+  familyInviteReturnPath?: string | null;
   label: string;
+  ownershipConfirmation?: boolean;
+  returnDirectlyToInvite?: boolean;
+  resolveCheckoutForInvite?: boolean;
+  trialConversionConfirmation?: Omit<HostedFamilyCheckoutConfirmation, "description"> & {
+    description: string;
+  };
   variant?: "default" | "secondary";
 }) {
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const confirmation: HostedFamilyCheckoutConfirmation | null =
+    props.trialConversionConfirmation ?? (
+      props.ownershipConfirmation
+        ? {
+            cancelLabel: "I'll use an invite",
+            confirmLabel: "Start a plan I pay for",
+            description: null,
+            title: "Start your own Family plan?",
+          }
+        : null
+    );
 
   async function startCheckout() {
     setErrorMessage(null);
     setStatusMessage(null);
     setIsSubmitting(true);
     try {
+      const payload = {
+        ...(props.trialConversionConfirmation
+          ? { confirmedTrialConversion: true }
+          : {}),
+      };
       const response = await requestHostedOnboardingJson<{
         alreadyActive: boolean;
         url: string | null;
       }>({
         method: "POST",
-        ...(props.trialConversionConfirmation
-          ? { payload: { confirmedTrialConversion: true } }
+        ...(Object.keys(payload).length > 0
+          ? { payload }
           : {}),
         url: "/api/settings/billing/family/checkout",
       });
@@ -70,13 +94,48 @@ export function HostedFamilyStartButton(props: {
     }
   }
 
+  async function resolveCheckoutForInvite() {
+    if (!props.familyInviteReturnPath) {
+      setConfirmationOpen(false);
+      return;
+    }
+    setErrorMessage(null);
+    setStatusMessage(null);
+    setIsSubmitting(true);
+    try {
+      const response = await requestHostedOnboardingJson<{
+        alreadyActive: boolean;
+        url: string | null;
+      }>({
+        method: "POST",
+        payload: {
+          abandonForInvite: true,
+          familyInviteReturnPath: props.familyInviteReturnPath,
+        },
+        url: "/api/settings/billing/family/checkout",
+      });
+      if (!response.url) {
+        throw new Error(
+          "Family billing changed before the invite recovery completed.",
+        );
+      }
+      window.location.assign(response.url);
+    } catch (error) {
+      setIsSubmitting(false);
+      setErrorMessage(toErrorMessage(
+        error,
+        "Could not resolve the unfinished Family checkout right now.",
+      ));
+    }
+  }
+
   return (
     <div className={cn("flex flex-col gap-2", props.block ? "items-stretch" : "items-start")}>
       <Button
         type="button"
         variant={props.variant ?? "default"}
         onClick={() => {
-          if (props.trialConversionConfirmation) {
+          if (confirmation) {
             setConfirmationOpen(true);
             return;
           }
@@ -97,7 +156,7 @@ export function HostedFamilyStartButton(props: {
           {statusMessage}
         </p>
       ) : null}
-      {props.trialConversionConfirmation ? (
+      {confirmation ? (
         <Dialog
           open={confirmationOpen}
           onOpenChange={(open) => {
@@ -108,11 +167,18 @@ export function HostedFamilyStartButton(props: {
         >
           <DialogContent className="max-w-md gap-6 p-6 md:p-7">
             <DialogHeader className="pr-10">
-              <DialogTitle>
-                {props.trialConversionConfirmation.title}
-              </DialogTitle>
-              <DialogDescription>
-                {props.trialConversionConfirmation.description}
+              <DialogTitle>{confirmation.title}</DialogTitle>
+              <DialogDescription className="space-y-2">
+                <span className="block">
+                  You will own this Family plan and pay for every included member.
+                </span>
+                <span className="block">
+                  To join someone else&apos;s Family, use the invite they sent you
+                  instead of starting a plan here.
+                </span>
+                {confirmation.description ? (
+                  <span className="block">{confirmation.description}</span>
+                ) : null}
               </DialogDescription>
             </DialogHeader>
             {errorMessage ? (
@@ -128,19 +194,32 @@ export function HostedFamilyStartButton(props: {
                 disabled={isSubmitting}
                 className="w-full"
               >
-                {isSubmitting
-                  ? "Starting Family..."
-                  : props.trialConversionConfirmation.confirmLabel}
+                {isSubmitting ? "Starting Family..." : confirmation.confirmLabel}
               </Button>
               <Button
                 type="button"
                 size="xl"
                 variant="ghost"
-                onClick={() => setConfirmationOpen(false)}
+                onClick={() => {
+                  if (props.resolveCheckoutForInvite) {
+                    void resolveCheckoutForInvite();
+                    return;
+                  }
+                  if (
+                    props.returnDirectlyToInvite
+                    && props.familyInviteReturnPath
+                  ) {
+                    window.location.assign(props.familyInviteReturnPath);
+                    return;
+                  }
+                  setConfirmationOpen(false);
+                }}
                 disabled={isSubmitting}
                 className="w-full"
               >
-                {props.trialConversionConfirmation.cancelLabel}
+                {isSubmitting && props.resolveCheckoutForInvite
+                  ? "Resolving setup..."
+                  : confirmation.cancelLabel}
               </Button>
             </DialogFooter>
           </DialogContent>

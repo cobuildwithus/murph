@@ -26,7 +26,9 @@ import {
 } from "./errors";
 import {
   acceptHostedFamilyInviteFromPhoneTx,
+  buildHostedFamilyDraftCheckoutConflictReplyText,
   buildHostedFamilyInviteAcceptedReplyText,
+  HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
   resolveHostedFamilyInviteTokenForInbound,
 } from "./family-plan";
 import {
@@ -86,6 +88,7 @@ import {
   buildConversationHomeRedirectResponse,
   buildFallbackSignupLinkResponse,
   buildFamilyInviteAcceptedResponse,
+  buildFamilyInviteDraftRecoveryResponse,
   buildGroupLineRecoveryResponse,
   buildGroupSetupRequiredResponse,
   buildIgnoredLinqWebhookPlan,
@@ -1486,12 +1489,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   };
 
-  const familyInviteTokenPresent = await resolveHostedFamilyInviteTokenForInbound({
+  const familyInviteCode = await resolveHostedFamilyInviteTokenForInbound({
     prisma: input.prisma,
     text: summary.text,
-  }) !== null;
+  });
+  const familyInviteTokenPresent = familyInviteCode !== null;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   let familyActivationWake: HostedWebhookWakeHandoff | null = null;
+  let familyDraftCheckoutConflict = false;
   let familyRouteBlockedPlan: HostedOnboardingLinqDirectPlan | null = null;
   const familyRouteBlockedError = new Error("Hosted Linq family route is not bindable.");
   if (participantContact.kind === "phone") {
@@ -1554,7 +1559,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
       if (error === familyRouteBlockedError && familyRouteBlockedPlan) {
         return familyRouteBlockedPlan;
       }
-      if (!isExpectedHostedLinqFamilyInviteAcceptanceMiss(error)) {
+      if (
+        isHostedOnboardingError(error)
+        && error.code === HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE
+      ) {
+        familyDraftCheckoutConflict = true;
+      } else if (!isExpectedHostedLinqFamilyInviteAcceptanceMiss(error)) {
         throw error;
       }
     }
@@ -1585,6 +1595,49 @@ export async function planHostedOnboardingLinqWebhook(input: {
         existingMemberMatch,
         reason: "family-invite-accepted",
         routeStage: "family-invite-accepted",
+      }),
+    );
+  }
+
+  if (familyDraftCheckoutConflict) {
+    if (!existingMember) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_DRAFT_RECOVERY_MEMBER_MISSING",
+        httpStatus: 500,
+        message: "The Family invite recovery member could not be resolved.",
+        retryable: true,
+      });
+    }
+    if (!familyInviteCode) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_DRAFT_RECOVERY_INVITE_MISSING",
+        httpStatus: 500,
+        message: "The Family invite recovery link could not be resolved.",
+        retryable: true,
+      });
+    }
+    const dailyState = await incrementHostedLinqInboundDailyState({
+      memberId: existingMember.id,
+      occurredAt,
+      prisma: input.prisma,
+    });
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildFamilyInviteDraftRecoveryResponse({
+        chatId: summary.chatId,
+        memberId: existingMember.id,
+        message: buildHostedFamilyDraftCheckoutConflictReplyText({
+          inviteCode: familyInviteCode,
+        }),
+        messageId: summary.messageId,
+        occurredAt,
+        sourceEventId: input.event.event_id,
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        dailyInboundCount: dailyState.inboundCount,
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "family-invite-draft-recovery-required",
+        routeStage: "family-invite-draft-recovery-required",
       }),
     );
   }

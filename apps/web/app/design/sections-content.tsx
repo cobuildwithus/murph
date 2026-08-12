@@ -572,7 +572,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source actions and disconnect lifecycle">
+      <StudySection title="Connect source availability, actions, and disconnect lifecycle">
         <ConnectSourceCardStudy
           androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
         />
@@ -616,7 +616,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status">
+      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status, plus Family draft recovery">
         <GroupMemberPlanStudy />
       </StudySection>
 

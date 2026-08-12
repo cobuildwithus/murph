@@ -5,17 +5,43 @@ import { useState } from "react";
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
 import { Button } from "@/src/components/ui/button";
+import {
+  buildHostedFamilyInviteRecoveryPath,
+  HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
+} from "@/src/lib/hosted-onboarding/app-routes";
 
-export function FamilyInviteWebAcceptButton(props: { inviteCode: string }) {
+export type FamilyInviteWebAcceptInitialState = "draft_conflict" | "idle";
+
+const HOSTED_FAMILY_DRAFT_CONFLICT_MESSAGE =
+  "You already have an unfinished Family setup. Resolve it in Settings, then you’ll return here to try this invite again.";
+
+export function FamilyInviteWebAcceptButton(props: {
+  initialState?: FamilyInviteWebAcceptInitialState;
+  inviteCode: string;
+}) {
   const router = useRouter();
   const [status, setStatus] = useState<"accepted" | "idle" | "submitting">("idle");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const initialDraftConflict = props.initialState === "draft_conflict";
+  const [errorMessage, setErrorMessage] = useState<string | null>(
+    initialDraftConflict
+      ? HOSTED_FAMILY_DRAFT_CONFLICT_MESSAGE
+      : null,
+  );
+  const [recoveryPath, setRecoveryPath] = useState<string | null>(
+    initialDraftConflict
+      ? buildHostedFamilyInviteRecoveryPath(props.inviteCode)
+      : null,
+  );
 
   async function accept() {
     setErrorMessage(null);
+    setRecoveryPath(null);
     setStatus("submitting");
     try {
       await requestHostedOnboardingJson({
@@ -25,6 +51,14 @@ export function FamilyInviteWebAcceptButton(props: { inviteCode: string }) {
       setStatus("accepted");
     } catch (error) {
       setStatus("idle");
+      if (
+        error instanceof HostedOnboardingApiError
+        && error.code === HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE
+      ) {
+        setRecoveryPath(buildHostedFamilyInviteRecoveryPath(props.inviteCode));
+        setErrorMessage(HOSTED_FAMILY_DRAFT_CONFLICT_MESSAGE);
+        return;
+      }
       setErrorMessage(toErrorMessage(error, "Could not accept the invite right now."));
     }
   }
@@ -51,9 +85,21 @@ export function FamilyInviteWebAcceptButton(props: { inviteCode: string }) {
         {status === "submitting" ? "Joining..." : "Accept invite"}
       </Button>
       {errorMessage ? (
-        <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">
-          {errorMessage}
-        </p>
+        <div className="flex flex-col gap-2">
+          <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">
+            {errorMessage}
+          </p>
+          {recoveryPath ? (
+            <Button
+              type="button"
+              size="lg"
+              variant="outline"
+              onClick={() => router.push(recoveryPath)}
+            >
+              Open Family settings
+            </Button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

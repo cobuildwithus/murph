@@ -561,9 +561,14 @@ function parseHostedSystemMailboxRecordRequest(
   }
 
   if (record.kind === "device-sync.dirty-processed-batch") {
-    if (!Array.isArray(record.records) || record.records.length === 0) {
+    if (!Array.isArray(record.records)) {
       throw new TypeError(
-        "hosted system mailbox postCheckpointRecord records must be a non-empty array.",
+        "hosted system mailbox postCheckpointRecord records must be an array.",
+      );
+    }
+    if (record.records.length === 0 && record.nextWakeAt == null) {
+      throw new TypeError(
+        "hosted system mailbox postCheckpointRecord empty records must include nextWakeAt.",
       );
     }
     if (record.records.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_BATCH_MAX_RECORDS) {

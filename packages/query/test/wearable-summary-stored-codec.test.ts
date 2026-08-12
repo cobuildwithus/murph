@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { buildWearableSummaryBundleFromDataset, summarizeWearableMetricTrendFromBundle } from "../src/wearables.ts";
+import {
+  buildWearableSummaryBundleFromDataset,
+  summarizeWearableMetricLatestFromBundle,
+  summarizeWearableMetricTrendFromBundle,
+} from "../src/wearables.ts";
 import {
   buildActivitySessionAggregates,
   buildActivitySessionDayRollups,
@@ -558,9 +562,79 @@ test("stored activity composition matches direct numeric and provenance results 
     candidate({ date, facet: "max-heart-rate", metric: "maxHeartRate", provider, unit: "bpm", value: values[3] }),
     candidate({ date, facet: "workout-strain", metric: "workoutStrain", provider, unit: "strain", value: values[4] }),
   ];
+  const activitySummaryFidelityMetrics = (
+    provider: string,
+    values: readonly [number, number, number, number, number, number, number],
+  ) => [
+    candidate({
+      date,
+      facet: "activity-minutes",
+      metric: "activityMinutes",
+      provider,
+      resourceType: "activity_summary",
+      unit: "minutes",
+      value: values[0],
+    }),
+    candidate({
+      date,
+      facet: "low-activity-minutes",
+      metric: "lowActivityMinutes",
+      provider,
+      resourceType: "activity_summary",
+      unit: "minutes",
+      value: values[1],
+    }),
+    candidate({
+      date,
+      facet: "medium-activity-minutes",
+      metric: "mediumActivityMinutes",
+      provider,
+      resourceType: "activity_summary",
+      unit: "minutes",
+      value: values[2],
+    }),
+    candidate({
+      date,
+      facet: "high-activity-minutes",
+      metric: "highActivityMinutes",
+      provider,
+      resourceType: "activity_summary",
+      unit: "minutes",
+      value: values[3],
+    }),
+    candidate({
+      date,
+      facet: "average-heart-rate",
+      metric: "averageHeartRate",
+      provider,
+      resourceType: "activity_summary",
+      unit: "bpm",
+      value: values[4],
+    }),
+    candidate({
+      date,
+      facet: "walking-average-heart-rate",
+      metric: "walkingAverageHeartRate",
+      provider,
+      resourceType: "activity_summary",
+      unit: "bpm",
+      value: values[5],
+    }),
+    candidate({
+      date,
+      facet: "lowest-heart-rate",
+      metric: "lowestHeartRate",
+      provider,
+      resourceType: "activity_summary",
+      unit: "bpm",
+      value: values[6],
+    }),
+  ];
   const metricCandidates = [
     ...explicitMetrics("garmin", [800, 10, 200, 178, 15]),
+    ...activitySummaryFidelityMetrics("garmin", [78, 60, 13, 5, 76, 101, 44]),
     ...explicitMetrics("oura", [700, 12, 250, 180, 12]),
+    ...activitySummaryFidelityMetrics("oura", [72, 54, 12, 6, 74, 98, 43]),
   ];
   const run = {
     activityType: "Running",
@@ -637,9 +711,16 @@ test("stored activity composition matches direct numeric and provenance results 
     for (const metric of [
       "sessionMinutes",
       "sessionCount",
+      "activityMinutes",
+      "lowActivityMinutes",
+      "mediumActivityMinutes",
+      "highActivityMinutes",
       "activeCalories",
       "distanceKm",
       "totalElevationGainMeters",
+      "averageHeartRate",
+      "walkingAverageHeartRate",
+      "lowestHeartRate",
       "maxHeartRate",
       "workoutStrain",
     ] as const) {
@@ -652,6 +733,90 @@ test("stored activity composition matches direct numeric and provenance results 
     if (providers.length === 0) {
       assert.equal(stored.sessionMinutes.selection.value, 83);
       assert.equal(stored.sessionCount.selection.value, 2);
+    }
+    if (providers.length === 1 && providers[0] === "garmin") {
+      assert.equal(stored.activityMinutes.selection.value, 78);
+      assert.equal(stored.lowActivityMinutes.selection.value, 60);
+      assert.equal(stored.mediumActivityMinutes.selection.value, 13);
+      assert.equal(stored.highActivityMinutes.selection.value, 5);
+      assert.equal(stored.averageHeartRate.selection.value, 76);
+      assert.equal(stored.walkingAverageHeartRate.selection.value, 101);
+      assert.equal(stored.lowestHeartRate.selection.value, 44);
+    }
+  }
+});
+
+test("stored metric drilldowns distinguish activity and sleep heart-rate aliases", () => {
+  const date = "2026-06-12";
+  const metricCandidates = [
+    candidate({
+      date,
+      facet: "average-heart-rate",
+      metric: "averageHeartRate",
+      provider: "garmin",
+      resourceType: "activity_summary",
+      unit: "bpm",
+      value: 76,
+    }),
+    candidate({
+      date,
+      facet: "lowest-heart-rate",
+      metric: "lowestHeartRate",
+      provider: "garmin",
+      resourceType: "activity_summary",
+      unit: "bpm",
+      value: 44,
+    }),
+    candidate({
+      date,
+      facet: "average-heart-rate",
+      metric: "averageHeartRate",
+      provider: "garmin",
+      resourceType: "sleep",
+      suffix: ":sleep",
+      unit: "bpm",
+      value: 58,
+    }),
+    candidate({
+      date,
+      facet: "lowest-heart-rate",
+      metric: "lowestHeartRate",
+      provider: "garmin",
+      resourceType: "sleep",
+      suffix: ":sleep",
+      unit: "bpm",
+      value: 47,
+    }),
+  ];
+  const dataset: WearableDataset = {
+    activitySessionCandidates: [],
+    activitySessionAggregates: [],
+    activitySessionDayRollups: [],
+    metricSuppressionEvidence: [],
+    metricCandidates,
+    provenanceDiagnostics: [],
+    rawMetricCandidates: metricCandidates,
+    sleepWindows: [sleepWindow("garmin", date)],
+  };
+  const direct = buildWearableSummaryBundleFromDataset(dataset);
+  const stored = composeStoredDataset(dataset);
+  const scenarios = [
+    ["average-heart-rate", "sleep", 58],
+    ["activity-average-heart-rate", "activity", 76],
+    ["lowest-heart-rate", "sleep", 47],
+    ["activity-lowest-heart-rate", "activity", 44],
+  ] as const;
+
+  for (const bundle of [direct, stored]) {
+    for (const [alias, summaryKind, value] of scenarios) {
+      const latest = summarizeWearableMetricLatestFromBundle(bundle, alias, { windowDays: 1 });
+      const trend = summarizeWearableMetricTrendFromBundle(bundle, alias, { windowDays: 1 });
+
+      assert.equal(latest?.summaryKind, summaryKind, `${alias}: latest kind`);
+      assert.equal(latest?.value, value, `${alias}: latest value`);
+      assert.equal(trend?.summaryKind, summaryKind, `${alias}: trend kind`);
+      assert.equal(trend?.value, value, `${alias}: trend value`);
+      assert.equal(trend?.points[0]?.value, value, `${alias}: trend point`);
     }
   }
 });
