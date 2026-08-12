@@ -67,12 +67,16 @@ Updated: 2026-08-12
   implementations.
 - Leave query/index/pointer and runtime-log isolation changes to their dedicated
   sibling owners; this branch will not touch those files or behaviors.
-- Accept the first exact-head ReviewGPT lifecycle finding: started connected-app
-  and Clinical Records intents remain non-redeemable at their public expiry but
-  keep the exact completion owner for one bounded 30-minute retention grace.
-- Keep retention as the sole owner of completed-row retirement: account-deletion
-  safety checks must continue to observe any still-present incomplete owner even
-  after its public deadline instead of duplicating the retention predicate.
+- Accept the first exact-head ReviewGPT lifecycle finding, then its round-one
+  correction: Clinical bearer claims remain non-redeemable at public expiry,
+  while a started connected-app callback keeps its exact completion authority
+  until one canonical 30-minute owner cutoff shared by callback completion,
+  retention, and account deletion.
+- Keep retention as the sole physical-row retirement owner. Account deletion
+  freezes its provider-cleanup reference time, observes only owner-live started
+  connected-app intents, and reads a deterministic `LIMIT 21` probe that admits
+  at most 20 external cleanup owners before failing closed without provider
+  fan-out.
 - Accept the final exact-head ReviewGPT race finding: device and Clinical Records
   OAuth consumers must lock the exact session row before replay classification
   and conditional consume so concurrent `SKIP LOCKED` retention cannot fabricate
@@ -108,6 +112,29 @@ Updated: 2026-08-12
   lint, privacy, and diff checks pass. Preliminary specialist and final round-1
   ReviewGPT retain their immutable reviewed-head baseline while CI evaluates
   the test-only correction.
+- Preliminary specialist thread `6a7ce467-40f4-83ea-a156-f85c0d1655cc`
+  identified truthful account-deletion copy, an unbounded connected-app intent
+  cleanup read, missing Clinical consumer contention proof, and direct Clinical
+  foreground regression cases. Final round-one thread
+  `6a7ce4bf-e020-83ea-9e27-62b6048f7bfa` reviewed the same behavior head and
+  found divergent connected-app owner cutoffs plus five separable, undisclosed
+  lock-skipping query conversions. The corrections use one connected-app
+  owner-cutoff helper, bounded ordered account-deletion admission, direct
+  Clinical failure tests, and production callback/retention PostgreSQL races.
+  The unrelated inbox-media, ingress-latency, assistant-issue, device-webhook,
+  and web-session `SKIP LOCKED` conversions are reverted rather than expanding
+  this PR's operational surface.
+- The connected-app creation path had no member intent-cardinality admission
+  bound, and the widened deletion read could therefore collect unbounded
+  retained history before making sequential provider calls. The correction
+  uses a deterministic expiry/hash `LIMIT 21` probe, admits at most 20 owners,
+  and reports a typed retryable backlog state before any provider call.
+- Product-experience revalidation verdict: the irreducible purpose is a
+  truthful, recoverable deletion result without unrelated maintenance latency.
+  The correction is the smallest complete experience: incomplete setup and
+  bounded-backlog states now return specific retryable copy while the ordinary
+  revocation error remains unchanged. `NO FINDINGS`; no rendered surface
+  changed, and focused service tests directly prove the error classification.
 
 ## Verification
 

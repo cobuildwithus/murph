@@ -420,10 +420,18 @@ Last verified: 2026-08-12
   consumers lock their addressed state row before replay classification and
   consume, so retention skips a live consumer instead of fabricating replay
   evidence. The hourly retention owner owns backlog deletion. Started
-  connected-app and Clinical Records intents remain non-redeemable but retain
-  their exact completion row for one bounded 30-minute grace past link expiry,
-  covering provider setup and valid OAuth callback finalization without creating
-  another worker or lease table. Retention deletes eligible expiry-indexed rows
+  connected-app and Clinical Records intents retain their exact completion row
+  for one bounded 30-minute grace past link expiry. Clinical bearer claims stay
+  non-redeemable after public expiry; a connected-app provider callback that
+  already owns its started row may finalize until the shared owner cutoff.
+  Connected-app retention, callback completion, and account deletion all derive
+  that cutoff from one owning helper and one frozen operation time. Account
+  deletion reads at most 21 deterministically ordered incomplete intents to
+  admit a maximum of 20 provider-cleanup owners, fails closed before provider
+  fan-out on overflow, and ignores an owner-dead physical row while hourly
+  retention reclaims it. This covers provider setup and valid callback
+  finalization without creating another worker or lease table. Retention
+  deletes eligible expiry-indexed rows
   serially in expiry-and-primary-key order under the smaller control-artifact
   batch and max-batch ceilings, with `FOR UPDATE SKIP LOCKED`. The unbound
   sensitive-action lane has a partial expiry-and-token index so durable

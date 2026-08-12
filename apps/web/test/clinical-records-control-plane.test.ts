@@ -164,6 +164,8 @@ describe("Clinical Records authorization persistence", () => {
       createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
     );
     expect(created).not.toHaveProperty("fhirBaseUrl");
+    expect(harness.transactionCalls).toBe(1);
+    expect(harness.oauthSessionDeleteMany).not.toHaveBeenCalled();
   });
 
   it("uses only the non-production client id for the curated Epic sandbox", async () => {
@@ -704,6 +706,22 @@ describe("Clinical Records authorization persistence", () => {
     expect(harness.connectionCreate).not.toHaveBeenCalled();
   });
 
+  it("rejects an expired OAuth callback without mutating or deleting its owner", async () => {
+    const harness = createHarness(null, {
+      expiresAt: new Date("2000-07-10T12:02:00.000Z"),
+    });
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+
+    await expect(finishAuthorization()).rejects.toMatchObject({
+      code: "CLINICAL_RECORD_OAUTH_STATE_EXPIRED",
+    });
+
+    expect(harness.oauthSessionUpdateMany).not.toHaveBeenCalled();
+    expect(harness.oauthSessionDeleteMany).not.toHaveBeenCalled();
+    expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+    expect(harness.connectionCreate).not.toHaveBeenCalled();
+  });
+
   it("rejects OAuth state bound to another member or browser session before token exchange", async () => {
     for (const oauthOverrides of [
       { memberId: "member_clinical_other" },
@@ -768,6 +786,7 @@ function createHarness(
     return { count: 1 };
   });
   const oauthSessionCreate = vi.fn();
+  const oauthSessionDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
   const oauthSessionFindUnique = vi.fn(async () => ({
     ...oauthSession(),
     ...oauthOverrides,
@@ -810,7 +829,7 @@ function createHarness(
     },
     clinicalRecordOauthSession: {
       create: oauthSessionCreate,
-      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: oauthSessionDeleteMany,
       findUnique: oauthSessionFindUnique,
       updateMany: oauthSessionUpdateMany,
     },
@@ -864,6 +883,7 @@ function createHarness(
       return transactionState.depth;
     },
     oauthSessionCreate,
+    oauthSessionDeleteMany,
     oauthSessionFindUnique,
     oauthSessionLock,
     oauthSessionUpdateMany,

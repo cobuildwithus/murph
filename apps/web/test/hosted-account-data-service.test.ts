@@ -3519,7 +3519,7 @@ describe("deleteHostedAccountData", () => {
       prisma,
       request: new Request("https://join.example.test/settings"),
     })).rejects.toMatchObject({
-      code: "ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED",
+      code: "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS",
       httpStatus: 503,
       retryable: true,
     });
@@ -3527,13 +3527,19 @@ describe("deleteHostedAccountData", () => {
     expect(serviceMocks.connectedAppsClient.listAccounts).not.toHaveBeenCalled();
     expect(serviceMocks.connectedAppsClient.deleteAccount).not.toHaveBeenCalled();
     expect(intentFindManyCalls).toContainEqual({
+      orderBy: [
+        { expiresAt: "asc" },
+        { claimHash: "asc" },
+      ],
       select: {
         alias: true,
         connectedAccountId: true,
         toolkit: true,
       },
+      take: 21,
       where: {
         completedAt: null,
+        expiresAt: { gt: expect.any(Date) },
         memberId: "member_123",
         startedAt: { not: null },
       },
@@ -3576,13 +3582,19 @@ describe("deleteHostedAccountData", () => {
     });
     expect(serviceMocks.connectedAppsClient.deleteAccount).toHaveBeenCalledWith("ca_started");
     expect(intentFindManyCalls).toContainEqual({
+      orderBy: [
+        { expiresAt: "asc" },
+        { claimHash: "asc" },
+      ],
       select: {
         alias: true,
         connectedAccountId: true,
         toolkit: true,
       },
+      take: 21,
       where: {
         completedAt: null,
+        expiresAt: { gt: expect.any(Date) },
         memberId: "member_123",
         startedAt: { not: null },
       },
@@ -3602,6 +3614,61 @@ describe("deleteHostedAccountData", () => {
         warningCode: null,
       },
     ]);
+  });
+
+  it("fails closed before provider calls when connected-app cleanup ownership exceeds its bound", async () => {
+    const order: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      connectedAppConnectIntentRows: Array.from({ length: 21 }, (_, index) => ({
+        alias: `account-${index}`,
+        connectedAccountId: `ca_started_${index}`,
+        toolkit: "gmail",
+      })),
+      connectedAppsSession: true,
+      onTransaction: () => order.push("transaction"),
+      operationOrder: order,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
+      details: { limit: 20 },
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(serviceMocks.connectedAppsClient.listAccounts).not.toHaveBeenCalled();
+    expect(serviceMocks.connectedAppsClient.deleteAccount).not.toHaveBeenCalled();
+    expect(order).toContain("update:hostedMember");
+    expect(order).not.toContain("delete:hostedMember");
+  });
+
+  it("does not let an owner-dead connected-app row strand account deletion before retention", async () => {
+    const order: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      connectedAppConnectIntentRows: [{
+        alias: "work",
+        connectedAccountId: null,
+        expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+        toolkit: "gmail",
+      }],
+      onTransaction: () => order.push("transaction"),
+      operationOrder: order,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).resolves.toMatchObject({
+      providerRevocations: [],
+    });
+
+    expect(serviceMocks.connectedAppsClient.listAccounts).not.toHaveBeenCalled();
+    expect(order).toContain("delete:hostedMember");
   });
 
   it("re-fences before local deletion and aborts if a connected-app write starts after provider cleanup", async () => {
@@ -4050,7 +4117,14 @@ function createHostedAccountDeletionPrismaForTest(input: {
     hostedConnectedAppConnectIntent: {
       findMany: async (args: unknown) => {
         input.connectedAppConnectIntentFindManyCalls?.push(args);
-        return input.connectedAppConnectIntentRows ?? [];
+        const query = args as {
+          take?: number;
+          where?: { expiresAt?: { gt?: Date } };
+        };
+        const ownerCutoff = query.where?.expiresAt?.gt;
+        return (input.connectedAppConnectIntentRows ?? [])
+          .filter((row) => !row.expiresAt || !ownerCutoff || row.expiresAt > ownerCutoff)
+          .slice(0, query.take);
       },
     },
     hostedThreadContainer: {
@@ -4223,6 +4297,7 @@ type HostedAccountDeletionConnectedAppIntentRow = {
   alias: string | null;
   claimHash?: string;
   connectedAccountId: string | null;
+  expiresAt?: Date;
   toolkit: string;
 };
 

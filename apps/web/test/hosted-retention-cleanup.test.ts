@@ -10,7 +10,9 @@ vi.mock("@/src/lib/hosted-privacy/account-deletion-cleanup", () => ({
 }));
 
 import * as hostedRuntimeSignals from "@/src/lib/hosted-orchestration/signal-runtime";
+import { HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS } from "@/src/lib/connected-apps/connect-intent-ownership";
 import {
+  CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
   HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
   HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES,
   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
@@ -22,7 +24,6 @@ import {
   HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS,
   HOSTED_RETENTION_BATCH_SIZE,
   HOSTED_RETENTION_MAX_BATCHES,
-  HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
   HOSTED_WEB_SESSION_RETENTION_MS,
   runHostedRetentionCleanup,
 } from "@/src/lib/hosted-retention/cleanup";
@@ -275,11 +276,13 @@ describe("hosted retention cleanup", () => {
       if (startedIntentOwner) {
         expect(sql).toContain(`${statement.lockAlias}."started_at" IS NULL`);
         expect(sql).toContain(`OR ${statement.lockAlias}."expires_at" <= ?`);
+        const graceMs = statement.fragment
+          === 'DELETE FROM "hosted_connected_app_connect_intent"'
+          ? HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS
+          : CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS;
         expect(call.slice(1)).toEqual([
           now,
-          new Date(
-            now.getTime() - HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
-          ),
+          new Date(now.getTime() - graceMs),
           HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
         ]);
       } else {
@@ -402,7 +405,7 @@ describe("hosted retention cleanup", () => {
     );
     expect(dueSql).toContain('RETURNING "hosted_workspace"."user_id" AS "userId"');
     expect(dueSql).toContain(`LIMIT ?`);
-    expect(dueSql).toContain("FOR UPDATE SKIP LOCKED");
+    expect(dueSql).not.toContain("FOR UPDATE");
     expect(queryRaw.mock.calls[1]?.slice(1)).toEqual([
       now,
       HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
@@ -459,16 +462,20 @@ describe("hosted retention cleanup", () => {
       signalRuntimeRecheck: vi.fn(),
     });
 
-    const cutoff = new Date(
-      now.getTime() - HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
-    );
     for (const fragment of [
       'DELETE FROM "hosted_connected_app_connect_intent"',
       'DELETE FROM "clinical_record_connect_intent"',
     ]) {
+      const graceMs = fragment === 'DELETE FROM "hosted_connected_app_connect_intent"'
+        ? HOSTED_CONNECTED_APP_STARTED_INTENT_OWNER_GRACE_MS
+        : CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS;
+      const cutoff = new Date(now.getTime() - graceMs);
       const call = findRetentionCall(executeRaw, fragment);
       const sql = sqlOf(call);
       expect(sql).toContain('intent."expires_at" <= ?');
+      if (fragment === 'DELETE FROM "hosted_connected_app_connect_intent"') {
+        expect(sql).toContain('intent."completed_at" IS NOT NULL');
+      }
       expect(sql).toContain('intent."started_at" IS NULL');
       expect(sql).toContain('OR intent."expires_at" <= ?');
       expect(call.slice(1)).toEqual([

@@ -15,6 +15,7 @@ import {
   createComposioConnectedAppsClient,
   type ComposioConnectedAccount,
 } from "./composio";
+import { hostedConnectedAppStartedIntentOwnerCutoff } from "./connect-intent-ownership";
 import {
   assertHostedConnectedAppsSearchToolkit,
   assertHostedConnectedAppToolkit,
@@ -387,11 +388,12 @@ export async function completeHostedConnectedAppConnection(input: {
     prisma,
   });
   const now = new Date();
+  const ownerCutoff = hostedConnectedAppStartedIntentOwnerCutoff(now);
 
   if (
     !intent.startedAt
     || intent.completedAt
-    || intent.expiresAt <= now
+    || intent.expiresAt <= ownerCutoff
     || intent.connectedAccountId !== input.connectedAccountId
   ) {
     throw hostedOnboardingError({
@@ -438,7 +440,7 @@ export async function completeHostedConnectedAppConnection(input: {
         claimHash: intent.claimHash,
         completedAt: null,
         connectedAccountId: input.connectedAccountId,
-        expiresAt: { gt: now },
+        expiresAt: { gt: ownerCutoff },
         startedAt: { not: null },
       },
       data: { completedAt: now },

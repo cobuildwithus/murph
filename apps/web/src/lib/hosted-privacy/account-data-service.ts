@@ -17,6 +17,7 @@ import {
   formatHostedConnectedAppToolkitLabel,
   readHostedConnectedAppsConfig,
 } from "../connected-apps/config";
+import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
 import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
 import { resolveHostedDeviceSyncConnectionCleanup } from "../device-sync/provider-application-cleanup";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
@@ -130,6 +131,7 @@ const HOSTED_ACCOUNT_DELETION_SUSPENSION_FENCE_TRANSACTION_OPTIONS = {
 } as const;
 const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
 const HOSTED_PRIVY_PHONE_TRANSFER_MIN_TRIAL_REMAINING_SECONDS = 10;
+const HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT = 20;
 const HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_REQUEST_OPTIONS: Stripe.RequestOptions = {
   maxNetworkRetries: 0,
   timeout: HOSTED_PRIVY_PHONE_TRANSFER_STRIPE_AUTHORITY_TIMEOUT_MS,
@@ -885,6 +887,7 @@ async function deleteHostedAccountDataInternal(input: {
   const connectedAppProviderCleanupStartedAt = new Date();
   const connectedAppRevocations = await revokeConnectedAppsBestEffort({
     memberId: input.memberId,
+    now: deletionStartedAt,
     prisma: input.prisma,
   });
   const providerRevocations = [
@@ -2510,6 +2513,7 @@ async function revokeDeviceProvidersBestEffort(input: {
 
 async function revokeConnectedAppsBestEffort(input: {
   memberId: string;
+  now: Date;
   prisma: HostedAccountDataPrisma;
 }): Promise<HostedAccountProviderRevocationResult[]> {
   const inFlightIntents = await listInFlightConnectedAppIntentsForDeletion(input);
@@ -2629,26 +2633,44 @@ async function revokeConnectedAppsBestEffort(input: {
 
 async function listInFlightConnectedAppIntentsForDeletion(input: {
   memberId: string;
+  now: Date;
   prisma: HostedAccountDataPrisma;
 }): Promise<Array<{
   alias: string | null;
   connectedAccountId: string | null;
   toolkit: string;
 }>> {
-  // A still-present started intent remains the exact provider-cleanup owner,
-  // even after its public bearer link expires.
-  return await input.prisma.hostedConnectedAppConnectIntent.findMany({
+  const ownerCutoff = hostedConnectedAppStartedIntentOwnerCutoff(input.now);
+  const intents = await input.prisma.hostedConnectedAppConnectIntent.findMany({
+    orderBy: [
+      { expiresAt: "asc" },
+      { claimHash: "asc" },
+    ],
     select: {
       alias: true,
       connectedAccountId: true,
       toolkit: true,
     },
+    take: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT + 1,
     where: {
       completedAt: null,
+      expiresAt: { gt: ownerCutoff },
       memberId: input.memberId,
       startedAt: { not: null },
     },
   });
+  if (intents.length > HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_CONNECTED_APP_CLEANUP_BACKLOG",
+      details: {
+        limit: HOSTED_ACCOUNT_DELETION_CONNECTED_APP_INTENT_LIMIT,
+      },
+      httpStatus: 503,
+      message: "Connected-app cleanup is still settling. Retry account deletion after the next cleanup pass.",
+      retryable: true,
+    });
+  }
+  return intents;
 }
 
 function isComposioAccountDeletable(account: ComposioConnectedAccount): boolean {
@@ -2686,6 +2708,17 @@ function assertProviderRevocationsAllowDeletion(
 
   if (failures.length === 0) {
     return;
+  }
+
+  if (failures.some((failure) =>
+    failure.errorCode === "CONNECTED_APP_CONNECTION_IN_PROGRESS"
+  )) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_CONNECTED_APP_SETUP_IN_PROGRESS",
+      httpStatus: 503,
+      message: "Connected-app setup is still settling. Retry account deletion after the next cleanup pass.",
+      retryable: true,
+    });
   }
 
   throw hostedOnboardingError({

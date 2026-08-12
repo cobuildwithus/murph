@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
 import { getPrisma } from "../prisma";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
@@ -34,10 +35,10 @@ export const HOSTED_RETENTION_MAX_BATCHES = 4;
 // one hourly pass at 12 statements and 3,000 deleted rows.
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE = 250;
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
-// Started connect intents remain the completion owner after their bearer link
-// expires. Keep that owner through every bounded provider/OAuth continuation,
-// then let ordinary expiry ordering reclaim it without a second scheduler.
-export const HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS = 30 * 60 * 1_000;
+// Clinical Records started intents remain the completion owner after their
+// bearer link expires. Keep that owner through the bounded OAuth continuation.
+export const CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS =
+  30 * 60 * 1_000;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 5;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS = 10_000;
 
@@ -219,7 +220,6 @@ async function claimDueInboxMediaRetentionSignalWorkspaces(input: {
         "inbox_media_retention_wake_at" ASC,
         "user_id" ASC
       LIMIT ${HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE}
-      FOR UPDATE SKIP LOCKED
     )
     UPDATE "hosted_workspace"
     SET "inbox_media_retention_signal_attempted_at" = ${input.now}
@@ -513,20 +513,19 @@ export async function deleteExpiredHostedCallbackRequestNonces(input: {
   `);
 }
 
-async function deleteExpiredConnectedAppConnectIntents(input: {
+export async function deleteExpiredConnectedAppConnectIntents(input: {
   now: Date;
   prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
-  const startedIntentCutoff = new Date(
-    input.now.getTime() - HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
-  );
+  const startedIntentCutoff = hostedConnectedAppStartedIntentOwnerCutoff(input.now);
   return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
     WITH doomed AS MATERIALIZED (
       SELECT intent."claim_hash"
       FROM "hosted_connected_app_connect_intent" AS intent
       WHERE intent."expires_at" <= ${input.now}
         AND (
-          intent."started_at" IS NULL
+          intent."completed_at" IS NOT NULL
+          OR intent."started_at" IS NULL
           OR intent."expires_at" <= ${startedIntentCutoff}
         )
       ORDER BY intent."expires_at" ASC, intent."claim_hash" ASC
@@ -602,7 +601,7 @@ async function deleteExpiredClinicalRecordConnectIntents(input: {
   prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
   const startedIntentCutoff = new Date(
-    input.now.getTime() - HOSTED_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
+    input.now.getTime() - CLINICAL_RECORD_STARTED_CONNECT_INTENT_RETENTION_GRACE_MS,
   );
   return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
     WITH doomed AS MATERIALIZED (
@@ -623,7 +622,7 @@ async function deleteExpiredClinicalRecordConnectIntents(input: {
   `);
 }
 
-async function deleteExpiredClinicalRecordOauthSessions(input: {
+export async function deleteExpiredClinicalRecordOauthSessions(input: {
   now: Date;
   prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
@@ -650,14 +649,13 @@ export async function deleteExpiredIngressLatencyTraces(input: {
     input.now.getTime() - HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS,
   );
   return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS MATERIALIZED (
-      SELECT trace."id"
-      FROM "hosted_ingress_latency_trace" AS trace
-      WHERE trace."accepted_at" < ${cutoff}
-        AND trace."updated_at" < ${cutoff}
-      ORDER BY trace."accepted_at" ASC, trace."id" ASC
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_ingress_latency_trace"
+      WHERE "accepted_at" < ${cutoff}
+        AND "updated_at" < ${cutoff}
+      ORDER BY "accepted_at" ASC, "id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-      FOR UPDATE OF trace SKIP LOCKED
     )
     DELETE FROM "hosted_ingress_latency_trace" AS trace
     USING doomed
@@ -671,13 +669,12 @@ async function deleteExpiredAssistantRuntimeIssues(input: {
   prisma: PrismaClient;
 }): Promise<number> {
   return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS MATERIALIZED (
-      SELECT issue."id"
-      FROM "hosted_assistant_runtime_issue" AS issue
-      WHERE issue."expires_at" <= ${input.now}
-      ORDER BY issue."expires_at" ASC, issue."id" ASC
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_assistant_runtime_issue"
+      WHERE "expires_at" <= ${input.now}
+      ORDER BY "expires_at" ASC, "id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-      FOR UPDATE OF issue SKIP LOCKED
     )
     DELETE FROM "hosted_assistant_runtime_issue" AS issue
     USING doomed
@@ -698,17 +695,13 @@ async function deleteExpiredDeviceWebhookTraces(input: {
     input.now.getTime() - HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
   );
   return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS MATERIALIZED (
-      SELECT trace."provider", trace."trace_id"
-      FROM "device_webhook_trace" AS trace
-      WHERE trace."status" = 'processed'
-        AND trace."received_at" < ${cutoff}
-      ORDER BY
-        trace."received_at" ASC,
-        trace."provider" ASC,
-        trace."trace_id" ASC
+    WITH doomed AS (
+      SELECT "provider", "trace_id"
+      FROM "device_webhook_trace"
+      WHERE "status" = 'processed'
+        AND "received_at" < ${cutoff}
+      ORDER BY "received_at" ASC, "provider" ASC, "trace_id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-      FOR UPDATE OF trace SKIP LOCKED
     )
     DELETE FROM "device_webhook_trace" AS trace
     USING doomed
@@ -822,26 +815,24 @@ async function deleteStaleHostedWebSessions(input: {
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS);
   const expired = await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS MATERIALIZED (
-      SELECT web_session."id"
-      FROM "hosted_web_session" AS web_session
-      WHERE web_session."expires_at" < ${cutoff}
-      ORDER BY web_session."expires_at" ASC, web_session."id" ASC
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_web_session"
+      WHERE "expires_at" < ${cutoff}
+      ORDER BY "expires_at" ASC, "id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-      FOR UPDATE OF web_session SKIP LOCKED
     )
     DELETE FROM "hosted_web_session" AS web_session
     USING doomed
     WHERE web_session."id" = doomed."id"
   `);
   const revoked = await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS MATERIALIZED (
-      SELECT web_session."id"
-      FROM "hosted_web_session" AS web_session
-      WHERE web_session."revoked_at" < ${cutoff}
-      ORDER BY web_session."revoked_at" ASC, web_session."id" ASC
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_web_session"
+      WHERE "revoked_at" < ${cutoff}
+      ORDER BY "revoked_at" ASC, "id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-      FOR UPDATE OF web_session SKIP LOCKED
     )
     DELETE FROM "hosted_web_session" AS web_session
     USING doomed
