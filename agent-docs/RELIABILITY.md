@@ -216,6 +216,12 @@ Last verified: 2026-08-11
   independently: an absent or structurally unusable family remains unknown,
   its canonical allowlisted name is retained with the failed sample and warning,
   and every available signal is still evaluated. No unknown value becomes zero.
+  A collection that fails before producing a usable observation, including a
+  scrape with every required family absent, receives one bounded retry after one
+  second, outside any storage transaction. Only an exhausted two-attempt
+  collection increments the consecutive-failure state; partial observations
+  with any usable family remain single-pass so their available unsafe evidence
+  is evaluated without delay.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
   consecutive runs before paging the monitoring condition. Crossing that
   threshold persists one bounded telemetry-page obligation in the existing

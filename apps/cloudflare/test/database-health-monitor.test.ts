@@ -986,6 +986,8 @@ describe("database health monitor", () => {
       serviceDiscoveryResponses: [
         () => new Response(null, { status: 503 }),
         () => new Response(null, { status: 503 }),
+        () => new Response(null, { status: 503 }),
+        () => new Response(null, { status: 503 }),
       ],
     });
 
@@ -994,6 +996,8 @@ describe("database health monitor", () => {
       outcome: "healthy",
       sampleStatus: "failed",
     });
+    expect(harness.planetScaleRequests).toHaveLength(2);
+    expect(harness.retryWaits).toEqual([1_000]);
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
     ).resolves.toMatchObject({
@@ -1020,6 +1024,108 @@ describe("database health monitor", () => {
       failureCode: "service_discovery_failed",
       scrapeStatus: "failed",
     });
+    expect(harness.planetScaleRequests).toHaveLength(4);
+    expect(harness.retryWaits).toEqual([1_000, 1_000]);
+  });
+
+  it("retries transient telemetry failure before counting a failed check", async () => {
+    const harness = createMonitorHarness({
+      serviceDiscoveryResponses: [
+        () => new Response(null, { status: 503 }),
+        createServiceDiscoveryResponse,
+      ],
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "ok",
+    });
+
+    expect(harness.planetScaleRequests).toHaveLength(3);
+    expect(harness.retryWaits).toEqual([1_000]);
+    expect(harness.monitor.readRecentSamples()).toEqual([
+      expect.objectContaining({
+        failureCode: null,
+        scrapeStatus: "ok",
+      }),
+    ]);
+    expect(harness.primaryLinqRequests).toEqual([]);
+  });
+
+  it("pages concrete pressure returned by the retry without delay", async () => {
+    const harness = createMonitorHarness({
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      serviceDiscoveryResponses: [
+        () => new Response(null, { status: 503 }),
+        createServiceDiscoveryResponse,
+      ],
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({
+        conditions: [{ kind: "client_wait", seconds: 8 }],
+        outcome: "alert_sent",
+        sampleStatus: "ok",
+      });
+
+    expect(harness.primaryLinqRequests).toHaveLength(1);
+    expect(harness.retryWaits).toEqual([1_000]);
+  });
+
+  it("retries a zero-evidence scrape before evaluating recovered pressure", async () => {
+    let scrapeAttempt = 0;
+    const recoveredMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+    });
+    const harness = createMonitorHarness({
+      readMetricsBody() {
+        scrapeAttempt += 1;
+        return scrapeAttempt === 1 ? "" : recoveredMetricsBody;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({
+        conditions: [{ kind: "client_wait", seconds: 8 }],
+        outcome: "alert_sent",
+        sampleStatus: "ok",
+      });
+
+    expect(harness.planetScaleRequests).toHaveLength(4);
+    expect(harness.retryWaits).toEqual([1_000]);
+    expect(harness.monitor.readAlertState().consecutiveScrapeFailures).toBe(0);
+    expect(harness.primaryLinqRequests).toHaveLength(1);
+  });
+
+  it("pages only after two scheduled runs exhaust zero-evidence retries", async () => {
+    const harness = createMonitorHarness({ metricsBody: "" });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "failed",
+    });
+    expect(harness.planetScaleRequests).toHaveLength(4);
+    expect(harness.retryWaits).toEqual([1_000]);
+
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [{ failures: 2, kind: "monitoring_unavailable" }],
+      outcome: "alert_sent",
+      sampleStatus: "failed",
+    });
+    expect(harness.planetScaleRequests).toHaveLength(8);
+    expect(harness.retryWaits).toEqual([1_000, 1_000]);
+    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
+      failureCode: "required_metrics_missing",
+      scrapeStatus: "failed",
+    });
   });
 
   it("summarizes a partial-then-unavailable telemetry window across retry", async () => {
@@ -1038,6 +1144,7 @@ describe("database health monitor", () => {
       metricsBody: partialMetricsBody,
       serviceDiscoveryResponses: [
         createServiceDiscoveryResponse,
+        () => new Response(null, { status: 503 }),
         () => new Response(null, { status: 503 }),
       ],
     });
@@ -1120,6 +1227,7 @@ describe("database health monitor", () => {
     const harness = createMonitorHarness({
       metricsBody: partialMetricsBody,
       serviceDiscoveryResponses: [
+        () => new Response(null, { status: 503 }),
         () => new Response(null, { status: 503 }),
         createServiceDiscoveryResponse,
       ],
@@ -1249,6 +1357,8 @@ describe("database health monitor", () => {
       });
 
     expect(harness.primaryLinqRequests).toHaveLength(1);
+    expect(harness.planetScaleRequests).toHaveLength(2);
+    expect(harness.retryWaits).toEqual([]);
     const alert = await readLinqRequestBody(harness.primaryLinqRequests[0]);
     expect(alert.message.parts[0]?.value).toContain("PgBouncer wait 8s");
     expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
@@ -2966,21 +3076,23 @@ describe("database health monitor", () => {
   });
 
   it("rejects an unsafe discovered target before scrape egress", async () => {
+    const createUnsafeDiscoveryResponse = () =>
+      Response.json([
+        {
+          labels: {
+            __metrics_path__: "/metrics",
+            __scheme__: "https",
+            planetscale_branch_name: BRANCH_NAME,
+            planetscale_database_name: DATABASE_NAME,
+            planetscale_organization_name: ORGANIZATION,
+          },
+          targets: ["metrics.planetscale.test/redirect"],
+        },
+      ]);
     const harness = createMonitorHarness({
       serviceDiscoveryResponses: [
-        () =>
-          Response.json([
-            {
-              labels: {
-                __metrics_path__: "/metrics",
-                __scheme__: "https",
-                planetscale_branch_name: BRANCH_NAME,
-                planetscale_database_name: DATABASE_NAME,
-                planetscale_organization_name: ORGANIZATION,
-              },
-              targets: ["metrics.planetscale.test/redirect"],
-            },
-          ]),
+        createUnsafeDiscoveryResponse,
+        createUnsafeDiscoveryResponse,
       ],
     });
 
@@ -2990,7 +3102,12 @@ describe("database health monitor", () => {
         sampleStatus: "failed",
       });
 
-    expect(harness.planetScaleRequests).toHaveLength(1);
+    expect(harness.planetScaleRequests).toHaveLength(2);
+    expect(
+      harness.planetScaleRequests.every(
+        (request) => new URL(request.url).hostname === "api.planetscale.com",
+      ),
+    ).toBe(true);
     expect(harness.primaryLinqRequests).toEqual([]);
   });
 
@@ -3050,6 +3167,7 @@ function createMonitorHarness(input: {
   const primaryLinqHealthRequests: Request[] = [];
   const primaryLinqRequests: Request[] = [];
   const planetScaleRequests: Request[] = [];
+  const retryWaits: number[] = [];
   let linqPhoneNumbersRequestCount = 0;
   let nowMs = FIVE_MINUTES_MS;
   const linqHealthResponses = [...(input.linqHealthResponses ?? [])];
@@ -3160,6 +3278,9 @@ function createMonitorHarness(input: {
       environment,
       fetchImplementation,
       () => nowMs,
+      async (delayMs) => {
+        retryWaits.push(delayMs);
+      },
     );
   let monitor = createMonitor();
 
@@ -3171,6 +3292,7 @@ function createMonitorHarness(input: {
     fetchImplementation,
     primaryLinqHealthRequests,
     primaryLinqRequests,
+    retryWaits,
     get monitor() {
       return monitor;
     },
