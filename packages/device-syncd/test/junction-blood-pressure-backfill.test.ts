@@ -1003,6 +1003,82 @@ test("a sparse daily aggregate completes when several readings reduce to one eve
   );
 });
 
+test("a sparse daily aggregate retries a provider-bearing day with no canonical event", async () => {
+  const timeseriesRecords: Record<string, unknown>[] = [{
+    end: "2026-06-09T08:05:00.000Z",
+    start: "2026-06-09T08:00:00.000Z",
+    unit: "g",
+  }, {
+    end: "2026-06-10T08:05:00.000Z",
+    start: "2026-06-10T08:00:00.000Z",
+    unit: "g",
+    value: 0.08,
+  }];
+  const provider = createProvider({
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests: [],
+    summaryBackfillDays: 2,
+    timeseriesRecords: { caffeine: timeseriesRecords },
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const caffeine = findResourceJob(scheduled.jobs, "caffeine");
+  const firstPass = await executeImmediateResourceContinuations({
+    context: createJobContext(),
+    job: toJobRecord(caffeine, 1),
+    provider,
+    resource: "caffeine",
+  });
+  const delayedRetry = findResourceJob(firstPass.result.scheduledJobs ?? [], "caffeine");
+
+  assert.equal(
+    firstPass.result.metadataPatch?.junctionSparseDailyTimeseriesHistoryBackfillCoverage,
+    undefined,
+  );
+  assert.equal(delayedRetry.availableAt, "2026-06-11T12:15:00.000Z");
+  assert.equal(delayedRetry.payload?.windowStart, "2026-06-09T00:00:00.000Z");
+  assert.equal(delayedRetry.payload?.historicalDailyAggregateGapSeen, undefined);
+
+  timeseriesRecords[0] = {
+    ...timeseriesRecords[0],
+    value: 0.04,
+  };
+  const repaired = await executeImmediateResourceContinuations({
+    context: createJobContext({ now: "2026-06-11T12:15:00.000Z" }),
+    job: toJobRecord(delayedRetry, 3),
+    provider,
+    resource: "caffeine",
+  });
+
+  assert.equal(repaired.result.scheduledJobs?.length ?? 0, 0);
+  assert.equal(
+    repaired.result.metadataPatch?.junctionSparseDailyTimeseriesHistoryBackfillCoverage,
+    "v1|omron:16",
+  );
+  const completed = createScheduledJobs(
+    createStoredAccount({ metadata: repaired.result.metadataPatch, sources }),
+    "2026-06-12T12:00:00.000Z",
+  );
+  assert.equal(
+    completed.jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "caffeine"
+    ),
+    false,
+  );
+});
+
 test("empty Oura note history reaches terminal source coverage", async () => {
   const provider = createProvider({
     additionalProviders: [{

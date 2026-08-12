@@ -107,7 +107,9 @@ disturbance, caffeine, water, and mindfulness use the summary-history window,
 day at a time, serialize per account, and record terminal coverage in compact
 connection metadata; they do not add another queue or lifecycle. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
-semantics. An explicit timeseries backfill override still governs every
+semantics. A provider-bearing sparse day that produces no canonical observation
+forces the existing anchored retry before coverage can close. An explicit
+timeseries backfill override still governs every
 timeseries resource.
 
 Junction's historical-pull status is authoritative when available. A `success`

@@ -2096,6 +2096,18 @@ export function createJunctionDeviceSyncProvider(
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
           : undefined;
+        const historicalDailyAggregateGapSeen = extendedHistoricalBackfill
+          && resolveJunctionExtendedTimeseriesBackfillPolicy(effectiveResource)?.completion
+            === "daily_aggregate"
+          && (
+            job.payload.historicalDailyAggregateGapSeen === true
+            || (
+              timeseriesImport.providerRecordCount > 0
+              && timeseriesImport.canonicalEventCount === 0
+            )
+          )
+          ? true
+          : undefined;
         const historicalUnresolvedProviderRecords = extendedHistoricalBackfill
           ? resolveJunctionHistoricalUnresolvedProviderRecords(
               job,
@@ -2123,6 +2135,7 @@ export function createJunctionDeviceSyncProvider(
             context,
             buildYieldedJunctionJobResult({
               context,
+              historicalDailyAggregateGapSeen,
               historicalProviderRecordsSeen,
               historicalRecordsSeen,
               historicalUnresolvedProviderRecordIdentitiesJson,
@@ -2282,6 +2295,14 @@ export function createJunctionDeviceSyncProvider(
     const recordsSeen =
       input.job.payload.historicalRecordsSeen === true
       || input.importResult.canonicalEventCount > 0;
+    const dailyAggregateGapSeen = policy.completion === "daily_aggregate"
+      && (
+        input.job.payload.historicalDailyAggregateGapSeen === true
+        || (
+          input.importResult.providerRecordCount > 0
+          && input.importResult.canonicalEventCount === 0
+        )
+      );
     const unresolvedProviderRecords =
       resolveJunctionHistoricalUnresolvedProviderRecords(
         input.job,
@@ -2299,7 +2320,11 @@ export function createJunctionDeviceSyncProvider(
     // reduced. Blood pressure alone retains exact per-reading reconciliation.
     const completionProven = input.importResult.fetchComplete && (
       policy.completion === "fetch_complete"
-      || (policy.completion === "daily_aggregate" && recordsSeen)
+      || (
+        policy.completion === "daily_aggregate"
+        && recordsSeen
+        && !dailyAggregateGapSeen
+      )
       || (
         policy.completion === "exact_records"
         && recordsSeen
@@ -2346,6 +2371,8 @@ export function createJunctionDeviceSyncProvider(
       ...input.result,
       scheduledJobs: [
         ...(input.result.scheduledJobs ?? []),
+        // This is a new full pass from the historical anchor, so its aggregate
+        // gap evidence intentionally starts empty and is rebuilt day by day.
         buildExtendedTimeseriesBackfillJob({
           availableAt: addMilliseconds(input.context.now, retryDelayMs),
           dedupeKey: input.job.dedupeKey,
@@ -3146,6 +3173,7 @@ export function createJunctionDeviceSyncProvider(
 
   function buildYieldedJunctionJobResult(input: {
     context: ProviderJobContext;
+    historicalDailyAggregateGapSeen?: boolean;
     historicalProviderRecordsSeen?: boolean;
     historicalRecordsSeen?: boolean;
     historicalUnresolvedProviderRecordIdentitiesJson?: string;
@@ -3165,6 +3193,7 @@ export function createJunctionDeviceSyncProvider(
   }
 
   function buildYieldedJunctionFollowUpJob(input: {
+    historicalDailyAggregateGapSeen?: boolean;
     historicalProviderRecordsSeen?: boolean;
     historicalRecordsSeen?: boolean;
     historicalUnresolvedProviderRecordIdentitiesJson?: string;
@@ -3215,6 +3244,11 @@ export function createJunctionDeviceSyncProvider(
 
     const payload: Record<string, unknown> = stripUndefined({
       ...input.job.payload,
+      historicalDailyAggregateGapSeen:
+        input.historicalDailyAggregateGapSeen === true
+        || input.job.payload.historicalDailyAggregateGapSeen === true
+          ? true
+          : undefined,
       ...(input.historicalProviderRecordsSeen === undefined
         ? {}
         : { historicalProviderRecordsSeen: input.historicalProviderRecordsSeen }),
