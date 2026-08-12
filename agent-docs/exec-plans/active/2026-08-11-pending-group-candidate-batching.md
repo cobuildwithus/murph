@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-11
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 ## Goal
 
@@ -304,3 +304,42 @@ Updated: 2026-08-11
   typecheck, 722 test files/9,602 tests, lint with existing warnings only, dev
   smoke, and production Next build. A fresh exact-head ReviewGPT audit and
   exact-head CI remain before completion.
+
+### ReviewGPT round-five remediation
+
+- The final exact-head review of
+  `c71c1c4989663f735b09c7dbf53a677422a4edfa` found one material sibling
+  preparation failure: a selected pending-group setup package could be prepared
+  successfully, then discarded if the independent thread-container preparation
+  failed. The retry then re-entered without the selected setup identity and
+  could transfer the same event to another owner.
+- Retained prepared pending-group setup independently from sibling
+  thread-container preparation. When admission already selected a setup owner,
+  a later thread-container preparation failure is carried as an ephemeral
+  request-local failure; the transaction runner surfaces it only if the planner
+  proves that exact sibling package was required. Pending setup payload
+  failures still keep their existing wrapped error path, and nonterminal
+  candidate claim/selection outcomes remain route-free.
+- Accepted the complexity-collapse finding that the exported permanent crypto
+  error taxonomy no longer controlled production behavior after the
+  payload-crypto boundary. Deleted the app/runtime permanent unwrap and GCP KMS
+  classifier exports, the duplicate signature-encoding export, and
+  classifier-only tests. Persisted envelope shape, row/root binding, and
+  signature verification still fail closed through ordinary errors, while
+  higher-level pending-group ownership decides whether a locked malformed
+  plaintext is terminal.
+- Added a service-entry regression for replacement-line selection followed by
+  sibling container preparation failure and a second no-candidate preparation;
+  the same selected setup id is preserved for both prepared transactions and
+  no route/mailbox side effect transfers ownership.
+- Post-remediation proof: focused affected web/runtime-state tests passed
+  (5 web files/240 tests plus runtime-state 1 file/4 tests); app and
+  runtime-state typechecks passed; scoped ESLint, `git diff --check`,
+  symbol-deletion checks, `no-js`, and privacy scan passed. A session-owned
+  local PostgreSQL cluster with all migrations ran the pending-group
+  one-connection replay (4 tests). Diff-aware workspace verification passed
+  dependency, workspace, orchestration, crypto, privacy-log, provider-boundary,
+  package, web, and Cloudflare gates, including 9,603 hosted-web tests,
+  2,397 Cloudflare node tests, 10 Cloudflare worker tests, lint with existing
+  warnings only, dev smoke, and production Next build. A fresh exact-head
+  ReviewGPT audit and exact-head CI remain before completion.

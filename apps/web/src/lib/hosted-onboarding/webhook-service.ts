@@ -1943,6 +1943,7 @@ interface HostedThreadRoutingCryptoPreparation {
   preparedSenderMemberId?: string;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
+  threadContainerPreparationFailure?: unknown;
 }
 
 async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
@@ -2050,16 +2051,26 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     if (!admission.shouldPrepareThreadContainer || !accountLookupKey) {
       return pendingGroupPreparation;
     }
-    return {
-      ...pendingGroupPreparation,
-      preparedThreadContainerCreation:
-        await prepareHostedThreadContainerCreation({
-          accountLookupKey,
-          channel: "linq",
-          prisma: input.prisma,
-          threadId: context.summary.chatId,
-        }),
-    };
+    try {
+      return {
+        ...pendingGroupPreparation,
+        preparedThreadContainerCreation:
+          await prepareHostedThreadContainerCreation({
+            accountLookupKey,
+            channel: "linq",
+            prisma: input.prisma,
+            threadId: context.summary.chatId,
+          }),
+      };
+    } catch (error) {
+      if (admission.preparedPendingGroupSetup) {
+        return {
+          ...pendingGroupPreparation,
+          threadContainerPreparationFailure: error,
+        };
+      }
+      throw error;
+    }
   }
 
   if (!accountLookupKey) {
@@ -2178,6 +2189,7 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
     let preparation: HostedThreadRoutingCryptoPreparation = {};
     const preparationFailures: unknown[] = [];
     let pendingGroupSetupPreparationFailure: unknown;
+    let threadContainerPreparationFailure: unknown;
     try {
       return await runHostedOnboardingWebhookTransaction(
         input.prisma,
@@ -2188,6 +2200,10 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
             if (preparation.pendingGroupSetupPreparationFailure !== undefined) {
               pendingGroupSetupPreparationFailure =
                 preparation.pendingGroupSetupPreparationFailure;
+            }
+            if (preparation.threadContainerPreparationFailure !== undefined) {
+              threadContainerPreparationFailure =
+                preparation.threadContainerPreparationFailure;
             }
           } catch (error) {
             preparationFailures.push(error);
@@ -2213,6 +2229,14 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
           message: "Hosted pending group setup payload preparation failed.",
           retryable: true,
         });
+      }
+      if (
+        threadContainerPreparationFailure !== undefined
+        && isHostedOnboardingError(error)
+        && error.code === "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED"
+        && error.details?.preparationTarget !== "pending_group_setup_payload"
+      ) {
+        throw threadContainerPreparationFailure;
       }
       if (
         preparationFailures.length > 0

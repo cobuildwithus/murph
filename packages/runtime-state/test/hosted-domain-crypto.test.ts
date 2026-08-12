@@ -8,7 +8,6 @@ import {
   buildHostedDomainRootEnvelopeSigningPayload,
   buildHostedDomainRootWrapContext,
   buildHostedSecureBoxAad,
-  hasValidHostedDomainRootEnvelopeAuthoritySignatureEncoding,
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   openHostedSecureBox,
   parseHostedDomainRootKeyEnvelope,
@@ -94,16 +93,6 @@ test("hosted domain roots sign, verify, wrap, and unwrap by Cloudflare recipient
       signature: "AA==",
     },
   };
-  assert.equal(
-    hasValidHostedDomainRootEnvelopeAuthoritySignatureEncoding(parsed),
-    true,
-  );
-  assert.equal(
-    hasValidHostedDomainRootEnvelopeAuthoritySignatureEncoding(
-      malformedSignatureEnvelope,
-    ),
-    false,
-  );
   assert.equal(
     await verifyHostedDomainRootEnvelopeSignatureWithPublicKey({
       envelope: malformedSignatureEnvelope,

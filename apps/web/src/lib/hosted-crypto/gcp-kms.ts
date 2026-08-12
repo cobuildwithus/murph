@@ -138,26 +138,6 @@ class GoogleCloudApiError extends Error {
   }
 }
 
-class HostedGcpKmsPermanentDecryptError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "HostedGcpKmsPermanentDecryptError";
-  }
-}
-
-/** A decrypt request the same persisted ciphertext cannot make readable later. */
-export function isHostedGcpKmsPermanentDecryptError(
-  error: unknown,
-): boolean {
-  return error instanceof HostedGcpKmsPermanentDecryptError
-    || (
-      error instanceof GoogleCloudApiError
-      && error.googleCloudOperation === "cloudkms/decrypt"
-      && error.status === 400
-      && error.googleCloudReason === "INVALID_ARGUMENT"
-    );
-}
-
 export function createHostedGcpKmsClientFromEnv(
   source: NodeJS.ProcessEnv = process.env,
 ): HostedGcpKmsClient {
@@ -229,14 +209,14 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
   async decrypt(input: GcpKmsDecryptInput): Promise<{ plaintext: Uint8Array }> {
     const keyName = normalizeKmsCryptoKeyName(input.keyName, "Local KMS Decrypt keyName");
     if (!input.ciphertext.startsWith(LOCAL_KMS_CIPHERTEXT_PREFIX)) {
-      throw new HostedGcpKmsPermanentDecryptError(
+      throw new Error(
         "Local KMS ciphertext must use the local-kms-v1 envelope.",
       );
     }
 
     const packed = decodeBase64(input.ciphertext.slice(LOCAL_KMS_CIPHERTEXT_PREFIX.length));
     if (packed.byteLength <= LOCAL_KMS_IV_BYTES) {
-      throw new HostedGcpKmsPermanentDecryptError(
+      throw new Error(
         "Local KMS ciphertext is malformed.",
       );
     }
@@ -265,7 +245,7 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
         error instanceof DOMException
         && (error.name === "DataError" || error.name === "OperationError")
       ) {
-        throw new HostedGcpKmsPermanentDecryptError(
+        throw new Error(
           "Local KMS ciphertext could not be authenticated.",
           { cause: error },
         );

@@ -961,10 +961,6 @@ test("batch private-field decrypt deduplicates roots and fails closed on missing
   expect(missingEnvelopeError).toBeInstanceOf(Error);
   expect((missingEnvelopeError as Error).message)
     .toMatch(/domain root envelope is not available/u);
-  const { isHostedDomainRootPermanentUnwrapError } = await import(
-    "../src/lib/hosted-crypto/domain-root-store"
-  );
-  expect(isHostedDomainRootPermanentUnwrapError(missingEnvelopeError)).toBe(true);
   expect(decryptMetrics.calls).toHaveLength(0);
 
   const [firstEnvelope, secondEnvelope] = tx.persistedEnvelopes;
@@ -1257,7 +1253,6 @@ test("historical authority verify-key omissions stay retryable across request sc
   const tx = createCapturingTransaction();
   const memberId = "member-historical-authority-root";
   const {
-    isHostedDomainRootPermanentUnwrapError,
     provisionActiveHostedDomainRootEnvelopeForUserOnly,
     unwrapHostedDomainRootsForWebByRootKeyIds,
   } = await import("../src/lib/hosted-crypto/domain-root-store");
@@ -1303,7 +1298,6 @@ test("historical authority verify-key omissions stay retryable across request sc
   expect(missingKeyError).toBeInstanceOf(Error);
   expect((missingKeyError as Error).message)
     .toMatch(/not trusted for verification/u);
-  expect(isHostedDomainRootPermanentUnwrapError(missingKeyError)).toBe(false);
   expect(decryptMetrics.calls).toHaveLength(0);
 
   stubHostedCryptoEnv({
@@ -1436,13 +1430,6 @@ test("Linq authority batch retains metadata validation failures only for the cur
         (error: unknown) => error,
       );
       expect(firstFailure, variant.name).not.toBeNull();
-      const { isHostedDomainRootPermanentUnwrapError } = await import(
-        "../src/lib/hosted-crypto/domain-root-store"
-      );
-      expect(
-        isHostedDomainRootPermanentUnwrapError(firstFailure),
-        variant.name,
-      ).toBe(true);
       await expect(decrypt([record]), variant.name).rejects.toBe(firstFailure);
       await expect(decrypt([siblingRecord]), variant.name).resolves.toHaveLength(1);
     });
@@ -1493,10 +1480,6 @@ test("a retained root failure stops a mixed batch before new metadata or KMS wor
     );
     expect(transientError).toBeInstanceOf(Error);
     expect((transientError as Error).message).toBe("Test KMS decrypt failure.");
-    const { isHostedDomainRootPermanentUnwrapError } = await import(
-      "../src/lib/hosted-crypto/domain-root-store"
-    );
-    expect(isHostedDomainRootPermanentUnwrapError(transientError)).toBe(false);
     const envelopeCallsBeforeMixedBatch = envelopeFindMany.mock.calls.length;
     const kmsCallsBeforeMixedBatch = decryptMetrics.calls.length;
     decryptMetrics.failAtCall = null;
@@ -1548,10 +1531,6 @@ test("batch private-field decrypt zeroizes invalid KMS plaintext and stops befor
   expect(invalidRootError).toBeInstanceOf(Error);
   expect((invalidRootError as Error).message)
     .toMatch(/decrypt returned invalid root length/u);
-  const { isHostedDomainRootPermanentUnwrapError } = await import(
-    "../src/lib/hosted-crypto/domain-root-store"
-  );
-  expect(isHostedDomainRootPermanentUnwrapError(invalidRootError)).toBe(true);
   expect(envelopeFindMany).toHaveBeenCalledTimes(1);
   expect(decryptMetrics.calls).toHaveLength(4);
   expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);

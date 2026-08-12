@@ -410,6 +410,17 @@ beforeEach(() => {
     ok: true,
     status: 200,
   });
+  vi.mocked(domainRootStore.prepareHostedCryptoDomainRootCandidates).mockReset();
+  vi.mocked(domainRootStore.prepareHostedCryptoDomainRootCandidates)
+    .mockResolvedValue(new Map());
+  vi.mocked(domainRootStore.prewarmPreparedHostedCryptoDomainRootForWeb)
+    .mockReset();
+  vi.mocked(domainRootStore.prewarmPreparedHostedCryptoDomainRootForWeb)
+    .mockResolvedValue(undefined);
+  vi.mocked(domainRootStore.provisionPreparedHostedCryptoDomainRootsTx)
+    .mockReset();
+  vi.mocked(domainRootStore.provisionPreparedHostedCryptoDomainRootsTx)
+    .mockResolvedValue(undefined);
   vi.mocked(signalRuntime.signalHostedMailboxAppendRuntime).mockResolvedValue({
     signalAccepted: true,
     workflowId: "workflow_group_123",
@@ -7699,6 +7710,164 @@ describe("Linq group chat auto-provision", () => {
       preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
     ).toHaveBeenNthCalledWith(2, expect.objectContaining({
       fallbackOwnerMemberId: senderCore.id,
+      requiredPendingSetupCandidateId: setupId,
+    }));
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps a selected replacement-line owner after sibling container preparation fails", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    let transactionOpen = false;
+    let transactionCount = 0;
+    prisma.$transaction.mockImplementation(async (
+      callback: (tx: unknown) => Promise<unknown>,
+    ) => {
+      transactionCount += 1;
+      transactionOpen = true;
+      try {
+        return await callback(prisma);
+      } finally {
+        transactionOpen = false;
+      }
+    });
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
+    mockSenderLookup(senderCore);
+    mockSuccessfulGroupProvision({ prisma, senderCore });
+
+    const recoveredOwnerMemberId = "member_recovered_owner";
+    const recoveredOwnerPhone = "+15552223333";
+    const recoveredOwnerPhoneLookupKey =
+      requireTestPhoneLookupKey(recoveredOwnerPhone);
+    const senderPhoneLookupKey = requireTestPhoneLookupKey("+15551112222");
+    prisma.hostedMemberIdentity.findMany.mockImplementation(async (input: {
+      where: { phoneLookupKey: { in: string[] } };
+    }) => input.where.phoneLookupKey.in.flatMap((phoneLookupKey) => {
+      if (phoneLookupKey === senderPhoneLookupKey) {
+        return [{ memberId: senderCore.id }];
+      }
+      if (phoneLookupKey === recoveredOwnerPhoneLookupKey) {
+        return [{ memberId: recoveredOwnerMemberId }];
+      }
+      return [];
+    }));
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15551112222", isMe: false, status: "active" },
+        { handle: recoveredOwnerPhone, isMe: false, status: "active" },
+      ],
+      isGroup: true,
+    });
+
+    const setupId = "hpgs_container_failure_pin";
+    const setupLineLookupKey = requireTestPhoneLookupKey("+15553334444");
+    let preparationCount = 0;
+    pendingGroupSetupMocks.prepareHostedPendingGroupSetupForParticipants
+      .mockImplementation(async (input: Parameters<
+        typeof pendingGroupSetupMocks.prepareHostedPendingGroupSetupForParticipants
+      >[0]) => {
+        preparationCount += 1;
+        expect(transactionOpen).toBe(false);
+        const base = {
+          incomingRecipientPhoneLookupKeys:
+            input.incomingRecipientPhoneLookupKeys,
+          occurredAt: input.occurredAt,
+          participantMemberIds: input.participantMemberIds,
+          recoveredRecipientPhoneLookupKey:
+            input.recoveredRecipientPhoneLookupKey,
+          senderMemberId: input.senderMemberId ?? null,
+          threadId: input.threadId,
+        };
+        if (preparationCount > 1) {
+          return {
+            ...base,
+            candidateRows: [],
+            candidates: [],
+            selected: null,
+            selectedPayload: null,
+          };
+        }
+        const row = {
+          armedAt: new Date("2026-06-24T11:30:00.000Z"),
+          expiresAt: new Date("2026-06-24T12:30:00.000Z"),
+          id: setupId,
+          ownerMemberId: recoveredOwnerMemberId,
+          payloadEncrypted: "sealed:test-container-failure-pin",
+          recipientPhoneLookupKey: setupLineLookupKey,
+        };
+        return {
+          ...base,
+          candidateRows: [row],
+          candidates: [{
+            ...row,
+            originalLineManaged: true,
+            originalRecipientPhone: "+15553334444",
+            originalRecipientPhoneLookupKeys: [setupLineLookupKey],
+            recoveryAuthority: "accepted" as const,
+            routing: {
+              linqRecipientPhoneEncrypted: "sealed:test-home-line",
+              linqRecipientPhoneLookupKey: setupLineLookupKey,
+              memberId: recoveredOwnerMemberId,
+            },
+            runtimeAccessAllowed: true,
+          }],
+          selected: {
+            admissionKind: "replacement_line" as const,
+            candidateId: setupId,
+            reason: "only_candidate" as const,
+          },
+          selectedPayload: {
+            candidateId: setupId,
+            kind: "ready" as const,
+            preparedClaim: {
+              id: setupId,
+              ownerMemberId: recoveredOwnerMemberId,
+              payloadEncrypted: "sealed:test-container-failure-pin",
+              payloadRootKeyId: null,
+              recipientPhoneLookupKey: setupLineLookupKey,
+            },
+          },
+        };
+      });
+    const containerFailure = new Error("temporary container KMS outage");
+    vi.mocked(domainRootStore.prepareHostedCryptoDomainRootCandidates)
+      .mockRejectedValueOnce(containerFailure)
+      .mockResolvedValueOnce(new Map());
+    preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
+      .mockRejectedValueOnce(hostedOnboardingError({
+        code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+        details: {
+          preparationTarget: "pending_group_setup_payload",
+        },
+        httpStatus: 409,
+        message: "fresh pending-group preparation required",
+        retryable: true,
+      }))
+      .mockResolvedValueOnce({
+        kind: "owner_unavailable",
+        pendingSetupResolution: "claim_raced",
+      });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({ ignored: true, ok: true });
+    expect(preparationCount).toBe(2);
+    expect(transactionCount).toBe(2);
+    expect(
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+    ).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      requiredPendingSetupCandidateId: setupId,
+    }));
+    expect(
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+    ).toHaveBeenNthCalledWith(2, expect.objectContaining({
       requiredPendingSetupCandidateId: setupId,
     }));
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();

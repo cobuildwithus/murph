@@ -676,14 +676,6 @@ export async function verifyHostedDomainRootEnvelopeSignatureWithPublicKey(input
   );
 }
 
-export function hasValidHostedDomainRootEnvelopeAuthoritySignatureEncoding(
-  envelope: Pick<HostedDomainRootKeyEnvelopeV1, "authoritySignature">,
-): boolean {
-  return tryNormalizeHostedDomainRootEnvelopeAuthoritySignature(
-    envelope.authoritySignature.signature,
-  ) !== null;
-}
-
 export async function assertHostedAuthorityVerifyPublicKeyPem(
   publicKeyPem: string,
 ): Promise<void> {

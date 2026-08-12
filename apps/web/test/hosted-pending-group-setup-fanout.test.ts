@@ -120,7 +120,6 @@ vi.mock("@/src/lib/hosted-onboarding/phone", () => ({
     typeof value === "string" && value.trim() ? value.trim() : null,
 }));
 
-import { HostedDomainRootPermanentUnwrapError } from "@/src/lib/hosted-crypto/domain-root-store";
 import {
   claimHostedPendingGroupSetupForParticipantsTx,
   prepareHostedPendingGroupSetupForParticipants,
@@ -773,11 +772,11 @@ describe("pending-group preparation fanout", () => {
   it("keeps a permanently unreadable selected root retryable after exact lock", async () => {
     fixture = buildFixture({ count: 1, selectedIndex: 0 });
     installOwnerMocks();
-    const permanent = new HostedDomainRootPermanentUnwrapError(
+    const unreadableRoot = new Error(
       "missing root metadata",
     );
     mocks.unwrapHostedDomainRootsForWebByRootKeyIds.mockRejectedValueOnce(
-      permanent,
+      unreadableRoot,
     );
     const { executeRaw, prisma, queryRaw } = createPrismaFixture();
     const selected = fixture.candidateRows[0]!;
@@ -892,9 +891,6 @@ describe("pending-group preparation fanout", () => {
     expect(selectedPayload?.kind === "failed"
       ? (selectedPayload.error as Error).message
       : "").toMatch(/not trusted for verification/u);
-    expect(unavailableKeyError).not.toBeInstanceOf(
-      HostedDomainRootPermanentUnwrapError,
-    );
     expect(queryRaw.mock.calls.some(([query]) =>
       queryText(query).includes("FOR UPDATE")
     )).toBe(true);

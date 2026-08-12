@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createHostedGcpKmsClientFromEnv,
-  isHostedGcpKmsPermanentDecryptError,
 } from "../src/lib/hosted-crypto/gcp-kms";
 
 vi.mock("@vercel/oidc", () => ({
@@ -76,7 +75,7 @@ describe("hosted crypto GCP KMS access-token guard", () => {
 });
 
 describe("hosted crypto GCP Workload Identity Federation", () => {
-  it("classifies only deterministic provider ciphertext rejection as permanent", async () => {
+  it("surfaces provider decrypt failures without a public permanent classifier", async () => {
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({
         error: { status: "INVALID_ARGUMENT" },
@@ -98,9 +97,16 @@ describe("hosted crypto GCP Workload Identity Federation", () => {
       keyName: LOCAL_KMS_KEY_NAME,
     }).then(() => null, (error: unknown) => error);
 
-    expect(isHostedGcpKmsPermanentDecryptError(await decrypt())).toBe(true);
-    expect(isHostedGcpKmsPermanentDecryptError(await decrypt())).toBe(false);
-    expect(isHostedGcpKmsPermanentDecryptError(await decrypt())).toBe(false);
+    const invalidArgument = await decrypt();
+    expect(invalidArgument).toBeInstanceOf(Error);
+    expect((invalidArgument as Error).message)
+      .toMatch(/cloudkms\/decrypt failed \(400\): INVALID_ARGUMENT/u);
+    const notFound = await decrypt();
+    expect(notFound).toBeInstanceOf(Error);
+    expect((notFound as Error).message)
+      .toMatch(/cloudkms\/decrypt failed \(404\): NOT_FOUND/u);
+    const network = await decrypt();
+    expect(network).toBeInstanceOf(TypeError);
   });
 
   it("bounds a stalled cold-token exchange with the operation deadline and no retry", async () => {
@@ -627,7 +633,8 @@ describe("hosted crypto local KMS", () => {
       keyName: LOCAL_KMS_KEY_NAME,
     }).then(() => null, (failure: unknown) => failure);
     expect(error).toBeInstanceOf(Error);
-    expect(isHostedGcpKmsPermanentDecryptError(error)).toBe(true);
+    expect((error as Error).message)
+      .toMatch(/Local KMS ciphertext could not be authenticated/u);
   });
 
   it("derives stable, key-version-bound 256-bit MACs without exposing the key", async () => {

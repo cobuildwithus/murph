@@ -8,7 +8,6 @@ import {
   createHostedDomainRootKeyId,
   findHostedDomainRootWrap,
   generateHostedDomainRootKey,
-  hasValidHostedDomainRootEnvelopeAuthoritySignatureEncoding,
   parseHostedDomainRootKeyEnvelope,
   serializeAdditionalAuthenticatedData,
   selectHostedAuthorityVerifyPublicKeyPem,
@@ -27,7 +26,6 @@ import {
 import { getPrisma } from "../prisma";
 import { getHostedDomainRootUnwrapCache } from "./domain-root-unwrap-cache";
 import { getHostedWebCryptoConfig, selectActiveHostedCloudflareAutomationRecipient } from "./env";
-import { isHostedGcpKmsPermanentDecryptError } from "./gcp-kms";
 
 type HostedCryptoTx = Prisma.TransactionClient;
 type HostedCryptoClient = PrismaClient | Prisma.TransactionClient;
@@ -41,15 +39,7 @@ const WEB_BATCH_UNWRAP_CONCURRENCY = 4;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const HOSTED_RUNTIME_CRYPTO_CONTEXT_POLICY_VERSION = "hosted-runtime-crypto-context-policy:v1";
 
-export class HostedDomainRootPermanentUnwrapError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "HostedDomainRootPermanentUnwrapError";
-  }
-}
-
-export class HostedDomainRootEnvelopeUnavailableError
-  extends HostedDomainRootPermanentUnwrapError {
+export class HostedDomainRootEnvelopeUnavailableError extends Error {
   constructor(input: { domain: HostedCryptoDomain }) {
     super(`Hosted ${input.domain} domain root envelope is not available for decrypt.`);
     this.name = "HostedDomainRootEnvelopeUnavailableError";
@@ -72,12 +62,6 @@ export function isHostedDomainRootEnvelopeUnavailableError(
   error: unknown,
 ): error is HostedDomainRootEnvelopeUnavailableError {
   return error instanceof HostedDomainRootEnvelopeUnavailableError;
-}
-
-export function isHostedDomainRootPermanentUnwrapError(
-  error: unknown,
-): error is HostedDomainRootPermanentUnwrapError {
-  return error instanceof HostedDomainRootPermanentUnwrapError;
 }
 
 interface HostedUserCryptoEnvelopeRow {
@@ -863,37 +847,26 @@ async function unwrapEnvelopeForWeb(input: {
   await verifyEnvelopeAuthoritySignature(input.envelope);
   const recipient = kmsRecipientForDomain(input.envelope.domain);
   if (!recipient) {
-    throw new HostedDomainRootPermanentUnwrapError(
+    throw new Error(
       `Web has no KMS recipient for hosted ${input.envelope.domain} roots.`,
     );
   }
   const wrap = findHostedDomainRootWrap({ envelope: input.envelope, recipient });
   if (!wrap || wrap.kind !== "gcp-kms") {
-    throw new HostedDomainRootPermanentUnwrapError(
+    throw new Error(
       `Hosted ${input.envelope.domain} root envelope is missing ${recipient} wrap.`,
     );
   }
   assertExpectedGcpKmsWrap({ envelope: input.envelope, recipient, wrap });
-  let decrypted: Awaited<ReturnType<typeof config.gcpKms.decrypt>>;
-  try {
-    decrypted = await config.gcpKms.decrypt({
-      additionalAuthenticatedData: wrap.additionalAuthenticatedData,
-      ciphertext: wrap.ciphertextBlob,
-      keyName: wrap.kmsKeyName,
-      signal: input.signal,
-    });
-  } catch (error) {
-    if (isHostedGcpKmsPermanentDecryptError(error)) {
-      throw new HostedDomainRootPermanentUnwrapError(
-        `Hosted ${input.envelope.domain} root wrap is permanently unreadable.`,
-        { cause: error },
-      );
-    }
-    throw error;
-  }
+  const decrypted = await config.gcpKms.decrypt({
+    additionalAuthenticatedData: wrap.additionalAuthenticatedData,
+    ciphertext: wrap.ciphertextBlob,
+    keyName: wrap.kmsKeyName,
+    signal: input.signal,
+  });
   if (decrypted.plaintext.byteLength !== 32) {
     decrypted.plaintext.fill(0);
-    throw new HostedDomainRootPermanentUnwrapError(
+    throw new Error(
       `Hosted ${input.envelope.domain} root GCP KMS decrypt returned invalid root length.`,
     );
   }
@@ -901,11 +874,6 @@ async function unwrapEnvelopeForWeb(input: {
 }
 
 async function verifyEnvelopeAuthoritySignature(envelope: HostedDomainRootKeyEnvelopeV1): Promise<void> {
-  if (!hasValidHostedDomainRootEnvelopeAuthoritySignatureEncoding(envelope)) {
-    throw new HostedDomainRootPermanentUnwrapError(
-      "Hosted domain root envelope authority signature encoding is invalid.",
-    );
-  }
   const config = getHostedWebCryptoConfig();
   const publicKeyPem = selectHostedAuthorityVerifyPublicKeyPem({
     keyring: config.authorityVerifyKeyring,
@@ -916,7 +884,7 @@ async function verifyEnvelopeAuthoritySignature(envelope: HostedDomainRootKeyEnv
     publicKeyPem,
   });
   if (!valid) {
-    throw new HostedDomainRootPermanentUnwrapError(
+    throw new Error(
       "Hosted domain root envelope authority signature verification failed.",
     );
   }
@@ -929,7 +897,7 @@ function assertExpectedGcpKmsWrap(input: {
 }): void {
   const config = getHostedWebCryptoConfig();
   if (input.wrap.kmsKeyName !== config.webWrapKmsKeyName) {
-    throw new HostedDomainRootPermanentUnwrapError(
+    throw new Error(
       `Hosted ${input.envelope.domain} root envelope uses an unexpected GCP KMS key.`,
     );
   }
@@ -942,7 +910,7 @@ function assertExpectedGcpKmsWrap(input: {
   });
   const expectedAad = serializeAdditionalAuthenticatedData(expectedContext);
   if (input.wrap.additionalAuthenticatedData !== expectedAad) {
-    throw new HostedDomainRootPermanentUnwrapError(
+    throw new Error(
       "Hosted domain root KMS AAD mismatch.",
     );
   }
@@ -950,7 +918,7 @@ function assertExpectedGcpKmsWrap(input: {
     serializeAdditionalAuthenticatedData(input.wrap.encryptionContext)
     !== serializeAdditionalAuthenticatedData(expectedContext)
   ) {
-    throw new HostedDomainRootPermanentUnwrapError(
+    throw new Error(
       "Hosted domain root KMS encryption context mismatch.",
     );
   }
@@ -1149,10 +1117,7 @@ async function parseAssertAndVerifyEnvelope(
       throw new Error("Hosted domain root envelope row rootKeyId mismatch.");
     }
   } catch (error) {
-    if (isHostedDomainRootPermanentUnwrapError(error)) {
-      throw error;
-    }
-    throw new HostedDomainRootPermanentUnwrapError(
+    throw new Error(
       error instanceof Error
         ? error.message
         : "Hosted domain root envelope is structurally invalid.",
