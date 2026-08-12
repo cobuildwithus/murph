@@ -725,7 +725,20 @@ test("Junction timed and derived timeseries facts survive core replay and remain
           groups: {
             dexcom: [{
               data: [
-                { timestamp: "2026-04-22T00:00:00Z", unit: "mmol/L", value: 5.5 },
+                {
+                  id: "corrected-glucose-reading",
+                  timestamp: "2026-04-22T00:00:00Z",
+                  recordedAt: "2026-04-23T08:00:00Z",
+                  unit: "mmol/L",
+                  value: 7,
+                },
+                {
+                  id: "corrected-glucose-reading",
+                  timestamp: "2026-04-22T00:00:00Z",
+                  recordedAt: "2026-04-23T09:00:00Z",
+                  unit: "mmol/L",
+                  value: 5.5,
+                },
               ],
               source: { provider: "dexcom", type: "cgm" },
             }],

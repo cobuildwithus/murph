@@ -1859,6 +1859,94 @@ function buildJunctionTimeseriesFidelityRecordKey(input: {
   ]);
 }
 
+function buildJunctionDenseFidelityStableIdentity(
+  resource: JunctionDenseFidelityResource,
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+): string | undefined {
+  const stableId = firstStringFromPaths(entry, JUNCTION_TIMESERIES_RECORD_ID_PATHS);
+  return stableId
+    ? JSON.stringify([
+        resource,
+        resourceContext.sourceProviderSlug,
+        resourceContext.origin.sourceType ?? "",
+        resourceContext.origin.sourceInstanceId ?? "",
+        stableId,
+      ])
+    : undefined;
+}
+
+function selectJunctionDenseFidelityRecordKeys(input: {
+  context: NormalizationContext;
+  entries: readonly JunctionResourceEntry[];
+  normalizeValue: (value: unknown) => number | undefined;
+  resource: JunctionDenseFidelityResource;
+  resourceSlug: string;
+  valuePaths: readonly string[];
+}): ReadonlyMap<string, string> {
+  const selected = new Map<string, { recordKey: string; recordedAt: string }>();
+  const fallbackArtifactRole = `junction-timeseries-daily-${input.resourceSlug}`;
+
+  for (const [index, { entry, originFallback }] of input.entries.entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource: input.resource,
+      resourceSlug: input.resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole,
+      context: input.context,
+    });
+    if (!resourceContext) continue;
+
+    const stableIdentity = buildJunctionDenseFidelityStableIdentity(
+      input.resource,
+      entry,
+      resourceContext,
+    );
+    if (!stableIdentity) continue;
+
+    const providerValue = firstValueFromPaths(entry, input.valuePaths);
+    const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths));
+    const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
+    const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp);
+    if (value === undefined || !sampleAt) continue;
+
+    const providerUnit = trimOptionalToLength(
+      firstStringFromPaths(entry, JUNCTION_INTERVAL_UNIT_PATHS),
+      160,
+    );
+    const recordKey = buildJunctionTimeseriesFidelityRecordKey({
+      entry,
+      providerUnit,
+      providerValue,
+      resource: input.resource,
+      resourceContext,
+      timestamp,
+    });
+    const candidate = {
+      recordKey,
+      recordedAt: timestamp.recordedAt ?? sampleAt,
+    };
+    const existing = selected.get(stableIdentity);
+    if (
+      !existing
+      || existing.recordedAt.localeCompare(candidate.recordedAt) < 0
+      || (
+        existing.recordedAt === candidate.recordedAt
+        && existing.recordKey.localeCompare(candidate.recordKey) < 0
+      )
+    ) {
+      selected.set(stableIdentity, candidate);
+    }
+  }
+
+  return new Map(
+    [...selected].map(([stableIdentity, selection]) => [stableIdentity, selection.recordKey]),
+  );
+}
+
 function buildJunctionTimeseriesFidelityPoint(input: {
   defaultTimeZone?: string;
   entry: PlainObject;
@@ -2010,6 +2098,16 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   if (fidelityResource) {
     assertJunctionTimeseriesResponseBound(fidelityResource, entries.length);
   }
+  const selectedDenseRecordKeys = isJunctionDenseFidelityResource(input.resource)
+    ? selectJunctionDenseFidelityRecordKeys({
+        context: input.context,
+        entries,
+        normalizeValue: input.normalizeValue,
+        resource: input.resource,
+        resourceSlug: input.resourceSlug,
+        valuePaths: input.valuePaths,
+      })
+    : undefined;
   const seenFidelityRecords = new Set<string>();
 
   for (const [index, { entry, originFallback }] of entries.entries()) {
@@ -2030,7 +2128,17 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     const providerValue = firstValueFromPaths(entry, input.valuePaths);
     const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths));
-    const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
+    const sparseStartRaw = isJunctionSparseIntervalResource(input.resource)
+      ? firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS)
+      : undefined;
+    const timestamp = sparseStartRaw
+      ? resolveJunctionSparseIntervalTimestamp(
+          entry,
+          sparseStartRaw,
+          input.context,
+          resourceContext.sourceProviderSlug,
+        )
+      : resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
     const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp);
     const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt, input.context.defaultTimeZone);
     const legacyDayKey = resolveLegacyJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
@@ -2062,6 +2170,16 @@ function buildJunctionDailyTimeseriesAggregates(input: {
           timestamp,
         })
       : undefined;
+    const denseStableIdentity = isJunctionDenseFidelityResource(input.resource)
+      ? buildJunctionDenseFidelityStableIdentity(input.resource, entry, resourceContext)
+      : undefined;
+    if (
+      denseStableIdentity
+      && fidelityRecordKey
+      && selectedDenseRecordKeys?.get(denseStableIdentity) !== fidelityRecordKey
+    ) {
+      continue;
+    }
     if (
       isJunctionSparseIntervalResource(input.resource)
       && fidelityRecordKey
@@ -2484,17 +2602,12 @@ function pushJunctionSparseIntervalReadings(
       continue;
     }
 
-    const resolvedTimestamp = resolveRecordTimestamp(
-      { ...entry, observedAtRaw: startRaw },
+    const timestamp = resolveJunctionSparseIntervalTimestamp(
+      entry,
+      startRaw,
       context,
       resourceContext.sourceProviderSlug,
     );
-    const timestamp = withTimestampOverride(resolvedTimestamp, {
-      occurredAt: startAt,
-      recordedAt: resolvedTimestamp.recordedAt ?? startAt,
-      observedAtRaw: startRaw,
-      timestampSemantics: inferTimestampSemantics(startRaw),
-    });
     const dayKey = resolveJunctionTimeseriesAggregateDayKey(
       entry,
       timestamp,
@@ -2583,6 +2696,28 @@ function pushJunctionSparseIntervalReadings(
     pushJunctionSparseIntervalReading(context, resource, resourceSlug, reading);
   }
   return new Set(readings.map((reading) => reading.fidelityRecordKey));
+}
+
+function resolveJunctionSparseIntervalTimestamp(
+  entry: PlainObject,
+  startRaw: string,
+  context: NormalizationContext,
+  sourceProviderSlug: string,
+): ReturnType<typeof resolveRecordTimestamp> {
+  const startAt = resolveSafeTimestamp(startRaw);
+  const timestamp = resolveRecordTimestamp(
+    { ...entry, observedAtRaw: startRaw },
+    context,
+    sourceProviderSlug,
+  );
+  return startAt
+    ? withTimestampOverride(timestamp, {
+        occurredAt: startAt,
+        recordedAt: timestamp.recordedAt ?? startAt,
+        observedAtRaw: startRaw,
+        timestampSemantics: inferTimestampSemantics(startRaw),
+      })
+    : timestamp;
 }
 
 function compareJunctionSparseIntervalReadings(

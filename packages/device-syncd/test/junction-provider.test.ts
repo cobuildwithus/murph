@@ -7204,7 +7204,13 @@ test("Junction reconcile keeps distinct same-time fidelity records while dedupli
           slug: "garmin",
           name: "Garmin",
           status: "connected",
-          resource_availability: { glucose: true, water: true },
+          resource_availability: {
+            blood_oxygen: true,
+            glucose: true,
+            mindfulness_minutes: true,
+            stress_level: true,
+            water: true,
+          },
         }],
       });
     }
@@ -7245,6 +7251,57 @@ test("Junction reconcile keeps distinct same-time fidelity records while dedupli
         },
       });
     }
+    if (url.pathname === "/v2/timeseries/junction-user-1/blood_oxygen/grouped") {
+      const first = {
+        recordId: "oxygen-record-1",
+        timestamp: "2026-04-02T10:00:00.000Z",
+        oxygenSaturation: 0.91,
+      };
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [
+              first,
+              { ...first },
+              { ...first, recordId: "oxygen-record-2" },
+              { ...first, oxygenSaturation: 0.97 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      const first = {
+        providerId: "stress-record-1",
+        timestamp: "2026-04-02T11:00:00.000Z",
+        averageStressLevel: 50,
+      };
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [first, { ...first }, { ...first, averageStressLevel: 80 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/mindfulness_minutes/grouped") {
+      const first = {
+        sampleId: "mindfulness-record-1",
+        start: "2026-04-02T12:00:00.000Z",
+        end: "2026-04-02T12:05:00.000Z",
+        mindfulnessMinutes: 5,
+      };
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [first, { ...first }, { ...first, mindfulnessMinutes: 10 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
     if (url.pathname === "/v2/summary/activity/junction-user-1") {
       return createJsonResponse({ data: [] });
     }
@@ -7252,7 +7309,13 @@ test("Junction reconcile keeps distinct same-time fidelity records while dedupli
   }, {
     providerFilter: ["garmin"],
     summaryResources: ["activity"],
-    timeseriesResources: ["glucose", "water"],
+    timeseriesResources: [
+      "blood_oxygen",
+      "glucose",
+      "mindfulness_minutes",
+      "stress_level",
+      "water",
+    ],
   });
   const importedSnapshots: unknown[] = [];
 
@@ -7271,7 +7334,9 @@ test("Junction reconcile keeps distinct same-time fidelity records while dedupli
     }),
   );
 
-  const recordsFor = (resource: "glucose" | "water") => importedSnapshots.flatMap((snapshot) => {
+  const recordsFor = (
+    resource: "blood_oxygen" | "glucose" | "mindfulness_minutes" | "stress_level" | "water",
+  ) => importedSnapshots.flatMap((snapshot) => {
     const timeseries = (snapshot as { timeseries?: Record<string, unknown[]> }).timeseries;
     return timeseries?.[resource] ?? [];
   });
@@ -7285,6 +7350,24 @@ test("Junction reconcile keeps distinct same-time fidelity records while dedupli
     ["2026-04-02T09:00:00.000Z", 250],
     ["2026-04-02T09:02:00.000Z", 125],
   ]);
+  assert.deepEqual(
+    (recordsFor("blood_oxygen") as Array<{ oxygenSaturation?: number }>).map((record) =>
+      record.oxygenSaturation
+    ).sort(),
+    [0.91, 0.91, 0.97],
+  );
+  assert.deepEqual(
+    (recordsFor("stress_level") as Array<{ averageStressLevel?: number }>).map((record) =>
+      record.averageStressLevel
+    ).sort((left, right) => Number(left) - Number(right)),
+    [50, 80],
+  );
+  assert.deepEqual(
+    (recordsFor("mindfulness_minutes") as Array<{ mindfulnessMinutes?: number }>).map((record) =>
+      record.mindfulnessMinutes
+    ).sort((left, right) => Number(left) - Number(right)),
+    [5, 10],
+  );
 });
 
 test("Junction historical reconcile jobs preserve their summary window", async () => {

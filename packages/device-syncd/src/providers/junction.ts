@@ -5112,7 +5112,19 @@ function junctionTimeseriesRecordValueIdentity(
   // Same stable-id alias list as the importer's reading identity. Fidelity
   // resources still include their shape/value fields so only exact repeats
   // collapse before the importer deterministically reconciles same-id revisions.
-  const rowId = ["id", "resourceId", "resource_id", "externalId", "external_id"]
+  const rowId = [
+    "id",
+    "resourceId",
+    "resource_id",
+    "externalId",
+    "external_id",
+    "providerId",
+    "provider_id",
+    "recordId",
+    "record_id",
+    "sampleId",
+    "sample_id",
+  ]
     .map((key) => normalizeString(entry[key]))
     .find((value): value is string => Boolean(value));
 
@@ -5155,12 +5167,17 @@ function junctionTimeseriesRecordValueIdentity(
   ];
 
   if (fidelityIntervalResource) {
+    const intervalValue = resource === "mindfulness_minutes"
+      ? entry.value ?? entry.mindfulnessMinutes ?? entry.mindfulness_minutes
+      : resource === "caffeine"
+        ? entry.value ?? entry.caffeine
+        : entry.value ?? entry.water;
     return [
       rowId ?? "",
       String(entry.start ?? entry.startAt ?? entry.start_at ?? entry.timeStart ?? entry.time_start ?? ""),
       String(entry.end ?? entry.endAt ?? entry.end_at ?? entry.timeEnd ?? entry.time_end ?? ""),
       String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
-      String(entry.value ?? entry[resource] ?? ""),
+      String(intervalValue ?? ""),
       ...timeZoneIdentity,
     ];
   }
@@ -5178,15 +5195,23 @@ function junctionTimeseriesRecordValueIdentity(
           ?? entry.day
           ?? "",
       ),
-      String(
-        entry.value
-          ?? (resource === "glucose"
-            ? entry.glucose ?? entry.bloodGlucose ?? entry.blood_glucose
-            : resource === "blood_oxygen"
-              ? entry.spo2 ?? entry.spO2 ?? entry.bloodOxygen ?? entry.blood_oxygen
-              : entry.stressLevel ?? entry.stress_level ?? entry.score)
-          ?? "",
-      ),
+      String(entry.value ?? (resource === "glucose"
+        ? entry.glucose ?? entry.bloodGlucose ?? entry.blood_glucose
+        : resource === "blood_oxygen"
+          ? entry.spo2
+            ?? entry.spO2
+            ?? entry.bloodOxygen
+            ?? entry.blood_oxygen
+            ?? entry.oxygenSaturation
+            ?? entry.oxygen_saturation
+          : entry.stressLevel
+            ?? entry.stress_level
+            ?? entry.averageStressLevel
+            ?? entry.average_stress_level
+            ?? readPlainObject(entry.stress)?.average
+            ?? entry.stressLevelValue
+            ?? entry.stress_level_value
+            ?? entry.score) ?? ""),
       String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
       ...timeZoneIdentity,
     ];
