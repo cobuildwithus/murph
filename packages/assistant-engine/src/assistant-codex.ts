@@ -4635,8 +4635,9 @@ async function runCodexAppServerTurnOnProcess(
         dynamicToolRequest.localAtRecovery &&
         requiredAutomationLocalAtClarification?.resolvedLocalDate ===
           dynamicToolRequest.localAtRecovery.resolvedLocalDate &&
-        requiredAutomationLocalAtClarification.targetKey ===
-          dynamicToolRequest.localAtRecovery.targetKey
+        result.automationTargetKeys?.includes(
+          requiredAutomationLocalAtClarification.targetKey,
+        ) === true
       ) {
         requiredAutomationLocalAtClarification = null
       }

@@ -359,8 +359,9 @@ export function readAutomationDynamicToolRequest(input: {
     }
   }
 
-  const localAtAttempt = readAutomationLocalAtAttempt(parsed.args)
+  let localAtAttempt: ReturnType<typeof readAutomationLocalAtAttempt> = null
   try {
+    localAtAttempt = readAutomationLocalAtAttempt(parsed.args)
     return {
       kind: 'automation',
       ...(localAtAttempt?.explicitLocalDate
@@ -427,17 +428,24 @@ function readAutomationLocalAtAttempt(
   }
 
   const targetIdentity = args.action === 'patch'
-    ? ['patch', args.lookup]
-    : ['save', resolveAutomationUpsertSlug({
+    ? args.lookup
+    : resolveAutomationUpsertSlug({
         slug: args.slug,
         title: args.title,
-      })]
+      })
   return {
     explicitLocalDate: schedule.localAt.date ?? null,
-    targetKey: createHash('sha256')
-      .update(JSON.stringify(targetIdentity))
-      .digest('hex'),
+    targetKey: buildAutomationLocalAtTargetKey(args.action, targetIdentity),
   }
+}
+
+function buildAutomationLocalAtTargetKey(
+  action: 'patch' | 'save',
+  targetIdentity: string,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify([action, targetIdentity]))
+    .digest('hex')
 }
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {
@@ -681,6 +689,7 @@ export async function executeAutomationDynamicTool(input: {
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   request: Extract<AutomationDynamicToolRequest, { kind: 'automation' }>
 }): Promise<{
+  automationTargetKeys?: readonly string[]
   rpcResult: {
     contentItems: Array<{ text: string; type: 'inputText' }>
     success: boolean
@@ -711,9 +720,28 @@ export async function executeAutomationDynamicTool(input: {
     }
 
     const text = serializeAutomationToolResponse(response)
-    return text
-      ? automationTextResult(true, text)
-      : automationTextResult(false, 'automation result is too large')
+    if (!text) {
+      return automationTextResult(false, 'automation result is too large')
+    }
+    const result = automationTextResult(true, text)
+    if (response.action === 'save') {
+      return {
+        ...result,
+        automationTargetKeys: [
+          buildAutomationLocalAtTargetKey('save', response.lookupId),
+        ],
+      }
+    }
+    if (response.action === 'patch') {
+      return {
+        ...result,
+        automationTargetKeys: [...new Set([
+          buildAutomationLocalAtTargetKey('patch', response.automationId),
+          buildAutomationLocalAtTargetKey('patch', response.lookupId),
+        ])],
+      }
+    }
+    return result
   } catch (error) {
     if (isAutomationConflictError(error)) {
       return automationTextResult(

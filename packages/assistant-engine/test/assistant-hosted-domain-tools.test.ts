@@ -342,6 +342,140 @@ describe('hosted domain dynamic tools', () => {
     )
   })
 
+  it.each([
+    {
+      failedLookup: 'medication-reminder',
+      recoveryLookup: 'automation-medication-reminder',
+    },
+    {
+      failedLookup: 'automation-medication-reminder',
+      recoveryLookup: 'medication-reminder',
+    },
+  ])('binds patch DST recovery across canonical lookup aliases', async ({
+    failedLookup,
+    recoveryLookup,
+  }) => {
+    const failedPatch = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      lookup: failedLookup,
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+    }, referenceWindow('2026-03-08T04:59:00.000Z'))
+    const recovery = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      lookup: recoveryLookup,
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+    })
+    if (
+      failedPatch?.kind !== 'invalid-automation-arguments' ||
+      recovery?.kind !== 'automation'
+    ) {
+      throw new TypeError('Expected a failed patch and explicit-date recovery.')
+    }
+    expect(recovery.localAtRecovery?.targetKey).not.toBe(
+      failedPatch.localAtTargetKey,
+    )
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: {
+          request: async (request) => ({
+            action: 'patch',
+            automationId: 'automation-medication-reminder',
+            created: false,
+            effectiveTimeZone: 'America/New_York',
+            lookupId: 'medication-reminder',
+            nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+            routeBinding: 'current_conversation',
+            schedule: request.action === 'patch' && request.schedule
+              ? request.schedule
+              : { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
+            status: 'active',
+            timingVerified: true,
+            updatedAt: '2026-03-08T05:01:00.000Z',
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: recovery,
+    })
+
+    expect(result.rpcResult.success).toBe(true)
+    expect(result.automationTargetKeys).toContain(
+      failedPatch.localAtTargetKey,
+    )
+  })
+
+  it('contains local one-shot slug derivation failures for a recoverable retry', async () => {
+    const localizedRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: '薬を飲む',
+    })
+    expect(localizedRequest).toMatchObject({
+      kind: 'invalid-automation-arguments',
+    })
+    if (localizedRequest?.kind !== 'invalid-automation-arguments') {
+      throw new TypeError('Expected a recoverable invalid automation request.')
+    }
+    const invalidResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({}),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: localizedRequest,
+    })
+    expect(invalidResult.rpcResult.success).toBe(false)
+
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      slug: 'take-medicine',
+      title: '薬を飲む',
+    })).toMatchObject({
+      kind: 'automation',
+      request: {
+        action: 'save',
+        slug: 'take-medicine',
+      },
+    })
+  })
+
   it('keeps privileged and generic execution fields out of both schemas', () => {
     const propertyKeys = new Set([
       ...collectJsonSchemaPropertyKeys(MURPH_AUTOMATION_TOOL.inputSchema),

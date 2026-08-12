@@ -948,6 +948,7 @@ type HostedComputerToolPayloadSanitizer =
   | 'open'
 
 export interface MurphDynamicToolExecutionResult {
+  automationTargetKeys?: readonly string[]
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
