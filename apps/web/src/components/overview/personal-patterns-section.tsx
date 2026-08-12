@@ -240,6 +240,7 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
           <div
             key={outcomes.map((outcome) => outcome.id).join(":")}
             className={cn(groupIndex > 0 && "border-t-4 border-border")}
+            data-pattern-outcome-group={groupIndex + 1}
           >
             <div
               className="grid items-stretch bg-muted/20"

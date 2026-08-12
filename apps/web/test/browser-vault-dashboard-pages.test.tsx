@@ -169,12 +169,16 @@ test("PatternsPage renders personal comparisons on their own route", () => {
 });
 
 test("Personal Patterns comparison controls name their factor and next-day outcome", () => {
-  const markup = renderToStaticMarkup(createElement(PersonalPatternsComponentStudy));
+  const markup = renderToStaticMarkup(
+    createElement(PersonalPatternsComponentStudy),
+  );
 
   assert.match(markup, /aria-label="Running, next-day HRV\./);
   assert.match(markup, /aria-label="Sauna, next-day Total sleep\./);
   assert.match(markup, /data-patterns-layout="mobile"/u);
   assert.match(markup, /data-patterns-layout="desktop"/u);
+  assert.equal((markup.match(/data-pattern-outcome-group=/gu) ?? []).length, 3);
+  assert.match(markup, /Sleep efficiency/u);
   assert.match(markup, />14 days</u);
   assert.doesNotMatch(markup, /Scroll sideways/u);
 });
@@ -198,9 +202,15 @@ test("PatternsPage explains the bounded wait when a legacy replica has no patter
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Patterns are getting ready/u);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Patterns are getting ready/u,
+    );
     assert.match(rendered.container.textContent ?? "", /within 24 hours/u);
-    assert.doesNotMatch(rendered.container.textContent ?? "", /No clear comparison is ready/u);
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /No clear comparison is ready/u,
+    );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Refresh now/u);
   } finally {
     await rendered.cleanup();
@@ -236,16 +246,23 @@ test("PatternsPage exposes the existing retry action after a load failure", asyn
     refresh: mocks.refresh,
     status: "error",
   });
-  const rendered = await renderClientComponent(createElement(PatternsPageClient));
+  const rendered = await renderClientComponent(
+    createElement(PatternsPageClient),
+  );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Could not load your patterns/u);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Could not load your patterns/u,
+    );
     const retryButton = [...rendered.container.querySelectorAll("button")].find(
       (button) => button.textContent === "Retry",
     );
     assert.ok(retryButton);
     await act(async () => {
-      retryButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      retryButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
     });
     assert.equal(mocks.refresh.mock.calls.length, 1);
   } finally {
