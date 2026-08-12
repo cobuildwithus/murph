@@ -60,6 +60,7 @@ import {
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
   resolveJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataKey,
@@ -2798,6 +2799,7 @@ export function createJunctionDeviceSyncProvider(
             chunkRecords,
             chunkWindowStart,
             chunkWindowEnd,
+            options.dateQueryFormat,
           ),
         );
       } catch (error) {
@@ -3637,7 +3639,9 @@ export function createJunctionDeviceSyncProvider(
         metadataKey === JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
       version: resource === "note"
         ? JUNCTION_NOTE_HISTORY_BACKFILL_VERSION
-        : JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
+        : resource === "weight"
+          ? JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION
+          : JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
     };
   }
 
@@ -5615,6 +5619,7 @@ function filterJunctionTimeseriesRecordsToWindow(
   records: readonly unknown[],
   windowStart: string,
   windowEnd: string,
+  dateQueryFormat: JunctionDateQueryFormat | undefined,
 ): unknown[] {
   const startMs = Date.parse(windowStart);
   const endMs = Date.parse(windowEnd);
@@ -5630,10 +5635,23 @@ function filterJunctionTimeseriesRecordsToWindow(
     if (!entry) {
       return true;
     }
-    const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry, preferIntervalStart);
-    if (!timestamp) {
+    const rawTimestamp = resolveJunctionTimeseriesRecordRawTimestamp(
+      entry,
+      preferIntervalStart,
+    );
+    if (!rawTimestamp) {
       return true;
     }
+
+    if (
+      dateQueryFormat === "date"
+      && (resource === "steps" || resource === "distance")
+      && isJunctionFloatingCalendarTimestamp(rawTimestamp)
+    ) {
+      return rawTimestamp.slice(0, 10) === windowStart.slice(0, 10);
+    }
+
+    const timestamp = toIsoTimestampIfValid(rawTimestamp) ?? rawTimestamp;
     const recordedMs = Date.parse(timestamp);
     if (!Number.isFinite(recordedMs)) {
       return true;
@@ -5834,6 +5852,19 @@ function resolveJunctionTimeseriesRecordTimestamp(
   record: Record<string, unknown>,
   preferIntervalStart = false,
 ): string | null {
+  const rawTimestamp = resolveJunctionTimeseriesRecordRawTimestamp(
+    record,
+    preferIntervalStart,
+  );
+  return rawTimestamp
+    ? toIsoTimestampIfValid(rawTimestamp) ?? rawTimestamp
+    : null;
+}
+
+function resolveJunctionTimeseriesRecordRawTimestamp(
+  record: Record<string, unknown>,
+  preferIntervalStart = false,
+): string | null {
   const intervalKeys = preferIntervalStart
     ? ["sessionStart", "session_start", "timeStart", "time_start", "start", "startAt", "start_at", "sessionEnd", "session_end", "timeEnd", "time_end", "end", "endAt", "end_at"]
     : ["sessionEnd", "session_end", "timeEnd", "time_end", "end", "endAt", "end_at", "sessionStart", "session_start", "timeStart", "time_start", "start", "startAt", "start_at"];
@@ -5852,10 +5883,19 @@ function resolveJunctionTimeseriesRecordTimestamp(
       continue;
     }
 
-    return toIsoTimestampIfValid(normalized) ?? normalized;
+    return normalized;
   }
 
   return null;
+}
+
+function isJunctionFloatingCalendarTimestamp(value: string): boolean {
+  const normalized = value.trim();
+  if (/z$/iu.test(normalized) || /[+-]\d{2}:?\d{2}$/u.test(normalized)) {
+    return false;
+  }
+
+  return /^\d{4}-\d{2}-\d{2}(?:$|[ t]\d{2}:\d{2})/iu.test(normalized);
 }
 
 function buildJunctionRedirectUrl(callbackUrl: string, state: string): string {

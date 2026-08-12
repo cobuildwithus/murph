@@ -995,6 +995,19 @@ test("weight receives summary-history backfill while dense opt-ins stay bounded"
     ),
     false,
   );
+
+  const afterReconnect = createScheduledJobs(
+    createStoredAccount({ metadata: {}, sources }),
+    "2026-06-12T12:00:00.000Z",
+  );
+  const renewedWeightJobs = afterReconnect.jobs.filter((job) =>
+    job.kind === "resource" && job.payload?.resource === "weight"
+  );
+  assert.equal(renewedWeightJobs.length, 1);
+  assert.equal(
+    renewedWeightJobs[0]?.payload?.historicalWindowStart,
+    "2025-12-14T00:00:00.000Z",
+  );
 });
 
 test("weight history terminalizes validation rejects and preserves distinct same-timestamp readings", async () => {
