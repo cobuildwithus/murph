@@ -43,6 +43,15 @@ Current providers:
   budget. Sparse `insulin_injection` records become medication-intake events and
   timed `carbohydrates` records become sample-grain observations rather than meals;
   both retain only compact allowlisted per-record evidence.
+- Junction resource admission derives from the static 57-resource policy in
+  `@murphai/contracts`. Sparse supported VO2 max, temperature, caffeine,
+  one-minute heart-rate recovery, sleep-breathing-disturbance, AFib-burden,
+  insulin-injection, and carbohydrate resources use the existing per-source
+  history owner for a 180-day initial scan. That scan advances in one bounded
+  30-day provider window per resource job, schedules at most eight
+  resource/source pairs per reconcile pass, and retains only compact daily facts
+  or compact per-record evidence. It never persists full provider timeseries
+  arrays or emits canonical sample rows.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
