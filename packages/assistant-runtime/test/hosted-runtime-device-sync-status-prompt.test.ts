@@ -224,6 +224,42 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).not.toContain("vault-cli device connect strava --format json");
   });
 
+  it("keeps an existing modern Dexcom recovery command available", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectionAvailable: true,
+          connectTarget: "dexcom_v3",
+          connectTargetCommandSafe: true,
+          label: "Dexcom",
+          provider: "junction",
+          sourceProviderSlug: "dexcom_v3",
+        },
+      ],
+      snapshot: buildSnapshot({
+        sources: [
+          {
+            displayName: null,
+            firstSeenAt: "2026-06-01T00:00:00.000Z",
+            lastErrorCode: "TOKEN_REFRESH_FAILED",
+            lastErrorMessage: "refresh failed",
+            lastSeenAt: "2026-06-29T00:00:00.000Z",
+            lastDataAt: null,
+            resourceCount: 0,
+            sourceProviderSlug: "dexcom_v3",
+            status: "error",
+          },
+        ],
+      }),
+    });
+
+    expect(prompt).toContain("Dexcom currently needs reconnect");
+    expect(prompt).toContain("source `dexcom_v3`");
+    expect(prompt).toContain(
+      "vault-cli device connect dexcom_v3 --format json",
+    );
+  });
+
   it("guides Garmin historical recovery through the confirmed connection reset", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [

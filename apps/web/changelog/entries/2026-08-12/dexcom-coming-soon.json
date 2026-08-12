@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "Clearer Dexcom connection availability",
     "summary": "The modern Dexcom card now says when production connections are coming soon instead of opening an unsupported setup flow.",
-    "details": "Existing connected accounts keep their management controls, and the separate Dexcom G6 and older connection remains available.",
+    "details": "Existing connected accounts keep their management and recovery controls, and the separate Dexcom G6 and older connection remains available.",
     "relevanceTags": ["dexcom", "wearables", "connections"],
     "sourcePullRequests": [1720]
   }

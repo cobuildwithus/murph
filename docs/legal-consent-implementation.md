@@ -187,7 +187,9 @@ web group-join, and iMessage mini-app enrollment actions still fail closed with
 `HOSTED_CONSENT_REQUIRED` until the member accepts the current documents.
 Account export is the withdrawal exception described above. Strava remains
 disabled for new connections and reconnect offers as a separate provider
-product gate.
+product gate. Modern Dexcom remains visible but disabled for fresh connections;
+an authenticated member may recover only an exact existing `dexcom_v3`
+connection after Web revalidates its current member-owned recovery state.
 
 If a companion health-data action encounters zero or partial historical launch
 consent, the native app keeps the Privy member session, closes Junction and

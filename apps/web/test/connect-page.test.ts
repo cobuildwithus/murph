@@ -1206,6 +1206,53 @@ test("ConnectPage does not offer Strava reconnection for an existing account nee
   assert.doesNotMatch(markup, /aria-label="Reconnect Strava"/u);
 });
 
+test("ConnectPage preserves modern Dexcom recovery while keeping fresh connections closed", async () => {
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv(
+    "JUNCTION_CLIENT_USER_ID_SECRET",
+    "junction-client-user-id-secret",
+  );
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "dexcom_v3");
+  vi.stubEnv("JUNCTION_REGION", "us");
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-08-12T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_dexcom_recovery",
+        connectSourceId: "dexcom",
+        connectTarget: "dexcom_v3",
+        primaryAction: {
+          kind: "reconnect",
+          label: "Reconnect",
+        },
+        provider: "junction",
+        state: "reauthorization_required",
+        upstreamSources: [
+          {
+            connectProvider: "junction",
+            connectSourceId: "dexcom",
+            connectTarget: "dexcom_v3",
+            sourceProviderSlug: "dexcom_v3",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import(
+    "../app/(dashboard)/connect/connect-page-content"
+  );
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /Please reconnect Dexcom to resume syncing\./u);
+  assert.match(markup, /aria-label="Reconnect Dexcom"/u);
+  assert.match(markup, /aria-label="Disconnect Dexcom"/u);
+  assert.doesNotMatch(markup, />Coming soon<\/button>/u);
+});
+
 test("ConnectPage enables every Link source exposed by the shared Junction defaults", async () => {
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv(
@@ -2698,6 +2745,63 @@ test("SourceCard shows modern Dexcom as coming soon without hiding existing-acco
 
   assert.match(connectedMarkup, /aria-label="Disconnect account"/u);
   assert.doesNotMatch(connectedMarkup, />Coming soon<\/button>/u);
+
+  const recoveryMarkup = renderToStaticMarkup(
+    createElement(SourceCard, {
+      ...cardProps,
+      authenticated: true,
+      source: {
+        ...source,
+        connectProvider: "junction" as const,
+        connectTarget: "dexcom_v3",
+        disconnectConnectionId: "dsc_dexcom_recovery",
+        disconnectSourceProviderSlug: "dexcom_v3",
+        requiresReconnect: true,
+      },
+    }),
+  );
+
+  assert.match(recoveryMarkup, /Please reconnect Dexcom to resume syncing\./u);
+  assert.match(recoveryMarkup, /aria-label="Reconnect Dexcom"/u);
+  assert.match(recoveryMarkup, /aria-label="Disconnect Dexcom"/u);
+  assert.doesNotMatch(recoveryMarkup, />Coming soon<\/button>/u);
+});
+
+test("Dexcom disconnect confirmation warns that a voluntary disconnect cannot yet reconnect", async () => {
+  const { ConnectDisconnectDialog } = await import(
+    "../app/(dashboard)/connect/connect-page-dialogs"
+  );
+  const markup = renderToStaticMarkup(
+    createElement(ConnectDisconnectDialog, {
+      errorMessage: null,
+      inert: true,
+      pending: false,
+      source: {
+        connected: true,
+        connectionAvailable: false,
+        description: "CGM glucose readings and trends.",
+        disconnectConnectionId: "dsc_dexcom_existing",
+        id: "dexcom",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/dexcom.png",
+          width: 44,
+        },
+        name: "Dexcom",
+        unavailableActionLabel: "Coming soon",
+        unavailableMessage: "Dexcom connections are coming soon.",
+      },
+      onConfirm: async () => {},
+      onOpenChange: () => {},
+    }),
+  );
+
+  assert.match(markup, /Disconnect Dexcom\?/u);
+  assert.match(
+    markup,
+    /You won’t be able to reconnect it through Murph until this connection becomes available\./u,
+  );
 });
 
 test("SourceCard does not promise unavailable Strava recovery connections", async () => {
@@ -2849,6 +2953,8 @@ test("connect source card design study renders the production action states", as
   assert.match(markup, /aria-label="Sign in to connect Oura"/u);
   assert.match(markup, /Dexcom connections are coming soon\./u);
   assert.match(markup, /aria-label="Dexcom web setup is not available yet"/u);
+  assert.match(markup, /Please reconnect Dexcom to resume syncing\./u);
+  assert.match(markup, /aria-label="Reconnect Dexcom"/u);
   assert.doesNotMatch(markup, /aria-label="Sign in to connect Dexcom"/u);
   assert.match(markup, /Whoop needs a fresh connection/u);
   assert.match(markup, /aria-label="Disconnect account"/u);

@@ -26,7 +26,9 @@ export function toHostedBrowserDeviceSyncConnectionSource(
     firstSeenAt: source.firstSeenAt,
     lastSeenAt: source.lastSeenAt,
     ...(recoveryKind ? { recoveryKind } : {}),
-    ...(requiresConnectionSourceReconnect(source) ? { requiresReconnect: true } : {}),
+    ...(requiresHostedDeviceConnectionSourceReconnect(source)
+      ? { requiresReconnect: true }
+      : {}),
     resourceCount: countSourceResources(source.resourceAvailabilitySummary),
     sourceProviderSlug: source.sourceProviderSlug,
     status: source.status,
@@ -36,7 +38,12 @@ export function toHostedBrowserDeviceSyncConnectionSource(
 const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
   "sourceInstanceKeyFallback",
 ]);
-const CONNECTION_SOURCE_RECONNECT_ERROR_CODES = new Set(["TOKEN_REFRESH_FAILED"]);
+export const HOSTED_DEVICE_CONNECTION_SOURCE_RECONNECT_ERROR_CODES = [
+  "TOKEN_REFRESH_FAILED",
+] as const;
+const CONNECTION_SOURCE_RECONNECT_ERROR_CODES = new Set<string>(
+  HOSTED_DEVICE_CONNECTION_SOURCE_RECONNECT_ERROR_CODES,
+);
 
 /**
  * True when a `resourceAvailabilitySummary` entry names an available resource
@@ -64,9 +71,14 @@ function countSourceResources(
   ).length;
 }
 
-function requiresConnectionSourceReconnect(source: HostedDeviceConnectionSource): boolean {
+export function requiresHostedDeviceConnectionSourceReconnect(
+  source: {
+    lastErrorCode?: string | null;
+    status?: string | null;
+  },
+): boolean {
   return source.status === "error"
-    && source.lastErrorCode !== null
+    && typeof source.lastErrorCode === "string"
     && CONNECTION_SOURCE_RECONNECT_ERROR_CODES.has(source.lastErrorCode);
 }
 

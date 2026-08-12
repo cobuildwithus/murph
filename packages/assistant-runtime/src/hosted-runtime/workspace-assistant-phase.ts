@@ -85,6 +85,7 @@ import {
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import {
   isDeviceConnectSourceAvailableForConnection,
+  isDeviceConnectSourceAvailableForExistingConnectionRecovery,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/connect-config";
@@ -8268,7 +8269,9 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
   const publicTargetsByConnectTarget = new Map(
     listConfiguredDeviceSyncConnectTargets(providerConfigs)
       .filter((target) =>
-        isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
+        isDeviceConnectSourceAvailableForExistingConnectionRecovery(
+          target.connectSourceId,
+        )
       )
       .map((target) => [
         target.connectTarget,
@@ -8284,7 +8287,7 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
   }
 
   return targets.map((target) => ({
-    connectionAvailable: isDeviceConnectSourceAvailableForConnection(
+    connectionAvailable: isDeviceConnectSourceAvailableForExistingConnectionRecovery(
       target.connectSourceId,
     ),
     connectTarget: target.connectTarget,

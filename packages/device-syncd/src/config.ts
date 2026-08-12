@@ -183,6 +183,7 @@ export {
 } from "./config/runtime-config.ts";
 export {
   isDeviceConnectSourceAvailableForConnection,
+  isDeviceConnectSourceAvailableForExistingConnectionRecovery,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
   normalizeDeviceSyncConnectTargetKey,

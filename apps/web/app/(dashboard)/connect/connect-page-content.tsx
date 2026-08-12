@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import {
   DEVICE_CONNECT_SOURCES,
   isDeviceConnectSourceAvailableForConnection,
+  isDeviceConnectSourceAvailableForExistingConnectionRecovery,
   listConfiguredDeviceSyncConnectTargets,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
@@ -661,12 +662,16 @@ export function resolveConfiguredConnectSources(
         source.id,
       );
       const reconnectTarget = options.reconnectTargetBySourceId?.get(source.id);
-      const resolvedConnectTarget = connectionAvailable
-        ? (reconnectTarget ?? connectConfig?.connectTarget)
-        : undefined;
+      const existingRecoveryAvailable = Boolean(reconnectTarget)
+        && isDeviceConnectSourceAvailableForExistingConnectionRecovery(source.id);
+      const resolvedConnectTarget = existingRecoveryAvailable
+        ? reconnectTarget
+        : connectionAvailable
+          ? connectConfig?.connectTarget
+          : undefined;
       const requiresVitalDisclosure =
-        connectionAvailable &&
-        connectConfig?.provider === "junction";
+        connectionAvailable
+        && connectConfig?.provider === "junction";
 
       return {
         ...source,

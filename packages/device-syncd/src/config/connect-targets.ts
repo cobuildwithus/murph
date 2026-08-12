@@ -28,6 +28,9 @@ const JUNCTION_PREFERRED_CONNECT_SOURCE_IDS = new Set(["whoop"]);
 // Keep provider ingestion configured for existing accounts while this product
 // gate controls whether a fresh user-facing connection can be started.
 const DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set(["strava", "dexcom"]);
+// Modern Dexcom is closed to fresh connections while existing members retain
+// narrowly revalidated recovery. Strava remains closed to both offers and recovery.
+const RECOVERY_ENABLED_DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set(["dexcom"]);
 
 export function normalizeDeviceSyncConnectTargetKey(value: string): string | null {
   const normalized = value
@@ -44,6 +47,19 @@ export function isDeviceConnectSourceAvailableForConnection(
 ): boolean {
   const normalized = normalizeDeviceConnectSourceId(connectSourceId);
   return Boolean(normalized && !DISABLED_DEVICE_CONNECT_SOURCE_IDS.has(normalized));
+}
+
+export function isDeviceConnectSourceAvailableForExistingConnectionRecovery(
+  connectSourceId: string,
+): boolean {
+  const normalized = normalizeDeviceConnectSourceId(connectSourceId);
+  return Boolean(
+    normalized
+    && (
+      !DISABLED_DEVICE_CONNECT_SOURCE_IDS.has(normalized)
+      || RECOVERY_ENABLED_DISABLED_DEVICE_CONNECT_SOURCE_IDS.has(normalized)
+    )
+  );
 }
 
 export function listConfiguredDeviceSyncConnectTargets(

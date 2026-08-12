@@ -3,6 +3,7 @@ import { test } from "vitest";
 
 import {
   isDeviceConnectSourceAvailableForConnection,
+  isDeviceConnectSourceAvailableForExistingConnectionRecovery,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
   readConfiguredDeviceSyncProviderConfigs,
@@ -108,6 +109,14 @@ test("disabled offers remain configured for status and ingestion while fresh sta
   assert.ok(configs.strava);
   assert.equal(isDeviceConnectSourceAvailableForConnection("strava"), false);
   assert.equal(isDeviceConnectSourceAvailableForConnection("dexcom"), false);
+  assert.equal(
+    isDeviceConnectSourceAvailableForExistingConnectionRecovery("strava"),
+    false,
+  );
+  assert.equal(
+    isDeviceConnectSourceAvailableForExistingConnectionRecovery("dexcom"),
+    true,
+  );
   assert.equal(
     isDeviceConnectSourceAvailableForConnection("dexcom-g6-and-older"),
     true,

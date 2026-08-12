@@ -1,6 +1,6 @@
 # Connected-source launch gate
 
-Last verified: 2026-07-23
+Last verified: 2026-08-12
 
 This is an internal release gate, not a user-facing legal notice. Public legal copy does not cure a data path that violates a source-provider agreement. User consent is necessary but does not override provider API, license, branding, retention, or data-use restrictions.
 
@@ -21,6 +21,7 @@ For the July 23, 2026 release, the product owner has directed engineering to tre
 | Source | Hosted-production status | Continuing control |
 | --- | --- | --- |
 | Strava direct API | **New connections and reconnect offers disabled.** Existing connection lifecycle support remains configured. | Keep the approved commercial AI, storage, analytics, display, subprocessor, revocation, and deletion path aligned with the retained authorization before changing this product gate. |
+| Modern Dexcom through Junction / Vital | **New connections disabled; exact existing-account recovery retained.** The legacy Dexcom G6 and older route remains available when configured. | Require live member-owned `dexcom_v3` recovery evidence before Web or assistant connect-link issuance and again before provider start. Keep fresh offers closed until the retained Dexcom and Junction approvals cover production use. |
 | Oura direct API | **Enabled when configured.** | Keep Murph's AI, storage, aggregator, opt-out, and deletion behavior within the retained authorization and current provider controls. |
 | WHOOP direct API | **Enabled when configured.** | Maintain application approval, cache behavior, derivative-record, attribution, disclosure, downstream-processor, and deletion controls. |
 | Garmin through Junction / Vital | **Enabled when configured.** | Maintain the Junction / Vital agreement and applicable Garmin commercial license or flow-down for data categories, regions, retention, downstream processors, AI use, attribution, revocation, and deletion. |

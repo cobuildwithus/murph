@@ -2,6 +2,7 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   configuredDeviceSyncProviderKeys,
   isDeviceConnectSourceAvailableForConnection,
+  isDeviceConnectSourceAvailableForExistingConnectionRecovery,
   listConfiguredDeviceSyncConnectTargets,
   readConfiguredDeviceSyncConnectTargetConfigs,
   resolveConfiguredDeviceSyncConnectTarget,
@@ -10,6 +11,7 @@ import {
 import {
   createHostedDeviceConnectIntent,
 } from "@/src/lib/device-sync/connect-intents";
+import { isHostedDeviceSyncExistingConnectionRecoveryAuthorized } from "@/src/lib/device-sync/recovery-authorization";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readOptionalJsonObject, resolveDecodedRouteParam } from "@/src/lib/http";
 import {
@@ -150,6 +152,21 @@ async function createHostedDeviceConnectLinkIntent(input: {
   userId: string;
 }) {
   try {
+    if (
+      !isDeviceConnectSourceAvailableForConnection(input.target.connectSourceId)
+      && !await isHostedDeviceSyncExistingConnectionRecoveryAuthorized({
+        memberId: input.userId,
+        target: input.target,
+      })
+    ) {
+      throw deviceSyncError({
+        code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
+        httpStatus: 404,
+        message: "Hosted device connect target is not configured.",
+        retryable: false,
+      });
+    }
+
     return await createHostedDeviceConnectIntent({
       connectSourceId: input.target.connectSourceId,
       connectTarget: input.target.connectTarget,
@@ -176,7 +193,9 @@ function resolveHostedDeviceConnectTarget(connectTarget: string) {
 
   if (
     !target
-    || !isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
+    || !isDeviceConnectSourceAvailableForExistingConnectionRecovery(
+      target.connectSourceId,
+    )
   ) {
     throw deviceSyncError({
       code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",

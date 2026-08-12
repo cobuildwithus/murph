@@ -179,6 +179,46 @@ describe("hosted device connect intent route", () => {
     expect(mocks.startHostedDeviceSyncConnection).not.toHaveBeenCalled();
   });
 
+  it("preserves an exact modern Dexcom recovery intent for live server revalidation", async () => {
+    vi.stubEnv("WHOOP_CLIENT_ID", "");
+    vi.stubEnv("WHOOP_CLIENT_SECRET", "");
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "dexcom_v3");
+    vi.stubEnv("JUNCTION_REGION", "us");
+    mocks.claimHostedDeviceConnectIntentForStart.mockResolvedValueOnce({
+      status: "claimed",
+      intent: createIntentRecord({
+        connectSourceId: "dexcom",
+        connectTarget: "dexcom_v3",
+        provider: "junction",
+        sourceProviderSlug: "dexcom_v3",
+        startedAt: new Date("2026-05-08T12:01:00.000Z"),
+      }),
+    });
+
+    const response = await deviceConnectIntentRoute.POST(
+      new Request("https://join.example.test/device/connect/dc_opaque", {
+        method: "POST",
+      }),
+      createRouteContext({ claim: "dc_opaque" }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(mocks.startHostedDeviceSyncConnection).toHaveBeenCalledWith({
+      defaultReturnTo:
+        "/device-sync/connect/complete?source=assistant&connectSource=dexcom&connectTarget=dexcom_v3",
+      request: expect.any(Request),
+      target: expect.objectContaining({
+        connectSourceId: "dexcom",
+        connectTarget: "dexcom_v3",
+        provider: "junction",
+        sourceProviderSlug: "dexcom_v3",
+      }),
+    });
+  });
+
   it("returns JSON for app-page intent starts", async () => {
     const response = await deviceConnectIntentRoute.POST(
       new Request("https://join.example.test/device/connect/dc_opaque", {

@@ -205,11 +205,13 @@ function resolveDisconnectDialogTitle(source: ConnectSource | null): string {
 function resolveDisconnectDialogDescription(
   source: ConnectSource | null,
 ): string {
-  if (source?.disconnectScope === "junction_account") {
-    return "Murph will stop syncing new data from every source in this connection. Your history is kept.";
-  }
+  const description = source?.disconnectScope === "junction_account"
+    ? "Murph will stop syncing new data from every source in this connection. Your history is kept."
+    : `Murph will stop syncing new data from ${source?.name ?? "this source"}. Your history is kept.`;
 
-  return `Murph will stop syncing new data from ${source?.name ?? "this source"}. Your history is kept.`;
+  return source?.connectionAvailable === false
+    ? `${description} You won’t be able to reconnect it through Murph until this connection becomes available.`
+    : description;
 }
 
 export function ConnectRedirectDialog({
