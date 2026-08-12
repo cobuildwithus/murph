@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 340,
+  "item": {
+    "id": "reliable-workout-image-sequences",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable workout image sequences",
+    "summary": "Workout explanations now keep complete movement sequences within a bounded image set so the whole response is less likely to fail in Messages.",
+    "details": "Murph prioritizes the movements that benefit most from setup, transition, and endpoint frames. If an image response fails, it remains an image task instead of being replaced with text.",
+    "relevanceTags": ["assistant", "imessage", "workouts", "images"],
+    "sourcePullRequests": [1731]
+  }
+}

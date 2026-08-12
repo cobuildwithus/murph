@@ -65,6 +65,9 @@ diagnostics when Linq rejects a request.
   typecheck passed. The adapter proof covers safe current-envelope error
   parsing, request-shape counts, response signatures, header trace fallback,
   and 10,001-character rejection before provider entry.
+- Changelog fragment and registry coverage: 2 files and 45 tests passed. Web
+  typecheck passed after generating the fresh worktree's ignored Prisma and
+  Health Commons artifacts; neither generator changed tracked files.
 - Complete first-provider request capture used the pinned real Codex App
   Server, local scripted Responses provider, `gpt-5.6-terra`, low reasoning,
   production code mode, synthetic direct/group Linq workout turns, and
