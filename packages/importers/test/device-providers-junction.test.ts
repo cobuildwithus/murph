@@ -2298,7 +2298,7 @@ test("Junction summary completeness facts roundtrip and replay without samples",
     assert.equal(observations.get("low-activity-minutes"), 84);
     assert.equal(observations.get("medium-activity-minutes"), 15);
     assert.equal(observations.get("high-activity-minutes"), 29);
-    assert.equal(observations.get("average-heart-rate"), 72);
+    assert.equal(observations.get("activity-average-heart-rate"), 72);
     assert.equal(observations.get("walking-average-heart-rate"), 83);
     assert.equal(observations.get("minimum-heart-rate"), 44);
     assert.equal(observations.get("sleep-latency-minutes"), 18);
@@ -4617,15 +4617,15 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   assert.equal(flowEvents.length, 2);
   assert.deepEqual(readMeasurement(flowEvents[0]), {
     metric: "menstrual-flow",
-    value: 1,
+    value: 2,
     unit: "score",
-    qualifiers: { flow: "light" },
+    qualifiers: { flow: "medium" },
   });
-  assert.deepEqual(readMeasurement(flowEvents[1])?.qualifiers, { flow: "medium" });
-  assert.equal(flowEvents[0]?.dayKey, "2026-04-07");
+  assert.deepEqual(readMeasurement(flowEvents[1])?.qualifiers, { flow: "light" });
+  assert.equal(flowEvents[0]?.dayKey, "2026-04-10");
   // Stable ordinal facets let a newer complete snapshot revise one value while
   // preserving simultaneously reported same-day facts.
-  assert.equal(flowEvents[0]?.externalRef?.facet, "menstrual-flow-2026-04-07-1");
+  assert.equal(flowEvents[0]?.externalRef?.facet, "menstrual-flow-2026-04-10-1");
 
   const ovulationEvents = measurementEvents.filter((event) => event.title === "Junction ovulation test");
   // Two same-day tests with different results land as two events with
@@ -4915,7 +4915,8 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   const profileArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-profile");
   assertJsonOmits(JSON.stringify(profileArtifact?.content), ["1990-05-14", "183"]);
 
-  // "Unknown" enum values carry no canonical information and stay raw-only.
+  // "Unknown" enum values carry no canonical information and stay only in
+  // the identity-sanitized, bounded profile evidence.
   const unknownSexPayload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
@@ -4928,6 +4929,14 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
     },
   });
   assert.equal(unknownSexPayload.events?.length ?? 0, 0);
+  const unknownProfileEvidence = unknownSexPayload.evidenceParts?.find((artifact) =>
+    artifact.role === "junction-summary-profile"
+  );
+  assert.deepEqual(unknownProfileEvidence?.content, {
+    sourceProviderSlug: "oura",
+    sourceType: "ring",
+    reportedGender: "unknown",
+  });
 });
 
 test("Junction future menstrual enum values stay bounded and evidence-only", () => {
@@ -4954,9 +4963,9 @@ test("Junction future menstrual enum values stay bounded and evidence-only", () 
   assert.deepEqual(
     evidence.facts.map((fact) => [fact.kind, fact.value]),
     [
-      ["cervical_mucus", "q".repeat(80)],
-      ["contraceptive", "t".repeat(80)],
       ["detected_deviation", "a".repeat(80)],
+      ["contraceptive", "t".repeat(80)],
+      ["cervical_mucus", "q".repeat(80)],
     ],
   );
 });
@@ -5270,6 +5279,154 @@ test("Junction menstrual evidence and receipt hashes are stable under provider-a
   ]);
   assert.equal(ordered.samples?.length ?? 0, 0);
   assert.equal(reversed.samples?.length ?? 0, 0);
+});
+
+test("Junction menstrual preparation keeps same-provider source instances distinct and replay-safe", async () => {
+  const snapshot = {
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      menstrual_cycle: ["private-device-one", "private-device-two"].map((deviceId) => ({
+        id: "shared-provider-cycle-id",
+        updated_at: "2026-05-20T10:00:00.000Z",
+        period_start: "2026-05-01",
+        period_end: "2026-05-05",
+        menstrual_flow: [{ date: "2026-05-02", flow: "medium" }],
+        source: { provider: "apple_health", type: "phone", device_id: deviceId },
+      })),
+    },
+  };
+  const normalized = normalizeJunctionSnapshot(snapshot);
+  const evidence = readJunctionMenstrualCycleEvidence(normalized);
+  const flows = normalized.events?.filter((event) => event.title === "Junction menstrual flow") ?? [];
+  const flowResourceIds = new Set(flows.map((event) => event.externalRef?.resourceId));
+  const vaultRoot = await makeTempDirectory("murph-junction-menstrual-source-instances");
+
+  assert.equal(evidence.cycleCount, 2);
+  assert.equal(evidence.factCount, 2);
+  assert.equal(new Set(evidence.cycles.map((cycle) => cycle.recordHash)).size, 2);
+  assert.equal(new Set(evidence.facts.map((fact) => fact.cycleRecordHash)).size, 2);
+  assert.equal(flows.length, 2);
+  assert.equal(flowResourceIds.size, 2);
+  assertJsonOmits(evidence, [
+    "shared-provider-cycle-id",
+    "private-device-one",
+    "private-device-two",
+  ]);
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-19T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const importSnapshot = () =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        { provider: "junction", vaultRoot, snapshot },
+        { corePort: coreRuntime },
+      );
+    const first = await importSnapshot();
+    const replay = await importSnapshot();
+    const importedFlows = first.events.filter((event) => event.title === "Junction menstrual flow");
+
+    assert.equal(importedFlows.length, 2);
+    assert.equal(new Set(importedFlows.map((event) => event.externalRef?.resourceId)).size, 2);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.samples.length, 0);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction menstrual caps keep newest cycles and facts with deterministic omission hashing", async () => {
+  const isoDate = (index: number) =>
+    new Date(Date.UTC(2024, 0, 1 + index)).toISOString().slice(0, 10);
+  const cycles = Array.from({ length: 65 }, (_, index) => ({
+    id: `cycle-${index}`,
+    period_start: isoDate(index),
+    source: { provider: "apple_health", type: "phone" },
+  }));
+  const orderedCycles = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: { menstrual_cycle: cycles },
+  });
+  const reversedCycles = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: { menstrual_cycle: [...cycles].reverse() },
+  });
+  const cycleEvidence = readJunctionMenstrualCycleEvidence(orderedCycles);
+
+  assert.deepEqual(cycleEvidence, readJunctionMenstrualCycleEvidence(reversedCycles));
+  assert.equal(cycleEvidence.cycleCount, 64);
+  assert.equal(cycleEvidence.omittedCycleCount, 1);
+  assert.equal(cycleEvidence.cycles[0]?.periodStart, isoDate(64));
+  assert.equal(cycleEvidence.cycles.some((cycle) => cycle.periodStart === isoDate(0)), false);
+
+  const facts = Array.from({ length: 513 }, (_, index) => ({
+    date: isoDate(index),
+    quality: "watery",
+  }));
+  const factSnapshot = (inputFacts: typeof facts) => ({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      menstrual_cycle: [{
+        id: "bounded-fact-cycle",
+        period_start: "2024-01-01",
+        cervical_mucus: inputFacts,
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  });
+  const baseNormalized = normalizeJunctionSnapshot(factSnapshot(facts));
+  const baseEvidence = readJunctionMenstrualCycleEvidence(baseNormalized);
+  const reversedEvidence = readJunctionMenstrualCycleEvidence(
+    normalizeJunctionSnapshot(factSnapshot([...facts].reverse())),
+  );
+  const omittedChangedFacts = facts.map((fact, index) =>
+    index === 0 ? { ...fact, quality: "egg_white" } : fact
+  );
+  const admittedChangedFacts = facts.map((fact, index) =>
+    index === facts.length - 1 ? { ...fact, quality: "egg_white" } : fact
+  );
+  const prepare = (inputFacts: typeof facts) => prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn_junction_menstrual_caps",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: factSnapshot(inputFacts),
+  });
+  const [baseImport, reversedImport, omittedChangedImport, admittedChangedImport] = await Promise.all([
+    prepare(facts),
+    prepare([...facts].reverse()),
+    prepare(omittedChangedFacts),
+    prepare(admittedChangedFacts),
+  ]);
+
+  assert.deepEqual(baseEvidence, reversedEvidence);
+  assert.equal(baseEvidence.factCount, 512);
+  assert.equal(baseEvidence.omittedFactCount, 1);
+  assert.equal(baseEvidence.facts[0]?.date, isoDate(512));
+  assert.equal(baseEvidence.facts.some((fact) => fact.date === isoDate(0)), false);
+  assert.deepEqual(
+    new Set(
+      baseNormalized.events
+        ?.filter((event) => event.kind === "measurement")
+        .map((event) => event.dayKey),
+    ),
+    new Set(baseEvidence.facts.map((fact) => fact.date)),
+  );
+  assert.equal(
+    readRawReceiptArtifact(baseImport).payloadHash,
+    readRawReceiptArtifact(reversedImport).payloadHash,
+  );
+  assert.equal(
+    readRawReceiptArtifact(baseImport).payloadHash,
+    readRawReceiptArtifact(omittedChangedImport).payloadHash,
+  );
+  assert.notEqual(
+    readRawReceiptArtifact(baseImport).payloadHash,
+    readRawReceiptArtifact(admittedChangedImport).payloadHash,
+  );
 });
 
 test("Junction ECG summaries drop negative metrics and cap qualifier lengths", () => {
@@ -9014,7 +9171,7 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("day-strain"), 10.4);
   assert.equal(metricValue("workout-strain"), 8.8);
   assert.equal(metricValue("max-heart-rate"), 148);
-  assert.equal(metricValue("average-heart-rate"), 72);
+  assert.equal(metricValue("activity-average-heart-rate"), 72);
   assert.equal(metricValue("walking-average-heart-rate"), 83);
   assert.equal(metricValue("minimum-heart-rate"), 44);
   assert.equal(metricValue("resting-heart-rate"), 52);

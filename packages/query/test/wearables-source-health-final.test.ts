@@ -56,6 +56,7 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     makeResolvedMetric(metric, provider, value, metric === "steps" ? conflictingProviders : []);
 
   return {
+    activityAverageHeartRate: makeMetric("activityAverageHeartRate", 112),
     activityScore: makeMetric("activityScore", 91),
     activeCalories: makeMetric("activeCalories", 315),
     activityTypes: ["Running"],
@@ -66,7 +67,11 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     estimatedVo2Max: makeMetric("estimatedVo2Max", 48.6),
     floorsClimbed: makeMetric("floorsClimbed", 12),
     heartRateZones: [],
+    highActivityMinutes: makeMetric("highActivityMinutes", 18),
+    lowActivityMinutes: makeMetric("lowActivityMinutes", 70),
     maxHeartRate: makeMetric("maxHeartRate", 168),
+    mediumActivityMinutes: makeMetric("mediumActivityMinutes", 32),
+    minimumHeartRate: makeMetric("minimumHeartRate", 51),
     notes: [],
     percentRecorded: makeMetric("percentRecorded", 99),
     sessionCount: makeMetric("sessionCount", 1),
@@ -82,6 +87,7 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     totalCalories: makeMetric("totalCalories", 530),
     totalElevationGainMeters: makeMetric("totalElevationGainMeters", 42),
     workoutStrain: makeMetric("workoutStrain", 11.1),
+    walkingAverageHeartRate: makeMetric("walkingAverageHeartRate", 83),
   };
 }
 
@@ -270,7 +276,7 @@ test("buildWearableSourceHealth aggregates duplicates, conflicts, staleness, and
   assert.equal(alpha?.candidateMetrics, 1);
   assert.equal(alpha?.exactDuplicatesSuppressed, 1);
   assert.equal(alpha?.activityDays, 1);
-  assert.equal(alpha?.selectedMetrics, 15);
+  assert.equal(alpha?.selectedMetrics, 21);
   assert.equal(alpha?.conflictCount, 1);
   assert.equal(alpha?.stalenessVsNewestDays, 2);
   assert.deepEqual(alpha?.metricsContributed, ["steps"]);
