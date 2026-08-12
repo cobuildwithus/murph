@@ -1093,9 +1093,21 @@ class DeviceSyncServiceController {
         localConnectionRevision: number;
         metadataPatch?: Record<string, unknown>;
         nextReconcileAt?: string | null;
+        preserveLastSyncCompletedAt?: boolean;
       } = {
         localConnectionRevision,
       };
+
+      if (
+        provider.provider === "junction"
+        && shouldPreserveJunctionLastSyncCompletedAt({
+          activeJobs,
+          scheduledJobs: result.scheduledJobs ?? [],
+          syncSucceededAt: now,
+        })
+      ) {
+        successOptions.preserveLastSyncCompletedAt = true;
+      }
 
       if (Object.prototype.hasOwnProperty.call(result, "metadataPatch")) {
         successOptions.metadataPatch = result.metadataPatch;
@@ -2111,6 +2123,44 @@ function toPlainRecord(value: unknown): Record<string, unknown> | null {
 function readCanonicalDeviceImportEventCount(value: unknown): number {
   const record = toPlainRecord(value);
   return record && Array.isArray(record.events) ? record.events.length : 0;
+}
+
+function shouldPreserveJunctionLastSyncCompletedAt(input: {
+  activeJobs: readonly DeviceSyncJobRecord[];
+  scheduledJobs: readonly DeviceSyncJobInput[];
+  syncSucceededAt: string;
+}): boolean {
+  if (input.scheduledJobs.some(isFullDeviceSyncJob)) {
+    return true;
+  }
+
+  const currentClosedDayEnd = floorUtcDayTimestampIfValid(input.syncSucceededAt);
+  if (!currentClosedDayEnd) {
+    return true;
+  }
+
+  return !input.activeJobs.some((job) =>
+    isFullDeviceSyncJob(job)
+    && normalizeIsoTimestamp(job.payload.windowEnd) === currentClosedDayEnd
+  );
+}
+
+function isFullDeviceSyncJob(job: Pick<DeviceSyncJobInput, "kind">): boolean {
+  return job.kind === "backfill" || job.kind === "reconcile";
+}
+
+function floorUtcDayTimestampIfValid(value: string): string | null {
+  const normalized = normalizeIsoTimestamp(value);
+  return normalized ? `${normalized.slice(0, 10)}T00:00:00.000Z` : null;
+}
+
+function normalizeIsoTimestamp(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
 function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): string[] {

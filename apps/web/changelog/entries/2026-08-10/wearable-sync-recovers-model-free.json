@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 410,
+  "item": {
+    "id": "wearable-sync-recovers-model-free",
+    "kind": "improvement",
+    "priority": 5,
+    "title": "Wearable sync can recover without waking the assistant",
+    "summary": "Pending wearable updates can now finish their sync work even while scheduled assistant automations are paused.",
+    "details": "Fresh messages still take priority. Murph checkpoints recovered health-data changes before marking them handled, retries safely when a source remains pending, and does not start an AI response just to finish the sync.",
+    "relevanceTags": ["wearables", "connections", "health-data", "reliability"],
+    "sourcePullRequests": [1597]
+  }
+}

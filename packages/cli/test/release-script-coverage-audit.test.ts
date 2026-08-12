@@ -1256,6 +1256,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain(
       'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain)',
     )
+    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('REVIEW_GPT_FULL_REVIEW_REASON')
@@ -1910,6 +1911,8 @@ printf '%s|%s|%s|%s|%s|%s\n' \
     const localConfigRoot = path.join(harnessRoot, 'config')
     const configHarness = `
 set -euo pipefail
+# Keep live local CDP ports out of the lock fixture.
+curl() { return 1; }
 review_gpt_register_dir_preset() { :; }
 review_gpt_register_preset_group() { :; }
 source "$REPO_ROOT/scripts/review-gpt.config.sh"
@@ -1919,6 +1922,17 @@ printf '%s|%s|%s|%s\n' \
   "$browser_binary_path" \
   "$managed_browser_background_mode"
 `
+    const cleanBrowserPreferenceEnv = () => {
+      const env = withoutNodeV8Coverage()
+      delete env.REVIEW_GPT_BROWSER_LANE
+      delete env.MURPH_REVIEW_GPT_BROWSER_LANE
+      delete env.MURPH_REVIEW_GPT_PROFILE_SLUG
+      delete env.REVIEW_GPT_BROWSER_LANE_COUNT
+      delete env.MURPH_REVIEW_GPT_BROWSER_LANE_COUNT
+      delete env.browser_binary_path
+      delete env.managed_browser_background_mode
+      return env
+    }
 
     try {
       writeHarnessFile(
@@ -1935,28 +1949,56 @@ printf '%s|%s|%s|%s\n' \
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
-          ...withoutNodeV8Coverage(),
+          ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
           REPO_ROOT: repoRoot,
           XDG_CONFIG_HOME: localConfigRoot,
         },
       })
       expect(localResult.status, localResult.stderr).toBe(0)
-      expect(localResult.stdout.trim()).toBe('main|1|/tmp/custom-brave|unthrottled')
+      expect(localResult.stdout.trim()).toBe('eragon|1|/tmp/custom-brave|unthrottled')
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
+      for (const lane of ['Eragon', 'Phlebas', 'Hercules']) {
+        writeHarnessFile(
+          harnessRoot,
+          `Library/Application Support/MurphReviewGPT/${lane}/SingletonLock`,
+          'locked\n',
+        )
+      }
       const defaultResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
         encoding: 'utf8',
         env: {
-          ...withoutNodeV8Coverage(),
+          ...cleanBrowserPreferenceEnv(),
           HOME: harnessRoot,
           REPO_ROOT: repoRoot,
           XDG_CONFIG_HOME: localConfigRoot,
         },
       })
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
-      expect(defaultResult.stdout.trim()).toBe(
+      const [defaultLane, defaultLaneCount, defaultBrowser, defaultBackgroundMode] =
+        defaultResult.stdout.trim().split('|')
+      expect(defaultLane).toBe('mountain')
+      expect(defaultLaneCount).toBe('4')
+      expect(defaultBrowser).toBe(
+        '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      )
+      expect(defaultBackgroundMode).toBe('balanced')
+
+      const mainResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...cleanBrowserPreferenceEnv(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_BROWSER_LANE: 'main',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(mainResult.status, mainResult.stderr).toBe(0)
+      expect(mainResult.stdout.trim()).toBe(
         'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced',
       )
 

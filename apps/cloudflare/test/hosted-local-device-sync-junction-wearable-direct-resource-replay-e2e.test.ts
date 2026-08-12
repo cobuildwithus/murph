@@ -834,6 +834,7 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
       `last error code: ${activationStatus.lastErrorCode}`,
     ]));
   }
+  const activationReplicaRef = activationStatus.workspace?.browserVaultReplicaRef ?? null;
 
   const seed = await input.scenario.seedJunctionDeviceSyncConnection({
     connectedAt: input.seededAt,
@@ -908,12 +909,11 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
     userId: input.userId,
   });
 
-  const finalStatus = deviceSyncStatus.workspace?.browserVaultReplicaRef
-    ? deviceSyncStatus
-    : await waitForScheduledBrowserVaultReplica({
-        scenario: input.scenario,
-        userId: input.userId,
-      });
+  const finalStatus = await waitForAdvancedBrowserVaultReplica({
+    baselineReplicaRef: activationReplicaRef,
+    scenario: input.scenario,
+    userId: input.userId,
+  });
   const replicaRef = requireReplicaRef(finalStatus.workspace?.browserVaultReplicaRef ?? null);
   const replica = await readBrowserVaultReplica({
     replicaRef,
@@ -1608,6 +1608,54 @@ async function waitForScheduledBrowserVaultReplica(input: {
     ]));
   }
   return status;
+}
+
+async function waitForAdvancedBrowserVaultReplica(input: {
+  baselineReplicaRef: HostedBrowserVaultReplicaRef | null;
+  scenario: HostedLocalFullStackScenario;
+  userId: string;
+}): Promise<HostedRunnerStatusResponse> {
+  const startedAt = Date.now();
+  const timeoutMs = 240_000;
+
+  while ((Date.now() - startedAt) < timeoutMs) {
+    const status = parseHostedRunnerStatusResponse(
+      await input.scenario.harness.requestJson<unknown>(
+        buildCloudflareHostedControlUserStatusPath(input.userId),
+        {
+          headers: {
+            [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+          },
+        },
+      ),
+    );
+    if (status.lastErrorCode ?? null) {
+      throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+        "Hosted runner recorded an error before publishing the drained Junction replica.",
+        `last error code: ${status.lastErrorCode}`,
+      ]));
+    }
+
+    const replicaRef = status.workspace?.browserVaultReplicaRef ?? null;
+    if (
+      replicaRef !== null
+      && (
+        input.baselineReplicaRef === null
+        || replicaRef.dataVersion !== input.baselineReplicaRef.dataVersion
+        || replicaRef.generatedAt !== input.baselineReplicaRef.generatedAt
+        || replicaRef.generation !== input.baselineReplicaRef.generation
+        || replicaRef.objectKey !== input.baselineReplicaRef.objectKey
+      )
+    ) {
+      return status;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  throw new Error(await input.scenario.buildFailureMessage(input.userId, [
+    "Timed out waiting for the drained Junction browser-vault replica to advance.",
+  ]));
 }
 
 function requirePlan(): JunctionWearableHostedReplayPlan {

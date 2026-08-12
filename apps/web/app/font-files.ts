@@ -51,5 +51,11 @@ export const fraunces600FontPath = resolveOgAssetPath(
   "app/fonts/Fraunces-600.ttf",
 );
 export const dmSans400FontPath = resolveOgAssetPath("app/fonts/DMSans-400.ttf");
+export const dmSans600FontPath = resolveOgAssetPath(
+  "app/fonts/DMSans-600.ttf",
+);
 
 export const logoSvgPath = resolveOgAssetPath("public/logo.svg");
+export const murphMarkSvgPath = resolveOgAssetPath(
+  "public/icons/murph-mark.svg",
+);

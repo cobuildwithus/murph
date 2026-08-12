@@ -519,7 +519,10 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       buildAssistantProviderMurphToolCall("attach_response_card", {
         card: scheduledNutritionCard,
       }),
-      { text: "" },
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver scheduled nutrition card",
+        text: "Nutrition card attached.",
+      }),
     ], {
       matchInputContains: scheduledNutritionCardInstructions,
     });
@@ -551,7 +554,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(scheduledCardSend)).toBeNull();
     expect(requireLinqStub().readObservedMessageAppCard(scheduledCardSend)).toMatchObject({
-      fallback_text: "Ask Murph for this card in text",
+      fallback_text: "Your daily nutrition. Ask Murph for this card in text",
       interactive: true,
       layout: {
         caption: "Jul 28 · 3 meals",

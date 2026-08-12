@@ -296,6 +296,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       redactedStatusJson: {
         conversationImportedSeq: "2",
+        hostedMailboxSystemHandledThroughSeq: "11",
         payload: UNSAFE_SENTINEL,
         systemImportedSeq: "0",
       },
@@ -322,6 +323,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts).toMatchObject({
       blocked: null,
       workspace: {
+        hostedMailboxSystemHandledThroughSeq: "11",
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
         nextWakeReason: null,

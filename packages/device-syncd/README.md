@@ -34,9 +34,17 @@ Current providers:
 - Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`
   selects Link targets such as Garmin and Fitbit; recognized Junction SDK sources such
   as Apple Health participate independently of that Link-only filter.
-- Junction fetches the sparse `note` timeseries by default. Oura note tags become
-  completed intervention events for Personal Patterns. Free-text note values are
-  dropped before raw snapshot and compact evidence retention.
+- Junction fetches the sparse `note` timeseries by default. Normalized tags from
+  every admitted Junction source persist as neutral canonical notes. Personal
+  Patterns currently derives an action factor only from the exact Oura `sauna`
+  tag; other-source, symptom, context, outcome, and custom tags remain neutral.
+  Free-text note values are dropped before raw snapshot and compact evidence
+  retention. Note-history coverage version 2 reopens sources completed under
+  the legacy intervention normalizer for one bounded semantic reimport, then
+  records terminal source coverage again. The admitted resource-job payload
+  freezes that generation across durable continuations and retries. Persisted
+  unversioned work remains v1 after an upgrade and cannot certify or downgrade
+  v2 coverage.
 - Junction's established default summary and timeseries lists are unchanged. The
   code-owned `timeseriesResources` policy additionally admits five off-by-default
   opt-ins: `steps`, `distance`, `calories_active`, `heartrate`, and `weight`.
@@ -64,9 +72,14 @@ Current providers:
   uses the ordinary workout index only to admit at most 32 stable workouts per
   one-day window, then reads Junction's dedicated per-workout stream endpoint
   serially and caps each stream at 100,000 points. The common single-page bound is
-  33 provider calls (one index plus 32 streams); the hard bound is 132 calls under
-  the existing 100-page pagination ceiling. Neither path retains waveform/stream
+  33 logical GETs (one index plus 32 streams); the hard bound is 132 logical GETs
+  under the existing 100-page pagination ceiling and 396 network attempts with
+  the existing three-attempt GET retry policy. Neither path retains waveform/stream
   points, provider envelopes, or evidence whose size scales with sample count.
+- Successful Junction resource/webhook jobs preserve the full-sync completion
+  watermark. They still complete and clear their own failures, while only a
+  terminal reconcile or backfill whose window ends at the current closed-day
+  horizon can prove the configured collection ran.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use

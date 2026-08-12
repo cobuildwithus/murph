@@ -5349,7 +5349,10 @@ async function runSystemMailboxMaintenancePhase(input: {
     });
   }
   const systemMailboxWake = systemMailboxPreparation.status === "retryable_failed"
-    ? createHostedRuntimeWakeCandidate(systemMailboxPreparation.nextWakeAt, "assistant")
+    ? createHostedRuntimeWakeCandidate(
+        systemMailboxPreparation.nextWakeAt,
+        systemMailboxPreparation.nextWakeReason ?? "assistant",
+      )
     : phaseInput.foregroundCausalOnly === true
       ? null
       : await resolveHostedSystemMailboxNextWakeCandidate({
