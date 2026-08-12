@@ -282,6 +282,21 @@ test("additive wearables schemas stay compact and metric-aware", () => {
     Object.hasOwn(metricLatestParsed.summary?.confidence as Record<string, unknown>, "reasons"),
     false,
   );
+  assert.ok(metricLatestParsed.summary);
+  for (const metric of [
+    "carbohydrateIntake",
+    "glucoseCoefficientOfVariation",
+    "glucoseStandardDeviation",
+  ] as const) {
+    assert.equal(
+      wearablesMetricLatestResultSchema.safeParse({
+        filters: metricLatestParsed.filters,
+        summary: { ...metricLatestParsed.summary, metric },
+      }).success,
+      true,
+      metric,
+    );
+  }
   assert.equal("vault" in metricLatestParsed, false);
   assert.equal(metricTrendParsed.summary?.windowDays, 7);
   assert.equal("vault" in metricTrendParsed, false);
