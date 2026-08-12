@@ -237,9 +237,16 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // extend the existing hosted callback output without adding a forbidden boot
 // input. Exact current-main assembly measured 9,846,997B total on 2026-08-11,
 // so ratchet the total only and retain the 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_846_997 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
+//
+// Group-projection delivery ownership and its end-to-end deadline extend that
+// same hosted callback graph without adding a forbidden boot input or changing
+// runner permissions. Exact ubuntu assembly measured a 1,668,070B entry on
+// 2026-08-12. Exact macOS assembly measured a 7,936,584B static closure and
+// 9,905,760B total. Ratchet those measurements and retain every fixed
+// cross-platform tolerance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_905_760 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_668_070;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_936_584;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

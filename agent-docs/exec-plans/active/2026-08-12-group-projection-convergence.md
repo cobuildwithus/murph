@@ -175,9 +175,10 @@ Updated: 2026-08-12
   all three scopes with a fresh owner, and executes the tagged durable effect
   only after that complete retry.
 - ReviewGPT reached its seven-round hard cap with this accepted finding. The
-  known bug is corrected; round 8 requires an explicit continuation decision
-  after focused verification, required GitHub Actions, parent final review, and
-  the cap retrospective are complete.
+  known bug is corrected, and the user explicitly authorized round 8 after the
+  focused verification, required GitHub Actions, and cap retrospective were
+  complete. Round 8 will audit a fresh full-patch snapshot rather than reuse the
+  capped baseline.
 - The corrected preliminary specialist pass returned no product, prompt, or
   frontend finding and confirmed the earlier failure-retention, group-read, and
   system-mailbox replay gaps are resolved. Its one coverage finding requested
@@ -185,3 +186,14 @@ Updated: 2026-08-12
   projectable scopes and 25 destinations from their owning constants, prove
   ordered peak-one scope and destination work, and assert each replacement's
   encryption, two access revalidations, source lock, and exact-generation update.
+- Exact-head required GitHub Actions passed after the maximum-cardinality proof.
+  The optional runner permission-sandbox job then isolated one touched-path
+  failure to the production bundle entry-size ratchet: ubuntu measured
+  1,668,070 bytes, 689 bytes above the former baseline plus tolerance. No
+  forbidden subsystem entered the boot graph and no permission check failed, so
+  the entry baseline is ratcheted to that exact measurement. The production-
+  shaped local assembly then measured a 7,936,584-byte static closure and
+  9,905,760-byte total on macOS; those matching baselines are ratcheted too.
+  Every existing fixed tolerance and permission boundary remains unchanged.
+  The canonical production bundle command passes with a 1,674,886-byte entry,
+  7,936,584-byte static closure, and 9,905,760-byte total.
