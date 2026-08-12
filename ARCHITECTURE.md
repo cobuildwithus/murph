@@ -1691,9 +1691,10 @@ persisted state owner, callback action, or mutable message state exists.
 
 Private Telegram can also attach one model-authored rich-content card when a
 complete structured answer does not fit the nutrition, compact-table, workout,
-or catalog exercise contracts. Those semantic cards keep priority and remain
-unchanged. The new card stores only bounded Rich HTML from a closed
-presentation-only subset. Contract parsing rejects links, remote media,
+or catalog exercise contracts. Those semantic cards keep exclusive ownership
+and remain unchanged. If an owning semantic card cannot attach, the reply stays
+ordinary text. The new card stores only bounded Rich HTML from a closed
+presentation-only subset. Contract parsing rejects links, visible URLs, remote media,
 provider fetches, unknown tags or attributes, malformed nesting, oversized
 tables, and content whose derived text exceeds one Telegram fallback message.
 Trusted code derives that fallback from the accepted HTML, so the model cannot

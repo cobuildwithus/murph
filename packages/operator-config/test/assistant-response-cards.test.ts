@@ -472,6 +472,7 @@ describe('assistant response cards', () => {
 
     expect(parseHtml('<h2>Guide</h2><script>alert(1)</script>').success).toBe(false)
     expect(parseHtml('<h2>Guide</h2><a href="https://example.test">Link</a>').success).toBe(false)
+    expect(parseHtml('<h2>Guide</h2><p>https&#58;//example.test</p>').success).toBe(false)
     expect(parseHtml('<h2 style="color:red">Guide</h2>').success).toBe(false)
     expect(parseHtml('<details><p>Hidden</p></details>').success).toBe(false)
     expect(parseHtml('<table><tr><td>A</td></table>').success).toBe(false)

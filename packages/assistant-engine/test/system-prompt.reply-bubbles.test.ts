@@ -37,13 +37,16 @@ describe('assistant reply bubble prompt guidance', () => {
           'Text styling is not a Rich Message.',
         )
         expect(layers.threadContextPrompt).toContain(
-          'use it for a complete structured guide, checklist, schedule, comparison, or multi-section summary',
+          'use it only for a complete structured guide, checklist, detailed comparison, or multi-section summary',
         )
         expect(layers.threadContextPrompt).toContain(
           'Keep short or simple replies as text.',
         )
         expect(layers.threadContextPrompt).toContain(
-          'Existing nutrition, compact-table, workout, and catalog exercise cards keep priority',
+          'Nutrition, compact-table, tracked-workout, and catalog exercise content must use its owning card',
+        )
+        expect(layers.threadContextPrompt).toContain(
+          'If the owning card cannot attach, use ordinary text, never generic rich content',
         )
       } else {
         expect(layers.threadContextPrompt).not.toContain(

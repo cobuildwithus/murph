@@ -520,7 +520,16 @@ describe('murph.attach_response_card', () => {
 
   it('describes the private on-demand canonical-read contract', () => {
     expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
-      'This tool fills the gaps; it does not replace those approved cards',
+      'Never use this tool to derive or present nutrition totals or targets, tracked-workout state, a compact table that attach_response_card can represent, or a catalog-backed movement routine',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'If the owning semantic card cannot be attached, use ordinary text instead of this tool',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'These three approved cards remain routing examples',
+    )
+    expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
+      'They are not HTML templates',
     )
     expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
       'Keep short answers, one-paragraph advice, confirmations, urgent single actions, and casual chat as ordinary text',
@@ -535,7 +544,7 @@ describe('murph.attach_response_card', () => {
       'Do not repeat the same facts in a summary, table, and details',
     )
     expect(MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.description).toContain(
-      '<details open><summary>1. Prepare</summary>',
+      '<details><summary>Why this helps</summary>',
     )
     expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
       'repeat, resend, or improve the presentation of a movement routine already present in the committed conversation',

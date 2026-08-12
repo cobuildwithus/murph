@@ -40,6 +40,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+  MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
@@ -1107,7 +1108,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
               exerciseGuidance,
             ].join('\n\n'),
             dynamicTools: scenario.expected === 'card'
-              ? [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL]
+              ? [
+                  MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+                  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+                ]
               : [MURPH_ATTACH_RESPONSE_MEDIA_TOOL],
             env: {
               ...config.env,
@@ -1202,7 +1206,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
         const repairedRoutine = await executeRealCodexAppServerTurn({
           ...repairInput,
-          dynamicTools: [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL],
+          dynamicTools: [
+            MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+            MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+          ],
           prompt: [
             'Recent conversation history for context only; do not answer these prior messages:',
             'User:',
@@ -1276,7 +1283,11 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildTelegramRichContentDeveloperInstructions(),
-          dynamicTools: [MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL],
+          dynamicTools: [
+            MURPH_ATTACH_RESPONSE_CARD_TOOL,
+            MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+            MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
+          ],
           env: config.env,
           model: config.model,
           modelProvider: config.modelProvider,
@@ -1305,15 +1316,21 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(voiceRoutine.finalMessage.trim()).toBe('')
         expect(voiceRoutine.responseMedia).toEqual([])
 
-        const comparison = await executeRealCodexAppServerTurn({
+        const compactSchedule = await executeRealCodexAppServerTurn({
           ...common,
-          prompt: 'Compare a short morning walk and a short evening walk. Show timing, main benefit, and one practical caution in a compact Telegram comparison.',
+          prompt: 'Make a compact two-column Telegram table for Monday and Wednesday focus sessions. Use 20 minutes on both days. The table alone is the complete answer.',
         })
-        expect(comparison.responseCard).toMatchObject({
-          kind: 'telegram_rich_content',
-          html: expect.stringMatching(/<table bordered(?: striped)?>/iu),
+        const compactActions = readCapabilityRoutingActions(
+          compactSchedule.jsonEvents,
+        )
+        expect(compactActions.some((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
+        )).toBe(false)
+        expect(compactSchedule.responseCard).toMatchObject({
+          kind: 'compact_table',
         })
-        expect(comparison.finalMessage.trim()).toBe('')
+        expect(compactSchedule.finalMessage.trim()).toBe('')
 
         const shortReply = await executeRealCodexAppServerTurn({
           ...common,

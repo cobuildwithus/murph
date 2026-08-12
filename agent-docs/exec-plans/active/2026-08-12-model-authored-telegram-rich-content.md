@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-12
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Goal
 
@@ -29,11 +29,11 @@ Updated: 2026-08-12
 
 ## Tasks
 
-1. [ ] Add a bounded Telegram rich-content card contract and deterministic text fallback.
-2. [ ] Add a private-Telegram-only authoring tool with Telegram rules and three approved presentation examples.
-3. [ ] Preserve semantic-card priority and route the new card through the existing response-card effect.
-4. [ ] Add contract, tool, planning, rendering, delivery, prompt, and real-model regression proof.
-5. [ ] Update durable product, architecture, security, reliability, and verification guidance.
+1. [x] Add a bounded Telegram rich-content card contract and deterministic text fallback.
+2. [x] Add a private-Telegram-only authoring tool with Telegram rules and three approved presentation examples.
+3. [x] Preserve semantic-card priority and route the new card through the existing response-card effect.
+4. [x] Add contract, tool, planning, rendering, delivery, prompt, and real-model regression proof.
+5. [x] Update durable product, architecture, security, reliability, and verification guidance.
 6. [ ] Run focused checks, inspect the full diff, push the candidate, complete required reviews and CI, then open the PR.
 
 ## Decisions
@@ -43,3 +43,19 @@ Updated: 2026-08-12
 - Accept presentation-only HTML. Reject links, media, maps, custom emoji, and provider-side fetches.
 - Derive fallback text in trusted code. Do not ask the model to author a second copy.
 - Reuse the existing response-card, outbox, retry, and provider-entry owners.
+
+## Review evidence
+
+- Preliminary specialists found that soft semantic-card priority let generic
+  HTML compete with nutrition and other owning cards. The corrected prompt
+  makes those owners exclusive and keeps all three approved cards as routing
+  examples, not HTML templates.
+- Preliminary specialists found that rejecting anchor tags did not reject
+  visible URLs. The corrected parser rejects HTTP, HTTPS, and `www` text after
+  entity decoding, including mixed-case and whitespace-obfuscated forms.
+- Competitive real-model coverage now exposes the generic and semantic tools
+  together for compact-table and catalog-routine selection. Local execution
+  remains at the expected provider-credential gate.
+- A live Telegram canary is not available in the current local environment.
+  Mocked provider-boundary proof covers exact Rich HTML, definitive rejection,
+  one fallback, and ambiguous-acceptance duplicate suppression.
