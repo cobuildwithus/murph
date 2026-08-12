@@ -266,3 +266,35 @@ Updated: 2026-08-12
   and the next authorized group read remains the existing completion surface.
   No evidence-backed product-experience finding or new rendered-evidence gap
   remains; exact-head CI and the final cross-cutting audit are still pending.
+- Final ReviewGPT round 9 accepted one remaining symmetric terminality defect.
+  Temporary grantor inactivity after source checkpoint returned an acknowledged
+  first-materialization response with no deferred work, so Runtime consumed the
+  sole mailbox item while current grants could remain null. Restored family
+  sponsorship does not necessarily emit a new activation or runtime-recheck wake
+  for an already-activated non-owner, making the pending state permanently
+  dependent on unrelated activity.
+- The remediation changes only the inactive-grantor response for acknowledged
+  first materialization: deferred-capable runtimes receive the existing opaque
+  deferred bit with no scopes or grant/destination read, while old runtimes
+  receive the existing generic retryable capability error. The same local item,
+  blocked watermark, five-minute retry, and scheduled handoff remain the owners.
+  Generic idle refresh stays terminal. After access returns, the retry either
+  materializes remaining null grants or terminates normally if they were revoked.
+- Round-9 remediation proof passes 455 focused tests across Hosted Execution,
+  Assistant Runtime, Web, and Cloudflare, plus all four package typechecks. Direct
+  cases prove inactive first materialization reads neither share discovery nor
+  private vault state, retains the item and watermark on the five-minute retry,
+  permits independent controls, retries without grantor input, terminates after
+  restored authoritative access sees revocation, fails closed for an older
+  runtime, and preserves generic idle-refresh terminality. Final ReviewGPT must
+  rerun on the corrected exact head; exact-head CI and current-base mergeability
+  remain unresolved.
+- Round-9 corrected-head product-purpose revalidation: the irreducible purpose
+  is still truthful, recoverable preparation after exact consent. Treating
+  temporary grantor inaccessibility as opaque deferred work is the smallest
+  complete experience because it adds no user action, promise, visible state,
+  notification, or recovery concept; it preserves `pending`, prevents accepted
+  work from becoming ownerless, and resumes through the already-scheduled local
+  retry. Generic idle refresh remains terminal, and revocation still ends the
+  item after authoritative access returns. No evidence-backed product-experience
+  finding or new rendered-evidence gap remains on the corrected behavior.

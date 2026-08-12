@@ -561,6 +561,25 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     expect(deliver).not.toHaveBeenCalled();
   });
 
+  it("terminates acknowledged first-materialization after all grants are revoked", async () => {
+    const deliver = vi.fn();
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot: "/must-not-read",
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(),
+          hasDeferredProjectionWork: false,
+          projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+        }),
+      },
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    });
+
+    expect(result.outcome).toBe("no-active-share");
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it("continues after a bounded first-materialization page with more work", async () => {
     const vaultRoot = await createMemoryDisplayNameVault("Theo");
     const deliver = vi.fn().mockResolvedValue({ status: "delivered" });

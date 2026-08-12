@@ -34,13 +34,21 @@ export const GET = withJsonError(async (request: Request) => {
   });
   const prisma = getPrisma();
   const projectionMode = readHostedVaultShareProjectionModeFromRequest(request);
+  const supportsDeferredProjectionWork =
+    supportsHostedVaultShareDeferredProjectionWork(request);
 
   try {
     await requireHostedRuntimeActiveAccess(grantorMemberId, { prisma });
   } catch (error) {
     if (isHostedRuntimeInactiveAccessError(error)) {
+      const hasDeferredProjectionWork = projectionMode
+        === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
+      requireHostedVaultShareDeferredProjectionWorkCapability({
+        hasDeferredProjectionWork,
+        supportsDeferredProjectionWork,
+      });
       return jsonOk({
-        hasDeferredProjectionWork: false,
+        hasDeferredProjectionWork,
         ...(projectionMode ? { projectionMode } : {}),
         projectionKinds: [],
         projectionScopes: [],
@@ -66,17 +74,10 @@ export const GET = withJsonError(async (request: Request) => {
     projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
   );
   const hasDeferredProjectionWork = projectionWork.hasDeferredProjectionWork;
-  if (
-    hasDeferredProjectionWork
-    && !supportsHostedVaultShareDeferredProjectionWork(request)
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_REQUIRED",
-      httpStatus: 503,
-      message: "Hosted vault-share projection work requires a compatible runtime. Retry the request.",
-      retryable: true,
-    });
-  }
+  requireHostedVaultShareDeferredProjectionWorkCapability({
+    hasDeferredProjectionWork,
+    supportsDeferredProjectionWork,
+  });
 
   return jsonOk({
     hasDeferredProjectionWork,
@@ -102,3 +103,18 @@ export const GET = withJsonError(async (request: Request) => {
     ),
   } satisfies HostedVaultShareActiveProjectionKindsResponse);
 });
+
+function requireHostedVaultShareDeferredProjectionWorkCapability(input: {
+  hasDeferredProjectionWork: boolean;
+  supportsDeferredProjectionWork: boolean;
+}): void {
+  if (!input.hasDeferredProjectionWork || input.supportsDeferredProjectionWork) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_REQUIRED",
+    httpStatus: 503,
+    message: "Hosted vault-share projection work requires a compatible runtime. Retry the request.",
+    retryable: true,
+  });
+}

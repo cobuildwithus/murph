@@ -506,6 +506,17 @@ retry. Either future retry time lets foreground and independent system controls
 proceed between pages. The ordinary abortable idle projection refresh omits this
 mode and retains its existing all-active-scope behavior.
 
+A temporary loss of grantor runtime access also returns the acknowledged
+first-materialization mode with only the opaque deferred-work bit and no scopes.
+Web does not read grants or destinations in that branch, and the runtime performs
+no private-vault read. A deferred-capability runner retains the same recording
+item on its five-minute retry; an older runner receives the existing generic
+retryable capability failure. After access returns, ordinary null-only discovery
+resumes. If the grants were revoked during the inaccessible interval, the next
+authoritative discovery returns no active work and the item terminates normally.
+Generic idle refresh during grantor inactivity remains an empty terminal response
+because it owns no accepted first-snapshot obligation.
+
 Web returns a single fixed-width
 `hasDeferredProjectionWork` bit when any approved null-snapshot generation is
 temporarily omitted by destination access or runner capability; it exposes no

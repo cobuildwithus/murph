@@ -407,7 +407,7 @@ describe("vault-share active-kinds route", () => {
 		}
 	});
 
-	it("returns no projection scopes for an inactive grantor runtime", async () => {
+	it("keeps generic idle refresh terminal for an inactive grantor runtime", async () => {
 		mocks.requireHostedRuntimeActiveAccess.mockRejectedValue(hostedOnboardingError({
 			code: "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
 			httpStatus: 403,
@@ -423,5 +423,57 @@ describe("vault-share active-kinds route", () => {
 			projectionScopes: [],
 		});
 		expect(mocks.readDeliverableHostedVaultShareProjectionScopeGenerations).not.toHaveBeenCalled();
+	});
+
+	it("retains first-materialization work without reading shares for an inactive grantor", async () => {
+		mocks.requireHostedRuntimeActiveAccess.mockRejectedValue(hostedOnboardingError({
+			code: "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
+			httpStatus: 403,
+			message: "Hosted runtime mailbox access is not active.",
+		}));
+
+		const response = await activeKindsRoute.GET(buildRequest(
+			withFirstMaterializationMode(),
+		));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			hasDeferredProjectionWork: true,
+			projectionKinds: [],
+			projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+			projectionScopes: [],
+		});
+		expect(mocks.readDeliverableHostedVaultShareProjectionScopeGenerations).not.toHaveBeenCalled();
+	});
+
+	it("fails closed for an old runtime while inactive first-materialization work is retained", async () => {
+		mocks.requireHostedRuntimeActiveAccess.mockRejectedValue(hostedOnboardingError({
+			code: "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
+			httpStatus: 403,
+			message: "Hosted runtime mailbox access is not active.",
+		}));
+		const params = new URLSearchParams();
+		params.set(
+			HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
+			HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+		);
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			const response = await activeKindsRoute.GET(buildRequest(`?${params.toString()}`));
+
+			expect(response.status).toBe(503);
+			expect(await response.json()).toEqual({
+				error: expect.objectContaining({
+					code: "HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_REQUIRED",
+					retryable: true,
+				}),
+			});
+			expect(
+				mocks.readDeliverableHostedVaultShareProjectionScopeGenerations,
+			).not.toHaveBeenCalled();
+		} finally {
+			consoleError.mockRestore();
+		}
 	});
 });
