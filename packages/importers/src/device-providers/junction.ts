@@ -1807,7 +1807,16 @@ function pushJunctionSparseTimeseriesRecords(
   descriptor: JunctionSparseTimeseriesDescriptor,
 ): void {
   const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
-  const seenRecordIdentityHashes = new Set<string>();
+  const candidates: Array<{
+    dayKey: string;
+    entry: PlainObject;
+    identityHash: string;
+    occurredAt: string;
+    record: JunctionSparseTimeseriesRecord;
+    resourceContext: ResourceContext;
+    semanticContentKey: string;
+    timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  }> = [];
 
   for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
     const resourceContext = buildResourceContext({
@@ -1845,12 +1854,62 @@ function pushJunctionSparseTimeseriesRecords(
       continue;
     }
 
-    const identityHash = buildJunctionSparseTimeseriesIdentityHash({
+    candidates.push({
+      dayKey,
+      entry,
+      identityHash: buildJunctionSparseTimeseriesIdentityHash({
+        record,
+        resourceContext,
+        resourceSlug,
+      }),
+      occurredAt,
       record,
       resourceContext,
-      resourceSlug,
+      semanticContentKey: buildJunctionSparseTimeseriesSemanticContentKey({
+        dayKey,
+        entry,
+        occurredAt,
+        record,
+        resourceContext,
+        resourceSlug,
+        timestamp,
+      }),
+      timestamp,
     });
-    if (seenRecordIdentityHashes.has(identityHash)) {
+  }
+
+  const semanticContentKeysByProviderIdentity = new Map<string, Set<string>>();
+  for (const candidate of candidates) {
+    if (!candidate.record.providerRowId) {
+      continue;
+    }
+
+    const contentKeys = semanticContentKeysByProviderIdentity.get(candidate.identityHash)
+      ?? new Set<string>();
+    contentKeys.add(candidate.semanticContentKey);
+    semanticContentKeysByProviderIdentity.set(candidate.identityHash, contentKeys);
+  }
+  const conflictingProviderIdentityHashes = new Set(
+    [...semanticContentKeysByProviderIdentity.entries()]
+      .filter(([, contentKeys]) => contentKeys.size > 1)
+      .map(([identityHash]) => identityHash),
+  );
+  const seenRecordIdentityHashes = new Set<string>();
+
+  for (const candidate of candidates) {
+    const {
+      dayKey,
+      entry,
+      identityHash,
+      occurredAt,
+      record,
+      resourceContext,
+      timestamp,
+    } = candidate;
+    if (
+      conflictingProviderIdentityHashes.has(identityHash)
+      || seenRecordIdentityHashes.has(identityHash)
+    ) {
       continue;
     }
     seenRecordIdentityHashes.add(identityHash);
@@ -1896,7 +1955,7 @@ function pushJunctionSparseTimeseriesRecords(
       resourceContext.externalRefResourceType,
       `${resourceSlug}-${identityHash}`,
       undefined,
-      record.alertType ?? descriptor.metric ?? resourceSlug,
+      descriptor.metric ?? resourceSlug,
     );
     const dataOrigin = buildDataOrigin(
       entry,
@@ -2068,7 +2127,33 @@ function buildJunctionSparseTimeseriesIdentityHash(input: {
   resourceContext: ResourceContext;
   resourceSlug: string;
 }): string {
-  return shortHash([
+  if (input.record.providerRowId) {
+    return shortHash([
+      input.resourceSlug,
+      input.resourceContext.sourceProviderSlug,
+      input.resourceContext.origin.sourceType ?? "",
+      input.resourceContext.origin.sourceInstanceId ?? "",
+      input.record.providerRowId,
+    ]);
+  }
+
+  return buildJunctionSparseTimeseriesSemanticIdentityHash(input);
+}
+
+function buildJunctionSparseTimeseriesSemanticIdentityHash(input: {
+  record: JunctionSparseTimeseriesRecord;
+  resourceContext: ResourceContext;
+  resourceSlug: string;
+}): string {
+  return shortHash(junctionSparseTimeseriesSemanticIdentityParts(input));
+}
+
+function junctionSparseTimeseriesSemanticIdentityParts(input: {
+  record: JunctionSparseTimeseriesRecord;
+  resourceContext: ResourceContext;
+  resourceSlug: string;
+}): readonly unknown[] {
+  return [
     input.resourceSlug,
     input.resourceContext.sourceProviderSlug,
     input.resourceContext.origin.sourceType ?? "",
@@ -2085,6 +2170,26 @@ function buildJunctionSparseTimeseriesIdentityHash(input: {
     input.record.deliveryForm ?? "",
     input.record.deliveryMode ?? "",
     input.record.insulinType ?? "",
+  ];
+}
+
+function buildJunctionSparseTimeseriesSemanticContentKey(input: {
+  dayKey: string;
+  entry: PlainObject;
+  occurredAt: string;
+  record: JunctionSparseTimeseriesRecord;
+  resourceContext: ResourceContext;
+  resourceSlug: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+}): string {
+  return JSON.stringify([
+    ...junctionSparseTimeseriesSemanticIdentityParts(input),
+    input.occurredAt,
+    input.timestamp.recordedAt ?? "",
+    input.dayKey,
+    input.timestamp.timestampSemantics ?? "",
+    readJunctionTimeZoneOffsetMinutes(input.entry) ?? "",
+    input.resourceContext.origin.originConfidence ?? "",
   ]);
 }
 

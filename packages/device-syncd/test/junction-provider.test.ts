@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
+import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
@@ -13873,6 +13874,148 @@ test("Junction import accountId is stable across local account row re-registrati
   assert.ok(importedAccountIds.length >= 2, "expected reconcile runs to import snapshots");
   assert.match(importedAccountIds[0] ?? "", /^jxn_acct_[a-f0-9]{32}$/u);
   assert.equal(new Set(importedAccountIds).size, 1);
+});
+
+test("Junction sparse fetch dedupe preserves stable importer identities and rejects ambiguous rows in either order", async () => {
+  const run = async (records: readonly Record<string, unknown>[]) => {
+    const importedSnapshots: unknown[] = [];
+    const normalizedPayloads: Awaited<ReturnType<typeof prepareDeviceProviderSnapshotImport>>[] = [];
+    const provider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-withings-1",
+            slug: "withings",
+            name: "Withings",
+            status: "connected",
+            resource_availability: { body_fat: true },
+          }],
+        });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/body_fat/grouped") {
+        return createJsonResponse({
+          groups: {
+            withings: [{
+              data: records,
+              source: {
+                device_id: "scale-1",
+                provider: "withings",
+                type: "scale",
+              },
+            }],
+          },
+        });
+      }
+      if (url.pathname.startsWith("/v2/summary/")) {
+        return createJsonResponse({ data: [] });
+      }
+
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }, {
+      summaryResources: [],
+      timeseriesBackfillDays: 1,
+      timeseriesResources: ["fat"],
+    });
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          lastSyncCompletedAt: "2026-06-15T00:00:00.000Z",
+        }),
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          const normalized = await prepareDeviceProviderSnapshotImport({
+            provider: "junction",
+            connectionId: "acct-junction-1",
+            deliveryMode: "scheduled_reconcile",
+            sourceKind: "poll",
+            snapshot,
+          });
+          normalizedPayloads.push(normalized);
+          return {
+            canonicalEventCount: normalized.events?.length ?? 0,
+            durableDeliveryAccepted: true,
+          };
+        },
+      }),
+      createJob("reconcile", {
+        windowStart: "2026-06-15T00:00:00.000Z",
+        windowEnd: "2026-06-16T00:00:00.000Z",
+      }),
+    );
+
+    assert.equal(importedSnapshots.length, normalizedPayloads.length);
+    const sparseImportIndex = normalizedPayloads.findIndex((payload) =>
+      payload.events?.some((event) => event.fields?.metric === "body-fat-percentage")
+    );
+    assert.notEqual(sparseImportIndex, -1);
+    return {
+      normalized: requireValue(
+        normalizedPayloads[sparseImportIndex],
+        "normalized Junction sparse payload",
+      ),
+      snapshot: requireValue(
+        importedSnapshots[sparseImportIndex],
+        "device-sync Junction sparse snapshot",
+      ),
+    };
+  };
+  const findFatEvent = (
+    payload: Awaited<ReturnType<typeof prepareDeviceProviderSnapshotImport>>,
+  ) => payload.events?.find((event) => event.fields?.metric === "body-fat-percentage");
+
+  const original = await run([{
+    id: "fat-row-revision",
+    timestamp: "2026-06-15T08:00:00.000Z",
+    unit: "%",
+    value: 18,
+  }]);
+  const corrected = await run([{
+    id: "fat-row-revision",
+    timestamp: "2026-06-15T08:05:00.000Z",
+    unit: "%",
+    value: 19,
+  }]);
+  const originalEvent = findFatEvent(original.normalized);
+  const correctedEvent = findFatEvent(corrected.normalized);
+
+  assert.ok(originalEvent);
+  assert.ok(correctedEvent);
+  assert.equal(correctedEvent.externalRef?.resourceId, originalEvent.externalRef?.resourceId);
+  assert.equal(correctedEvent.externalRef?.facet, "body-fat-percentage");
+
+  const records = [
+    { id: "fat-row-exact", timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 18 },
+    { id: "fat-row-exact", timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 18 },
+    { id: "fat-row-distinct", timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 18 },
+    { timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 19 },
+    { timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 20 },
+    { id: "fat-row-conflict", timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 21 },
+    { id: "fat-row-conflict", timestamp: "2026-06-15T09:00:00.000Z", unit: "%", value: 22 },
+  ];
+  const forward = await run(records);
+  const reversed = await run([...records].reverse());
+  const summarize = (
+    payload: Awaited<ReturnType<typeof prepareDeviceProviderSnapshotImport>>,
+  ) => (payload.events ?? [])
+    .map((event) => ({
+      identity: `${event.externalRef?.resourceId}:${event.externalRef?.facet}`,
+      value: event.fields?.value,
+    }))
+    .sort((left, right) => left.identity.localeCompare(right.identity));
+  const forwardSummary = summarize(forward.normalized);
+
+  assert.deepEqual(forwardSummary, summarize(reversed.normalized));
+  assert.equal(forwardSummary.length, 4);
+  assert.equal(new Set(forwardSummary.map((event) => event.identity)).size, 4);
+  assert.deepEqual(forwardSummary.map((event) => event.value).sort((left, right) =>
+    Number(left) - Number(right)
+  ), [18, 18, 19, 20]);
+  assert.doesNotMatch(JSON.stringify(forward.snapshot), /fat-row-conflict/u);
+  assert.doesNotMatch(JSON.stringify(reversed.snapshot), /fat-row-conflict/u);
 });
 
 test("Junction opt-in sparse resources use bounded 30-day extended-history windows while dense defaults stay daily", async () => {

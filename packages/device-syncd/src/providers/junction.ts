@@ -5194,19 +5194,46 @@ function isBlockedJunctionImportSourceIdentityContainerKey(key: string): boolean
 }
 
 function dedupeJunctionTimeseriesRecords(resource: string, records: unknown[]): unknown[] {
-  const seen = new Set<string>();
-  const deduped: unknown[] = [];
-
-  for (const record of records) {
-    const key = buildJunctionTimeseriesRecordKey(resource, record);
-    if (key && seen.has(key)) {
+  const candidates = records.map((record) => ({
+    contentKey: buildJunctionTimeseriesRecordContentKey(resource, record),
+    key: buildJunctionTimeseriesRecordKey(resource, record),
+    providerRowKey: buildJunctionTimeseriesProviderRowKey(resource, record),
+    record,
+  }));
+  const contentKeysByProviderRow = new Map<string, Set<string>>();
+  for (const candidate of candidates) {
+    if (!candidate.providerRowKey || !candidate.contentKey) {
       continue;
     }
 
-    if (key) {
-      seen.add(key);
+    const contentKeys = contentKeysByProviderRow.get(candidate.providerRowKey)
+      ?? new Set<string>();
+    contentKeys.add(candidate.contentKey);
+    contentKeysByProviderRow.set(candidate.providerRowKey, contentKeys);
+  }
+  const conflictingProviderRows = new Set(
+    [...contentKeysByProviderRow.entries()]
+      .filter(([, contentKeys]) => contentKeys.size > 1)
+      .map(([providerRowKey]) => providerRowKey),
+  );
+  const seen = new Set<string>();
+  const deduped: unknown[] = [];
+
+  for (const candidate of candidates) {
+    if (
+      candidate.providerRowKey
+      && conflictingProviderRows.has(candidate.providerRowKey)
+    ) {
+      continue;
     }
-    deduped.push(record);
+    if (candidate.key && seen.has(candidate.key)) {
+      continue;
+    }
+
+    if (candidate.key) {
+      seen.add(candidate.key);
+    }
+    deduped.push(candidate.record);
   }
 
   return deduped;
@@ -5251,6 +5278,11 @@ function filterJunctionTimeseriesRecordsToWindow(
 }
 
 function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): string | null {
+  const providerRowKey = buildJunctionTimeseriesProviderRowKey(resource, record);
+  if (providerRowKey) {
+    return providerRowKey;
+  }
+
   const entry = readPlainObject(record);
   if (!entry) {
     return null;
@@ -5274,32 +5306,83 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
   ]);
 }
 
-// Sparse records carry stable row ids or normalized values as identity, so
-// pre-import dedupe preserves distinct same-timestamp rows for the importer.
-function junctionTimeseriesRecordValueIdentity(
+function buildJunctionTimeseriesProviderRowKey(
   resource: string,
-  entry: Record<string, unknown>,
-): string[] {
-  if (resource === "weight") {
-    const { providerReadingId, weightKilograms } =
-      resolveJunctionWeightProviderRecordIdentity(entry);
-    if (providerReadingId) {
-      return [`id:${providerReadingId}`];
-    }
-    return weightKilograms === undefined ? [] : [`kg:${weightKilograms}`];
+  record: unknown,
+): string | null {
+  const entry = readPlainObject(record);
+  if (!entry) {
+    return null;
   }
 
+  const providerRowId = readJunctionTimeseriesProviderRowId(resource, entry);
+  if (!providerRowId) {
+    return null;
+  }
+
+  const origin = resolveJunctionOrigin(entry);
+  const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
+  if (!sourceProviderSlug) {
+    return null;
+  }
+
+  return JSON.stringify([
+    "junction-timeseries-provider-row",
+    resource,
+    sourceProviderSlug,
+    normalizeString(origin.sourceType) ?? "",
+    normalizeString(origin.sourceInstanceId) ?? "",
+    providerRowId,
+  ]);
+}
+
+function buildJunctionTimeseriesRecordContentKey(
+  resource: string,
+  record: unknown,
+): string | null {
+  const entry = readPlainObject(record);
+  if (!entry) {
+    return null;
+  }
+
+  return JSON.stringify([
+    "junction-timeseries-content",
+    resolveJunctionTimeseriesRecordTimestamp(entry) ?? "",
+    normalizeString(entry.recordedAt ?? entry.recorded_at ?? entry.updatedAt ?? entry.updated_at)
+      ?? "",
+    String(
+      entry.timeZoneOffsetMinutes
+        ?? entry.time_zone_offset_minutes
+        ?? entry.timezoneOffsetMinutes
+        ?? entry.timezone_offset_minutes
+        ?? entry.timezone_offset
+        ?? entry.timezoneOffset
+        ?? "",
+    ),
+    normalizeString(entry.timestampSemantics ?? entry.timestamp_semantics) ?? "",
+    normalizeString(entry.originConfidence ?? entry.origin_confidence) ?? "",
+    ...junctionTimeseriesRecordValueIdentity(resource, entry, false),
+  ]);
+}
+
+function junctionTimeseriesRecordNeedsSemanticIdentity(resource: string): boolean {
   const policy = resolveJunctionTimeseriesResourcePolicy(resource);
-  const needsSemanticIdentity = resource === "blood_pressure"
+  return resource === "blood_pressure"
     || resource === "note"
     || policy?.normalizationMode === "sparse_alert"
     || policy?.normalizationMode === "sparse_intervention"
-    || policy?.normalizationMode === "sparse_observation";
-  if (!needsSemanticIdentity) {
-    return [];
+    || policy?.normalizationMode === "sparse_observation"
+    || policy?.normalizationMode === "sparse_reading";
+}
+
+function readJunctionTimeseriesProviderRowId(
+  resource: string,
+  entry: Record<string, unknown>,
+): string | null {
+  if (!junctionTimeseriesRecordNeedsSemanticIdentity(resource)) {
+    return null;
   }
 
-  let providerRowId = "";
   for (const key of [
     "id",
     "resourceId",
@@ -5311,13 +5394,35 @@ function junctionTimeseriesRecordValueIdentity(
   ]) {
     const rowId = normalizeString(entry[key]);
     if (rowId) {
-      providerRowId = rowId;
-      break;
+      return rowId;
     }
   }
 
+  return null;
+}
+
+// Sparse records without stable provider row ids retain their semantic tuple
+// identity so same-time rows remain distinct when their canonical bodies differ.
+function junctionTimeseriesRecordValueIdentity(
+  resource: string,
+  entry: Record<string, unknown>,
+  includeProviderRowId = true,
+): string[] {
+  if (!junctionTimeseriesRecordNeedsSemanticIdentity(resource)) {
+    return [];
+  }
+
+  const providerRowId = readJunctionTimeseriesProviderRowId(resource, entry) ?? "";
+  if (resource === "weight") {
+    if (includeProviderRowId && providerRowId) {
+      return [providerRowId];
+    }
+    const { weightKilograms } = resolveJunctionWeightProviderRecordIdentity(entry);
+    return weightKilograms === undefined ? [] : [`kg:${weightKilograms}`];
+  }
+
   if (resource === "note") {
-    if (providerRowId) {
+    if (includeProviderRowId && providerRowId) {
       return [providerRowId];
     }
     return [
@@ -5331,13 +5436,13 @@ function junctionTimeseriesRecordValueIdentity(
   }
 
   if (resource === "blood_pressure") {
-    return providerRowId
+    return includeProviderRowId && providerRowId
       ? [providerRowId]
       : [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
   }
 
   return [
-    providerRowId,
+    ...(includeProviderRowId ? [providerRowId] : []),
     String(entry.start ?? ""),
     String(entry.end ?? ""),
     String(entry.value ?? ""),
