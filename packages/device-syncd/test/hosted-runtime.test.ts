@@ -5,9 +5,11 @@ import * as hostedRuntime from "../src/hosted-runtime.ts";
 import { JUNCTION_CONNECT_SOURCE_TARGETS } from "../src/config/junction-connect-sources.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  addJunctionExtendedTimeseriesHistoryBackfillTerminal,
   addJunctionHistoricalBackfillEvidence,
   canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillTerminal,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_SOURCE_SLUGS,
@@ -458,6 +460,64 @@ describe("Junction extended-timeseries history coverage", () => {
     });
     expect(versionTwo?.[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY])
       .toMatch(/^m2\|/u);
+  });
+
+  it("stores and merges terminal coordinates separately from successful coverage", () => {
+    const terminalPatch = addJunctionExtendedTimeseriesHistoryBackfillTerminal({
+      existingMetadata: {},
+      providerSlug: "garmin",
+      resource: "workout_duration",
+      version: 1,
+    });
+    expect(terminalPatch).not.toBeNull();
+    const localMetadata = mergeStoredDeviceSyncMetadataPatch({}, terminalPatch);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      localMetadata,
+      "garmin",
+      "workout_duration",
+      1,
+    )).toBe(false);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillTerminal(
+      localMetadata,
+      "garmin",
+      "workout_duration",
+      1,
+    )).toBe(true);
+    expect(String(localMetadata[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY]).length)
+      .toBe(203);
+
+    const hostedCoveragePatch = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingMetadata: {},
+      providerSlug: "oura",
+      resource: "caffeine",
+      version: 1,
+    });
+    expect(hostedCoveragePatch).not.toBeNull();
+    const merged = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: mergeStoredDeviceSyncMetadataPatch({}, hostedCoveragePatch),
+      localConnectionStateUnpublished: true,
+      localMetadata,
+    });
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      merged.metadata,
+      "oura",
+      "caffeine",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillTerminal(
+      merged.metadata,
+      "garmin",
+      "workout_duration",
+      1,
+    )).toBe(true);
+    expect(merged.preservedLocalProgress).toBe(true);
+
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillTerminal(
+      merged.metadata,
+      "garmin",
+      "workout_duration",
+      2,
+    )).toBe(false);
   });
 });
 

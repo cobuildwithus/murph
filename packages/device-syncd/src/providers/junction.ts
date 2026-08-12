@@ -47,11 +47,13 @@ import {
 } from "../junction-inline-authority.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  addJunctionExtendedTimeseriesHistoryBackfillTerminal,
   addJunctionHistoricalBackfillEvidence,
   canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   encodeJunctionHistoricalBackfillStatus,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillTerminal,
   hasJunctionHistoricalBackfillEvidence,
   isJunctionExtendedTimeseriesHistoryBackfillCoverageCoordinate,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
@@ -713,6 +715,12 @@ export function createJunctionDeviceSyncProvider(
             )
           )
           || hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            account.metadata,
+            sourceProviderSlug,
+            resource,
+            policy.version,
+          )
+          || hasJunctionExtendedTimeseriesHistoryBackfillTerminal(
             account.metadata,
             sourceProviderSlug,
             resource,
@@ -2428,7 +2436,14 @@ export function createJunctionDeviceSyncProvider(
     const unresolvedProviderRecordsSeen = unresolvedProviderRecordCount > 0;
 
     if (input.importResult.companionSummaryUnavailable === true) {
-      return input.result;
+      return withJunctionMetadataPatch(
+        input.result,
+        buildJunctionExtendedTimeseriesBackfillTerminalMetadataPatch(
+          input.context,
+          input.resource,
+          sourceProviderSlug,
+        ),
+      );
     }
 
     if (input.importResult.companionCoverageIncomplete === true) {
@@ -2437,16 +2452,23 @@ export function createJunctionDeviceSyncProvider(
         EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyBackfillAttempts - 1]
         ?? null;
       if (retryDelayMs === null) {
-        return withJunctionSkippedResourceMetadata(
-          input.context,
-          input.result,
-          [{
-            reason: "ambiguous",
-            resource: "workouts",
-            resourceCategory: "summary",
-            responseDetail: "workout duration companion coverage incomplete",
-            responseStatus: 0,
-          }],
+        return withJunctionMetadataPatch(
+          withJunctionSkippedResourceMetadata(
+            input.context,
+            input.result,
+            [{
+              reason: "ambiguous",
+              resource: "workouts",
+              resourceCategory: "summary",
+              responseDetail: "workout duration companion coverage incomplete",
+              responseStatus: 0,
+            }],
+          ),
+          buildJunctionExtendedTimeseriesBackfillTerminalMetadataPatch(
+            input.context,
+            input.resource,
+            sourceProviderSlug,
+          ),
         );
       }
       return {
@@ -2563,6 +2585,28 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingMetadata: context.account.metadata,
+      providerSlug: sourceProviderSlug,
+      resource,
+      version: policy.version,
+    }) ?? {};
+  }
+
+  function buildJunctionExtendedTimeseriesBackfillTerminalMetadataPatch(
+    context: ProviderJobContext,
+    resource: string,
+    sourceProviderSlug: string | null,
+  ): Record<string, unknown> {
+    if (!sourceProviderSlug) {
+      return {};
+    }
+
+    const policy = resolveJunctionExtendedTimeseriesBackfillPolicy(resource);
+    if (!policy) {
+      return {};
+    }
+
+    return addJunctionExtendedTimeseriesHistoryBackfillTerminal({
       existingMetadata: context.account.metadata,
       providerSlug: sourceProviderSlug,
       resource,

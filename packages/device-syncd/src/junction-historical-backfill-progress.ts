@@ -411,6 +411,7 @@ interface JunctionBloodPressureHistoryBackfillCoverage {
 
 interface JunctionExtendedTimeseriesHistoryBackfillCoverage {
   bytes: Uint8Array;
+  terminalBytes: Uint8Array;
 }
 
 interface JunctionExtendedTimeseriesHistoryBackfillCoordinate {
@@ -479,7 +480,10 @@ export function addJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
     input.existingMetadata,
     input.version,
   ) ?? createEmptyJunctionExtendedTimeseriesHistoryBackfillCoverage();
-  setJunctionExtendedTimeseriesHistoryBackfillCoverageBit(coverage, coordinate.bitIndex);
+  setJunctionExtendedTimeseriesHistoryBackfillCoverageBit(
+    coverage.bytes,
+    coordinate.bitIndex,
+  );
   const encoded = encodeJunctionExtendedTimeseriesHistoryBackfillCoverage(
     coverage,
     input.version,
@@ -502,6 +506,41 @@ export function addJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
   return metadataPatch;
 }
 
+export function addJunctionExtendedTimeseriesHistoryBackfillTerminal(input: {
+  existingMetadata: Record<string, unknown>;
+  providerSlug: string;
+  resource: string;
+  version: number;
+}): Record<string, unknown> | null {
+  const coordinate = resolveJunctionExtendedTimeseriesHistoryBackfillCoordinate(input);
+  if (
+    !coordinate
+    || !canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      input.existingMetadata,
+      input.resource,
+      input.version,
+    )
+  ) {
+    return null;
+  }
+
+  const coverage = readLogicalJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    input.existingMetadata,
+    input.version,
+  ) ?? createEmptyJunctionExtendedTimeseriesHistoryBackfillCoverage();
+  setJunctionExtendedTimeseriesHistoryBackfillCoverageBit(
+    coverage.terminalBytes,
+    coordinate.bitIndex,
+  );
+  const encoded = encodeJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    coverage,
+    input.version,
+  );
+  return encoded
+    ? { [JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY]: encoded }
+    : null;
+}
+
 export function hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
   metadata: Record<string, unknown>,
   providerSlug: string,
@@ -519,7 +558,33 @@ export function hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
   );
   return coordinate !== null
     && coverage !== null
-    && hasJunctionExtendedTimeseriesHistoryBackfillCoverageBit(coverage, coordinate.bitIndex);
+    && hasJunctionExtendedTimeseriesHistoryBackfillCoverageBit(
+      coverage.bytes,
+      coordinate.bitIndex,
+    );
+}
+
+export function hasJunctionExtendedTimeseriesHistoryBackfillTerminal(
+  metadata: Record<string, unknown>,
+  providerSlug: string,
+  resource: string,
+  version: number,
+): boolean {
+  const coordinate = resolveJunctionExtendedTimeseriesHistoryBackfillCoordinate({
+    providerSlug,
+    resource,
+    version,
+  });
+  const coverage = readLogicalJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    metadata,
+    version,
+  );
+  return coordinate !== null
+    && coverage !== null
+    && hasJunctionExtendedTimeseriesHistoryBackfillCoverageBit(
+      coverage.terminalBytes,
+      coordinate.bitIndex,
+    );
 }
 
 export function canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -588,7 +653,10 @@ function resolveLegacyJunctionExtendedTimeseriesHistoryBackfillCoverageMetadataK
 
 function createEmptyJunctionExtendedTimeseriesHistoryBackfillCoverage():
   JunctionExtendedTimeseriesHistoryBackfillCoverage {
-  return { bytes: new Uint8Array(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT) };
+  return {
+    bytes: new Uint8Array(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT),
+    terminalBytes: new Uint8Array(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT),
+  };
 }
 
 function readLogicalJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -610,7 +678,10 @@ function readLogicalJunctionExtendedTimeseriesHistoryBackfillCoverage(
     version,
   );
   const coverage = compactCoverage
-    ? { bytes: compactCoverage.bytes.slice() }
+    ? {
+        bytes: compactCoverage.bytes.slice(),
+        terminalBytes: compactCoverage.terminalBytes.slice(),
+      }
     : createEmptyJunctionExtendedTimeseriesHistoryBackfillCoverage();
   let hasCoverage = compactCoverage !== null;
 
@@ -631,7 +702,10 @@ function readLogicalJunctionExtendedTimeseriesHistoryBackfillCoverage(
         version: legacyCoverage.version,
       });
       if (coordinate) {
-        setJunctionExtendedTimeseriesHistoryBackfillCoverageBit(coverage, coordinate.bitIndex);
+        setJunctionExtendedTimeseriesHistoryBackfillCoverageBit(
+          coverage.bytes,
+          coordinate.bitIndex,
+        );
         hasCoverage = true;
       }
     }
@@ -657,8 +731,11 @@ function readJunctionExtendedTimeseriesHistoryBackfillCoverage(
   const decoded = Buffer.from(encodedBytes, "base64url");
   if (
     decoded.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT
-    || decoded.toString("base64url") !== encodedBytes
+      && decoded.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT * 2
   ) {
+    return null;
+  }
+  if (decoded.toString("base64url") !== encodedBytes) {
     return null;
   }
   const unusedBitCount =
@@ -666,11 +743,26 @@ function readJunctionExtendedTimeseriesHistoryBackfillCoverage(
     - JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BIT_COUNT;
   if (
     unusedBitCount > 0
-    && (decoded[decoded.length - 1] & (0xff << (8 - unusedBitCount))) !== 0
+    && (
+      (decoded[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT - 1]
+        & (0xff << (8 - unusedBitCount))) !== 0
+      || (
+        decoded.length === JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT * 2
+        && (decoded[decoded.length - 1] & (0xff << (8 - unusedBitCount))) !== 0
+      )
+    )
   ) {
     return null;
   }
-  return { bytes: new Uint8Array(decoded) };
+  return {
+    bytes: new Uint8Array(decoded.subarray(
+      0,
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT,
+    )),
+    terminalBytes: decoded.length === JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT * 2
+      ? new Uint8Array(decoded.subarray(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT))
+      : new Uint8Array(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT),
+  };
 }
 
 function readJunctionExtendedTimeseriesHistoryBackfillCoverageEncodingVersion(
@@ -690,30 +782,37 @@ function encodeJunctionExtendedTimeseriesHistoryBackfillCoverage(
 ): string | null {
   if (
     coverage.bytes.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT
-    || !coverage.bytes.some((byte) => byte !== 0)
+    || coverage.terminalBytes.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_BYTE_COUNT
+    || (
+      !coverage.bytes.some((byte) => byte !== 0)
+      && !coverage.terminalBytes.some((byte) => byte !== 0)
+    )
   ) {
     return null;
   }
+  const bytes = coverage.terminalBytes.some((byte) => byte !== 0)
+    ? Buffer.concat([Buffer.from(coverage.bytes), Buffer.from(coverage.terminalBytes)])
+    : Buffer.from(coverage.bytes);
   const encoded = `m${version}|${
-    Buffer.from(coverage.bytes).toString("base64url")
+    bytes.toString("base64url")
   }`;
   return encoded.length <= DEVICE_SYNC_METADATA_MAX_STRING_LENGTH ? encoded : null;
 }
 
 function hasJunctionExtendedTimeseriesHistoryBackfillCoverageBit(
-  coverage: JunctionExtendedTimeseriesHistoryBackfillCoverage,
+  bytes: Uint8Array,
   bitIndex: number,
 ): boolean {
   const byteIndex = Math.floor(bitIndex / 8);
-  return (coverage.bytes[byteIndex] & (1 << (bitIndex % 8))) !== 0;
+  return (bytes[byteIndex] & (1 << (bitIndex % 8))) !== 0;
 }
 
 function setJunctionExtendedTimeseriesHistoryBackfillCoverageBit(
-  coverage: JunctionExtendedTimeseriesHistoryBackfillCoverage,
+  bytes: Uint8Array,
   bitIndex: number,
 ): void {
   const byteIndex = Math.floor(bitIndex / 8);
-  coverage.bytes[byteIndex] |= 1 << (bitIndex % 8);
+  bytes[byteIndex] |= 1 << (bitIndex % 8);
 }
 
 function mergeJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
@@ -764,11 +863,15 @@ function mergeJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
     )
     : null;
   const mergedCoverage = hostedCoverage
-    ? { bytes: hostedCoverage.bytes.slice() }
+    ? {
+        bytes: hostedCoverage.bytes.slice(),
+        terminalBytes: hostedCoverage.terminalBytes.slice(),
+      }
     : createEmptyJunctionExtendedTimeseriesHistoryBackfillCoverage();
   if (localCoverage) {
     for (let index = 0; index < mergedCoverage.bytes.length; index += 1) {
       mergedCoverage.bytes[index] |= localCoverage.bytes[index];
+      mergedCoverage.terminalBytes[index] |= localCoverage.terminalBytes[index];
     }
   }
   return {
@@ -832,7 +935,10 @@ function doesJunctionExtendedTimeseriesCoverageAdvance(
   if (!hosted) {
     return true;
   }
-  return local.bytes.some((byte, index) => (byte & ~hosted.bytes[index]) !== 0);
+  return local.bytes.some((byte, index) => (byte & ~hosted.bytes[index]) !== 0)
+    || local.terminalBytes.some(
+      (byte, index) => (byte & ~hosted.terminalBytes[index]) !== 0,
+    );
 }
 
 export function encodeJunctionHistoricalBackfillStatus(

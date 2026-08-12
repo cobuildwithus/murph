@@ -19,6 +19,7 @@ import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-defin
 import { DeviceSyncError } from "../src/errors.ts";
 import {
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillTerminal,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
 } from "../src/junction-historical-backfill-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
@@ -15045,6 +15046,19 @@ test.each([404, 422])(
       "workout_duration",
       JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     ), false);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillTerminal(
+      result.metadataPatch ?? {},
+      "garmin",
+      "workout_duration",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), true);
+    const nextPass = requireValue(provider.jobExecutor).createScheduledJobs?.(
+      createStoredAccount({ metadata: result.metadataPatch ?? {}, sources: [source] }),
+      "2026-08-12T12:00:00.000Z",
+    );
+    assert.equal(nextPass?.jobs.some((job) =>
+      job.payload?.resource === "workout_duration" && job.payload?.historicalBackfill === true
+    ), false);
   },
 );
 
@@ -15056,6 +15070,7 @@ async function runUnmatchedWorkoutDurationHistoryScenario(input: {
   durationRequestCount: number;
   importCount: number;
   lastResult: Awaited<ReturnType<typeof executeJunctionJob>>;
+  nextScheduledHistoryCount: number;
   summaryRequestCount: number;
 }> {
   let summaryRequestCount = 0;
@@ -15146,7 +15161,21 @@ async function runUnmatchedWorkoutDurationHistoryScenario(input: {
     }
   }
 
-  return { durationRequestCount, importCount, lastResult, summaryRequestCount };
+  const nextScheduledHistoryCount = requireValue(provider.jobExecutor).createScheduledJobs?.(
+    createStoredAccount({ metadata: lastResult.metadataPatch ?? {}, sources: [source] }),
+    "2026-08-17T12:00:00.000Z",
+  ).jobs.filter((candidate) =>
+    candidate.payload?.resource === "workout_duration"
+    && candidate.payload?.historicalBackfill === true
+  ).length ?? 0;
+
+  return {
+    durationRequestCount,
+    importCount,
+    lastResult,
+    nextScheduledHistoryCount,
+    summaryRequestCount,
+  };
 }
 
 test("Junction empty workout companions exhaust bounded retry without import or coverage", async () => {
@@ -15160,6 +15189,7 @@ test("Junction empty workout companions exhaust bounded retry without import or 
   assert.equal(result.durationRequestCount, 5);
   assert.equal(result.importCount, 0);
   assert.equal(result.lastResult.scheduledJobs, undefined);
+  assert.equal(result.nextScheduledHistoryCount, 0);
   assert.equal(
     result.lastResult.metadataPatch?.junctionSkippedResourceLast,
     "summary.workouts.0.ambiguous",
@@ -15170,6 +15200,12 @@ test("Junction empty workout companions exhaust bounded retry without import or 
     "workout_duration",
     JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
   ), false);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillTerminal(
+    result.lastResult.metadataPatch ?? {},
+    "garmin",
+    "workout_duration",
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+  ), true);
 });
 
 test.each([
@@ -15193,15 +15229,28 @@ test.each([
   },
 ])("Junction workout-duration history rejects $label atomically", async ({ summaries, workoutIds }) => {
   const result = await runUnmatchedWorkoutDurationHistoryScenario({
-    executions: 1,
+    executions: 5,
     summaries,
     workoutIds,
   });
 
-  assert.equal(result.summaryRequestCount, 1);
-  assert.equal(result.durationRequestCount, 1);
+  assert.equal(result.summaryRequestCount, 5);
+  assert.equal(result.durationRequestCount, 5);
   assert.equal(result.importCount, 0);
-  assert.equal(result.lastResult.scheduledJobs?.length, 1);
+  assert.equal(result.lastResult.scheduledJobs, undefined);
+  assert.equal(result.nextScheduledHistoryCount, 0);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    result.lastResult.metadataPatch ?? {},
+    "garmin",
+    "workout_duration",
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+  ), false);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillTerminal(
+    result.lastResult.metadataPatch ?? {},
+    "garmin",
+    "workout_duration",
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+  ), true);
 });
 
 test("Junction workout summaries cannot turn malformed duration history into canonical coverage", async () => {

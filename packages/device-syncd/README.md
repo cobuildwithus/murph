@@ -62,10 +62,13 @@ Current providers:
   never persists full provider timeseries arrays or emits canonical sample rows.
 - Extended source/resource completion has one writable owner:
   `junctionExtendedHistoryCoverage`. Its `mN` prefix is the normalization
-  coverage-policy version; adding support for a previously noncanonical shape
-  must increment that version so exhausted history is reconsidered. The older
-  blood-pressure and note lists are read-only migration inputs and are removed
-  by the metadata merge once their bits are represented in the matrix.
+  coverage-policy version. The scalar has separate compact planes for proven
+  coverage and terminal unsupported coordinates, so a bounded failed scan can
+  stop future scheduler passes without claiming that data was imported.
+  Adding support for a previously noncanonical shape must increment the policy
+  version so terminal coordinates are reconsidered. The older blood-pressure
+  and note lists are read-only migration inputs and are removed by the metadata
+  merge once their bits are represented in the matrix.
 - Long-history anchoring is resource policy, not scheduler inference.
   Rollout-added resources end their first scan at scheduling time so existing
   connections receive recent history; resources whose history predates source
