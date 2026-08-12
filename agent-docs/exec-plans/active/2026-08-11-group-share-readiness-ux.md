@@ -194,3 +194,11 @@ Updated: 2026-08-11
   rotation during the read therefore produces the ordinary no-active result and
   a fresh retry instead of writing old records into the new generation. Raw
   share IDs and recipient cardinality remain outside the private runtime.
+- Final ReviewGPT round 5 found that tokenless legacy delivery still bypassed
+  that fence during mixed-version operation. The contract now requires the
+  digest on every delivery; new Runtime fails before reading a projectable
+  scope when old Web omits proof, and new Web returns a retryable error before
+  lookup or replacement when an old Runtime omits proof. The token-capable
+  runner fleet is the hard rollback floor before Web promotion, and the
+  pending-aware Web reader becomes its own rollback floor as soon as the Web
+  writer begins admitting fresh null-snapshot generations.

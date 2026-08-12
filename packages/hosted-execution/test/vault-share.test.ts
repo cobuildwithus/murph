@@ -25,7 +25,7 @@ import {
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliveryRecord,
-  parseHostedVaultShareDeliverRequest,
+  parseHostedVaultShareDeliverRequest as parseHostedVaultShareDeliverRequestContract,
   parseHostedVaultShareDeliverResponse,
   parseHostedVaultShareProjectionScopeKey,
 } from "../src/vault-share.ts";
@@ -69,6 +69,18 @@ const VALID_RECORD = {
   occurredAt: "2026-06-09T00:00:00.000Z",
   recordKey: "2026-06-09",
 };
+const GENERATION_TOKEN = "a".repeat(43);
+
+function parseHostedVaultShareDeliverRequest(
+  value: Record<string, unknown>,
+) {
+  const { expectedGenerationToken: _generationToken, ...parsed } =
+    parseHostedVaultShareDeliverRequestContract({
+      expectedGenerationToken: GENERATION_TOKEN,
+      ...value,
+    });
+  return parsed;
+}
 
 const VALID_ACTIVITY_RECORD = {
   data: {
@@ -383,7 +395,7 @@ describe("vault-share contracts", () => {
 
   it("parses only fixed-width opaque share-generation tokens", () => {
     const expectedGenerationToken = "a".repeat(43);
-    expect(parseHostedVaultShareDeliverRequest({
+    expect(parseHostedVaultShareDeliverRequestContract({
       expectedGenerationToken,
       projectionKind: "sleep-times.v0",
       records: [VALID_RECORD],
@@ -401,6 +413,13 @@ describe("vault-share contracts", () => {
       projectionKind: "sleep-times.v0",
       records: [VALID_RECORD],
     })).toThrow(/non-empty string/u);
+  });
+
+  it("rejects a deliver request without generation proof", () => {
+    expect(() => parseHostedVaultShareDeliverRequestContract({
+      projectionKind: "sleep-times.v0",
+      records: [VALID_RECORD],
+    })).toThrow(/expectedGenerationToken/u);
   });
 
   it("parses an optional opaque source revision", () => {

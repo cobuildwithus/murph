@@ -17,7 +17,7 @@ import {
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
-  parseHostedVaultShareDeliverRequest,
+  parseHostedVaultShareDeliverRequest as parseHostedVaultShareDeliverRequestContract,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareDeliverRequest,
   type HostedVaultShareWorkoutsDayData,
@@ -102,10 +102,27 @@ const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
 );
 const GENERATION_TOKEN = "a".repeat(43);
 
+function parseHostedVaultShareDeliverRequest(
+  value: Record<string, unknown>,
+) {
+  const { expectedGenerationToken: _generationToken, ...parsed } =
+    parseHostedVaultShareDeliverRequestContract({
+      expectedGenerationToken: GENERATION_TOKEN,
+      ...value,
+    });
+  return parsed;
+}
+
 function activeProjectionResponse(
   ...projectionScopes: HostedVaultShareProjectionScope[]
 ) {
   return {
+    generationTokensByProjectionScopeKey: Object.fromEntries(
+      projectionScopes.map((scope) => [
+        buildHostedVaultShareProjectionScopeKey(scope),
+        GENERATION_TOKEN,
+      ]),
+    ),
     projectionKinds: [...new Set(
       projectionScopes.map((scope) => scope.projectionKind),
     )],
@@ -524,6 +541,23 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     expect(deliver).not.toHaveBeenCalled();
   });
 
+  it("does not read or deliver when old Web omits active-generation proof", async () => {
+    const deliver = vi.fn();
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot: "/must-not-read",
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          projectionKinds: [PROFILE_SCOPE.projectionKind],
+          projectionScopes: [PROFILE_SCOPE],
+        }),
+      },
+    });
+
+    expect(result.outcome).toBe("error");
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it("skips email delivery authorization grants because they carry no records", async () => {
     const deliver = vi.fn();
     const result = await offerHostedVaultShareProjectionBestEffort({
@@ -551,6 +585,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
 
     expect(result.outcome).toBe("delivered");
     expect(deliver).toHaveBeenCalledWith({
+      expectedGenerationToken: GENERATION_TOKEN,
       projectionKind: "profile-name.v0",
       projectionScope: PROFILE_SCOPE,
       records: [],
@@ -2243,6 +2278,7 @@ describe("selectProjectableMealNutritionDays", () => {
       })).resolves.toEqual({ outcome: "delivered" });
       expect(deliver).toHaveBeenCalledTimes(1);
       expect(deliver).toHaveBeenCalledWith({
+        expectedGenerationToken: GENERATION_TOKEN,
         projectionKind: "protein-days.v0",
         projectionScope: PROTEIN_SCOPE,
         records: selected,
@@ -4515,6 +4551,7 @@ describe("readProjectableProfileName", () => {
     expect(result.outcome).toBe("delivered");
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith({
+      expectedGenerationToken: GENERATION_TOKEN,
       projectionKind: "profile-name.v0",
       projectionScope: PROFILE_SCOPE,
       records,
@@ -4645,6 +4682,7 @@ describe("readProjectableProfileName", () => {
     });
     expect(result.outcome).toBe("delivered");
     expect(deliver).toHaveBeenCalledWith({
+      expectedGenerationToken: GENERATION_TOKEN,
       projectionKind: "profile-name.v0",
       projectionScope: PROFILE_SCOPE,
       records: [],

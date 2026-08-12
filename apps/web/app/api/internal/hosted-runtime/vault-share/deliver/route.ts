@@ -52,7 +52,16 @@ export const POST = withJsonError(async (request: Request) => {
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
   });
-  const body = parseHostedVaultShareDeliverRequest(await readOptionalJsonObject(request));
+  const rawBody = await readOptionalJsonObject(request);
+  if (rawBody.expectedGenerationToken === undefined) {
+    throw hostedOnboardingError({
+      code: "HOSTED_VAULT_SHARE_GENERATION_PROOF_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted vault-share delivery requires current generation proof. Retry the request.",
+      retryable: true,
+    });
+  }
+  const body = parseHostedVaultShareDeliverRequest(rawBody);
 
   const shares = await findActiveHostedVaultShares({
     grantorMemberId,
@@ -63,7 +72,6 @@ export const POST = withJsonError(async (request: Request) => {
   }
   if (
     body.expectedGenerationToken
-    && body.expectedGenerationToken
       !== buildHostedVaultShareGenerationToken(shares.map((share) => share.id))
   ) {
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);

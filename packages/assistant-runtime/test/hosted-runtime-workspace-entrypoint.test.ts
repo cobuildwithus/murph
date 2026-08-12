@@ -21012,6 +21012,9 @@ describe("hosted workspace runtime entrypoint", () => {
             vaultSharePort: {
               async listActiveProjectionScopes() {
                 return {
+                  generationTokensByProjectionScopeKey: {
+                    "sleep-times.v0": "a".repeat(43),
+                  },
                   projectionKinds: ["sleep-times.v0" as const],
                   projectionScopes: [{ projectionKind: "sleep-times.v0" as const }],
                 };
@@ -21234,6 +21237,9 @@ describe("hosted workspace runtime entrypoint", () => {
                 activeScopeReads += 1;
                 return activeScopeReads === 1
                   ? {
+                      generationTokensByProjectionScopeKey: {
+                        "sleep-times.v0": "a".repeat(43),
+                      },
                       projectionKinds: ["sleep-times.v0" as const],
                       projectionScopes: [{ projectionKind: "sleep-times.v0" as const }],
                     }
@@ -21443,6 +21449,9 @@ describe("hosted workspace runtime entrypoint", () => {
       const vaultSharePort: NonNullable<HostedRuntimePlatform["vaultSharePort"]> = {
         async listActiveProjectionScopes() {
           return {
+            generationTokensByProjectionScopeKey: {
+              "sleep-times.v0": "a".repeat(43),
+            },
             projectionKinds: ["sleep-times.v0" as const],
             projectionScopes: [{ projectionKind: "sleep-times.v0" as const }],
           };
@@ -21713,6 +21722,9 @@ describe("hosted workspace runtime entrypoint", () => {
             vaultSharePort: {
               async listActiveProjectionScopes() {
                 return {
+                  generationTokensByProjectionScopeKey: {
+                    "sleep-times.v0": "a".repeat(43),
+                  },
                   projectionKinds: ["sleep-times.v0" as const],
                   projectionScopes: [{ projectionKind: "sleep-times.v0" as const }],
                 };
@@ -22182,6 +22194,9 @@ describe("hosted workspace runtime entrypoint", () => {
                 activeScopeReads += 1;
                 return activeScopeReads === 1
                   ? {
+                      generationTokensByProjectionScopeKey: {
+                        "sleep-times.v0": "a".repeat(43),
+                      },
                       projectionKinds: ["sleep-times.v0" as const],
                       projectionScopes: [{ projectionKind: "sleep-times.v0" as const }],
                     }
@@ -22386,6 +22401,9 @@ describe("hosted workspace runtime entrypoint", () => {
                 activeScopeReads += 1;
                 return activeScopeReads === 1
                   ? {
+                      generationTokensByProjectionScopeKey: {
+                        "sleep-times.v0": "a".repeat(43),
+                      },
                       projectionKinds: ["sleep-times.v0" as const],
                       projectionScopes: [{ projectionKind: "sleep-times.v0" as const }],
                     }
@@ -22634,6 +22652,9 @@ describe("hosted workspace runtime entrypoint", () => {
             vaultSharePort: {
               async listActiveProjectionScopes() {
                 return {
+                  generationTokensByProjectionScopeKey: {
+                    "sleep-times.v0": "a".repeat(43),
+                  },
                   projectionKinds: ["sleep-times.v0" as const],
                   projectionScopes: [{ projectionKind: "sleep-times.v0" as const }],
                 };

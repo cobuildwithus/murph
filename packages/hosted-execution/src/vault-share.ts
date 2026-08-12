@@ -635,7 +635,7 @@ export interface HostedVaultShareDeliverRequest {
    * the runtime begins reading this scope. Web accepts delivery only while the
    * digest still matches, so a rotated consent cannot receive stale records.
    */
-  expectedGenerationToken?: string;
+  expectedGenerationToken: string;
   projectionKind: HostedVaultShareProjectionKind;
   projectionScope: HostedVaultShareProjectionScope;
   records: HostedVaultShareDeliveryRecord[];
@@ -2084,16 +2084,11 @@ export function parseHostedVaultShareDeliverRequest(
     );
   }
   const records = requireArray(request.records, "Vault share deliver request records");
-  const expectedGenerationToken = request.expectedGenerationToken === undefined
-    ? undefined
-    : requireString(
-        request.expectedGenerationToken,
-        "Vault share deliver request expectedGenerationToken",
-      );
-  if (
-    expectedGenerationToken !== undefined
-    && !HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN.test(expectedGenerationToken)
-  ) {
+  const expectedGenerationToken = requireString(
+    request.expectedGenerationToken,
+    "Vault share deliver request expectedGenerationToken",
+  );
+  if (!HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN.test(expectedGenerationToken)) {
     throw new TypeError(
       "Vault share deliver request expectedGenerationToken must be a SHA-256 base64url digest.",
     );
@@ -2127,7 +2122,7 @@ export function parseHostedVaultShareDeliverRequest(
   }
 
   return {
-    ...(expectedGenerationToken ? { expectedGenerationToken } : {}),
+    expectedGenerationToken,
     projectionKind,
     projectionScope,
     records: parsedRecords,

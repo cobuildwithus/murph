@@ -223,13 +223,18 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
     if (!readRecords) {
       continue;
     }
+    const generationToken = activeProjections.generationTokensByProjectionScopeKey?.[
+      buildHostedVaultShareProjectionScopeKey(projectionScope)
+    ];
+    if (!generationToken) {
+      outcomes.push("error");
+      continue;
+    }
     outcomes.push(await offerHostedVaultShareScopeBestEffort({
       context,
       port,
       projectionScope,
-      generationToken: activeProjections.generationTokensByProjectionScopeKey?.[
-        buildHostedVaultShareProjectionScopeKey(projectionScope)
-      ],
+      generationToken,
       readRecords,
       vaultRoot: input.vaultRoot,
     }));
@@ -255,7 +260,7 @@ type ProjectableRecordReader = (input: {
 
 async function offerHostedVaultShareScopeBestEffort(input: {
   context: HostedVaultShareProjectionReadContext;
-  generationToken?: string;
+  generationToken: string;
   port: HostedRuntimeVaultSharePort;
   projectionScope: HostedVaultShareProjectionScope;
   readRecords: ProjectableRecordReader;
@@ -268,9 +273,7 @@ async function offerHostedVaultShareScopeBestEffort(input: {
     });
 
     const response = await input.port.deliver({
-      ...(input.generationToken
-        ? { expectedGenerationToken: input.generationToken }
-        : {}),
+      expectedGenerationToken: input.generationToken,
       projectionKind: input.projectionScope.projectionKind,
       projectionScope: input.projectionScope,
       records,

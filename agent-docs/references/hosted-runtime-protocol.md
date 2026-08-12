@@ -499,8 +499,10 @@ the offer, and Web re-derives it from the active destination set before writing.
 A mismatch returns the ordinary `no-active-share` result, retains no stale
 records, and lets the durable maintenance obligation retry from a fresh active
 scope read. Raw share IDs and destination cardinality never cross into the
-member runtime. Requests without a digest remain accepted only for the bounded
-old-runtime compatibility window.
+member runtime. A projectable active scope without a digest fails before any
+private vault read, and Web rejects a tokenless delivery as retryable before
+resolving or replacing a share. The converged token-capable runner bundle is
+therefore the hard rollback floor before Web promotion.
 
 The rollout is consumer-first and reader-before-backfill. First deploy the
 runtime/Worker parser, bounded projection owner, retry consumer, and generation
@@ -517,9 +519,10 @@ one durable maintenance row. Exact signaling
 occurs after commit and its failure is recoverable from the row. Wait for that
 maintenance backlog to drain before declaring the rollout complete. Reusing the
 same cutoff makes the command idempotent and leaves current-state, email,
-device-status, non-group, and newly created grants untouched. Once the first
-backfill batch commits, the pending-aware Web reader is the rollback floor;
-rolling Web back would recreate false missing states for refreshed generations.
+device-status, non-group, and newly created grants untouched. Once the complete
+Web writer begins serving approvals, the pending-aware Web reader is the
+rollback floor; rolling Web back would recreate false missing states for newly
+admitted or refreshed generations even before the legacy backfill begins.
 
 Recent daily and sleep projection owners derive the member's current civil date
 from the validated vault timezone, admit only that date and the prior six civil

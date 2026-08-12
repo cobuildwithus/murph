@@ -2125,6 +2125,9 @@ describe("hosted system mailbox notification execution context", () => {
         deliver,
         async listActiveProjectionScopes() {
           return {
+            generationTokensByProjectionScopeKey: {
+              "sleep-times.v0": "a".repeat(43),
+            },
             projectionKinds: ["sleep-times.v0" as const],
             projectionScopes: [hostedVaultShareProjectionKindToScope("sleep-times.v0")],
           };
@@ -2237,6 +2240,9 @@ describe("hosted system mailbox notification execution context", () => {
         deliver,
         async listActiveProjectionScopes() {
           return {
+            generationTokensByProjectionScopeKey: {
+              "sleep-times.v0": "a".repeat(43),
+            },
             projectionKinds: ["sleep-times.v0" as const],
             projectionScopes: [hostedVaultShareProjectionKindToScope("sleep-times.v0")],
           };

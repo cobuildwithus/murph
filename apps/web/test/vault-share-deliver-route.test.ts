@@ -101,7 +101,10 @@ const STALE_RECORD = {
   recordKey: "1999-01-01",
 };
 
+const CURRENT_GENERATION_TOKEN = "a".repeat(43);
+const STALE_GENERATION_TOKEN = "b".repeat(43);
 const VALID_BODY = {
+  expectedGenerationToken: CURRENT_GENERATION_TOKEN,
   projectionKind: "sleep-times.v0",
   records: [recentRecord(1)],
 };
@@ -116,8 +119,6 @@ const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope("workouts.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const PROFILE_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
 const MAXIMUM_WIDTH_WORKOUT_MINUTES = 0.0000030024105450300988;
-const CURRENT_GENERATION_TOKEN = "a".repeat(43);
-const STALE_GENERATION_TOKEN = "b".repeat(43);
 
 const ACTIVE_SHARE = {
   destinationMemberId: "member_referee",
@@ -138,6 +139,13 @@ const SECOND_SHARE = {
 };
 
 function buildRequest(body: unknown): Request {
+  const requestBody = typeof body === "object" && body !== null && !Array.isArray(body)
+    ? { expectedGenerationToken: CURRENT_GENERATION_TOKEN, ...body }
+    : body;
+  return buildRawRequest(requestBody);
+}
+
+function buildRawRequest(body: unknown): Request {
   return new Request("https://web.test/api/internal/hosted-runtime/vault-share/deliver", {
     body: JSON.stringify(body),
     headers: { "content-type": "application/json" },
@@ -147,6 +155,7 @@ function buildRequest(body: unknown): Request {
 
 function workoutsDeliveryBody(workoutsPerDay: number): HostedVaultShareDeliverRequest {
   return {
+    expectedGenerationToken: CURRENT_GENERATION_TOKEN,
     projectionKind: "workouts.v0",
     projectionScope: WORKOUTS_SCOPE,
     records: Array.from(
@@ -193,6 +202,7 @@ function sourceAwareSleepDeliveryBody(
     { label: "Strava", source: "strava" },
   ] as const;
   return {
+    expectedGenerationToken: CURRENT_GENERATION_TOKEN,
     projectionKind: projectionScope.projectionKind,
     projectionScope,
     records: Array.from(
@@ -260,11 +270,11 @@ describe("vault-share deliver route", () => {
       new RegExp(`at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY}`, "u"),
     );
     expect(JSON.stringify(MAXIMUM_WIDTH_WORKOUT_MINUTES)).toHaveLength(24);
-    expect(bodyBytes).toBe(18_375);
+    expect(bodyBytes).toBe(18_447);
     expect(bodyBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );
-    expect(nextBoundBodyBytes).toBe(19_583);
+    expect(nextBoundBodyBytes).toBe(19_655);
     expect(nextBoundBodyBytes).toBeGreaterThan(
       HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
     );
@@ -387,6 +397,15 @@ describe("vault-share deliver route", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "no-active-share" });
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects a tokenless previous runtime before resolving or replacing shares", async () => {
+    const { expectedGenerationToken: _omitted, ...tokenlessBody } = VALID_BODY;
+    const response = await deliverRoute.POST(buildRawRequest(tokenlessBody));
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(mocks.findActiveHostedVaultShares).not.toHaveBeenCalled();
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
