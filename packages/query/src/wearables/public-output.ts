@@ -265,16 +265,24 @@ export function projectWearableRecoveryDayPublicSources(day: WearableRecoveryDay
 export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateDay): WearableBodyStateDay {
   const weightKg = projectWearableResolvedMetricPublicSources(day.weightKg);
   const bodyFatPercentage = projectWearableResolvedMetricPublicSources(day.bodyFatPercentage);
+  const bodyWaterPercentage = projectWearableResolvedMetricPublicSources(day.bodyWaterPercentage);
+  const boneMassPercentage = projectWearableResolvedMetricPublicSources(day.boneMassPercentage);
   const bmi = projectWearableResolvedMetricPublicSources(day.bmi);
   const leanBodyMassKg = projectWearableResolvedMetricPublicSources(day.leanBodyMassKg);
+  const muscleMassPercentage = projectWearableResolvedMetricPublicSources(day.muscleMassPercentage);
   const temperature = projectWearableResolvedMetricPublicSources(day.temperature);
+  const visceralFatIndex = projectWearableResolvedMetricPublicSources(day.visceralFatIndex);
   const waistCircumference = projectWearableResolvedMetricPublicSources(day.waistCircumference);
   const metrics: ReadonlyArray<readonly [string, WearableResolvedMetric]> = [
     ["weightKg", weightKg],
     ["bodyFatPercentage", bodyFatPercentage],
+    ["bodyWaterPercentage", bodyWaterPercentage],
+    ["boneMassPercentage", boneMassPercentage],
     ["bmi", bmi],
     ["leanBodyMassKg", leanBodyMassKg],
+    ["muscleMassPercentage", muscleMassPercentage],
     ["temperature", temperature],
+    ["visceralFatIndex", visceralFatIndex],
     ["waistCircumference", waistCircumference],
   ];
   const summaryConfidence = rebuildPublicSummaryConfidence(
@@ -287,6 +295,8 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
     ...day,
     bmi,
     bodyFatPercentage,
+    bodyWaterPercentage,
+    boneMassPercentage,
     notes: projectSummaryNotes({
       metrics: metrics.map(([, metric]) => metric),
       originalNotes: day.notes,
@@ -299,8 +309,10 @@ export function projectWearableBodyStateDayPublicSources(day: WearableBodyStateD
       }),
     }),
     leanBodyMassKg,
+    muscleMassPercentage,
     summaryConfidence,
     temperature,
+    visceralFatIndex,
     waistCircumference,
     weightKg,
   };

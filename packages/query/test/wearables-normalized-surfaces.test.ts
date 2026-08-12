@@ -977,6 +977,78 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   assert.equal(waistCircumference?.value, 86.36);
 });
 
+test("Junction body composition facts remain distinct across wearable and canonical metric queries", () => {
+  const vault = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      body: [{
+        source: { provider: "withings", type: "scale" },
+        id: "body-composition-queryable",
+        date: "2026-05-20T08:00:00Z",
+        bone_mass_percentage: 4.2,
+        muscle_mass_percentage: 61.8,
+        visceral_fat_index: 7,
+        water_percentage: 54.6,
+      }],
+    },
+  });
+
+  const bodyState = summarizeWearableLatest(vault)?.bodyState;
+  const boneMass = summarizeWearableMetricLatest(vault, "bone_mass_percentage", { windowDays: 1 });
+  const muscleMass = summarizeWearableMetricLatest(vault, "muscle-mass-percentage", { windowDays: 1 });
+  const visceralFat = summarizeWearableMetricLatest(vault, "visceral_fat_index", { windowDays: 1 });
+  const bodyWater = summarizeWearableMetricLatest(vault, "water_percentage", { windowDays: 1 });
+  const compositionMetricKeys = new Set([
+    "body-water-percentage",
+    "bone-mass-percentage",
+    "muscle-mass-percentage",
+    "visceral-fat-index",
+  ]);
+  const metricPoints = buildMetricProjection(vault).metricPoints
+    .filter((point) => compositionMetricKeys.has(point.metricKey))
+    .sort((left, right) => left.metricKey.localeCompare(right.metricKey));
+
+  assert.equal(bodyState?.boneMassPercentage.selection.value, 4.2);
+  assert.equal(bodyState?.boneMassPercentage.selection.unit, "%");
+  assert.equal(bodyState?.boneMassPercentage.selection.provider, "withings");
+  assert.equal(bodyState?.muscleMassPercentage.selection.value, 61.8);
+  assert.equal(bodyState?.bodyWaterPercentage.selection.value, 54.6);
+  assert.equal(bodyState?.visceralFatIndex.selection.value, 7);
+  assert.equal(bodyState?.visceralFatIndex.selection.unit, "index");
+  assert.deepEqual(
+    [boneMass, muscleMass, visceralFat, bodyWater].map((summary) => ({
+      metric: summary?.metric,
+      provider: summary?.provider,
+      summaryKind: summary?.summaryKind,
+      unit: summary?.unit,
+      value: summary?.value,
+    })),
+    [
+      { metric: "boneMassPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 4.2 },
+      { metric: "muscleMassPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 61.8 },
+      { metric: "visceralFatIndex", provider: "withings", summaryKind: "bodyState", unit: "index", value: 7 },
+      { metric: "bodyWaterPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 54.6 },
+    ],
+  );
+  assert.deepEqual(
+    metricPoints.map((point) => ({
+      canonicalUnit: point.canonicalUnit,
+      metricKey: point.metricKey,
+      provider: point.provenance.provider,
+      sourceKind: point.source.kind,
+      value: point.value,
+    })),
+    [
+      { canonicalUnit: "percent", metricKey: "body-water-percentage", provider: "withings", sourceKind: "wearable-summary", value: 54.6 },
+      { canonicalUnit: "percent", metricKey: "bone-mass-percentage", provider: "withings", sourceKind: "wearable-summary", value: 4.2 },
+      { canonicalUnit: "percent", metricKey: "muscle-mass-percentage", provider: "withings", sourceKind: "wearable-summary", value: 61.8 },
+      { canonicalUnit: "index", metricKey: "visceral-fat-index", provider: "withings", sourceKind: "wearable-summary", value: 7 },
+    ],
+  );
+  assert.ok(metricPoints.every((point) => (point.provenance.dataOrigin as DeviceDataOrigin | null)?.aggregatorProvider === "junction"));
+  assert.ok(metricPoints.every((point) => (point.provenance.dataOrigin as DeviceDataOrigin | null)?.sourceProviderSlug === "withings"));
+});
+
 test("metric latest and trend surfaces keep derived sleep and aggregate-backed points", () => {
   const vault = makeVault([
     makeSleepSession({

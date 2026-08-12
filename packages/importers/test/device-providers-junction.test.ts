@@ -8656,6 +8656,80 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
 });
 
+test("Junction body composition summaries preserve distinct facts, provenance, and replay identity", () => {
+  const snapshot = {
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      body: [{
+        source: {
+          provider: "withings",
+          type: "scale",
+        },
+        id: "body-composition-fidelity",
+        date: "2026-05-20T08:00:00+00:00",
+        unit: "kg",
+        bone_mass_percentage: 4.2,
+        muscle_mass_percentage: 61.8,
+        visceral_fat_index: 7,
+        water_percentage: 54.6,
+        height: 1.82,
+      }],
+    },
+  };
+
+  const first = normalizeJunctionSnapshot(snapshot);
+  const replay = normalizeJunctionSnapshot(snapshot);
+  const expectedMetrics = new Set([
+    "body-water-percentage",
+    "bone-mass-percentage",
+    "muscle-mass-percentage",
+    "visceral-fat-index",
+  ]);
+  const observations = (first.events ?? []).filter(
+    (event) => event.kind === "observation" && expectedMetrics.has(String(event.fields?.metric)),
+  );
+  const replayObservations = (replay.events ?? []).filter(
+    (event) => event.kind === "observation" && expectedMetrics.has(String(event.fields?.metric)),
+  );
+  const evidenceParts = (first.evidenceParts ?? []).filter(
+    (part) => part.role === "junction-summary-body",
+  );
+
+  assert.deepEqual(
+    observations
+      .map((event) => ({
+        facet: event.externalRef?.facet,
+        metric: event.fields?.metric,
+        unit: event.fields?.unit,
+        value: event.fields?.value,
+      }))
+      .sort((left, right) => String(left.metric).localeCompare(String(right.metric))),
+    [
+      { facet: "body-water-percentage", metric: "body-water-percentage", unit: "%", value: 54.6 },
+      { facet: "bone-mass-percentage", metric: "bone-mass-percentage", unit: "%", value: 4.2 },
+      { facet: "muscle-mass-percentage", metric: "muscle-mass-percentage", unit: "%", value: 61.8 },
+      { facet: "visceral-fat-index", metric: "visceral-fat-index", unit: "index", value: 7 },
+    ],
+  );
+  assert.equal(new Set(observations.map((event) => event.externalRef?.resourceId)).size, 1);
+  assert.ok(observations.every((event) => event.externalRef?.system === "junction"));
+  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-withings-body"));
+  assert.ok(observations.every((event) => event.dataOrigin?.aggregatorProvider === "junction"));
+  assert.ok(observations.every((event) => event.dataOrigin?.sourceProviderSlug === "withings"));
+  assert.ok(observations.every((event) => event.dataOrigin?.sourceType === "scale"));
+  assert.ok(observations.every((event) => event.evidenceRoles?.join(",") === "junction-summary-body"));
+  assert.deepEqual(
+    replayObservations.map((event) => event.externalRef),
+    observations.map((event) => event.externalRef),
+  );
+  assert.equal(evidenceParts.length, 1);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"bone_mass_percentage":4.2/u);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"muscle_mass_percentage":61.8/u);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"visceral_fat_index":7/u);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"water_percentage":54.6/u);
+  assert.equal(first.events?.some((event) => event.fields?.metric === "height"), false);
+});
+
 test("Junction normalizer rejects incomplete or invalid daily activity minute buckets", () => {
   const invalidBuckets = [
     {
