@@ -32,6 +32,17 @@ Last verified: 2026-08-12
   credential, or provider body values. Transport ambiguity, timeouts, rate
   limits, and server failures remain failed delivery attempts and must not
   start a second send.
+- Newly authored ordinary assistant responses attach at most eight images,
+  below Linq's 40-public-media provider ceiling. This keeps full-motion
+  exercise sequences bounded without adding a second message or partial-send
+  lifecycle; Murph teaches fewer movements when the complete useful sequences
+  would exceed the budget. Linq text is rendered and checked against the
+  provider's 10,000-character limit before private media is loaded or uploaded
+  and before message-provider entry. A terminal direct-chat
+  image failure stays image work and cannot recover as text alone. Hosted
+  outbox logs retain metadata-only payload aggregates plus allowlisted request
+  shape, provider correlation tokens, and response-body signatures, never
+  member text, alternative text, URLs, routes, or provider prose.
 - Non-affirmative Linq group reactions retain their consumed-at-ingress durable
   mailbox semantics, deterministic dedupe identity, and post-commit runtime
   signal. Before `BEGIN`, the reaction owner reads one exact canonical route,
@@ -238,9 +249,16 @@ Last verified: 2026-08-12
   A collection that fails before producing a usable observation, including a
   scrape with every required family absent, receives one bounded retry after one
   second, outside any storage transaction. Only an exhausted two-attempt
-  collection increments the consecutive-failure state; partial observations
-  with any usable family remain single-pass so their available unsafe evidence
-  is evaluated without delay.
+  collection increments the consecutive-failure state. A usable partial
+  observation remains single-pass when any available signal is unsafe, so
+  concrete evidence is evaluated without delay. When the only absent family is
+  the direct-error counter and every available signal is safe, the monitor uses
+  that same bounded retry as a confirmation scrape. Every available confirmation
+  signal is evaluated; a recovered direct counter is merged with the original
+  complete gauge evidence, while a failed or still-incomplete confirmation
+  retains the original partial observation. This makes transient counter-family
+  omission less noisy without converting unknown to zero or weakening the
+  two-check telemetry fallback.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
   consecutive runs before paging the monitoring condition. Crossing that
   threshold persists one bounded telemetry-page obligation in the existing
@@ -768,7 +786,12 @@ Last verified: 2026-08-12
   valid stamps with no execution evidence. It derives one effective latency
   origin from ingress, staging, provider, delivery, and consumption facts
   before applying its 24-hour window, bounded scan, or delivery/provider
-  grouping. Post-denial execution is measured from its earliest milestone even
+  grouping. Candidate admission unions trace identities from five independently
+  time-indexed ingress, staging, provider, delivery, and consumption branches,
+  then exactly hydrates those traces before chronology, origin, grouping, and
+  the 20,001-row truncation probe. Retained history outside the window therefore
+  does not participate in the cross-owner candidate scan. Post-denial execution
+  is measured from its earliest milestone even
   when the original ingress is older than the window. An unblocked row sharing
   the same reply remains alertable. The existing seven-day ingress-trace cleanup
   retires a trace only after both its original ingress and latest activity are

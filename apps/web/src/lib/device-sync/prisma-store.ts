@@ -19,13 +19,19 @@ import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
-import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
+import type {
+  HostedDeviceSyncSecretTestCodec,
+  HostedRuntimeConnectionSecretMaterial,
+  HostedRuntimeApplyPreparedTokenWrite,
+  HostedRuntimeApplyTokenWritePreparation,
+} from "./prisma-store/connection-secrets";
 import type { DeviceProviderApplicationBinding } from "./provider-applications/types";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
 import {
   PrismaHostedConnectionStore,
   type HostedConnectionRecord,
+  type HostedMemberDeviceConnectionStatus,
   type HostedStoredDeviceSyncAccount,
 } from "./prisma-store/connections";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
@@ -38,7 +44,7 @@ import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import {
   PrismaHostedConnectionSourceStore,
   type HostedDeviceConnectionSource,
-  type ListHostedRuntimeSnapshotConnectionSourcesInput,
+  type ListHostedBoundedConnectionSourcesForConnectionsInput,
   type MarkHostedDeviceConnectionSourceDataReceivedInput,
   type MarkHostedDeviceConnectionSourcesDisconnectedInput,
   type UpsertHostedDeviceConnectionSourceInput,
@@ -65,11 +71,21 @@ import { PrismaHostedWebhookTraceStore } from "./prisma-store/webhook-traces";
 
 export {
   hostedConnectionRecordArgs,
+  hostedRuntimeRedactedConnectionRecordArgs,
   mapHostedConnectionRecord,
+  mapHostedRuntimeRedactedConnectionRecord,
   sanitizeHostedDeviceSyncConnectionMetadata,
   type HostedStoredDeviceSyncAccount,
   type HostedConnectionRecord,
+  type HostedMemberDeviceConnectionStatus,
+  type HostedRuntimeConnectionRecord,
+  type HostedRuntimeRedactedConnectionRecord,
 } from "./prisma-store/connections";
+export type {
+  HostedRuntimeConnectionSecretMaterial,
+  HostedRuntimeApplyPreparedTokenWrite,
+  HostedRuntimeApplyTokenWritePreparation,
+} from "./prisma-store/connection-secrets";
 export {
   HOSTED_AGENT_BEARER_TOKEN_PREFIX,
   generateHostedAgentBearerToken,
@@ -83,7 +99,7 @@ export {
   mapHostedConnectionSourceRecord,
   type HostedConnectionSourceRecord,
   type HostedDeviceConnectionSource,
-  type ListHostedRuntimeSnapshotConnectionSourcesInput,
+  type ListHostedBoundedConnectionSourcesForConnectionsInput,
   type MarkHostedDeviceConnectionSourceDataReceivedInput,
   type MarkHostedDeviceConnectionSourcesDisconnectedInput,
   type UpsertHostedDeviceConnectionSourceInput,
@@ -257,6 +273,15 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.listConnectionsForUser(userId);
   }
 
+  async listMemberConnectionStatuses(input: {
+    limit: number;
+    provider: string;
+    status: "active" | "not_disconnected";
+    userId: string;
+  }): Promise<HostedMemberDeviceConnectionStatus[]> {
+    return this.connections.listMemberConnectionStatuses(input);
+  }
+
   async getConnectionForUser(
     userId: string,
     connectionId: string,
@@ -293,6 +318,18 @@ export class PrismaDeviceSyncControlPlaneStore
     );
   }
 
+  async readRuntimeConnectionSecretMaterial(input: {
+    records: readonly HostedConnectionRecord[];
+    tokenConnectionIds: ReadonlySet<string>;
+  }, tx?: HostedPrismaTransactionClient): Promise<
+    Map<string, HostedRuntimeConnectionSecretMaterial>
+  > {
+    return this.connections.readRuntimeConnectionSecretMaterial(
+      input,
+      tx ?? this.prisma,
+    );
+  }
+
   async getConnectionOwnerId(connectionId: string): Promise<string | null> {
     return this.connections.getConnectionOwnerId(connectionId);
   }
@@ -305,8 +342,25 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionRecordForUser(userId, connectionId, tx);
   }
 
-  async syncDurableConnectionState(account: PublicDeviceSyncAccount, tx?: HostedPrismaTransactionClient): Promise<void> {
+  async syncDurableConnectionState(
+    account: PublicDeviceSyncAccount,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedConnectionRecord> {
     return this.connections.syncDurableConnectionState(account, tx);
+  }
+
+  async prepareRuntimeApplyTokenWrites(
+    entries: readonly HostedRuntimeApplyTokenWritePreparation[],
+  ): Promise<Map<string, HostedRuntimeApplyPreparedTokenWrite>> {
+    return this.connections.prepareRuntimeApplyTokenWrites(entries);
+  }
+
+  async persistPreparedRuntimeApplyTokenWrite(input: {
+    prepared: HostedRuntimeApplyPreparedTokenWrite;
+    record: HostedConnectionRecord;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionRecord> {
+    return this.connections.persistPreparedRuntimeApplyTokenWrite(input);
   }
 
   async persistStoredConnectionTokenBundle(input: {
@@ -502,10 +556,10 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.sources.listConnectionSourcesForConnections(connectionIds, tx);
   }
 
-  async listRuntimeSnapshotConnectionSources(
-    input: ListHostedRuntimeSnapshotConnectionSourcesInput,
+  async listBoundedConnectionSourcesForConnections(
+    input: ListHostedBoundedConnectionSourcesForConnectionsInput,
   ): Promise<HostedDeviceConnectionSource[]> {
-    return this.sources.listRuntimeSnapshotConnectionSources(input);
+    return this.sources.listBoundedConnectionSourcesForConnections(input);
   }
 
   async consumeBrowserAssertionNonce(input: {

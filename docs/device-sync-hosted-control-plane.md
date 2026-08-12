@@ -324,6 +324,68 @@ one signed runtime callback from amplifying into unbounded concurrent database
 transactions without introducing a queue, bulk mutation owner, or second retry
 path.
 
+### Runtime snapshot collection and credential hydration
+
+The shared `@murphai/device-syncd/hosted-runtime` contract owns the snapshot
+work ceilings. A snapshot page contains at most 32 connections, ordered by
+`createdAt DESC, id DESC`. Web uses an immutable `(createdAt, id)` keyset
+predicate and reads at most 33 rows, returning the last emitted row as
+`nextCursor` only when the extra row proves another page exists. Caller limits
+are advisory below the ceiling; larger values cannot increase SQL,
+source-projection, or decrypt work.
+A `connectionId` lookup remains an exact member-owned lookup rather than a
+collection scan.
+
+Credential-free pages use a distinct Prisma projection that does not select
+`external_account_id_encrypted`, `access_token_encrypted`, or
+`refresh_token_encrypted`, and they never enter the device-secret opener. They
+retain the existing `opaque:<connectionId>` identity and redacted credential
+shape. Credential-bearing runtime hydration follows pages sequentially and
+fails closed if authority exceeds 100 connections, the existing runtime apply
+ceiling. The reader omits the limit on its first request so the legacy Web
+producer can return its complete snapshot; an omitted cursor is accepted only
+on that first response and only within the 100-connection ceiling. Cursor-aware
+responses use 32-row pages, and every continuing page must preserve explicit
+cursor presence. Authority is never silently truncated.
+
+Each page resolves connection sources through one set projection. The query
+keeps provider/source alias matching, applies a hard 64-row per-connection
+window plus one saturation detector, and rejects a saturated connection rather
+than returning partial source authority. Eligible external-account and OAuth
+token material is opened through the existing secure-box and domain-root
+owners as page-scoped sets. A single scoped root-metadata read is reused across
+the two device lanes, KMS unwraps remain chunked at four, AAD continues to bind
+member, connection, provider, field/purpose, and token version, and every root
+and plaintext buffer is zeroized. Missing or mismatched material fails closed;
+database, KMS, and secure-box outages propagate as operational failures rather
+than being rewritten as reauthorization. Application revision, refresh lease,
+terminal/disconnect state, connection epoch, and provider/source authority stay
+Web-owned and are preserved in the emitted snapshot.
+
+Cloudflare only forwards the bounded request and cursor through the signed Web
+callback. It does not persist a cursor, cache a page, hydrate secrets, or copy
+this policy into the execution plane.
+
+### Native companion status projection
+
+Native companion status remains Privy-bearer-authenticated, consent-gated, and
+member-isolated. After those checks, Web performs one narrow member-owned
+Junction connection read selecting only `id` and `status` with a 32+1
+saturation check, one bounded set source read for those ids with a 64+1
+unscoped authority check or a narrower 32+1 source-filtered check, and one set
+receipt-signal read. The path never selects or decrypts an external account id
+or OAuth token. It preserves the
+established active/not-disconnected predicates, source-scoped first-webhook
+behavior, disconnected-source `lastSeenAt` receipt cutoff, resource alias
+normalization, and timestamp-only response contract. Web remains the sole
+device-sync control-plane truth owner.
+
+Deploy the cursor-aware Cloudflare/assistant reader before the Web producer.
+The reader-first version accepts the legacy complete response under the total
+hydration ceiling; after Web deploys, the same reader follows the new bounded
+cursor pages. Deploying the Web producer before the cursor-aware reader would
+let a legacy transport discard continuation metadata and is therefore unsafe.
+
 ## Runtime access strategy
 
 The current hosted runtime strategy is:

@@ -124,6 +124,7 @@ import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import {
+  ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   matchesExactAssistantVaultImageResponseMedia,
   normalizeAssistantResponseMediaList,
 } from '../assistant/response-media.js'
@@ -309,7 +310,7 @@ const attachExerciseRoutineCardArgumentsSchema = z
 
 const attachResponseMediaArgumentsSchema = z
   .object({
-    media: z.array(z.unknown()).max(40),
+    media: z.array(z.unknown()).max(ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS),
   })
   .strict()
 
@@ -2730,13 +2731,24 @@ export async function executeMurphDynamicToolRequest(input: {
         acceptedInvocationSessionId ??
         userActionScope?.originSessionId ??
         null
+      const usesDetachedImageGeneration = Boolean(
+        imageGenerationLauncher && originAssistantInputId,
+      )
+      if (
+        !usesDetachedImageGeneration
+        && (input.currentResponseMedia?.length ?? 0)
+          >= ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS
+      ) {
+        return toolTextResult(false, 'response media limit reached')
+      }
       const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
         ?? `murph.dynamic-tool.generate-image:${originAssistantInputId}:${providerRequestOrdinal}`
       const generateImageArgs = input.request.args
       if (
-        imageGenerationLauncher
+        usesDetachedImageGeneration
+        && imageGenerationLauncher
         && originAssistantInputId
       ) {
         const launch = imageGenerationLauncher.launch({
