@@ -354,7 +354,10 @@ describe('private completion continuity', () => {
     })
   })
 
-  it('repairs a bound completion before a direct scheduled turn but leaves unbound work attended-only', async () => {
+  it.each([
+    'automation-cron',
+    'automation-auto-reply',
+  ] as const)('repairs a bound completion before a direct $turnTrigger turn but leaves unbound work attended-only', async (turnTrigger) => {
     const fixture = await createContinuityFixture(
       'private-continuity-scheduled-repair-',
     )
@@ -417,9 +420,9 @@ describe('private completion continuity', () => {
             userEnvKeys: [],
           },
         },
-        prompt: 'Prepare the scheduled direct update.',
+        prompt: 'Prepare the direct continuation.',
         sessionId: fixture.ordinarySession.sessionId,
-        turnTrigger: 'automation-cron',
+        turnTrigger,
         vault: fixture.vaultRoot,
       },
     })

@@ -685,9 +685,12 @@ An interrupted import converges from that journal, and canonical direct
 attended resolution repairs it before provider-resume selection. An ordinary
 direct scheduled occurrence repairs only an obligation already bound to its
 exact session before provider-resume selection; it cannot claim explicit-null
-unbound work. Hosted text turns use their nested direct-conversation route plus
-accepted assistant-input authority; multimodal payload shape is irrelevant,
-and detached system work does not trigger repair. The runtime recognizes this
+unbound work. The direct output-only Assistant Ask continuation applies the
+same bound-only rule before provider planning because it can be the next
+same-session history consumer. Hosted text turns use their nested
+direct-conversation route plus accepted assistant-input authority; multimodal
+payload shape is irrelevant, and detached system work does not trigger repair.
+The runtime recognizes this
 exception only from the complete queue-only, exact-text, one-mailbox-item,
 direct Linq-or-Telegram private-completion proof plus its matching durable
 delivery. Rejected completions, an expiry marker alone, and all generic

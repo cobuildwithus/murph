@@ -265,7 +265,7 @@ function resolveAssistantPrivateCompletionAdmission(
   const initialInputs = input.acceptedTurnInput?.initialInputs ?? []
   return initialInputs.some((item) => item.source === 'assistant-input')
     ? 'allow-unbound'
-    : null
+    : 'bound-only'
 }
 
 async function resolveAssistantSessionForMessageInput(input: {

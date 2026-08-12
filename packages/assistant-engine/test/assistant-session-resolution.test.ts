@@ -559,7 +559,7 @@ describe('assistant session resolution', () => {
     })
   })
 
-  it('does not repair direct system continuation work without accepted input', async () => {
+  it('repairs only bound completions before a direct system continuation', async () => {
     const target = createDefaultLocalAssistantModelTarget()
     const resolvedSession = createResolvedAssistantSessionForTest({ target })
     sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
@@ -582,7 +582,11 @@ describe('assistant session resolution', () => {
       }),
     })
 
-    expect(sessionResolutionMocks.reconcilePrivateCompletion).not.toHaveBeenCalled()
+    expect(sessionResolutionMocks.reconcilePrivateCompletion).toHaveBeenCalledWith({
+      allowUnbound: false,
+      sessionId: resolvedSession.session.sessionId,
+      vault: '/tmp/assistant-session-resolution-vault',
+    })
   })
 
   it('repairs only bound completions before a direct scheduled turn', async () => {
@@ -605,6 +609,35 @@ describe('assistant session resolution', () => {
       sessionId: resolvedSession.session.sessionId,
       vault: '/tmp/assistant-session-resolution-vault',
     })
+  })
+
+  it.each([
+    {
+      label: 'group continuation',
+      message: {
+        threadIsDirect: false,
+        turnTrigger: 'automation-auto-reply' as const,
+      },
+    },
+    {
+      label: 'detached notification',
+      message: {
+        threadIsDirect: true,
+        turnTrigger: 'manual-deliver' as const,
+      },
+    },
+  ])('does not repair private continuity for a $label', async ({ message }) => {
+    const target = createDefaultLocalAssistantModelTarget()
+    const resolvedSession = createResolvedAssistantSessionForTest({ target })
+    sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
+
+    await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: target,
+      defaults: null,
+      message: createMessageInput(message),
+    })
+
+    expect(sessionResolutionMocks.reconcilePrivateCompletion).not.toHaveBeenCalled()
   })
 
   it('repairs manual direct asks regardless of multimodal payload shape', async () => {

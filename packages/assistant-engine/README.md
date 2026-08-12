@@ -77,8 +77,10 @@ repairs it before provider-resume selection even for text-only payloads.
 An ordinary direct scheduled occurrence also repairs an exact session-bound
 obligation before provider-resume selection, but cannot claim unbound work;
 that remains reserved for the first attended direct turn.
-Rejected completions, system continuations, and every generic detached
-notification remain isolated and cannot claim this continuity behavior.
+The direct output-only Assistant Ask continuation uses that same bound-only
+admission before provider planning. Rejected completions, unrelated-session
+continuations, and every generic detached notification remain isolated and
+cannot claim this continuity behavior.
 An outbox intent written before the explicit continuity binding existed fails
 closed instead of inferring an owner. Partial or ambiguous provider receipts do
 not participate, even when they preserve message metadata for transport retry.

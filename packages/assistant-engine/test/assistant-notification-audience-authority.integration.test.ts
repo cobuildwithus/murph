@@ -14,6 +14,7 @@ import {
 } from '../src/assistant/codex-thread-route.ts'
 import { resolveAssistantExecutionPlan } from '../src/assistant/execution-plan.ts'
 import type { persistAssistantTurnAndSession } from '../src/assistant/turn-finalizer.ts'
+import { sendAssistantAskContinuationLocal } from '../src/assistant/ask-continuation.ts'
 import { sendAssistantNotificationLocal } from '../src/assistant/notification-turn.ts'
 import { resolveAssistantSessionForMessage } from '../src/assistant/session-resolution.ts'
 import {
@@ -564,11 +565,25 @@ describe('notification audience authority integration', () => {
   })
 
   it.each([
-    'after-canonical-sent',
-    'after-prepared-session-write',
-  ] as const)(
-    'imports a bound private completion before scheduled provider planning $stage',
-    async (stage) => {
+    {
+      consumer: 'scheduled',
+      stage: 'after-canonical-sent',
+    },
+    {
+      consumer: 'scheduled',
+      stage: 'after-prepared-session-write',
+    },
+    {
+      consumer: 'assistant-ask-continuation',
+      stage: 'after-canonical-sent',
+    },
+    {
+      consumer: 'assistant-ask-continuation',
+      stage: 'after-prepared-session-write',
+    },
+  ])(
+    'imports a bound private completion before $consumer provider planning $stage',
+    async ({ stage, consumer }) => {
       const { parentRoot, vaultRoot } = await createTempVaultContext(
         'private-continuity-scheduled-provider-',
       )
@@ -580,7 +595,9 @@ describe('notification audience authority integration', () => {
           completionEventId,
         )
       const privateText = 'Private context before scheduled planning.'
-      const scheduledText = 'Scheduled result after private context.'
+      const consumerText = consumer === 'scheduled'
+        ? 'Scheduled result after private context.'
+        : 'Assistant Ask continuation after private context.'
       const locator = {
         actorId: 'h1_121212121212121212121212',
         channel: 'linq',
@@ -707,22 +724,26 @@ describe('notification audience authority integration', () => {
             provider: input.route.provider,
             providerOptions: input.route.providerOptions,
             rawEvents: [],
-            response: JSON.stringify({
-              kind: 'send_message',
-              privateSummary: 'Scheduled update prepared.',
-              text: scheduledText,
-            }),
+            response: consumer === 'scheduled'
+              ? JSON.stringify({
+                  kind: 'send_message',
+                  privateSummary: 'Scheduled update prepared.',
+                  text: consumerText,
+                })
+              : consumerText,
             responseDeliveryContextOrdinal: 0,
             responseMedia: [],
             route: input.route,
             session: input.resolvedSession,
             stderr: '',
             stdout: '',
-            transcriptResponse: JSON.stringify({
-              kind: 'send_message',
-              privateSummary: 'Scheduled update prepared.',
-              text: scheduledText,
-            }),
+            transcriptResponse: consumer === 'scheduled'
+              ? JSON.stringify({
+                  kind: 'send_message',
+                  privateSummary: 'Scheduled update prepared.',
+                  text: consumerText,
+                })
+              : consumerText,
             usage: null,
             workingDirectory: input.plan.requestedWorkingDirectory,
           },
@@ -732,7 +753,7 @@ describe('notification audience authority integration', () => {
         await appendAssistantTranscriptEntries(vaultRoot, ordinaryWithResume.sessionId, [{
           createdAt: '2026-08-11T18:01:00.000Z',
           kind: 'assistant',
-          text: scheduledText,
+          text: consumerText,
         }])
         return await saveAssistantSession(vaultRoot, {
           ...input.session,
@@ -742,21 +763,41 @@ describe('notification audience authority integration', () => {
         })
       })
 
-      await sendAssistantNotificationLocal({
-        ...locator,
-        allowBindingRebind: true,
-        bindingDeliveryTarget: locator.threadId,
-        deliveryIdempotencyKey: 'scheduled-private-continuity-occurrence',
-        deliveryKind: 'thread',
-        deliveryTarget: locator.threadId,
-        executionContext,
-        instructions:
-          'Prepare a scheduled update using the direct conversation.',
-        sessionId: ordinaryWithResume.sessionId,
-        scheduledOccurrenceAt: '2026-08-11T18:01:00.000Z',
-        turnTrigger: 'automation-cron',
-        vault: vaultRoot,
-      })
+      if (consumer === 'scheduled') {
+        await sendAssistantNotificationLocal({
+          ...locator,
+          allowBindingRebind: true,
+          bindingDeliveryTarget: locator.threadId,
+          deliveryIdempotencyKey: 'scheduled-private-continuity-occurrence',
+          deliveryKind: 'thread',
+          deliveryTarget: locator.threadId,
+          executionContext,
+          instructions:
+            'Prepare a scheduled update using the direct conversation.',
+          sessionId: ordinaryWithResume.sessionId,
+          scheduledOccurrenceAt: '2026-08-11T18:01:00.000Z',
+          turnTrigger: 'automation-cron',
+          vault: vaultRoot,
+        })
+      } else {
+        await sendAssistantAskContinuationLocal({
+          ...locator,
+          bindingDeliveryTarget: locator.threadId,
+          canCommit: () => true,
+          deliveryIdempotencyKey:
+            'assistant-ask-private-continuity-continuation',
+          deliveryTarget: locator.threadId,
+          executionContext,
+          instructions:
+            'Continue the direct conversation using the returned group answer.',
+          originAssistantInputId: `ain_${'a'.repeat(32)}`,
+          participantId: locator.actorId,
+          requestId: 'aask_req_private_continuity_continuation',
+          sessionId: ordinaryWithResume.sessionId,
+          vault: vaultRoot,
+          workingDirectory: vaultRoot,
+        })
+      }
 
       const transcript = await listAssistantTranscriptEntries(
         vaultRoot,
@@ -767,7 +808,7 @@ describe('notification audience authority integration', () => {
           sourceOutboxIntentId: pending.intentId,
           text: privateText,
         }),
-        expect.objectContaining({ text: scheduledText }),
+        expect.objectContaining({ text: consumerText }),
       ])
       await expect(readAssistantOutboxIntent(
         vaultRoot,
@@ -781,7 +822,8 @@ describe('notification audience authority integration', () => {
         message: {
           ...locator,
           executionContext,
-          prompt: 'Continue after the scheduled direct turn.',
+          prompt: 'Continue after the direct system turn.',
+          sessionId: ordinaryWithResume.sessionId,
           vault: vaultRoot,
         },
       })).resolves.toMatchObject({

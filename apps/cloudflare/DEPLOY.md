@@ -299,7 +299,8 @@ Require managed-container smoke to report the new runner fingerprint, monitor
 `outbox.intent.quarantined` and strict outbox parse failures, then verify one
 same-channel private completion is delivered exactly once, never to the group,
 and is visible before the next ordinary direct turn, whether that consumer is
-an attended member turn or an exact-session scheduled occurrence.
+an attended member turn, an exact-session scheduled occurrence, or an
+exact-session Assistant Ask continuation.
 
 ## Audience-Key Rollout
 
