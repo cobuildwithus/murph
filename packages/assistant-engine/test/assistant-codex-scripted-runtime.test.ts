@@ -2177,6 +2177,296 @@ text(JSON.stringify(result));
     expect(result.transcriptMessage).not.toContain(staleClarification)
   })
 
+  it('honors a conditional withdrawal after a DST gap', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tomorrow.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "02:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Gap reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${recoveryKey}",
+  resolvedLocalDate: "2026-03-08",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text:
+          'That time is invalid, so I did not create the reminder as requested.',
+      },
+    )
+
+    const automationRequest = vi.fn(async () => {
+      throw new Error('A conditionally withdrawn reminder must not be saved.')
+    })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt:
+        'Remind me tomorrow at 2:30 AM in New York, but if that time does not exist, do not create anything.',
+    })
+
+    expect(automationRequest).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe(
+      'That time is invalid, so I did not create the reminder as requested.',
+    )
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.finalMessage).not.toContain('What other local time')
+  })
+
+  it('honors a live withdrawal of a pending DST reminder', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    let steered: Promise<void> | null = null
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tomorrow.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "02:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Gap reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        delayMs: 4_000,
+        text: 'That time does not exist on March 8. What should I do?',
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${recoveryKey}",
+  resolvedLocalDate: "2026-03-08",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'Okay — I did not create that reminder.' },
+    )
+
+    const automationRequest = vi.fn(async () => {
+      throw new Error('A withdrawn reminder must not reach the owner.')
+    })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = delay(1_000).then(() =>
+          turn.steer({
+            prompt: 'Never mind. Do not create that reminder.',
+            relativeDateReferenceWindow: {
+              earliestAt: '2026-03-08T05:01:00.000Z',
+              latestAt: '2026-03-08T05:01:00.000Z',
+            },
+          }))
+      },
+      prompt: 'Remind me tomorrow at 2:30 AM in New York.',
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(automationRequest).not.toHaveBeenCalled()
+    expect(result.finalMessage).toBe(
+      'Okay — I did not create that reminder.',
+    )
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.finalMessage).not.toContain('What other local time')
+    expect(result.transcriptMessage).not.toContain('What other local time')
+  })
+
+  it('dismisses a superseded DST date before saving its replacement', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey('gap-reminder')
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "02:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Gap reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${recoveryKey}",
+  resolvedLocalDate: "2026-03-08",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      date: "2026-03-09",
+      time: "03:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Replacement reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'The replacement reminder is set for March 9 at 3:30 AM.' },
+    )
+
+    const automationRequest = vi.fn(async (
+      request: AssistantHostedAutomationToolRequest,
+    ) => {
+      if (request.action !== 'save') {
+        throw new Error('Expected one replacement save.')
+      }
+      return {
+        action: 'save' as const,
+        automationId: 'automation-replacement-reminder',
+        created: true,
+        effectiveTimeZone: 'America/New_York',
+        lookupId: 'replacement-reminder',
+        nextOccurrenceAt: '2026-03-09T07:30:00.000Z',
+        routeBinding: 'current_conversation' as const,
+        schedule: request.schedule,
+        status: 'active' as const,
+        timingVerified: true,
+        updatedAt: '2026-03-08T05:01:00.000Z',
+      }
+    })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt:
+        'Remind me tomorrow at 2:30 AM in New York; if that is invalid, use March 9 at 3:30 AM instead.',
+    })
+
+    expect(automationRequest).toHaveBeenCalledTimes(1)
+    expect(automationRequest).toHaveBeenCalledWith({
+      action: 'save',
+      instructions: 'Send the reminder.',
+      schedule: { at: '2026-03-09T07:30:00.000Z', kind: 'at' },
+      title: 'Replacement reminder',
+    }, expect.anything())
+    expect(result.finalMessage).toBe(
+      'The replacement reminder is set for March 9 at 3:30 AM.',
+    )
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.finalMessage).not.toContain('What other local time')
+  })
+
   it.each([
     {
       expectedAt: '2026-03-08T07:30:00.000Z',
@@ -2757,9 +3047,12 @@ text(JSON.stringify(result));
       'both-pending',
       'second-resolved',
       'both-resolved',
+      'first-dismissed',
       'unrelated-and-date-mismatch',
       'matching-without-correlation',
       'unknown-correlation',
+      'unknown-dismissal',
+      'date-mismatched-dismissal',
     ] as const) {
       const scenario = await prepareScriptedTurnScenario()
       const automationRequests: Array<Extract<
@@ -2807,6 +3100,23 @@ text(JSON.stringify(result));
             name: 'exec',
           },
         })
+      }
+      if (mode === 'first-dismissed') {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          scenario.stub.queue({
+            customToolCall: {
+              input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  resolvedLocalDate: "${date}",
+});
+text(JSON.stringify(result));
+`,
+              name: 'exec',
+            },
+          })
+        }
       }
       if (mode === 'unrelated-and-date-mismatch') {
         const unrelated = {
@@ -2876,6 +3186,36 @@ text(JSON.stringify(result));
           customToolCall: {
             input: `
 const result = await tools.murph__automation(${JSON.stringify(unknownCorrelation)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'unknown-dismissal') {
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${'f'.repeat(64)}",
+  resolvedLocalDate: "${date}",
+});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'date-mismatched-dismissal') {
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation({
+  action: "dismiss_local_at_recovery",
+  localAtRecoveryKey: "${buildTestAutomationLocalAtRecoveryKey('medication-reminder')}",
+  resolvedLocalDate: "${mismatchDate}",
+});
 text(JSON.stringify(result));
 `,
             name: 'exec',
@@ -2988,8 +3328,13 @@ text(JSON.stringify(result));
       }
 
       expect(result.responseCard).toBeNull()
-      expect(result.finalMessage).toContain(questionA)
-      expect(result.transcriptMessage).toContain(questionA)
+      if (mode === 'first-dismissed') {
+        expect(result.finalMessage).not.toContain(questionA)
+        expect(result.transcriptMessage).not.toContain(questionA)
+      } else {
+        expect(result.finalMessage).toContain(questionA)
+        expect(result.transcriptMessage).toContain(questionA)
+      }
       if (mode === 'second-resolved') {
         expect(automationRequests).toHaveLength(1)
         expect(automationRequests[0]?.schedule).toEqual({
@@ -3002,18 +3347,26 @@ text(JSON.stringify(result));
       } else {
         expect(result.finalMessage).toContain(questionB)
         expect(result.transcriptMessage).toContain(questionB)
-        expect(result.finalMessage.indexOf(questionA)).toBeLessThan(
-          result.finalMessage.indexOf(questionB),
-        )
-        if (mode === 'both-pending') {
+        if (mode !== 'first-dismissed') {
+          expect(result.finalMessage.indexOf(questionA)).toBeLessThan(
+            result.finalMessage.indexOf(questionB),
+          )
+        }
+        if (
+          mode === 'both-pending' ||
+          mode === 'first-dismissed' ||
+          mode === 'unknown-correlation' ||
+          mode === 'unknown-dismissal' ||
+          mode === 'date-mismatched-dismissal'
+        ) {
           expect(automationRequests).toHaveLength(0)
         } else if (
-          mode === 'matching-without-correlation'
-          || mode === 'unknown-correlation'
+          mode === 'matching-without-correlation' ||
+          mode === 'unrelated-and-date-mismatch'
         ) {
           expect(automationRequests).toHaveLength(1)
         } else {
-          expect(automationRequests).toHaveLength(2)
+          expect(automationRequests).toHaveLength(0)
         }
       }
     }

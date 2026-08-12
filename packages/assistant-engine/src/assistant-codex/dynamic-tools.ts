@@ -1853,14 +1853,14 @@ export async function executeMurphDynamicToolRequest(input: {
           return toolTextResult(
             false,
             input.request.resolvedLocalDate && input.request.localAtTargetKey
-              ? `that local reminder time does not exist because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date, ask for another local time, then retry with schedule.localAt.date=${input.request.resolvedLocalDate} instead of relativeDay and localAtRecoveryKey=${input.request.localAtTargetKey}`
+              ? `that local reminder time does not exist because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date and ask for another local time; retry with schedule.localAt.date=${input.request.resolvedLocalDate} instead of relativeDay and localAtRecoveryKey=${input.request.localAtTargetKey}, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${input.request.localAtTargetKey} and resolvedLocalDate=${input.request.resolvedLocalDate}`
               : 'that local reminder time does not exist because of a daylight-saving change; ask for another local time',
           )
         case 'local_at_fold':
           return toolTextResult(
             false,
             input.request.resolvedLocalDate && input.request.localAtTargetKey
-              ? `that local reminder time occurs twice because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date, ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.date=${input.request.resolvedLocalDate}, schedule.localAt.fold, and localAtRecoveryKey=${input.request.localAtTargetKey} instead of relativeDay`
+              ? `that local reminder time occurs twice because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date and ask whether the earlier or later occurrence is intended; retry with schedule.localAt.date=${input.request.resolvedLocalDate}, schedule.localAt.fold, and localAtRecoveryKey=${input.request.localAtTargetKey} instead of relativeDay, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${input.request.localAtTargetKey} and resolvedLocalDate=${input.request.resolvedLocalDate}`
               : 'that local reminder time occurs twice because of a daylight-saving change; ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.fold',
           )
         case 'local_at_invalid_timezone':
@@ -2043,6 +2043,11 @@ export async function executeMurphDynamicToolRequest(input: {
         progressDelivery: input.progressDelivery,
         text: input.request.text,
       })
+    case 'automation-local-at-recovery-dismissal':
+      return toolTextResult(
+        false,
+        'local-time recovery dismissal is unavailable outside the active root turn',
+      )
     case 'automation': {
       const automationTool = input.hostedToolContext?.automationTool ?? null
       if (!automationTool) {

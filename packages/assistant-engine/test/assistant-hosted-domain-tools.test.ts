@@ -48,6 +48,12 @@ describe('hosted domain dynamic tools', () => {
       'omitting it leaves that clarification pending and treats the call as an independent reminder',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'action=dismiss_local_at_recovery',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'unknown or wrong-date keys are rejected before mutation',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'raw exact ISO schedule.at is not accepted on generic save or patch',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
@@ -311,6 +317,49 @@ describe('hosted domain dynamic tools', () => {
     expect(foldRecoveryRequest).not.toHaveProperty(
       'request.localAtRecoveryKey',
     )
+  })
+
+  it('parses DST recovery dismissal as root-turn-only state', async () => {
+    const recoveryKey = 'a'.repeat(64)
+    const dismissal = readToolRequest('automation', {
+      action: 'dismiss_local_at_recovery',
+      localAtRecoveryKey: recoveryKey,
+      resolvedLocalDate: '2026-03-08',
+    })
+    expect(dismissal).toEqual({
+      kind: 'automation-local-at-recovery-dismissal',
+      recoveryKey,
+      resolvedLocalDate: '2026-03-08',
+    })
+    expect(readToolRequest('automation', {
+      action: 'dismiss_local_at_recovery',
+      localAtRecoveryKey: recoveryKey,
+      resolvedLocalDate: 'March 8',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'dismiss_local_at_recovery',
+      localAtRecoveryKey: 'not-a-recovery-key',
+      resolvedLocalDate: '2026-03-08',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    if (dismissal?.kind !== 'automation-local-at-recovery-dismissal') {
+      throw new TypeError('Expected a parsed recovery dismissal.')
+    }
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({}),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: dismissal,
+    })
+    expect(result.rpcResult).toEqual({
+      contentItems: [{
+        text:
+          'local-time recovery dismissal is unavailable outside the active root turn',
+        type: 'inputText',
+      }],
+      success: false,
+    })
   })
 
   it('binds DST recovery only to the echoed root-turn correlation', () => {

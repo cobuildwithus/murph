@@ -4448,6 +4448,53 @@ async function runCodexAppServerTurnOnProcess(
         await hostedToolContext?.beforeToolExecution?.(
           dynamicToolRequestDeliveryContextOrdinal,
         )
+        const requestedLocalAtRecovery =
+          dynamicToolRequest.kind === 'automation' &&
+            dynamicToolRequest.localAtRecovery
+            ? dynamicToolRequest.localAtRecovery
+            : dynamicToolRequest.kind ===
+                'automation-local-at-recovery-dismissal'
+              ? {
+                  recoveryKey: dynamicToolRequest.recoveryKey,
+                  resolvedLocalDate: dynamicToolRequest.resolvedLocalDate,
+                }
+              : null
+        if (requestedLocalAtRecovery) {
+          const clarificationKey =
+            buildRequiredAutomationLocalAtClarificationKey({
+              resolvedLocalDate:
+                requestedLocalAtRecovery.resolvedLocalDate,
+              targetKey: requestedLocalAtRecovery.recoveryKey,
+            })
+          if (!requiredAutomationLocalAtClarifications.has(clarificationKey)) {
+            return {
+              rpcResult: {
+                contentItems: [{
+                  text:
+                    'local-time recovery key or trusted date is not pending in this active root turn',
+                  type: 'inputText' as const,
+                }],
+                success: false,
+              },
+            }
+          }
+          if (
+            dynamicToolRequest.kind ===
+              'automation-local-at-recovery-dismissal'
+          ) {
+            requiredAutomationLocalAtClarifications.delete(clarificationKey)
+            return {
+              rpcResult: {
+                contentItems: [{
+                  text:
+                    'local-time reminder recovery dismissed; no automation was changed',
+                  type: 'inputText' as const,
+                }],
+                success: true,
+              },
+            }
+          }
+        }
         const result = await executeMurphDynamicToolRequest({
           authorizeAcceptedMessageTarget:
             input.authorizeAcceptedMessageTarget ?? null,
@@ -5892,6 +5939,7 @@ function isSerializedDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   return request.kind === 'automation' ||
+    request.kind === 'automation-local-at-recovery-dismissal' ||
     request.kind === 'device' ||
     request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
@@ -5932,6 +5980,7 @@ function isInvocationScopedRootToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   return request.kind === 'automation' ||
+    request.kind === 'automation-local-at-recovery-dismissal' ||
     request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||
     request.kind === 'invalid-device-arguments' ||
