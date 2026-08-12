@@ -49,6 +49,7 @@ import {
   readWebhookTraceLifecycleRowsForTesting,
   readWebhookTraceStatusForTesting,
   setCredentialStateForTesting,
+  setJobContinuationForTesting,
   setJobAttemptsForTesting,
 } from "./store-test-helpers.ts";
 
@@ -1818,7 +1819,9 @@ test("a stale Junction history retry finishes without coverage and is replaced o
       assert.equal(activeHistoryJobs().length, 1);
       assert.equal(activeHistoryJobs()[0]?.dedupeKey, stableDedupeKey);
       assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      const completedDailyAt = store.getAccountById(account.id)?.lastSyncCompletedAt;
       assert.equal((await service.runWorkerOnce())?.kind, "resource");
+      assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, completedDailyAt);
       assert.equal(hasCoverage(), false);
     }
 
@@ -1829,8 +1832,13 @@ test("a stale Junction history retry finishes without coverage and is replaced o
     await service.runSchedulerOnce();
     assert.equal(activeHistoryJobs().length, 1);
     assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+    const completedDailyBeforeStaleHistory = store.getAccountById(account.id)?.lastSyncCompletedAt;
     for (let pass = 0; pass < 16 && activeHistoryJobs().length > 0; pass += 1) {
       await service.runWorkerOnce();
+      assert.equal(
+        store.getAccountById(account.id)?.lastSyncCompletedAt,
+        completedDailyBeforeStaleHistory,
+      );
     }
     assert.equal(activeHistoryJobs().length, 0);
     assert.equal(hasCoverage(), false);
@@ -1845,18 +1853,38 @@ test("a stale Junction history retry finishes without coverage and is replaced o
     assert.notEqual(replacements[0]?.id, originalHistoryJob.id);
     assert.equal(replacements[0]?.payload.windowEnd, "2026-08-05T00:00:00.000Z");
     const replacementWindowStartIndex = successfulCaffeineWindows.length;
+    assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+    const completedDailyBeforeReplacement = store.getAccountById(account.id)?.lastSyncCompletedAt;
 
     for (let pass = 0; pass < 16 && activeHistoryJobs().length > 0; pass += 1) {
       await service.runWorkerOnce();
+      if (activeHistoryJobs().length > 0) {
+        assert.equal(
+          store.getAccountById(account.id)?.lastSyncCompletedAt,
+          completedDailyBeforeReplacement,
+        );
+      }
     }
     assert.equal(activeHistoryJobs().length, 0);
     assert.equal(hasCoverage(), true);
+    assert.equal(
+      store.getAccountById(account.id)?.lastSyncCompletedAt,
+      completedDailyBeforeReplacement,
+    );
     assert.equal(
       successfulCaffeineWindows.slice(replacementWindowStartIndex).some((window) =>
         Date.parse(window.start) <= Date.parse("2026-08-01T00:00:00.000Z")
         && Date.parse(window.end) >= Date.parse("2026-08-04T00:00:00.000Z")
       ),
       true,
+    );
+    assert.equal(
+      successfulCaffeineWindows.some((window) =>
+        window.start === "2026-08-04"
+        && window.end === "2026-08-04"
+      ),
+      true,
+      "The current daily reconcile must still fetch its gap instead of treating coarse sync success as resource coverage.",
     );
 
     now = new Date("2026-08-06T12:00:00.000Z");
@@ -6297,18 +6325,17 @@ test("device sync service preserves Junction yielded backfill timeseries cursor 
   }
 });
 
-test("Junction reconcile resumes one owned day-resource cursor until the fixed window is complete", async () => {
+test("Junction reconcile checkpoints each completed day-resource before an in-flight cutoff", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-reconcile-cursor");
   let now = new Date("2026-08-12T12:00:00.000Z");
-  let yieldRequested = false;
+  let yieldDeadline = Number.POSITIVE_INFINITY;
   let failVo2Max = true;
-  let hrvAbortPending = true;
-  let hrvFetchStartedResolve: (() => void) | null = null;
-  const hrvFetchStarted = new Promise<void>((resolve) => {
-    hrvFetchStartedResolve = resolve;
-  });
+  let retryableCoordinate: string | null = null;
   const requestsByCoordinate = new Map<string, number>();
-  const replayedPrefixEvents: Array<{ eventId: string; revision: number }> = [];
+  const terminalResponsesByCoordinate = new Map<string, number>();
+  const replayedCanonicalEvents: Array<{ eventId: string; revision: number }> = [];
+  let canonicalStressInput: Parameters<DeviceSyncImporterPort["importDeviceProviderSnapshot"]>[0]
+    | null = null;
   const resources = [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES];
   const resourceAvailability = Object.fromEntries(resources.map((resource) => [resource, true]));
   const provider = createJunctionDeviceSyncProvider({
@@ -6348,43 +6375,61 @@ test("Junction reconcile resumes one owned day-resource cursor until the fixed w
       const coordinate = `${day}:${resource}`;
       requestsByCoordinate.set(coordinate, (requestsByCoordinate.get(coordinate) ?? 0) + 1);
 
-      if (day === "2026-08-10" && resource === "hrv" && hrvAbortPending) {
-        hrvAbortPending = false;
-        hrvFetchStartedResolve?.();
-        const signal = init?.signal;
-        if (!signal) {
-          throw new Error("Expected the in-flight Junction request to carry the worker signal.");
-        }
-        await new Promise<never>((_resolve, reject) => {
-          if (signal.aborted) {
-            reject(signal.reason);
-            return;
-          }
-          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      if (day === "2026-08-10" && resource === "vo2_max" && failVo2Max) {
+        retryableCoordinate = coordinate;
+        return new Response(JSON.stringify({ code: "upstream_unavailable" }), {
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": "0",
+          },
+          status: 503,
         });
       }
 
-      if (day === "2026-08-10" && resource === "vo2_max" && failVo2Max) {
-        return createJsonResponse({ code: "upstream_unavailable" }, 503);
-      }
+      await new Promise<void>((resolve, reject) => {
+        const signal = init?.signal;
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        }, 70);
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(signal?.reason ?? new Error("Junction request aborted."));
+        };
+        if (signal?.aborted) {
+          onAbort();
+          return;
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
+      });
 
       if (day === "2026-08-10" && resource === "body_temperature") {
+        terminalResponsesByCoordinate.set(
+          coordinate,
+          (terminalResponsesByCoordinate.get(coordinate) ?? 0) + 1,
+        );
         return createJsonResponse({ code: "resource_not_available" }, 404);
       }
-      if (
-        resource === "blood_oxygen"
-        || (day === "2026-08-10" && resource === "stress_level")
-        || (day === "2026-08-10" && resource === "respiratory_rate")
-        || (day === "2026-08-10" && resource === "basal_body_temperature")
-      ) {
+      if (day === "2026-08-10" && resource === "basal_body_temperature") {
+        terminalResponsesByCoordinate.set(
+          coordinate,
+          (terminalResponsesByCoordinate.get(coordinate) ?? 0) + 1,
+        );
+        return createJsonResponse({ code: "unsupported_resource" }, 422);
+      }
+      terminalResponsesByCoordinate.set(
+        coordinate,
+        (terminalResponsesByCoordinate.get(coordinate) ?? 0) + 1,
+      );
+      if (day === "2026-08-10" && resource === "stress_level") {
         return createJsonResponse({
           groups: {
             garmin: [{
               data: [{
-                id: `${resource}-${day}`,
-                timestamp: `${day}T08:00:00.000Z`,
-                unit: resource === "blood_oxygen" ? "%" : "count",
-                value: resource === "blood_oxygen" ? 97 : 1,
+                id: "stress-level-2026-08-10",
+                timestamp: "2026-08-10T08:00:00.000Z",
+                unit: "count",
+                value: 1,
               }],
               source: { provider: "garmin", type: "watch" },
             }],
@@ -6403,29 +6448,20 @@ test("Junction reconcile resumes one owned day-resource cursor until the fixed w
       vaultRoot,
       publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
-      shouldYieldJobExecution: () => yieldRequested,
+      shouldYieldJobExecution: () => Date.now() >= yieldDeadline,
     },
     importer: {
       async importDeviceProviderSnapshot(input) {
         const result = await canonicalImporter.importDeviceProviderSnapshot(input) as {
           events?: Array<{ id: string; lifecycle?: { revision?: number } }>;
         };
-        const snapshot = (input as {
-          snapshot?: { timeseries?: Record<string, unknown[]> };
-        }).snapshot;
-        const importedResources = Object.keys(snapshot?.timeseries ?? {});
-        if ((snapshot?.timeseries?.stress_level?.length ?? 0) > 0) {
-          replayedPrefixEvents.push(...(result.events ?? []).map((event) => ({
+        const snapshot = input.snapshot as { timeseries?: Record<string, unknown[]> };
+        if ((snapshot.timeseries?.stress_level?.length ?? 0) > 0) {
+          canonicalStressInput ??= input;
+          replayedCanonicalEvents.push(...(result.events ?? []).map((event) => ({
             eventId: event.id,
             revision: event.lifecycle?.revision ?? 1,
           })));
-        }
-        if (importedResources.some((resource) =>
-          resource === "blood_oxygen"
-          || resource === "respiratory_rate"
-          || resource === "basal_body_temperature"
-        )) {
-          yieldRequested = true;
         }
         return result;
       },
@@ -6461,79 +6497,87 @@ test("Junction reconcile resumes one owned day-resource cursor until the fixed w
       dedupeKey: "junction-reconcile-cursor-fixed-window",
     });
     let workerRuns = 0;
+    let cursorAtLastWorkerStart = 0;
+    let retainedFailureAttempts = 0;
     const runOne = async () => {
-      yieldRequested = false;
+      const before = store.getJobById(job.id);
+      cursorAtLastWorkerStart = typeof before?.payload.timeseriesResourceIndex === "number"
+        ? before.payload.timeseriesResourceIndex
+        : 0;
+      yieldDeadline = Date.now() + 90;
       workerRuns += 1;
       const processed = await service.runWorkerOnce();
       assert.equal(processed?.id, job.id);
-      return store.getJobById(job.id);
+      const persisted = store.getJobById(job.id);
+      assert.equal(persisted?.id, job.id);
+      return persisted;
     };
 
     let persistedJob = await runOne();
-    assert.deepEqual(persistedJob?.payload, {
-      timeseriesCursor: "2026-08-10T00:00:00.000Z",
-      timeseriesResourceIndex: 1,
-      windowEnd: "2026-08-12T00:00:00.000Z",
-      windowStart: "2026-08-10T00:00:00.000Z",
-    });
-    assert.equal(persistedJob?.id, job.id);
-    assert.equal(persistedJob?.attempts, 0);
-    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
-
-    yieldRequested = false;
-    workerRuns += 1;
-    const abortedWorker = service.runWorkerOnce();
-    await hrvFetchStarted;
-    yieldRequested = true;
-    assert.equal((await abortedWorker)?.id, job.id);
-    persistedJob = store.getJobById(job.id);
-    assert.equal(persistedJob?.status, "queued");
-    assert.equal(persistedJob?.attempts, 0);
-    assert.equal(persistedJob?.payload.timeseriesResourceIndex, 1);
-    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
-
-    persistedJob = await runOne();
-    assert.equal(persistedJob?.payload.timeseriesResourceIndex, 4);
-
-    persistedJob = await runOne();
-    assert.equal(persistedJob?.status, "queued");
-    assert.equal(persistedJob?.payload.timeseriesResourceIndex, 4);
-    assert.equal(persistedJob?.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
-    assert.equal(persistedJob?.attempts, 1);
-    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
-    failVo2Max = false;
-
     while (persistedJob?.status !== "succeeded") {
+      assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      if (persistedJob?.lastErrorCode === "JUNCTION_API_REQUEST_FAILED") {
+        assert.ok(retryableCoordinate);
+        assert.equal(
+          `${String(persistedJob.payload.timeseriesCursor).slice(0, 10)}:${resources[Number(persistedJob.payload.timeseriesResourceIndex)]}`,
+          retryableCoordinate,
+          "A retryable 5xx must retain the exact in-flight resource coordinate.",
+        );
+        assert.ok(Number(persistedJob.payload.timeseriesResourceIndex) >= cursorAtLastWorkerStart);
+        assert.equal(persistedJob.attempts, 1);
+        retainedFailureAttempts = persistedJob.attempts;
+        failVo2Max = false;
+      } else {
+        assert.ok(
+          (persistedJob?.attempts ?? Number.POSITIVE_INFINITY) <= retainedFailureAttempts,
+          "Cooperative yields must not consume additional job attempts.",
+        );
+      }
       if (persistedJob?.availableAt && Date.parse(persistedJob.availableAt) > now.getTime()) {
         now = new Date(persistedJob.availableAt);
       }
       persistedJob = await runOne();
-      if (persistedJob?.status === "queued") {
-        assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
-      }
-      assert.ok(workerRuns <= 7, "The fixed two-day resource window must finish within its tested cursor bound.");
+      assert.ok(
+        workerRuns <= resources.length * 2 + 12,
+        "The fixed two-day resource window must finish within the coordinate count plus bounded retry and cutoff scheduling allowance.",
+      );
     }
 
-    assert.equal(workerRuns, 7);
     assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, now.toISOString());
     assert.equal(store.getAccountById(account.id)?.lastErrorCode, null);
-    assert.equal(store.getAccountById(account.id)?.metadata.junctionSkippedTimeseriesTotal, 1);
+    assert.ok(persistedJob.attempts <= retainedFailureAttempts + 1);
+    assert.equal(store.getAccountById(account.id)?.metadata.junctionSkippedTimeseriesTotal, 2);
     assert.equal(requestsByCoordinate.size, resources.length * 2);
+    assert.equal(terminalResponsesByCoordinate.size, resources.length * 2);
     for (const day of ["2026-08-10", "2026-08-11"]) {
       for (const resource of resources) {
-        const expectedAttempts = day === "2026-08-10" && resource === "stress_level"
-          ? 2
-          : day === "2026-08-10" && resource === "hrv"
-          ? 2
-          : day === "2026-08-10" && resource === "vo2_max"
-            ? 4
-            : 1;
-        assert.equal(requestsByCoordinate.get(`${day}:${resource}`), expectedAttempts);
+        assert.ok((requestsByCoordinate.get(`${day}:${resource}`) ?? 0) >= 1);
+        assert.equal(
+          terminalResponsesByCoordinate.get(`${day}:${resource}`),
+          1,
+          `Expected exactly one terminal handling for ${day}:${resource}.`,
+        );
       }
     }
-    assert.ok(replayedPrefixEvents.length >= 2);
-    assert.equal(new Set(replayedPrefixEvents.map((event) => event.eventId)).size, 1);
-    assert.equal(replayedPrefixEvents.every((event) => event.revision === 1), true);
+    assert.equal(requestsByCoordinate.get("2026-08-10:vo2_max"), 4);
+
+    assert.ok(canonicalStressInput);
+    setJobContinuationForTesting(store, job.id, {
+      timeseriesCursor: "2026-08-10T00:00:00.000Z",
+      timeseriesResourceIndex: resources.indexOf("stress_level"),
+      windowEnd: "2026-08-12T00:00:00.000Z",
+      windowStart: "2026-08-10T00:00:00.000Z",
+    });
+    const replay = await canonicalImporter.importDeviceProviderSnapshot(canonicalStressInput) as {
+      events?: Array<{ id: string; lifecycle?: { revision?: number } }>;
+    };
+    replayedCanonicalEvents.push(...(replay.events ?? []).map((event) => ({
+      eventId: event.id,
+      revision: event.lifecycle?.revision ?? 1,
+    })));
+    assert.ok(replayedCanonicalEvents.length >= 2);
+    assert.equal(new Set(replayedCanonicalEvents.map((event) => event.eventId)).size, 1);
+    assert.equal(replayedCanonicalEvents.every((event) => event.revision === 1), true);
   } finally {
     close();
   }

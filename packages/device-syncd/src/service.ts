@@ -856,7 +856,7 @@ class DeviceSyncServiceController {
     }
 
     const disconnectGeneration = storedAccount.disconnectGeneration;
-    const localConnectionRevision = storedAccount.localConnectionRevision;
+    let localConnectionRevision = storedAccount.localConnectionRevision;
     const jobExecutor = resolveProviderJobExecutor(provider);
 
     if (!jobExecutor) {
@@ -967,7 +967,8 @@ class DeviceSyncServiceController {
           ? normalizedJob
           : normalizeConfiguredDeviceSyncJobRecord(provider.provider, activeJob, "execution")
       );
-      const jobContext: ProviderJobContext = {
+      let jobContext: ProviderJobContext;
+      jobContext = {
         account: currentAccount,
         now,
         signal: jobAbortController.signal,
@@ -978,6 +979,50 @@ class DeviceSyncServiceController {
           ? { shouldYield: this.shouldYieldJobExecution }
           : {}),
         throwIfAborted: assertJobExecutionNotYielded,
+        checkpointJobContinuation: async (input) => {
+          if (activeJobs.length !== 1) {
+            throw deviceSyncError({
+              code: "DEVICE_SYNC_JOB_CONTINUATION_INVALID",
+              message: "An in-place job checkpoint must own exactly one claimed row.",
+              retryable: false,
+            });
+          }
+
+          // A completed provider/import unit may checkpoint even if foreground
+          // yield arrived immediately afterward. The transaction still fences
+          // the exact lease and account revision before advancing the cursor.
+          ensureJobLeasesOwned();
+          ensureAccountActive();
+          const checkpoint = normalizeConfiguredDeviceSyncJobInput(
+            provider.provider,
+            {
+              kind: normalizedJob.kind,
+              payload: input.payload,
+            },
+            "checkpoint",
+          );
+          const checkpointNow = currentNow();
+          const updated = this.store.updateJobContinuationAndPatchSyncMetadataIfOwned({
+            accountId: storedAccount.id,
+            availableAt: checkpointNow,
+            disconnectGeneration,
+            jobId: normalizedJob.id,
+            localConnectionRevision,
+            ...(input.metadataPatch ? { metadataPatch: input.metadataPatch } : {}),
+            now: checkpointNow,
+            payload: checkpoint.payload ?? {},
+            releaseLease: false,
+            workerId: this.workerId,
+          });
+
+          if (!updated) {
+            throw new DeviceSyncJobExecutionCancelledError(storedAccount.id, normalizedJob.id);
+          }
+
+          localConnectionRevision = updated.localConnectionRevision;
+          currentAccount = this.toDecryptedAccount(updated);
+          jobContext.account = currentAccount;
+        },
         importSnapshot: async (snapshot: unknown) => {
           ensureExecutionActive();
           const importResult = await this.importer.importDeviceProviderSnapshot({
@@ -1113,7 +1158,7 @@ class DeviceSyncServiceController {
           },
           "continuation",
         );
-        const continued = this.store.continueJobAndPatchSyncMetadataIfOwned({
+        const continued = this.store.updateJobContinuationAndPatchSyncMetadataIfOwned({
           accountId: storedAccount.id,
           availableAt: continuation.availableAt ?? currentNow(),
           disconnectGeneration,
@@ -1122,6 +1167,7 @@ class DeviceSyncServiceController {
           ...(result.metadataPatch ? { metadataPatch: result.metadataPatch } : {}),
           now: currentNow(),
           payload: continuation.payload ?? {},
+          releaseLease: true,
           workerId: this.workerId,
         });
 
@@ -1135,6 +1181,7 @@ class DeviceSyncServiceController {
         localConnectionRevision: number;
         metadataPatch?: Record<string, unknown>;
         nextReconcileAt?: string | null;
+        updatesLastSyncCompletedAt?: boolean;
       } = {
         localConnectionRevision,
       };
@@ -1145,6 +1192,10 @@ class DeviceSyncServiceController {
 
       if (Object.prototype.hasOwnProperty.call(result, "nextReconcileAt")) {
         successOptions.nextReconcileAt = result.nextReconcileAt ?? null;
+      }
+
+      if (result.updatesLastSyncCompletedAt === false) {
+        successOptions.updatesLastSyncCompletedAt = false;
       }
 
       const scheduledJobs = this.normalizeJobsForEnqueue(storedAccount, result.scheduledJobs ?? []);

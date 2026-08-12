@@ -946,7 +946,7 @@ test("pre-epoch schedule-time history cannot import or certify current coverage"
       return { canonicalEventCount: 0, durableDeliveryAccepted: true };
     },
   }), legacyJob);
-  assert.deepEqual(firstResult, {});
+  assert.deepEqual(firstResult, { updatesLastSyncCompletedAt: false });
   assert.equal(importCount, 0);
 
   const sources = [createSourceSummary(
@@ -999,7 +999,7 @@ test("a queued pre-reconnect job cannot block or certify the current source epoc
     listConnectionSources: async () => [epochTwoSource],
   }), toJobRecord(oldJob, 2));
 
-  assert.deepEqual(staleResult, {});
+  assert.deepEqual(staleResult, { updatesLastSyncCompletedAt: false });
   assert.equal(importCount, 0);
   assert.equal(requests.filter((request) => request.resource === "note").length, 0);
 
@@ -1097,7 +1097,7 @@ test("an in-flight pre-reconnect import cannot publish terminal coverage", async
 
   assert.equal(importCount, 1);
   assert.equal(requests.filter((request) => request.resource === "note").length, 1);
-  assert.deepEqual(result, {});
+  assert.deepEqual(result, { updatesLastSyncCompletedAt: false });
 });
 
 test("source projection reads hosted authority once for all listed providers", async () => {

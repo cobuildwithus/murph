@@ -38,7 +38,7 @@ import {
   completeDeviceSyncJobIfOwned,
   completeDeviceSyncJobsIfOwned,
   completeDeviceSyncJobsIfOwnedInTransaction,
-  continueDeviceSyncJobIfOwnedInTransaction,
+  updateDeviceSyncJobContinuationIfOwnedInTransaction,
   enqueueDeviceSyncJobInTransaction,
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
@@ -544,6 +544,7 @@ export class SqliteDeviceSyncStore {
       localConnectionRevision?: number | null;
       metadataPatch?: Record<string, unknown>;
       nextReconcileAt?: string | null;
+      updatesLastSyncCompletedAt?: boolean;
     };
     workerId: string;
   }): boolean {
@@ -595,7 +596,7 @@ export class SqliteDeviceSyncStore {
     }
   }
 
-  continueJobAndPatchSyncMetadataIfOwned(input: {
+  updateJobContinuationAndPatchSyncMetadataIfOwned(input: {
     accountId: string;
     availableAt: string;
     disconnectGeneration: number | null;
@@ -604,23 +605,25 @@ export class SqliteDeviceSyncStore {
     metadataPatch?: Record<string, unknown>;
     now: string;
     payload: Record<string, unknown>;
+    releaseLease: boolean;
     workerId: string;
-  }): boolean {
+  }): StoredDeviceSyncAccount | null {
     try {
       return withImmediateTransaction(this.database, () => {
-        const continued = continueDeviceSyncJobIfOwnedInTransaction(this.database, {
+        const continued = updateDeviceSyncJobContinuationIfOwnedInTransaction(this.database, {
           availableAt: input.availableAt,
           jobId: input.jobId,
           now: input.now,
           payload: input.payload,
+          releaseLease: input.releaseLease,
           workerId: input.workerId,
         });
 
         if (!continued) {
-          return false;
+          return null;
         }
 
-        const patched = patchStoredSyncContinuationMetadataInTransaction(
+        const updatedAccount = patchStoredSyncContinuationMetadataInTransaction(
           this.database,
           input.accountId,
           input.now,
@@ -631,15 +634,15 @@ export class SqliteDeviceSyncStore {
           },
         );
 
-        if (!patched) {
+        if (!updatedAccount) {
           throw new DeviceSyncSuccessFenceRejectedError();
         }
 
-        return true;
+        return updatedAccount;
       });
     } catch (error) {
       if (error instanceof DeviceSyncSuccessFenceRejectedError) {
-        return false;
+        return null;
       }
 
       throw error;
