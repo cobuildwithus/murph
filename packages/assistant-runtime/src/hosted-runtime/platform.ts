@@ -66,6 +66,7 @@ import type {
 import type {
   HostedBrowserVaultReplicaRef,
   HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
 import type {
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
@@ -311,15 +312,10 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
+  expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
   replyToMessageId?: string | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
-}
-
-export interface HostedRuntimeLinqTargetOverride {
-  conversationThreadId?: string | null;
-  target: string;
-  targetKind: "thread";
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
@@ -327,8 +323,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null;
   deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null;
   providerDispatchClaimed?: boolean | null;
-  targetOverride?: HostedRuntimeLinqTargetOverride | null;
-  threadIsDirect?: boolean | null;
+  resolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
 }
 
 export interface HostedRuntimeAssistantAskCompletionAuthority {

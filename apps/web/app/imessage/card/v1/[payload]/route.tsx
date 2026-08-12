@@ -14,7 +14,11 @@ import {
 } from "@murphai/contracts";
 import { ImageResponse } from "next/og";
 
-import { dmSans400FontPath } from "../../../../font-files";
+import {
+  dmSans400FontPath,
+  dmSans600FontPath,
+  murphMarkSvgPath,
+} from "../../../../font-files";
 import {
   IMESSAGE_NUTRITION_CARD_IMAGE_SIZE,
   NutritionCardImage,
@@ -57,7 +61,12 @@ export async function GET(
     return invalidPayloadResponse();
   }
 
-  const dmSans400 = await readFile(dmSans400FontPath).then(toArrayBuffer);
+  const [dmSans400, dmSans600, murphMarkSvg] = await Promise.all([
+    readFile(dmSans400FontPath).then(toArrayBuffer),
+    readFile(dmSans600FontPath).then(toArrayBuffer),
+    readFile(murphMarkSvgPath),
+  ]);
+  const logoSrc = `data:image/svg+xml;base64,${murphMarkSvg.toString("base64")}`;
   const size = card.kind === "daily_nutrition"
     ? IMESSAGE_NUTRITION_CARD_IMAGE_SIZE
     : card.kind === "compact_table"
@@ -66,14 +75,15 @@ export async function GET(
 
   return new ImageResponse(
     card.kind === "daily_nutrition"
-      ? <NutritionCardImage card={card} />
+      ? <NutritionCardImage card={card} logoSrc={logoSrc} />
       : card.kind === "compact_table"
-        ? <CompactTableCardImage card={card} />
-        : <ChallengeStandingsCardImage card={card} />,
+        ? <CompactTableCardImage card={card} logoSrc={logoSrc} />
+        : <ChallengeStandingsCardImage card={card} logoSrc={logoSrc} />,
     {
       ...size,
       fonts: [
         { name: "DM Sans", data: dmSans400, weight: 400 },
+        { name: "DM Sans", data: dmSans600, weight: 600 },
       ],
       headers: PRIVATE_IMAGE_HEADERS,
     },

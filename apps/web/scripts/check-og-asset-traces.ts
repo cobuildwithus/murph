@@ -21,10 +21,12 @@ import { resolveHostedWebDistDir } from "../next-artifacts";
 // Trace entries are recorded relative to each trace file and stay inside
 // apps/web, so the suffixes carry no apps/web prefix.
 const requiredOgAssetSuffixes = [
+  "public/icons/murph-mark.svg",
   "public/logo.svg",
   "app/fonts/Fraunces-400.ttf",
   "app/fonts/Fraunces-600.ttf",
   "app/fonts/DMSans-400.ttf",
+  "app/fonts/DMSans-600.ttf",
 ] as const;
 
 // Routes that render OG/share-card images on demand. Each must have a

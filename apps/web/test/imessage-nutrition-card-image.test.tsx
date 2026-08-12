@@ -29,6 +29,10 @@ const mocks = vi.hoisted(() => ({
   readFile: vi.fn(async (path: string | URL) => {
     const value = String(path);
     if (value.includes("DMSans-400.ttf")) return Buffer.from([4, 5, 6]);
+    if (value.includes("DMSans-600.ttf")) return Buffer.from([7, 8, 9]);
+    if (value.includes("murph-mark.svg")) {
+      return Buffer.from('<svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>');
+    }
     throw new Error("Unexpected nutrition card asset read.");
   }),
 }));
@@ -97,16 +101,22 @@ const CARD_WITH_PARTIAL_UNAVAILABLE_CALORIES: DailyNutritionResponseCardV2 = {
     calories: { total: 1_840, mealCount: 2 },
   },
   goals: {
-    ...CARD.goals,
     calories: { target: 2_200, status: "unavailable" },
+    proteinGrams: { target: 120, status: "unavailable" },
+    carbsGrams: { target: 220, status: "unavailable" },
+    fatGrams: { target: 65, status: "unavailable" },
+    fiberGrams: { target: 30, status: "unavailable" },
   },
 };
 
 const CARD_WITH_COMPLETE_UNAVAILABLE_CALORIES: DailyNutritionResponseCardV2 = {
   ...CARD,
   goals: {
-    ...CARD.goals,
     calories: { target: 2_200, status: "unavailable" },
+    proteinGrams: { target: 120, status: "unavailable" },
+    carbsGrams: { target: 220, status: "unavailable" },
+    fatGrams: { target: 65, status: "unavailable" },
+    fiberGrams: { target: 30, status: "unavailable" },
   },
 };
 
@@ -170,6 +180,37 @@ const POSITIVE_KERNING_TABLE_CARD: CompactTablePresentationCardV1 = {
     label: "Recovery",
     values: ["slow gait, ankle impact, or load", "Stable", "Up", "Review"],
   }],
+  footer: null,
+};
+
+const MAX_STACKED_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Maximum-width field proof",
+  subtitle: null,
+  rowHeader: "MaximumMetricLabelField",
+  columns: Array.from({ length: 4 }, () => "MaximumHeartRatePercentX"),
+  rows: [{
+    label: "Contract valid row label with deliberate maximum width text",
+    values: Array.from(
+      { length: 4 },
+      () => "CountermovementJumpAsymmetryXXXX",
+    ),
+  }],
+  footer: null,
+};
+
+const NARROW_FOUR_COLUMN_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "T",
+  subtitle: null,
+  rowHeader: "R",
+  columns: ["A", "B", "C", "D"],
+  rows: Array.from({ length: 8 }, () => ({
+    label: "R",
+    values: ["1", "2", "3", "4"],
+  })),
   footer: null,
 };
 
@@ -273,15 +314,18 @@ test("nutrition card image route renders the bounded V2 snapshot without caching
   assert.equal(response.headers.get("Content-Type"), "image/png");
   assert.equal(response.headers.get("Cache-Control"), "private, no-store");
   assert.equal(response.headers.get("X-Robots-Tag"), "noindex, nofollow, noarchive");
-  expect(mocks.readFile).toHaveBeenCalledTimes(1);
+  expect(mocks.readFile).toHaveBeenCalledTimes(3);
   expect(mocks.imageResponse).toHaveBeenCalledTimes(1);
 
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 568);
+  assert.equal(init.height, 539);
   assert.deepEqual(
     init.fonts?.map((font) => [font.name, font.weight]),
-    [["DM Sans", 400]],
+    [
+      ["DM Sans", 400],
+      ["DM Sans", 600],
+    ],
   );
   assert.match(JSON.stringify(imageTree), /2026-06-18/u);
   assert.match(JSON.stringify(imageTree), /1840/u);
@@ -304,20 +348,22 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.match(serialized, /data-calorie-progress="0\.8364"/u);
   assert.match(serialized, /data-goal-status="under_target"/u);
   assert.match(serialized, /data-calorie-goal-status="under_target"/u);
-  assert.match(serialized, /top:146px/u);
-  assert.match(serialized, />UNDER</u);
+  assert.match(serialized, /top:171px/u);
+  assert.match(serialized, /data-murph-card-badge="svg"/u);
+  assert.match(serialized, /data-murph-card-logo="true"/u);
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /data-goal-status="unavailable"/u);
   assert.match(serialized, /color:#666163/u);
+  assert.match(serialized, /min-height:135px/u);
+  assert.doesNotMatch(serialized, />UNDER</u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
-  assert.doesNotMatch(serialized, /box-shadow/u);
   assert.doesNotMatch(
     serialized,
     /Jun 18|PARTIAL TOTALS|2 of 3 meals|2,200|Goal unavailable|Complete total/u,
   );
 });
 
-test("nutrition card image renders every assessed goal direction without target amounts", async () => {
+test("nutrition card image keeps goal direction semantic without visible status copy", async () => {
   const { NutritionCardImage } = await import(
     "@/src/components/imessage/nutrition-card-image"
   );
@@ -335,15 +381,23 @@ test("nutrition card image renders every assessed goal direction without target 
     <NutritionCardImage card={directionalCard} />,
   );
 
+  assert.match(serialized, /color:#B3332B/u);
+  assert.match(serialized, /color:#995E08/u);
+  assert.match(serialized, /color:#337338/u);
   for (const label of [
-    "FAR UNDER",
-    "UNDER",
-    "ON TARGET",
-    "OVER",
-    "FAR OVER",
+    "far under target",
+    "under target",
+    "on target",
+    "over target",
+    "far over target",
   ]) {
-    assert.match(serialized, new RegExp(`>${label}<`, "u"));
+    assert.match(serialized, new RegExp(`aria-label="[^"]*${label}`, "u"));
   }
+  assert.doesNotMatch(
+    serialized,
+    />FAR UNDER<|>UNDER<|>ON TARGET<|>OVER<|>FAR OVER</u,
+  );
+  assert.doesNotMatch(serialized, /data-goal-status-label=/u);
   assert.doesNotMatch(serialized, /3,000|130g|210g|50g|10g/u);
 });
 
@@ -397,6 +451,9 @@ test.each([
 
     assert.match(serialized, /data-calorie-progress="unavailable"/u);
     assert.doesNotMatch(serialized, /stroke-dasharray/u);
+    if (card.goals.calories?.status === "unavailable") {
+      assert.doesNotMatch(serialized, /data-goal-status-label=/u);
+    }
   },
 );
 
@@ -430,7 +487,7 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 670);
+  assert.equal(init.height, 768);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /imessage-native-compact-table-card/u);
   assert.match(serialized, /Weekly plan/u);
@@ -438,9 +495,18 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.match(serialized, /Wednesday/u);
   assert.match(serialized, />16</u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
-  assert.doesNotMatch(serialized, /box-shadow/u);
-  assert.match(serialized, /data-provider-icon-clearance="155"/u);
-  assert.match(serialized, /margin-left:155px/u);
+  assert.match(serialized, /data-murph-card-badge="svg"/u);
+  assert.match(serialized, /data-imessage-card-header="true"/u);
+  assert.match(serialized, /data-card-header="beside-badge"/u);
+  assert.match(serialized, /margin-left:-15px/u);
+  assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
+  assert.match(serialized, /data-imessage-card-title-row="true"/u);
+  assert.match(serialized, /transform:translateY\(-8px\)/u);
+  assert.match(serialized, /margin-left:15px/u);
+  assert.match(serialized, /gap:30px/u);
+  assert.doesNotMatch(serialized, /margin-top:171px/u);
+  assert.match(serialized, /<h1/u);
+  assert.match(serialized, /data-compact-table-layout="grid"/u);
 });
 
 test("response-card image route restores and renders the exact compact V4 workout snapshot", async () => {
@@ -459,7 +525,7 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 580);
+  assert.equal(init.height, 925);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /Push day/u);
   assert.match(serialized, /IN PROGRESS/u);
@@ -467,7 +533,7 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.match(serialized, /Next: 55 lb × 8–10/u);
   assert.match(
     serialized,
-    /Reply with the exercise, set, and result to\s+log or correct it\./u,
+    /Reply with the exercise, set, and result to log or\s+correct it\./u,
   );
   assert.doesNotMatch(serialized, /Tap an exercise/u);
   assert.match(serialized, /data-workout-progress="0\.6667"/u);
@@ -477,12 +543,16 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.match(serialized, /data-exercise-checkmark="true"/u);
   assert.doesNotMatch(serialized, /✓/u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
-  assert.doesNotMatch(serialized, /box-shadow/u);
-  assert.match(serialized, /data-provider-icon-clearance="155"/u);
-  assert.match(serialized, /margin-left:155px/u);
+  assert.match(serialized, /data-murph-card-badge="svg"/u);
+  assert.match(serialized, /data-imessage-card-header="true"/u);
+  assert.match(serialized, /data-card-header="beside-badge"/u);
+  assert.match(serialized, /margin-left:-15px/u);
+  assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
+  assert.match(serialized, /data-imessage-card-title-row="true"/u);
+  assert.match(serialized, /transform:translateY\(-8px\)/u);
+  assert.match(serialized, /<h1/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
-  assert.doesNotMatch(serialized, /box-shadow/u);
 });
 
 test("workout images ignore legacy subtitles in both pixels and height", async () => {
@@ -507,6 +577,27 @@ test("workout images ignore legacy subtitles in both pixels and height", async (
     <CompactTableCardImage card={legacySubtitleCard} />,
   );
   assert.doesNotMatch(serialized, /Legacy progress copy/u);
+});
+
+test("workout headers use semibold metrics for intrinsic wrapping", async () => {
+  const {
+    CompactTableCardImage,
+    getCompactTableCardImageSize,
+  } = await import("@/src/components/imessage/compact-table-card-image");
+  const boundaryCard: typeof WORKOUT_CARD = {
+    ...WORKOUT_CARD,
+    title: "activity progress morning workout",
+  };
+  const serialized = renderToStaticMarkup(
+    <CompactTableCardImage card={boundaryCard} />,
+  );
+
+  assert.match(serialized, /activity progress morning\nworkout/u);
+  assert.match(serialized, /data-card-text-lines="2"/u);
+  assert.ok(
+    getCompactTableCardImageSize(boundaryCard).height
+      > getCompactTableCardImageSize(WORKOUT_CARD).height,
+  );
 });
 
 test("workout image keeps Next on the first pending set when it has no target", async () => {
@@ -564,12 +655,64 @@ test("dense contract-valid tables wrap every value into measured row height", as
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /data-card-text-lines="2"/u);
   assert.match(serialized, /white-space:pre-wrap/u);
-  assert.match(serialized, /Bodyweight ×\n16/u);
+  assert.match(serialized, /data-compact-table-layout="stacked"/u);
+  assert.match(serialized, /Bodyweight × 16/u);
   assert.doesNotMatch(serialized, /Bodywe\night/u);
-  assert.match(serialized, /1xxxxxxxxxxxxx\nxxxxxxxx/u);
+  assert.match(serialized, /1xxxxxxxxxxxxxxxxxxxxx/u);
 });
 
-test("four-column rows use exact DM Sans advances for word breaks and height", async () => {
+test("stacked tables place every maximum header above its full-width value", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({
+    schemaVersion: 3,
+    card: MAX_STACKED_TABLE_CARD,
+  });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /data-compact-table-layout="stacked"/u);
+  assert.equal(
+    serialized.match(/>MaximumHeartRatePercentX</gu)?.length,
+    4,
+  );
+  assert.equal(
+    serialized.match(/>CountermovementJumpAsymmetryXXXX</gu)?.length,
+    4,
+  );
+  assert.match(
+    serialized,
+    />MaximumHeartRatePercentX<\/div><div[^>]*width:100%/u,
+  );
+  assert.doesNotMatch(serialized, /max-width:720px/u);
+});
+
+test("fitting four-column tables retain one shared header and compact height", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({
+    schemaVersion: 3,
+    card: NARROW_FOUR_COLUMN_TABLE_CARD,
+  });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree, init] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.equal(init.height, 1_046);
+  assert.match(serialized, /data-compact-table-layout="grid"/u);
+  assert.equal(serialized.match(/>A<\/div>/gu)?.length, 1);
+  assert.ok((serialized.match(/flex-shrink:0/gu)?.length ?? 0) >= 5);
+  assert.doesNotMatch(serialized, /data-compact-table-layout="stacked"/u);
+});
+
+test("four-column rows use exact DM Sans advances for full-width field height", async () => {
   const { GET } = await import("../app/imessage/card/v1/[payload]/route");
   const payload = encodePayload({
     schemaVersion: 3,
@@ -583,12 +726,15 @@ test("four-column rows use exact DM Sans advances for word breaks and height", a
   assert.equal(response.status, 200);
   const [imageTree] = getImageResponseCall();
   const serialized = renderToStaticMarkup(imageTree);
-  assert.match(serialized, /deep sleep\nand mood\nguidance/u);
-  assert.match(serialized, /height:100px/u);
-  assert.match(serialized, /data-card-text-lines="3"[^>]*>deep sleep/u);
+  assert.match(serialized, /deep sleep and mood guidance/u);
+  assert.match(serialized, /min-height:742px/u);
+  assert.match(
+    serialized,
+    /data-card-text-lines="1"[^>]*>deep sleep/u,
+  );
 });
 
-test("positive DM Sans kerning cannot reflow text beyond its measured row", async () => {
+test("positive DM Sans kerning remains inside its measured full-width field", async () => {
   const { GET } = await import("../app/imessage/card/v1/[payload]/route");
   const payload = encodePayload({
     schemaVersion: 3,
@@ -602,10 +748,9 @@ test("positive DM Sans kerning cannot reflow text beyond its measured row", asyn
   assert.equal(response.status, 200);
   const [imageTree] = getImageResponseCall();
   const serialized = renderToStaticMarkup(imageTree);
-  assert.match(serialized, /slow gait,\nankle impact,\nor load/u);
-  assert.match(serialized, /height:100px/u);
-  assert.match(serialized, /data-card-text-lines="3"[^>]*>slow gait,/u);
-  assert.doesNotMatch(serialized, /slow gait, ankle\nimpact, or load/u);
+  assert.match(serialized, /slow gait, ankle impact, or load/u);
+  assert.match(serialized, /min-height:742px/u);
+  assert.match(serialized, /data-card-text-lines="1"[^>]*>slow gait,/u);
 });
 
 test("response-card image route renders the exact V5 standings snapshot", async () => {
@@ -619,10 +764,10 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 614);
+  assert.equal(init.height, 986);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /imessage-native-challenge-standings-card/u);
-  assert.match(serialized, /Summer movement challenge/u);
+  assert.match(serialized, /Summer movement\s+challenge/u);
   assert.match(serialized, /North team/u);
   assert.match(serialized, /210/u);
   assert.match(serialized, /OF 250 PTS/u);
@@ -633,8 +778,17 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   );
   assert.ok(rootTag);
   assert.doesNotMatch(rootTag[0], /border-radius|overflow:hidden/u);
-  assert.match(serialized, /margin-left:155px/u);
-  assert.doesNotMatch(serialized, /box-shadow:/u);
+  assert.match(serialized, /data-murph-card-badge="svg"/u);
+  assert.match(serialized, /data-imessage-card-header="true"/u);
+  assert.match(serialized, /data-card-header="beside-badge"/u);
+  assert.match(serialized, /margin-left:-15px/u);
+  assert.match(serialized, /data-murph-card-badge-placement="inline"/u);
+  assert.match(serialized, /data-imessage-card-title-row="true"/u);
+  assert.match(serialized, /transform:translateY\(-8px\)/u);
+  assert.match(serialized, /margin-left:15px/u);
+  assert.match(serialized, /gap:30px/u);
+  assert.doesNotMatch(serialized, /margin-top:171px/u);
+  assert.match(serialized, /<h1/u);
   assert.doesNotMatch(
     serialized,
     /VERIFIED STANDINGS|TEAM STANDINGS|GROUP GOAL|LEADERBOARD|verified minimum|waiting for data/u,
@@ -655,7 +809,8 @@ test("standings image keeps collective progress collective", async () => {
   assert.match(serialized, /640\+/u);
   assert.match(serialized, /\/ 1,000 pts/u);
   assert.match(serialized, /data-collective-progress="0\.6400"/u);
-  assert.match(serialized, /More progress may be pending/u);
+  assert.match(serialized, /More progress may be\s+pending/u);
+  assert.match(serialized, /data-collective-status-lines="2"/u);
   assert.match(serialized, /2\/3 SCORED/u);
   assert.doesNotMatch(serialized, /North team|South team|West team/u);
 
@@ -681,7 +836,41 @@ test("standings image keeps collective progress collective", async () => {
     ...COLLECTIVE_STANDINGS_CARD,
     title: "T".repeat(60),
     subtitle: "S".repeat(120),
-  })).toEqual({ width: 1_200, height: 654 });
+  })).toEqual({ width: 1_200, height: 1_015 });
+});
+
+test("standings image sizes semibold titles and maximum score context", async () => {
+  const {
+    ChallengeStandingsCardImage,
+    getChallengeStandingsCardImageSize,
+  } = await import(
+    "@/src/components/imessage/challenge-standings-card-image"
+  );
+  const boundaryCard: ChallengeStandingsResponseCardV1 = {
+    kind: "challenge_standings",
+    version: 1,
+    format: "individual",
+    title: "standings progress challenge morning",
+    subtitle: null,
+    objective: { kind: "target", targetPoints: Number.MAX_SAFE_INTEGER },
+    entries: [{
+      label: "Participant with a semibold boundary label",
+      points: Number.MAX_SAFE_INTEGER - 1,
+      coverage: "complete",
+      detail: null,
+    }],
+    footer: null,
+  };
+  const serialized = renderToStaticMarkup(
+    <ChallengeStandingsCardImage card={boundaryCard} />,
+  );
+
+  assert.match(serialized, /standings progress challenge\nmorning/u);
+  assert.match(serialized, /OF 9,007,199,254,740,991 PTS/u);
+  assert.match(serialized, /data-score-column-width="525"/u);
+  assert.match(serialized, /data-score-points-font-size="47"/u);
+  assert.match(serialized, /data-score-context-font-size="32"/u);
+  assert.ok(getChallengeStandingsCardImageSize(boundaryCard).height > 500);
 });
 
 test("response-card image route rejects malformed, incomplete, and query-bearing URLs before asset reads", async () => {

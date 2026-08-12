@@ -1,6 +1,6 @@
 # Non-expiring starter usage
 
-Last verified: 2026-08-09
+Last verified: 2026-08-11
 Status: Implemented current-state contract
 
 ## Product contract
@@ -166,12 +166,15 @@ production apply retired 69 exact candidates, then its automatic verification
 reported zero remaining candidates and convergence. The one-time Ops control,
 batch route and service, and local CLI were then removed.
 
-Keep the configured accepted legacy Pulse Price and the per-member cleanup and
-event-compatibility guards unchanged through the delayed-event and manual-replay
-horizon so exact old objects remain verifiable. These retained guards continue
-to fail closed for unreadable, ambiguous, or potentially paid provider state.
-After that horizon has passed, remove the legacy offer fields, wire actions,
-and per-member compatibility owner together in a separate contracting change.
+The checkout-time per-member cleanup owner is removed after the completed
+provider-object drain. Starting an ordinary paid Checkout no longer retrieves
+or cancels a legacy subscription. Keep the configured accepted legacy Pulse
+Price plus the delayed-event, Family-conversion, and account-deletion guards
+through the delayed-event and manual-replay horizon so exact old objects remain
+verifiable. These retained guards continue to fail closed for unreadable,
+ambiguous, or potentially paid provider state. After that horizon has passed,
+remove the remaining legacy offer fields and event compatibility together in a
+separate contracting change.
 
 Rollback after the committed Starter migration is forward-only: repair or
 redeploy the current compatible Web/runner pair. A pre-Starter Web or runner
@@ -195,11 +198,12 @@ After deploy, verify:
 - a legacy trial retired to Starter can accept a Family invitation only after
   its obsolete direct subscription binding is cleared.
 
-Compatibility is removable only when all three conditions hold: old trial
-creators are gone, the operator dry-run has reported zero, and the maximum
-delayed Stripe event and manual-replay horizon has elapsed. The first two are
-complete; the horizon remains the final gate. Analytics-only cohort names and
-immutable historical records are not runtime compatibility and may remain.
+Remaining event compatibility is removable only when all three conditions
+hold: old trial creators are gone, the operator dry-run has reported zero, and
+the maximum delayed Stripe event and manual-replay horizon has elapsed. The
+first two are complete; the horizon remains the final gate for those retained
+event guards. Analytics-only cohort names and immutable historical records are
+not runtime compatibility and may remain.
 
 Do not revert the Starter migration: its ledger kind and historical entries are
 accounting history. Recovery after migration commit is forward-only while both

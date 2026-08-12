@@ -31,6 +31,12 @@ provisional values do not live in transient assistant state; it does not accept,
 activate, or use those targets. The explanation and explicit later acceptance
 remain required before the proposal can affect a card.
 
+An ordinary verified private meal log carries default attachment intent only.
+It may use an already accepted complete active bundle after every required safety,
+authority, and totals read, but it does not authorize this proposal workflow,
+target setting, or any Goal mutation. When that accepted bundle is absent or any
+card gate fails, return the owning food-journal skill's short truthful fallback.
+
 ## Target authority
 
 - Before treating any target bundle as complete or deciding that a metric is
