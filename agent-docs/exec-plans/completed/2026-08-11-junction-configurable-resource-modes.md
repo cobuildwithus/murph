@@ -5,8 +5,8 @@
 Make the five Junction timeseries resources that Murph already recognizes into
 truthful, bounded opt-ins:
 
-- `steps` and `distance` retain only provider-scoped daily or hourly aggregates.
-- `calories_active` and `heartrate` retain only bounded hourly/session feature
+- `steps` and `distance` retain only provider-scoped UTC-day aggregates.
+- `calories_active` and `heartrate` retain only bounded UTC-hour feature
   envelopes and never default raw samples.
 - `weight` lands as a sparse canonical reading with the long history window.
 
@@ -26,12 +26,14 @@ enable these resources.
 
 ## Architecture
 
-Extend the existing static Junction resource policy and importer owners. Do not
+Extend the existing static Junction resource lists and importer owners. Do not
 add a service, queue, database table, raw-sample store, compatibility shim, or
 second source of truth. Derive runtime admission, history choice, sanitization,
 and normalization from the smallest static policy that removes current list
 drift without importing the provider implementation graph into boot-time
-configuration.
+configuration. Aggregate identities must match the existing closed UTC-day
+import boundary; do not introduce persisted state to merge provider-local days
+or upstream sessions across independent transport windows.
 
 ## Work
 
@@ -65,3 +67,6 @@ Keep the change backward compatible: defaults remain unchanged, opt-ins are
 additive, and old runtimes ignore no new persisted schema requirement. If the
 final design changes a shared Web/runner configuration contract, document the
 safe deployment order and warm-runner compatibility before merge.
+Status: completed
+Updated: 2026-08-11
+Completed: 2026-08-11

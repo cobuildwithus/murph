@@ -43,9 +43,10 @@ Current providers:
   Omitting the list uses the existing defaults; an explicit empty list disables all
   timeseries; an explicit non-empty list resolves exactly to supported canonical
   names and rejects unknown names instead of substituting defaults.
-- Opted-in `steps` and `distance` use provider/source-partitioned daily aggregates.
+- Opted-in `steps` and `distance` use provider/source-partitioned UTC-day aggregates.
   Opted-in `calories_active` and `heartrate` use provider/source-partitioned UTC-hour
-  or upstream-session features. These four dense resources retain the bounded
+  features. These identities match the complete closed-day import boundary instead
+  of treating provider-local day or session fragments as complete facts. The four dense resources retain the bounded
   dense-timeseries fetch window and never persist raw sample arrays or full provider
   snapshots. Opted-in `weight` uses sparse canonical measurements with compact
   per-reading evidence and the existing long summary-history backfill window.

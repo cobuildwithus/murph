@@ -2672,7 +2672,7 @@ test("Junction opt-in steps and distance stay provider-partitioned and summary-i
   assertEventRawArtifactRolesExist(payload);
 });
 
-test("Junction opt-in heart rate and active calories emit only bounded hourly or session features", async () => {
+test("Junction opt-in heart rate and active calories emit only bounded UTC-hour features", async () => {
   const snapshot = {
     importedAt: "2026-04-24T12:00:00.000Z",
     timeseries: {
@@ -2791,7 +2791,10 @@ test("Junction opt-in heart rate and active calories emit only bounded hourly or
   const calorieEvents = (payload.events ?? []).filter((event) =>
     event.fields?.metric === "active-calories"
   );
-  const sessionHeartRate = heartRateArtifacts.find((content) => content.bucketKind === "session");
+  const workoutHeartRateHour = heartRateArtifacts.find((content) =>
+    content.bucketStartAt === "2026-04-22T09:00:00.000Z"
+    && content.sourceProviderSlug === "garmin"
+  );
   const firstHeartRateHour = heartRateArtifacts.find((content) =>
     content.bucketStartAt === "2026-04-22T07:00:00.000Z"
     && content.sourceProviderSlug === "oura"
@@ -2800,7 +2803,10 @@ test("Junction opt-in heart rate and active calories emit only bounded hourly or
     .filter((content) => content.bucketStartAt === "2026-04-22T07:00:00.000Z")
     .map((content) => content.sourceProviderSlug)
     .sort();
-  const sessionCalories = calorieArtifacts.find((content) => content.bucketKind === "session");
+  const workoutCaloriesHour = calorieArtifacts.find((content) =>
+    content.bucketStartAt === "2026-04-22T09:00:00.000Z"
+    && content.sourceProviderSlug === "garmin"
+  );
 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["heartrate", "calories_active"]);
   assert.equal(payload.samples?.length ?? 0, 0);
@@ -2813,11 +2819,12 @@ test("Junction opt-in heart rate and active calories emit only bounded hourly or
   assert.equal(firstHeartRateHour?.minValue, 60);
   assert.equal(firstHeartRateHour?.maxValue, 72);
   assert.deepEqual(sameHourHeartRateProviders, ["garmin", "oura"]);
-  assert.equal(sessionHeartRate?.sourceProviderSlug, "garmin");
-  assert.equal(sessionHeartRate?.sessionId, "workout-1");
-  assert.equal(sessionHeartRate?.sessionType, "run");
-  assert.equal(sessionHeartRate?.meanValue, 110);
-  assert.equal(sessionCalories?.sumValue, 50);
+  assert.ok(heartRateArtifacts.every((content) => content.bucketKind === "hour"));
+  assert.ok(calorieArtifacts.every((content) => content.bucketKind === "hour"));
+  assert.equal(workoutHeartRateHour?.meanValue, 110);
+  assert.equal(workoutCaloriesHour?.sumValue, 50);
+  assert.ok(heartRateArtifacts.every((content) => !("sessionId" in content)));
+  assert.ok(calorieArtifacts.every((content) => !("sessionId" in content)));
   assert.ok(
     [...heartRateEvents, ...calorieEvents].every((event) =>
       Date.parse(event.occurredAt) <= Date.parse(snapshot.importedAt)
@@ -2842,6 +2849,92 @@ test("Junction opt-in heart rate and active calories emit only bounded hourly or
     '"value":100',
     '"value":120',
   ]);
+});
+
+test("Junction dense opt-ins keep adjacent UTC import buckets complete and replay-order stable", async () => {
+  const normalizeWindow = async (input: {
+    heartRate: number;
+    steps: number;
+    timestamp: string;
+    windowEnd: string;
+    windowStart: string;
+  }) => prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: input.windowEnd,
+      windowEnd: input.windowEnd,
+      windowStart: input.windowStart,
+      timeseries: {
+        steps: [{
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          sourceInstanceId: "watch-1",
+          timestamp: input.timestamp,
+          timezoneOffset: -25_200,
+          unit: "count",
+          value: input.steps,
+        }],
+        heartrate: [{
+          sessionEnd: "2026-04-23T01:00:00.000Z",
+          sessionId: "cross-midnight-workout",
+          sessionStart: "2026-04-22T23:00:00.000Z",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          sourceInstanceId: "watch-1",
+          timestamp: input.timestamp,
+          unit: "bpm",
+          value: input.heartRate,
+        }],
+      },
+    },
+  });
+  const first = await normalizeWindow({
+    heartRate: 90,
+    steps: 100,
+    timestamp: "2026-04-22T23:30:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+    windowStart: "2026-04-22T00:00:00.000Z",
+  });
+  const second = await normalizeWindow({
+    heartRate: 110,
+    steps: 200,
+    timestamp: "2026-04-23T00:30:00.000Z",
+    windowEnd: "2026-04-24T00:00:00.000Z",
+    windowStart: "2026-04-23T00:00:00.000Z",
+  });
+
+  const selectEvents = (payload: Awaited<ReturnType<typeof normalizeWindow>>) =>
+    (payload.events ?? []).filter((event) =>
+      event.fields?.metric === "daily-steps"
+      || event.fields?.metric === "average-heart-rate"
+    );
+  const firstEvents = selectEvents(first);
+  const secondEvents = selectEvents(second);
+  const identity = (event: (typeof firstEvents)[number]) => JSON.stringify(event.externalRef);
+  const forwardIdentities = [...firstEvents, ...secondEvents].map(identity).sort();
+  const reverseIdentities = [...secondEvents, ...firstEvents].map(identity).sort();
+
+  assert.deepEqual(
+    firstEvents.map((event) => [event.fields?.metric, event.dayKey]),
+    [["daily-steps", "2026-04-22"], ["average-heart-rate", "2026-04-22"]],
+  );
+  assert.deepEqual(
+    secondEvents.map((event) => [event.fields?.metric, event.dayKey]),
+    [["daily-steps", "2026-04-23"], ["average-heart-rate", "2026-04-23"]],
+  );
+  assert.equal(new Set(forwardIdentities).size, 4);
+  assert.deepEqual(forwardIdentities, reverseIdentities);
+  assert.ok([...firstEvents, ...secondEvents].every((event) => event.timeZone === "UTC"));
+  assert.deepEqual(
+    [first, second].flatMap((payload) =>
+      findJunctionFeatureTimeseriesArtifacts(payload, "heartrate")
+        .map((artifact) => (artifact.content as Record<string, unknown>).bucketKind)
+    ),
+    ["hour", "hour"],
+  );
 });
 
 test("Junction opt-in weight readings are compact, replay-stable, distinct, and canonically queryable", async () => {

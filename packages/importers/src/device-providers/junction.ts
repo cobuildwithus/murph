@@ -724,41 +724,6 @@ const JUNCTION_WEIGHT_VALUE_PATHS = [
   "weightKg",
   "weight_kg",
 ] as const;
-const JUNCTION_FEATURE_SESSION_ID_PATHS = [
-  "sessionId",
-  "session_id",
-  "activityId",
-  "activity_id",
-  "workoutId",
-  "workout_id",
-  "recordingId",
-  "recording_id",
-] as const;
-const JUNCTION_FEATURE_SESSION_START_PATHS = [
-  "sessionStart",
-  "session_start",
-  "activityStart",
-  "activity_start",
-  "workoutStart",
-  "workout_start",
-] as const;
-const JUNCTION_FEATURE_SESSION_END_PATHS = [
-  "sessionEnd",
-  "session_end",
-  "activityEnd",
-  "activity_end",
-  "workoutEnd",
-  "workout_end",
-] as const;
-const JUNCTION_FEATURE_SESSION_TYPE_PATHS = [
-  "sessionType",
-  "session_type",
-  "activityType",
-  "activity_type",
-  "workoutType",
-  "workout_type",
-  "type",
-] as const;
 const JUNCTION_READING_STABLE_ID_PATHS = [
   "id",
   "resourceId",
@@ -868,7 +833,7 @@ interface JunctionDailyTimeseriesAggregate {
 interface JunctionFeatureTimeseriesAggregate {
   bucketEndAt: string;
   bucketIdentity: string;
-  bucketKind: "hour" | "session";
+  bucketKind: "hour";
   bucketStartAt: string;
   dayKey: string;
   entry: PlainObject;
@@ -880,8 +845,6 @@ interface JunctionFeatureTimeseriesAggregate {
   minValue: number;
   resourceContext: ResourceContext;
   sampleCount: number;
-  sessionId?: string;
-  sessionType?: string;
   sum: number;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   timeZone?: string;
@@ -1516,7 +1479,7 @@ interface JunctionFeatureTimeseriesDescriptor {
 
 // Every daily-aggregate timeseries resource must appear here. Defaults keep
 // their established bounded mapping; opt-in `steps` and `distance` use the
-// same provider-partitioned day owner. Paired/sparse and feature-shaped
+// scheduler's complete UTC-day owner. Paired/sparse and feature-shaped
 // resources use dedicated handlers below. Raw evidence stays one compact
 // ~430 B `junction.timeseries_daily_aggregate.v1` artifact per day per
 // resource (~160 KB/member-year/resource) no matter how dense the provider
@@ -1955,8 +1918,17 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths), entry);
     const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
     const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp);
-    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt, input.context.defaultTimeZone);
-    const legacyDayKey = resolveLegacyJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
+    const dayKey = input.requireExplicitTimestamp
+      ? extractIsoDatePrefix(sampleAt) ?? undefined
+      : resolveJunctionTimeseriesAggregateDayKey(
+          entry,
+          timestamp,
+          sampleAt,
+          input.context.defaultTimeZone,
+        );
+    const legacyDayKey = input.requireExplicitTimestamp
+      ? dayKey
+      : resolveLegacyJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
 
     if (
       value === undefined
@@ -1978,7 +1950,9 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     ].join("\u0000");
     const existing = aggregates.get(key);
     const recordedAt = timestamp.recordedAt ?? sampleAt;
-    const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+    const timeZone = input.requireExplicitTimestamp
+      ? "UTC"
+      : firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
     const legacyDayKeys = new Set<string>();
     if (legacyDayKey && legacyDayKey !== dayKey) {
       legacyDayKeys.add(legacyDayKey);
@@ -2227,8 +2201,9 @@ function legacyJunctionDailyTimeseriesAggregateExternalRefs(
 }
 
 // Dense opt-in streams never retain provider rows. They collapse into one
-// provider-partitioned feature artifact per UTC hour, or per upstream session
-// when Junction supplies a stable session id or explicit session bounds.
+// provider-partitioned feature artifact per UTC hour. The import owner commits
+// closed UTC-day snapshots, so an hour is the broadest feature bucket whose
+// completeness is provable without persisted cross-window aggregation state.
 function pushJunctionFeatureTimeseriesObservations(
   payload: unknown,
   resource: string,
@@ -2294,8 +2269,6 @@ function pushJunctionFeatureTimeseriesObservations(
             sourceProviderSlug: aggregate.resourceContext.sourceProviderSlug,
             sourceType: aggregate.resourceContext.origin.sourceType,
             sourceInstanceId: aggregate.resourceContext.origin.sourceInstanceId,
-            sessionId: aggregate.sessionId,
-            sessionType: aggregate.sessionType,
             sampleCount: aggregate.sampleCount,
             firstSampleAt: aggregate.firstSampleAt,
             lastSampleAt: aggregate.lastSampleAt,
@@ -2358,21 +2331,12 @@ function buildJunctionFeatureTimeseriesAggregates(input: {
     }
 
     const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
-    const dayKey = resolveJunctionTimeseriesAggregateDayKey(
-      entry,
-      timestamp,
-      sampleAt,
-      input.context.defaultTimeZone,
-    );
+    const dayKey = extractIsoDatePrefix(sampleAt) ?? undefined;
     if (!dayKey) {
       continue;
     }
 
-    const bucket = resolveJunctionFeatureTimeseriesBucket(
-      entry,
-      sampleAt,
-      resourceContext.sourceProviderSlug,
-    );
+    const bucket = resolveJunctionFeatureTimeseriesBucket(sampleAt);
     const key = [
       resourceContext.externalRefResourceType,
       resourceContext.origin.sourceType ?? "",
@@ -2382,7 +2346,7 @@ function buildJunctionFeatureTimeseriesAggregates(input: {
     ].join("\u0000");
     const existing = aggregates.get(key);
     const recordedAt = timestamp.recordedAt ?? sampleAt;
-    const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+    const timeZone = "UTC";
 
     if (!existing) {
       aggregates.set(key, {
@@ -2400,8 +2364,6 @@ function buildJunctionFeatureTimeseriesAggregates(input: {
         minValue: value,
         resourceContext,
         sampleCount: 1,
-        sessionId: bucket.sessionId,
-        sessionType: bucket.sessionType,
         sum: value,
         timestamp,
         timeZone,
@@ -2430,61 +2392,19 @@ function buildJunctionFeatureTimeseriesAggregates(input: {
       existing.timestamp = timestamp;
       existing.timeZone = timeZone;
     }
-    existing.sessionType ??= bucket.sessionType;
   }
 
   return [...aggregates.values()].sort(compareJunctionFeatureTimeseriesAggregates);
 }
 
 function resolveJunctionFeatureTimeseriesBucket(
-  entry: PlainObject,
   sampleAt: string,
-  sourceProviderSlug: string,
 ): {
   endAt: string;
   identity: string;
-  kind: "hour" | "session";
-  sessionId?: string;
-  sessionType?: string;
+  kind: "hour";
   startAt: string;
 } {
-  const sessionId = trimOptionalToLength(
-    firstStringFromPaths(entry, JUNCTION_FEATURE_SESSION_ID_PATHS),
-    160,
-  );
-  const explicitStartAt = resolveSafeTimestamp(
-    firstValueFromPaths(entry, JUNCTION_FEATURE_SESSION_START_PATHS),
-    sourceProviderSlug,
-  );
-  const explicitEndAt = resolveSafeTimestamp(
-    firstValueFromPaths(entry, JUNCTION_FEATURE_SESSION_END_PATHS),
-    sourceProviderSlug,
-  );
-  const hasValidExplicitRange = Boolean(
-    explicitStartAt
-    && explicitEndAt
-    && Date.parse(explicitEndAt) >= Date.parse(explicitStartAt),
-  );
-
-  if (sessionId || hasValidExplicitRange) {
-    const startAt = hasValidExplicitRange && explicitStartAt ? explicitStartAt : sampleAt;
-    const endAt = hasValidExplicitRange && explicitEndAt ? explicitEndAt : sampleAt;
-    const sessionType = trimOptionalToLength(
-      firstStringFromPaths(entry, JUNCTION_FEATURE_SESSION_TYPE_PATHS),
-      120,
-    );
-    return {
-      endAt: laterIsoTimestamp(endAt, sampleAt),
-      identity: sessionId
-        ? `id:${sessionId}`
-        : `range:${startAt}:${endAt}`,
-      kind: "session",
-      ...(sessionId ? { sessionId } : {}),
-      ...(sessionType ? { sessionType } : {}),
-      startAt: earlierIsoTimestamp(startAt, sampleAt),
-    };
-  }
-
   const hourStartMs = Math.floor(Date.parse(sampleAt) / 3_600_000) * 3_600_000;
   const startAt = new Date(hourStartMs).toISOString();
   return {

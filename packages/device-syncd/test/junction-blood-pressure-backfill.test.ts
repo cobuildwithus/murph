@@ -1073,6 +1073,116 @@ test("weight history terminalizes validation rejects and preserves distinct same
   );
 });
 
+test("invalid-only weight history preserves terminal examination across multi-day continuations", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { body_weight: true },
+      slug: "withings",
+    }],
+    requests,
+    summaryBackfillDays: 3,
+    timeseriesResources: ["weight"],
+    weightRecords: [{
+      id: "invalid-early-weight",
+      timestamp: "2026-06-08T08:00:00.000Z",
+      unit: "kg",
+      value: 501,
+    }],
+  });
+  const sources = [createSourceSummary(
+    "withings",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { body_weight: true },
+  )];
+  const scheduled = requireValue(provider.jobExecutor).createScheduledJobs?.(
+    createStoredAccount({ sources }),
+    NOW,
+  );
+  const weight = requireValue(requireValue(scheduled).jobs.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "weight"
+  ));
+
+  const { executionCount, result } = await executeImmediateResourceContinuations({
+    context: createJobContext(),
+    job: toJobRecord(weight, 1),
+    provider,
+    resource: "weight",
+  });
+
+  assert.equal(executionCount, 3);
+  assert.equal(requests.filter((request) => request.resource === "body_weight").length, 3);
+  assert.equal(result.metadataPatch?.[WEIGHT_HISTORY_COVERAGE_KEY], "v1|withings");
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+});
+
+test("retryable weight import failure retains delivery work before terminal examination", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { body_weight: true },
+      slug: "withings",
+    }],
+    requests,
+    summaryBackfillDays: 2,
+    timeseriesResources: ["weight"],
+    weightRecords: [{
+      id: "retryable-weight",
+      timestamp: "2026-06-09T08:00:00.000Z",
+      unit: "kg",
+      value: 80,
+    }],
+  });
+  const sources = [createSourceSummary(
+    "withings",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { body_weight: true },
+  )];
+  const scheduled = requireValue(provider.jobExecutor).createScheduledJobs?.(
+    createStoredAccount({ sources }),
+    NOW,
+  );
+  const weight = requireValue(requireValue(scheduled).jobs.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "weight"
+  ));
+  let failImport = true;
+  const context = createJobContext({
+    importSnapshot: async (snapshot) => {
+      if (failImport) {
+        failImport = false;
+        throw deviceSyncError({
+          code: "DEVICE_SYNC_IMPORT_RETRYABLE",
+          message: "Temporary import failure.",
+          retryable: true,
+        });
+      }
+      return importWithRealJunctionNormalizer(snapshot);
+    },
+  });
+
+  const failed = await requireValue(provider.jobExecutor).executeJob(
+    context,
+    toJobRecord(weight, 1),
+  );
+  const retry = requireValue(failed.scheduledJobs?.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "weight"
+  ));
+  assert.equal(retry.availableAt, "2026-06-11T12:15:00.000Z");
+  assert.notEqual(retry.payload?.historicalUnresolvedProviderRecordCount, 0);
+  assert.notEqual(retry.payload?.historicalRecordsSeen, true);
+
+  const completed = await executeImmediateResourceContinuations({
+    context,
+    job: toJobRecord(retry, 2),
+    provider,
+    resource: "weight",
+  });
+  assert.equal(completed.result.metadataPatch?.[WEIGHT_HISTORY_COVERAGE_KEY], "v1|withings");
+  assert.equal(completed.result.scheduledJobs?.length ?? 0, 0);
+});
+
 test("empty Oura note history reaches terminal source coverage", async () => {
   const provider = createProvider({
     additionalProviders: [{

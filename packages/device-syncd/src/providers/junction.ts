@@ -170,6 +170,7 @@ interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImport
   canonicalEventCount: number;
   fetchComplete: boolean;
   postFetchSourceAdmission?: JunctionCurrentSourceAdmission;
+  providerRecordsExamined: boolean;
   providerRecordCount: number;
   unresolvedProviderRecordIdentities: readonly string[];
   unresolvedProviderRecordCount: number;
@@ -344,6 +345,12 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
 );
+const JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES = new Set<string>([
+  "steps",
+  "distance",
+  "calories_active",
+  "heartrate",
+]);
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileIntervalMs;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
@@ -1942,6 +1949,7 @@ export function createJunctionDeviceSyncProvider(
                 canonicalProviderRecordIdentities: [],
                 canonicalEventCount: 0,
                 fetchComplete: false,
+                providerRecordsExamined: false,
                 providerRecordCount: 0,
                 unresolvedProviderRecordIdentities: [],
                 unresolvedProviderRecordCount: 0,
@@ -1988,6 +1996,7 @@ export function createJunctionDeviceSyncProvider(
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
               fetchComplete: false,
+              providerRecordsExamined: false,
               providerRecordCount: 0,
               unresolvedProviderRecordIdentities: [],
               unresolvedProviderRecordCount: 0,
@@ -1999,6 +2008,29 @@ export function createJunctionDeviceSyncProvider(
             result,
             window,
           });
+        }
+        if (JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES.has(effectiveResource)) {
+          const dailyImport = await importTimeseriesDailySnapshots(
+            context,
+            sourceProviders,
+            window.windowStart,
+            window.windowEnd,
+            skippedOptionalResources,
+            [effectiveResource],
+            sourceProviderSlug,
+          );
+          return withJunctionSkippedResourceMetadata(
+            context,
+            dailyImport.yieldedAt
+              ? buildYieldedJunctionJobResult({
+                  context,
+                  job,
+                  windowEnd: window.windowEnd,
+                  windowStart: dailyImport.yieldedAt,
+                })
+              : { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
+            skippedOptionalResources,
+          );
         }
         const timeseriesImport = await importTimeseriesPreciseSnapshots(
           context,
@@ -2041,6 +2073,10 @@ export function createJunctionDeviceSyncProvider(
         const historicalRecordsSeen = extendedHistoricalBackfill
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
+            || (
+              effectiveResource === "weight"
+              && timeseriesImport.providerRecordsExamined
+            )
           : undefined;
         const historicalUnresolvedProviderRecords = extendedHistoricalBackfill
           ? resolveJunctionHistoricalUnresolvedProviderRecords(
@@ -2226,7 +2262,7 @@ export function createJunctionDeviceSyncProvider(
       || input.importResult.canonicalEventCount > 0
       || (
         input.resource === "weight"
-        && input.importResult.providerRecordCount > 0
+        && input.importResult.providerRecordsExamined
       );
     const unresolvedProviderRecords =
       input.resource === "weight"
@@ -2702,6 +2738,7 @@ export function createJunctionDeviceSyncProvider(
     let yieldedAt: string | null = null;
     let canonicalProviderRecordIdentities: readonly string[] = [];
     let canonicalEventCount = 0;
+    let providerRecordsExamined = false;
     let postFetchSourceAdmission: JunctionCurrentSourceAdmission | undefined;
 
     const preciseWindows = buildPreciseTimeseriesWindows(windowStart, windowEnd);
@@ -2819,6 +2856,7 @@ export function createJunctionDeviceSyncProvider(
               canonicalEventCount: 0,
               fetchComplete: false,
               postFetchSourceAdmission,
+              providerRecordsExamined: false,
               providerRecordCount,
               unresolvedProviderRecordIdentities,
               unresolvedProviderRecordCount,
@@ -2846,6 +2884,7 @@ export function createJunctionDeviceSyncProvider(
             summaries: {},
             timeseries: preparedImport.snapshots,
           });
+          providerRecordsExamined = true;
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
           if (fetchedProviderRecordIdentityEvidence) {
             const resolutionEvidence =
@@ -2894,6 +2933,7 @@ export function createJunctionDeviceSyncProvider(
             canonicalProviderRecordIdentities: [],
             canonicalEventCount: 0,
             fetchComplete: false,
+            providerRecordsExamined: false,
             providerRecordCount,
             unresolvedProviderRecordIdentities,
             unresolvedProviderRecordCount,
@@ -2912,6 +2952,7 @@ export function createJunctionDeviceSyncProvider(
       ...(postFetchSourceAdmission === undefined
         ? {}
         : { postFetchSourceAdmission }),
+      providerRecordsExamined,
       providerRecordCount,
       unresolvedProviderRecordIdentities,
       unresolvedProviderRecordCount,

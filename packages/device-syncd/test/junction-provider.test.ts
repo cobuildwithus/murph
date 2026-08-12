@@ -657,6 +657,83 @@ test("Junction programmatic timeseries opt-ins fetch exactly the requested resou
   assert.equal(importedSnapshots.length, 1);
 });
 
+test("Junction dense opt-in resource jobs import only complete closed UTC days", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: ["heartrate"],
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [] });
+      }
+      if (url.includes("/v2/timeseries/junction-user-1/heartrate/grouped")) {
+        const day = new URL(url).searchParams.get("start_date");
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                sessionEnd: "2026-04-23T01:00:00.000Z",
+                sessionId: "cross-midnight-workout",
+                sessionStart: "2026-04-22T23:00:00.000Z",
+                timestamp: `${day}T00:30:00.000Z`,
+                unit: "bpm",
+                value: day === "2026-04-22" ? 90 : 110,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-24T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      resource: "heartrate",
+      resourceCategory: "timeseries",
+      windowStart: "2026-04-22T12:00:00.000Z",
+      windowEnd: "2026-04-24T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(
+    importedSnapshots.map((snapshot) => {
+      const entry = snapshot as { windowEnd?: string; windowStart?: string };
+      return [entry.windowStart, entry.windowEnd];
+    }),
+    [
+      ["2026-04-22T00:00:00.000Z", "2026-04-23T00:00:00.000Z"],
+      ["2026-04-23T00:00:00.000Z", "2026-04-24T00:00:00.000Z"],
+    ],
+  );
+  assert.deepEqual(
+    requests
+      .filter((url) => url.includes("/v2/timeseries/"))
+      .map((url) => {
+        const search = new URL(url).searchParams;
+        return [search.get("start_date"), search.get("end_date")];
+      }),
+    [["2026-04-22", "2026-04-22"], ["2026-04-23", "2026-04-23"]],
+  );
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+});
+
 function buildExpectedJunctionDedupeKey(
   kind: "backfill" | "reconcile",
   windowStart: string,
