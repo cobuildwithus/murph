@@ -2118,6 +2118,53 @@ test("importDeviceBatch retracts omitted facets from a newer bounded authoritati
   assert.equal(tombstone?.lifecycle?.state, "deleted");
 });
 
+test("importDeviceBatch rejects authoritative resources above the composed 514-facet maximum", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-authoritative-facet-limit");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const identity = {
+    system: "junction",
+    resourceType: "junction-apple-health-menstrual-cycle",
+    resourceId: "cycle-over-limit",
+  } as const;
+  const version = "2026-05-02T08:00:00.000Z";
+  const facets = Array.from(
+    { length: 515 },
+    (_, index) => `menstrual-flow-2026-05-01-${String(index).padStart(3, "0")}`,
+  );
+  const before = await snapshotVaultFiles(vaultRoot);
+
+  await assert.rejects(
+    importDeviceBatch({
+      vaultRoot,
+      provider: "junction",
+      importedAt: "2026-05-02T09:00:00.000Z",
+      events: facets.map((facet, index) => ({
+        kind: "measurement",
+        occurredAt: "2026-05-01T12:00:00.000Z",
+        recordedAt: version,
+        title: "Junction menstrual flow",
+        externalRef: { ...identity, facet, version },
+        fields: {
+          measurements: [{
+            metric: "menstrual-flow",
+            value: (index % 3) + 1,
+            unit: "score",
+          }],
+        },
+      })),
+      authoritativeEventSets: [{
+        ...identity,
+        version,
+        facetPrefixes: ["menstrual-flow"],
+        currentFacets: facets,
+      }],
+    }),
+    (error) => error instanceof VaultError && error.code === "VAULT_INVALID_INPUT",
+  );
+
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
+});
+
 test("importDeviceBatch makes byte-identical overlap a storage no-op for one provider account", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-storage-idempotency");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -8384,7 +8431,7 @@ test("importDeviceBatch does not claim unscoped WHOOP body legacy refs across ac
   assert.equal(liveWeightIds.size, 2);
 });
 
-test("importDeviceBatch repairs proven legacy refs after no-externalRef edits move shards", async () => {
+test("importDeviceBatch rejects legacy-ref repair after a no-externalRef member edit moves shards", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-cross-shard");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
 
@@ -8444,7 +8491,7 @@ test("importDeviceBatch repairs proven legacy refs after no-externalRef edits mo
       unit: "score",
     } satisfies Record<string, unknown>,
   });
-  const repaired = await importDeviceBatch({
+  const providerCorrection = {
     vaultRoot,
     provider: "junction",
     accountId: "jxn_acct_stable",
@@ -8468,13 +8515,20 @@ test("importDeviceBatch repairs proven legacy refs after no-externalRef edits mo
         unit: "score",
       },
     }],
-  });
+  } as const;
+  const beforeConflict = await snapshotVaultFiles(vaultRoot);
+
+  await assert.rejects(
+    importDeviceBatch(providerCorrection),
+    (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
+
   const records = (
     await Promise.all(
       [...new Set([
         ...first.eventShardPaths,
         edited.ledgerFile,
-        ...repaired.eventShardPaths,
       ])].map((relativePath) => readJsonlRecords({ vaultRoot, relativePath })),
     )
   ).flat() as EventRecord[];
@@ -8484,10 +8538,13 @@ test("importDeviceBatch repairs proven legacy refs after no-externalRef edits mo
       .map((record) => record.id),
   );
 
-  assert.equal(repaired.events[0]?.id, eventId);
-  assert.equal(repaired.events[0]?.lifecycle?.revision, 3);
-  assert.equal(repaired.events[0]?.externalRef?.resourceId, currentExternalRef.resourceId);
   assert.deepEqual([...stressIds], [eventId]);
+  const memberRevision = records.find((record) =>
+    record.id === eventId && record.lifecycle?.revision === 2
+  );
+  assert.equal(memberRevision?.source, "manual");
+  assert.equal(memberRevision?.occurredAt, "2026-05-31T23:30:00.000Z");
+  assert.equal(memberRevision?.dayKey, "2026-05-31");
 });
 
 test("findEventByExternalRef ignores historical refs after an event moves identity", async () => {

@@ -448,6 +448,9 @@ interface DeviceBatchPlan {
 }
 
 const MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT = 1_000;
+// Junction menstrual resources admit 512 dated non-BBT facts plus the
+// period-length and cycle-length scalar facets for the same resource version.
+const MAX_DEVICE_AUTHORITATIVE_CURRENT_FACETS = 514;
 
 interface BuildEventRecordInput<K extends EventKind> {
   kind: K;
@@ -1541,7 +1544,7 @@ function normalizeDeviceAuthoritativeEventSets(
     const currentFacets = normalizeUniqueTextList(
       input.currentFacets,
       `authoritativeEventSets[${index}].currentFacets`,
-      512,
+      MAX_DEVICE_AUTHORITATIVE_CURRENT_FACETS,
       200,
     ) ?? [];
     if (!facetPrefixes || facetPrefixes.length === 0) {
@@ -1814,10 +1817,14 @@ function compareIncomingExternalRefVersion(
   return compareIsoTimestampsAscending(incomingVersion, existingVersion);
 }
 
-// Device-sync content equality ignores per-import identity (id, lifecycle,
+// Event-content equality ignores per-import identity (id, lifecycle,
 // recordedAt) AND rawRefs, because device imports mint fresh raw-artifact
-// paths on every sync run.
-function deviceEventContentKey(record: EventRecord): string {
+// paths on every sync run. Member-edit comparison additionally excludes the
+// immutable provider attribution fields while retaining every public edit.
+function eventContentKey(
+  record: EventRecord,
+  options: { includeProviderAttribution: boolean },
+): string {
   const {
     id: _id,
     rawRefs: _rawRefs,
@@ -1825,7 +1832,20 @@ function deviceEventContentKey(record: EventRecord): string {
     recordedAt: _recordedAt,
     ...content
   } = record;
-  return stableStringify(content);
+  if (options.includeProviderAttribution) {
+    return stableStringify(content);
+  }
+
+  const {
+    dataOrigin: _dataOrigin,
+    externalRef: _externalRef,
+    ...memberMutableContent
+  } = content;
+  return stableStringify(memberMutableContent);
+}
+
+function deviceEventContentKey(record: EventRecord): string {
+  return eventContentKey(record, { includeProviderAttribution: true });
 }
 
 function deviceEventContentFingerprint(record: EventRecord): string {
@@ -2450,11 +2470,7 @@ interface CurrentDeviceEventOwners {
 }
 
 function userAuthoredEventStateKey(record: EventRecord): string {
-  return stableStringify({
-    links: record.links ?? [],
-    note: record.note ?? null,
-    tags: record.tags ?? [],
-  });
+  return eventContentKey(record, { includeProviderAttribution: false });
 }
 
 function hasHistoricalExternalRefUserAuthoredChanges(match: IndexedEventExternalRefMatch): boolean {
@@ -2898,6 +2914,13 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
+    const indexedProviderMatch = matchedEntries.find(
+      (match) => match.indexedMatch.record.id === latest.id,
+    )?.indexedMatch ?? matchedEntries[0]?.indexedMatch;
+    const matchesIndexedProviderContent = indexedProviderMatch !== undefined
+      && deviceEventContentKey(indexedProviderMatch.indexedRecord)
+        === deviceEventContentKey(entry.record);
+
     const authoritativeSet = authoritativeEventSets.find((set) =>
       externalRef.system === set.system
       && externalRef.resourceType === set.resourceType
@@ -2924,6 +2947,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
           isDeletedEventSpineRecord(latest)
           || deviceEventContentKey(latest) !== deviceEventContentKey(entry.record)
         )
+        && !matchesIndexedProviderContent
       ) {
         throw new VaultError(
           "EVENT_SOURCE_REVISION_CONFLICT",
@@ -2953,14 +2977,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    const indexedProviderMatch = matchedEntries.find(
-      (match) => match.indexedMatch.record.id === latest.id,
-    )?.indexedMatch ?? matchedEntries[0]?.indexedMatch;
-    if (
-      indexedProviderMatch
-      && deviceEventContentKey(indexedProviderMatch.indexedRecord)
-        === deviceEventContentKey(entry.record)
-    ) {
+    if (matchesIndexedProviderContent) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
       records.push(latest);
@@ -4570,7 +4587,8 @@ function preparedDeviceEventRetainsCurrentOutput(input: {
   return current !== undefined && (
     isDeletedEventSpineRecord(current)
     || (
-      eventSpineRevision(current) > eventSpineRevision(input.entry.record)
+      current.source !== "device"
+      && eventSpineRevision(current) > eventSpineRevision(input.entry.record)
       && userAuthoredEventStateKey(current) !== userAuthoredEventStateKey(input.entry.record)
     )
   );

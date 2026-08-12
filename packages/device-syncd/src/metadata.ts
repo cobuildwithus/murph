@@ -64,6 +64,18 @@ const DEVICE_SYNC_METADATA_RAW_IDENTIFIER_KEY_SUBSTRINGS = [
 
 type DeviceSyncMetadataScalar = string | number | boolean | null;
 
+/** In-process metadata-patch instruction; never a storable metadata value. */
+export const DEVICE_SYNC_METADATA_DELETE = Symbol("device-sync-metadata-delete");
+
+function normalizeStoredDeviceSyncMetadataKey(rawKey: string): string | null {
+  const key = rawKey.trim();
+  return !key
+      || key.length > DEVICE_SYNC_METADATA_MAX_KEY_LENGTH
+      || isBlockedStoredDeviceSyncMetadataKey(key)
+    ? null
+    : key;
+}
+
 function isAllowedHashedDeviceSyncIdentifierMetadataKey(normalizedKey: string): boolean {
   return normalizedKey.startsWith("hashed")
     || normalizedKey.endsWith("hash")
@@ -136,9 +148,8 @@ export function sanitizeStoredDeviceSyncMetadata(
       break;
     }
 
-    const key = rawKey.trim();
-
-    if (!key || key.length > DEVICE_SYNC_METADATA_MAX_KEY_LENGTH || isBlockedStoredDeviceSyncMetadataKey(key)) {
+    const key = normalizeStoredDeviceSyncMetadataKey(rawKey);
+    if (!key) {
       continue;
     }
 
@@ -164,6 +175,14 @@ export function mergeStoredDeviceSyncMetadataPatch(
 
   const sanitizedPatch = sanitizeStoredDeviceSyncMetadata(patch);
   const sanitizedExisting = sanitizeStoredDeviceSyncMetadata(existing);
+  const deletedKeys = new Set(
+    Object.entries(patch).flatMap(([rawKey, value]) => {
+      const key = value === DEVICE_SYNC_METADATA_DELETE
+        ? normalizeStoredDeviceSyncMetadataKey(rawKey)
+        : null;
+      return key ? [key] : [];
+    }),
+  );
   const merged: Record<string, DeviceSyncMetadataScalar> = {};
 
   for (const [key, value] of Object.entries(sanitizedPatch)) {
@@ -174,7 +193,7 @@ export function mergeStoredDeviceSyncMetadataPatch(
     if (Object.keys(merged).length >= DEVICE_SYNC_METADATA_MAX_ENTRIES) {
       break;
     }
-    if (!Object.prototype.hasOwnProperty.call(merged, key)) {
+    if (!deletedKeys.has(key) && !Object.prototype.hasOwnProperty.call(merged, key)) {
       merged[key] = value;
     }
   }

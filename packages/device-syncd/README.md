@@ -40,9 +40,10 @@ Current providers:
 - Junction fetches sparse `workout_duration` facts with stable interval
   identity; duration is never linked by time overlap. The high-frequency
   `workout_distance` and `workout_swimming_stroke` row feeds remain excluded.
-  Shallow `workout_stream` webhooks schedule one durable exact
-  `/v2/timeseries/workouts/{workout_id}/stream` execution with the provider
-  client's bounded three-request attempt budget and no outer job retry. The
+  Shallow `workout_stream` webhooks schedule an exact durable
+  `/v2/timeseries/workouts/{workout_id}/stream` job with a three-execution
+  budget. Each durable execution makes exactly one provider GET, so timeout,
+  503, and body-read failures return to the durable job owner. The
   fetched stream's source identity is revalidated against local and remote
   connection authority before import without projecting or mutating the full
   source catalog. The raw response is then discarded after reduction to a
@@ -59,6 +60,16 @@ Current providers:
   window per resource job, schedules at most eight resource/source pairs per
   reconcile pass, and retains only compact daily or per-interval facts. It
   never persists full provider timeseries arrays or emits canonical sample rows.
+- Extended source/resource completion has one writable owner:
+  `junctionExtendedHistoryCoverage`. Its `mN` prefix is the normalization
+  coverage-policy version; adding support for a previously noncanonical shape
+  must increment that version so exhausted history is reconsidered. The older
+  blood-pressure and note lists are read-only migration inputs and are removed
+  by the metadata merge once their bits are represented in the matrix.
+- Long-history anchoring is resource policy, not scheduler inference.
+  Rollout-added resources end their first scan at scheduling time so existing
+  connections receive recent history; resources whose history predates source
+  admission may explicitly use the source-first-seen anchor.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use

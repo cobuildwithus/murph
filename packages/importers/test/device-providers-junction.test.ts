@@ -5436,6 +5436,76 @@ test("Junction menstrual caps keep newest cycles and facts with deterministic om
   );
 });
 
+test("Junction commits the composed 514-facet menstrual maximum and replays as a no-op", async () => {
+  const isoDate = (index: number) =>
+    new Date(Date.UTC(2024, 0, 1 + index)).toISOString().slice(0, 10);
+  const snapshot = {
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      menstrual_cycle: [{
+        id: "maximum-canonical-cycle",
+        updated_at: "2026-05-20T10:00:00.000Z",
+        period_start: "2024-01-01",
+        period_end: "2024-01-05",
+        cycle_end: "2024-01-29",
+        cervical_mucus: Array.from({ length: 512 }, (_, index) => ({
+          date: isoDate(index),
+          quality: "watery",
+        })),
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  };
+  const normalized = normalizeJunctionSnapshot(snapshot);
+  const evidence = readJunctionMenstrualCycleEvidence(normalized);
+  const authoritativeSet = normalized.authoritativeEventSets?.[0];
+  const vaultRoot = await makeTempDirectory("murph-junction-menstrual-514-facets");
+
+  assert.equal(evidence.factCount, 512);
+  assert.equal(evidence.omittedFactCount, 0);
+  assert.equal(normalized.events?.length, 514);
+  assert.equal(authoritativeSet?.currentFacets.length, 514);
+  assert.equal(normalized.samples?.length ?? 0, 0);
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-19T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const importSnapshot = () =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        { provider: "junction", vaultRoot, snapshot },
+        { corePort: coreRuntime },
+      );
+    const first = await importSnapshot();
+    const watchedPaths = [...new Set([
+      ...first.eventShardPaths,
+      first.ingestShardPath,
+      first.auditPath,
+    ].filter((relativePath): relativePath is string => typeof relativePath === "string"))];
+    const beforeReplay = await Promise.all(
+      watchedPaths.map((relativePath) => readFile(join(vaultRoot, relativePath))),
+    );
+    const replay = await importSnapshot();
+
+    assert.equal(first.applied, true);
+    assert.equal(first.events.length, 514);
+    assert.equal(first.samples.length, 0);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.ingestId, null);
+    assert.equal(replay.samples.length, 0);
+    assert.deepEqual(
+      await Promise.all(
+        watchedPaths.map((relativePath) => readFile(join(vaultRoot, relativePath))),
+      ),
+      beforeReplay,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction ECG summaries drop negative metrics and cap qualifier lengths", () => {
   const oversizedClassification = `c${"x".repeat(120)}`;
   const payload = normalizeJunctionSnapshot({
