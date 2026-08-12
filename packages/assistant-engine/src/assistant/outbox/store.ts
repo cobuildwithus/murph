@@ -340,6 +340,13 @@ function isPruneProtectedAssistantOutboxIntent(
   intent: AssistantOutboxIntent,
   protectedGroupEmailOccurrencePrefixes: readonly string[],
 ): boolean {
+  if (
+    intent.privateCompletionContinuitySessionId !== undefined
+    && intent.delivery !== null
+    && intent.privateCompletionContinuity?.status !== 'applied'
+  ) {
+    return true
+  }
   const deliveryIdempotencyKey = intent.deliveryIdempotencyKey
   if (
     !deliveryIdempotencyKey

@@ -241,6 +241,9 @@ describe('notification audience authority integration', () => {
         threadIsDirect,
       }),
     )
+    expect(boundaries.deliverMessage.mock.calls[0]?.[0]).not.toHaveProperty(
+      'privateCompletionContinuitySessionId',
+    )
   })
 
   it('rejects an unknown Linq audience before provider work', async () => {
@@ -354,6 +357,9 @@ describe('notification audience authority integration', () => {
 
     expect(boundaries.executeProvider).not.toHaveBeenCalled()
     expect(notification.session.providerOptions.sandbox).toBe('read-only')
+    expect(boundaries.deliverMessage.mock.calls[0]?.[0]).not.toHaveProperty(
+      'privateCompletionContinuitySessionId',
+    )
 
     const attended = await resolveAssistantSessionForMessage({
       boundaryDefaultTarget: modelTarget,

@@ -281,6 +281,25 @@ Telegram daily-nutrition Rich Messages reuse the existing queryless response-
 card image route. Keep that Web route available while sent Telegram or Linq
 cards can still fetch their immutable image.
 
+## Private Completion Continuity Rollout
+
+Deploy Web first, then deploy the Cloudflare Worker and runner bundle together
+with `container_rollout=immediate`. Only authenticated private-completion
+intents write the new strict outbox continuity fields; generic notifications
+remain compatible. An old runner cannot parse a retained new-format private
+intent, so the first such write is the rollback floor for that workspace.
+Forward-fix on this bundle or newer after the floor is crossed.
+
+Recent production evidence showed six total Assistant Ask completion mailbox
+items—an upper bound on private completions—and no matching private-completion
+or outbox-quarantine runtime-log events over 14 days. Recent successful
+protected deploy workflows completed in 8–13 minutes;
+immediate rollout makes that one workflow the expected compatibility window.
+Require managed-container smoke to report the new runner fingerprint, monitor
+`outbox.intent.quarantined` and strict outbox parse failures, then verify one
+same-channel private completion is delivered exactly once, never to the group,
+and is visible to the next attended direct turn.
+
 ## Audience-Key Rollout
 
 The first production deploy that can write assistant conversation keys with an

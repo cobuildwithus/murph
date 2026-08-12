@@ -76,6 +76,10 @@ import, and nested hosted direct route plus accepted assistant-input authority
 repairs it before provider-resume selection even for text-only payloads.
 Rejected completions, system continuations, and every generic detached
 notification remain isolated and cannot claim this continuity behavior.
+An outbox intent written before the explicit continuity binding existed fails
+closed instead of inferring an owner. A current provider-accepted continuity
+obligation remains exempt from terminal outbox pruning until its journal is
+applied; applied intents return to ordinary terminal retention.
 
 The `creative-response` and `creative-response-text` notification prompt
 profiles are isolated system continuations for verified, explicitly requested

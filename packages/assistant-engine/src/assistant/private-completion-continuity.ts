@@ -207,6 +207,12 @@ function assistantPrivateCompletionCanJoinSession(input: {
   intent: AssistantOutboxIntent
   session: AssistantSession
 }): boolean {
+  // Omission identifies an intent written before continuity ownership existed.
+  // Only current writers can distinguish an exact binding from intentionally
+  // unbound work, so legacy records must not infer an owner from route shape.
+  if (input.intent.privateCompletionContinuitySessionId === undefined) {
+    return false
+  }
   const continuity = input.intent.privateCompletionContinuity
   if (
     continuity?.status === 'prepared'

@@ -17,10 +17,13 @@ import {
 } from '../src/assistant/private-completion-continuity.ts'
 import {
   createAssistantOutboxIntent,
+  dispatchAssistantOutboxIntent,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
+import { pruneAssistantTerminalOutboxIntents } from '../src/assistant/outbox/store.ts'
 import { resolveAssistantSessionForMessage } from '../src/assistant/session-resolution.ts'
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import {
   appendAssistantTranscriptEntries,
   getAssistantSession,
@@ -150,6 +153,65 @@ describe('private completion continuity', () => {
         status: 'applied',
       },
     })
+  })
+
+  it('does not infer continuity ownership for a legacy intent without the binding field', async () => {
+    const fixture = await createContinuityFixture('private-continuity-legacy-')
+    const pending = await createPrivateCompletionIntent({
+      continuitySessionId: fixture.ordinarySession.sessionId,
+      deliverySession: fixture.ordinarySession,
+      vault: fixture.vaultRoot,
+    })
+    const legacyIntent = { ...pending }
+    delete legacyIntent.privateCompletionContinuitySessionId
+    const persistedLegacy = await saveAssistantOutboxIntent(
+      fixture.vaultRoot,
+      legacyIntent,
+    )
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinq: async () => ({
+          idempotencyKey: persistedLegacy.deliveryIdempotencyKey,
+          providerMessageId: 'provider_private_continuity_legacy',
+          providerThreadId: locator.threadId,
+          target: locator.bindingDeliveryTarget,
+          targetKind: 'thread',
+        }),
+      },
+      dispatchHooks: {
+        persistDeliveredIntent: async ({ intent, vault }) =>
+          persistAssistantPrivateCompletionContinuityAfterDelivery({
+            intent,
+            vault,
+          }),
+      },
+      force: true,
+      intentId: persistedLegacy.intentId,
+      vault: fixture.vaultRoot,
+    })
+    expect(dispatched.intent.status).toBe('sent')
+    await reconcileAssistantPrivateCompletionContinuityForSession({
+      sessionId: fixture.ordinarySession.sessionId,
+      vault: fixture.vaultRoot,
+    })
+
+    await expect(getAssistantSession(
+      fixture.vaultRoot,
+      fixture.ordinarySession.sessionId,
+    )).resolves.toMatchObject({
+      codexResume: fixture.nativeResume,
+      resumeState: fixture.nativeResume,
+      turnCount: 0,
+    })
+    await expect(listAssistantTranscriptEntries(
+      fixture.vaultRoot,
+      fixture.ordinarySession.sessionId,
+    )).resolves.toEqual([])
+    await expect(readAssistantOutboxIntent(
+      fixture.vaultRoot,
+      pending.intentId,
+    )).resolves.not.toHaveProperty('privateCompletionContinuity')
   })
 
   it('recovers a prepared partial write without duplicating transcript or turn count', async () => {
@@ -327,6 +389,95 @@ describe('private completion continuity', () => {
         text: delivered.message,
       }),
     ])
+  })
+
+  it('retains a sent unbound completion until the first attended direct import', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'private-continuity-sent-unbound-',
+    )
+    cleanupPaths.push(parentRoot)
+    const detachedSession = (await resolveAssistantSession({
+      ...locator,
+      target: detachedTarget,
+      vault: vaultRoot,
+    })).session
+    const pending = await createPrivateCompletionIntent({
+      continuitySessionId: null,
+      deliverySession: detachedSession,
+      vault: vaultRoot,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinq: async () => ({
+          idempotencyKey: pending.deliveryIdempotencyKey,
+          providerMessageId: 'provider_private_continuity_unbound',
+          providerThreadId: locator.threadId,
+          target: locator.bindingDeliveryTarget,
+          targetKind: 'thread',
+        }),
+      },
+      dispatchHooks: {
+        persistDeliveredIntent: async ({ intent, vault }) =>
+          persistAssistantPrivateCompletionContinuityAfterDelivery({
+            intent,
+            vault,
+          }),
+      },
+      force: true,
+      intentId: pending.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    await expect(pruneAssistantTerminalOutboxIntents({
+      now: new Date('2100-01-01T00:00:00.000Z'),
+      paths: resolveAssistantStatePaths(vaultRoot),
+      vault: vaultRoot,
+    })).resolves.toBe(0)
+
+    const attended = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: ordinaryTarget,
+      defaults: null,
+      message: {
+        ...locator,
+        executionContext: {
+          hosted: {
+            defaultTarget: ordinaryTarget,
+            memberId: 'member_private_continuity_retention',
+            userEnvKeys: [],
+          },
+        },
+        prompt: 'Continue after the retained private reply.',
+        vault: vaultRoot,
+      },
+    })
+
+    await expect(listAssistantTranscriptEntries(
+      vaultRoot,
+      attended.session.sessionId,
+    )).resolves.toEqual([
+      expect.objectContaining({
+        sourceOutboxIntentId: pending.intentId,
+        text: pending.message,
+      }),
+    ])
+    await expect(readAssistantOutboxIntent(
+      vaultRoot,
+      pending.intentId,
+    )).resolves.toMatchObject({
+      privateCompletionContinuity: { status: 'applied' },
+      status: 'sent',
+    })
+    await expect(pruneAssistantTerminalOutboxIntents({
+      now: new Date('2100-01-01T00:01:00.000Z'),
+      paths: resolveAssistantStatePaths(vaultRoot),
+      vault: vaultRoot,
+    })).resolves.toBe(1)
+    await expect(readAssistantOutboxIntent(
+      vaultRoot,
+      pending.intentId,
+    )).resolves.toBeNull()
   })
 })
 

@@ -1504,8 +1504,6 @@ async function deliverAssistantNotificationMessage(input: {
     channel: deliveryFields.channel,
     media: requestedMedia,
   })
-  const privateCompletionContinuitySessionId =
-    input.privateCompletionContinuitySessionId ?? null
   const outcome = await state.outbox.deliverMessage({
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     reviewedAssistantAskCompletionExpiresAt:
@@ -1522,7 +1520,12 @@ async function deliverAssistantNotificationMessage(input: {
     ...deliveryFields,
     card: input.card ?? null,
     media,
-    privateCompletionContinuitySessionId,
+    ...(input.privateCompletionContinuitySessionId === undefined
+      ? {}
+      : {
+          privateCompletionContinuitySessionId:
+            input.privateCompletionContinuitySessionId,
+        }),
     dispatchMode: input.input.deliveryDispatchMode,
   })
   switch (outcome.kind) {

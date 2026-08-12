@@ -672,8 +672,12 @@ hosted provider accepts the live-authorized same-channel delivery, the durable
 outbox intent becomes the recovery journal. If queue-time resolution found an
 existing ordinary direct session, the intent binds that exact session ID before
 the notification target is projected read-only; otherwise the target stays
-unbound until the first attended direct turn. No route-sibling heuristic may
-choose the owner. The import appends the exact reviewed assistant text once,
+unbound until the first attended direct turn. An omitted binding identifies a
+pre-rollout intent and fails closed; only an explicit current-writer null may
+wait for that first session. No route-sibling heuristic may choose the owner.
+A delivered field-present obligation is exempt from ordinary terminal outbox
+pruning until its journal reaches `applied`, after which ordinary retention
+resumes. The import appends the exact reviewed assistant text once,
 advances the session once, and clears both stale native provider-resume aliases.
 An interrupted import converges from that journal, and canonical direct
 attended resolution repairs it before provider-resume selection. Hosted text
