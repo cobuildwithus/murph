@@ -43,10 +43,11 @@ import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
 import {
-  HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
+  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+  HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT,
 } from "@/src/lib/hosted-vault-share/delivery-limits";
 import {
-  findActiveHostedVaultSharePage,
+  findActiveHostedVaultShares,
   readDeliverableHostedVaultShareProjectionScopes,
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
@@ -144,22 +145,21 @@ function buildShareRow(index: number) {
   };
 }
 
-describe("findActiveHostedVaultSharePage", () => {
-  it("returns no continuation at the exact page boundary", async () => {
+describe("findActiveHostedVaultShares", () => {
+  it("returns the entire legal cohort from one invariant-bounded read", async () => {
     const rows = Array.from(
-      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE },
+      { length: HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION },
       (_, index) => buildShareRow(index + 1),
     );
     const findMany = vi.fn().mockResolvedValue(rows);
 
-    await expect(findActiveHostedVaultSharePage({
+    await expect(findActiveHostedVaultShares({
       grantorMemberId: SHARE.grantorMemberId,
       prisma: createPrismaClientTestDouble({ hostedVaultShare: { findMany } }),
       projectionScope: SLEEP_SCOPE,
-    })).resolves.toMatchObject({
-      continuation: null,
-      shares: rows.map((row) => expect.objectContaining({ id: row.id })),
-    });
+    })).resolves.toMatchObject(
+      rows.map((row) => expect.objectContaining({ id: row.id })),
+    );
     expect(findMany).toHaveBeenCalledWith({
       orderBy: { destinationMemberId: "asc" },
       select: {
@@ -170,7 +170,7 @@ describe("findActiveHostedVaultSharePage", () => {
         projectionScopeJson: true,
         projectionScopeKey: true,
       },
-      take: HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE + 1,
+      take: HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT,
       where: {
         grantorMemberId: SHARE.grantorMemberId,
         projectionScopeKey: SLEEP_SCOPE_KEY,
@@ -179,74 +179,23 @@ describe("findActiveHostedVaultSharePage", () => {
     });
   });
 
-  it("rejects a malformed continuation before querying shares", async () => {
-    const findMany = vi.fn();
+  it("fails closed instead of truncating a corrupt 26th grant", async () => {
+    const rows = Array.from(
+      { length: HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT },
+      (_, index) => buildShareRow(index + 1),
+    );
+    const findMany = vi.fn().mockResolvedValue(rows);
 
-    await expect(findActiveHostedVaultSharePage({
-      continuation: "share/032",
+    await expect(findActiveHostedVaultShares({
       grantorMemberId: SHARE.grantorMemberId,
       prisma: createPrismaClientTestDouble({ hostedVaultShare: { findMany } }),
       projectionScope: SLEEP_SCOPE,
-    })).rejects.toThrow("Hosted vault-share delivery continuation is invalid.");
-    expect(findMany).not.toHaveBeenCalled();
-  });
-
-  it("resumes by stable destination when an unprocessed share is regranted", async () => {
-    const rows = Array.from(
-      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE + 1 },
-      (_, index) => buildShareRow(index + 1),
-    );
-    const firstPageRows = rows.slice(
-      0,
-      HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
-    );
-    const lastRow = rows[rows.length - 1];
-    const continuation = firstPageRows[firstPageRows.length - 1]
-      ?.destinationMemberId;
-    if (!lastRow || !continuation) {
-      throw new Error("Pagination test fixture did not reach the one-over boundary.");
-    }
-    const regrantedLastRow = {
-      ...lastRow,
-      // Regrant replaces the exact generation with a random id that can sort
-      // before the completed page's generation ids.
-      id: "share_000_regranted",
-    };
-    const findMany = vi.fn()
-      .mockResolvedValueOnce(rows)
-      .mockResolvedValueOnce([regrantedLastRow]);
-    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
-
-    const firstPage = await findActiveHostedVaultSharePage({
-      grantorMemberId: SHARE.grantorMemberId,
-      prisma,
-      projectionScope: SLEEP_SCOPE,
+    })).rejects.toMatchObject({
+      code: "HOSTED_VAULT_SHARE_GRANT_LIMIT_INVARIANT_VIOLATION",
+      httpStatus: 503,
+      retryable: false,
     });
-    expect(firstPage).toMatchObject({
-      continuation,
-      shares: firstPageRows.map((row) => expect.objectContaining({ id: row.id })),
-    });
-
-    await expect(findActiveHostedVaultSharePage({
-      continuation: firstPage.continuation,
-      grantorMemberId: SHARE.grantorMemberId,
-      prisma,
-      projectionScope: SLEEP_SCOPE,
-    })).resolves.toMatchObject({
-      continuation: null,
-      shares: [expect.objectContaining({ id: regrantedLastRow.id })],
-    });
-    expect(findMany).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        where: {
-          destinationMemberId: { gt: continuation },
-          grantorMemberId: SHARE.grantorMemberId,
-          projectionScopeKey: SLEEP_SCOPE_KEY,
-          status: "granted",
-        },
-      }),
-    );
+    expect(findMany).toHaveBeenCalledTimes(1);
   });
 });
 

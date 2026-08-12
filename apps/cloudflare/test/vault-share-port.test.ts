@@ -27,93 +27,35 @@ function createPort() {
   });
 }
 
-describe("createHostedWebVaultSharePort delivery continuation", () => {
+describe("createHostedWebVaultSharePort delivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("drains later pages without replaying a completed page", async () => {
-    mocks.fetchHostedWebControlPlaneJson
-      .mockResolvedValueOnce({
-        continuation: "share_032",
-        status: "delivered",
-      })
-      .mockResolvedValueOnce({ status: "no-active-share" });
+  it("delivers one complete legal cohort with one exact callback replay boundary", async () => {
+    mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
+      status: "delivered",
+    });
 
     await expect(createPort().deliver(DELIVER_REQUEST)).resolves.toEqual({
       status: "delivered",
     });
 
-    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledTimes(2);
-    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenNthCalledWith(
-      1,
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith(
       expect.objectContaining({
         body: DELIVER_REQUEST,
         replayOnceOnRetryableFailure: true,
-      }),
-    );
-    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        body: {
-          ...DELIVER_REQUEST,
-          continuation: "share_032",
-        },
-        replayOnceOnRetryableFailure: true,
+        timeoutMs: 1_000,
       }),
     );
   });
 
-  it("fails closed on a malformed Web continuation", async () => {
+  it("fails closed on a malformed Web delivery result", async () => {
     mocks.fetchHostedWebControlPlaneJson.mockResolvedValue({
-      continuation: "share/032",
-      status: "delivered",
+      status: "partial",
     });
 
-    await expect(createPort().deliver(DELIVER_REQUEST)).rejects.toThrow(
-      "Hosted vault-share delivery continuation is invalid.",
-    );
-    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledTimes(1);
-  });
-
-  it("fails closed when Web repeats a continuation", async () => {
-    mocks.fetchHostedWebControlPlaneJson
-      .mockResolvedValueOnce({
-        continuation: "share_032",
-        status: "delivered",
-      })
-      .mockResolvedValueOnce({
-        continuation: "share_032",
-        status: "delivered",
-      });
-
-    await expect(createPort().deliver(DELIVER_REQUEST)).rejects.toThrow(
-      "Hosted vault-share delivery continuation repeated.",
-    );
-    expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not start a later page after the original delivery deadline", async () => {
-    const now = vi.spyOn(Date, "now")
-      .mockReturnValueOnce(1_000)
-      .mockReturnValueOnce(1_000)
-      .mockReturnValue(2_000);
-    mocks.fetchHostedWebControlPlaneJson.mockResolvedValueOnce({
-      continuation: "share_032",
-      status: "delivered",
-    });
-
-    try {
-      await expect(createPort().deliver(DELIVER_REQUEST)).rejects.toMatchObject({
-        message: "Hosted vault-share delivery deadline exceeded.",
-        name: "TimeoutError",
-      });
-      expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledTimes(1);
-      expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith(
-        expect.objectContaining({ timeoutMs: 1_000 }),
-      );
-    } finally {
-      now.mockRestore();
-    }
+    await expect(createPort().deliver(DELIVER_REQUEST)).rejects.toThrow();
   });
 });

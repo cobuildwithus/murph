@@ -1,9 +1,6 @@
 import "server-only";
 
 import {
-  isHostedRuntimeVaultShareDeliverContinuation,
-} from "@murphai/hosted-execution/routes";
-import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   type HostedVaultShareDeliveryRecord,
@@ -27,7 +24,8 @@ import {
 } from "../hosted-mailbox/runtime-access";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
-  HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
+  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+  HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT,
 } from "./delivery-limits";
 import { encryptHostedVaultShareProjectionSnapshot } from "./projection-snapshot";
 import { parseHostedVaultShareRowProjectionScope } from "./row-projection-scope";
@@ -41,25 +39,18 @@ export interface ActiveHostedVaultShare {
   projectionScopeKey: string;
 }
 
-export interface ActiveHostedVaultSharePage {
-  continuation: string | null;
-  shares: ActiveHostedVaultShare[];
-}
-
 /**
- * Reads one deterministic, hard-bounded page. The destination member id is stable across
- * revoke/regrant generations and serves only as an opaque callback cursor; the mutable row
- * id remains the exact-generation authority used by encryption and finalization. Malformed
- * rows still advance the cursor instead of pinning delivery forever.
+ * Reads every legally admitted share plus one invariant-check row. The sole
+ * production grant owner atomically caps the exact grantor/scope cohort at 25;
+ * a 26th row is corruption and fails closed rather than being silently
+ * truncated or normalized into another delivery lifecycle.
  */
-export async function findActiveHostedVaultSharePage(input: {
-  continuation?: unknown;
+export async function findActiveHostedVaultShares(input: {
   grantorMemberId: string;
   prisma?: PrismaClient;
   projectionScope: HostedVaultShareProjectionScope;
-}): Promise<ActiveHostedVaultSharePage> {
+}): Promise<ActiveHostedVaultShare[]> {
   const prisma = input.prisma ?? getPrisma();
-  const continuation = parseHostedVaultShareDeliveryContinuation(input.continuation);
   const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
     input.projectionScope,
   );
@@ -73,39 +64,42 @@ export async function findActiveHostedVaultSharePage(input: {
       projectionScopeJson: true,
       projectionScopeKey: true,
     },
-    take: HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE + 1,
+    take: HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT,
     where: {
       grantorMemberId: input.grantorMemberId,
-      ...(continuation
-        ? { destinationMemberId: { gt: continuation } }
-        : {}),
       projectionScopeKey,
       status: "granted",
     },
   });
-  const pageRows = rows.slice(0, HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE);
+  if (
+    rows.length
+    > HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_VAULT_SHARE_GRANT_LIMIT_INVARIANT_VIOLATION",
+      httpStatus: 503,
+      message:
+        "Hosted vault-share delivery found an invalid active grant cohort.",
+      retryable: false,
+    });
+  }
 
-  return {
-    continuation: rows.length > HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE
-      ? pageRows[pageRows.length - 1]?.destinationMemberId ?? null
-      : null,
-    shares: pageRows.flatMap((row) => {
-      const projectionScope = parseHostedVaultShareRowProjectionScope(row);
-      if (!projectionScope) {
-        return [];
-      }
-      const rowScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+  return rows.flatMap((row) => {
+    const projectionScope = parseHostedVaultShareRowProjectionScope(row);
+    if (!projectionScope) {
+      return [];
+    }
+    const rowScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
 
-      return [{
-        destinationMemberId: row.destinationMemberId,
-        grantorMemberId: row.grantorMemberId,
-        id: row.id,
-        projectionKind: projectionScope.projectionKind,
-        projectionScope,
-        projectionScopeKey: rowScopeKey,
-      }];
-    }),
-  };
+    return [{
+      destinationMemberId: row.destinationMemberId,
+      grantorMemberId: row.grantorMemberId,
+      id: row.id,
+      projectionKind: projectionScope.projectionKind,
+      projectionScope,
+      projectionScopeKey: rowScopeKey,
+    }];
+  });
 }
 
 export async function readDeliverableHostedVaultShareProjectionScopes(input: {
@@ -223,16 +217,6 @@ async function hasHostedVaultShareRuntimeActiveAccessBeforePreparation(
     }
     throw error;
   }
-}
-
-function parseHostedVaultShareDeliveryContinuation(value: unknown): string | null {
-  if (value === undefined) {
-    return null;
-  }
-  if (!isHostedRuntimeVaultShareDeliverContinuation(value)) {
-    throw new TypeError("Hosted vault-share delivery continuation is invalid.");
-  }
-  return value;
 }
 
 async function hasHostedVaultShareRuntimeActiveAccessForUpdateTx(

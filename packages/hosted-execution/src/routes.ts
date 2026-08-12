@@ -46,17 +46,6 @@ export const HOSTED_RUNTIME_CODEX_AUTH_PATH =
   "/api/internal/hosted-runtime/codex-auth";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =
   "/api/internal/hosted-runtime/vault-share/deliver";
-export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD =
-  "continuation";
-export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH = 128;
-export function isHostedRuntimeVaultShareDeliverContinuation(
-  value: unknown,
-): value is string {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH
-    && /^[A-Za-z0-9_-]+$/u.test(value);
-}
 export const HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH =
   "/api/internal/hosted-runtime/vault-share/active-kinds";
 export const HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH =

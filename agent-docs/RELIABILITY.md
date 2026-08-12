@@ -1270,21 +1270,23 @@ Last verified: 2026-08-11
   A successful attribution pass remains authoritative and may replace unknown
   values or write null when it proves retained sender evidence incomplete.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
-- Vault-share projection delivery reads at most 33 active generations through
-  the partial `(grantor, scope, destination)` index and attempts at most 32 per
-  signed Web callback. An opaque stable-destination cursor continues later pages
-  within the Cloudflare call's original deadline, while each selected row still
-  carries the exact generation used by encryption and finalization; repeated or
-  malformed cursors fail closed. Each share performs an unlocked active-access preflight, prepares its
+- The sole vault-share create/regrant owner takes one transaction-scoped
+  advisory lock for the exact grantor/scope cohort, then checks and enforces the
+  25-active-share limit before writing. Projection delivery reads at most 26
+  active generations through the existing partial grantor/scope index: a 26th
+  row is an invariant violation that fails closed, while a legal cohort of at
+  most 25 is attempted serially in one signed Web callback. Each selected row
+  still carries the exact generation used by encryption and finalization. Each
+  share performs an unlocked active-access preflight, prepares its
   destination-root ciphertext before `BEGIN`, then takes every discovered
   owner and requested runtime in one globally sorted member-lock order,
   revalidates both sides and
   the exact prepared destination root under its authority lock, and
   compare-and-sets only the exact still-granted generation. Reciprocal delivery can never choose
-  caller-role lock order, and a failed later page replays only that bounded page.
-  Rollout applies the index migration first, then the continuation-capable
-  Cloudflare reader, then the Web pager so drifted state beyond 32 rows is never
-  stranded behind an older single-callback reader.
+  caller-role lock order. Cloudflare owns one exact retry of the complete legal
+  cohort; a retry may repeat earlier serial attempts, which remain idempotent by
+  exact-generation compare-and-set. No schema change or new delivery index is
+  required.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event

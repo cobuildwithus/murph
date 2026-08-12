@@ -11,12 +11,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-vault-share/projection-store", () => ({
-  findActiveHostedVaultSharePage: async (input: unknown) => {
-    const result = await mocks.findActiveHostedVaultShares(input);
-    return Array.isArray(result)
-      ? { continuation: null, shares: result }
-      : result;
-  },
+	findActiveHostedVaultShares: mocks.findActiveHostedVaultShares,
 	replaceHostedVaultShareProjectionSnapshot: mocks.replaceHostedVaultShareProjectionSnapshot,
 }));
 
@@ -317,29 +312,6 @@ describe("vault-share deliver route", () => {
 		});
   });
 
-  it("forwards and returns the opaque delivery continuation", async () => {
-    mocks.findActiveHostedVaultShares.mockResolvedValue({
-      continuation: "share_064",
-      shares: [ACTIVE_SHARE],
-    });
-
-    const response = await deliverRoute.POST(buildRequest({
-      ...VALID_BODY,
-      continuation: "share_032",
-    }));
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      continuation: "share_064",
-      status: "delivered",
-    });
-    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
-      continuation: "share_032",
-      grantorMemberId: "member_grantor",
-      projectionScope: SLEEP_SCOPE,
-    });
-  });
-
   it("preserves activity semantics through the deliver route into snapshot storage", async () => {
     const activityShare = {
       ...ACTIVE_SHARE,
@@ -447,18 +419,15 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(2);
   });
 
-  it("attempts one maximum page sequentially and returns its continuation", async () => {
-    const shares = Array.from({ length: 32 }, (_, index) => ({
+  it("attempts the maximum legal grant cohort sequentially", async () => {
+    const shares = Array.from({ length: 25 }, (_, index) => ({
       ...ACTIVE_SHARE,
       destinationMemberId: `member_destination_${String(index).padStart(2, "0")}`,
       id: `share_${String(index).padStart(2, "0")}`,
     }));
     let activeReplacements = 0;
     let peakReplacements = 0;
-    mocks.findActiveHostedVaultShares.mockResolvedValue({
-      continuation: "member_destination_31",
-      shares,
-    });
+    mocks.findActiveHostedVaultShares.mockResolvedValue(shares);
     mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementation(
       async () => {
         activeReplacements += 1;
@@ -472,12 +441,9 @@ describe("vault-share deliver route", () => {
     const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      continuation: "member_destination_31",
-      status: "delivered",
-    });
+    expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledTimes(1);
-    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(32);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(25);
     expect(mocks.replaceHostedVaultShareProjectionSnapshot.mock.calls.map(
       ([input]) => input.share.destinationMemberId,
     )).toEqual(shares.map((share) => share.destinationMemberId));

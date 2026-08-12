@@ -1,7 +1,4 @@
 import {
-  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD,
-} from "@murphai/hosted-execution/routes";
-import {
   isHostedVaultShareCurrentStateProjectionKind,
   parseHostedVaultShareDeliverRequest,
   type HostedVaultShareDeliverResponse,
@@ -22,7 +19,7 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
-  findActiveHostedVaultSharePage,
+  findActiveHostedVaultShares,
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -31,10 +28,6 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS = 60;
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-type HostedVaultShareDeliverPageResponse = HostedVaultShareDeliverResponse & {
-  [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]?: string;
-};
 
 const NO_ACTIVE_SHARE_RESPONSE: HostedVaultShareDeliverResponse = {
   status: "no-active-share",
@@ -46,32 +39,26 @@ const DELIVERED_RESPONSE: HostedVaultShareDeliverResponse = {
 
 /**
  * The single cross-member write seam. The grantor identity comes exclusively from the
- * signed Cloudflare callback. Each callback attempts one hard-bounded page and returns
- * only an opaque stable-destination continuation when more configured shares remain. Web
+ * signed Cloudflare callback. Each callback reads at most 26 rows to prove the atomically
+ * enforced 25-share grantor/scope invariant, then attempts those legal shares serially. Web
  * remains the sole authority: each replacement prepares crypto before its transaction,
  * then the transaction validates both members and conditionally updates the exact active
- * HostedVaultShare generation. Status remains a function of share configuration alone;
- * continuation reveals only that another bounded callback is required.
+ * HostedVaultShare generation. Status remains a function of share configuration alone.
  */
 export const POST = withJsonError(async (request: Request) => {
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
   });
-  const requestBody = await readOptionalJsonObject(request);
-  const body = parseHostedVaultShareDeliverRequest(requestBody);
-  const continuation =
-    requestBody[HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD];
+  const body = parseHostedVaultShareDeliverRequest(
+    await readOptionalJsonObject(request),
+  );
 
-  const page = await findActiveHostedVaultSharePage({
+  const shares = await findActiveHostedVaultShares({
     grantorMemberId,
     projectionScope: body.projectionScope,
-    ...(continuation === undefined ? {} : { continuation }),
   });
-  if (page.shares.length === 0) {
-    return jsonOk(buildHostedVaultShareDeliverPageResponse(
-      NO_ACTIVE_SHARE_RESPONSE,
-      page.continuation,
-    ));
+  if (shares.length === 0) {
+    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
 
   // An all-stale offer replaces the prior snapshot with an encrypted empty snapshot. The
@@ -81,7 +68,7 @@ export const POST = withJsonError(async (request: Request) => {
   let delivered = false;
   let deliveryFailed = false;
 
-  for (const share of page.shares) {
+  for (const share of shares) {
     try {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
         records,
@@ -105,23 +92,8 @@ export const POST = withJsonError(async (request: Request) => {
     throw createHostedVaultShareDeliveryFailedError();
   }
 
-  return jsonOk(buildHostedVaultShareDeliverPageResponse(
-    delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE,
-    page.continuation,
-  ));
+  return jsonOk(delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE);
 });
-
-function buildHostedVaultShareDeliverPageResponse(
-  response: HostedVaultShareDeliverResponse,
-  continuation: string | null,
-): HostedVaultShareDeliverPageResponse {
-  return continuation === null
-    ? response
-    : {
-        ...response,
-        [HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD]: continuation,
-      };
-}
 
 function createHostedVaultShareDeliveryFailedError(): Error {
   return hostedOnboardingError({

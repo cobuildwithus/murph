@@ -7,9 +7,9 @@ Last verified: 2026-08-12
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
-Bounded Linq chat-health projection and vault-share delivery, including stable
-destination paging, globally ordered runtime/owner member locks, prepared-root
-fencing, and split concurrent index deployment, are jointly specified by
+Bounded Linq chat-health projection and vault-share delivery, including the
+atomic 25-share grantor/scope invariant, fail-closed 26-row delivery read,
+globally ordered runtime/owner member locks, and prepared-root fencing, are jointly specified by
 `agent-docs/RELIABILITY.md`, `agent-docs/operations/imessage-deliverability.md`,
 and `agent-docs/references/testing-ci-map.md`.
 

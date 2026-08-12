@@ -10,6 +10,9 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { generateHostedVaultShareId } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
+import {
+  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+} from "./delivery-limits";
 import { parseHostedVaultShareRowProjectionScope } from "./row-projection-scope";
 
 export type HostedVaultShareGrantClient = PrismaClient | Prisma.TransactionClient;
@@ -33,6 +36,20 @@ export async function grantHostedVaultShareTx(input: {
     });
   }
 
+  // This is the sole production create/regrant owner. Serialize the exact
+  // grantor/scope cohort before checking both the tuple and its active count,
+  // and retain the transaction-scoped lock through the eventual write.
+  const cohortLockKey = JSON.stringify([
+    input.grantorMemberId,
+    projectionScopeKey,
+  ]);
+  await input.tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext('hosted_vault_share_grant_limit'),
+      hashtext(${cohortLockKey})
+    )
+  `;
+
   let existing = await input.tx.hostedVaultShare.findUnique({
     where: {
       grantorMemberId_projectionScopeKey_destinationMemberId: {
@@ -43,6 +60,30 @@ export async function grantHostedVaultShareTx(input: {
     },
     select: { id: true, status: true },
   });
+
+  if (existing?.status === "granted") {
+    return;
+  }
+
+  const activeGrantCount = await input.tx.hostedVaultShare.count({
+    where: {
+      grantorMemberId: input.grantorMemberId,
+      projectionScopeKey,
+      status: "granted",
+    },
+  });
+  if (
+    activeGrantCount
+    >= HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
+      httpStatus: 409,
+      message:
+        "You have reached the group health-sharing limit for this permission. Turn off this permission in another group before sharing it here.",
+      retryable: false,
+    });
+  }
 
   if (!existing) {
     try {

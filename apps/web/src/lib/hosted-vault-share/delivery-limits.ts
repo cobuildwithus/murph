@@ -4,5 +4,9 @@
  */
 export const HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES = 19 * 1024;
 
-/** Maximum active share generations one signed callback may attempt. */
-export const HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE = 32;
+// Every production grant passes through the exact grantor/scope owner that
+// serializes and enforces this limit. Delivery reads one extra row only to
+// detect invariant corruption and fail closed instead of truncating it.
+export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
+export const HOSTED_VAULT_SHARE_DELIVER_INVARIANT_READ_LIMIT =
+  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION + 1;

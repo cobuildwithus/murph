@@ -59,6 +59,9 @@ import {
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
+  HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
+} from "../hosted-vault-share/delivery-limits";
+import {
   grantHostedVaultShareTx,
   readActiveHostedVaultShareProjectionScopes,
   revokeHostedVaultSharesTx,
@@ -208,7 +211,7 @@ export type HostedGroupMemberLeaveSelector =
   | { joinCode: string; membershipId?: never }
   | { joinCode?: never; membershipId: string };
 
-export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
+export { HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION };
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
 export const HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX = 64;
 
@@ -2143,7 +2146,7 @@ async function acceptHostedGroupJoinTx(input: {
             revokedVaultShareProjectionScopes.push(legacyProjectionScope);
           }
         }
-        await assertHostedGroupVaultShareGrantLimitTx(input.tx, {
+        await assertHostedGroupVaultShareDestinationLimitTx(input.tx, {
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
           projectionScope,
@@ -2537,7 +2540,7 @@ async function grantHostedGroupMembershipProjectionTx(
     projectionScope: HostedVaultShareProjectionScope;
   },
 ): Promise<void> {
-  await assertHostedGroupVaultShareGrantLimitTx(tx, {
+  await assertHostedGroupVaultShareDestinationLimitTx(tx, {
     destinationMemberId: input.groupRuntimeMemberId,
     grantorMemberId: input.memberId,
     projectionScope: input.projectionScope,
@@ -2778,7 +2781,7 @@ async function assertHostedGroupRuntimeDestinationTx(
   }
 }
 
-async function assertHostedGroupVaultShareGrantLimitTx(
+async function assertHostedGroupVaultShareDestinationLimitTx(
   tx: Prisma.TransactionClient,
   input: {
     destinationMemberId: string;
@@ -2800,24 +2803,6 @@ async function assertHostedGroupVaultShareGrantLimitTx(
 
   if (existing?.status === "granted") {
     return;
-  }
-
-  const activeGroupGrantCount = await tx.hostedVaultShare.count({
-    where: {
-      grantorMemberId: input.grantorMemberId,
-      projectionScopeKey,
-      status: "granted",
-    },
-  });
-
-  if (activeGroupGrantCount >= HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
-      httpStatus: 409,
-      message:
-        "You have reached the group health-sharing limit for this permission. Turn off this permission in another group before sharing it here.",
-      retryable: false,
-    });
   }
 
   const activeDestinationGrantCount = await tx.hostedVaultShare.count({

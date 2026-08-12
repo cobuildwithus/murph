@@ -1,1 +1,0 @@
-DROP INDEX CONCURRENTLY "hosted_vault_share_active_grantor_scope_idx";
