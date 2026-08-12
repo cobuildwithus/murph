@@ -1,6 +1,6 @@
 # Linq image batching and diagnostics
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -47,7 +47,7 @@ diagnostics when Linq rejects a request.
 2. [x] Define the smallest safe authored-response and diagnostic contracts.
 3. [x] Implement bounded authoring, model guidance, diagnostics, and tests.
 4. [x] Run focused verification and direct large-payload proof.
-5. [ ] Complete ReviewGPT, exact-head CI, parent review, and plan closure.
+5. [x] Complete ReviewGPT, exact-head CI, parent review, and plan closure.
 
 ## Verification log
 
@@ -141,3 +141,18 @@ diagnostics when Linq rejects a request.
   the safe zero-media counts, text-part count, and response signature. The
   focused CLI case, all 67 Linq adapter tests, CLI and Operator Config
   typechecks, and the provider-request guard pass after remediation.
+- Final ReviewGPT round 2 ran a fresh full-snapshot audit of code head
+  `b4ccdf5590` for more than 25 minutes with the requested GPT-5.6 Sol model;
+  the captured model slug was `gpt-5-6-pro`. It returned `ROUND_OUTCOME: PASS`
+  with no findings. Its PR-body count and scope discrepancies were corrected
+  before completion.
+- Exact code-head CI is fully green. The first platform-coverage run had one
+  unchanged interactive setup-wizard test select its default option; the exact
+  six-test file and complete 124-test setup package passed locally, and the
+  isolated CI rerun passed together with the release umbrella. All other
+  required checks passed on the first candidate run.
+- The candidate produces a clean merge tree against current `origin/main`.
+  The three overlapping intervening-base files were inspected; their routine
+  card and device-sync maintenance changes are independent of this patch's
+  image-budget, text-preflight, diagnostics, and recovery behavior.
+Completed: 2026-08-12
