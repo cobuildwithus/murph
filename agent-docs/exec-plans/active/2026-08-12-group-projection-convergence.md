@@ -202,3 +202,11 @@ Updated: 2026-08-12
   forbidden-input checks, and all 12,265 other Cloudflare/Web tests passed. The
   mirrored assertion is updated to the same reviewed measurements and rerun
   directly before pushing the test-only correction.
+- ReviewGPT round 8 found that the attempt-local stop predicate observed only a
+  foreground wake. Exact host abort during canonical system-mailbox persistence,
+  and ordinary graceful shutdown, still drained the active Web request correctly
+  but then admitted every captured suffix scope before releasing the runner. The
+  existing predicate now observes host abort, runtime abort, and shutdown too;
+  no owner or retry path is added. Stable three-scope proof covers ordinary host
+  abort followed by foreground provider admission, shutdown, and deferred system-
+  mailbox host abort followed by complete replacement projection and dirty ack.

@@ -650,7 +650,10 @@ Last verified: 2026-08-12
   successful prefix as complete. That stop bit belongs only to the active
   delivery promise; after it settles, a later opportunity starts unpreempted and
   the existing dirty or recording owner retries every undispatched scope before
-  acknowledgement. The invocation starts no second projection and does not release its
+  acknowledgement. The same between-scope predicate observes exact host abort
+  and shutdown, so those owner-ending conditions drain the active request but
+  never admit its captured suffix. The invocation starts no second projection
+  and does not release its
   runner ownership until the real proxy-to-Web response is terminal. Web owns a
   finite effect deadline for each delivery, stops admitting destination
   replacements on deadline or request cancellation, and gives the final
@@ -677,9 +680,10 @@ Last verified: 2026-08-12
   and at most 25 sequential share-replacement transactions per delivery under
   the existing grant cap: 2,450 replacement transactions at maximum admitted
   cardinality. There is at most one active scope-resolution or delivery request
-  per opportunity. An error stops the remaining scopes; a foreground wake
-  finishes only the already-started scope; and the existing continuation cannot
-  retry until that request reaches its server-owned terminal boundary. Repeated
+  per opportunity. An error stops the remaining scopes; a foreground wake,
+  exact host abort, or shutdown finishes only the already-started scope; and the
+  existing continuation cannot retry until that request reaches its server-owned
+  terminal boundary. Repeated
   wakes may admit conversation work but cannot start another projection. Each
   replacement adds one source-workspace row lock/check at its final write
   boundary. The runtime starts no concurrent per-scope or per-share transactions,

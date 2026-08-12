@@ -354,8 +354,10 @@ a foreground conversation may enter the provider without waiting for
 publication, but that invocation starts no second projection and retains runner
 ownership until the forwarded Web request is terminal. Abort and shutdown
 finalization join the same end-to-end request before a successor invocation or
-durable continuation may retry. Foreground preemption is local to that active
-delivery owner. If it skips later captured scopes, the offer reports preempted;
+durable continuation may retry, but their between-scope stop condition prevents
+the captured suffix from starting after the active request drains. Foreground
+preemption is local to that active delivery owner. If any owner-ending condition
+skips later captured scopes, the offer reports preempted;
 the next opportunity starts with a fresh stop state and cannot acknowledge the
 dirty or recording obligation until its complete scope set succeeds. No
 projection work outlives that owner, and a failed scope terminates the remaining

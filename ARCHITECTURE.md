@@ -58,9 +58,10 @@ materializes every selected record while the invocation still owns the restored
 vault path. Scope resolution receives the invocation's abort signal, so a
 foreground wake cancels and drains that read. An already-started immutable
 delivery instead remains owned and
-finishes its current scope. The wake prevents admission of every later captured
-scope, and that offer reports preempted instead of treating its successful
-prefix as complete. The stop bit belongs only to the active delivery owner, so
+finishes its current scope. A foreground wake, exact host abort, or shutdown
+prevents admission of every later captured scope, and that offer reports
+preempted instead of treating its successful prefix as complete. Foreground's
+stop bit belongs only to the active delivery owner, so
 a later opportunity begins fresh and can retry every scope before the existing
 dirty or recording obligation is acknowledged. Web
 owns a finite effect deadline for that current scope, stops admitting destination
@@ -79,7 +80,9 @@ serializes only the final replacement against that existing workspace row; an
 older in-flight offer becomes a no-op after a newer checkpoint instead of
 overwriting the newer group snapshot. One opportunity has at most one active
 request; a failed scope or foreground preemption terminates the remaining
-delivery chain. Projection
+delivery chain. Exact host abort and shutdown likewise drain only the active
+request before leaving the undispatched suffix to the existing continuation.
+Projection
 failure retains the existing dirty or recording obligation and its bounded
 continuation rather than creating a projection-specific queue or watermark.
 After an authenticated group join or sharing save, the page reuses the

@@ -1218,7 +1218,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     let foregroundPreempted = false;
     const projection = offerCapturedHostedVaultShareProjectionBestEffort({
       ...offerInput,
-      shouldStop: () => foregroundPreempted,
+      shouldStop: () =>
+        foregroundPreempted
+        || hostAbortObserved
+        || runtimeAbortController.signal.aborted
+        || options.shutdownSignal?.aborted === true,
     });
     const owner: OwnedVaultShareProjection = {
       preemptForForeground() {

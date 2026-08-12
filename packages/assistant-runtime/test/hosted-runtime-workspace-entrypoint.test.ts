@@ -11740,6 +11740,237 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("exact host abort drains only the active system projection scope before replacement", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("synthetic host abort during system projection");
+    const projectionStarted = createDeferred<void>();
+    const projectionRelease = createDeferred<void>();
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:host-abort-system-projection",
+      id: "mailbox_item_system_mailbox_host_abort_projection",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const baseDeviceSyncPort = createEmptyDeviceSyncPort();
+    let dirtyAckCalls = 0;
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...baseDeviceSyncPort,
+      async ackDirtyStateProcessed(request) {
+        dirtyAckCalls += 1;
+        events.push("device-sync.dirty-ack");
+        return {
+          connectionId: request.connectionId,
+          dirtyRevision: request.processedRevision,
+          nextWakeAt: null,
+          processedRevision: request.processedRevision,
+          recorded: true,
+          stillDirty: false,
+          userId: TEST_USER_ID,
+        };
+      },
+    };
+    const deliveredProjectionKinds: string[] = [];
+    let activeProjectionCalls = 0;
+    let peakActiveProjectionCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValue([]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === deviceItem.id
+            ? {
+                ...item,
+                postCheckpointRecord: {
+                  connectionId: "device_sync_connection_host_abort_projection",
+                  kind: "device-sync.dirty-processed" as const,
+                  processedDirtyPayloadIds: ["dirty_payload_host_abort_projection"],
+                  processedRevision: "8",
+                },
+                status: "recording" as const,
+              }
+            : item
+        ),
+      }));
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-host-abort-projection-before.bundle.json",
+        vaultRoot,
+      });
+      const artifactBytesByHash = new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]);
+      let snapshotIndex = 0;
+      const createRunOptions = (
+        workspace: HostedWorkspaceState,
+        signal?: AbortSignal,
+      ) => ({
+        async createCheckpointSnapshot() {
+          snapshotIndex += 1;
+          const snapshot = await createVaultSnapshotBundle({
+            key:
+              `users/bundles/member-synthetic/system-mailbox-host-abort-projection-after-${snapshotIndex}.bundle.json`,
+            vaultRoot,
+          });
+          artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+          return { snapshotRef: snapshot.snapshotRef };
+        },
+        async importItem() {
+          throw new Error("Already-imported recording work should not import a new row.");
+        },
+        platform: createPlatform({
+          artifactBytesByHash,
+          deviceSyncPort,
+          mailboxPort: createMailboxPort({ events, items: [] }),
+          vaultSharePort: {
+            async listActiveProjectionScopes() {
+              return [
+                { projectionKind: "profile-name.v0" as const },
+                { projectionKind: "time-zone.v0" as const },
+                { projectionKind: "sleep-times.v0" as const },
+              ];
+            },
+            async deliver(request) {
+              deliveredProjectionKinds.push(request.projectionKind);
+              activeProjectionCalls += 1;
+              peakActiveProjectionCalls = Math.max(
+                peakActiveProjectionCalls,
+                activeProjectionCalls,
+              );
+              events.push(`vault-share.deliver:start:${request.projectionKind}`);
+              try {
+                if (deliveredProjectionKinds.length === 1) {
+                  projectionStarted.resolve();
+                  await projectionRelease.promise;
+                }
+                events.push(`vault-share.deliver:done:${request.projectionKind}`);
+                return { status: "delivered" as const };
+              } finally {
+                activeProjectionCalls -= 1;
+              }
+            },
+          },
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace,
+          }),
+        }),
+        ...(signal ? { signal } : {}),
+        async runAssistantPhase() {
+          throw new Error("System mailbox recording must not enter assistant phase.");
+        },
+        vaultRoot,
+      });
+      const createRuntimeInput = (attemptId: string, workspaceVersion: string) =>
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId,
+            processingMode: "system_mailbox",
+            workspaceVersion,
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        });
+      const initialWorkspace = createWorkspaceState({
+        snapshotRef: restoredWorkspace.snapshotRef,
+        version: "0",
+      });
+
+      const interruptedRun = runHostedWorkspaceRuntimeJobInProcess(
+        createRuntimeInput(
+          "attempt_synthetic_system_mailbox_host_abort_projection",
+          "0",
+        ),
+        createRunOptions(initialWorkspace, hostAbortController.signal),
+      );
+      await projectionStarted.promise;
+      let interruptedRunSettled = false;
+      void interruptedRun.then(
+        () => {
+          interruptedRunSettled = true;
+        },
+        () => {
+          interruptedRunSettled = true;
+        },
+      );
+      hostAbortController.abort(hostAbortReason);
+      await Promise.resolve();
+      assert.equal(interruptedRunSettled, false);
+      assert.deepEqual(deliveredProjectionKinds, ["profile-name.v0"]);
+      projectionRelease.resolve();
+      await expect(withRealTimeout(
+        interruptedRun,
+        5_000,
+        () => events.join(","),
+      )).rejects.toBe(hostAbortReason);
+
+      assert.deepEqual(deliveredProjectionKinds, ["profile-name.v0"]);
+      assert.equal(dirtyAckCalls, 0);
+      assert.equal(activeProjectionCalls, 0);
+      assert.equal(checkpointRequests.length, 1);
+      const retainedItem = (await readHostedSystemMailboxState(vaultRoot)).pending.find(
+        (item) => item.itemId === deviceItem.id,
+      );
+      assert.equal(retainedItem?.status, "recording");
+      assert.ok(retainedItem?.postCheckpointRecord);
+      const durableRecordingCheckpoint = checkpointRequests[0];
+      assert.ok(durableRecordingCheckpoint);
+      const resumedWorkspace = createWorkspaceState({
+        inboxMediaRetentionWakeAt:
+          durableRecordingCheckpoint.inboxMediaRetentionWakeAt ?? null,
+        nextWakeAt: durableRecordingCheckpoint.nextWakeAt ?? null,
+        nextWakeReason: durableRecordingCheckpoint.nextWakeReason ?? null,
+        redactedStatus: durableRecordingCheckpoint.redactedStatus ?? null,
+        snapshotRef: durableRecordingCheckpoint.snapshotRef,
+        version: "1",
+      });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createRuntimeInput(
+          "attempt_synthetic_system_mailbox_host_abort_projection_replacement",
+          "1",
+        ),
+        createRunOptions(resumedWorkspace),
+      );
+
+      assert.deepEqual(deliveredProjectionKinds, [
+        "profile-name.v0",
+        "profile-name.v0",
+        "time-zone.v0",
+        "sleep-times.v0",
+      ]);
+      assert.equal(peakActiveProjectionCalls, 1);
+      assert.equal(dirtyAckCalls, 1);
+      assert.ok(
+        requireEventIndex(events, "vault-share.deliver:done:profile-name.v0")
+          < events.lastIndexOf("vault-share.deliver:start:profile-name.v0"),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(events, "vault-share.deliver:done:sleep-times.v0")
+          < requireEventIndex(events, "device-sync.dirty-ack"),
+        events.join(","),
+      );
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+    } finally {
+      projectionRelease.resolve();
+      hostAbortController.abort(hostAbortReason);
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("checkpoint-reported foreground input defers system mailbox post-checkpoint recording", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -23335,6 +23566,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const secondProviderStarted = createDeferred<void>();
     const originalAutomationPass =
       mocks.runAssistantAutomationPass.getMockImplementation();
+    const deliveredProjectionKinds: string[] = [];
     let importedInputId: string | null = null;
 
     assert.ok(originalAutomationPass);
@@ -23404,9 +23636,14 @@ describe("hosted workspace runtime entrypoint", () => {
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
               async listActiveProjectionScopes() {
-                return [{ projectionKind: "sleep-times.v0" }];
+                return [
+                  { projectionKind: "sleep-times.v0" },
+                  { projectionKind: "profile-name.v0" },
+                  { projectionKind: "time-zone.v0" },
+                ];
               },
-              async deliver() {
+              async deliver(request) {
+                deliveredProjectionKinds.push(request.projectionKind);
                 events.push("vault-share.deliver:start");
                 offerStarted.resolve();
                 await offerRelease.promise;
@@ -23455,6 +23692,7 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       )).rejects.toBe(firstAbortReason);
       assert.ok(events.includes("vault-share.deliver:done"), events.join(","));
+      assert.deepEqual(deliveredProjectionKinds, ["sleep-times.v0"]);
 
       const secondMailboxItem = createMailboxItem({
         id: "mailbox_item_entrypoint_after_stalled_vault_share_offer",
@@ -24648,6 +24886,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let assistantPhaseCalls = 0;
     let checkpointCount = 0;
     let vaultShareDeliverCalls = 0;
+    const deliveredProjectionKinds: string[] = [];
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -24707,11 +24946,16 @@ describe("hosted workspace runtime entrypoint", () => {
               async listActiveProjectionScopes() {
                 activeScopeReads += 1;
                 return activeScopeReads === 1
-                  ? [{ projectionKind: "sleep-times.v0" }]
+                  ? [
+                    { projectionKind: "sleep-times.v0" },
+                    { projectionKind: "profile-name.v0" },
+                    { projectionKind: "time-zone.v0" },
+                  ]
                   : [];
               },
-              async deliver() {
+              async deliver(request) {
                 vaultShareDeliverCalls += 1;
+                deliveredProjectionKinds.push(request.projectionKind);
                 events.push("vault-share.deliver:start");
                 offerStarted.resolve();
                 await offerRelease.promise;
@@ -24811,6 +25055,8 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await withRealTimeout(resultPromise, 10_000, () => events.join(","));
 
       assert.ok(events.includes("vault-share.deliver:done"), events.join(","));
+      assert.deepEqual(deliveredProjectionKinds, ["sleep-times.v0"]);
+      assert.equal(vaultShareDeliverCalls, 1);
       assert.equal(
         events.includes("mailbox.importItem:mailbox_item_entrypoint_vault_share_device_shutdown_2"),
         false,
