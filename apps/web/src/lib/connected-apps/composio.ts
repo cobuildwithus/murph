@@ -147,7 +147,7 @@ export function createComposioConnectedAppsClient(input: {
         }[];
       };
       toolSlug: string;
-      userId?: string;
+      userId: string;
       version: string;
     }): Promise<unknown> {
       const payload = await requestJson({
@@ -159,7 +159,7 @@ export function createComposioConnectedAppsClient(input: {
           ...(inputExecute.customAuthParams
             ? { custom_auth_params: inputExecute.customAuthParams }
             : {}),
-          ...(inputExecute.userId ? { user_id: inputExecute.userId } : {}),
+          user_id: inputExecute.userId,
           version: inputExecute.version,
         },
         config: input.config,

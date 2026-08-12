@@ -138,6 +138,7 @@ describe("Composio connected-app client", () => {
         timezone: "America/New_York",
       },
       toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      userId: "hbm_member",
       version: "20260429_00",
     });
     await client.executeDirect({
@@ -187,6 +188,7 @@ describe("Composio connected-app client", () => {
             timezone: "America/New_York",
           },
           connected_account_id: "calendar",
+          user_id: "hbm_member",
           version: "20260429_00",
         },
         url: "https://backend.composio.test/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT",
@@ -223,6 +225,7 @@ describe("Composio connected-app client", () => {
       account: "calendar",
       arguments: { summary: "Annual physical" },
       toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      userId: "hbm_member",
       version: "20260429_00",
     }).catch((value) => value);
 

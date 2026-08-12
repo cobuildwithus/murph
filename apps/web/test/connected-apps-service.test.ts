@@ -1110,6 +1110,7 @@ describe("connected-app service", () => {
             timezone: "America/New_York",
           },
           connected_account_id: "ca_calendar",
+          user_id: "hbm_member",
           version: "20260429_00",
         },
         pathname: "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT",
