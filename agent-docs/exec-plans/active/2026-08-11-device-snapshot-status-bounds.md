@@ -65,6 +65,9 @@ companion bearer status
 - [x] Normal-merge current main, retain both sides of its independent crypto
       test update, and replace the replay's cross-workspace relative imports
       with one narrow public assistant-runtime status seam.
+- [x] Collapse background status from one complete snapshot per reconnect
+      target to one complete credential-free member snapshot, then project
+      only configured direct accounts and exact provider/source targets.
 - [x] Run focused tests, direct replay, typecheck, lint, diff, and privacy
       checks.
 - [ ] Complete the terminal exact-head ReviewGPT audit and obtain green
@@ -122,6 +125,21 @@ dependency plus the repository's standard source-resolution mappings. It adds
 no production caller, query, state, helper implementation, or authority owner;
 the real-PostgreSQL proof still exercises the same production functions. The
 post-merge suite applied all 177 current migrations and passed all five proofs.
+
+Round-six retrospective: the accepted finding exposed consumer fanout that
+multiplied the already-bounded complete snapshot collector by every configured
+reconnect target. With the default 27 Junction Link targets, one status read
+could start 27 concurrent complete collections and retain successful siblings
+after another collection failed. The correction invokes the existing
+credential-free collector once, preserves its sequential 32-row pages and
+100-connection fail-closed ceiling, and locally projects only configured
+direct-provider accounts or exact `(provider, sourceProviderSlug)` targets.
+The displaced merge and per-target fanout helpers were deleted. Focused proof
+covers all 27 default targets with one request, 33 and 100 connections with two
+and four sequential requests, cancellation and 101-connection failure without
+partial context, direct-versus-Junction authority separation, and suppression
+of SDK-only or otherwise unconfigured sources. No query, credential/KMS path,
+cache, retry, cursor, persisted state, or new authority owner was added.
 
 ## Rollout
 

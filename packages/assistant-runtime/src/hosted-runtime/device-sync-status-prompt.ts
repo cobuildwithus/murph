@@ -81,61 +81,70 @@ async function fetchHostedDeviceSyncStatusSnapshot(input: {
     return null;
   }
 
-  const snapshots = await Promise.all(
-    input.reconnectTargets.map(async (target) => {
-      const sourceProviderSlug = normalizeHostedDeviceSyncKey(target.sourceProviderSlug);
-      const provider = normalizeHostedDeviceSyncKey(target.provider);
-      if (!sourceProviderSlug && !provider) {
-        return null;
-      }
+  const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+    deviceSyncPort: input.deviceSyncPort,
+    includeCredentialMaterial: false,
+    signal: input.signal,
+  }).catch(() => null);
 
-      return await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
-        deviceSyncPort: input.deviceSyncPort,
-        includeCredentialMaterial: false,
-        ...(sourceProviderSlug ? { sourceProviderSlug } : { provider }),
-        signal: input.signal,
-      }).catch(() => null);
-    }),
-  );
-
-  return mergeHostedDeviceSyncStatusSnapshots(snapshots);
+  return snapshot
+    ? projectHostedDeviceSyncStatusSnapshot({
+        reconnectTargets: input.reconnectTargets,
+        snapshot,
+      })
+    : null;
 }
 
-function mergeHostedDeviceSyncStatusSnapshots(
-  snapshots: readonly (HostedDeviceSyncRuntimeSnapshot | null)[],
-): HostedDeviceSyncRuntimeSnapshot | null {
-  const connections = new Map<string, HostedDeviceSyncRuntimeConnectionSnapshot>();
-  let generatedAt: string | null = null;
-  let userId: string | null = null;
+function projectHostedDeviceSyncStatusSnapshot(input: {
+  reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
+  snapshot: HostedDeviceSyncRuntimeSnapshot;
+}): HostedDeviceSyncRuntimeSnapshot | null {
+  const connections = input.snapshot.connections.flatMap((entry) => {
+    const provider = normalizeHostedDeviceSyncKey(entry.connection.provider);
+    const providerTarget = provider
+      ? resolveHostedDeviceSyncReconnectTargetForProvider({
+          provider,
+          reconnectTargets: input.reconnectTargets,
+        })
+      : null;
+    const sources = (entry.sources ?? []).filter((source) =>
+      providerTarget !== null
+      || hasHostedDeviceSyncReconnectTargetForConnectionSource({
+        provider,
+        reconnectTargets: input.reconnectTargets,
+        sourceProviderSlug: source.sourceProviderSlug,
+      })
+    );
 
-  for (const snapshot of snapshots) {
-    if (!snapshot) {
-      continue;
-    }
-    generatedAt ??= snapshot.generatedAt;
-    userId ??= snapshot.userId;
-    for (const entry of snapshot.connections) {
-      const existing = connections.get(entry.connection.id);
-      connections.set(
-        entry.connection.id,
-        existing
-          ? mergeHostedDeviceSyncStatusConnectionSnapshots(existing, entry)
-          : entry,
-      );
-    }
-  }
+    return providerTarget || sources.length > 0
+      ? [{ ...entry, sources }]
+      : [];
+  });
 
-  if (connections.size === 0 || !generatedAt || !userId) {
+  if (connections.length === 0) {
     return null;
   }
 
   return {
-    connections: sortHostedDeviceSyncStatusConnections(
-      [...connections.values()],
-    ),
-    generatedAt,
-    userId,
+    ...input.snapshot,
+    connections: sortHostedDeviceSyncStatusConnections(connections),
   };
+}
+
+function hasHostedDeviceSyncReconnectTargetForConnectionSource(input: {
+  provider: string | null;
+  reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
+  sourceProviderSlug: string;
+}): boolean {
+  const sourceProviderSlug = normalizeHostedDeviceSyncKey(input.sourceProviderSlug);
+  if (!input.provider || !sourceProviderSlug) {
+    return false;
+  }
+
+  return input.reconnectTargets.some((target) =>
+    normalizeHostedDeviceSyncKey(target.provider) === input.provider
+    && normalizeHostedDeviceSyncKey(target.sourceProviderSlug) === sourceProviderSlug
+  );
 }
 
 function sortHostedDeviceSyncStatusConnections(
@@ -149,51 +158,6 @@ function sortHostedDeviceSyncStatusConnections(
     return rightUpdatedAt.localeCompare(leftUpdatedAt)
       || right.connection.id.localeCompare(left.connection.id);
   });
-}
-
-function mergeHostedDeviceSyncStatusConnectionSnapshots(
-  existing: HostedDeviceSyncRuntimeConnectionSnapshot,
-  next: HostedDeviceSyncRuntimeConnectionSnapshot,
-): HostedDeviceSyncRuntimeConnectionSnapshot {
-  return {
-    ...existing,
-    sources: mergeHostedDeviceSyncStatusSources(
-      existing.sources ?? [],
-      next.sources ?? [],
-    ),
-  };
-}
-
-function mergeHostedDeviceSyncStatusSources(
-  existingSources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
-  nextSources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
-): HostedDeviceSyncRuntimeConnectionSourceSnapshot[] {
-  const merged = new Map<string, HostedDeviceSyncRuntimeConnectionSourceSnapshot>();
-
-  for (const source of [...existingSources, ...nextSources]) {
-    const key = buildHostedDeviceSyncSourceMergeKey(source);
-    if (!merged.has(key)) {
-      merged.set(key, source);
-    }
-  }
-
-  return [...merged.values()];
-}
-
-function buildHostedDeviceSyncSourceMergeKey(
-  source: HostedDeviceSyncRuntimeConnectionSourceSnapshot,
-): string {
-  const sourceInstanceKey = normalizeHostedDeviceSyncMergeKey(source.sourceInstanceKey);
-  if (sourceInstanceKey) {
-    return `instance:${sourceInstanceKey}`;
-  }
-
-  return `provider:${normalizeHostedDeviceSyncMergeKey(source.sourceProviderSlug) ?? ""}`;
-}
-
-function normalizeHostedDeviceSyncMergeKey(value: string | null | undefined): string | null {
-  const normalized = value?.trim().toLowerCase();
-  return normalized ? normalized : null;
 }
 
 export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {

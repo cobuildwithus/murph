@@ -6,7 +6,10 @@ import {
   type HostedDeviceSyncRuntimeSnapshotReader,
 } from "@murphai/assistant-runtime/hosted-device-sync-status";
 import { describe, expect, it, vi } from "vitest";
-import { listJunctionDeviceConnectRouteEntries } from "@murphai/device-syncd/connect-config";
+import {
+  listConfiguredDeviceSyncReconnectTargets,
+  listJunctionDeviceConnectRouteEntries,
+} from "@murphai/device-syncd/connect-config";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 
 const controlPlaneMocks = vi.hoisted(() => ({
@@ -523,9 +526,13 @@ describe.skipIf(!runPostgresProof)(
         store,
         "listBoundedConnectionSourcesForConnections",
       );
+      const connectionRead = vi.spyOn(prisma.deviceConnection, "findMany");
       const snapshotRequests: Array<
         Parameters<HostedDeviceSyncStatusSnapshotReader["fetchSnapshot"]>[0]
       > = [];
+      const reconnectTargets = listConfiguredDeviceSyncReconnectTargets({
+        junction: { providerFilter: [] },
+      });
 
       controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
         store,
@@ -600,28 +607,20 @@ describe.skipIf(!runPostgresProof)(
 
         const prompt = await buildHostedDeviceSyncStatusPrompt({
           deviceSyncPort,
-          reconnectTargets: [
-            {
-              connectTarget: "whoop",
-              connectTargetCommandSafe: true,
-              label: "WHOOP",
-              provider: "junction",
-              sourceProviderSlug: "whoop_v2",
-            },
-          ],
+          reconnectTargets,
         });
 
+        expect(reconnectTargets).toHaveLength(27);
         expect(snapshotRequests).toHaveLength(2);
         expect(snapshotRequests[0]).toEqual({
           includeCredentialMaterial: false,
-          sourceProviderSlug: "whoop_v2",
         });
         expect(snapshotRequests[1]).toMatchObject({
           includeCredentialMaterial: false,
           limit: 32,
-          sourceProviderSlug: "whoop_v2",
         });
         expect(snapshotRequests[1]?.cursor).toEqual(expect.any(Object));
+        expect(connectionRead).toHaveBeenCalledTimes(2);
         expect(sourceRead).toHaveBeenCalledTimes(2);
         expect(prompt).toContain("WHOOP currently needs reconnect");
         expect(prompt).toContain("`TOKEN_REFRESH_STATE_UNKNOWN`");
