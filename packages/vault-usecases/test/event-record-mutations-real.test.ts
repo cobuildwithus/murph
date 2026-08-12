@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,7 +9,9 @@ import {
   importDeviceBatch,
   initializeVault,
   readJsonlRecords,
+  VaultError,
 } from "@murphai/core";
+import { summarizeWearableSourceHealthRuntime } from "@murphai/query";
 import { test } from "vitest";
 
 import { editEventRecord } from "../src/usecases/event-record-mutations.js";
@@ -29,6 +31,13 @@ function buildWhoopSleep(resourceId: string, sleepType?: "main_sleep") {
       resourceType: "sleep",
       resourceId,
       version: WHOOP_SLEEP_VERSION,
+    },
+    dataOrigin: {
+      version: 1 as const,
+      sourceProviderSlug: "whoop",
+      sourceType: "watch",
+      observedAtRaw: "2026-06-03T06:30:00.000Z",
+      timestampSemantics: "utc" as const,
     },
     fields: {
       startAt: "2026-06-03T06:30:00.000Z",
@@ -69,6 +78,17 @@ async function readEventShards(vaultRoot: string, relativePaths: readonly string
       bytes: await readFile(path.join(vaultRoot, relativePath)),
     })),
   );
+}
+
+async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, Buffer>> {
+  const snapshot = new Map<string, Buffer>();
+  for (const relativePath of await readdir(vaultRoot, { recursive: true })) {
+    const absolutePath = path.join(vaultRoot, relativePath);
+    if ((await stat(absolutePath)).isFile()) {
+      snapshot.set(relativePath, await readFile(absolutePath));
+    }
+  }
+  return snapshot;
 }
 
 test("WHOOP sleep-type enrichment preserves a newer edit from the real event mutation path", async () => {
@@ -132,14 +152,18 @@ test("WHOOP sleep-type enrichment preserves a newer edit from the real event mut
     });
     assert.equal(preservedEdit?.id, editedEventId);
     assert.equal(preservedEdit?.lifecycle?.revision, 2);
-    assert.equal(preservedEdit?.source, "device");
+    assert.equal(preservedEdit?.source, "manual");
     assert.equal(preservedEdit?.title, "Corrected overnight sleep");
     assert.equal(preservedEdit?.timeZone, "America/Los_Angeles");
     assert.equal(preservedEdit?.dayKey, "2026-06-02");
+    assert.equal(preservedEdit?.externalRef?.system, "whoop");
+    assert.equal(preservedEdit?.dataOrigin?.sourceProviderSlug, "whoop");
     assert.equal(
       preservedEdit?.kind === "sleep_session" ? preservedEdit.sleepType : undefined,
       undefined,
     );
+    const sourceHealth = await summarizeWearableSourceHealthRuntime(vaultRoot);
+    assert.ok(sourceHealth.some((entry) => entry.provider === "whoop"));
 
     const enrichedUntouched = await findEventByExternalRef({
       vaultRoot,
@@ -243,7 +267,7 @@ test("WHOOP typed-sleep replay preserves an explicitly cleared type", async () =
     });
     assert.equal(preservedClear?.id, eventId);
     assert.equal(preservedClear?.lifecycle?.revision, 2);
-    assert.equal(preservedClear?.source, "device");
+    assert.equal(preservedClear?.source, "manual");
     assert.equal(
       preservedClear?.kind === "sleep_session" ? preservedClear.sleepType : undefined,
       undefined,
@@ -325,7 +349,7 @@ test("WHOOP typed-sleep replay preserves a source-retaining edit", async () => {
     });
     assert.equal(preservedEdit?.id, editedEventId);
     assert.equal(preservedEdit?.lifecycle?.revision, 2);
-    assert.equal(preservedEdit?.source, "device");
+    assert.equal(preservedEdit?.source, "manual");
     assert.equal(preservedEdit?.title, "Corrected typed overnight sleep");
     assert.equal(preservedEdit?.timeZone, "America/Los_Angeles");
     assert.equal(preservedEdit?.dayKey, "2026-06-02");
@@ -356,6 +380,244 @@ test("WHOOP typed-sleep replay preserves a source-retaining edit", async () => {
       events: mixedSnapshotEvents,
     });
     assert.deepEqual(await readEventShards(vaultRoot, eventShardPaths), beforeExactReplay);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("a real profile edit conflicts atomically with a retained authoritative provider update", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-event-edit-junction-profile-"));
+  const identity = {
+    system: "junction",
+    resourceType: "junction-apple-health-profile",
+    resourceId: "stable-profile",
+  } as const;
+  const facet = "profile-demographics";
+  const initialVersion = "2026-06-03T15:00:00.000Z";
+  const dataOrigin = {
+    version: 1 as const,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "apple-health",
+    sourceType: "phone",
+    observedAtRaw: initialVersion,
+    timestampSemantics: "offset" as const,
+  };
+  const initialInput = {
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-account",
+    importedAt: "2026-06-03T16:00:00.000Z",
+    events: [{
+      kind: "note" as const,
+      occurredAt: initialVersion,
+      recordedAt: initialVersion,
+      dayKey: "2026-06-03",
+      timeZone: "UTC",
+      title: "Junction profile",
+      note: "Reported gender: other.",
+      externalRef: { ...identity, facet, version: initialVersion },
+      dataOrigin,
+      fields: { reportedGender: "other" },
+    }],
+    authoritativeEventSets: [{
+      ...identity,
+      version: initialVersion,
+      facetPrefixes: [facet],
+      currentFacets: [facet],
+    }],
+  };
+
+  try {
+    await initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-01T12:00:00.000Z",
+      timezone: "UTC",
+    });
+    const initial = await importDeviceBatch(initialInput);
+    const eventId = initial.events[0]?.id;
+    assert.ok(eventId);
+
+    await editEventRecord({
+      vault: vaultRoot,
+      lookup: eventId,
+      entityLabel: "event",
+      set: [
+        "title=Corrected profile context",
+        "note=Member-confirmed profile context.",
+      ],
+    });
+
+    const exactReplay = await importDeviceBatch(initialInput);
+    assert.equal(exactReplay.applied, false);
+    assert.equal(exactReplay.ingestId, null);
+
+    const corrected = await findEventByExternalRef({
+      vaultRoot,
+      ...identity,
+      facet,
+    });
+    assert.equal(corrected?.id, eventId);
+    assert.equal(corrected?.lifecycle?.revision, 2);
+    assert.equal(corrected?.source, "manual");
+    assert.equal(corrected?.title, "Corrected profile context");
+    assert.equal(corrected?.note, "Member-confirmed profile context.");
+    assert.deepEqual(corrected?.externalRef, { ...identity, facet, version: initialVersion });
+    assert.deepEqual(corrected?.dataOrigin, dataOrigin);
+
+    const beforeConflict = await snapshotVaultFiles(vaultRoot);
+    const updatedVersion = "2026-06-04T15:00:00.000Z";
+    await assert.rejects(
+      importDeviceBatch({
+        vaultRoot,
+        provider: "junction",
+        accountId: "junction-account",
+        importedAt: "2026-06-04T16:00:00.000Z",
+        events: [{
+          ...initialInput.events[0],
+          occurredAt: updatedVersion,
+          recordedAt: updatedVersion,
+          note: "Reported gender: female.",
+          externalRef: { ...identity, facet, version: updatedVersion },
+          dataOrigin: { ...dataOrigin, observedAtRaw: updatedVersion },
+          fields: { reportedGender: "female" },
+        }],
+        authoritativeEventSets: [{
+          ...identity,
+          version: updatedVersion,
+          facetPrefixes: [facet],
+          currentFacets: [facet],
+        }],
+      }),
+      (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+    );
+
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
+    assert.deepEqual(
+      await findEventByExternalRef({ vaultRoot, ...identity, facet }),
+      corrected,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("a real cycle edit rejects an omitted authoritative facet and keeps provider attribution", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-event-edit-junction-cycle-"));
+  const identity = {
+    system: "junction",
+    resourceType: "junction-apple-health-menstrual-cycle",
+    resourceId: "stable-cycle",
+  } as const;
+  const facet = "menstrual-flow-2026-05-01-1";
+  const initialVersion = "2026-06-03T15:00:00.000Z";
+  const dataOrigin = {
+    version: 1 as const,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "apple-health",
+    sourceType: "phone",
+    observedAtRaw: "2026-05-01",
+    timestampSemantics: "floating" as const,
+  };
+  const initialInput = {
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-account",
+    importedAt: "2026-06-03T16:00:00.000Z",
+    events: [{
+      kind: "measurement" as const,
+      occurredAt: "2026-05-01T00:00:00.000Z",
+      recordedAt: initialVersion,
+      dayKey: "2026-05-01",
+      timeZone: "UTC",
+      title: "Junction menstrual flow",
+      externalRef: { ...identity, facet, version: initialVersion },
+      dataOrigin,
+      fields: {
+        measurements: [{
+          metric: "menstrual-flow",
+          value: 2,
+          unit: "score",
+          qualifiers: { flow: "medium" },
+        }],
+      },
+    }],
+    authoritativeEventSets: [{
+      ...identity,
+      version: initialVersion,
+      facetPrefixes: ["menstrual-flow"],
+      currentFacets: [facet],
+    }],
+  };
+
+  try {
+    await initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const initial = await importDeviceBatch(initialInput);
+    const eventId = initial.events[0]?.id;
+    assert.ok(eventId);
+
+    await editEventRecord({
+      vault: vaultRoot,
+      lookup: eventId,
+      entityLabel: "event",
+      set: [
+        "title=Corrected period length day",
+        "timeZone=America/Chicago",
+        "dayKey=2026-04-30",
+        "source=device",
+      ],
+    });
+
+    const exactReplay = await importDeviceBatch(initialInput);
+    assert.equal(exactReplay.applied, false);
+    assert.equal(exactReplay.ingestId, null);
+
+    const corrected = await findEventByExternalRef({
+      vaultRoot,
+      ...identity,
+      facet,
+    });
+    assert.equal(corrected?.id, eventId);
+    assert.equal(corrected?.lifecycle?.revision, 2);
+    assert.equal(corrected?.source, "manual");
+    assert.equal(corrected?.title, "Corrected period length day");
+    assert.equal(corrected?.dayKey, "2026-04-30");
+    assert.equal(corrected?.timeZone, "America/Chicago");
+    assert.deepEqual(corrected?.externalRef, { ...identity, facet, version: initialVersion });
+    assert.deepEqual(corrected?.dataOrigin, dataOrigin);
+
+    const beforeConflict = await snapshotVaultFiles(vaultRoot);
+    const updatedVersion = "2026-06-04T15:00:00.000Z";
+    await assert.rejects(
+      importDeviceBatch({
+        vaultRoot,
+        provider: "junction",
+        accountId: "junction-account",
+        importedAt: "2026-06-04T16:00:00.000Z",
+        events: [],
+        evidenceParts: [{
+          role: "junction-summary-menstrual-cycle",
+          fileName: "menstrual-cycle.json",
+          content: { cycleCount: 1, factCount: 0 },
+        }],
+        authoritativeEventSets: [{
+          ...identity,
+          version: updatedVersion,
+          facetPrefixes: ["menstrual-flow"],
+          currentFacets: [],
+        }],
+      }),
+      (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+    );
+
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
+    assert.deepEqual(
+      await findEventByExternalRef({ vaultRoot, ...identity, facet }),
+      corrected,
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
