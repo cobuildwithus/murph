@@ -393,6 +393,10 @@ export type AutomationDynamicToolRequest =
     }
   | {
       kind: 'invalid-automation-arguments'
+      localAtRecovery?: {
+        recoveryKey: string
+        resolvedLocalDate: string
+      }
       localAtTargetLabel?: string
       localAtTargetKey?: string
       resolvedLocalDate?: string
@@ -459,6 +463,16 @@ export function readAutomationDynamicToolRequest(input: {
         ? {
             ...(localAtAttempt
               ? {
+                  ...(localAtAttempt.explicitLocalDate &&
+                    localAtAttempt.recoveryKey
+                    ? {
+                        localAtRecovery: {
+                          recoveryKey: localAtAttempt.recoveryKey,
+                          resolvedLocalDate:
+                            localAtAttempt.explicitLocalDate,
+                        },
+                      }
+                    : {}),
                   localAtTargetKey: localAtAttempt.targetKey,
                   localAtTargetLabel: localAtAttempt.targetLabel,
                 }

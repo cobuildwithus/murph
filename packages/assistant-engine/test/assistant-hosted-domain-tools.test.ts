@@ -246,6 +246,10 @@ describe('hosted domain dynamic tools', () => {
     })
     expect(repeatedGapRequest).toMatchObject({
       kind: 'invalid-automation-arguments',
+      localAtRecovery: {
+        recoveryKey: gapRequest.localAtTargetKey,
+        resolvedLocalDate: '2026-03-08',
+      },
       localAtTargetKey: gapRequest.localAtTargetKey,
       localAtTargetLabel: 'Morning meds (morning-meds)',
       resolvedLocalDate: '2026-03-08',

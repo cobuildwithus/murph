@@ -2931,6 +2931,218 @@ text(JSON.stringify(result));
     {
       date: '2026-03-08',
       failedTime: '02:30',
+      mismatchLocalAt: {
+        date: '2026-11-01',
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+      question:
+        'For reminder "Medication reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      resolvedAt: '2026-03-08T07:30:00.000Z',
+      resolvedLocalAt: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
+    },
+    {
+      date: '2026-11-01',
+      failedTime: '01:30',
+      mismatchLocalAt: {
+        date: '2026-03-08',
+        time: '02:30',
+        timeZone: 'America/New_York',
+      },
+      question:
+        'For reminder "Medication reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      resolvedAt: '2026-11-01T06:30:00.000Z',
+      resolvedLocalAt: {
+        date: '2026-11-01',
+        fold: 'later' as const,
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+    },
+  ])('keeps invalid correlated $date retries from minting recovery state', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    date,
+    failedTime,
+    mismatchLocalAt,
+    question,
+    referenceAt,
+    resolvedAt,
+    resolvedLocalAt,
+  }) => {
+    const recoveryKey = buildTestAutomationLocalAtRecoveryKey(
+      'medication-reminder',
+    )
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Medication reminder',
+    }
+    const matchingInvalidRetry = {
+      ...failedRequest,
+      instructions: 'Send the renamed medication reminder.',
+      localAtRecoveryKey: recoveryKey,
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date,
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Renamed medication reminder',
+    }
+    const validRetry = {
+      ...failedRequest,
+      localAtRecoveryKey: recoveryKey,
+      schedule: { kind: 'at', localAt: resolvedLocalAt },
+    }
+    const responseCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Reminder result',
+      subtitle: date,
+      rowHeader: 'Reminder',
+      columns: ['Status'],
+      rows: [{ label: 'Medication', values: ['Saved'] }],
+      footer: null,
+      tracking: null,
+    } satisfies AssistantResponseCard
+
+    for (const mode of [
+      'unknown-then-valid',
+      'wrong-date-then-valid',
+      'matching-invalid',
+      'dismiss-then-stale',
+      'success-then-stale',
+    ] as const) {
+      const scenario = await prepareScriptedTurnScenario()
+      const automationRequest = vi.fn(async (
+        request: AssistantHostedAutomationToolRequest,
+      ) => {
+        if (request.action !== 'save' || request.schedule.kind !== 'at') {
+          throw new TypeError('Expected an exact one-shot save request.')
+        }
+        return {
+          action: 'save' as const,
+          automationId: 'automation-medication-reminder',
+          created: true,
+          effectiveTimeZone: 'America/New_York',
+          lookupId: 'medication-reminder',
+          nextOccurrenceAt: resolvedAt,
+          routeBinding: 'current_conversation' as const,
+          schedule: request.schedule,
+          status: 'active' as const,
+          timingVerified: true,
+          updatedAt: '2026-03-08T05:01:00.000Z',
+        }
+      })
+      const calls: unknown[] = [failedRequest]
+      if (mode === 'unknown-then-valid') {
+        calls.push({
+          ...matchingInvalidRetry,
+          localAtRecoveryKey: 'f'.repeat(64),
+          title: 'Unknown reminder',
+        }, validRetry)
+      } else if (mode === 'wrong-date-then-valid') {
+        calls.push({
+          ...matchingInvalidRetry,
+          schedule: { kind: 'at', localAt: mismatchLocalAt },
+        }, validRetry)
+      } else if (mode === 'matching-invalid') {
+        calls.push(matchingInvalidRetry)
+      } else if (mode === 'dismiss-then-stale') {
+        calls.push({
+          action: 'dismiss_local_at_recovery',
+          localAtRecoveryKey: recoveryKey,
+          resolvedLocalDate: date,
+        }, matchingInvalidRetry)
+      } else {
+        calls.push(validRetry, matchingInvalidRetry)
+      }
+      for (const request of calls) {
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(request)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: { card: responseCard },
+            name: 'attach_response_card',
+            namespace: 'murph',
+          },
+        },
+        { text: 'CARD_ATTACHED' },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        automationRelativeDateReferenceWindow: {
+          earliestAt: referenceAt,
+          latestAt: referenceAt,
+        },
+        dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        groupConversation: false,
+        hostedToolContext: {
+          automationTool: { request: automationRequest },
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        prompt: 'Set my medication reminder for tomorrow.',
+      })
+
+      if (mode === 'matching-invalid') {
+        expect(automationRequest).not.toHaveBeenCalled()
+        expect(result.responseCard).toBeNull()
+        expect(result.finalMessage).toContain(question)
+        expect(result.transcriptMessage).toContain(question)
+        expect(result.finalMessage).not.toContain(
+          'For reminder "Renamed medication reminder"',
+        )
+        continue
+      }
+
+      expect(automationRequest).toHaveBeenCalledTimes(
+        mode === 'dismiss-then-stale' ? 0 : 1,
+      )
+      expect(result.responseCard, `${mode}: ${result.finalMessage}`).toEqual(
+        responseCard,
+      )
+      expect(result.finalMessage).not.toContain('the trusted date is')
+      expect(result.transcriptMessage).not.toContain('the trusted date is')
+    }
+  })
+
+  it.each([
+    {
+      date: '2026-03-08',
+      failedTime: '02:30',
       kind: 'gap',
       mismatchDate: '2026-03-09',
       referenceAt: '2026-03-08T04:59:00.000Z',

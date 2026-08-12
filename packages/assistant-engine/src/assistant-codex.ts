@@ -4228,27 +4228,6 @@ async function runCodexAppServerTurnOnProcess(
         request: dynamicToolRequest,
         reason: 'invalid_arguments',
       }))
-      if (
-        dynamicToolRequest.kind === 'invalid-automation-arguments' &&
-        (
-          dynamicToolRequest.safeFailureCode === 'local_at_gap' ||
-          dynamicToolRequest.safeFailureCode === 'local_at_fold'
-        ) &&
-        dynamicToolRequest.resolvedLocalDate &&
-        dynamicToolRequest.localAtTargetKey &&
-        dynamicToolRequest.localAtTargetLabel
-      ) {
-        const requirement = {
-          code: dynamicToolRequest.safeFailureCode,
-          resolvedLocalDate: dynamicToolRequest.resolvedLocalDate,
-          targetKey: dynamicToolRequest.localAtTargetKey,
-          targetLabel: dynamicToolRequest.localAtTargetLabel,
-        }
-        requiredAutomationLocalAtClarifications.set(
-          buildRequiredAutomationLocalAtClarificationKey(requirement),
-          requirement,
-        )
-      }
     }
 
     if (
@@ -4448,17 +4427,25 @@ async function runCodexAppServerTurnOnProcess(
         await hostedToolContext?.beforeToolExecution?.(
           dynamicToolRequestDeliveryContextOrdinal,
         )
-        const requestedLocalAtRecovery =
-          dynamicToolRequest.kind === 'automation' &&
-            dynamicToolRequest.localAtRecovery
-            ? dynamicToolRequest.localAtRecovery
-            : dynamicToolRequest.kind ===
-                'automation-local-at-recovery-dismissal'
-              ? {
-                  recoveryKey: dynamicToolRequest.recoveryKey,
-                  resolvedLocalDate: dynamicToolRequest.resolvedLocalDate,
-                }
-              : null
+        let requestedLocalAtRecovery: {
+          recoveryKey: string
+          resolvedLocalDate: string
+        } | null = null
+        if (
+          (dynamicToolRequest.kind === 'automation' ||
+            dynamicToolRequest.kind === 'invalid-automation-arguments') &&
+          dynamicToolRequest.localAtRecovery
+        ) {
+          requestedLocalAtRecovery = dynamicToolRequest.localAtRecovery
+        } else if (
+          dynamicToolRequest.kind ===
+          'automation-local-at-recovery-dismissal'
+        ) {
+          requestedLocalAtRecovery = {
+            recoveryKey: dynamicToolRequest.recoveryKey,
+            resolvedLocalDate: dynamicToolRequest.resolvedLocalDate,
+          }
+        }
         if (requestedLocalAtRecovery) {
           const clarificationKey =
             buildRequiredAutomationLocalAtClarificationKey({
@@ -4494,6 +4481,28 @@ async function runCodexAppServerTurnOnProcess(
               },
             }
           }
+        }
+        if (
+          dynamicToolRequest.kind === 'invalid-automation-arguments' &&
+          (
+            dynamicToolRequest.safeFailureCode === 'local_at_gap' ||
+            dynamicToolRequest.safeFailureCode === 'local_at_fold'
+          ) &&
+          dynamicToolRequest.resolvedLocalDate &&
+          dynamicToolRequest.localAtTargetKey &&
+          dynamicToolRequest.localAtTargetLabel &&
+          !dynamicToolRequest.localAtRecovery
+        ) {
+          const requirement = {
+            code: dynamicToolRequest.safeFailureCode,
+            resolvedLocalDate: dynamicToolRequest.resolvedLocalDate,
+            targetKey: dynamicToolRequest.localAtTargetKey,
+            targetLabel: dynamicToolRequest.localAtTargetLabel,
+          }
+          requiredAutomationLocalAtClarifications.set(
+            buildRequiredAutomationLocalAtClarificationKey(requirement),
+            requirement,
+          )
         }
         const result = await executeMurphDynamicToolRequest({
           authorizeAcceptedMessageTarget:
@@ -5940,6 +5949,7 @@ function isSerializedDynamicToolRequest(
 ): boolean {
   return request.kind === 'automation' ||
     request.kind === 'automation-local-at-recovery-dismissal' ||
+    request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||
     request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
