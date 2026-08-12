@@ -72,8 +72,8 @@ function validActivitySnapshot(): Record<string, unknown> {
         value: 1,
       }]),
       stand_duration: source([
-        { end: `${DAY}T11:30:00.000Z`, start: `${DAY}T11:00:00.000Z`, unit: "seconds", value: 1800 },
-        { end: `${DAY}T17:45:00.000Z`, start: `${DAY}T17:00:00.000Z`, unit: "seconds", value: 2700 },
+        { end: `${DAY}T11:30:00.000Z`, start: `${DAY}T11:00:00.000Z`, unit: "milliseconds", value: 1_800_000 },
+        { end: `${DAY}T17:45:00.000Z`, start: `${DAY}T17:00:00.000Z`, unit: "milliseconds", value: 2_700_000 },
       ]),
       stand_hour: source([
         { end: `${DAY}T11:00:00.000Z`, start: `${DAY}T10:00:00.000Z`, unit: "count", value: 1 },
@@ -96,8 +96,8 @@ function validActivitySnapshot(): Record<string, unknown> {
         end: WORKOUT_END,
         intensity: "medium",
         start: START,
-        unit: "seconds",
-        value: 2880,
+        unit: "minutes",
+        value: 48,
       }]),
       workout_swimming_stroke: source([
         { end: END, sport: "swimming", start: START, timestamp: `${DAY}T12:01:00.000Z`, unit: "count", value: 20, workout_id: "workout-swim-1" },
