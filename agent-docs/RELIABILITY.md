@@ -630,6 +630,13 @@ Last verified: 2026-08-11
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
   and authority failures, other HTTP responses, malformed data, and unclassified
   errors remain terminal; the runtime must not create a second artifact retry queue.
+- A successful hosted checkpoint gets one best-effort, wake-raced vault-share
+  projection opportunity before device-sync dirty acknowledgement or the next
+  complete device-sync-only maintenance prefix. A conversation wake preempts
+  immediately and leaves acknowledgement replayable. Projection errors remain
+  fail-soft; this ordering reuses the existing dirty record, checkpoint, and
+  Web-owned replacement snapshot instead of adding a projection retry queue,
+  group wake fanout, or second freshness watermark.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;

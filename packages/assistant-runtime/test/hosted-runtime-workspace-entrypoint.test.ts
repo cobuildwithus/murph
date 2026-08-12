@@ -11072,6 +11072,15 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             deviceSyncPort,
             mailboxPort: createMailboxPort({ events, items: [] }),
+            vaultSharePort: {
+              async listActiveProjectionScopes() {
+                return [{ projectionKind: "sleep-times.v0" }];
+              },
+              async deliver() {
+                events.push("vault-share.deliver");
+                return { status: "delivered" };
+              },
+            },
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
@@ -11091,8 +11100,19 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(dirtyAckCalls, 1);
       assert.equal(browserWriteCalls, 1);
       assert.equal(browserPublishCalls, 1);
+      assert.ok(events.includes("vault-share.deliver"), JSON.stringify(events));
       assert.ok(
         requireEventIndex(events, "browser-vault.publish")
+          < requireEventIndex(events, "device-sync.dirty-ack"),
+        JSON.stringify(events),
+      );
+      assert.ok(
+        requireEventIndex(events, "workspace.checkpoint")
+          < requireEventIndex(events, "vault-share.deliver"),
+        JSON.stringify(events),
+      );
+      assert.ok(
+        requireEventIndex(events, "vault-share.deliver")
           < requireEventIndex(events, "device-sync.dirty-ack"),
         JSON.stringify(events),
       );
@@ -23405,10 +23425,21 @@ describe("hosted workspace runtime entrypoint", () => {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             return {
+              ...(assistantPhaseCalls === 1
+                ? {
+                    afterCheckpoint: async () => ({
+                      afterDurableCheckpoint: async () => {
+                        events.push("device-sync.dirty-ack");
+                      },
+                      checkpointReason: "assistant_runtime_commit" as const,
+                    }),
+                    checkpointReason: "assistant_runtime_commit" as const,
+                  }
+                : {}),
               nextWakeAt: null,
-              progressed: false,
+              progressed: assistantPhaseCalls === 1,
               redactedStatus: {
-                hostedAssistantProgressed: false,
+                hostedAssistantProgressed: assistantPhaseCalls === 1,
               },
             };
           },
@@ -23465,6 +23496,11 @@ describe("hosted workspace runtime entrypoint", () => {
       offerRelease.resolve();
       const result = await withRealTimeout(resultPromise, 15_000, () => events.join(","));
 
+      assert.ok(
+        requireEventIndex(events, "vault-share.deliver:done")
+          < requireEventIndex(events, "device-sync.dirty-ack"),
+        events.join(","),
+      );
       for (const laneSeq of ["2", "3"] as const) {
         assert.ok(
           requireEventIndex(events, "vault-share.deliver:done")
@@ -23508,7 +23544,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("keeps an explicit device command beyond a full dirty prefix ahead of projection", async () => {
+  test("keeps an incomplete device-sync prefix foreground", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-vault-share-hidden-command-"),
     );
@@ -24411,7 +24447,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("lets explicit device commands and fresh conversation preempt a stalled vault-share offer", async () => {
+  test("holds device-sync maintenance behind projection while conversation preempts", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-vault-share-conversation-preempt-"),
     );
@@ -24623,18 +24659,13 @@ describe("hosted workspace runtime entrypoint", () => {
         5_000,
         () => events.join(","),
       );
-      await withRealTimeout(
-        waitUntil(() => {
-          for (const command of explicitDeviceCommands) {
-            assert.ok(
-              events.includes(`mailbox.importItem:${command.id}`),
-              events.join(","),
-            );
-          }
-        }),
-        5_000,
-        () => events.join(","),
-      );
+      for (const command of explicitDeviceCommands) {
+        assert.equal(
+          events.includes(`mailbox.importItem:${command.id}`),
+          false,
+          events.join(","),
+        );
+      }
       assert.equal(events.includes("vault-share.deliver:done"), false, events.join(","));
 
       mailboxItems.push(createMailboxItem({
@@ -24650,6 +24681,12 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(events.includes("vault-share.deliver:done"), false, events.join(","));
+      for (const command of explicitDeviceCommands) {
+        assert.ok(
+          events.includes(`mailbox.importItem:${command.id}`),
+          events.join(","),
+        );
+      }
       assert.ok(events.includes(
         "mailbox.importItem:mailbox_item_entrypoint_vault_share_preempt_conversation",
       ));

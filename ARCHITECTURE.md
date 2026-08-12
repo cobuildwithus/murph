@@ -47,6 +47,12 @@ sharing state or persist a copy in the workspace. Private self-leave atomically
 removes the non-owner membership and its shares under Web ownership. It does
 not append a runtime cleanup wake. Other permission mutations remain on the
 authenticated group join page or route-bound group-chat offer flow.
+After a successful personal checkpoint, the runtime offers complete replacement
+snapshots before a complete device-sync-only maintenance prefix may resume;
+the dedicated system-mailbox lane likewise offers before acknowledging imported
+dirty state. Conversation work still preempts the offer. Group reads query the
+current Web-owned snapshot on demand, so publication adds no per-group wake,
+cache invalidation, fanout, or second projection owner.
 After an authenticated group join or sharing save, the page reuses the
 dashboard auth owner's first-checkout decision: a member who still requires
 checkout continues directly to `/join`, while an accessible member retains the
