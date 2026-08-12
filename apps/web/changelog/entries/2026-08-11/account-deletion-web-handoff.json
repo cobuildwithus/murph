@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 100,
+  "item": {
+    "id": "account-deletion-web-handoff",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer account deletion on the web",
+    "summary": "Murph's web deletion page now explains how to remove an account even when the Android app is no longer installed.",
+    "details": "The page names what the request covers, the usual active-system and backup deletion targets, limited reasons records may remain longer, and where to request help or partial deletion.",
+    "relevanceTags": ["settings", "privacy", "account"],
+    "sourcePullRequests": [1717],
+    "tryIt": {
+      "href": "/settings/data-privacy",
+      "label": "Manage your data"
+    }
+  }
+}
