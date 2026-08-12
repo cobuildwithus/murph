@@ -159,12 +159,18 @@ export async function readHostedRuntimeProgressHealth(input: {
   const retainedAfter = new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
   const alertableRows: HostedRuntimeProgressQueryRow[] = [];
   let cursor: HostedRuntimeProgressReadCursor | null = null;
+  let candidateRowCount = 0;
   let excludedInactiveLaneCount = 0;
   let excludedUsageBlockedConversationLaneCount = 0;
 
-  while (alertableRows.length <= HOSTED_RUNTIME_PROGRESS_READ_LIMIT) {
+  while (candidateRowCount <= HOSTED_RUNTIME_PROGRESS_READ_LIMIT) {
+    const pageLimit = Math.min(
+      HOSTED_RUNTIME_PROGRESS_READ_PAGE_SIZE,
+      HOSTED_RUNTIME_PROGRESS_READ_LIMIT + 1 - candidateRowCount,
+    );
     const page = await readHostedRuntimeProgressCandidatePage({
       cursor,
+      limit: pageLimit,
       now,
       prisma,
       retainedAfter,
@@ -174,12 +180,21 @@ export async function readHostedRuntimeProgressHealth(input: {
       break;
     }
 
-    const allowedRuntimeKeys = await readHostedRuntimeAiAllowedMemberIds({
-      memberIds: [...new Set(page.map((row) => row.runtimeKey))],
-      now,
-      prisma,
-    });
-    for (const row of page) {
+    const remainingVisibleCandidateCount = Math.max(
+      0,
+      HOSTED_RUNTIME_PROGRESS_READ_LIMIT - candidateRowCount,
+    );
+    const visiblePage = page.slice(0, remainingVisibleCandidateCount);
+    candidateRowCount += page.length;
+
+    const allowedRuntimeKeys = visiblePage.length === 0
+      ? new Set<string>()
+      : await readHostedRuntimeAiAllowedMemberIds({
+          memberIds: [...new Set(visiblePage.map((row) => row.runtimeKey))],
+          now,
+          prisma,
+        });
+    for (const row of visiblePage) {
       if (!allowedRuntimeKeys.has(row.runtimeKey)) {
         excludedInactiveLaneCount += 1;
         continue;
@@ -189,9 +204,6 @@ export async function readHostedRuntimeProgressHealth(input: {
         continue;
       }
       alertableRows.push(row);
-      if (alertableRows.length > HOSTED_RUNTIME_PROGRESS_READ_LIMIT) {
-        break;
-      }
     }
 
     const last = page.at(-1);
@@ -204,24 +216,21 @@ export async function readHostedRuntimeProgressHealth(input: {
       runtimeKey: last.runtimeKey,
     };
     if (
-      alertableRows.length > HOSTED_RUNTIME_PROGRESS_READ_LIMIT
-      || page.length < HOSTED_RUNTIME_PROGRESS_READ_PAGE_SIZE
+      candidateRowCount > HOSTED_RUNTIME_PROGRESS_READ_LIMIT
+      || page.length < pageLimit
     ) {
       break;
     }
   }
 
   const scanTruncated =
-    alertableRows.length > HOSTED_RUNTIME_PROGRESS_READ_LIMIT;
-  const visibleRows = scanTruncated
-    ? alertableRows.slice(0, HOSTED_RUNTIME_PROGRESS_READ_LIMIT)
-    : alertableRows;
+    candidateRowCount > HOSTED_RUNTIME_PROGRESS_READ_LIMIT;
   return summarizeHostedRuntimeProgressRows({
-    activeRuntimeKeys: [...new Set(visibleRows.map((row) => row.runtimeKey))],
+    activeRuntimeKeys: [...new Set(alertableRows.map((row) => row.runtimeKey))],
     excludedInactiveLaneCount,
     excludedUsageBlockedConversationLaneCount,
     now,
-    rows: visibleRows,
+    rows: alertableRows,
     scanTruncated,
   });
 }
@@ -234,6 +243,7 @@ interface HostedRuntimeProgressReadCursor {
 
 async function readHostedRuntimeProgressCandidatePage(input: {
   cursor: HostedRuntimeProgressReadCursor | null;
+  limit: number;
   now: Date;
   prisma: Pick<PrismaClient, "$queryRaw">;
   retainedAfter: Date;
@@ -282,7 +292,6 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         lane_boundary.user_id,
         lane_boundary.lane,
         pending_head.ai_usage_denied_at AS head_usage_denied_at,
-        pending_head.consumed_at AS head_consumed_at,
         pending_head.created_at AS head_created_at,
         pending_head.id AS head_item_id,
         pending_head.pending_count
@@ -290,7 +299,6 @@ async function readHostedRuntimeProgressCandidatePage(input: {
       JOIN LATERAL (
         SELECT
           mailbox_item.ai_usage_denied_at,
-          mailbox_item.consumed_at,
           mailbox_item.created_at,
           mailbox_item.id,
           COUNT(*) OVER () AS pending_count
@@ -298,6 +306,10 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         WHERE mailbox_item.user_id = lane_boundary.user_id
           AND mailbox_item.lane = lane_boundary.lane
           AND mailbox_item.lane_seq > lane_boundary.effective_consumed_seq
+          AND (
+            lane_boundary.lane <> 'conversation'
+            OR mailbox_item.consumed_at IS NULL
+          )
           AND mailbox_item.created_at > ${input.retainedAfter}
           AND (
             mailbox_item.expires_at IS NULL
@@ -342,8 +354,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           VALUES
             (trace.assistant_input_staged_at),
             (trace.provider_start_at),
-            (delivery.accepted_at),
-            (lagging_lane.head_consumed_at)
+            (delivery.accepted_at)
         ) AS execution_evidence(at)
         WHERE execution_evidence.at IS NOT NULL
       ) AS evidence ON TRUE
@@ -404,7 +415,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
       progress_lane.progress_origin_at ASC,
       progress_lane.user_id ASC,
       progress_lane.lane ASC
-    LIMIT ${HOSTED_RUNTIME_PROGRESS_READ_PAGE_SIZE}
+    LIMIT ${input.limit}
   `);
 }
 

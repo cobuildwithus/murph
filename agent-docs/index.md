@@ -64,6 +64,13 @@ without generic-notification admission, are jointly specified by `ARCHITECTURE.m
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
+Hosted runtime-progress monitoring and Linq exact-consume reaction confirmation,
+including consumed conversation exclusion before lane head/count selection,
+bounded raw candidate scans, receipt-backed confirmation-failure ownership, and
+provider-no-replay recovery, are jointly specified by
+`agent-docs/RELIABILITY.md` and
+`agent-docs/references/hosted-runtime-protocol.md`.
+
 Independent partial PlanetScale metric normalization, explicit unknown-family
 evidence, continued evaluation of available database signals, and one-shot
 telemetry-only operator paging with unresolved-window coalescing, current-pressure
