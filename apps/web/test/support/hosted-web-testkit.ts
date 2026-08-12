@@ -73,6 +73,7 @@ import type {
   HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedVaultShareProjectionMode,
   HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import { Client } from "pg";
@@ -203,6 +204,7 @@ interface HostedVaultShareProjectionStoreForTestModule {
   findActiveHostedVaultShares(input: {
     grantorMemberId: string;
     prisma: HostedTestPrismaClient;
+    projectionMode?: HostedVaultShareProjectionMode;
     projectionScope: HostedVaultShareProjectionScope;
   }): Promise<Array<{
     destinationMemberId: string;
@@ -214,6 +216,7 @@ interface HostedVaultShareProjectionStoreForTestModule {
   }>>;
   replaceHostedVaultShareProjectionSnapshot(input: {
     prisma: HostedTestPrismaClient;
+    projectionMode?: HostedVaultShareProjectionMode;
     records: [];
     share: {
       destinationMemberId: string;

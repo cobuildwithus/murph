@@ -16,6 +16,7 @@ import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
+import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
 import {
   createDeviceSyncService,
   resolveDeviceSyncStoreNextWakeAt,
@@ -1099,10 +1100,12 @@ test("persisted provider-projected disconnects can recover an evidence-bearing p
       "connected",
     );
     assert.equal(importedSnapshots.length > 0, true);
-    assert.equal(
-      store.getAccountById(account.id)?.metadata.junctionBloodPressureHistoryBackfillCoverage,
-      "v1|omron",
-    );
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      store.getAccountById(account.id)?.metadata ?? {},
+      "omron",
+      "blood_pressure",
+      1,
+    ), true);
   } finally {
     close();
   }
@@ -1282,10 +1285,12 @@ test("hosted listed-only recovery publishes connected before pressure egress res
     }
 
     assert.equal(importedSnapshots.length > 0, true);
-    assert.equal(
-      store.getAccountById(account.id)?.metadata.junctionBloodPressureHistoryBackfillCoverage,
-      "v1|omron",
-    );
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      store.getAccountById(account.id)?.metadata ?? {},
+      "omron",
+      "blood_pressure",
+      1,
+    ), true);
   } finally {
     close();
   }
@@ -1923,6 +1928,114 @@ test("device sync service scheduler queues due active jobs and skips unsupported
   assert.equal(countJobsForAccountForTesting(store, disconnected.id), 0);
 
   close();
+});
+
+test("device sync service defers unretainable Junction history without surfacing account errors", async () => {
+  let now = new Date("2026-06-11T12:00:00.000Z");
+  const timeseriesWindowStarts: string[] = [];
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-history-capacity");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        return { ok: true };
+      },
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60 * 60_000,
+        summaryResources: [],
+        timeseriesResources: ["caffeine"],
+        fetchImpl: async (input) => {
+          const url = new URL(readUrl(input));
+          if (url.pathname === "/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [{
+                id: "provider-omron-1",
+                slug: "omron",
+                name: "Omron",
+                status: "connected",
+                resource_availability: { caffeine: true },
+              }],
+            });
+          }
+          if (url.pathname === "/v2/timeseries/junction-user-1/caffeine/grouped") {
+            timeseriesWindowStarts.push(url.searchParams.get("start_date") ?? "");
+            return createJsonResponse({ groups: {} });
+          }
+          if (url.pathname.startsWith("/v2/summary/")) {
+            return createJsonResponse({ data: [] });
+          }
+          throw new Error(`Unexpected Junction capacity test request: ${url.toString()}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      metadata: Object.fromEntries(
+        Array.from({ length: 16 }, (_, index) => [`capacityFact${index}`, index]),
+      ),
+      connectedAt: "2026-01-01T00:00:00.000Z",
+      nextReconcileAt: now.toISOString(),
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "omron",
+      sourceProviderSlug: "omron",
+      status: "connected",
+      resourceAvailabilitySummary: { caffeine: true },
+      lastSeenAt: now.toISOString(),
+    });
+
+    await service.runSchedulerOnce();
+    const scheduledKinds = listJobKindsForAccountForTesting(store, account.id);
+    assert.equal(scheduledKinds.includes("reconcile"), true);
+    assert.equal(scheduledKinds.includes("resource"), false);
+    const manualKinds = service.queueManualReconcile(account.id).jobs.map((job) => job.kind);
+    assert.equal(manualKinds.includes("reconcile"), true);
+    assert.equal(manualKinds.includes("resource"), false);
+
+    const processed = await service.runWorkerOnce();
+    assert.equal(processed?.kind, "reconcile");
+    assert.equal(store.getJobById(processed.id)?.status, "succeeded");
+    assert.equal(store.getAccountById(account.id)?.lastErrorCode, null);
+    assert.equal(
+      timeseriesWindowStarts.some((start) => start < "2026-05-28"),
+      false,
+    );
+
+    now = new Date("2026-06-11T13:00:00.000Z");
+    await service.runSchedulerOnce();
+    const jobs = readJobsForAccountForTesting(store, account.id);
+    assert.equal(jobs.filter((job) => job.kind === "resource").length, 0);
+    assert.equal(jobs.filter((job) => job.status === "dead").length, 0);
+    assert.equal(jobs.filter((job) => job.kind === "reconcile").length, 2);
+    assert.equal(store.getAccountById(account.id)?.lastErrorCode, null);
+  } finally {
+    close();
+  }
 });
 
 test("device sync service keeps pending external-link setup out of manual, scheduled, and worker execution", async () => {

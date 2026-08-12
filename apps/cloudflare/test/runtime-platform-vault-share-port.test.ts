@@ -35,6 +35,8 @@ import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { createHostedWebVaultSharePort } from "../src/runtime-platform/vault-share-port.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
+const GENERATION_TOKEN = "a".repeat(43);
+
 beforeEach(() => {
   mocks.fetchHostedExecutionWebControlPlaneResponse.mockReset();
 });
@@ -131,6 +133,7 @@ describe("createHostedWebVaultSharePort", () => {
 
     let deliverySettled = false;
     const delivery = vaultSharePort.deliver({
+      expectedGenerationToken: GENERATION_TOKEN,
       projectionKind: "profile-name.v0",
       projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
       records: [],
@@ -221,6 +224,7 @@ describe("createHostedWebVaultSharePort", () => {
     });
 
     await expect(vaultSharePort.deliver({
+      expectedGenerationToken: GENERATION_TOKEN,
       projectionKind: "profile-name.v0",
       projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
       records: [],
@@ -255,6 +259,7 @@ describe("createHostedWebVaultSharePort", () => {
       });
 
       await expect(vaultSharePort.deliver({
+        expectedGenerationToken: GENERATION_TOKEN,
         projectionKind: "profile-name.v0",
         projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
         records: [],
@@ -319,6 +324,7 @@ describe("createHostedWebVaultSharePort", () => {
       let deliverySettled = false;
 
       const delivery = vaultSharePort.deliver({
+        expectedGenerationToken: GENERATION_TOKEN,
         projectionKind: "profile-name.v0",
         projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
         records: [],
@@ -372,6 +378,7 @@ describe("createHostedWebVaultSharePort", () => {
       let deliverySettled = false;
 
       const delivery = vaultSharePort.deliver({
+        expectedGenerationToken: GENERATION_TOKEN,
         projectionKind: "profile-name.v0",
         projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
         records: [],
@@ -423,6 +430,7 @@ describe("createHostedWebVaultSharePort", () => {
       let deliverySettled = false;
 
       const delivery = vaultSharePort.deliver({
+        expectedGenerationToken: GENERATION_TOKEN,
         projectionKind: "profile-name.v0",
         projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
         records: [],

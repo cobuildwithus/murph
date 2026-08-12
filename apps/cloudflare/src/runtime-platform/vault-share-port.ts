@@ -1,13 +1,17 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
   HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverResponse,
+  type HostedVaultShareProjectionMode,
 } from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
@@ -30,25 +34,25 @@ export function createHostedWebVaultSharePort(input: {
 }): NonNullable<HostedRuntimePlatform["vaultSharePort"]> {
   return {
     async listActiveProjectionScopes(
-      context?: Parameters<
+      request: Parameters<
         NonNullable<HostedRuntimePlatform["vaultSharePort"]>["listActiveProjectionScopes"]
-      >[0],
+      >[0] = {},
     ) {
-      const signal = context?.signal ?? null;
+      const signal = request.signal ?? null;
       const payload = await runWithExactCallerAbort(signal, async () =>
         await fetchHostedWebControlPlaneJson({
           boundUserId: input.boundUserId,
           description: "Hosted vault share active projection scopes",
           fetchImpl: input.fetchImpl,
           method: "GET",
-          path: buildHostedVaultShareActiveKindsPath(),
+          path: buildHostedVaultShareActiveKindsPath(request.projectionMode),
           signal,
           timeoutMs: input.timeoutMs,
           transport: input.transport,
         })
       );
 
-      return parseHostedVaultShareActiveProjectionKindsResponse(payload).projectionScopes;
+      return parseHostedVaultShareActiveProjectionKindsResponse(payload);
     },
     async deliver(
       request: Parameters<
@@ -141,13 +145,22 @@ async function runWithExactCallerAbort<T>(
   }
 }
 
-function buildHostedVaultShareActiveKindsPath(): string {
+function buildHostedVaultShareActiveKindsPath(
+  projectionMode?: HostedVaultShareProjectionMode,
+): string {
   const params = new URLSearchParams();
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
     params.append(
       HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,
       buildHostedVaultShareProjectionScopeKey(projectionScope),
     );
+  }
+  params.set(
+    HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+    HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+  );
+  if (projectionMode) {
+    params.set(HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM, projectionMode);
   }
 
   return `${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}?${params.toString()}`;

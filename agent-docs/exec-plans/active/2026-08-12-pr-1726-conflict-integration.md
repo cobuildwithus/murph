@@ -46,9 +46,9 @@ Updated: 2026-08-12
 
 1. [x] Inspect both exact reviewed heads, their conflict set, prior findings,
    deployment contracts, and focused proof.
-2. [ ] Merge the landed PR 1688 head, resolve every overlap by preserving both
+2. [x] Merge the landed PR 1688 head, resolve every overlap by preserving both
    reviewed mechanisms, and add only missing integration coverage.
-3. [ ] Run focused tests, affected typechecks, docs guards, production runner
+3. [x] Run focused tests, affected typechecks, docs guards, production runner
    assembly, diff/privacy checks, and parent review.
 4. [ ] Push the exact candidate, run the applicable ReviewGPT continuation and
    exact-head CI, resolve accepted findings, and prove current-base mergeability.
@@ -67,4 +67,14 @@ Updated: 2026-08-12
 
 ## Verification
 
-- Pending.
+- Four affected TypeScript package/app typechecks pass.
+- Focused vault-share projection, mailbox recording, workspace preemption,
+  hosted-execution contract, Web read/store/route, and Cloudflare transport and
+  bundle-budget tests pass. Timing-sensitive workspace cases also pass alone
+  after the overloaded concurrent aggregate exceeded their fixed wall clocks.
+- `pnpm docs:drift`, `pnpm docs:gardening`, and the production Cloudflare runner
+  assembly pass. The integrated runner graph measured 1,689,721B entry,
+  7,992,470B static closure, and 9,975,121B total with no forbidden boot input.
+- The staged patch is conflict-marker-free, whitespace-clean, and contains no
+  home-directory paths. Parent inspection confirmed one immutable capture and
+  delivery owner carries generation, mode, deadline, and source-version proof.

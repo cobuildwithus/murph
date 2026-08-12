@@ -606,7 +606,6 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       },
       sourceWorkspaceVersion: "7",
     })).resolves.toBe("replaced");
-
     const result = await readHostedGroupSharedDataByRuntimeMemberId({
       prisma,
       projectionScopes: [STEPS_SCOPE],
@@ -618,6 +617,42 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       throw new Error("Expected the projected group snapshot to be readable.");
     }
     expect(result.members[0]?.projections[0]?.records).toEqual([record]);
+  });
+
+  it("reports an active readable grant as pending until its first snapshot materializes", async () => {
+    const pendingShare = shareRow({
+      id: "share_steps_pending",
+      memberId: "member_a",
+      projectionScope: STEPS_SCOPE,
+    });
+    const { prisma } = createPrisma({ shares: [pendingShare] });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [STEPS_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.members.map((member) => member.projections[0])).toEqual([
+      expect.objectContaining({
+        dataStatus: "pending",
+        grantedAt: GRANTED_AT.toISOString(),
+        grantStatus: "granted",
+        records: [],
+      }),
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "not_granted",
+        records: [],
+      }),
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "not_granted",
+        records: [],
+      }),
+    ]);
   });
 
   it("returns scoped participant keys and the complete matrix when names collide", async () => {
@@ -1339,7 +1374,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         records: [],
       }),
       expect.objectContaining({
-        dataStatus: "missing",
+        dataStatus: "pending",
         grantStatus: "granted",
         records: [],
       }),
@@ -1361,7 +1396,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         records: [],
       }),
       expect.objectContaining({
-        dataStatus: "missing",
+        dataStatus: "pending",
         grantStatus: "granted",
         records: [],
       }),

@@ -28,6 +28,8 @@ import {
 } from "@/src/lib/hosted-onboarding/errors";
 import {
   findActiveHostedVaultShares,
+  buildHostedVaultShareGenerationToken,
+  hasUnmaterializedHostedVaultShareProjectionGeneration,
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -51,9 +53,10 @@ const DELIVERED_RESPONSE: HostedVaultShareDeliverResponse = {
  * kinds, then this write seam revalidates the requested kind before fanout. Web remains
  * the sole authority: each replacement transaction validates both members' access and
  * conditionally updates the exact active HostedVaultShare generation. The response is a
- * function of share configuration alone — no grants, only inactive destinations, or only
- * stale generations resolves to `no-active-share`; everything else resolves to a bare
- * `delivered`, so the grantor runtime learns nothing beyond "an active share exists".
+ * function of share configuration alone. A missing current grant resolves to
+ * `no-active-share`; a temporarily inactive or changed generation with unmaterialized
+ * approved work returns a generic retryable error so the durable runtime obligation is
+ * retained without revealing a destination or fan-out count.
  */
 export const POST = withJsonError(async (request: Request) => {
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {
@@ -69,13 +72,41 @@ export const POST = withJsonError(async (request: Request) => {
     Math.max(0, effectDeadlineAtEpochMs - Date.now()),
   );
   const effectSignal = AbortSignal.any([request.signal, effectTimeoutSignal]);
-  const body = parseHostedVaultShareDeliverRequest(await readOptionalJsonObject(request));
+  const rawBody = await readOptionalJsonObject(request);
+  if (rawBody.expectedGenerationToken === undefined) {
+    throw hostedOnboardingError({
+      code: "HOSTED_VAULT_SHARE_GENERATION_PROOF_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted vault-share delivery requires current generation proof. Retry the request.",
+      retryable: true,
+    });
+  }
+  const body = parseHostedVaultShareDeliverRequest(rawBody);
 
   const shares = await findActiveHostedVaultShares({
     grantorMemberId,
+    ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
     projectionScope: body.projectionScope,
   });
   if (shares.length === 0) {
+    if (await hasUnmaterializedHostedVaultShareProjectionGeneration({
+      grantorMemberId,
+      projectionScope: body.projectionScope,
+    })) {
+      throw createHostedVaultShareDeliveryDeferredError();
+    }
+    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
+  }
+  if (
+    body.expectedGenerationToken
+      !== buildHostedVaultShareGenerationToken(shares.map((share) => share.id))
+  ) {
+    if (await hasUnmaterializedHostedVaultShareProjectionGeneration({
+      grantorMemberId,
+      projectionScope: body.projectionScope,
+    })) {
+      throw createHostedVaultShareDeliveryDeferredError();
+    }
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
 
@@ -86,6 +117,7 @@ export const POST = withJsonError(async (request: Request) => {
   let delivered = false;
   let deliveryFailed = false;
   let scopeFailed = false;
+  let deliveryDeferred = false;
 
   for (const share of shares) {
     if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
@@ -95,12 +127,14 @@ export const POST = withJsonError(async (request: Request) => {
     try {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
         deadlineAtEpochMs: effectDeadlineAtEpochMs,
+        ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
         records,
         share,
         signal: effectSignal,
         sourceWorkspaceVersion: body.sourceWorkspaceVersion,
       });
       delivered ||= outcome === "replaced";
+      deliveryDeferred ||= outcome === "no-active-share";
     } catch (error) {
       if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
         deliveryFailed = true;
@@ -136,6 +170,9 @@ export const POST = withJsonError(async (request: Request) => {
       HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
     );
   }
+  if (deliveryDeferred) {
+    throw createHostedVaultShareDeliveryDeferredError();
+  }
 
   return jsonOk(delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE);
 });
@@ -149,6 +186,15 @@ function createHostedVaultShareDeliveryError(
     code,
     httpStatus: 503,
     message: "Hosted vault-share delivery failed. Retry the request.",
+    retryable: true,
+  });
+}
+
+function createHostedVaultShareDeliveryDeferredError(): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
+    httpStatus: 503,
+    message: "Hosted vault-share delivery has deferred approved work. Retry the request.",
     retryable: true,
   });
 }

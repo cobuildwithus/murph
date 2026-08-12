@@ -175,81 +175,9 @@ export async function readHostedRuntimeLatencyHealth(input: {
   const windowStart = new Date(
     now.getTime() - HOSTED_RUNTIME_LATENCY_UNRESOLVED_WINDOW_MS,
   );
-  const rows = await prisma.$queryRaw<HostedRuntimeLatencyQueryRow[]>(Prisma.sql`
-    WITH latency_candidates AS (
-      SELECT
-        CASE
-          WHEN mailbox_item.ai_usage_denied_at IS NULL
-            OR mailbox_item.ai_usage_denied_at < trace.accepted_at
-            OR mailbox_item.ai_usage_denied_at > ${now}
-            OR execution.has_future_evidence
-            OR execution.has_pre_denial_evidence
-            THEN trace.accepted_at
-          ELSE execution.first_evidence_at
-        END AS latency_origin_at,
-        (
-          mailbox_item.ai_usage_denied_at IS NOT NULL
-          AND (
-            mailbox_item.ai_usage_denied_at < trace.accepted_at
-            OR mailbox_item.ai_usage_denied_at > ${now}
-            OR execution.has_future_evidence
-          )
-        ) AS usage_denial_chronology_invalid,
-        mailbox_item.consumed_at,
-        delivery.accepted_at AS delivery_accepted_at,
-        trace.linq_delivery_id,
-        trace.phase_breakdown_json,
-        trace.provider_request_ordinal,
-        trace.provider_start_at,
-        trace.runtime_attempt_id
-      FROM hosted_ingress_latency_trace AS trace
-      JOIN hosted_mailbox_item AS mailbox_item
-        ON mailbox_item.user_id = trace.user_id
-        AND mailbox_item.id = trace.mailbox_item_id
-      LEFT JOIN hosted_linq_delivery AS delivery
-        ON delivery.id = trace.linq_delivery_id
-      LEFT JOIN LATERAL (
-        SELECT
-          MIN(evidence.at) AS first_evidence_at,
-          COALESCE(
-            BOOL_OR(evidence.at <= mailbox_item.ai_usage_denied_at),
-            FALSE
-          ) AS has_pre_denial_evidence,
-          COALESCE(BOOL_OR(evidence.at > ${now}), FALSE) AS has_future_evidence
-        FROM (
-          VALUES
-            (trace.assistant_input_staged_at),
-            (trace.provider_start_at),
-            (delivery.accepted_at),
-            (mailbox_item.consumed_at)
-        ) AS evidence(at)
-        WHERE evidence.at IS NOT NULL
-      ) AS execution ON TRUE
-      WHERE trace.source = 'linq'
-        AND (
-          trace.accepted_at >= ${windowStart}
-          OR trace.assistant_input_staged_at >= ${windowStart}
-          OR trace.provider_start_at >= ${windowStart}
-          OR delivery.accepted_at >= ${windowStart}
-          OR mailbox_item.consumed_at >= ${windowStart}
-        )
-    )
-    SELECT
-      latency_origin_at AS "acceptedAt",
-      consumed_at AS "consumedAt",
-      delivery_accepted_at AS "deliveryAcceptedAt",
-      linq_delivery_id AS "linqDeliveryId",
-      phase_breakdown_json AS "phaseBreakdownJson",
-      provider_request_ordinal AS "providerRequestOrdinal",
-      provider_start_at AS "providerStartAt",
-      runtime_attempt_id AS "runtimeAttemptId",
-      usage_denial_chronology_invalid AS "usageDenialChronologyInvalid"
-    FROM latency_candidates
-    WHERE latency_origin_at >= ${windowStart}
-      AND latency_origin_at <= ${now}
-    ORDER BY latency_origin_at DESC
-    LIMIT ${HOSTED_RUNTIME_LATENCY_READ_LIMIT + 1}
-  `);
+  const rows = await prisma.$queryRaw<HostedRuntimeLatencyQueryRow[]>(
+    buildHostedRuntimeLatencyHealthQuery({ now, windowStart }),
+  );
   const scanTruncated = rows.length > HOSTED_RUNTIME_LATENCY_READ_LIMIT;
   const visibleRows = scanTruncated
     ? rows.slice(0, HOSTED_RUNTIME_LATENCY_READ_LIMIT)
@@ -275,6 +203,127 @@ export async function readHostedRuntimeLatencyHealth(input: {
     })),
     scanTruncated,
   });
+}
+
+export function buildHostedRuntimeLatencyHealthQuery(input: {
+  now: Date;
+  windowStart: Date;
+}): Prisma.Sql {
+  return Prisma.sql`
+    WITH latency_candidate_trace_ids AS MATERIALIZED (
+      SELECT trace.id
+      FROM hosted_ingress_latency_trace AS trace
+      WHERE trace.source = 'linq'
+        AND trace.accepted_at >= ${input.windowStart}
+        AND trace.accepted_at <= ${input.now}
+
+      UNION
+
+      SELECT trace.id
+      FROM hosted_ingress_latency_trace AS trace
+      WHERE trace.source = 'linq'
+        AND trace.assistant_input_staged_at >= ${input.windowStart}
+        AND trace.assistant_input_staged_at <= ${input.now}
+
+      UNION
+
+      SELECT trace.id
+      FROM hosted_ingress_latency_trace AS trace
+      WHERE trace.source = 'linq'
+        AND trace.provider_start_at >= ${input.windowStart}
+        AND trace.provider_start_at <= ${input.now}
+
+      UNION
+
+      SELECT trace.id
+      FROM hosted_linq_delivery AS delivery
+      JOIN hosted_ingress_latency_trace AS trace
+        ON trace.linq_delivery_id = delivery.id
+      WHERE trace.source = 'linq'
+        AND delivery.accepted_at >= ${input.windowStart}
+        AND delivery.accepted_at <= ${input.now}
+
+      UNION
+
+      SELECT trace.id
+      FROM hosted_mailbox_item AS mailbox_item
+      JOIN hosted_ingress_latency_trace AS trace
+        ON trace.mailbox_item_id = mailbox_item.id
+      WHERE trace.source = 'linq'
+        AND mailbox_item.consumed_at >= ${input.windowStart}
+        AND mailbox_item.consumed_at <= ${input.now}
+    ),
+    latency_candidates AS (
+      SELECT
+        CASE
+          WHEN mailbox_item.ai_usage_denied_at IS NULL
+            OR mailbox_item.ai_usage_denied_at < trace.accepted_at
+            OR mailbox_item.ai_usage_denied_at > ${input.now}
+            OR execution.has_future_evidence
+            OR execution.has_pre_denial_evidence
+            THEN trace.accepted_at
+          ELSE execution.first_evidence_at
+        END AS latency_origin_at,
+        (
+          mailbox_item.ai_usage_denied_at IS NOT NULL
+          AND (
+            mailbox_item.ai_usage_denied_at < trace.accepted_at
+            OR mailbox_item.ai_usage_denied_at > ${input.now}
+            OR execution.has_future_evidence
+          )
+        ) AS usage_denial_chronology_invalid,
+        mailbox_item.consumed_at,
+        delivery.accepted_at AS delivery_accepted_at,
+        trace.linq_delivery_id,
+        trace.phase_breakdown_json,
+        trace.provider_request_ordinal,
+        trace.provider_start_at,
+        trace.runtime_attempt_id
+      FROM latency_candidate_trace_ids AS candidate
+      JOIN hosted_ingress_latency_trace AS trace
+        ON trace.id = candidate.id
+      JOIN hosted_mailbox_item AS mailbox_item
+        ON mailbox_item.user_id = trace.user_id
+        AND mailbox_item.id = trace.mailbox_item_id
+      LEFT JOIN hosted_linq_delivery AS delivery
+        ON delivery.id = trace.linq_delivery_id
+      LEFT JOIN LATERAL (
+        SELECT
+          MIN(evidence.at) AS first_evidence_at,
+          COALESCE(
+            BOOL_OR(evidence.at <= mailbox_item.ai_usage_denied_at),
+            FALSE
+          ) AS has_pre_denial_evidence,
+          COALESCE(
+            BOOL_OR(evidence.at > ${input.now}),
+            FALSE
+          ) AS has_future_evidence
+        FROM (
+          VALUES
+            (trace.assistant_input_staged_at),
+            (trace.provider_start_at),
+            (delivery.accepted_at),
+            (mailbox_item.consumed_at)
+        ) AS evidence(at)
+        WHERE evidence.at IS NOT NULL
+      ) AS execution ON TRUE
+    )
+    SELECT
+      latency_origin_at AS "acceptedAt",
+      consumed_at AS "consumedAt",
+      delivery_accepted_at AS "deliveryAcceptedAt",
+      linq_delivery_id AS "linqDeliveryId",
+      phase_breakdown_json AS "phaseBreakdownJson",
+      provider_request_ordinal AS "providerRequestOrdinal",
+      provider_start_at AS "providerStartAt",
+      runtime_attempt_id AS "runtimeAttemptId",
+      usage_denial_chronology_invalid AS "usageDenialChronologyInvalid"
+    FROM latency_candidates
+    WHERE latency_origin_at >= ${input.windowStart}
+      AND latency_origin_at <= ${input.now}
+    ORDER BY latency_origin_at DESC
+    LIMIT ${HOSTED_RUNTIME_LATENCY_READ_LIMIT + 1}
+  `;
 }
 
 export function summarizeHostedRuntimeLatencyRows(input: {

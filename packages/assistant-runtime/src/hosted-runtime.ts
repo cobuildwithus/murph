@@ -33,6 +33,10 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  type HostedVaultShareProjectionMode,
+} from "@murphai/hosted-execution/vault-share";
+import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   isMurphAndroidAppEnabled,
   MURPH_ANDROID_APP_ENABLED_ENV,
@@ -136,6 +140,7 @@ import {
   captureHostedVaultShareProjectionBestEffort,
   offerCapturedHostedVaultShareProjectionBestEffort,
   resolveHostedVaultShareProjectionScopesBestEffort,
+  type HostedVaultShareProjectionOfferResult,
 } from "./hosted-runtime/vault-share-projection.ts";
 import { createHostedGroupSharedReader } from "./hosted-runtime/group-shared-reader.ts";
 import type {
@@ -2358,15 +2363,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
         }
       };
-      const offerVaultShareProjectionBeforeRecording = async (): Promise<
-        "completed" | "preempted" | "retry"
+      const offerVaultShareProjectionBeforeRecording = async (
+        projectionMode?: HostedVaultShareProjectionMode,
+      ): Promise<
+        | { outcome: "completed"; result: HostedVaultShareProjectionOfferResult }
+        | { outcome: "preempted" }
       > => {
         const vaultSharePort = foregroundRuntime.platform.vaultSharePort ?? null;
         if (!vaultSharePort) {
-          return "completed";
+          return { outcome: "completed", result: { outcome: "no-port" } };
         }
         if (pendingOwnedVaultShareProjection) {
-          return "preempted";
+          return { outcome: "preempted" };
         }
 
         const workSignal = options.shutdownSignal
@@ -2448,22 +2456,32 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
         const scopeResolutionResult = await waitForOwnedProjectionStage(
           (signal) => resolveHostedVaultShareProjectionScopesBestEffort({
+            ...(projectionMode ? { projectionMode } : {}),
             signal,
             vaultSharePort,
           }),
         );
         if (scopeResolutionResult.kind === "wake") {
-          return "preempted";
+          return { outcome: "preempted" };
         }
-        if (scopeResolutionResult.value.outcome === "error") {
-          logHostedVaultShareProjectionOfferOutcome({ outcome: "error" });
-          return "retry";
-        }
-        if (scopeResolutionResult.value.outcome === "no-active-share") {
-          return consumeForegroundWake() ? "preempted" : "completed";
+        if (scopeResolutionResult.value.outcome !== "active-scopes") {
+          const result = { outcome: scopeResolutionResult.value.outcome };
+          if (result.outcome === "error") {
+            logHostedVaultShareProjectionOfferOutcome(result);
+          }
+          return consumeForegroundWake()
+            ? { outcome: "preempted" }
+            : { outcome: "completed", result };
         }
 
         const capture = await captureHostedVaultShareProjectionBestEffort({
+          generationTokensByProjectionScopeKey:
+            scopeResolutionResult.value.generationTokensByProjectionScopeKey,
+          hasDeferredProjectionWork:
+            scopeResolutionResult.value.hasDeferredProjectionWork,
+          ...(scopeResolutionResult.value.projectionMode
+            ? { projectionMode: scopeResolutionResult.value.projectionMode }
+            : {}),
           projectionScopes: scopeResolutionResult.value.projectionScopes,
           sourceWorkspaceVersion:
             activeWorkspace?.version ?? input.request.workspaceVersion,
@@ -2473,14 +2491,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           throw readHostedRuntimeAbortReason(workSignal);
         }
         if (consumeForegroundWake()) {
-          return "preempted";
+          return { outcome: "preempted" };
         }
-        if (capture.outcome === "error") {
-          logHostedVaultShareProjectionOfferOutcome({ outcome: "error" });
-          return "retry";
-        }
-        if (capture.outcome === "no-projectable-records") {
-          return "completed";
+        if (capture.outcome !== "captured") {
+          const result = { outcome: capture.outcome };
+          if (result.outcome === "error") {
+            logHostedVaultShareProjectionOfferOutcome(result);
+          }
+          return { outcome: "completed", result };
         }
 
         const offerResult = await waitForOwnedProjectionStage(
@@ -2491,16 +2509,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           "retain",
         );
         if (offerResult.kind === "wake") {
-          return "preempted";
+          return { outcome: "preempted" };
         }
         logHostedVaultShareProjectionOfferOutcome(offerResult.value);
-        if (offerResult.value.outcome === "error") {
-          return "retry";
-        }
         if (offerResult.value.outcome === "preempted") {
-          return "preempted";
+          return { outcome: "preempted" };
         }
-        return consumeForegroundWake() ? "preempted" : "completed";
+        return consumeForegroundWake()
+          ? { outcome: "preempted" }
+          : { outcome: "completed", result: offerResult.value };
       };
       const checkpointSystemMailboxMode = async (
         systemMailboxCheckpointStage: string,
@@ -2652,17 +2669,27 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (!recordItem) {
             return { preempted: false, prepared: preparation !== null };
           }
+          const isVaultShareProjectionRecord =
+            recordItem.postCheckpointRecord?.kind === "vault-share.projection";
           const projectionOpportunity =
-            await offerVaultShareProjectionBeforeRecording();
-          if (projectionOpportunity !== "completed") {
-            if (projectionOpportunity === "retry") {
-              rememberSystemMailboxPostRecordWake(
-                await deferHostedSystemMailboxItemAfterVaultShareProjectionFailure({
-                  item: recordItem,
-                  vaultRoot: restored.vaultRoot,
-                }),
-              );
-            }
+            await offerVaultShareProjectionBeforeRecording(
+              isVaultShareProjectionRecord
+                ? HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+                : undefined,
+            );
+          if (projectionOpportunity.outcome === "preempted") {
+            return { preempted: true, prepared: true };
+          }
+          if (
+            !isVaultShareProjectionRecord
+            && projectionOpportunity.result.outcome === "error"
+          ) {
+            rememberSystemMailboxPostRecordWake(
+              await deferHostedSystemMailboxItemAfterVaultShareProjectionFailure({
+                item: recordItem,
+                vaultRoot: restored.vaultRoot,
+              }),
+            );
             return { preempted: true, prepared: true };
           }
           emitPhaseLog({
@@ -2732,6 +2759,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               operatorHomeRoot: restored.operatorHomeRoot,
               runtime: foregroundRuntime,
               signal: recordSignal,
+              ...(isVaultShareProjectionRecord
+                ? { vaultShareProjectionResult: projectionOpportunity.result }
+                : {}),
               vaultRoot: restored.vaultRoot,
             });
             const recordWake = selectHostedRuntimeWakeCandidate([
@@ -3951,6 +3981,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
 
       const capture = await captureHostedVaultShareProjectionBestEffort({
+        generationTokensByProjectionScopeKey:
+          scopeResolutionStage.value.generationTokensByProjectionScopeKey,
+        hasDeferredProjectionWork:
+          scopeResolutionStage.value.hasDeferredProjectionWork,
+        ...(scopeResolutionStage.value.projectionMode
+          ? { projectionMode: scopeResolutionStage.value.projectionMode }
+          : {}),
         projectionScopes: scopeResolutionStage.value.projectionScopes,
         sourceWorkspaceVersion:
           committedWorkspace?.version ?? invocationWorkspaceVersion,
@@ -7233,8 +7270,8 @@ function createAbortGuardedHostedRuntimePlatform(
           vaultSharePort: {
             deliver: (deliverInput) =>
               guard(() => platform.vaultSharePort!.deliver(deliverInput)),
-            listActiveProjectionScopes: (context) =>
-              guard(() => platform.vaultSharePort!.listActiveProjectionScopes(context)),
+            listActiveProjectionScopes: (listInput) =>
+              guard(() => platform.vaultSharePort!.listActiveProjectionScopes(listInput)),
           },
         }
       : {}),

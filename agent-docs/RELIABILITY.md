@@ -64,6 +64,25 @@ Last verified: 2026-08-12
   attempt. Both prewarm operations settle before transaction entry; signing,
   provider, or KMS failure starts no transaction, and activation's control and
   ingress unwraps must be scoped-cache hits.
+- Standalone generic mailbox-item append resolves an already-durable dedupe
+  replay before crypto work. On a miss it unwraps the exact active ingress root
+  before `BEGIN`; the transaction locks and re-reads that root identity, then
+  seals only from the matching request-scoped cache entry. A root change rolls
+  back and permits one fresh full preparation attempt. The prepared envelope
+  transaction adapter carries the same generic crypto-only token without a
+  mailbox proxy capability or second drift error, and does not replace envelope
+  target or workspace checks. Legacy transaction append adapters stay
+  provider-capable for separately migrated producers and must not be mistaken
+  for the prepared surface.
+- Privy completion settles live provider authority, the exact control-domain
+  root, and existing private projections before `BEGIN`. It drains sibling
+  preparation after a failure and reports the first observed failure. Identity
+  and verified-email writes revalidate the exact root in the transaction and
+  seal locally; exact root drift rolls back and permits one fresh full
+  preparation attempt. The token is crypto identity only and is not member,
+  invite, routing, or email authority. Cross-member phone conflict suppression
+  reads only the blind-index owner id, so it neither decrypts the other
+  member's private identity nor needs that member's root in the transaction.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
@@ -123,6 +142,15 @@ Last verified: 2026-08-12
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- A hosted-group projection grant that needs its first private projection and
+  one generation-stable `runtime.maintenance-requested` control row commit in
+  the same Web transaction. An append failure therefore rolls back the grant
+  instead of admitting unrecoverable work. After commit, Web signals that exact
+  mailbox pointer in parallel with bounded join-confirmation recovery, and the
+  scheduled mailbox-handoff sweep includes an unconsumed row when the immediate
+  signal fails or the process stops. Either best-effort signal can stall without
+  starving the other. The durable null snapshot remains an explicit `pending`
+  shared-read state until the member runtime materializes it.
 - Direct hosted Codex process projection includes the selected core provider
   and only that provider's signed egress credential. Changing providers
   therefore changes the warm-process launch identity; the replacement process
@@ -834,7 +862,12 @@ Last verified: 2026-08-12
   valid stamps with no execution evidence. It derives one effective latency
   origin from ingress, staging, provider, delivery, and consumption facts
   before applying its 24-hour window, bounded scan, or delivery/provider
-  grouping. Post-denial execution is measured from its earliest milestone even
+  grouping. Candidate admission unions trace identities from five independently
+  time-indexed ingress, staging, provider, delivery, and consumption branches,
+  then exactly hydrates those traces before chronology, origin, grouping, and
+  the 20,001-row truncation probe. Retained history outside the window therefore
+  does not participate in the cross-owner candidate scan. Post-denial execution
+  is measured from its earliest milestone even
   when the original ingress is older than the window. An unblocked row sharing
   the same reply remains alertable. The existing seven-day ingress-trace cleanup
   retires a trace only after both its original ingress and latest activity are
