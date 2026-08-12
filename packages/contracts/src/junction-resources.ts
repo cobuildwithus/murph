@@ -245,6 +245,8 @@ export const JUNCTION_RESOURCE_POLICIES = Object.freeze({
     "canonical_per_record",
     JUNCTION_LONG_HISTORY_DAYS,
     JUNCTION_SPARSE_HISTORY_CHUNK_DAYS,
+    null,
+    "schedule_time",
   ),
   workout_swimming_stroke: excluded(
     "high",

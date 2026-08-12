@@ -8182,6 +8182,107 @@ test("importDeviceBatch rejects primary provider refs after user-authored same-e
   );
 });
 
+test("importDeviceBatch preserves member fields during a non-workout legacy identity correction", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-generic-legacy-member-edit");
+  const conflictVaultRoot = await makeTempDirectory("murph-device-import-generic-legacy-conflict");
+  await Promise.all([
+    initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" }),
+    initializeVault({ vaultRoot: conflictVaultRoot, createdAt: "2026-06-01T12:00:00.000Z" }),
+  ]);
+  const legacyExternalRef = {
+    system: "junction",
+    resourceType: "junction-garmin-stress-level",
+    resourceId: "stress-level-pre-canonical",
+    facet: "stress-level",
+  };
+  const canonicalExternalRef = {
+    ...legacyExternalRef,
+    resourceId: "stress-level-canonical",
+  };
+  const buildEvent = (input: {
+    externalRef: typeof legacyExternalRef;
+    legacyExternalRefs?: Array<typeof legacyExternalRef>;
+  }) => ({
+    kind: "observation" as const,
+    occurredAt: "2026-06-01T08:00:00.000Z",
+    recordedAt: "2026-06-01T08:00:00.000Z",
+    dayKey: "2026-06-01",
+    title: "Junction stress level",
+    externalRef: input.externalRef,
+    legacyExternalRefs: input.legacyExternalRefs,
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      observedAtRaw: "2026-06-01:stress_level:daily",
+      timestampSemantics: "offset" as const,
+      normalizerVersion: "junction-stress-summary.v1",
+    },
+    fields: {
+      metric: "stress-level",
+      observationGrain: "summary" as const,
+      value: 44,
+      unit: "score",
+    },
+  });
+  const importEvent = (
+    targetVaultRoot: string,
+    externalRef: typeof legacyExternalRef,
+    legacyExternalRefs?: Array<typeof legacyExternalRef>,
+  ) => importDeviceBatch({
+    vaultRoot: targetVaultRoot,
+    provider: "junction",
+    accountId: "junction-generic-identity-user",
+    importedAt: "2026-06-01T12:00:00.000Z",
+    events: [buildEvent({ externalRef, legacyExternalRefs })],
+  });
+
+  const legacy = await importEvent(vaultRoot, legacyExternalRef);
+  const legacyEvent = legacy.events[0];
+  assert.ok(legacyEvent);
+  await upsertEvent({
+    vaultRoot,
+    payload: {
+      ...legacyEvent,
+      links: [{ type: "related_to", targetId: legacyEvent.id }],
+      note: "member context",
+      source: "manual",
+      tags: ["member-context"],
+    },
+  });
+
+  const corrected = await importEvent(vaultRoot, canonicalExternalRef, [legacyExternalRef]);
+  const current = corrected.events[0];
+  assert.ok(current);
+  assert.equal(current.id, legacyEvent.id);
+  assert.equal(current.lifecycle?.revision, 4);
+  assert.equal(current.externalRef?.resourceId, canonicalExternalRef.resourceId);
+  assert.equal(current.note, "member context");
+  assert.equal(current.source, "manual");
+  assert.deepEqual(current.tags, ["member-context"]);
+  assert.deepEqual(current.links, [{ type: "related_to", targetId: legacyEvent.id }]);
+  assert.equal(await findEventByExternalRef({ vaultRoot, ...legacyExternalRef }), null);
+  assert.equal(
+    (await findEventByExternalRef({ vaultRoot, ...canonicalExternalRef }))?.id,
+    legacyEvent.id,
+  );
+
+  const beforeReplay = await snapshotVaultFiles(vaultRoot);
+  const replay = await importEvent(vaultRoot, canonicalExternalRef, [legacyExternalRef]);
+  assert.equal(replay.applied, false);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+
+  await importEvent(conflictVaultRoot, legacyExternalRef);
+  await importEvent(conflictVaultRoot, canonicalExternalRef);
+  const beforeConflict = await snapshotVaultFiles(conflictVaultRoot);
+  await assert.rejects(
+    importEvent(conflictVaultRoot, canonicalExternalRef, [legacyExternalRef]),
+    (error) => error instanceof VaultError && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+  );
+  assert.deepEqual(await snapshotVaultFiles(conflictVaultRoot), beforeConflict);
+});
+
 test("importDeviceBatch rejects historical provider refs after user-authored no-externalRef edits", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-legacy-ref-no-external-ref-edit");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

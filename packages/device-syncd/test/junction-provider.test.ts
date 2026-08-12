@@ -13156,6 +13156,45 @@ test("Junction nested compact timeseries webhooks use sample timestamps for stab
   assert.equal("webhookDataJson" in (firstParse.jobs[0]?.payload ?? {}), false);
 });
 
+test("Junction exact workout jobs use the signed provider timestamp when event time is absent", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  }, {
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.workout_stream.created",
+      user_id: "junction-user-1",
+      data: {
+        workout_id: "workout-stable-provider-time",
+        resource: "workout_stream",
+        source: { provider: "garmin", type: "watch" },
+        sport: "running",
+      },
+    },
+    messageId: "msg_workout_stable_provider_time_1",
+    timestamp: "1775174400",
+  });
+  const verify = requireJunctionWebhookHandler(provider).verifyAndParseWebhook;
+
+  const first = await verify({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:30.000Z",
+  });
+  const retry = await verify({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:02:00.000Z",
+  });
+
+  assert.equal(first.providerSentAt, "2026-04-03T00:00:00.000Z");
+  assert.equal(first.jobs[0]?.payload?.occurredAt, first.providerSentAt);
+  assert.equal(retry.jobs[0]?.payload?.occurredAt, first.providerSentAt);
+  assert.equal(first.jobs[0]?.dedupeKey, retry.jobs[0]?.dedupeKey);
+});
+
 test("Junction signed daily timeseries webhooks omit direct sample payload jobs", async () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);
@@ -13326,6 +13365,110 @@ test("Junction legacy direct compact timeseries payloads fetch instead of import
   assert.equal(importedSnapshots.length, 1);
   assert.match(JSON.stringify(importedSnapshots), /97/u);
   assert.doesNotMatch(JSON.stringify(importedSnapshots), /9999/u);
+});
+
+test("Junction grouped workout duration forwards only bounded linkage scalars", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [{
+        slug: "garmin",
+        status: "connected",
+        resource_availability: { workout_duration: true, workouts: true },
+      }] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/workout_duration/grouped") {
+      return createJsonResponse({ groups: { garmin: [{
+        data: [{
+          start: "2026-04-02T14:00:00.000Z",
+          end: "2026-04-02T14:30:00.000Z",
+          unit: "minutes",
+          value: 30,
+        }],
+        source: {
+          provider: "garmin",
+          type: "watch",
+          workout_id: "workout-group-linked-1",
+          sport: { slug: "running", raw_marker: "raw-sport-marker" },
+          raw_marker: "raw-group-source-marker",
+        },
+      }] } });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    timeseriesResources: ["workout_duration"],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("resource", {
+      occurredAt: "2026-04-02T14:30:00.000Z",
+      resource: "workout_duration",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const rows = (importedSnapshots[0] as {
+    timeseries?: { workout_duration?: Array<Record<string, unknown>> };
+  }).timeseries?.workout_duration ?? [];
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.workoutId, "workout-group-linked-1");
+  assert.equal(rows[0]?.sport, "running");
+  assert.equal(rows[0]?.sourceProviderSlug, "garmin");
+  assert.equal(rows[0]?.sourceType, "watch");
+  assert.equal("source" in (rows[0] ?? {}), false);
+  assert.doesNotMatch(JSON.stringify(rows), /raw-group-source-marker|raw-sport-marker/u);
+});
+
+test("Junction empty grouped workout duration response performs no import", async () => {
+  let importCount = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [{
+        slug: "garmin",
+        status: "connected",
+        resource_availability: { workout_duration: true },
+      }] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/workout_duration/grouped") {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    timeseriesResources: ["workout_duration"],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async () => {
+        importCount += 1;
+        return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("resource", {
+      occurredAt: "2026-04-02T14:30:00.000Z",
+      resource: "workout_duration",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importCount, 0);
 });
 
 test("Junction does not chunk oversized daily timeseries webhook samples into durable jobs", async () => {

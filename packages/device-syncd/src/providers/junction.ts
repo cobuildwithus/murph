@@ -2654,7 +2654,7 @@ export function createJunctionDeviceSyncProvider(
       });
     }
     const eventOccurredAt = extractJunctionWebhookOccurredAt(data);
-    const occurredAt = eventOccurredAt ?? context.now;
+    const occurredAt = eventOccurredAt ?? verified.providerSentAt;
     const window = buildJunctionWebhookWindow(data, occurredAt, context.now, resource);
     const webhookDataJsons = buildJunctionWebhookDataJobJsons({
       data,

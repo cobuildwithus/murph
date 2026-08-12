@@ -2095,6 +2095,20 @@ test("Junction workout-duration corrections supersede by immutable interval iden
     unit: "minutes",
     value: 31,
   });
+  assert.ok(correction.ingestId);
+  const correctionIngest = await readRequiredIntegrationIngest(vaultRoot, correction.ingestId);
+  const correctionParts = JSON.stringify(correctionIngest.parts);
+  assert.match(correctionParts, /junction\.workout_timeseries_fact\.v1/u);
+  assert.doesNotMatch(correctionParts, /provider-snapshot/u);
+
+  const replay = await importDuration(31, "tracker", "Run");
+  assert.equal(replay.applied, false);
+  const replayRecords = (
+    await Promise.all(correction.eventShardPaths.map((relativePath) =>
+      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+    ))
+  ).flat();
+  assert.deepEqual(replayRecords, records);
 });
 
 test("importDeviceProviderSnapshot rejects ambiguous Junction daily aggregate legacy aliases", async () => {

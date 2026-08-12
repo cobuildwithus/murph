@@ -5704,6 +5704,66 @@ test("Junction sparse workout duration keeps explicit linkage and never infers i
   assert.equal(payload.samples?.length ?? 0, 0);
 });
 
+test("Junction workout duration emits fixed-shape evidence for nonempty all-invalid responses", async () => {
+  const invalidMarker = "invalid-workout-row-must-not-be-retained";
+  const prepared = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    snapshot: {
+      importedAt: "2026-04-22T13:00:00.000Z",
+      timeseries: {
+        workout_duration: [{
+          start: invalidMarker,
+          unit: "minutes",
+          value: "not-a-number",
+          source: { private_raw_group: invalidMarker },
+        }],
+      },
+    },
+  });
+  const evidenceParts = prepared.evidenceParts ?? [];
+
+  assert.deepEqual(prepared.events, []);
+  assert.equal(evidenceParts.length, 1);
+  assert.deepEqual(evidenceParts[0]?.content, {
+    schema: "junction.workout_timeseries_fact.v1",
+    provider: "junction",
+    resource: "workout_duration",
+    sampleCount: 1,
+    status: "no_valid_samples",
+  });
+  assert.notEqual(evidenceParts[0]?.role, "provider-snapshot");
+  assert.doesNotMatch(JSON.stringify(prepared), new RegExp(invalidMarker, "u"));
+
+  const mixedMarker = "mixed-invalid-row-must-not-be-retained";
+  const mixed = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T13:00:00.000Z",
+    timeseries: {
+      workout_duration: [{
+        start: "2026-04-22T12:00:00.000Z",
+        end: "2026-04-22T12:30:00.000Z",
+        source: { provider: "garmin", type: "watch" },
+        unit: "minutes",
+        value: 30,
+      }, {
+        start: mixedMarker,
+        source: { provider: "garmin", type: "watch" },
+        unit: "minutes",
+        value: "invalid",
+      }],
+    },
+  });
+  assert.equal(mixed.events?.length, 1);
+  assert.equal(mixed.evidenceParts?.length, 1);
+  assert.doesNotMatch(JSON.stringify(mixed.evidenceParts), new RegExp(mixedMarker, "u"));
+
+  const empty = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T13:00:00.000Z",
+    timeseries: { workout_duration: [] },
+  });
+  assert.deepEqual(empty.events, []);
+  assert.deepEqual(empty.evidenceParts, []);
+});
+
 test("Junction workout stream reduction emits only capped derived features and fixed-distance splits", () => {
   const feature = reduceJunctionWorkoutStream({
     altitude: [10, 11, 12, 13, 14],
@@ -5980,7 +6040,6 @@ test("Junction exact workout IDs join stream features despite a distinct provide
     system: sessionExternalRef.system,
     resourceType: sessionExternalRef.resourceType,
     resourceId: legacyWorkoutResourceId,
-    version: "2026-04-22T13:00:00.000Z",
     facet: "session",
   }]);
   assert.ok(featureEvents.length >= 3);

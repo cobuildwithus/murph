@@ -1245,8 +1245,19 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
           ...group,
           groupedSourceSlug: sourceSlug,
         });
+        const groupedWorkoutScalars = resource === "workout_duration"
+          ? extractGroupedWorkoutScalars(sample, group)
+          : {};
+        const sampleRecord = resource === "workout_duration"
+          ? Object.fromEntries(
+              Object.entries(sample).filter(([key]) =>
+                !["source", "sport", "workoutId", "workout_id"].includes(key)
+              ),
+            )
+          : sample;
         records.push(stripUndefinedRecord({
-          ...sample,
+          ...sampleRecord,
+          ...groupedWorkoutScalars,
           sourceProviderSlug: normalizeSourceSlug(origin.sourceProviderSlug) ?? undefined,
           sourceType: origin.sourceType,
           sourceInstanceId: origin.sourceInstanceId,
@@ -1257,6 +1268,59 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
   }
 
   return records;
+}
+
+function extractGroupedWorkoutScalars(
+  sample: Readonly<Record<string, unknown>>,
+  group: Readonly<Record<string, unknown>>,
+): Readonly<{ sport?: string; workoutId?: string }> {
+  const sampleSource = readPlainObject(sample.source);
+  const groupSource = readPlainObject(group.source);
+  const workoutId = firstBoundedGroupedString([
+    sample.workoutId,
+    sample.workout_id,
+    sampleSource?.workoutId,
+    sampleSource?.workout_id,
+    group.workoutId,
+    group.workout_id,
+    groupSource?.workoutId,
+    groupSource?.workout_id,
+  ], 200);
+  const sport = firstBoundedGroupedSport([
+    sample.sport,
+    sampleSource?.sport,
+    group.sport,
+    groupSource?.sport,
+  ]);
+
+  return stripUndefinedRecord({ sport, workoutId });
+}
+
+function firstBoundedGroupedSport(values: readonly unknown[]): string | undefined {
+  for (const value of values) {
+    const sport = readPlainObject(value);
+    const normalized = firstBoundedGroupedString(
+      sport ? [sport.slug, sport.name] : [value],
+      80,
+    );
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return undefined;
+}
+
+function firstBoundedGroupedString(
+  values: readonly unknown[],
+  maxLength: number,
+): string | undefined {
+  for (const value of values) {
+    const normalized = normalizeString(value);
+    if (normalized && normalized.length <= maxLength) {
+      return normalized;
+    }
+  }
+  return undefined;
 }
 
 function asArray(value: unknown): unknown[] {

@@ -4,7 +4,12 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { beforeEach, describe, test, vi } from "vitest";
-import { initializeVault, readJsonlRecords, updateVaultSummary } from "@murphai/core";
+import {
+  initializeVault,
+  readIntegrationIngestEntries,
+  readJsonlRecords,
+  updateVaultSummary,
+} from "@murphai/core";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import {
@@ -616,6 +621,17 @@ function eventHasMetric(record: Awaited<ReturnType<typeof readCanonicalEventReco
       && !Array.isArray(measurement)
       && Reflect.get(measurement, "metric") === metric
     );
+}
+
+function eventExternalRefResourceId(
+  record: Awaited<ReturnType<typeof readCanonicalEventRecords>>[number],
+): string | null {
+  const externalRef = record.externalRef;
+  if (typeof externalRef !== "object" || externalRef === null || Array.isArray(externalRef)) {
+    return null;
+  }
+  const resourceId = Reflect.get(externalRef, "resourceId");
+  return typeof resourceId === "string" ? resourceId : null;
 }
 
 function setAccountUpdatedAtForTesting(
@@ -3914,6 +3930,169 @@ describe("hosted device-sync runtime", () => {
         1,
       );
       assert.deepEqual(afterReplay, afterCrash);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("grouped workout duration joins only by explicit ID through the real vault path", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-grouped-workout-duration-",
+    );
+    await initializeVault({
+      createdAt: "2026-04-02T00:00:00.000Z",
+      vaultRoot,
+    });
+    const defaultImporter = createDefaultImporterPort();
+    await defaultImporter.importDeviceProviderSnapshot({
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-grouped-workout-duration",
+        importedAt: "2026-04-02T15:00:00.000Z",
+        summaries: {
+          workouts: [{
+            id: "workout-group-linked-1",
+            time_start: "2026-04-02T14:00:00.000Z",
+            time_end: "2026-04-02T14:30:00.000Z",
+            source: {
+              device_id: "grouped-workout-device-1",
+              provider: "garmin",
+              type: "watch",
+            },
+            sport: { slug: "running" },
+          }],
+        },
+      },
+    });
+    const externalAccountId = "junction-grouped-workout-duration";
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async (input) => {
+          const url = new URL(readTestUrl(input));
+          if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+            return createTestJsonResponse({ providers: [{
+              slug: "garmin",
+              status: "connected",
+              resource_availability: { workout_duration: true, workouts: true },
+            }] });
+          }
+          if (url.pathname === `/v2/timeseries/${externalAccountId}/workout_duration/grouped`) {
+            return createTestJsonResponse({ groups: { garmin: [{
+              data: [{
+                start: "2026-04-02T14:00:00.000Z",
+                end: "2026-04-02T14:30:00.000Z",
+                unit: "minutes",
+                value: 30,
+              }],
+              source: {
+                device_id: "grouped-workout-device-1",
+                provider: "garmin",
+                type: "watch",
+                workout_id: "workout-group-linked-1",
+                sport: { slug: "running", raw_marker: "raw-linked-sport" },
+                raw_marker: "raw-linked-group",
+              },
+            }, {
+              data: [{
+                start: "2026-04-02T14:00:00.000Z",
+                end: "2026-04-02T14:30:00.000Z",
+                unit: "minutes",
+                value: 31,
+              }],
+              source: {
+                device_id: "grouped-workout-device-2",
+                provider: "garmin",
+                type: "chest_strap",
+                raw_marker: "raw-unattributed-group",
+              },
+            }] } });
+          }
+          throw new Error(`Unexpected Junction request: ${url.pathname}`);
+        },
+        region: "us",
+        summaryResources: [],
+        timeseriesResources: ["workout_duration"],
+      },
+    });
+    assert.ok(provider);
+    const clock = { now: () => new Date("2030-04-02T15:00:00.000Z") };
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider], { clock });
+
+    try {
+      const account = getStore(service).upsertAccount({
+        connectedAt: "2026-04-02T12:00:00.000Z",
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        displayName: "Junction",
+        externalAccountId,
+        provider: "junction",
+        scopes: [],
+        status: "active",
+      });
+      const enqueueDuration = () => getStore(service).enqueueJob({
+        accountId: account.id,
+        availableAt: clock.now().toISOString(),
+        kind: "resource",
+        payload: {
+          occurredAt: "2026-04-02T14:30:00.000Z",
+          resource: "workout_duration",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          windowStart: "2026-04-02T00:00:00.000Z",
+          windowEnd: "2026-04-03T00:00:00.000Z",
+        },
+        provider: "junction",
+      });
+      enqueueDuration();
+      assert.equal(await service.drainWorker(1), 1);
+
+      const records = await readCanonicalEventRecords(vaultRoot);
+      const session = records.find((record) => record.kind === "activity_session");
+      assert.ok(session);
+      const sessionResourceId = eventExternalRefResourceId(session);
+      assert.ok(sessionResourceId);
+      const durations = records.filter((record) => eventHasMetric(record, "workout-duration"));
+      assert.equal(durations.length, 2);
+      const linked = durations.find((record) =>
+        eventExternalRefResourceId(record) === sessionResourceId
+      );
+      const unattributed = durations.find((record) => record.id !== linked?.id);
+      assert.ok(linked);
+      assert.ok(unattributed);
+      assert.notEqual(eventExternalRefResourceId(unattributed), sessionResourceId);
+      const linkedMeasurements = linked.kind === "measurement" && Array.isArray(linked.measurements)
+        ? linked.measurements
+        : [];
+      const qualifiers = linkedMeasurements[0]
+        && typeof linkedMeasurements[0] === "object"
+        && !Array.isArray(linkedMeasurements[0])
+        ? Reflect.get(linkedMeasurements[0], "qualifiers")
+        : undefined;
+      assert.deepEqual(qualifiers, { sport: "running" });
+
+      const ingests = await readIntegrationIngestEntries(vaultRoot);
+      const durationIngest = ingests.find((entry) =>
+        entry.record.parts.some((part) => part.role.includes("workout-duration"))
+      );
+      assert.ok(durationIngest);
+      const retainedText = JSON.stringify(durationIngest.record.parts);
+      assert.doesNotMatch(
+        retainedText,
+        /provider-snapshot|raw-linked-group|raw-linked-sport|raw-unattributed-group/u,
+      );
+
+      const beforeReplay = await readCanonicalEventRecords(vaultRoot);
+      enqueueDuration();
+      assert.equal(await service.drainWorker(1), 1);
+      assert.deepEqual(await readCanonicalEventRecords(vaultRoot), beforeReplay);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

@@ -1836,6 +1836,24 @@ function pushJunctionSparseWorkoutDurationFacts(
     pushEvidencePart(context.evidenceParts, evidencePart);
   }
   context.events.push(...selectedEvents.reverse());
+
+  if (entries.length > 0 && selectedEvents.length === 0) {
+    const role = `${baseArtifactRole}:no-valid-samples`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(role, `${role}.json`, {
+          schema: "junction.workout_timeseries_fact.v1",
+          provider: "junction",
+          resource,
+          sampleCount: entries.length,
+          status: "no_valid_samples",
+        }),
+        "timeseries_reading",
+      ),
+    );
+  }
 }
 
 function normalizeJunctionSparseWorkoutDurationValue(
@@ -5852,7 +5870,7 @@ function makeJunctionLegacyWorkoutExternalRef(
       resourceContext.origin.sourceInstanceId,
       providerWorkoutId,
     ])}`,
-    junctionExternalRefVersion(resourceContext, entry),
+    undefined,
     canonicalExternalRef.facet ?? "session",
   );
 }
