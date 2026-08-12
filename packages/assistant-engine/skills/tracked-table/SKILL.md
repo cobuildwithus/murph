@@ -7,7 +7,7 @@ description: Use when a private Murph member asks to start or update a live work
 
 ## Goal
 
-Make workout logging easier than opening a dedicated tracker while keeping one canonical workout record that the member can inspect for months. Text remains an assistant write interface; an eligible Messages app may also submit a closed deterministic action. A compact table is always an immutable presentation snapshot.
+Make workout logging easier than opening a dedicated tracker while keeping one canonical workout record that the member can inspect for months. Text is the write interface; a compact table is an immutable presentation snapshot.
 
 A tracked `compact_table` may add structured `workout` detail for one active or just-finished strength workout. An ordinary `compact_table` remains the right surface for arbitrary tables, historical comparisons, or tracked data that is not one live workout.
 
@@ -15,7 +15,7 @@ A tracked `compact_table` may add structured `workout` detail for one active or 
 
 A saved workout format owns the plan: ordered exercises, stable `sourceExerciseId` values, planned sets, and target values. One canonical `activity_session` workout event owns what actually happened: session timing, ordered exercises, completed set values, notes, and the routine reference.
 
-The canonical event is the only mutable authority. Never create a parallel tracker file, table document, memory record, database row, mutable card record, or app-only workout state. Cards are immutable presentation snapshots. An eligible active-workout Messages editor may submit the closed member-action contract through its separately enrolled scoped credential; the runtime applies it deterministically through the same canonical workout use case without an assistant turn. The card URL still contains no credentials or write authority.
+The canonical event is the only mutable authority. Never create a parallel tracker file, table document, memory record, database row, mutable card record, or app-only workout state. Cards are immutable presentation snapshots. The Messages extension is offline and unauthenticated; its controls only insert visible commands into the current composer, and the member still sends the message. Only the normal Murph message path may mutate canonical workout state.
 
 A prior bubble never changes in place. Updating a workout means mutating the canonical event through the guarded command surface, verifying the result, and, when canonical state changes, sending a new snapshot on a supported private card route. The native URL must not contain the canonical event id, member identity, credentials, or write authority.
 
@@ -55,13 +55,28 @@ The legacy `workout edit` full-structure replacement remains available only for 
 
 Never use `workout format log` to start a live workout. That command records a completed workout from a format; a live session deliberately keeps targets in the format and actual performance in the event.
 
-## iMessage direct actions
+## iMessage card commands
 
-The native editor is outside the assistant loop. It may send only the bounded
-versioned workout action implemented by the trusted runtime. Do not ask the
-member to type or send a duplicate command after that editor accepts an action,
-and do not claim the model interpreted or applied it. Normal text messages still
-follow the command flow above.
+Commands inserted by the iMessage card use explicit one-based coordinates:
+
+- `Log workout exercise 2 set 1: ...`
+- `Correct workout exercise 2 set 1: ...`
+- `Finish this tracked workout.`
+
+The numbers in those sentences are presentation positions, not canonical `exercise.order` or `set.order` values. Resolve them only against the single unambiguous tracked workout card in the same private conversation. Prefer the latest verified snapshot only when it is the sole plausible session. The inserted text carries no record authority. If multiple tracked cards or events are plausible—or a command from an older completed card could otherwise land on a different active workout—ask one narrow question instead of choosing by recency alone. The durable transcript marker contains the canonical event id and snapshot instant; the native URL does not.
+
+Then:
+
+1. Resolve the exact canonical event from the sole plausible durable card marker. A missing or mismatched event fails closed instead of falling through to another live workout.
+2. For Finish, run `vault-cli workout finish --workout-id <evt_id>` directly. The explicit command is replay-safe: an already-completed return is convergence, not failure. Verify that returned event and build the completed card, including skipped planned sets, even when the first reply or card delivery failed after persistence.
+3. For a set log, correction, or clear, run `vault-cli workout active --workout-id <evt_id> --format json`. A completed or stale workout fails closed.
+4. Reconcile the card's ordered exercise names and set counts against the latest canonical event. If the displayed exercise no longer maps to exactly one canonical exercise, or its displayed set position no longer exists, fail closed. An old card never authorizes overwriting newer actual values.
+5. Map the displayed exercise and set positions to that exercise's current canonical `order` values. Do not pass the display numbers through as canonical orders; saved formats may use sparse orders. Use `vault-cli workout set log '<displayed-exercise-name>' --workout-id <evt_id> --exercise-order <canonical-order> --set-order <canonical-order> --require-existing-set` for a card log or correction, passing only member-stated actual values. The exact displayed name and mapped order must both match. Use the same mapped selectors for `workout set clear`.
+6. Persist qualitative annotations such as spotted reps on that exact set's canonical `note`.
+7. Treat the successful targeted command result as the verification read. Only that returned record proves the update.
+8. Send a refreshed immutable structured workout card from the verified event plus verified format.
+
+An exact replay for the same exercise and set coordinate converges on that coordinate and never appends a duplicate. Card actions always require the mapped set to exist; ordinary free-form logging may still append a deliberately requested new set. If the coordinate already has the same actual result, report the saved state. If a later command conflicts with it and does not clearly request a correction, ask one narrow question.
 
 ## Interpretation rules
 
