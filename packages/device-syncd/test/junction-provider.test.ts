@@ -14541,3 +14541,163 @@ test("Junction sparse aggregate import failures remain retryable without coverag
   assert.equal(retry.payload?.historicalProviderRecordsSeen, false);
   assert.equal(retry.payload?.historicalRecordsSeen, false);
 });
+
+test.each([404, 422])(
+  "Junction classified incomplete %i sparse history never terminalizes as exhausted no-progress",
+  async (responseStatus) => {
+    const provider = createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: [],
+      timeseriesResources: ["caffeine"],
+      fetchImpl: async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === "/v2/user/providers/junction-user-1") {
+          return createJsonResponse({ providers: [{
+            id: "provider-garmin-incomplete-history",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { caffeine: true },
+          }] });
+        }
+        if (url.pathname === "/v2/timeseries/junction-user-1/caffeine/grouped") {
+          return createJsonResponse({ code: "historical_window_not_ready" }, responseStatus);
+        }
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      },
+    });
+    const source = {
+      sourceProviderSlug: "garmin",
+      displayName: null,
+      status: "connected" as const,
+      resourceCount: 1,
+      resourceAvailabilitySummary: { caffeine: true },
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      firstSeenAt: "2026-04-03T00:00:00.000Z",
+      lastSeenAt: "2026-08-11T00:00:00.000Z",
+      lastDataAt: null,
+    };
+    const initial = requireValue(provider.jobExecutor?.createScheduledJobs?.(
+      createStoredAccount({ sources: [source] }),
+      "2026-08-11T12:00:00.000Z",
+    ).jobs.find((job) => job.payload?.resource === "caffeine"));
+    let job: DeviceSyncJobRecord = {
+      ...createJob("resource", initial.payload ?? {}),
+      dedupeKey: initial.dedupeKey ?? null,
+    };
+    let metadata: Record<string, unknown> = {};
+    let now = "2026-08-11T12:00:00.000Z";
+    const observedDelayMs: number[] = [];
+
+    for (let scan = 0; scan < 5; scan += 1) {
+      const result = await executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          account: createAccount({ metadata, sources: [source] }),
+          now,
+        }),
+        job,
+      );
+      metadata = mergeStoredDeviceSyncMetadataPatch(metadata, result.metadataPatch);
+      assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        metadata,
+        "garmin",
+        "caffeine",
+        JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+      ), false);
+      const retry = requireValue(result.scheduledJobs?.find((candidate) =>
+        candidate.payload?.resource === "caffeine"
+      ));
+      assert.equal(retry.dedupeKey, initial.dedupeKey);
+      const retryAt = requireValue(retry.availableAt);
+      observedDelayMs.push(Date.parse(retryAt) - Date.parse(now));
+      now = retryAt;
+      job = {
+        ...createJob("resource", retry.payload ?? {}),
+        dedupeKey: retry.dedupeKey ?? null,
+      };
+    }
+
+    assert.deepEqual(observedDelayMs, [
+      15 * 60_000,
+      60 * 60_000,
+      6 * 60 * 60_000,
+      24 * 60 * 60_000,
+      24 * 60 * 60_000,
+    ]);
+  },
+);
+
+test("Junction retryable 5xx sparse history fails before terminal coverage", async () => {
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: [],
+    timeseriesResources: ["caffeine"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-retryable-history",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true },
+        }] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/caffeine/grouped") {
+        return createJsonResponse({ code: "temporary_failure" }, 503);
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    },
+  });
+  const source = {
+    sourceProviderSlug: "garmin",
+    displayName: null,
+    status: "connected" as const,
+    resourceCount: 1,
+    resourceAvailabilitySummary: { caffeine: true },
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    firstSeenAt: "2026-04-03T00:00:00.000Z",
+    lastSeenAt: "2026-08-11T00:00:00.000Z",
+    lastDataAt: null,
+  };
+  const metadata: Record<string, unknown> = {};
+  const initial = requireValue(provider.jobExecutor?.createScheduledJobs?.(
+    createStoredAccount({ sources: [source] }),
+    "2026-08-11T12:00:00.000Z",
+  ).jobs.find((job) => job.payload?.resource === "caffeine"));
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ metadata, sources: [source] }),
+        now: "2026-08-11T12:00:00.000Z",
+      }),
+      {
+        ...createJob("resource", initial.payload ?? {}),
+        dedupeKey: initial.dedupeKey ?? null,
+      },
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    metadata,
+    "garmin",
+    "caffeine",
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+  ), false);
+});

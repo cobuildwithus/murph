@@ -213,6 +213,11 @@ interface JunctionHistoricalUnresolvedProviderRecords {
   withoutStableIdentity: boolean;
 }
 
+type JunctionExtendedTimeseriesBackfillCompletionReason =
+  | "fetch_complete_no_progress_exhausted"
+  | "note_semantic_noop"
+  | "record_bearing";
+
 interface PreparedJunctionImportSnapshot {
   connections: Array<Record<string, unknown>>;
   sourceProviders: readonly JunctionProviderConnection[];
@@ -2355,6 +2360,7 @@ export function createJunctionDeviceSyncProvider(
           input.job,
           input.resource,
           sourceProviderSlug,
+          "note_semantic_noop",
         ),
       );
     }
@@ -2371,6 +2377,7 @@ export function createJunctionDeviceSyncProvider(
           input.job,
           input.resource,
           sourceProviderSlug,
+          "record_bearing",
         ),
       );
     }
@@ -2389,7 +2396,12 @@ export function createJunctionDeviceSyncProvider(
         EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyBackfillAttempts - 1]
         ?? null;
     }
-    if (retryDelayMs === null) {
+    if (
+      retryDelayMs === null
+      && input.importResult.fetchComplete
+      && !recordsSeen
+      && unresolvedProviderRecordCount === 0
+    ) {
       return withJunctionExtendedTimeseriesBackfillCompletion(
         input.result,
         buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
@@ -2397,8 +2409,16 @@ export function createJunctionDeviceSyncProvider(
           input.job,
           input.resource,
           sourceProviderSlug,
+          "fetch_complete_no_progress_exhausted",
         ),
       );
+    }
+
+    if (retryDelayMs === null) {
+      // Defensive fallback for an incomplete or unresolved state that cannot
+      // safely certify coverage. Complete this stale row without its matrix
+      // bit so the existing scheduler can offer one current replacement.
+      return input.result;
     }
 
     return {
@@ -2451,6 +2471,7 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     resource: string,
     sourceProviderSlug: string | null,
+    completionReason: JunctionExtendedTimeseriesBackfillCompletionReason,
   ): Record<string, unknown> {
     if (!sourceProviderSlug) {
       return {};
@@ -2472,6 +2493,7 @@ export function createJunctionDeviceSyncProvider(
 
     if (
       policy.historyAnchor === "schedule_time"
+      && completionReason !== "fetch_complete_no_progress_exhausted"
       && !doesJunctionScheduleTimeHistoryWindowReachDailyCoverage({
         currentClosedDayTarget: floorUtcDayTimestamp(context.now),
         fixedWindowEnd: normalizeString(job.payload.windowEnd),

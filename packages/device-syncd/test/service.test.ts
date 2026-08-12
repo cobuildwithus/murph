@@ -1556,6 +1556,207 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
   }
 });
 
+test("Junction empty sparse history exhausts real delayed scans once and records terminal coverage", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-empty-history-terminal");
+  let now = new Date("2026-08-11T12:00:00.000Z");
+  const historicalRequests = new Map<string, number>();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 1,
+    reconcileIntervalMs: 60 * 60_000,
+    summaryBackfillDays: 1,
+    summaryResources: [],
+    timeseriesResources: ["caffeine", "vo2_max"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-empty-history-terminal") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-empty-history-terminal",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true, vo2_max: true },
+        }] });
+      }
+      if (
+        url.pathname.startsWith("/v2/summary/")
+        && url.pathname.endsWith("/junction-user-empty-history-terminal")
+      ) {
+        return createJsonResponse({ data: [] });
+      }
+      if (
+        url.pathname.startsWith(
+          "/v2/timeseries/junction-user-empty-history-terminal/",
+        )
+      ) {
+        const resource = url.pathname.split("/").at(-2);
+        assert.ok(resource === "caffeine" || resource === "vo2_max");
+        if (url.searchParams.get("provider") === "garmin") {
+          historicalRequests.set(resource, (historicalRequests.get(resource) ?? 0) + 1);
+        }
+        if (resource === "caffeine") {
+          return createJsonResponse({ groups: {} });
+        }
+        return createJsonResponse({ groups: { garmin: [{
+          data: [{ start: url.searchParams.get("start_date"), value: "not-a-number" }],
+          source: { provider: "garmin", type: "watch" },
+        }] } });
+      }
+      throw new Error(`Unexpected Junction empty-history request: ${url.pathname}`);
+    },
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(snapshot) {
+        const prepared = await prepareDeviceProviderSnapshotImport(snapshot);
+        return { events: prepared.events ?? [] };
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      connectedAt: "2026-04-03T12:00:00.000Z",
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-user-empty-history-terminal",
+      metadata: {
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
+      },
+      nextReconcileAt: now.toISOString(),
+      provider: "junction",
+      scopes: [],
+      status: "active",
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      lastSeenAt: now.toISOString(),
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { caffeine: true, vo2_max: true },
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    const activeHistoryJobs = () => readJobsForAccountForTesting(store, account.id)
+      .flatMap((row) => {
+        const job = store.getJobById(row.id);
+        return job
+          && job.kind === "resource"
+          && job.payload.historicalBackfill === true
+          && (job.status === "queued" || job.status === "running")
+          ? [job]
+          : [];
+      });
+
+    await service.runSchedulerOnce();
+    const initiallyScheduled = activeHistoryJobs();
+    assert.equal(initiallyScheduled.length, 2);
+    const stableDedupeKeys = new Map(initiallyScheduled.map((job) => [
+      String(job.payload.resource),
+      job.dedupeKey,
+    ]));
+    assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+
+    const observedRetryAttempts = new Map<string, number>();
+    const observedRetryDelays = new Map<string, number[]>();
+    let historyWorkerRuns = 0;
+    while (activeHistoryJobs().length > 0) {
+      const processed = await service.runWorkerOnce();
+      if (processed) {
+        assert.equal(processed.kind, "resource");
+        historyWorkerRuns += 1;
+        assert.ok(historyWorkerRuns <= 60);
+        const activeJobs = activeHistoryJobs();
+        for (const active of activeJobs) {
+          assert.equal(
+            active.dedupeKey,
+            stableDedupeKeys.get(String(active.payload.resource)),
+          );
+        }
+        const resource = String(processed.payload.resource);
+        const continuation = activeJobs.find((active) =>
+          active.payload.resource === resource
+        );
+        const retryAttempts = typeof continuation?.payload.emptyBackfillAttempts === "number"
+          ? continuation.payload.emptyBackfillAttempts
+          : 0;
+        const previousRetryAttempts = observedRetryAttempts.get(resource) ?? 0;
+        if (continuation && retryAttempts > previousRetryAttempts) {
+          observedRetryDelays.set(resource, [
+            ...(observedRetryDelays.get(resource) ?? []),
+            Date.parse(continuation.availableAt) - now.getTime(),
+          ]);
+          observedRetryAttempts.set(resource, retryAttempts);
+        }
+        continue;
+      }
+
+      const nextAvailableAt = activeHistoryJobs()
+        .map((job) => Date.parse(job.availableAt))
+        .sort((left, right) => left - right)[0];
+      assert.ok(Number.isFinite(nextAvailableAt));
+      const delayMs = nextAvailableAt - now.getTime();
+      assert.ok(delayMs > 0);
+      now = new Date(nextAvailableAt);
+    }
+
+    assert.equal(historyWorkerRuns, 60, "two resources must complete six chunks across five scans");
+    for (const resource of ["caffeine", "vo2_max"]) {
+      assert.deepEqual(observedRetryDelays.get(resource), [
+        15 * 60_000,
+        60 * 60_000,
+        6 * 60 * 60_000,
+        24 * 60 * 60_000,
+      ]);
+    }
+    assert.equal(historicalRequests.get("caffeine"), 30);
+    assert.equal(historicalRequests.get("vo2_max"), 30);
+
+    const persisted = store.getAccountById(account.id);
+    assert.ok(persisted);
+    for (const resource of ["caffeine", "vo2_max"]) {
+      assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        persisted.metadata,
+        "garmin",
+        resource,
+        JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+      ), true);
+    }
+    const encodedCoverage = persisted.metadata.junctionExtendedHistoryCoverage;
+    assert.equal(typeof encodedCoverage, "string");
+    const encodedBytes = String(encodedCoverage).split("|", 2)[1];
+    assert.ok(encodedBytes);
+    const setBitCount = [...Buffer.from(encodedBytes, "base64url")]
+      .reduce((sum, byte) => sum + byte.toString(2).replaceAll("0", "").length, 0);
+    assert.equal(setBitCount, 2, "each completed source/resource pair owns exactly one bit");
+
+    store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await service.runSchedulerOnce();
+    assert.equal(activeHistoryJobs().length, 0, "terminal coverage must prevent a fresh chain");
+  } finally {
+    close();
+  }
+});
+
 test("Junction schedule-time history keeps one durable retry chain across UTC days", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-schedule-history-retry");
   let now = new Date("2026-08-11T12:00:00.000Z");
