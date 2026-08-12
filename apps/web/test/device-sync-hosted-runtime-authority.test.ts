@@ -730,6 +730,48 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.storedAccount?.tokenVersion).toBe(3);
   });
 
+  it("does not resurrect cleared weight coverage from a pre-reconnect completion", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        id: "conn_junction_weight_reconnect",
+        metadata: {
+          junctionWeightHistoryBackfillCoverage: "v1|renpho",
+        },
+        provider: "junction",
+        updatedAt: "2026-04-06T10:01:00.000Z",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connection: {
+              metadata: {
+                junctionWeightHistoryBackfillCoverage: "v1|renpho,withings",
+              },
+            },
+            connectionId: "conn_junction_weight_reconnect",
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
+    expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(harness.record.metadata).toEqual({
+      junctionWeightHistoryBackfillCoverage: "v1|renpho",
+    });
+  });
+
   it("rejects runtime writes after a provider-application binding becomes stale", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({

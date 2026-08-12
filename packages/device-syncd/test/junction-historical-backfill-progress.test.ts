@@ -8,9 +8,11 @@ import {
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+  JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
   mergeHostedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
+  removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
 } from "../src/junction-historical-backfill-progress.ts";
 
 const WINDOW_START = "2025-12-20T00:00:00.000Z";
@@ -51,6 +53,34 @@ describe("Junction historical backfill progress versions", () => {
       [JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]: "v1|renpho,withings",
     });
     expect(result.preservedLocalProgress).toBe(true);
+  });
+
+  it("removes only an explicitly reconnected source from current weight coverage", () => {
+    expect(JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION).toBe(1);
+    expect(removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingValue: "v1|renpho,withings",
+      providerSlug: "Withings",
+      version: JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
+    })).toEqual({
+      changed: true,
+      value: "v1|renpho",
+    });
+    expect(removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingValue: "v1|withings",
+      providerSlug: "withings",
+      version: JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
+    })).toEqual({
+      changed: true,
+      value: null,
+    });
+    expect(removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingValue: "v2|withings",
+      providerSlug: "withings",
+      version: JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
+    })).toEqual({
+      changed: false,
+      value: "v2|withings",
+    });
   });
 
   it("leaves future coverage versions opaque and immutable", () => {

@@ -7,6 +7,11 @@ import {
   JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
+import {
+  JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+  JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
+  removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "@murphai/device-syncd/junction-historical-backfill-progress";
 import type {
   DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
@@ -686,6 +691,20 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
             lastSeenAt: sourceStartedAt,
             tx,
           });
+          const connection = await input.store.getConnectionForUser(
+            input.userId,
+            input.connectionId,
+            tx,
+          );
+          if (!connection) {
+            connectionChangedDuringDisconnectError();
+          }
+          await resetHostedJunctionWeightHistoryCoverageForSource({
+            connection,
+            sourceProviderSlug,
+            store: input.store,
+            tx,
+          });
           return { complete: true as const, source: preparedSource };
         },
       );
@@ -746,6 +765,12 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
+    await resetHostedJunctionWeightHistoryCoverageForSource({
+      connection,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
     return {
       connectionId: input.connectionId,
       lastSeenAt: preparedSource.lastSeenAt,
@@ -753,6 +778,34 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       sourceProviderSlug,
     };
   });
+}
+
+async function resetHostedJunctionWeightHistoryCoverageForSource(input: {
+  connection: PublicDeviceSyncAccount;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+}): Promise<void> {
+  const reset = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
+    existingValue:
+      input.connection.metadata[JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY],
+    providerSlug: input.sourceProviderSlug,
+    version: JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
+  });
+  if (!reset.changed) {
+    return;
+  }
+
+  const metadata = { ...input.connection.metadata };
+  if (reset.value === null) {
+    delete metadata[JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY];
+  } else {
+    metadata[JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY] = reset.value;
+  }
+  await input.store.syncDurableConnectionState({
+    ...input.connection,
+    metadata,
+  }, input.tx);
 }
 
 /**

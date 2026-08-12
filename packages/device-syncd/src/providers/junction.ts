@@ -53,6 +53,7 @@ import {
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+  JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
   type JunctionHistoricalBackfillEvidence,
@@ -342,7 +343,7 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   },
   weight: {
     metadataKey: JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
-    version: 1,
+    version: JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
   },
 } as const satisfies Partial<Record<
   JunctionTimeseriesResource,

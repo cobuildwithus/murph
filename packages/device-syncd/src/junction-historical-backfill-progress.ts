@@ -54,6 +54,7 @@ export const JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
   "junctionNoteHistoryBackfillCoverage";
 export const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
   "junctionWeightHistoryBackfillCoverage";
+export const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION = 1;
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_PREFIX = "v";
 
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS = Object.freeze([
@@ -345,6 +346,34 @@ export function hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
   version: number,
 ): boolean {
   return hasJunctionBloodPressureHistoryBackfillCoverage(value, providerSlug, version);
+}
+
+export function removeJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
+  existingValue: unknown;
+  providerSlug: string;
+  version: number;
+}): { changed: boolean; value: string | null } {
+  const providerSlug = input.providerSlug.trim().toLowerCase();
+  const existing = readJunctionExtendedTimeseriesHistoryBackfillCoverage(input.existingValue);
+  if (
+    existing === null
+    || existing.version !== input.version
+    || !isSafeJunctionHistoricalBackfillEvidenceSource(providerSlug)
+    || !existing.providerSlugs.includes(providerSlug)
+  ) {
+    return {
+      changed: false,
+      value: existing ? encodeJunctionBloodPressureHistoryBackfillCoverage(existing) : null,
+    };
+  }
+
+  return {
+    changed: true,
+    value: encodeJunctionBloodPressureHistoryBackfillCoverage({
+      providerSlugs: existing.providerSlugs.filter((slug) => slug !== providerSlug),
+      version: existing.version,
+    }),
+  };
 }
 
 export function canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
