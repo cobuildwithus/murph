@@ -307,18 +307,34 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
 });
 
 describe("Junction extended-timeseries history coverage", () => {
-  it("pins the v1 bit order to the authoritative source and resource catalogs", () => {
+  it("pins v1 source order and reserves the exact append-only stack resource union", () => {
     expect(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_SOURCE_SLUGS).toEqual(
       JUNCTION_CONNECT_SOURCE_TARGETS.map((target) => target.providerSlug),
     );
     expect(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES).toEqual(
-      JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
+      [
+        ...JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
+        "insulin_injection",
+        "carbohydrates",
+        "workout_duration",
+        "weight",
+        "fat",
+        "body_mass_index",
+        "lean_body_mass",
+        "waist_circumference",
+      ],
     );
+    const reservedResources = new Set<string>(
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES,
+    );
+    expect(JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.every((resource) =>
+      reservedResources.has(resource)
+    )).toBe(true);
   });
 
-  it("stores all 33 by 10 completions in one bounded authoritative scalar", () => {
+  it("stores all 33 by 18 reserved completions in one bounded authoritative scalar", () => {
     let metadata: Record<string, unknown> = {};
-    for (const resource of JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES) {
+    for (const resource of JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES) {
       for (const { providerSlug } of JUNCTION_CONNECT_SOURCE_TARGETS) {
         const patch = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
           existingMetadata: metadata,
@@ -338,7 +354,9 @@ describe("Junction extended-timeseries history coverage", () => {
     ].sort());
     expect(String(metadata[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY]).length)
       .toBeLessThan(DEVICE_SYNC_METADATA_MAX_STRING_LENGTH);
-    for (const resource of JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES) {
+    expect(String(metadata[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY]).length)
+      .toBe(103);
+    for (const resource of JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES) {
       for (const { providerSlug } of JUNCTION_CONNECT_SOURCE_TARGETS) {
         expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
           metadata,
