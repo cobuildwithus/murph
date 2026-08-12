@@ -46,6 +46,38 @@ const EXPECTED_NEW_SPARSE_OPT_INS = [
   "waist_circumference",
 ];
 
+const EXPECTED_NEXT_OPT_INS = [
+  "calories_basal",
+  "daylight_exposure",
+  "fall",
+  "floors_climbed",
+  "handwashing",
+  "stand_duration",
+  "stand_hour",
+  "uv_exposure",
+  "wheelchair_push",
+  "workout_distance",
+  "workout_duration",
+  "workout_swimming_stroke",
+];
+
+const EXPECTED_NEXT_DAILY_AGGREGATES = [
+  "calories_basal",
+  "daylight_exposure",
+  "floors_climbed",
+  "stand_duration",
+  "stand_hour",
+  "wheelchair_push",
+];
+
+const EXPECTED_NEXT_SESSION_FEATURES = [
+  "handwashing",
+  "uv_exposure",
+  "workout_distance",
+  "workout_duration",
+  "workout_swimming_stroke",
+];
+
 const EXPECTED_OPT_IN = [
   "steps",
   "distance",
@@ -53,6 +85,7 @@ const EXPECTED_OPT_IN = [
   "heartrate",
   "weight",
   ...EXPECTED_NEW_SPARSE_OPT_INS,
+  ...EXPECTED_NEXT_OPT_INS,
 ];
 
 describe("Junction timeseries resource policy", () => {
@@ -69,7 +102,10 @@ describe("Junction timeseries resource policy", () => {
   });
 
   it("keeps the new slice off by default and gives it extended bounded history", () => {
-    expect(JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES).toEqual(EXPECTED_NEW_SPARSE_OPT_INS);
+    expect(JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES).toEqual([
+      ...EXPECTED_NEW_SPARSE_OPT_INS,
+      "fall",
+    ]);
     for (const resource of EXPECTED_NEW_SPARSE_OPT_INS) {
       expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).not.toContain(resource);
       expect(JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES).toContain(resource);
@@ -83,6 +119,34 @@ describe("Junction timeseries resource policy", () => {
       enabledByDefault: true,
       fetchChunkDays: 1,
       historyWindow: "dense_timeseries",
+    });
+  });
+
+  it("keeps the activity slice exact-opt-in with policy-owned compact storage modes", () => {
+    for (const resource of EXPECTED_NEXT_OPT_INS) {
+      expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).not.toContain(resource);
+    }
+    for (const resource of EXPECTED_NEXT_DAILY_AGGREGATES) {
+      expect(resolveJunctionTimeseriesResourcePolicy(resource)).toMatchObject({
+        enabledByDefault: false,
+        fetchChunkDays: 1,
+        historyWindow: "dense_timeseries",
+        normalizationMode: "daily_aggregate",
+      });
+    }
+    for (const resource of EXPECTED_NEXT_SESSION_FEATURES) {
+      expect(resolveJunctionTimeseriesResourcePolicy(resource)).toMatchObject({
+        enabledByDefault: false,
+        fetchChunkDays: 1,
+        historyWindow: "dense_timeseries",
+        normalizationMode: "hourly_or_session_feature",
+      });
+    }
+    expect(resolveJunctionTimeseriesResourcePolicy("fall")).toMatchObject({
+      enabledByDefault: false,
+      fetchChunkDays: 30,
+      historyWindow: "summary_history",
+      normalizationMode: "sparse_alert",
     });
   });
 

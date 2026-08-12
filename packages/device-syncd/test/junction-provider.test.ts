@@ -13749,6 +13749,22 @@ test("Junction provider rejects unsupported configured resources", () => {
   assert.doesNotThrow(() => createJunctionProvider(async () => createJsonResponse({}), {
     summaryResources: ["meal", "menstrual_cycle", "electrocardiogram", "profile"],
   }));
+  assert.doesNotThrow(() => createJunctionProvider(async () => createJsonResponse({}), {
+    timeseriesResources: [
+      "calories_basal",
+      "daylight_exposure",
+      "fall",
+      "floors_climbed",
+      "handwashing",
+      "stand_duration",
+      "stand_hour",
+      "uv_exposure",
+      "wheelchair_push",
+      "workout_distance",
+      "workout_duration",
+      "workout_swimming_stroke",
+    ],
+  }));
   assert.throws(
     () => createJunctionProvider(async () => createJsonResponse({}), {
       summaryResources: ["clinical_note"],
@@ -13757,9 +13773,9 @@ test("Junction provider rejects unsupported configured resources", () => {
   );
   assert.throws(
     () => createJunctionProvider(async () => createJsonResponse({}), {
-      timeseriesResources: ["workout_distance"],
+      timeseriesResources: ["electrocardiogram_voltage", "workout_stream"],
     }),
-    /Junction timeseries resources include unsupported resource\(s\): workout_distance\./u,
+    /Junction timeseries resources include unsupported resource\(s\): electrocardiogram_voltage, workout_stream\./u,
   );
 });
 
@@ -14321,6 +14337,78 @@ test("Junction existing connections receive one bounded retryable fat activation
   assert.equal(afterCompletion.jobs.some((job) =>
     job.kind === "resource" && job.payload?.resource === "fat"
   ), false);
+});
+
+test("Junction activity opt-ins keep fall on bounded sparse history while dense aggregates and features stay daily", async () => {
+  const denseResources = ["calories_basal", "handwashing", "workout_distance"];
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-apple-health-1",
+          slug: "apple_health_kit",
+          name: "Apple Health",
+          status: "connected",
+          resource_availability: Object.fromEntries([
+            "activity",
+            "fall",
+            ...denseResources,
+          ].map((resource) => [resource, true])),
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.includes("/v2/timeseries/junction-user-1/")) {
+      return createJsonResponse({ groups: {} });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryBackfillDays: 30,
+    summaryResources: ["activity"],
+    timeseriesResources: ["fall", ...denseResources],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({ now: "2026-03-03T00:00:00.000Z" }),
+    createJob("backfill", {
+      windowStart: "2026-02-01T00:00:00.000Z",
+      windowEnd: "2026-03-03T00:00:00.000Z",
+    }),
+  );
+
+  const timeseriesRequests = requests
+    .filter((url) => url.includes("/v2/timeseries/"))
+    .map((url) => new URL(url));
+  const fallRequests = timeseriesRequests.filter((url) =>
+    url.pathname === "/v2/timeseries/junction-user-1/fall/grouped"
+  );
+  assert.equal(fallRequests.length, 1);
+  for (const url of fallRequests) {
+    const start = Date.parse(requireValue(url.searchParams.get("start_date"), "fall start_date"));
+    const end = Date.parse(requireValue(url.searchParams.get("end_date"), "fall end_date"));
+    assert.ok(end > start);
+    assert.ok(end - start <= 30 * 24 * 60 * 60_000);
+  }
+
+  for (const resource of denseResources) {
+    const resourceRequests = timeseriesRequests.filter((url) =>
+      url.pathname === `/v2/timeseries/junction-user-1/${resource}/grouped`
+    );
+    assert.equal(resourceRequests.length, 14, resource);
+    assert.ok(resourceRequests.every((url) => {
+      const start = url.searchParams.get("start_date");
+      const end = url.searchParams.get("end_date");
+      return start !== null && start === end;
+    }), resource);
+  }
 });
 
 test("Junction mixed sparse and dense backfills resume the longest history before advancing the shared cursor", async () => {

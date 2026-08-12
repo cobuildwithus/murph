@@ -3,6 +3,17 @@ import type { MetricDefinition } from "../types.ts";
 /** Sparse physiological/event measurements shared by device and manual paths. */
 export const PHYSIOLOGY_METRICS = [
   {
+    aliases: ["fall"],
+    biomarkerKey: null,
+    canonicalUnit: "count",
+    category: "custom",
+    displayName: "Fall count",
+    displayUnit: "count",
+    key: "fall-count",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 90 },
+    valuePrecision: 0,
+  },
+  {
     aliases: ["carbohydrate", "carbohydrates", "carbohydrate-grams", "carbohydrates_g"],
     biomarkerKey: null,
     canonicalUnit: "g",

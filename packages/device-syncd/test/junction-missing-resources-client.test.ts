@@ -26,6 +26,22 @@ test("Junction timeseries API mapping changes only public fat and legacy weight 
   assert.equal(resolveJunctionTimeseriesApiResource("fat"), "body_fat");
   assert.equal(resolveJunctionTimeseriesApiResource("weight"), "body_weight");
   assert.equal(resolveJunctionTimeseriesApiResource("body_mass_index"), "body_mass_index");
+  for (const resource of [
+    "calories_basal",
+    "daylight_exposure",
+    "fall",
+    "floors_climbed",
+    "handwashing",
+    "stand_duration",
+    "stand_hour",
+    "uv_exposure",
+    "wheelchair_push",
+    "workout_distance",
+    "workout_duration",
+    "workout_swimming_stroke",
+  ]) {
+    assert.equal(resolveJunctionTimeseriesApiResource(resource), resource);
+  }
 
   const paths: string[] = [];
   const client = createClient(async (input) => {
@@ -35,10 +51,12 @@ test("Junction timeseries API mapping changes only public fat and legacy weight 
 
   await client.listTimeseries({ ...WINDOW, resource: "fat" });
   await client.listTimeseries({ ...WINDOW, resource: "body_mass_index" });
+  await client.listTimeseries({ ...WINDOW, resource: "workout_distance" });
 
   assert.deepEqual(paths, [
     "/v2/timeseries/junction-user-1/body_fat/grouped",
     "/v2/timeseries/junction-user-1/body_mass_index/grouped",
+    "/v2/timeseries/junction-user-1/workout_distance/grouped",
   ]);
 });
 

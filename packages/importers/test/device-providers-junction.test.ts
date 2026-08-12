@@ -4718,6 +4718,18 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "peak_expiratory_flow_rate",
     "sleep_apnea_alert",
     "waist_circumference",
+    "calories_basal",
+    "daylight_exposure",
+    "fall",
+    "floors_climbed",
+    "handwashing",
+    "stand_duration",
+    "stand_hour",
+    "uv_exposure",
+    "wheelchair_push",
+    "workout_distance",
+    "workout_duration",
+    "workout_swimming_stroke",
   ]);
   assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_ALLOWED_SUMMARY_RESOURCES], [
@@ -5272,7 +5284,7 @@ test("Junction partial profiles land height-only and reject non-boolean wheelcha
   assert.equal(demographics?.note, "Birth date: 1990-05-14.");
 });
 
-test("Junction normalizer ignores unsupported timeseries and workout stream resources", () => {
+test("Junction normalizer ignores dense dedicated timeseries and workout stream resources", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
@@ -5283,13 +5295,13 @@ test("Junction normalizer ignores unsupported timeseries and workout stream reso
       }],
     },
     timeseries: {
-      workout_distance: [{
+      electrocardiogram_voltage: [{
         timestamp: "2026-04-22T18:00:00Z",
-        value: 1200,
+        value: 0.2,
       }],
-      workout_swimming_stroke: [{
+      workout_heartrate: [{
         timestamp: "2026-04-22T18:00:00Z",
-        value: "freestyle",
+        value: 64,
       }],
     },
   });
@@ -5299,8 +5311,8 @@ test("Junction normalizer ignores unsupported timeseries and workout stream reso
   assert.deepEqual(payload.events, []);
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-workout-stream"), false);
-  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-workout-distance"), false);
-  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-workout-swimming-stroke"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-electrocardiogram-voltage"), false);
+  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-workout-heartrate"), false);
 });
 
 test("Junction import receipt does not retain unsupported-only clinical summaries", async () => {
@@ -5362,7 +5374,7 @@ test("Junction raw receipt hash ignores unsupported-only resources", async () =>
       timeseries: {
         electrocardiogram_voltage: [{ timestamp: "2026-04-22T18:00:00Z", value: 0.2 }],
         workout_heartrate: [{ timestamp: "2026-04-22T18:00:00Z", value: 64 }],
-        workout_distance: [{ timestamp: "2026-04-22T18:00:00Z", value: 1200 }],
+        workout_power: [{ timestamp: "2026-04-22T18:00:00Z", value: 250 }],
       },
     },
   });
@@ -5381,9 +5393,9 @@ test("Junction raw receipt hash ignores unsupported-only resources", async () =>
     "workout_stream",
     "electrocardiogram_voltage",
     "workout_heartrate",
-    "workout_distance",
+    "workout_power",
     "\"value\":64",
-    "\"value\":1200",
+    "\"value\":250",
   ]);
 });
 
@@ -5418,7 +5430,7 @@ test("Junction raw receipt hash ignores unsupported resources mixed with support
       },
       timeseries: {
         workout_heartrate: [{ timestamp: "2026-04-22T18:00:00Z", value: 64 }],
-        workout_distance: [{ timestamp: "2026-04-22T18:00:00Z", value: 1200 }],
+        workout_power: [{ timestamp: "2026-04-22T18:00:00Z", value: 250 }],
       },
     },
   });
@@ -5435,9 +5447,9 @@ test("Junction raw receipt hash ignores unsupported resources mixed with support
     "unsupported_clinical_value",
     "workout_stream",
     "workout_heartrate",
-    "workout_distance",
+    "workout_power",
     "\"value\":64",
-    "\"value\":1200",
+    "\"value\":250",
   ]);
 });
 

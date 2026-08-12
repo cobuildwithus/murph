@@ -726,6 +726,7 @@ const JUNCTION_WEIGHT_VALUE_PATHS = [
   "weightKg",
   "weight_kg",
 ] as const;
+const JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS = ["value"] as const;
 const JUNCTION_READING_STABLE_ID_PATHS = [
   "id",
   "resourceId",
@@ -1462,6 +1463,7 @@ interface JunctionDailyTimeseriesDescriptor {
   normalizeValue: (value: unknown, entry: PlainObject) => number | undefined;
   observations: readonly JunctionDailyTimeseriesObservationDescriptor[];
   requireExplicitTimestamp?: boolean;
+  retainSumValue?: boolean;
   unit: string;
   valuePaths: readonly string[];
 }
@@ -1504,6 +1506,7 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
       { metric: "daily-steps", statistic: "sum", title: "Junction steps" },
     ],
     requireExplicitTimestamp: true,
+    retainSumValue: true,
     unit: "count",
     valuePaths: JUNCTION_STEPS_VALUE_PATHS,
   }],
@@ -1513,6 +1516,7 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
       { metric: "distance-km", statistic: "sum", title: "Junction distance" },
     ],
     requireExplicitTimestamp: true,
+    retainSumValue: true,
     unit: "km",
     valuePaths: JUNCTION_DISTANCE_VALUE_PATHS,
   }],
@@ -1641,6 +1645,66 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
     unit: "mg/dL",
     valuePaths: JUNCTION_GLUCOSE_VALUE_PATHS,
   }],
+  ["calories_basal", {
+    normalizeValue: normalizeBasalCaloriesKilocalories,
+    observations: [
+      { metric: "basal-calories", statistic: "sum", title: "Junction basal calories" },
+    ],
+    requireExplicitTimestamp: true,
+    retainSumValue: true,
+    unit: "kcal",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
+  }],
+  ["daylight_exposure", {
+    normalizeValue: normalizeDaylightExposureMinutes,
+    observations: [
+      { metric: "daylight-exposure-minutes", statistic: "sum", title: "Junction daylight exposure" },
+    ],
+    requireExplicitTimestamp: true,
+    retainSumValue: true,
+    unit: "minutes",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
+  }],
+  ["floors_climbed", {
+    normalizeValue: normalizeFloorsClimbedCount,
+    observations: [
+      { metric: "floors-climbed", statistic: "sum", title: "Junction floors climbed" },
+    ],
+    requireExplicitTimestamp: true,
+    retainSumValue: true,
+    unit: "count",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
+  }],
+  ["stand_duration", {
+    normalizeValue: normalizeStandDurationMinutes,
+    observations: [
+      { metric: "stand-duration-minutes", statistic: "sum", title: "Junction stand duration" },
+    ],
+    requireExplicitTimestamp: true,
+    retainSumValue: true,
+    unit: "minutes",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
+  }],
+  ["stand_hour", {
+    normalizeValue: normalizeStandHourCount,
+    observations: [
+      { metric: "stand-hours", statistic: "sum", title: "Junction stand hours" },
+    ],
+    requireExplicitTimestamp: true,
+    retainSumValue: true,
+    unit: "count",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
+  }],
+  ["wheelchair_push", {
+    normalizeValue: normalizeWheelchairPushCount,
+    observations: [
+      { metric: "wheelchair-push-count", statistic: "sum", title: "Junction wheelchair pushes" },
+    ],
+    requireExplicitTimestamp: true,
+    retainSumValue: true,
+    unit: "count",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
+  }],
 ];
 
 const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTimeseriesDescriptor> =
@@ -1667,6 +1731,46 @@ const JUNCTION_FEATURE_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
     ],
     unit: "bpm",
     valuePaths: JUNCTION_HEARTRATE_VALUE_PATHS,
+  }],
+  ["handwashing", {
+    normalizeValue: normalizeHandwashingCount,
+    observations: [
+      { metric: "handwashing-count", statistic: "sum", title: "Junction handwashing" },
+    ],
+    unit: "count",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
+  }],
+  ["uv_exposure", {
+    normalizeValue: normalizeUvExposureIndex,
+    observations: [
+      { metric: "uv-exposure-index", statistic: "mean", title: "Junction UV exposure" },
+    ],
+    unit: "index",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
+  }],
+  ["workout_distance", {
+    normalizeValue: normalizeDistanceKilometers,
+    observations: [
+      { metric: "workout-distance-km", statistic: "sum", title: "Junction workout distance" },
+    ],
+    unit: "km",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
+  }],
+  ["workout_duration", {
+    normalizeValue: normalizeWorkoutDurationMinutes,
+    observations: [
+      { metric: "workout-minutes", statistic: "sum", title: "Junction workout duration" },
+    ],
+    unit: "minutes",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
+  }],
+  ["workout_swimming_stroke", {
+    normalizeValue: normalizeWorkoutSwimmingStrokeCount,
+    observations: [
+      { metric: "swimming-stroke-count", statistic: "sum", title: "Junction swimming strokes" },
+    ],
+    unit: "count",
+    valuePaths: JUNCTION_GENERIC_TIMESERIES_VALUE_PATHS,
   }],
 ];
 
@@ -1724,6 +1828,7 @@ const JUNCTION_SPARSE_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionSparse
     ["peak_expiratory_flow_rate", { canonicalUnit: "L/min", kind: "observation", maximum: 2_000, metric: "peak-expiratory-flow-rate", minimum: 1, title: "Junction peak expiratory flow rate", upstreamUnit: "L/min" }],
     ["sleep_apnea_alert", { canonicalUnit: "count", kind: "alert", maximum: 10_000, metric: "sleep-apnea-alert", minimum: 1, requireInteger: true, title: "Junction sleep-apnea alert", upstreamUnit: "count" }],
     ["waist_circumference", { canonicalUnit: "cm", kind: "observation", maximum: 300, metric: "waist-circumference", minimum: 20, title: "Junction waist circumference", upstreamUnit: "cm" }],
+    ["fall", { canonicalUnit: "count", kind: "alert", maximum: 1_000, metric: "fall-count", minimum: 1, requireInteger: true, title: "Junction fall", upstreamUnit: "count" }],
   ] satisfies readonly (readonly [string, JunctionSparseTimeseriesDescriptor])[]);
 
 const JUNCTION_HEART_ALERT_TYPES = new Set([
@@ -2536,7 +2641,7 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
             meanValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
             minValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
             maxValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
-            sumValue: resource === "steps" || resource === "distance"
+            sumValue: JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource)?.retainSumValue === true
               ? roundJunctionTimeseriesAggregateValue(resource, aggregate.sum)
               : undefined,
             unit: junctionDailyTimeseriesAggregateUnit(resource),
@@ -2911,7 +3016,7 @@ function pushJunctionFeatureTimeseriesObservation(
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
       metric: observation.metric,
-      // Hour/session aggregates are compact derived features, not competing
+      // Hour aggregates are compact derived features, not competing
       // representations of one provider day. Keeping them non-summary stops
       // daily and sleep selectors from promoting a single bucket as a day fact.
       observationGrain: "derived_fact",
@@ -3313,6 +3418,12 @@ function buildRawResourcePayload(
   if (
     policy?.normalizationMode === "daily_aggregate"
     && !JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.has(resource)
+  ) {
+    return undefined;
+  }
+  if (
+    policy?.normalizationMode === "hourly_or_session_feature"
+    && !JUNCTION_FEATURE_TIMESERIES_DESCRIPTORS.has(resource)
   ) {
     return undefined;
   }
@@ -7103,6 +7214,119 @@ function normalizeActiveCaloriesKilocalories(value: unknown, entry: PlainObject)
   }
 
   return roundJunctionDailyAggregateValue(kilocalories);
+}
+
+function normalizeBasalCaloriesKilocalories(value: unknown, entry: PlainObject): number | undefined {
+  return normalizeActiveCaloriesKilocalories(value, entry);
+}
+
+function normalizeDaylightExposureMinutes(value: unknown, entry: PlainObject): number | undefined {
+  return normalizeJunctionDurationMinutes(value, entry, 1440);
+}
+
+function normalizeStandDurationMinutes(value: unknown, entry: PlainObject): number | undefined {
+  return normalizeJunctionDurationMinutes(value, entry, 1440);
+}
+
+function normalizeWorkoutDurationMinutes(value: unknown, entry: PlainObject): number | undefined {
+  return normalizeJunctionDurationMinutes(value, entry, 7 * 24 * 60);
+}
+
+function normalizeJunctionDurationMinutes(
+  value: unknown,
+  entry: PlainObject,
+  maximum: number,
+): number | undefined {
+  const numeric = finiteNumber(value);
+  const unit = readJunctionTimeseriesUnit(entry);
+  if (numeric === undefined || numeric < 0) {
+    return undefined;
+  }
+
+  let minutes: number;
+  switch (unit) {
+    case undefined:
+    case "min":
+    case "mins":
+    case "minute":
+    case "minutes":
+      minutes = numeric;
+      break;
+    case "s":
+    case "sec":
+    case "secs":
+    case "second":
+    case "seconds":
+      minutes = numeric / 60;
+      break;
+    case "ms":
+    case "millisecond":
+    case "milliseconds":
+      minutes = numeric / 60_000;
+      break;
+    default:
+      return undefined;
+  }
+
+  return minutes <= maximum
+    ? roundJunctionDailyAggregateValue(minutes)
+    : undefined;
+}
+
+function normalizeFloorsClimbedCount(value: unknown, entry: PlainObject): number | undefined {
+  return normalizeJunctionIntegerCount(value, entry, 0, 10_000);
+}
+
+function normalizeStandHourCount(value: unknown, entry: PlainObject): number | undefined {
+  return normalizeJunctionIntegerCount(value, entry, 0, 24);
+}
+
+function normalizeWheelchairPushCount(value: unknown, entry: PlainObject): number | undefined {
+  return normalizeJunctionIntegerCount(value, entry, 0, 10_000_000);
+}
+
+function normalizeHandwashingCount(value: unknown, entry: PlainObject): number | undefined {
+  return normalizeJunctionIntegerCount(value, entry, 1, 1_000);
+}
+
+function normalizeWorkoutSwimmingStrokeCount(value: unknown, entry: PlainObject): number | undefined {
+  return normalizeJunctionIntegerCount(value, entry, 0, 1_000_000);
+}
+
+function normalizeJunctionIntegerCount(
+  value: unknown,
+  entry: PlainObject,
+  minimum: number,
+  maximum: number,
+): number | undefined {
+  const numeric = finiteNumber(value);
+  const unit = readJunctionTimeseriesUnit(entry);
+  if (
+    numeric === undefined
+    || !Number.isSafeInteger(numeric)
+    || numeric < minimum
+    || numeric > maximum
+    || (unit !== undefined && unit !== "count" && unit !== "counts")
+  ) {
+    return undefined;
+  }
+
+  return numeric;
+}
+
+function normalizeUvExposureIndex(value: unknown, entry: PlainObject): number | undefined {
+  const numeric = finiteNumber(value);
+  const unit = readJunctionTimeseriesUnit(entry);
+  if (
+    numeric === undefined
+    || numeric < 0
+    || numeric > 100
+    || (unit !== undefined && unit !== "index")
+  ) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
 }
 
 function normalizeHeartRateBpm(value: unknown, entry: PlainObject): number | undefined {

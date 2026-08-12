@@ -56,6 +56,18 @@ export const JUNCTION_TIMESERIES_RESOURCE_POLICIES = Object.freeze([
   { resource: "peak_expiratory_flow_rate", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
   { resource: "sleep_apnea_alert", enabledByDefault: false, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 30 },
   { resource: "waist_circumference", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "calories_basal", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "daylight_exposure", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "fall", enabledByDefault: false, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "floors_climbed", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "handwashing", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "stand_duration", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "stand_hour", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "uv_exposure", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "wheelchair_push", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "workout_distance", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "workout_duration", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "workout_swimming_stroke", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
 ] as const satisfies readonly JunctionTimeseriesResourcePolicy[]);
 
 export type JunctionTimeseriesResource =

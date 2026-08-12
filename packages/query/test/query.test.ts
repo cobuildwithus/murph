@@ -6633,6 +6633,49 @@ test("Junction precise body readings suppress only exact body-summary overlaps",
   }
 });
 
+test("Junction activity resource metrics remain queryable through exact opt-in names", async () => {
+  const cases = [
+    ["calories_basal", "basal-calories", 1450, "kcal"],
+    ["daylight_exposure", "daylight-exposure-minutes", 45, "minutes"],
+    ["fall", "fall-count", 1, "count"],
+    ["floors_climbed", "floors-climbed", 8, "count"],
+    ["handwashing", "handwashing-count", 1, "count"],
+    ["stand_duration", "stand-duration-minutes", 75, "minutes"],
+    ["stand_hour", "stand-hours", 2, "count"],
+    ["uv_exposure", "uv-exposure-index", 5, "index"],
+    ["wheelchair_push", "wheelchair-push-count", 300, "count"],
+    ["workout_distance", "workout-distance-km", 2, "km"],
+    ["workout_duration", "workout-minutes", 48, "minutes"],
+    ["workout_swimming_stroke", "swimming-stroke-count", 37, "count"],
+  ] as const;
+  const vaultRoot = await createMetricObservationVault(cases.map(([, metric, value, unit], index) => ({
+    id: `evt_junction_activity_metric_${String(index).padStart(2, "0")}`,
+    metric,
+    observationGrain: metric === "fall-count" ? "sample" : "summary",
+    occurredAt: `2026-04-07T12:${String(index).padStart(2, "0")}:00Z`,
+    source: "device",
+    title: `Junction activity metric ${metric}`,
+    unit,
+    value,
+  })));
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    for (const [publicName, canonicalMetric, value] of cases) {
+      const points = await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: publicName,
+      });
+      assert.equal(points.length, 1, publicName);
+      assert.equal(points[0]?.metricKey, canonicalMetric, publicName);
+      assert.equal(points[0]?.value, value, publicName);
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("listMetricPointsRuntime rebuilds v15 wearable-summary projections before serving metric points", async () => {
   const vaultRoot = await createMetricObservationVault([
     {

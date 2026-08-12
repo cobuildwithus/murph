@@ -151,6 +151,18 @@ describe("deviceSyncProviderManifests", () => {
       "peak_expiratory_flow_rate",
       "sleep_apnea_alert",
       "waist_circumference",
+      "calories_basal",
+      "daylight_exposure",
+      "fall",
+      "floors_climbed",
+      "handwashing",
+      "stand_duration",
+      "stand_hour",
+      "uv_exposure",
+      "wheelchair_push",
+      "workout_distance",
+      "workout_duration",
+      "workout_swimming_stroke",
     ]);
     for (const resource of JUNCTION_OPT_IN_TIMESERIES_RESOURCES) {
       expect(normalizeJunctionDeviceSyncRuntimeConfig({
