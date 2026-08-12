@@ -1744,6 +1744,47 @@ test("nested domain root cache scopes reuse the transaction-owned cache", async 
   assert.equal(getHostedDomainRootUnwrapCache(), undefined);
 });
 
+test("fresh domain root cache scopes isolate retry aliases and wipe only the child", async () => {
+  const {
+    getHostedDomainRootUnwrapCache,
+    runWithFreshHostedDomainRootUnwrapCache,
+    runWithHostedDomainRootUnwrapCache,
+  } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const outerRootKey = Uint8Array.from({ length: 32 }, () => 7);
+  const childRootKey = Uint8Array.from({ length: 32 }, () => 9);
+  let outerCache: ReturnType<typeof getHostedDomainRootUnwrapCache> = undefined;
+  let childCache: ReturnType<typeof getHostedDomainRootUnwrapCache> = undefined;
+  let resumedOuterCache: ReturnType<typeof getHostedDomainRootUnwrapCache> =
+    undefined;
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    outerCache = getHostedDomainRootUnwrapCache();
+    assert.ok(outerCache);
+    outerCache.set("outer", Promise.resolve({
+      envelope: {} as never,
+      rootKey: outerRootKey,
+    }));
+
+    await runWithFreshHostedDomainRootUnwrapCache(async () => {
+      childCache = getHostedDomainRootUnwrapCache();
+      assert.ok(childCache);
+      childCache.set("child", Promise.resolve({
+        envelope: {} as never,
+        rootKey: childRootKey,
+      }));
+    });
+
+    resumedOuterCache = getHostedDomainRootUnwrapCache();
+    assert.equal(resumedOuterCache, outerCache);
+    assert.notEqual(childCache, outerCache);
+    assert.deepEqual([...childRootKey], Array.from({ length: 32 }, () => 0));
+    assert.deepEqual([...outerRootKey], Array.from({ length: 32 }, () => 7));
+  });
+
+  assert.deepEqual([...outerRootKey], Array.from({ length: 32 }, () => 0));
+  assert.equal(getHostedDomainRootUnwrapCache(), undefined);
+});
+
 test("scoped domain root cache does not cache failed unwraps", async () => {
   const { tx } = await createHostedWebCryptoTransactionFixture();
   const {

@@ -27,6 +27,18 @@ export async function runWithHostedDomainRootUnwrapCache<TResult>(
     return run();
   }
 
+  return runWithFreshHostedDomainRootUnwrapCache(run);
+}
+
+/**
+ * Runs with a child cache even when a broader request cache already exists.
+ * Exact-authority retry owners use this after drift so a stale `@active` alias
+ * cannot survive into the next full preparation attempt. The child cache is
+ * wiped without mutating or zeroizing entries owned by the outer scope.
+ */
+export async function runWithFreshHostedDomainRootUnwrapCache<TResult>(
+  run: () => Promise<TResult>,
+): Promise<TResult> {
   const cache: HostedDomainRootUnwrapCache = new Map();
   try {
     return await hostedDomainRootUnwrapCacheStorage.run(cache, run);
