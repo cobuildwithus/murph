@@ -111,6 +111,22 @@ describe("planWorkoutCsvImport", () => {
     assert.match(plan.warnings.join(" "), /outside the supported 24-hour range/u);
   });
 
+  test("does not partially parse a malformed duration", () => {
+    const plan = planWorkoutCsvImport({
+      text: [
+        STRONG_HEADER,
+        "2026-01-15 06:30:00,Strength,45m unexpected,Squat,1,0,5,0,0,,,",
+      ].join("\n"),
+      timeZone: "UTC",
+    });
+
+    assert.equal(plan.importable, true);
+    assert.equal(plan.sessions[0]?.durationMinutes, undefined);
+    assert.equal(plan.sessions[0]?.workout.endedAt, undefined);
+    assert.equal(plan.sessions[0]?.workout.exercises[0]?.sets[0]?.reps, 5);
+    assert.match(plan.warnings.join(" "), /duration\(s\) were invalid/u);
+  });
+
   test("requires and applies an explicit unit for unitless positive distances", () => {
     const text = [
       STRONG_HEADER,

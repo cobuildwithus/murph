@@ -394,6 +394,7 @@ function parseDurationMinutes(value: string | undefined): number | undefined {
   }
 
   let seconds = 0;
+  let matchedLength = 0;
   for (const match of normalized.matchAll(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)/gu)) {
     const amount = Number(match[1]);
     if (!Number.isFinite(amount)) {
@@ -401,9 +402,14 @@ function parseDurationMinutes(value: string | undefined): number | undefined {
     }
     const unit = match[2] ?? "";
     seconds += amount * (/^(?:hours?|hrs?|h)$/u.test(unit) ? 3600 : /^(?:minutes?|mins?|m)$/u.test(unit) ? 60 : 1);
+    matchedLength += match[0].replace(/\s/gu, "").length;
   }
 
-  if (seconds <= 0 || seconds > 24 * 60 * 60) {
+  if (
+    matchedLength !== normalized.replace(/\s/gu, "").length
+    || seconds <= 0
+    || seconds > 24 * 60 * 60
+  ) {
     return undefined;
   }
   return Math.max(1, Math.round(seconds / 60));
@@ -507,7 +513,7 @@ function toWarnings(input: {
     warnings.push(`${input.skippedRowCount} row(s) could not be mapped safely; structured import is blocked.`);
   }
   if (input.invalidDurationCount > 0) {
-    warnings.push(`${input.invalidDurationCount} workout duration(s) were outside the supported 24-hour range and will be omitted while their sets are preserved.`);
+    warnings.push(`${input.invalidDurationCount} workout duration(s) were invalid or outside the supported 24-hour range and will be omitted while their sets are preserved.`);
   }
   if (input.requiresWeightUnit) {
     warnings.push("Positive weights have no unit in this export; pass --weight-unit lb or --weight-unit kg before importing.");

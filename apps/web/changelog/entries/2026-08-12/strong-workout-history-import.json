@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 200,
+  "item": {
+    "id": "strong-workout-history-import",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Bring your Strong workout history into Murph",
+    "summary": "Murph can now inspect and import a Strong workout CSV as one historical batch instead of rebuilding each exercise and set by hand.",
+    "details": "Murph checks the whole file before writing, asks for missing weight or distance units instead of guessing, and safely skips an unchanged replay.",
+    "relevanceTags": ["workouts", "imports", "strong", "privacy"],
+    "sourcePullRequests": [1734]
+  }
+}
