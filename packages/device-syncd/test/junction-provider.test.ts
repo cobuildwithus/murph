@@ -14333,9 +14333,9 @@ test("Junction mixed sparse and dense backfills resume the longest history befor
     if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
       return createJsonResponse({
         providers: [{
-          id: "provider-withings-1",
-          slug: "withings",
-          name: "Withings",
+          id: "provider-garmin-1",
+          slug: "garmin",
+          name: "Garmin",
           status: "connected",
           resource_availability: {
             activity: true,
@@ -14394,9 +14394,29 @@ test("Junction mixed sparse and dense backfills resume the longest history befor
   assert.equal(continuation.payload?.timeseriesPhase, "wide");
 
   const secondRequests: string[] = [];
-  await executeJunctionJob(
+  const source = createConnectionSource({
+    resourceAvailabilitySummary: { body_fat: true },
+  });
+  const sourceSummary = {
+    displayName: source.displayName,
+    firstSeenAt: source.firstSeenAt,
+    lastDataAt: source.lastDataAt,
+    lastErrorCode: source.lastErrorCode,
+    lastErrorMessage: source.lastErrorMessage,
+    lastSeenAt: source.lastSeenAt,
+    resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+    resourceCount: Object.keys(source.resourceAvailabilitySummary).length,
+    sourceProviderSlug: source.sourceProviderSlug,
+    status: source.status,
+  };
+  const secondResult = await executeJunctionJob(
     createProviderForRequests(secondRequests),
-    createJunctionJobContext({ now: "2026-03-03T00:05:00.000Z" }),
+    createJunctionJobContext({
+      account: createAccount({
+        sources: [sourceSummary],
+      }),
+      now: "2026-03-03T00:05:00.000Z",
+    }),
     {
       ...createJob("backfill", continuation.payload ?? {}),
       dedupeKey: continuation.dedupeKey ?? null,
@@ -14425,4 +14445,9 @@ test("Junction mixed sparse and dense backfills resume the longest history befor
     const end = url.searchParams.get("end_date");
     return start !== null && start === end;
   }));
+  assert.equal(
+    secondResult.metadataPatch?.junctionExtendedTimeseriesHistoryBackfillCoverage,
+    undefined,
+    "a resumed connect backfill leaves extended coverage to the activation owner",
+  );
 });

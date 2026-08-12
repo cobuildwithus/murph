@@ -1241,7 +1241,7 @@ export function createJunctionDeviceSyncProvider(
           })
       : {};
     const connectExtendedTimeseriesCoverageMetadataPatch =
-      job.kind === "backfill" && isConnectHistoricalBackfill
+      job.kind === "backfill" && isConnectHistoricalBackfill && !timeseriesCursor
         ? buildJunctionConnectExtendedTimeseriesCoverageMetadataPatch({
             context,
             skippedOptionalResources,
