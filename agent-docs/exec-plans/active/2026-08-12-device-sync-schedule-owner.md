@@ -17,6 +17,8 @@ Updated: 2026-08-12
   shortening the provider account's canonical `nextReconcileAt` projection.
 - Provider-derived schedule changes still reach the Web control plane.
 - Focused regression tests prove both ownership boundaries.
+- The public changelog describes the member-visible reply-latency recovery
+  without exposing private incident evidence or internal identifiers.
 - Relevant package tests and typecheck pass, required exact-head CI is green,
   and the routed ReviewGPT gates return no unresolved findings.
 
