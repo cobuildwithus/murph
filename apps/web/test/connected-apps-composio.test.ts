@@ -247,7 +247,7 @@ describe("Composio connected-app client", () => {
       if (init?.method === "POST") {
         expect(parsed.pathname).toBe("/api/v3.1/connected_accounts/ca_work/revoke");
         expect(parsed.search).toBe("");
-        return jsonResponse({ success: true });
+        return new Response(null, { status: 204 });
       }
       if (init?.method === "DELETE") {
         expect(parsed.pathname).toBe("/api/v3.1/connected_accounts/ca_work");
@@ -285,6 +285,7 @@ describe("Composio connected-app client", () => {
     })).resolves.toHaveLength(2);
     await client.disconnectAccount("ca_work");
     await client.deleteAccount("ca_work");
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
   it("preserves repeated query parameters for multi-value account filters", async () => {
