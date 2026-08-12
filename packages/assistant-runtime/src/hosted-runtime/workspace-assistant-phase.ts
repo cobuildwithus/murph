@@ -97,6 +97,9 @@ import {
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
 import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+} from "./device-sync-snapshot-pagination.ts";
+import {
   collectHostedAssistantDeliverySideEffects,
   createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries,
@@ -4330,12 +4333,6 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<HostedDeviceSyncWakeMetrics> {
-  const cancellation = createHostedBackgroundMaintenanceCancellation({
-    signal: input.phaseInput.signal ?? null,
-    shouldYield: input.phaseInput.shouldYieldBackgroundMaintenance ?? null,
-    timeoutMs: input.phaseInput.runtime.commitTimeoutMs,
-  });
-
   try {
     const {
       runHostedDeviceSyncWakeLane,
@@ -4348,7 +4345,7 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
       ...(input.phaseInput.shouldYieldBackgroundMaintenance
         ? { shouldYieldDeviceSync: input.phaseInput.shouldYieldBackgroundMaintenance }
         : {}),
-      signal: cancellation.signal,
+      signal: input.phaseInput.signal ?? null,
       skipDirtyPendingFetch: input.phaseInput.suppressDirtyPendingFetch ?? false,
       stagedDirtyAcks: input.phaseInput.stagedDirtyAcks ?? null,
       timeoutMs: input.phaseInput.runtime.commitTimeoutMs,
@@ -4373,8 +4370,6 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
       parserProcessed: 0,
       postCheckpointRecord: null,
     };
-  } finally {
-    cancellation.dispose();
   }
 }
 
@@ -8371,7 +8366,8 @@ function resolveHostedWorkspaceDeviceTool(input: {
       if (request.action === "list_accounts") {
         const provider = normalizeAssistantRouteString(request.provider);
         const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
-        const snapshot = await deviceSyncPort.fetchSnapshot({
+        const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+          deviceSyncPort,
           includeCredentialMaterial: false,
           ...(provider ? { provider } : {}),
           signal: context?.signal ?? null,
