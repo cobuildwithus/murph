@@ -1684,33 +1684,16 @@ function compareIncomingExternalRefVersion(
   return compareIsoTimestampsAscending(incomingVersion, existingVersion);
 }
 
-const JUNCTION_FIDELITY_RESOURCE_TYPE_SUFFIXES = [
-  "-blood-oxygen",
+const JUNCTION_SPARSE_INTERVAL_RESOURCE_TYPE_SUFFIXES = [
   "-caffeine",
-  "-glucose",
   "-mindfulness-minutes",
-  "-stress-level",
   "-water",
 ] as const;
-const JUNCTION_FIDELITY_FACETS = new Set([
-  "caffeine",
-  "features",
-  "glucose",
-  "highest-glucose",
-  "interval",
-  "lowest-glucose",
-  "lowest-spo2",
-  "mindfulness-minutes",
-  "spo2",
-  "stress-level",
-  "water",
-]);
 
-function isJunctionFidelityExternalRef(externalRef: ExternalRef): boolean {
+function isJunctionSparseIntervalExternalRef(externalRef: ExternalRef): boolean {
   return externalRef.system === "junction"
-    && externalRef.facet !== undefined
-    && JUNCTION_FIDELITY_FACETS.has(externalRef.facet)
-    && JUNCTION_FIDELITY_RESOURCE_TYPE_SUFFIXES.some((suffix) =>
+    && externalRef.facet === "interval"
+    && JUNCTION_SPARSE_INTERVAL_RESOURCE_TYPE_SUFFIXES.some((suffix) =>
       externalRef.resourceType.endsWith(suffix)
     );
 }
@@ -2838,8 +2821,8 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     if (
       indexedProviderMatch
-      && isJunctionFidelityExternalRef(indexedProviderMatch.indexedExternalRef)
-      && isJunctionFidelityExternalRef(externalRef)
+      && isJunctionSparseIntervalExternalRef(indexedProviderMatch.indexedExternalRef)
+      && isJunctionSparseIntervalExternalRef(externalRef)
       && (
         indexedProviderMatch.indexedExternalRef.version !== undefined
         || externalRef.version !== undefined
@@ -2858,7 +2841,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         if (!replacesUnorderedBaseline) {
           throw new VaultError(
             "EVENT_SOURCE_REVISION_UNORDERED",
-            "Changed Junction fidelity events require comparable explicit provider revisions; nothing was imported.",
+            "Changed Junction sparse intervals require comparable explicit provider revisions; nothing was imported.",
           );
         }
       }
@@ -2873,7 +2856,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (sourceVersionComparison === 0) {
         throw new VaultError(
           "EVENT_SOURCE_REVISION_CONFLICT",
-          "Junction fidelity event content conflicts at the same provider revision; nothing was imported.",
+          "Junction sparse interval content conflicts at the same provider revision; nothing was imported.",
         );
       }
     }

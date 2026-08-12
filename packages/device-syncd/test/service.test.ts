@@ -4937,6 +4937,143 @@ test("manual reconcile boosts Junction reconcile priority without promoting hist
   }
 });
 
+test("Junction scheduled reconcile imports a newly closed day after resource jobs advance the account clock", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-closed-day-floor");
+  let now = new Date("2026-04-02T00:05:00.000Z");
+  const importedSnapshots: unknown[] = [];
+  const timeseriesRequests: URL[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileDays: 1,
+        summaryResources: ["activity"],
+        timeseriesResources: ["glucose"],
+        fetchImpl: async (input) => {
+          const url = new URL(readUrl(input));
+          if (url.pathname === "/v2/user/providers/junction-user-closed-day-floor") {
+            return createJsonResponse({ providers: [] });
+          }
+          if (url.pathname === "/v2/summary/activity/junction-user-closed-day-floor") {
+            return createJsonResponse({ data: [] });
+          }
+          if (url.pathname === "/v2/timeseries/junction-user-closed-day-floor/glucose/grouped") {
+            timeseriesRequests.push(url);
+            return createJsonResponse({
+              groups: {
+                dexcom: [{
+                  data: [{
+                    id: "closed-day-glucose-reading",
+                    recordedAt: "2026-04-02T11:00:00.000Z",
+                    timestamp: "2026-04-01T23:30:00-07:00",
+                    unit: "mmol/L",
+                    value: 7,
+                  }],
+                  source: { provider: "dexcom", type: "cgm" },
+                }],
+              },
+            });
+          }
+          throw new Error(`Unexpected Junction request during closed-day floor test: ${url.toString()}`);
+        },
+      }),
+    ],
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importedSnapshots.push(input.snapshot);
+        return { ok: true };
+      },
+    },
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-closed-day-floor",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    const enqueueReconcile = (dedupeKey: string, priority = 40) => store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-02T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      priority,
+      dedupeKey,
+    });
+    const enqueueResource = (dedupeKey: string) => store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        resource: "activity",
+        resourceCategory: "summary",
+        windowStart: "2026-04-01T00:00:00.000Z",
+        windowEnd: "2026-04-02T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      priority: 80,
+      dedupeKey,
+    });
+
+    enqueueReconcile("junction-pre-closure-floor");
+    const preClosure = await service.runWorkerOnce();
+    assert.equal(preClosure?.kind, "reconcile");
+    assert.equal(timeseriesRequests.length, 0);
+
+    now = new Date("2026-04-02T12:00:00.000Z");
+    const firstResource = enqueueResource("junction-post-closure-resource-1");
+    const secondResource = enqueueResource("junction-post-closure-resource-2");
+    const postClosureReconcile = enqueueReconcile("junction-post-closure-floor");
+
+    const firstProcessedResource = await service.runWorkerOnce();
+    now = new Date("2026-04-02T12:01:00.000Z");
+    const secondProcessedResource = await service.runWorkerOnce();
+    assert.deepEqual(
+      new Set([firstProcessedResource?.id, secondProcessedResource?.id]),
+      new Set([firstResource.id, secondResource.id]),
+    );
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, now.toISOString());
+
+    now = new Date("2026-04-02T12:02:00.000Z");
+    assert.equal((await service.runWorkerOnce())?.id, postClosureReconcile.id);
+    assert.equal(timeseriesRequests.length, 1);
+    assert.equal(timeseriesRequests[0]?.searchParams.get("start_date"), "2026-04-01");
+    assert.equal(
+      importedSnapshots.some((snapshot) =>
+        Boolean((snapshot as { timeseries?: { glucose?: unknown[] } }).timeseries?.glucose)
+      ),
+      true,
+    );
+  } finally {
+    close();
+  }
+});
+
 test("manual reconcile preserves delayed Junction retry metadata timing", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-junction-retry-timing");
   const queuedAt = "2026-04-04T00:05:00.000Z";

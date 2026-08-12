@@ -151,14 +151,20 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    retain precise windows because each admitted interval has its own exact-start
    identity, but those precise snapshots emit intervals only. The calendar-day
    path is the sole writer of their daily sums, so a growing precise set cannot
-   create an immutable partial aggregate or block a later interval. For all six
-   resources, an explicit provider revision belongs to
-   both the existing daily fact and its feature or interval companion. One
-   versioned record may supersede a pre-versioning baseline; after that, only a
-   strictly newer revision may change either fact, while stale replay is a no-op
-   and conflicting equal or unversioned content fails closed. This keeps each
-   resource's compact resolutions mutually consistent without a second cursor,
-   watermark, or state owner.
+   create an immutable partial aggregate or block a later interval. Every
+   scheduled reconcile enters the bounded calendar importer; closure filtering
+   stays inside that owner, and an account-global completion clock must not gate
+   the pull floor. Daily sums and dense feature envelopes describe a complete
+   resource/day collection, so a maximum child-row revision must not version or
+   order that set. Serialized complete-calendar imports reconcile those
+   unversioned facts through the canonical event spine, where exact replays are
+   no-ops and later set growth or removal remains revisionable. Explicit
+   provider revisions belong only to stable sparse interval identities. One
+   versioned interval may supersede a pre-versioning baseline; after that, only
+   a strictly newer revision may change it, while stale replay is a no-op and
+   conflicting equal or unversioned interval content fails closed. This keeps
+   each compact resolution consistent without a second cursor, watermark, or
+   state owner.
 
 5. **Louder, never quieter.** Drops and skips surface as persisted
    `device-sync.job_failed`/skip metadata. But observability is not recovery:

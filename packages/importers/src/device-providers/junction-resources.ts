@@ -48,9 +48,9 @@ export type JunctionTimeseriesResource =
   (typeof JUNCTION_KNOWN_TIMESERIES_RESOURCES)[number];
 
 // Numeric default timeseries resources keep the compact daily-aggregate path.
-// glucose, blood_oxygen, and stress_level additionally retain one bounded,
-// versioned 24-hour feature envelope and one revisionable derived measurement
-// per source/day; raw point samples are never written. Sparse caffeine,
+// glucose, blood_oxygen, and stress_level additionally retain one bounded
+// 24-hour feature envelope and one derived measurement per source/day; raw
+// point samples are never written. Sparse caffeine,
 // water, and mindfulness_minutes intervals additionally land as exact-start
 // `measurement` events with start/end qualifiers and one compact evidence part
 // per admitted record, while their existing daily sums remain unchanged.

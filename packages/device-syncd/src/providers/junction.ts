@@ -1128,18 +1128,7 @@ export function createJunctionDeviceSyncProvider(
         : null,
       window,
     );
-    if (
-      jobTimeseriesResources.length > 0
-      && (
-        job.kind === "backfill"
-        || shouldImportClosedTimeseriesForReconcile(
-          context.account.lastSyncCompletedAt,
-          window.windowEnd,
-          context.now,
-          jobTimeseriesResources,
-        )
-      )
-    ) {
+    if (jobTimeseriesResources.length > 0) {
       const timeseriesImport = await importTimeseriesDailySnapshots(
         context,
         sourceProviders,
@@ -5478,45 +5467,6 @@ function isFullUtcDayWindow(window: { windowStart: string; windowEnd: string }):
   return Date.parse(window.windowStart) < Date.parse(window.windowEnd)
     && window.windowStart === floorUtcDayTimestamp(window.windowStart)
     && window.windowEnd === floorUtcDayTimestamp(window.windowEnd);
-}
-
-function shouldImportClosedTimeseriesForReconcile(
-  lastSyncCompletedAt: string | null | undefined,
-  windowEnd: string,
-  now: string,
-  resources: readonly string[],
-): boolean {
-  if (!lastSyncCompletedAt) {
-    return true;
-  }
-  const hasOrdinaryDailyResources = resources.some(
-    (resource) => !JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource),
-  );
-  const lastCompletedClosedDayMs = Date.parse(floorUtcDayTimestamp(lastSyncCompletedAt));
-  const windowEndMs = Date.parse(windowEnd);
-  if (
-    hasOrdinaryDailyResources
-    && (
-      !Number.isFinite(lastCompletedClosedDayMs)
-      || !Number.isFinite(windowEndMs)
-      || lastCompletedClosedDayMs < windowEndMs
-    )
-  ) {
-    return true;
-  }
-  if (
-    !resources.some((resource) => JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource))
-  ) {
-    return false;
-  }
-  const previousClosedEndMs = resolveGloballyClosedProviderDayEnd(
-    windowEnd,
-    lastSyncCompletedAt,
-  );
-  const currentClosedEndMs = resolveGloballyClosedProviderDayEnd(windowEnd, now);
-  return !Number.isFinite(previousClosedEndMs)
-    || !Number.isFinite(currentClosedEndMs)
-    || previousClosedEndMs < currentClosedEndMs;
 }
 
 function buildClosedDailyWindows(

@@ -826,7 +826,6 @@ interface JunctionDailyTimeseriesAggregate {
   duplicateSampleCount: number;
   entry: PlainObject;
   fidelitySamples: JunctionTimeseriesFidelityPoint[];
-  fidelitySourceVersionComplete: boolean;
   firstSampleAt: string;
   lastRecordedAt?: string;
   lastSampleAt: string;
@@ -836,7 +835,6 @@ interface JunctionDailyTimeseriesAggregate {
   evidencePartRole: string;
   resourceContext: ResourceContext;
   sampleCount: number;
-  sourceVersion?: string;
   sum: number;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   timeZone?: string;
@@ -2275,10 +2273,6 @@ function buildJunctionDailyTimeseriesAggregates(input: {
           value,
         })
       : undefined;
-    const fidelitySourceVersion = denseSelection?.sourceVersion
-      ?? (sparseSelection?.stableIdentity ? sparseSelection.sourceVersion : undefined);
-    const fidelitySourceVersionComplete = fidelityResource === undefined
-      || fidelitySourceVersion !== undefined;
     const legacyDayKeys = new Set<string>();
     if (legacyDayKey && legacyDayKey !== dayKey) {
       legacyDayKeys.add(legacyDayKey);
@@ -2290,7 +2284,6 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         duplicateSampleCount: 0,
         entry,
         fidelitySamples: fidelitySample ? [fidelitySample] : [],
-        fidelitySourceVersionComplete,
         firstSampleAt: sampleAt,
         lastRecordedAt: recordedAt,
         lastSampleAt: sampleAt,
@@ -2300,7 +2293,6 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         evidencePartRole,
         resourceContext,
         sampleCount: 1,
-        sourceVersion: fidelitySourceVersion,
         sum: value,
         timestamp,
         timeZone,
@@ -2318,11 +2310,6 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     if (fidelityResource) {
       assertJunctionTimeseriesSourceDayBound(fidelityResource, existing.sampleCount);
     }
-    existing.fidelitySourceVersionComplete = existing.fidelitySourceVersionComplete
-      && fidelitySourceVersionComplete;
-    existing.sourceVersion = existing.fidelitySourceVersionComplete
-      ? laterOptionalIsoTimestamp(existing.sourceVersion, fidelitySourceVersion)
-      : undefined;
     existing.sum += value;
     if (legacyDayKey && legacyDayKey !== dayKey) {
       existing.legacyDayKeys.add(legacyDayKey);
@@ -2496,11 +2483,6 @@ function pushJunctionDailyTimeseriesObservation(
     aggregate,
     observation.metric,
   );
-  const fidelityResource = isJunctionDenseFidelityResource(aggregate.resourceContext.resource)
-    || isJunctionSparseIntervalResource(aggregate.resourceContext.resource);
-  const externalRefUpdatePolicy: DeviceEventPayload["externalRefUpdatePolicy"] =
-    fidelityResource && !aggregate.sourceVersion ? "immutable" : undefined;
-
   context.events.push(stripUndefined({
     kind: "observation",
     occurredAt: aggregate.lastSampleAt,
@@ -2515,9 +2497,7 @@ function pushJunctionDailyTimeseriesObservation(
       aggregate.entry,
       timestamp,
       observation.metric,
-      fidelityResource ? aggregate.sourceVersion : undefined,
     ),
-    externalRefUpdatePolicy,
     legacyExternalRefs: legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
@@ -2548,7 +2528,6 @@ function legacyJunctionDailyTimeseriesAggregateExternalRefs(
         observedAtRaw: `${legacyDayKey}:${aggregate.resourceContext.resource}:daily`,
       }),
       metric,
-      aggregate.sourceVersion,
     )
   );
 }
@@ -2610,8 +2589,6 @@ function pushJunctionTimeseriesFeatureEnvelope(
     dayKey: aggregate.dayKey,
     observedAtRaw: `${aggregate.dayKey}:${resource}:features:${policy.policyVersion}`,
   });
-  const externalRefUpdatePolicy: DeviceEventPayload["externalRefUpdatePolicy"] =
-    aggregate.sourceVersion ? undefined : "immutable";
   context.events.push(stripUndefined({
     kind: "measurement",
     occurredAt: aggregate.lastSampleAt,
@@ -2625,10 +2602,9 @@ function pushJunctionTimeseriesFeatureEnvelope(
       "junction",
       aggregate.resourceContext.externalRefResourceType,
       resourceId,
-      aggregate.sourceVersion,
+      undefined,
       "features",
     ),
-    externalRefUpdatePolicy,
     dataOrigin: buildDataOrigin(
       aggregate.entry,
       aggregate.resourceContext,

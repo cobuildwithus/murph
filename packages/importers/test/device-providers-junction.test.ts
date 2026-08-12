@@ -3898,7 +3898,7 @@ test("Junction sparse interval revisions keep the daily sum aligned with the tim
   assert.equal(dailyArtifact.sampleCount, 1);
   assert.equal(dailyArtifact.meanValue, 300);
   assert.equal(findJunctionIntervalReadingArtifacts(payload, "water").length, 1);
-  assert.equal(daily?.externalRef?.version, "2026-04-22T11:00:00.000Z");
+  assert.equal(daily?.externalRef?.version, undefined);
   assert.equal(daily?.externalRefUpdatePolicy, undefined);
   assert.equal(timed?.externalRef?.version, "2026-04-22T11:00:00.000Z");
   assert.equal(timed?.externalRefUpdatePolicy, undefined);
@@ -3986,9 +3986,9 @@ test("Junction dense stable-ID revisions select one newest reading per payload",
   assert.equal(dailyArtifact.sampleCount, 1);
   assert.equal(dailyArtifact.meanValue, 126.1274);
   assert.equal(featureArtifact.sampleCount, 1);
-  assert.equal(daily?.externalRef?.version, "2026-04-22T10:00:00.000Z");
+  assert.equal(daily?.externalRef?.version, undefined);
   assert.equal(daily?.externalRefUpdatePolicy, undefined);
-  assert.equal(featureEvent?.externalRef?.version, "2026-04-22T10:00:00.000Z");
+  assert.equal(featureEvent?.externalRef?.version, undefined);
   assert.equal(featureEvent?.externalRefUpdatePolicy, undefined);
 });
 
@@ -4081,7 +4081,7 @@ test("Junction stable-ID fidelity conflicts at one provider revision fail closed
   );
 });
 
-test("Junction unversioned fidelity corrections cannot overwrite canonical core state", async () => {
+test("Junction unversioned calendar aggregates reconcile through the serialized event spine", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-unversioned-fidelity-correction");
   const inputFor = (value: number) => ({
     provider: "junction" as const,
@@ -4124,14 +4124,26 @@ test("Junction unversioned fidelity corrections cannot overwrite canonical core 
       inputFor(5),
       { corePort: coreRuntime },
     );
-    await assert.rejects(
-      () => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-        inputFor(7),
-        { corePort: coreRuntime },
+    const correction = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      inputFor(7),
+      { corePort: coreRuntime },
+    );
+    assert.equal(correction.applied, true);
+    assert.equal(
+      correction.events.some((event) =>
+        event.kind === "observation"
+        && event.metric === "glucose"
+        && event.value === 153.1547
       ),
-      (error: unknown) =>
-        coreRuntime.isVaultError(error)
-        && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+      true,
+    );
+    assert.equal(
+      correction.events.some((event) =>
+        event.kind === "measurement" && event.externalRef?.facet === "features"
+      ),
+      true,
     );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });

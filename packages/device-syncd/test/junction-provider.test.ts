@@ -386,7 +386,7 @@ function createHistoricalActivityProvider(
   }, overrides, historicalPullFetchImpl);
 }
 
-test("Junction provider defaults fetch every default summary resource", async () => {
+test("Junction provider defaults fetch every default summary and closed-day timeseries resource", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -427,6 +427,17 @@ test("Junction provider defaults fetch every default summary resource", async ()
         });
       }
 
+      const timeseriesResource = new URL(url).pathname.match(
+        /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+      )?.[1];
+      if (timeseriesResource) {
+        assert.ok(
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          `Unexpected default timeseries resource: ${timeseriesResource}`,
+        );
+        return createJsonResponse({ groups: {} });
+      }
+
       throw new Error(`Unexpected request: ${url}`);
     },
   });
@@ -437,6 +448,7 @@ test("Junction provider defaults fetch every default summary resource", async ()
       account: createAccount({
         lastSyncCompletedAt: "2026-04-03T12:00:00.000Z",
       }),
+      now: "2026-04-03T12:00:00.000Z",
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot);
         return { imported: true };
@@ -451,6 +463,11 @@ test("Junction provider defaults fetch every default summary resource", async ()
   const summaryResources = requests
     .map((url) => new URL(url).pathname.match(/^\/v2\/summary\/([^/]+)\//u)?.[1])
     .filter((resource): resource is string => Boolean(resource));
+  const timeseriesResources = requests
+    .map((url) =>
+      new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1]
+    )
+    .filter((resource): resource is string => Boolean(resource));
   const profileRequest = requireValue(
     requests.find((url) => new URL(url).pathname.includes("/v2/summary/profile/")),
     "Junction default summary sync should fetch the profile current-state summary once.",
@@ -462,6 +479,10 @@ test("Junction provider defaults fetch every default summary resource", async ()
   assert.equal(summaryResources.includes("electrocardiogram"), true);
   assert.equal(summaryResources.length, JUNCTION_DEFAULT_SUMMARY_RESOURCES.length);
   assert.deepEqual(new Set(summaryResources), new Set([...JUNCTION_DEFAULT_SUMMARY_RESOURCES]));
+  assert.deepEqual(
+    new Set(timeseriesResources),
+    new Set([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]),
+  );
   assert.equal(profileSearchParams.has("start_date"), false);
   assert.equal(profileSearchParams.has("end_date"), false);
   assert.equal(importedSnapshots.length, 1);

@@ -799,36 +799,174 @@ test("Junction timed and derived timeseries facts survive core replay and remain
     assert.equal(correctedCaffeineDaily?.value, 120);
     assert.deepEqual(correctedGlucoseDailyValues, [99.1001, 99.1001, 99.1001]);
 
-    const staleReplay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      importInput,
+    const correctionReplay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { ...importInput, snapshot: correctedSnapshot },
       { corePort: coreRuntime },
     );
-    const staleReplayTimeInRangePoints = await listMetricPointsRuntime(vaultRoot, {
+    const replayedTimeInRangePoints = await listMetricPointsRuntime(vaultRoot, {
       limit: null,
       metricKey: "glucose-estimated-time-in-range-percent",
     });
-    const staleReplayCaffeinePoints = await listMetricPointsRuntime(vaultRoot, {
+    const replayedCaffeinePoints = await listMetricPointsRuntime(vaultRoot, {
       limit: null,
       metricKey: "caffeine",
     });
-    const staleReplayCaffeineInterval = staleReplayCaffeinePoints.find(
+    const replayedCaffeineInterval = replayedCaffeinePoints.find(
       (point) => point.source.kind === "measurement",
     );
-    const staleReplayCaffeineDaily = staleReplayCaffeinePoints.find(
+    const replayedCaffeineDaily = replayedCaffeinePoints.find(
       (point) => point.source.kind === "observation",
     );
-    const staleReplayGlucoseDailyValues = await Promise.all(
+    const replayedGlucoseDailyValues = await Promise.all(
       ["glucose", "lowest-glucose", "highest-glucose"].map(async (metricKey) => {
         const points = await listMetricPointsRuntime(vaultRoot, { limit: null, metricKey });
         return points.find((point) => point.source.kind === "observation")?.value;
       }),
     );
 
-    assert.equal(staleReplay.applied, false);
-    assert.deepEqual(staleReplayTimeInRangePoints, []);
-    assert.equal(staleReplayCaffeineInterval?.value, 120);
-    assert.equal(staleReplayCaffeineDaily?.value, 120);
-    assert.deepEqual(staleReplayGlucoseDailyValues, [99.1001, 99.1001, 99.1001]);
+    assert.equal(correctionReplay.applied, false);
+    assert.deepEqual(replayedTimeInRangePoints, []);
+    assert.equal(replayedCaffeineInterval?.value, 120);
+    assert.equal(replayedCaffeineDaily?.value, 120);
+    assert.deepEqual(replayedGlucoseDailyValues, [99.1001, 99.1001, 99.1001]);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction child revisions do not order complete daily aggregate sets", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-aggregate-set-reconcile-"));
+  const reading = (
+    id: string,
+    timestamp: string,
+    recordedAt: string,
+    value: number,
+  ) => ({ id, recordedAt, timestamp, unit: "mmol/L", value });
+  const first = reading(
+    "glucose-set-a",
+    "2026-04-22T00:00:00.000Z",
+    "2026-04-22T10:00:00.000Z",
+    3.5,
+  );
+  const maxRevision = reading(
+    "glucose-set-b",
+    "2026-04-22T00:05:00.000Z",
+    "2026-04-22T20:00:00.000Z",
+    7,
+  );
+  const third = reading(
+    "glucose-set-d",
+    "2026-04-22T00:10:00.000Z",
+    "2026-04-22T12:00:00.000Z",
+    7,
+  );
+  const fourth = reading(
+    "glucose-set-e",
+    "2026-04-22T00:15:00.000Z",
+    "2026-04-22T11:00:00.000Z",
+    10.5,
+  );
+  const addedWithOlderRevision = reading(
+    "glucose-set-c",
+    "2026-04-22T00:07:30.000Z",
+    "2026-04-22T15:00:00.000Z",
+    5.5,
+  );
+  const snapshotFor = (
+    records: readonly ReturnType<typeof reading>[],
+    importedAt: string,
+  ) => ({
+    accountId: "junction-account-aggregate-set-reconcile",
+    importedAt,
+    timeseriesWindowKind: "calendar_day" as const,
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: records,
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+    },
+  });
+  const importSnapshot = (snapshot: ReturnType<typeof snapshotFor>) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", snapshot, vaultRoot },
+      { corePort: coreRuntime },
+    );
+  const includesDailyAndFeature = (
+    result: Awaited<ReturnType<typeof importSnapshot>>,
+  ) => ({
+    daily: result.events.some((event) =>
+      event.kind === "observation" && event.metric === "glucose"
+    ),
+    feature: result.events.some((event) =>
+      event.kind === "measurement" && event.externalRef?.facet === "features"
+    ),
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+
+    const initial = await importSnapshot(snapshotFor(
+      [first, maxRevision, third, fourth],
+      "2026-04-23T00:00:00.000Z",
+    ));
+    assert.deepEqual(includesDailyAndFeature(initial), { daily: true, feature: true });
+    assert.equal(
+      (await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: "glucose",
+      })).find((point) => point.source.kind === "observation")?.value,
+      126.1274,
+    );
+
+    const grownSnapshot = snapshotFor(
+      [first, maxRevision, addedWithOlderRevision, third, fourth],
+      "2026-04-23T01:00:00.000Z",
+    );
+    const growth = await importSnapshot(grownSnapshot);
+    assert.deepEqual(includesDailyAndFeature(growth), { daily: true, feature: true });
+    assert.equal(
+      (await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: "glucose",
+      })).find((point) => point.source.kind === "observation")?.value,
+      120.7219,
+    );
+
+    const reducedSnapshot = snapshotFor(
+      [first, addedWithOlderRevision, third, fourth],
+      "2026-04-23T02:00:00.000Z",
+    );
+    const removal = await importSnapshot(reducedSnapshot);
+    assert.deepEqual(includesDailyAndFeature(removal), { daily: true, feature: true });
+    assert.equal(
+      (await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: "glucose",
+      })).find((point) => point.source.kind === "observation")?.value,
+      119.3706,
+    );
+    assert.equal(
+      (await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: "glucose-estimated-time-in-range-percent",
+      })).length,
+      1,
+    );
+
+    const exactReplay = await importSnapshot(reducedSnapshot);
+    assert.equal(exactReplay.applied, false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -905,10 +1043,25 @@ test("Junction sparse precise growth stays queryable before one closed-day sum i
     );
 
     await importSnapshot(snapshotFor(
-      [firstRecord, secondRecord],
+      [firstRecord],
       "calendar_day",
       "2026-04-23T00:00:00.000Z",
     ));
+    const firstClosedDayPoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "water",
+    });
+    assert.equal(
+      firstClosedDayPoints.find((point) => point.source.kind === "observation")?.value,
+      250,
+    );
+
+    const completeCalendarSnapshot = snapshotFor(
+      [firstRecord, secondRecord],
+      "calendar_day",
+      "2026-04-23T00:00:00.000Z",
+    );
+    await importSnapshot(completeCalendarSnapshot);
     const closedDayPoints = await listMetricPointsRuntime(vaultRoot, {
       limit: null,
       metricKey: "water",
@@ -921,6 +1074,8 @@ test("Junction sparse precise growth stays queryable before one closed-day sum i
       closedDayPoints.find((point) => point.source.kind === "observation")?.value,
       500,
     );
+    const exactCalendarReplay = await importSnapshot(completeCalendarSnapshot);
+    assert.equal(exactCalendarReplay.applied, false);
 
     await assert.rejects(
       () => importSnapshot(snapshotFor(
