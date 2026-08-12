@@ -3746,6 +3746,82 @@ test("Junction normalizer applies latest sparse metabolic corrections as compact
   ].sort());
 });
 
+test("Junction sparse metabolic identity follows every documented compound-key coordinate", () => {
+  const sameKeyOriginal = {
+    id: "provider-row-original",
+    source_device_id: "phone-original",
+    start: "2026-04-22T12:00:00Z",
+    end: "2026-04-22T12:01:00Z",
+    unit: "g",
+    value: 10,
+  };
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      carbohydrates: {
+        groups: {
+          apple_health_kit: [
+            {
+              data: [
+                sameKeyOriginal,
+                {
+                  ...sameKeyOriginal,
+                  id: "provider-row-correction",
+                  source_device_id: "phone-correction",
+                  value: 20,
+                },
+                {
+                  ...sameKeyOriginal,
+                  id: "provider-row-next-timestamp",
+                  start: "2026-04-22T12:05:00Z",
+                  end: "2026-04-22T12:06:00Z",
+                  value: 30,
+                },
+              ],
+              source: { provider: "apple_health_kit", type: "phone" },
+            },
+            {
+              data: [{ ...sameKeyOriginal, id: "provider-row-watch", value: 40 }],
+              source: { provider: "apple_health_kit", type: "watch" },
+            },
+          ],
+          cronometer: [{
+            data: [{ ...sameKeyOriginal, id: "provider-row-cronometer", value: 50 }],
+            source: { provider: "cronometer", type: "phone" },
+          }],
+        },
+      },
+    },
+  });
+  const carbohydrateEvents = (payload.events ?? []).filter(
+    (event) => event.kind === "observation" && event.fields?.metric === "carbohydrate-intake",
+  );
+
+  assert.deepEqual(
+    carbohydrateEvents.map((event) => event.fields?.value).sort((left, right) =>
+      Number(left) - Number(right)
+    ),
+    [20, 30, 40, 50],
+  );
+  assert.equal(
+    new Set(carbohydrateEvents.map((event) => event.externalRef?.resourceId)).size,
+    4,
+  );
+  assert.deepEqual(
+    carbohydrateEvents.map((event) => [
+      event.dataOrigin?.sourceProviderSlug,
+      event.dataOrigin?.sourceType,
+      event.occurredAt,
+    ]).sort(),
+    [
+      ["apple-health-kit", "phone", "2026-04-22T12:00:00.000Z"],
+      ["apple-health-kit", "phone", "2026-04-22T12:05:00.000Z"],
+      ["apple-health-kit", "watch", "2026-04-22T12:00:00.000Z"],
+      ["cronometer", "phone", "2026-04-22T12:00:00.000Z"],
+    ],
+  );
+});
+
 test("Junction sparse metabolic resources fail closed without retaining invalid provider arrays", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
