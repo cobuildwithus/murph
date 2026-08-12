@@ -40,7 +40,7 @@ export const BODY_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["body_fat", "bodyFat", "body_fat_pct", "body-fat-pct", "bodyFatPercentage", "body_fat_percentage"],
+    aliases: ["fat", "body_fat", "bodyFat", "body_fat_pct", "body-fat-pct", "bodyFatPercentage", "body_fat_percentage"],
     biomarkerKey: null,
     canonicalUnit: "percent",
     category: "body",

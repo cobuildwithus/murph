@@ -139,6 +139,18 @@ describe("deviceSyncProviderManifests", () => {
       "calories_active",
       "heartrate",
       "weight",
+      "body_mass_index",
+      "carbohydrates",
+      "fat",
+      "forced_expiratory_volume_1",
+      "forced_vital_capacity",
+      "heart_rate_alert",
+      "inhaler_usage",
+      "insulin_injection",
+      "lean_body_mass",
+      "peak_expiratory_flow_rate",
+      "sleep_apnea_alert",
+      "waist_circumference",
     ]);
     for (const resource of JUNCTION_OPT_IN_TIMESERIES_RESOURCES) {
       expect(normalizeJunctionDeviceSyncRuntimeConfig({
@@ -202,6 +214,7 @@ describe("deviceSyncProviderManifests", () => {
         emptyBackfillAttempts: { kind: "number", includeInHostedHint: true },
         sourceProviderSlug: { kind: "string", includeInHostedHint: true },
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
+        timeseriesPhase: { kind: "string", includeInHostedHint: true },
         windowEnd: { kind: "string", includeInHostedHint: true },
         windowStart: { kind: "string", includeInHostedHint: true },
       },
@@ -518,6 +531,7 @@ describe("deviceSyncProviderManifests", () => {
           emptyBackfillAttempts: 2,
           resources: ["profile"],
           timeseriesCursor: "2026-04-01T00:00:00.000Z",
+          timeseriesPhase: "wide",
           windowEnd: "2026-04-22T00:00:00.000Z",
           windowStart: "2026-01-22T00:00:00.000Z",
         },
@@ -525,6 +539,7 @@ describe("deviceSyncProviderManifests", () => {
     ).toEqual({
       emptyBackfillAttempts: 2,
       timeseriesCursor: "2026-04-01T00:00:00.000Z",
+      timeseriesPhase: "wide",
       windowEnd: "2026-04-22T00:00:00.000Z",
       windowStart: "2026-01-22T00:00:00.000Z",
     });
@@ -776,5 +791,41 @@ describe("deviceSyncProviderManifests", () => {
     expect(Object.isFrozen(ouraManifest.jobs.resource?.payload ?? {})).toBe(true);
     expect(Object.isFrozen(ouraManifest.jobs.resource?.payload.objectId ?? {})).toBe(true);
     expect(Object.isFrozen(ouraManifest.serializableFields)).toBe(true);
+  });
+});
+
+describe("Junction opt-in timeseries configuration", () => {
+  const baseConfig = {
+    apiKey: "sk_us_test_opt_in",
+    clientUserIdSecret: "junction-opt-in-secret",
+    environment: "sandbox" as const,
+    providerFilter: ["oura"],
+    region: "us" as const,
+  };
+
+  it("keeps defaults unchanged when no code-owned override is supplied", () => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig(baseConfig).timeseriesResources)
+      .toEqual(JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
+  });
+
+  it("preserves an explicit only-opt-in list exactly", () => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...baseConfig,
+      timeseriesResources: ["fat", "insulin_injection", "heart_rate_alert", "fat"],
+    }).timeseriesResources).toEqual(["fat", "insulin_injection", "heart_rate_alert"]);
+  });
+
+  it("preserves the existing dense and weight opt-ins exactly", () => {
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...baseConfig,
+      timeseriesResources: ["steps", "weight"],
+    }).timeseriesResources).toEqual(["steps", "weight"]);
+  });
+
+  it("rejects unknown resource names", () => {
+    expect(() => normalizeJunctionDeviceSyncRuntimeConfig({
+      ...baseConfig,
+      timeseriesResources: ["not_a_junction_resource"],
+    })).toThrow(/unsupported resource/u);
   });
 });

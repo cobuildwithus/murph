@@ -1,0 +1,94 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
+  JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  JUNCTION_TIMESERIES_RESOURCE_POLICIES,
+  JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES,
+  resolveJunctionTimeseriesResourcePolicy,
+} from "../src/junction-resources.ts";
+
+const EXPECTED_DEFAULTS = [
+  "blood_oxygen",
+  "stress_level",
+  "hrv",
+  "respiratory_rate",
+  "vo2_max",
+  "body_temperature_delta",
+  "body_temperature",
+  "basal_body_temperature",
+  "caffeine",
+  "water",
+  "mindfulness_minutes",
+  "heart_rate_recovery_one_minute",
+  "sleep_breathing_disturbance",
+  "afib_burden",
+  "glucose",
+  "blood_pressure",
+  "note",
+];
+
+const EXPECTED_NEW_SPARSE_OPT_INS = [
+  "body_mass_index",
+  "carbohydrates",
+  "fat",
+  "forced_expiratory_volume_1",
+  "forced_vital_capacity",
+  "heart_rate_alert",
+  "inhaler_usage",
+  "insulin_injection",
+  "lean_body_mass",
+  "peak_expiratory_flow_rate",
+  "sleep_apnea_alert",
+  "waist_circumference",
+];
+
+const EXPECTED_OPT_IN = [
+  "steps",
+  "distance",
+  "calories_active",
+  "heartrate",
+  "weight",
+  ...EXPECTED_NEW_SPARSE_OPT_INS,
+];
+
+describe("Junction timeseries resource policy", () => {
+  it("derives unique exact known/default/opt-in/allowed projections", () => {
+    const names = JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((entry) => entry.resource);
+    expect(new Set(names).size).toBe(names.length);
+    expect(JUNCTION_KNOWN_TIMESERIES_RESOURCES).toEqual(names);
+    expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toEqual(EXPECTED_DEFAULTS);
+    expect(JUNCTION_OPT_IN_TIMESERIES_RESOURCES).toEqual(EXPECTED_OPT_IN);
+    expect(JUNCTION_ALLOWED_TIMESERIES_RESOURCES).toEqual([
+      ...EXPECTED_DEFAULTS,
+      ...EXPECTED_OPT_IN,
+    ]);
+  });
+
+  it("keeps the new slice off by default and gives it extended bounded history", () => {
+    expect(JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES).toEqual(EXPECTED_NEW_SPARSE_OPT_INS);
+    for (const resource of EXPECTED_NEW_SPARSE_OPT_INS) {
+      expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).not.toContain(resource);
+      expect(JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES).toContain(resource);
+      expect(resolveJunctionTimeseriesResourcePolicy(resource)).toMatchObject({
+        enabledByDefault: false,
+        fetchChunkDays: 30,
+        historyWindow: "summary_history",
+      });
+    }
+    expect(resolveJunctionTimeseriesResourcePolicy("blood_oxygen")).toMatchObject({
+      enabledByDefault: true,
+      fetchChunkDays: 1,
+      historyWindow: "dense_timeseries",
+    });
+  });
+
+  it("fails closed for unknown names and preserves public aliases", () => {
+    expect(resolveJunctionTimeseriesResourcePolicy("not_a_junction_resource")).toBeNull();
+    expect(resolveJunctionTimeseriesResourcePolicy("body_fat")?.resource).toBe("fat");
+    expect(resolveJunctionTimeseriesResourcePolicy("body_weight")?.resource).toBe("weight");
+  });
+});

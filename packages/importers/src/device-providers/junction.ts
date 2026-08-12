@@ -69,11 +69,13 @@ import {
   JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS,
   JUNCTION_SLEEP_TOTAL_MINUTE_PATHS,
   JUNCTION_SLEEP_TOTAL_SECOND_PATHS,
+  JUNCTION_TIMESERIES_RESOURCE_POLICIES,
   isJunctionRawDirectIdentityContainerKey,
   isJunctionRawDirectIdentityKey,
   normalizeJunctionRawIdentityKey,
   normalizeJunctionSleepStageValue,
   normalizeJunctionResourceName,
+  resolveJunctionTimeseriesResourcePolicy,
   type JunctionSleepStageValue,
   type JunctionTimeseriesResource,
 } from "./junction-resources.ts";
@@ -1717,16 +1719,65 @@ const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
 const JUNCTION_NOTE_RESOURCE = "note";
 const JUNCTION_WEIGHT_RESOURCE = "weight";
 
-// Derived from the descriptor entries (plus the sparse paired blood-pressure
-// resource) so the raw-snapshot sanitization allowlist cannot drift from the
-// bounded normalization set.
-const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set([
-  ...JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
-  ...JUNCTION_FEATURE_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
-  JUNCTION_BLOOD_PRESSURE_RESOURCE,
-  JUNCTION_NOTE_RESOURCE,
-  JUNCTION_WEIGHT_RESOURCE,
+type JunctionSparseTimeseriesKind = "alert" | "insulin" | "observation";
+
+interface JunctionSparseTimeseriesDescriptor {
+  readonly canonicalUnit: string;
+  readonly kind: JunctionSparseTimeseriesKind;
+  readonly maximum: number;
+  readonly metric?: string;
+  readonly minimum: number;
+  readonly requireInteger?: boolean;
+  readonly title: string;
+  readonly upstreamUnit: string;
+}
+
+interface JunctionSparseTimeseriesRecord {
+  readonly alertType?: string;
+  readonly bolusPurpose?: string;
+  readonly deliveryForm?: string;
+  readonly deliveryMode?: string;
+  readonly endAt?: string;
+  readonly insulinType?: string;
+  readonly observedAtRaw: string;
+  readonly providerRowId?: string;
+  readonly startAt?: string;
+  readonly unit: string;
+  readonly upstreamUnit: string;
+  readonly value: number;
+}
+
+const JUNCTION_SPARSE_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionSparseTimeseriesDescriptor> =
+  new Map([
+    ["body_mass_index", { canonicalUnit: "kg_m2", kind: "observation", maximum: 100, metric: "bmi", minimum: 5, title: "Junction BMI", upstreamUnit: "index" }],
+    ["carbohydrates", { canonicalUnit: "g", kind: "observation", maximum: 2_000, metric: "carbohydrates", minimum: 0, title: "Junction carbohydrates", upstreamUnit: "g" }],
+    ["fat", { canonicalUnit: "%", kind: "observation", maximum: 100, metric: "body-fat-percentage", minimum: 0, title: "Junction body fat", upstreamUnit: "%" }],
+    ["forced_expiratory_volume_1", { canonicalUnit: "L", kind: "observation", maximum: 15, metric: "forced-expiratory-volume-1", minimum: 0.05, title: "Junction FEV1", upstreamUnit: "L" }],
+    ["forced_vital_capacity", { canonicalUnit: "L", kind: "observation", maximum: 20, metric: "forced-vital-capacity", minimum: 0.05, title: "Junction forced vital capacity", upstreamUnit: "L" }],
+    ["heart_rate_alert", { canonicalUnit: "count", kind: "alert", maximum: 10_000, metric: "heart-rate-alert", minimum: 1, requireInteger: true, title: "Junction heart-rate alert", upstreamUnit: "count" }],
+    ["inhaler_usage", { canonicalUnit: "count", kind: "observation", maximum: 1_000, metric: "inhaler-usage", minimum: 1, requireInteger: true, title: "Junction inhaler usage", upstreamUnit: "count" }],
+    ["insulin_injection", { canonicalUnit: "unit", kind: "insulin", maximum: 1_000, minimum: 0.01, title: "Junction insulin injection", upstreamUnit: "unit" }],
+    ["lean_body_mass", { canonicalUnit: "kg", kind: "observation", maximum: 500, metric: "lean-body-mass", minimum: 1, title: "Junction lean body mass", upstreamUnit: "kg" }],
+    ["peak_expiratory_flow_rate", { canonicalUnit: "L/min", kind: "observation", maximum: 2_000, metric: "peak-expiratory-flow-rate", minimum: 1, title: "Junction peak expiratory flow rate", upstreamUnit: "L/min" }],
+    ["sleep_apnea_alert", { canonicalUnit: "count", kind: "alert", maximum: 10_000, metric: "sleep-apnea-alert", minimum: 1, requireInteger: true, title: "Junction sleep-apnea alert", upstreamUnit: "count" }],
+    ["waist_circumference", { canonicalUnit: "cm", kind: "observation", maximum: 300, metric: "waist-circumference", minimum: 20, title: "Junction waist circumference", upstreamUnit: "cm" }],
+  ] satisfies readonly (readonly [string, JunctionSparseTimeseriesDescriptor])[]);
+
+const JUNCTION_HEART_ALERT_TYPES = new Set([
+  "high",
+  "high_heart_rate",
+  "high_heart_rate_alert",
+  "irregular_rhythm",
+  "low",
+  "low_heart_rate",
+  "low_heart_rate_alert",
 ]);
+
+// Derived from the contracts-owned storage policy so admitting a new name
+// cannot silently make the raw-snapshot sanitizer retain an unsupported shape.
+const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set(
+  JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((policy) => policy.resource),
+);
 
 function normalizeTimeseries(
   timeseries: Record<string, unknown> | undefined,
@@ -1745,6 +1796,18 @@ function normalizeTimeseries(
 
     if (resource === JUNCTION_WEIGHT_RESOURCE) {
       pushJunctionWeightReadings(payload, resource, slugify(resource, "timeseries"), context);
+      continue;
+    }
+
+    const sparseDescriptor = JUNCTION_SPARSE_TIMESERIES_DESCRIPTORS.get(resource);
+    if (sparseDescriptor) {
+      pushJunctionSparseTimeseriesRecords(
+        payload,
+        resource,
+        slugify(resource, "timeseries"),
+        context,
+        sparseDescriptor,
+      );
       continue;
     }
 
@@ -1771,6 +1834,295 @@ function normalizeTimeseries(
       );
     }
   }
+}
+
+function pushJunctionSparseTimeseriesRecords(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+  descriptor: JunctionSparseTimeseriesDescriptor,
+): void {
+  const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
+  const seenRecordIdentityHashes = new Set<string>();
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: baseArtifactRole,
+      context,
+    });
+    if (!resourceContext) {
+      continue;
+    }
+
+    const record = parseJunctionSparseTimeseriesRecord(entry, resource, descriptor);
+    if (!record) {
+      continue;
+    }
+
+    const timestamp = resolveRecordTimestamp(
+      { ...entry, observedAtRaw: record.observedAtRaw },
+      context,
+      resourceContext.sourceProviderSlug,
+    );
+    const occurredAt = timestamp.occurredAt ?? timestamp.recordedAt;
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(
+      entry,
+      timestamp,
+      occurredAt,
+      context.defaultTimeZone,
+    );
+    if (!occurredAt || !dayKey) {
+      continue;
+    }
+
+    const identityHash = buildJunctionSparseTimeseriesIdentityHash({
+      record,
+      resourceContext,
+      resourceSlug,
+    });
+    if (seenRecordIdentityHashes.has(identityHash)) {
+      continue;
+    }
+    seenRecordIdentityHashes.add(identityHash);
+
+    const role = `${baseArtifactRole}:${dayKey}:${identityHash}`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          stripUndefined({
+            schema: "junction.sparse_timeseries_record.v1",
+            provider: "junction",
+            resource,
+            dayKey,
+            sourceProviderSlug: resourceContext.sourceProviderSlug,
+            sourceType: resourceContext.origin.sourceType,
+            sourceInstanceId: resourceContext.origin.sourceInstanceId,
+            providerRowId: record.providerRowId,
+            observedAtRaw: record.observedAtRaw,
+            occurredAt,
+            recordedAt: timestamp.recordedAt,
+            startAt: record.startAt,
+            endAt: record.endAt,
+            value: record.value,
+            unit: record.unit,
+            upstreamUnit: record.upstreamUnit,
+            alertType: record.alertType,
+            bolusPurpose: record.bolusPurpose,
+            deliveryForm: record.deliveryForm,
+            deliveryMode: record.deliveryMode,
+            insulinType: record.insulinType,
+          }),
+        ),
+        "timeseries_reading",
+      ),
+    );
+
+    const externalRef = makeProviderExternalRef(
+      "junction",
+      resourceContext.externalRefResourceType,
+      `${resourceSlug}-${identityHash}`,
+      undefined,
+      record.alertType ?? descriptor.metric ?? resourceSlug,
+    );
+    const dataOrigin = buildDataOrigin(
+      entry,
+      resourceContext,
+      withTimestampOverride(timestamp, {
+        occurredAt,
+        dayKey,
+        observedAtRaw: record.observedAtRaw,
+      }),
+      { normalizerVersion: "junction-sparse-timeseries.v1" },
+    );
+
+    if (descriptor.kind === "insulin") {
+      const insulinTags = [
+        record.bolusPurpose,
+        record.deliveryForm,
+        record.deliveryMode,
+        record.insulinType,
+      ].flatMap((value) => value ? [slugify(value, "insulin")] : []);
+      context.events.push(stripUndefined({
+        kind: "intervention_session",
+        occurredAt,
+        recordedAt: timestamp.recordedAt,
+        dayKey,
+        source: "device",
+        title: descriptor.title,
+        tags: insulinTags.length > 0 ? [...new Set(insulinTags)] : undefined,
+        evidenceRoles: [role],
+        externalRef,
+        dataOrigin,
+        fields: {
+          interventionType: "insulin-injection",
+          sessionStatus: "completed",
+          fields: stripUndefined({
+            "dose-amount": record.value,
+            "dose-unit": record.unit,
+            "start-at": record.startAt,
+            "end-at": record.endAt,
+            "bolus-purpose": record.bolusPurpose,
+            "delivery-form": record.deliveryForm,
+            "delivery-mode": record.deliveryMode,
+            "insulin-type": record.insulinType,
+          }),
+        },
+      }));
+      continue;
+    }
+
+    if (!descriptor.metric) {
+      continue;
+    }
+    const alertTag = record.alertType
+      ? slugify(`${resource}-${record.alertType}`, "alert")
+      : undefined;
+    context.events.push(stripUndefined({
+      kind: "observation",
+      occurredAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey,
+      source: "device",
+      title: descriptor.title,
+      tags: alertTag ? [alertTag] : undefined,
+      evidenceRoles: [role],
+      externalRef,
+      dataOrigin,
+      fields: {
+        metric: descriptor.metric,
+        observationGrain: "sample",
+        value: record.value,
+        unit: descriptor.canonicalUnit,
+      },
+    }));
+  }
+}
+
+function parseJunctionSparseTimeseriesRecord(
+  entry: PlainObject,
+  resource: string,
+  descriptor: JunctionSparseTimeseriesDescriptor,
+): JunctionSparseTimeseriesRecord | null {
+  const value = finiteNumber(entry.value);
+  const unit = stringId(entry.unit);
+  if (
+    value === undefined
+    || unit !== descriptor.upstreamUnit
+    || value < descriptor.minimum
+    || value > descriptor.maximum
+    || (descriptor.requireInteger === true && !Number.isSafeInteger(value))
+  ) {
+    return null;
+  }
+
+  const timestampRaw = stringId(entry.timestamp);
+  const startRaw = stringId(entry.start);
+  const endRaw = stringId(entry.end);
+  const requiresTimestamp = resource !== "carbohydrates"
+    && resource !== "heart_rate_alert"
+    && resource !== "insulin_injection";
+  const requiresInterval = resource !== "fat";
+  if ((requiresTimestamp && !timestampRaw) || (requiresInterval && (!startRaw || !endRaw))) {
+    return null;
+  }
+
+  const timestamp = timestampRaw ? normalizeTimestamp(timestampRaw) : undefined;
+  const startAt = startRaw ? normalizeTimestamp(startRaw) : undefined;
+  const endAt = endRaw ? normalizeTimestamp(endRaw) : undefined;
+  if (
+    (timestampRaw && !timestamp)
+    || (startRaw && !startAt)
+    || (endRaw && !endAt)
+    || (requiresInterval && (!startAt || !endAt))
+    || (startAt && endAt && Date.parse(endAt) < Date.parse(startAt))
+  ) {
+    return null;
+  }
+
+  const observedAtRaw = timestampRaw ?? startRaw;
+  if (!observedAtRaw) {
+    return null;
+  }
+
+  const alertType = descriptor.kind === "alert" && resource === "heart_rate_alert"
+    ? normalizeJunctionSemanticToken(entry.type)
+    : undefined;
+  if (resource === "heart_rate_alert" && (!alertType || !JUNCTION_HEART_ALERT_TYPES.has(alertType))) {
+    return null;
+  }
+
+  return stripUndefined({
+    alertType,
+    bolusPurpose: descriptor.kind === "insulin"
+      ? normalizeJunctionSemanticToken(entry.bolus_purpose ?? entry.bolusPurpose)
+      : undefined,
+    deliveryForm: descriptor.kind === "insulin"
+      ? normalizeJunctionSemanticToken(entry.delivery_form ?? entry.deliveryForm)
+      : undefined,
+    deliveryMode: descriptor.kind === "insulin"
+      ? normalizeJunctionSemanticToken(entry.delivery_mode ?? entry.deliveryMode)
+      : undefined,
+    insulinType: descriptor.kind === "insulin"
+      ? normalizeJunctionSemanticToken(entry.type)
+      : undefined,
+    endAt,
+    observedAtRaw,
+    providerRowId: trimOptionalToLength(
+      firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS),
+      200,
+    ),
+    startAt,
+    unit: descriptor.canonicalUnit,
+    upstreamUnit: descriptor.upstreamUnit,
+    value,
+  });
+}
+
+function normalizeJunctionSemanticToken(value: unknown): string | undefined {
+  const normalized = stringId(value)
+    ?.trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "_")
+    .replace(/^_+|_+$/gu, "")
+    .slice(0, 80)
+    .replace(/_+$/u, "");
+  return normalized || undefined;
+}
+
+function buildJunctionSparseTimeseriesIdentityHash(input: {
+  record: JunctionSparseTimeseriesRecord;
+  resourceContext: ResourceContext;
+  resourceSlug: string;
+}): string {
+  return shortHash([
+    input.resourceSlug,
+    input.resourceContext.sourceProviderSlug,
+    input.resourceContext.origin.sourceType ?? "",
+    input.resourceContext.origin.sourceInstanceId ?? "",
+    input.record.providerRowId ?? "",
+    input.record.observedAtRaw,
+    input.record.startAt ?? "",
+    input.record.endAt ?? "",
+    input.record.value,
+    input.record.unit,
+    input.record.upstreamUnit,
+    input.record.alertType ?? "",
+    input.record.bolusPurpose ?? "",
+    input.record.deliveryForm ?? "",
+    input.record.deliveryMode ?? "",
+    input.record.insulinType ?? "",
+  ]);
 }
 
 function pushJunctionNoteTags(
@@ -2922,6 +3274,37 @@ function buildRawResourcePayload(
     return sanitizeJunctionNoteRawValue(sanitizeJunctionRawPayload(payload));
   }
 
+  const policy = resolveJunctionTimeseriesResourcePolicy(resource);
+  const sparseDescriptor = JUNCTION_SPARSE_TIMESERIES_DESCRIPTORS.get(resource);
+  if (
+    policy
+    && (
+      policy.normalizationMode === "sparse_alert"
+      || policy.normalizationMode === "sparse_intervention"
+      || policy.normalizationMode === "sparse_observation"
+    )
+  ) {
+    return sparseDescriptor
+      ? sanitizeJunctionSparseTimeseriesRawPayload(resource, payload, sparseDescriptor)
+      : undefined;
+  }
+  if (
+    policy?.normalizationMode === "daily_aggregate"
+    && !JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.has(resource)
+  ) {
+    return undefined;
+  }
+  if (
+    policy?.normalizationMode === "sparse_reading"
+    && resource !== JUNCTION_BLOOD_PRESSURE_RESOURCE
+    && resource !== JUNCTION_WEIGHT_RESOURCE
+  ) {
+    return undefined;
+  }
+  if (policy?.normalizationMode === "note_tags" && resource !== JUNCTION_NOTE_RESOURCE) {
+    return undefined;
+  }
+
   if (resource !== "profile") {
     return sanitizeJunctionRawPayload(payload);
   }
@@ -2942,6 +3325,56 @@ function buildRawResourcePayload(
     payload,
     profile && connectionsByKey ? resolveEntryConnection(profile, connectionsByKey) : undefined,
   );
+}
+
+function sanitizeJunctionSparseTimeseriesRawPayload(
+  resource: string,
+  payload: unknown,
+  descriptor: JunctionSparseTimeseriesDescriptor,
+): PlainObject | undefined {
+  const recordDigests = new Set<string>();
+
+  for (const { entry, originFallback } of timeseriesResourceEntries(payload)) {
+    const record = parseJunctionSparseTimeseriesRecord(entry, resource, descriptor);
+    if (!record) {
+      continue;
+    }
+    const origin = resolveJunctionOrigin(entry, originFallback);
+    const sourceProviderSlug = readJunctionSourceProviderSlug(entry, originFallback)
+      ?? origin.sourceProviderSlug;
+    if (!sourceProviderSlug) {
+      continue;
+    }
+
+    recordDigests.add(shortHash([
+      resource,
+      sourceProviderSlug,
+      origin.sourceType ?? "",
+      origin.sourceInstanceId ?? "",
+      record.providerRowId ?? "",
+      record.observedAtRaw,
+      record.startAt ?? "",
+      record.endAt ?? "",
+      record.value,
+      record.unit,
+      record.upstreamUnit,
+      record.alertType ?? "",
+      record.bolusPurpose ?? "",
+      record.deliveryForm ?? "",
+      record.deliveryMode ?? "",
+      record.insulinType ?? "",
+    ]));
+  }
+
+  const digests = [...recordDigests].sort();
+  return digests.length > 0
+    ? {
+        schema: "junction.sparse_timeseries_digest.v1",
+        resource,
+        recordCount: digests.length,
+        recordsDigest: shortHash([resource, ...digests]),
+      }
+    : undefined;
 }
 
 function sanitizeJunctionNoteRawValue(value: unknown): unknown {

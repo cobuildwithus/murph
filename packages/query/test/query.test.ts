@@ -6373,6 +6373,48 @@ test("wearable projection preserves valid Apple HealthKit cycle fallback zero st
   }
 });
 
+test("Junction sparse observation metrics remain queryable through their public resource names", async () => {
+  const cases = [
+    ["body_mass_index", "bmi", 23.4, "kg_m2"],
+    ["carbohydrates", "carbohydrates", 48, "g"],
+    ["fat", "body-fat-percentage", 18.5, "%"],
+    ["forced_expiratory_volume_1", "forced-expiratory-volume-1", 3.52, "L"],
+    ["forced_vital_capacity", "forced-vital-capacity", 4.31, "L"],
+    ["heart_rate_alert", "heart-rate-alert", 1, "count"],
+    ["inhaler_usage", "inhaler-usage", 2, "count"],
+    ["lean_body_mass", "lean-body-mass", 61.2, "kg"],
+    ["peak_expiratory_flow_rate", "peak-expiratory-flow-rate", 475, "L/min"],
+    ["sleep_apnea_alert", "sleep-apnea-alert", 1, "count"],
+    ["waist_circumference", "waist-circumference", 82.4, "cm"],
+  ] as const;
+  const vaultRoot = await createMetricObservationVault(cases.map(([, metric, value, unit], index) => ({
+    id: `evt_junction_sparse_metric_${String(index).padStart(2, "0")}`,
+    metric,
+    observationGrain: "sample",
+    occurredAt: `2026-04-06T12:${String(index).padStart(2, "0")}:00Z`,
+    source: "device",
+    title: `Junction sparse metric ${metric}`,
+    unit,
+    value,
+  })));
+
+  try {
+    await rebuildQueryProjection(vaultRoot);
+
+    for (const [publicName, canonicalMetric, value] of cases) {
+      const points = await listMetricPointsRuntime(vaultRoot, {
+        limit: null,
+        metricKey: publicName,
+      });
+      assert.equal(points.length, 1, publicName);
+      assert.equal(points[0]?.metricKey, canonicalMetric, publicName);
+      assert.equal(points[0]?.value, value, publicName);
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("listMetricPointsRuntime rebuilds v15 wearable-summary projections before serving metric points", async () => {
   const vaultRoot = await createMetricObservationVault([
     {

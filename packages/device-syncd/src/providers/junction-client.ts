@@ -758,8 +758,15 @@ function buildJunctionIntrospectionSearch(input: JunctionIntrospectionInput): UR
   return search;
 }
 
-function resolveJunctionTimeseriesApiResource(resource: string): string {
-  return resource === "weight" ? "body_weight" : resource;
+export function resolveJunctionTimeseriesApiResource(resource: string): string {
+  switch (resource) {
+    case "fat":
+      return "body_fat";
+    case "weight":
+      return "body_weight";
+    default:
+      return resource;
+  }
 }
 
 function resolveJunctionSummaryDateQueryFormat(input: JunctionWindowInput): JunctionDateQueryFormat {
