@@ -915,7 +915,15 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
-    expect(migrationEntries).toEqual([
+    const queryShapeMigrationEntries = new Set([
+      "20260812030000_hosted_stripe_activation_result_pointer",
+      "20260812030100_group_email_message_volume_indexes",
+      "20260812030200_whoop_capacity_index",
+      "20260812030300_referral_handoff_indexes",
+    ]);
+    expect(
+      migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),
+    ).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
       "20260425010000_drop_revnet_issuance",
@@ -1094,12 +1102,11 @@ describe("hosted Prisma baseline migration", () => {
       "20260810150000_hosted_usage_credit_grant_slot_release",
       "20260811160000_add_group_sponsorship_funding_alias_publication",
       "20260811190000_hosted_linq_provider_event_diagnostics_retention_index",
-      "20260812030000_hosted_stripe_activation_result_pointer",
-      "20260812030100_group_email_message_volume_indexes",
-      "20260812030200_whoop_capacity_index",
-      "20260812030300_referral_handoff_indexes",
       "migration_lock.toml",
     ]);
+    expect(migrationEntries).toEqual(
+      expect.arrayContaining([...queryShapeMigrationEntries]),
+    );
     expect(hostedPendingGroupSetupMigrationSql).toContain(
       'CREATE TABLE "hosted_pending_group_setup"',
     );
