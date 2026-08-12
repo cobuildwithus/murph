@@ -16,6 +16,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./hosted-device-sync-status": {
+      "types": "./dist/hosted-device-sync-status.d.ts",
+      "import": "./dist/hosted-device-sync-status.js",
+      "default": "./dist/hosted-device-sync-status.js"
+    },
     "./hosted-assistant-bootstrap": {
       "types": "./dist/hosted-assistant-bootstrap.d.ts",
       "import": "./dist/hosted-assistant-bootstrap.js",

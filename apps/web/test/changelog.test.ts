@@ -1084,7 +1084,7 @@ describe("changelog registry", () => {
     expect(item).toMatchObject({
       kind: "improvement",
       priority: 5,
-      sourcePullRequests: [1597],
+      sourcePullRequests: [1597, 1721],
     });
     expect(item?.summary).toContain("scheduled assistant automations are paused");
     expect(item?.details).toContain("Fresh messages still take priority");

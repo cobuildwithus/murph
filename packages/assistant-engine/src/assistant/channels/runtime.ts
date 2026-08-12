@@ -9,6 +9,7 @@ import {
   resolveAgentmailBaseUrl,
 } from '@murphai/operator-config/agentmail-runtime'
 import {
+  assertLinqMessageTextPartWithinLimit,
   checkLinqIMessageCapability,
   createLinqChat,
   isDefinitiveLinqIMessageAppCardRejection,
@@ -806,6 +807,20 @@ export async function sendLinqMessage(
     }
   }
 
+  const message = responseMedia.some((item) => item.kind === 'vault_file')
+    ? ''
+    : appendImageAlternativeText(input.message, responseMedia)
+  assertLinqMessageTextPartWithinLimit({
+    message,
+    operation: participantFromPhoneNumber ? 'create_chat' : 'send_message',
+    requestAttachmentMediaPartCount: responseMedia.filter((item) =>
+      item.kind === 'vault_image' || item.kind === 'vault_file'
+    ).length,
+    requestMediaPartCount: responseMedia.length,
+    requestPublicUrlMediaPartCount:
+      responseMedia.filter((item) => item.kind === 'image').length,
+  })
+
   if (card !== null) {
     const textFallbackIdempotencyKey =
       appCardFallbackIdempotencyKey ?? idempotencyKey
@@ -831,9 +846,6 @@ export async function sendLinqMessage(
     responseMedia,
     dependencies,
   )
-  const message = responseMedia.some((item) => item.kind === 'vault_file')
-    ? ''
-    : appendImageAlternativeText(input.message, input.media ?? [])
 
   if (participantFromPhoneNumber) {
     const created = await createLinqChat(

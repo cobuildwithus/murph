@@ -12,6 +12,7 @@ import {
   findHostedDomainRootWrap,
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   parseHostedDomainRootKeyEnvelope,
+  parseSerializedHostedSecureBoxEnvelope,
   sealHostedSecureBox,
   serializeHostedSecureBoxEnvelope,
   verifyHostedDomainRootEnvelopeSignatureWithPublicKey,
@@ -45,10 +46,16 @@ import type {
   GcpKmsEncryptInput,
   HostedGcpKmsClient,
 } from "../src/lib/hosted-crypto/gcp-kms";
+import type { HostedConnectionRecord } from "../src/lib/device-sync/prisma-store/connection-records";
+import {
+  encryptHostedConnectionSecret,
+  readHostedRuntimeConnectionSecretMaterial,
+} from "../src/lib/device-sync/prisma-store/connection-secrets";
 
 const AUTHORITY_KEY_VERSION =
   "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
 const WEB_WRAP_KEY_NAME = "projects/test/locations/global/keyRings/ring/cryptoKeys/wrap";
+const decodeText = TextDecoder.prototype.decode;
 
 const gcpKmsMock = vi.hoisted(() => ({
   client: null as HostedGcpKmsClient | null,
@@ -882,6 +889,135 @@ test("hosted web private-field encryption uses already-provisioned control roots
   expect(openedPlaintexts).toHaveLength(1);
   expect(new Uint8Array(openedPlaintexts[0]!).every((byte) => byte === 0)).toBe(true);
   assert.equal(tx.persistedEnvelopes.length, 1);
+});
+
+test("runtime device-secret pages batch 32 distinct roots with bounded KMS unwraps", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const records: HostedConnectionRecord[] = [];
+
+  for (let index = 0; index < 32; index += 1) {
+    const connectionId = `dsc-runtime-${String(index + 1).padStart(2, "0")}`;
+    const tokenVersion = index + 1;
+    const userId = `member-runtime-${String(index + 1).padStart(2, "0")}`;
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "device",
+      prisma: tx.prisma,
+      reason: "test.runtime-device-secret-page",
+      userId,
+    });
+    const externalAccountIdEncrypted = await encryptHostedConnectionSecret({
+      connectionId,
+      provider: "junction",
+      prisma: tx.prisma,
+      purpose: "device-sync-external-account-id",
+      userId,
+      value: `junction-external-${index + 1}`,
+    });
+    const accessTokenEncrypted = await encryptHostedConnectionSecret({
+      connectionId,
+      provider: "junction",
+      prisma: tx.prisma,
+      purpose: "device-sync-access-token",
+      tokenVersion,
+      userId,
+      value: `junction-access-${index + 1}`,
+    });
+    const refreshTokenEncrypted = await encryptHostedConnectionSecret({
+      connectionId,
+      provider: "junction",
+      prisma: tx.prisma,
+      purpose: "device-sync-refresh-token",
+      tokenVersion,
+      userId,
+      value: `junction-refresh-${index + 1}`,
+    });
+    records.push(createHostedRuntimeDeviceSecretRecord({
+      accessTokenEncrypted,
+      connectionId,
+      externalAccountIdEncrypted,
+      refreshTokenEncrypted,
+      tokenVersion,
+      userId,
+    }));
+  }
+
+  const rootKeyIds = new Set(records.flatMap((record) => [
+    record.externalAccountIdEncrypted,
+    record.accessTokenEncrypted,
+    record.refreshTokenEncrypted,
+  ]).map((ciphertext) =>
+    parseSerializedHostedSecureBoxEnvelope(ciphertext!).rootKeyId
+  ));
+  expect(rootKeyIds.size).toBe(32);
+
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const openedPlaintexts = captureDecodedPlaintexts();
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+
+  const material = await readHostedRuntimeConnectionSecretMaterial({
+    prisma,
+    records,
+    tokenConnectionIds: new Set(records.map((record) => record.id)),
+  });
+
+  expect(material.size).toBe(32);
+  records.forEach((record, index) => {
+    expect(material.get(record.id)).toEqual({
+      externalAccountId: `junction-external-${index + 1}`,
+      tokenBundle: {
+        accessToken: `junction-access-${index + 1}`,
+        accessTokenExpiresAt: "2026-08-12T00:00:00.000Z",
+        keyVersion: "hosted-device-secure-box:v1",
+        refreshToken: `junction-refresh-${index + 1}`,
+        tokenVersion: index + 1,
+      },
+    });
+  });
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(decryptMetrics.calls).toHaveLength(32);
+  expect(decryptMetrics.maxConcurrent).toBeGreaterThanOrEqual(1);
+  expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+  expect(openedPlaintexts).toHaveLength(96);
+  expect(openedPlaintexts.every((plaintext) =>
+    new Uint8Array(plaintext).every((byte) => byte === 0)
+  )).toBe(true);
+
+  const openedPlaintextCountBeforeMismatch = openedPlaintexts.length;
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await expect(readHostedRuntimeConnectionSecretMaterial({
+    prisma,
+    records: [
+      { ...records[0]!, provider: "junction-mismatch" },
+      ...records.slice(1),
+    ],
+    tokenConnectionIds: new Set(records.map((record) => record.id)),
+  })).rejects.toThrow();
+  expect(decryptMetrics.activeCount).toBe(0);
+  expect(decryptMetrics.maxConcurrent).toBeLessThanOrEqual(4);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+  expect(openedPlaintexts.slice(openedPlaintextCountBeforeMismatch).every((plaintext) =>
+    new Uint8Array(plaintext).every((byte) => byte === 0)
+  )).toBe(true);
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, { yieldBeforeReturn: true });
+  await expect(readHostedRuntimeConnectionSecretMaterial({
+    prisma,
+    records: [{ ...records[0]!, accessTokenEncrypted: null }],
+    tokenConnectionIds: new Set([records[0]!.id]),
+  })).rejects.toThrow(/missing its access token/u);
+  expect(envelopeFindMany).toHaveBeenCalledTimes(2);
+  expect(decryptMetrics.calls).toHaveLength(0);
 });
 
 test("member email batches use one envelope query with bounded KMS unwraps", async () => {
@@ -2106,6 +2242,102 @@ test("batch private-field sealing unwraps once and preserves member-bound AAD", 
   })).rejects.toThrow();
 });
 
+test("batch secure-box opening drains all work and preserves the first observed failure", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const memberId = "member-test-first-observed-batch-failure";
+  const scope = "hosted-address-book-advisory-name:v1";
+  const entries = [
+    {
+      aad: {
+        field: "advisory_name",
+        purpose: "hosted-address-book-advisory-name",
+        rowId: "1:first-observed-a",
+        table: "hosted_address_book_contact",
+      },
+      scope,
+      value: "First",
+    },
+    {
+      aad: {
+        field: "advisory_name",
+        purpose: "hosted-address-book-advisory-name",
+        rowId: "1:first-observed-b",
+        table: "hosted_address_book_contact",
+      },
+      scope,
+      value: "Second",
+    },
+  ] as const;
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.first-observed-batch-failure",
+    userId: memberId,
+  });
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: {
+      findMany: createBatchEnvelopeFindMany(tx),
+    },
+  });
+  const sealed = await sealHostedUserSecureBoxStrings({
+    entries,
+    lane: "hosted-member-private-field",
+    prisma,
+    userId: memberId,
+  });
+
+  const firstObservedFailure = new Error("first observed secure-box failure");
+  const laterFailure = new Error("later secure-box failure");
+  let activeOpens = 0;
+  let decryptCalls = 0;
+  let releaseLaterFailure!: () => void;
+  const laterFailureGate = new Promise<void>((resolve) => {
+    releaseLaterFailure = resolve;
+  });
+  vi.spyOn(crypto.subtle, "decrypt").mockImplementation(async () => {
+    decryptCalls += 1;
+    activeOpens += 1;
+    try {
+      if (decryptCalls === 1) {
+        await laterFailureGate;
+        throw laterFailure;
+      }
+      throw firstObservedFailure;
+    } finally {
+      activeOpens -= 1;
+    }
+  });
+
+  let returned = false;
+  const opened = openHostedUserSecureBoxStrings({
+    entries: entries.map((entry, index) => ({
+      aad: entry.aad,
+      scope: entry.scope,
+      userId: memberId,
+      value: sealed[index],
+    })),
+    lane: "hosted-member-private-field",
+    prisma,
+  }).finally(() => {
+    returned = true;
+  });
+
+  await vi.waitFor(() => expect(decryptCalls).toBe(2));
+  await Promise.resolve();
+  expect(returned).toBe(false);
+  expect(activeOpens).toBe(1);
+  releaseLaterFailure();
+  await expect(opened).rejects.toBe(firstObservedFailure);
+  expect(activeOpens).toBe(0);
+  expect(decryptMetrics.activeCount).toBe(0);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+});
+
 function createEnvelopeReadCountingClient(
   base: HostedCryptoTestTransaction["prisma"],
 ): { client: HostedCryptoTestTransaction["prisma"]; readCount: () => number } {
@@ -2235,6 +2467,53 @@ async function createHostedWebCryptoTransactionFixture(
   };
 }
 
+function createHostedRuntimeDeviceSecretRecord(input: {
+  accessTokenEncrypted: string;
+  connectionId: string;
+  externalAccountIdEncrypted: string;
+  refreshTokenEncrypted: string;
+  tokenVersion: number;
+  userId: string;
+}): HostedConnectionRecord {
+  const createdAt = new Date("2026-08-11T12:00:00.000Z");
+  return {
+    accessTokenEncrypted: input.accessTokenEncrypted,
+    accessTokenExpiresAt: new Date("2026-08-12T00:00:00.000Z"),
+    connectedAt: createdAt,
+    createdAt,
+    credentialKind: "oauth_tokens",
+    credentialMetadataJson: {},
+    displayName: "Junction",
+    externalAccountIdEncrypted: input.externalAccountIdEncrypted,
+    id: input.connectionId,
+    keyVersion: "hosted-device-secure-box:v1",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastSyncStartedAt: null,
+    lastWebhookAt: null,
+    metadataJson: {},
+    nextReconcileAt: null,
+    provider: "junction",
+    providerAccountBlindIndex: `blind-${input.connectionId}`,
+    providerApplicationId: null,
+    providerApplicationRevision: null,
+    providerConfigKey: null,
+    refreshLeaseExpiresAt: null,
+    refreshLeaseOwner: null,
+    refreshLeaseTokenVersion: null,
+    refreshTokenEncrypted: input.refreshTokenEncrypted,
+    scopesJson: [],
+    setupExpiresAt: null,
+    setupPhase: null,
+    status: "active",
+    tokenVersion: input.tokenVersion,
+    updatedAt: createdAt,
+    userId: input.userId,
+  };
+}
+
 async function createBatchPrivateFieldRecords(input: {
   memberIds: readonly string[];
   tx: HostedCryptoTestTransaction;
@@ -2337,7 +2616,6 @@ function buildBatchEnvelopeRows(tx: HostedCryptoTestTransaction) {
 
 function captureDecodedPlaintexts(): Uint8Array[] {
   const outputs: Uint8Array[] = [];
-  const decode = TextDecoder.prototype.decode;
   vi.spyOn(TextDecoder.prototype, "decode").mockImplementation(function (
     this: TextDecoder,
     input,
@@ -2346,7 +2624,7 @@ function captureDecodedPlaintexts(): Uint8Array[] {
     if (input instanceof Uint8Array) {
       outputs.push(input);
     }
-    return decode.call(this, input, options);
+    return decodeText.call(this, input, options);
   });
   return outputs;
 }
