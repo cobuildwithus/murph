@@ -6,10 +6,10 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
 endobj
 3 0 obj
-<< /Length 5015 >>
+<< /Length 5013 >>
 stream
 BT /F2 19 Tf 1 0 0 1 54.00 738.00 Tm (Murph Privacy Policy) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: April 9, 2026 Last Updated: August 11, 2026) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: April 9, 2026 Last Updated: July 23, 2026) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 688.00 Tm (Murph \("Murph," "we," "us," or "our"\) provides software and services designed to help people) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 674.00 Tm (understand their bodies and lives better through tools such as health journaling, meal tracking, wearable) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 660.00 Tm (and device sync, messaging-based interactions, hosted onboarding, invite, import, export, and related) Tj ET
@@ -428,7 +428,7 @@ BT /F1 10 Tf 1 0 0 1 72.00 73.00 Tm (wearable, Apple Health, and clinical-record
 endstream
 endobj
 10 0 obj
-<< /Length 5752 >>
+<< /Length 5758 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (customer support, logging, monitoring, and security;) Tj ET
@@ -472,7 +472,7 @@ BT /F1 10 Tf 1 0 0 1 54.00 205.00 Tm (administration, service development, or ot
 BT /F1 10 Tf 1 0 0 1 54.00 191.00 Tm (policies. For example, Strava states that it may monitor and collect usage data relating to access to its) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 177.00 Tm (API and use that information for its business purposes.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 159.00 Tm (Connection pathways and user-provided exports. Data may reach Murph directly from a Connected) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 145.00 Tm (Service, through a synchronization provider such as Junction, or through a file that you lawfully) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 145.00 Tm (Service, through a synchronization provider such as Junction/Vital, or through a file that you lawfully) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 131.00 Tm (download and upload. A portal, laboratory, wearable company, merchant, or other service does not) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 117.00 Tm (become a Murph subprocessor merely because you upload an export from it or ask Murph to contact it.) Tj ET
 endstream
@@ -578,148 +578,147 @@ BT /F1 10 Tf 1 0 0 1 54.00 74.00 Tm (integration tokens, or health-related URL q
 endstream
 endobj
 13 0 obj
-<< /Length 5345 >>
+<< /Length 5543 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Analytics limits. Where we use analytics or diagnostics, we configure them to collect minimized) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (operational information such as performance, uptime, feature usage, crash reports, and security) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (events, and to avoid collecting health content where feasible.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 692.00 Tm (If Murph uses non-essential analytics, advertising, or personalization technologies in the future, Murph) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 678.00 Tm (will provide any disclosures and consent mechanisms required by applicable law.) Tj ET
-BT /F2 14 Tf 1 0 0 1 54.00 650.00 Tm (11. Apple Health, HealthKit, Google Health API, Google Fit, Android Health) Tj ET
-BT /F2 14 Tf 1 0 0 1 54.00 632.00 Tm (Connect, and wearable APIs) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (If you connect Apple Health, HealthKit, Google Health API, Google Fit, Android Health Connect, wearable) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (providers, device providers, or wellness apps, Murph will collect only the categories of data you) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (authorize and only for the features you enable.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 562.00 Tm (Apple Health / HealthKit. Murph uses HealthKit data only to provide health, fitness, wellness, journaling,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 548.00 Tm (personalization, import, export, or other features you request. Murph does not use HealthKit data for) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 534.00 Tm (advertising, data mining, third-party advertising, cross-context behavioral advertising, data-broker) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 520.00 Tm (disclosure, insurance/employment/credit decisions, or general-purpose AI model training. Murph does) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 506.00 Tm (not disclose HealthKit data to third parties except to service providers as necessary to provide or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 492.00 Tm (improve the health, fitness, wellness, import, export, sync, or personalization feature you request; for) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 478.00 Tm (health research with your permission; where required by law; or as otherwise permitted by Apple's rules) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 464.00 Tm (and applicable law.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 446.00 Tm (Android Health Connect publication surfaces. If Murph distributes an Android Health Connect) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 432.00 Tm (integration through Google Play or another app-store surface, the store listing, Health Connect) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 418.00 Tm (permission flow, and in-product legal links will point users to the same HTML Privacy Policy at) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 404.00 Tm (withmurph.ai/legal/privacy \(https://withmurph.ai/legal/privacy\). Murph will request only health and) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 390.00 Tm (fitness permissions tied to a clear feature benefit, and the Privacy Policy will describe the collected) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 376.00 Tm (data categories, use, storage, sharing, retention, deletion, and security practices.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 358.00 Tm (Google Health API, Google Fit, Android Health Connect, and wearable APIs. Murph uses data from Google) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 344.00 Tm (Health API, Google Fit, Android Health Connect, wearable providers, device providers, and wellness apps) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 330.00 Tm (only to provide the feature you enable; personalize, import, export, sync, summarize, secure, or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 316.00 Tm (troubleshoot that feature; or comply with law. Murph does not use that data for advertising,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 302.00 Tm (data-broker disclosure, insurance/employment/credit decisions, or general-purpose AI model training.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 284.00 Tm (Permissions and revocation. You can manage some health-data permissions through your device,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 270.00 Tm (browser, app, or connected-provider settings. Disconnecting a provider or revoking permissions stops) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 256.00 Tm (future collection from that provider, but may not automatically delete data already stored by Murph or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 242.00 Tm (by independent third parties, unless deletion is required by law or requested through available privacy) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 228.00 Tm (controls.) Tj ET
-BT /F2 14 Tf 1 0 0 1 54.00 200.00 Tm (12. Research and product improvement) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 176.00 Tm (Murph may improve the service using aggregated, de-identified, pseudonymized, or otherwise minimized) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 162.00 Tm (information where feasible.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 144.00 Tm (No identifiable health research without separate consent. Murph will not use identifiable health data for) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 130.00 Tm (human-subjects research, clinical research, publication, or sponsored research unless you separately opt) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 116.00 Tm (in, the use is otherwise permitted by law, or the data has been de-identified as permitted by applicable) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 102.00 Tm (law.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 650.00 Tm (11. Apple Health, HealthKit, Health Connect, and wearable APIs) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 626.00 Tm (If you connect Apple Health, HealthKit, Google Health Connect, wearable providers, device providers, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 612.00 Tm (wellness apps, Murph will collect only the categories of data you authorize and only for the features you) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 598.00 Tm (enable.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (Apple Health / HealthKit. Murph uses HealthKit data only to provide health, fitness, wellness, journaling,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 566.00 Tm (personalization, import, export, or other features you request. Murph does not use HealthKit data for) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 552.00 Tm (advertising, data mining, third-party advertising, cross-context behavioral advertising, data-broker) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 538.00 Tm (disclosure, insurance/employment/credit decisions, or general-purpose AI model training. Murph does) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 524.00 Tm (not disclose HealthKit data to third parties except to service providers as necessary to provide or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 510.00 Tm (improve the health, fitness, wellness, import, export, sync, or personalization feature you request; for) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 496.00 Tm (health research with your permission; where required by law; or as otherwise permitted by Apple's rules) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 482.00 Tm (and applicable law.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 464.00 Tm (Health Connect publication surfaces. If Murph distributes a Google Health Connect integration through) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 450.00 Tm (Google Play or another app-store surface, the store listing, Health Connect permission flow, and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 436.00 Tm (in-product legal links will point users to the same HTML Privacy Policy at withmurph.ai/legal/privacy) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 422.00 Tm (\(https://withmurph.ai/legal/privacy\). Murph will request only health and fitness permissions tied to a) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 408.00 Tm (clear feature benefit, and the Privacy Policy will describe the collected data categories, use, storage,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 394.00 Tm (sharing, retention, deletion, and security practices.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 376.00 Tm (Health Connect and wearable APIs. Murph uses data from Google Health Connect, wearable providers,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 362.00 Tm (device providers, and wellness apps only to provide the feature you enable; personalize, import, export,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 348.00 Tm (sync, summarize, secure, or troubleshoot that feature; or comply with law. Murph does not use that) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 334.00 Tm (data for advertising, data-broker disclosure, insurance/employment/credit decisions, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 320.00 Tm (general-purpose AI model training.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 302.00 Tm (Permissions and revocation. You can manage some health-data permissions through your device,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 288.00 Tm (browser, app, or connected-provider settings. Disconnecting a provider or revoking permissions stops) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 274.00 Tm (future collection from that provider, but may not automatically delete data already stored by Murph or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 260.00 Tm (by independent third parties, unless deletion is required by law or requested through available privacy) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 246.00 Tm (controls.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 218.00 Tm (12. Research and product improvement) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 194.00 Tm (Murph may improve the service using aggregated, de-identified, pseudonymized, or otherwise minimized) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 180.00 Tm (information where feasible.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 162.00 Tm (No identifiable health research without separate consent. Murph will not use identifiable health data for) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 148.00 Tm (human-subjects research, clinical research, publication, or sponsored research unless you separately opt) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 134.00 Tm (in, the use is otherwise permitted by law, or the data has been de-identified as permitted by applicable) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 120.00 Tm (law.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 102.00 Tm (Research notices. If Murph offers a research feature, the applicable consent or study notice will) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 88.00 Tm (describe the research sponsor, data categories, purpose, retention period, withdrawal process, whether) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 74.00 Tm (results may be published, and who controls the research data.) Tj ET
 endstream
 endobj
 14 0 obj
-<< /Length 5453 >>
+<< /Length 5733 >>
 stream
-BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Research notices. If Murph offers a research feature, the applicable consent or study notice will) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (describe the research sponsor, data categories, purpose, retention period, withdrawal process, whether) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (results may be published, and who controls the research data.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 692.00 Tm (Health Commons contributions. Private experiment runs and notes are private by default. If you choose) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 678.00 Tm (to contribute an outcome card, protocol note, aggregate result, or similar material to Health Commons,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 664.00 Tm (Murph will show the contribution boundary before submission and will process the contribution according) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 650.00 Tm (to the consent or product notice for that feature. Contributions may be tied to protocol revisions,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 636.00 Tm (confidence labels, source-quality labels, and de-identified or aggregate outcome summaries. Do not) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 622.00 Tm (contribute another person's personal or health information unless you have the required authority and) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (consent.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 590.00 Tm (De-identified data. If Murph maintains de-identified data, Murph will maintain and use it in de-identified) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 576.00 Tm (form and will not attempt to reidentify it except as permitted by law. We will use reasonable technical) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 562.00 Tm (and organizational measures to prevent reidentification and require recipients of de-identified data to) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 548.00 Tm (make similar commitments where required by law.) Tj ET
-BT /F2 14 Tf 1 0 0 1 54.00 520.00 Tm (13. Data retention) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 496.00 Tm (Murph retains personal information only for as long as reasonably necessary for the purposes described) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 482.00 Tm (in this Privacy Policy, including to provide Murph, comply with law, resolve disputes, enforce agreements,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 468.00 Tm (maintain security, prevent fraud or abuse, and honor your choices. The table below describes Murph's) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 454.00 Tm (current retention targets for hosted Murph systems. Actual deletion timing may vary where deletion) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 440.00 Tm (depends on a user-controlled provider, deployment-specific database backup cycle, legal hold, security) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 426.00 Tm (investigation, billing/tax obligation, unresolved dispute, or technically constrained backup restoration) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 412.00 Tm (process.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 394.00 Tm (Category: Account/profile information; Typical retention target: While your account is active and up to) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 380.00 Tm (90 days after deletion, unless longer retention is required for legal, security, fraud-prevention, or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 366.00 Tm (dispute purposes) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 348.00 Tm (Category: Health and user-submitted content; Typical retention target: Until you delete it or your) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 334.00 Tm (account is deleted; targeted for removal from active hosted systems within 30 days and from backups) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 320.00 Tm (within 90 days, unless legally preserved) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 302.00 Tm (Category: Wearable/device raw sync data; Typical retention target: While the integration is active, or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 288.00 Tm (queried on demand where technically supported; targeted for deletion within 30-90 days after) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 274.00 Tm (disconnect/account deletion unless needed for security, legal, or user-requested features) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 256.00 Tm (Category: Health memories, summaries, embeddings, and derived insights; Typical retention target: Until) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 242.00 Tm (you delete/disable them or your account is deleted; targeted for removal from active systems within 30) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 228.00 Tm (days and backups within 90 days unless legally preserved) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 210.00 Tm (Category: Integration tokens and credentials; Typical retention target: Until disconnect/account) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 196.00 Tm (deletion, then targeted for revocation or deletion promptly, normally within 7-30 days) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 178.00 Tm (Category: Webhook receipts, routing metadata, and sync logs; Typical retention target: Typically 30-90) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 164.00 Tm (days unless needed for security, debugging, replay protection, fraud prevention, reconciliation, or legal) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 150.00 Tm (preservation) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 132.00 Tm (Category: User-visible assistant history containing health data; Typical retention target: Until you) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 118.00 Tm (delete it or your account is deleted; targeted for removal from active hosted systems within 30 days) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 104.00 Tm (and backups within 90 days unless legally preserved) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Health Commons contributions. Private experiment runs and notes are private by default. If you choose) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (to contribute an outcome card, protocol note, aggregate result, or similar material to Health Commons,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (Murph will show the contribution boundary before submission and will process the contribution according) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (to the consent or product notice for that feature. Contributions may be tied to protocol revisions,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 682.00 Tm (confidence labels, source-quality labels, and de-identified or aggregate outcome summaries. Do not) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 668.00 Tm (contribute another person's personal or health information unless you have the required authority and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 654.00 Tm (consent.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 636.00 Tm (De-identified data. If Murph maintains de-identified data, Murph will maintain and use it in de-identified) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 622.00 Tm (form and will not attempt to reidentify it except as permitted by law. We will use reasonable technical) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (and organizational measures to prevent reidentification and require recipients of de-identified data to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (make similar commitments where required by law.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 566.00 Tm (13. Data retention) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 542.00 Tm (Murph retains personal information only for as long as reasonably necessary for the purposes described) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 528.00 Tm (in this Privacy Policy, including to provide Murph, comply with law, resolve disputes, enforce agreements,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 514.00 Tm (maintain security, prevent fraud or abuse, and honor your choices. The table below describes Murph's) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 500.00 Tm (current retention targets for hosted Murph systems. Actual deletion timing may vary where deletion) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 486.00 Tm (depends on a user-controlled provider, deployment-specific database backup cycle, legal hold, security) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 472.00 Tm (investigation, billing/tax obligation, unresolved dispute, or technically constrained backup restoration) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 458.00 Tm (process.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 440.00 Tm (Category: Account/profile information; Typical retention target: While your account is active and up to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 426.00 Tm (90 days after deletion, unless longer retention is required for legal, security, fraud-prevention, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 412.00 Tm (dispute purposes) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 394.00 Tm (Category: Health and user-submitted content; Typical retention target: Until you delete it or your) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 380.00 Tm (account is deleted; targeted for removal from active hosted systems within 30 days and from backups) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 366.00 Tm (within 90 days, unless legally preserved) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 348.00 Tm (Category: Wearable/device raw sync data; Typical retention target: While the integration is active, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 334.00 Tm (queried on demand where technically supported; targeted for deletion within 30-90 days after) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 320.00 Tm (disconnect/account deletion unless needed for security, legal, or user-requested features) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 302.00 Tm (Category: Health memories, summaries, embeddings, and derived insights; Typical retention target: Until) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 288.00 Tm (you delete/disable them or your account is deleted; targeted for removal from active systems within 30) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 274.00 Tm (days and backups within 90 days unless legally preserved) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 256.00 Tm (Category: Integration tokens and credentials; Typical retention target: Until disconnect/account) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 242.00 Tm (deletion, then targeted for revocation or deletion promptly, normally within 7-30 days) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 224.00 Tm (Category: Webhook receipts, routing metadata, and sync logs; Typical retention target: Typically 30-90) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 210.00 Tm (days unless needed for security, debugging, replay protection, fraud prevention, reconciliation, or legal) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 196.00 Tm (preservation) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 178.00 Tm (Category: User-visible assistant history containing health data; Typical retention target: Until you) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 164.00 Tm (delete it or your account is deleted; targeted for removal from active hosted systems within 30 days) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 150.00 Tm (and backups within 90 days unless legally preserved) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 132.00 Tm (Category: Operational prompt/tool traces containing health data; Typical retention target: Not retained) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 118.00 Tm (by default outside user-visible history; where retained for support, security, abuse prevention, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 104.00 Tm (debugging, targeted for deletion within 30 days unless legal, security, or dispute needs require longer) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 86.00 Tm (Category: Support communications; Typical retention target: Typically up to 3 years, with health) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 72.00 Tm (content redacted or deleted sooner where feasible) Tj ET
 endstream
 endobj
 15 0 obj
-<< /Length 5285 >>
+<< /Length 4605 >>
 stream
-BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Category: Operational prompt/tool traces containing health data; Typical retention target: Not retained) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (by default outside user-visible history; where retained for support, security, abuse prevention, or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (debugging, targeted for deletion within 30 days unless legal, security, or dispute needs require longer) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 692.00 Tm (Category: Support communications; Typical retention target: Typically up to 3 years, with health) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 678.00 Tm (content redacted or deleted sooner where feasible) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 660.00 Tm (Category: Billing/tax records; Typical retention target: As required for accounting, tax, audit, and legal) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 646.00 Tm (obligations) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 628.00 Tm (Category: Security logs; Typical retention target: Typically 90-365 days, with health content excluded) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 614.00 Tm (where feasible) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 596.00 Tm (Category: Backups; Typical retention target: Deleted or overwritten on a rolling basis, typically within) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 582.00 Tm (90 days for hosted systems Murph controls) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 564.00 Tm (We do not retain health data "just in case." We retain it only for the purposes described in this Privacy) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 550.00 Tm (Policy, for the periods described above, or as required to comply with legal, security, fraud-prevention,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 536.00 Tm (accounting, dispute-resolution, or user-request obligations.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 518.00 Tm (Murph may retain aggregated, de-identified, or otherwise non-identifying information that does not) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 504.00 Tm (reasonably identify you, provided we maintain and use it in de-identified form as required by law.) Tj ET
-BT /F2 14 Tf 1 0 0 1 54.00 476.00 Tm (14. Security and hosted processing transparency) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 452.00 Tm (Murph uses administrative, technical, and physical safeguards designed to protect personal information.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 438.00 Tm (These may include, as appropriate:) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 420.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 420.00 Tm (encryption in transit;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 404.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 404.00 Tm (encryption at rest for hosted health data and sensitive account data;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 388.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 388.00 Tm (access controls, least-privilege practices, and need-to-know review;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 372.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 372.00 Tm (privacy-preserving identifiers or lookup values for some workflows;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 356.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 356.00 Tm (logging, monitoring, and abuse-prevention controls;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 340.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 340.00 Tm (secure key handling and signed internal requests for certain hosted operations; and) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 324.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 324.00 Tm (staff training and vendor management processes.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 308.00 Tm (For hosted health data, Murph applies controls appropriate to the feature and hosting environment,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 294.00 Tm (which may include encryption in transit and at rest, role-based access controls, least-privilege access,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 280.00 Tm (production-access logging, access reviews, token vaulting or equivalent secure credential handling,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 266.00 Tm (secrets management, vendor review, incident-response procedures, and workforce confidentiality) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 252.00 Tm (obligations. Access to hosted health data is limited to personnel and providers with a need to operate,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 238.00 Tm (secure, support, or troubleshoot Murph, and sensitive access may be logged and reviewed.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 220.00 Tm (Hosted Murph may require Murph and its service providers to process readable content when necessary) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 206.00 Tm (to provide requested features, secure the service, investigate incidents, debug problems, or provide) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 192.00 Tm (support. Although Murph uses encryption and access controls, Hosted Murph is not a zero-knowledge,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 178.00 Tm (operator-blind, or end-to-end-encrypted service unless we expressly say otherwise for a specific) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 164.00 Tm (feature.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 146.00 Tm (Support access. Murph personnel do not access the contents of your hosted health data for support) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 132.00 Tm (unless needed to respond to your request, troubleshoot the service, investigate abuse/security issues,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 118.00 Tm (comply with law, or protect rights and safety.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Category: Billing/tax records; Typical retention target: As required for accounting, tax, audit, and legal) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (obligations) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Category: Security logs; Typical retention target: Typically 90-365 days, with health content excluded) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 692.00 Tm (where feasible) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 674.00 Tm (Category: Backups; Typical retention target: Deleted or overwritten on a rolling basis, typically within) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 660.00 Tm (90 days for hosted systems Murph controls) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 642.00 Tm (We do not retain health data "just in case." We retain it only for the purposes described in this Privacy) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 628.00 Tm (Policy, for the periods described above, or as required to comply with legal, security, fraud-prevention,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 614.00 Tm (accounting, dispute-resolution, or user-request obligations.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 596.00 Tm (Murph may retain aggregated, de-identified, or otherwise non-identifying information that does not) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 582.00 Tm (reasonably identify you, provided we maintain and use it in de-identified form as required by law.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 554.00 Tm (14. Security and hosted processing transparency) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 530.00 Tm (Murph uses administrative, technical, and physical safeguards designed to protect personal information.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 516.00 Tm (These may include, as appropriate:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 498.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 498.00 Tm (encryption in transit;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 482.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 482.00 Tm (encryption at rest for hosted health data and sensitive account data;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 466.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 466.00 Tm (access controls, least-privilege practices, and need-to-know review;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 450.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 450.00 Tm (privacy-preserving identifiers or lookup values for some workflows;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 434.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 434.00 Tm (logging, monitoring, and abuse-prevention controls;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 418.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 418.00 Tm (secure key handling and signed internal requests for certain hosted operations; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 402.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 402.00 Tm (staff training and vendor management processes.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 386.00 Tm (For hosted health data, Murph applies controls appropriate to the feature and hosting environment,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 372.00 Tm (which may include encryption in transit and at rest, role-based access controls, least-privilege access,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 358.00 Tm (production-access logging, access reviews, token vaulting or equivalent secure credential handling,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 344.00 Tm (secrets management, vendor review, incident-response procedures, and workforce confidentiality) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 330.00 Tm (obligations. Access to hosted health data is limited to personnel and providers with a need to operate,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 316.00 Tm (secure, support, or troubleshoot Murph, and sensitive access may be logged and reviewed.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 298.00 Tm (Hosted Murph may require Murph and its service providers to process readable content when necessary) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 284.00 Tm (to provide requested features, secure the service, investigate incidents, debug problems, or provide) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 270.00 Tm (support. Although Murph uses encryption and access controls, Hosted Murph is not a zero-knowledge,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 256.00 Tm (operator-blind, or end-to-end-encrypted service unless we expressly say otherwise for a specific) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 242.00 Tm (feature.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 224.00 Tm (Support access. Murph personnel do not access the contents of your hosted health data for support) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 210.00 Tm (unless needed to respond to your request, troubleshoot the service, investigate abuse/security issues,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 196.00 Tm (comply with law, or protect rights and safety.) Tj ET
 endstream
 endobj
 16 0 obj
@@ -911,42 +910,42 @@ xref
 0000000009 00000 n 
 0000000079 00000 n 
 0000000154 00000 n 
-0000005221 00000 n 
-0000011347 00000 n 
-0000016655 00000 n 
-0000022062 00000 n 
-0000027034 00000 n 
-0000031763 00000 n 
-0000037198 00000 n 
-0000043003 00000 n 
-0000048258 00000 n 
-0000053874 00000 n 
-0000059272 00000 n 
-0000064778 00000 n 
-0000070116 00000 n 
-0000075581 00000 n 
-0000080574 00000 n 
-0000082578 00000 n 
-0000082716 00000 n 
-0000082854 00000 n 
-0000082992 00000 n 
-0000083130 00000 n 
-0000083268 00000 n 
-0000083406 00000 n 
-0000083544 00000 n 
-0000083683 00000 n 
-0000083822 00000 n 
-0000083961 00000 n 
-0000084100 00000 n 
-0000084239 00000 n 
-0000084378 00000 n 
-0000084517 00000 n 
-0000084656 00000 n 
-0000084795 00000 n 
-0000084960 00000 n 
-0000085101 00000 n 
+0000005219 00000 n 
+0000011345 00000 n 
+0000016653 00000 n 
+0000022060 00000 n 
+0000027032 00000 n 
+0000031761 00000 n 
+0000037196 00000 n 
+0000043007 00000 n 
+0000048262 00000 n 
+0000053878 00000 n 
+0000059474 00000 n 
+0000065260 00000 n 
+0000069918 00000 n 
+0000075383 00000 n 
+0000080376 00000 n 
+0000082380 00000 n 
+0000082518 00000 n 
+0000082656 00000 n 
+0000082794 00000 n 
+0000082932 00000 n 
+0000083070 00000 n 
+0000083208 00000 n 
+0000083346 00000 n 
+0000083485 00000 n 
+0000083624 00000 n 
+0000083763 00000 n 
+0000083902 00000 n 
+0000084041 00000 n 
+0000084180 00000 n 
+0000084319 00000 n 
+0000084458 00000 n 
+0000084597 00000 n 
+0000084762 00000 n 
+0000084903 00000 n 
 trailer
 << /Size 38 /Root 37 0 R /Info 36 0 R >>
 startxref
-85152
+84954
 %%EOF

@@ -6,10 +6,10 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
 endobj
 3 0 obj
-<< /Length 4851 >>
+<< /Length 4849 >>
 stream
 BT /F2 19 Tf 1 0 0 1 54.00 738.00 Tm (Murph Terms of Service) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: July 23, 2026 Last Updated: August 11, 2026 Company: Just Cobuild, Co. \("Murph," "we,") Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: July 23, 2026 Last Updated: July 23, 2026 Company: Just Cobuild, Co. \("Murph," "we,") Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 692.00 Tm ("us," or "our"\)) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 674.00 Tm (These Terms of Service \("Terms"\) govern your access to and use of Murph's hosted websites, hosted) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 660.00 Tm (applications, hosted onboarding flows, hosted settings pages, hosted APIs, hosted messaging features,) Tj ET
@@ -308,13 +308,13 @@ BT /F2 14 Tf 1 0 0 1 54.00 130.00 Tm (Dependencies) Tj ET
 endstream
 endobj
 9 0 obj
-<< /Length 5772 >>
+<< /Length 5717 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Murph may let you connect or interact with third-party services, devices, accounts, APIs, applications,) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (or data sources, including identity providers, messaging providers, wearable providers, payment) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (processors, AI model providers, cloud providers, search providers, email providers, app stores, Apple) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (Health, HealthKit, Google Health API, Google Fit, Android Health Connect, Oura, WHOOP, Garmin, Strava,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 682.00 Tm (Terra, labs, medical-record services, and similar providers \(collectively, "Connected Services"\).) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (Health, HealthKit, Google Health Connect, Oura, WHOOP, Garmin, Strava, Terra, labs, medical-record) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 682.00 Tm (services, and similar providers \(collectively, "Connected Services"\).) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 664.00 Tm (If you enable a Connected Service:) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 646.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 646.00 Tm (you authorize us to exchange relevant information with that Connected Service to provide the) Tj ET
@@ -342,10 +342,10 @@ BT /F1 10 Tf 1 0 0 1 54.00 406.00 Tm (References to third-party names, services,
 BT /F1 10 Tf 1 0 0 1 54.00 392.00 Tm (do not imply sponsorship, endorsement, or affiliation unless we expressly say so. We may disable, modify,) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 378.00 Tm (or remove any integration at any time if required by law, provider terms, platform rules, security) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 364.00 Tm (needs, product changes, or operational reasons.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 346.00 Tm (If you connect data from Apple Health, HealthKit, Google Health API, Google Fit, Android Health) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 332.00 Tm (Connect, or similar health-data services, Murph will use that data only as described in our Privacy Policy) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 318.00 Tm (and applicable consent flows, and not for advertising, data brokerage, employment, insurance, credit,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 304.00 Tm (housing, or other eligibility decisions.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 346.00 Tm (If you connect data from Apple Health, HealthKit, Google Health Connect, or similar platform) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 332.00 Tm (health-data services, Murph will use that data only as described in our Privacy Policy and applicable) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 318.00 Tm (consent flows, and not for advertising, data brokerage, employment, insurance, credit, housing, or other) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 304.00 Tm (eligibility decisions.) Tj ET
 BT /F2 14 Tf 1 0 0 1 54.00 276.00 Tm (10. User Content and Data Rights) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 252.00 Tm ("User Content" means information you submit to Murph or authorize Murph to access, including) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 238.00 Tm (messages, notes, logs, attachments, chats, health-related text, wearable data, imported data, exported) Tj ET
@@ -527,12 +527,12 @@ BT /F2 14 Tf 1 0 0 1 54.00 92.00 Tm (14. Platform Health Data) Tj ET
 endstream
 endobj
 13 0 obj
-<< /Length 5159 >>
+<< /Length 5127 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Some features may depend on platform health-data services such as Apple Health, HealthKit, Google) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (Health API, Google Fit, Android Health Connect, or similar services. Your use of those services is) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (subject to the platform provider's rules and your device permissions. You can change many platform) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (health-data permissions through your device or platform settings.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (Health Connect, or similar services. Your use of those services is subject to the platform provider's) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (rules and your device permissions. You can change many platform health-data permissions through your) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 696.00 Tm (device or platform settings.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 678.00 Tm (We use platform health data only to provide and improve the health and wellness features you request or) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 664.00 Tm (enable, as described in our Privacy Policy and consent flows. We do not use platform health data for) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 650.00 Tm (advertising, data brokerage, employment, insurance, credit, housing, or other eligibility decisions, and we) Tj ET
@@ -1018,46 +1018,46 @@ xref
 0000000009 00000 n 
 0000000079 00000 n 
 0000000154 00000 n 
-0000005057 00000 n 
-0000010812 00000 n 
-0000016334 00000 n 
-0000021927 00000 n 
-0000027190 00000 n 
-0000031926 00000 n 
-0000037750 00000 n 
-0000043529 00000 n 
-0000049073 00000 n 
-0000054880 00000 n 
-0000060092 00000 n 
-0000065430 00000 n 
-0000071074 00000 n 
-0000076041 00000 n 
-0000081316 00000 n 
-0000086035 00000 n 
-0000091065 00000 n 
-0000096243 00000 n 
-0000096381 00000 n 
-0000096519 00000 n 
-0000096657 00000 n 
-0000096795 00000 n 
-0000096933 00000 n 
-0000097071 00000 n 
-0000097209 00000 n 
-0000097348 00000 n 
-0000097487 00000 n 
-0000097626 00000 n 
-0000097765 00000 n 
-0000097904 00000 n 
-0000098043 00000 n 
-0000098182 00000 n 
-0000098321 00000 n 
-0000098460 00000 n 
-0000098599 00000 n 
-0000098738 00000 n 
-0000098917 00000 n 
-0000099060 00000 n 
+0000005055 00000 n 
+0000010810 00000 n 
+0000016332 00000 n 
+0000021925 00000 n 
+0000027188 00000 n 
+0000031924 00000 n 
+0000037693 00000 n 
+0000043472 00000 n 
+0000049016 00000 n 
+0000054823 00000 n 
+0000060003 00000 n 
+0000065341 00000 n 
+0000070985 00000 n 
+0000075952 00000 n 
+0000081227 00000 n 
+0000085946 00000 n 
+0000090976 00000 n 
+0000096154 00000 n 
+0000096292 00000 n 
+0000096430 00000 n 
+0000096568 00000 n 
+0000096706 00000 n 
+0000096844 00000 n 
+0000096982 00000 n 
+0000097120 00000 n 
+0000097259 00000 n 
+0000097398 00000 n 
+0000097537 00000 n 
+0000097676 00000 n 
+0000097815 00000 n 
+0000097954 00000 n 
+0000098093 00000 n 
+0000098232 00000 n 
+0000098371 00000 n 
+0000098510 00000 n 
+0000098649 00000 n 
+0000098828 00000 n 
+0000098971 00000 n 
 trailer
 << /Size 42 /Root 41 0 R /Info 40 0 R >>
 startxref
-99111
+99022
 %%EOF

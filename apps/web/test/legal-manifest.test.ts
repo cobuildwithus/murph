@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -14,11 +15,11 @@ function readLegalManifest() {
     documents: Array<{
       aliases: Array<{ path: string }>;
       id: string;
-      latest: { path: string };
+      latest: { bytes: number; path: string; sha256: string };
       source: string;
       title: string;
       version: string;
-      versions: Array<{ path: string }>;
+      versions: Array<{ bytes: number; path: string; sha256: string }>;
     }>;
     generatedBy: string;
     schema: string;
@@ -52,9 +53,9 @@ test("legal manifest keeps the current PDF set versioned and deterministic", () 
     ["consumer-health-data-notice", "2026-07-23"],
     ["health-ai-safety-disclosure", "2026-07-23"],
     ["legal-documents", "2026-08-11"],
-    ["privacy-policy", "2026-08-11"],
+    ["privacy-policy", "2026-07-23"],
     ["subprocessors", "2026-08-11"],
-    ["terms-of-service", "2026-08-11"],
+    ["terms-of-service", "2026-07-23"],
   ]);
 
   for (const document of manifest.documents) {
@@ -80,4 +81,34 @@ test("legal manifest keeps the current PDF set versioned and deterministic", () 
     consumerHealthNotice?.versions[0]?.path,
     "/legal/consumer-health-data-notice-2026-07-23.pdf",
   );
+});
+
+test("consent-bearing latest PDFs match their immutable July 23 artifacts", () => {
+  const manifest = readLegalManifest();
+
+  for (const id of ["privacy-policy", "terms-of-service"]) {
+    const document = manifest.documents.find((candidate) => candidate.id === id);
+    assert.ok(document, `Missing legal document: ${id}`);
+    assert.equal(document.version, "2026-07-23");
+
+    const version = document.versions[0];
+    assert.ok(version, `Missing immutable version for: ${id}`);
+    const latestBytes = readFileSync(path.resolve(
+      process.cwd(),
+      "apps/web/public",
+      document.latest.path.replace(/^\//u, ""),
+    ));
+    const versionedBytes = readFileSync(path.resolve(
+      process.cwd(),
+      "apps/web/public",
+      version.path.replace(/^\//u, ""),
+    ));
+    const sha256 = createHash("sha256").update(latestBytes).digest("hex");
+
+    assert.deepEqual(latestBytes, versionedBytes);
+    assert.equal(document.latest.bytes, latestBytes.byteLength);
+    assert.equal(version.bytes, versionedBytes.byteLength);
+    assert.equal(document.latest.sha256, sha256);
+    assert.equal(version.sha256, sha256);
+  }
 });

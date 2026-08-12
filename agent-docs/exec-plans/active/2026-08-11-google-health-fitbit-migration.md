@@ -93,9 +93,18 @@ Updated: 2026-08-12
 7. Completed: triaged final ReviewGPT round 1 and remediated its accepted
    runtime-port, source-epoch, per-resource coverage, polling, disclosure, and
    legal-version findings with focused regression proof.
-8. In progress: push the round-one remediation head, run final ReviewGPT round
-   2 concurrently with required CI, and inspect current-base mergeability
-   without spending a second base-update attempt.
+8. Completed: pushed the round-one remediation head and ran final ReviewGPT
+   round 2 as a fresh full-snapshot audit with exact rendered evidence.
+9. Completed: final ReviewGPT round 2 required a repeated-mechanism
+   retrospective because reverting only the consent registry preserved old
+   grants but made new July 23 acceptance events point at August 11 documents.
+   The recorded shrink decision restores Terms and Privacy content, versions,
+   and immutable PDFs to July 23, retains exact disclosure on the connect card
+   and independently versioned subprocessor register, and adds no compatibility
+   owner or grant migration.
+10. In progress: push the retrospective correction, run final ReviewGPT round
+    3 concurrently with required CI, and inspect current-base mergeability
+    without spending a second base-update attempt.
 
 ## Decisions
 
@@ -133,12 +142,22 @@ Updated: 2026-08-12
 - Preliminary ReviewGPT returned one accepted finding and final ReviewGPT round
   1 returned six accepted findings. All are remediated locally; the corrected
   exact head must still complete final ReviewGPT round 2.
+- Final ReviewGPT round 2 returned `RETROSPECTIVE_REQUIRED` for the repeated
+  legal-version mechanism. The PR comment records the first-head/current-shape
+  comparison and selects scope deletion: no Terms/Privacy change belongs in
+  this migration, while the card and subprocessor register retain the required
+  provider disclosure. Round 3 must verify the resulting exact head.
+- Retrospective correction proof: all 34 focused consent-route, registry,
+  manifest, and legal-copy tests pass; the Web typecheck passes; generated
+  current Terms and Privacy PDFs are byte-identical to their immutable July 23
+  artifacts and match the manifest hashes.
 
 ## Remaining handoff
 
 - Keep the pull request draft.
-- Run final ReviewGPT round 2 against the corrected exact head while required CI
-  executes; resolve every accepted finding before archiving this plan.
+- Complete the recorded legal scope shrink, push its exact head, and run final
+  ReviewGPT round 3 while required CI executes; resolve every accepted finding
+  before archiving this plan.
 - Recheck the current base with `git merge-tree`. The one permitted base update
   is already consumed, so retain the draft PR and report a moving-base conflict
   if the reviewed patch no longer merges cleanly.

@@ -45,8 +45,6 @@ test("Terms keep health data model-training and adtech promises aligned with the
   assert.match(terms, /### Source-Specific Connected-Service Rules/u);
   assert.match(terms, /Your instruction or consent does not authorize Murph to use data in a way the source provider prohibits/u);
   assert.match(terms, /### Connected-Service Provider Disclaimer/u);
-  assert.match(terms, /Google Health API, Google Fit, Android Health Connect/u);
-  assert.doesNotMatch(terms, /Google Health Connect/u);
   assert.doesNotMatch(terms, /Unless we present a separate, specific opt-in consent/u);
 });
 
@@ -77,12 +75,6 @@ test("Privacy Policy keeps tightened health-data commitments and consumer-health
     privacyPolicy,
     /the store listing, Health Connect permission flow, and in-product legal links will point users to the same HTML Privacy Policy/u,
   );
-  assert.match(
-    privacyPolicy,
-    /Google Health API, Google Fit, Android Health Connect, and wearable APIs/u,
-  );
-  assert.doesNotMatch(privacyPolicy, /Google Health Connect/u);
-  assert.doesNotMatch(privacyPolicy, /Junction\/Vital/u);
   assert.match(
     privacyPolicy,
     /We will not apply materially different sale, sharing, targeted-advertising, data-broker, eligibility-decision, or general-purpose model-training practices to previously collected health data unless we first provide required notice and obtain any required opt-in consent or authorization/u,

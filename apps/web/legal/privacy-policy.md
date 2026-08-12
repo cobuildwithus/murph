@@ -1,7 +1,7 @@
 # Murph Privacy Policy
 
 **Effective Date:** April 9, 2026  
-**Last Updated:** August 11, 2026
+**Last Updated:** July 23, 2026
 
 Murph (“**Murph**,” “**we**,” “**us**,” or “**our**”) provides software and services designed to help people understand their bodies and lives better through tools such as health journaling, meal tracking, wearable and device sync, messaging-based interactions, hosted onboarding, invite, import, export, and related local or hosted experiences.
 
@@ -278,7 +278,7 @@ You can stop future collection from an integration by disconnecting it, revoking
 
 **Provider API monitoring.** Connected-service providers may monitor and collect technical and usage information about Murph's access to their APIs for security, support, compliance, platform administration, service development, or other purposes described in their own terms and privacy policies. For example, Strava states that it may monitor and collect usage data relating to access to its API and use that information for its business purposes.
 
-**Connection pathways and user-provided exports.** Data may reach Murph directly from a Connected Service, through a synchronization provider such as Junction, or through a file that you lawfully download and upload. A portal, laboratory, wearable company, merchant, or other service does not become a Murph subprocessor merely because you upload an export from it or ask Murph to contact it.
+**Connection pathways and user-provided exports.** Data may reach Murph directly from a Connected Service, through a synchronization provider such as Junction/Vital, or through a file that you lawfully download and upload. A portal, laboratory, wearable company, merchant, or other service does not become a Murph subprocessor merely because you upload an export from it or ask Murph to contact it.
 
 When you direct Murph to share information with a third-party provider, that provider may act as an independent controller of the information it receives under its own privacy policy and terms. Please review those policies carefully before enabling a connection.
 
@@ -343,15 +343,15 @@ Murph may also use analytics or similar tools to understand service performance 
 
 If Murph uses non-essential analytics, advertising, or personalization technologies in the future, Murph will provide any disclosures and consent mechanisms required by applicable law.
 
-## 11. Apple Health, HealthKit, Google Health API, Google Fit, Android Health Connect, and wearable APIs
+## 11. Apple Health, HealthKit, Health Connect, and wearable APIs
 
-If you connect Apple Health, HealthKit, Google Health API, Google Fit, Android Health Connect, wearable providers, device providers, or wellness apps, Murph will collect only the categories of data you authorize and only for the features you enable.
+If you connect Apple Health, HealthKit, Google Health Connect, wearable providers, device providers, or wellness apps, Murph will collect only the categories of data you authorize and only for the features you enable.
 
 **Apple Health / HealthKit.** Murph uses HealthKit data only to provide health, fitness, wellness, journaling, personalization, import, export, or other features you request. Murph does not use HealthKit data for advertising, data mining, third-party advertising, cross-context behavioral advertising, data-broker disclosure, insurance/employment/credit decisions, or general-purpose AI model training. Murph does not disclose HealthKit data to third parties except to service providers as necessary to provide or improve the health, fitness, wellness, import, export, sync, or personalization feature you request; for health research with your permission; where required by law; or as otherwise permitted by Apple's rules and applicable law.
 
-**Android Health Connect publication surfaces.** If Murph distributes an Android Health Connect integration through Google Play or another app-store surface, the store listing, Health Connect permission flow, and in-product legal links will point users to the same HTML Privacy Policy at [withmurph.ai/legal/privacy](https://withmurph.ai/legal/privacy). Murph will request only health and fitness permissions tied to a clear feature benefit, and the Privacy Policy will describe the collected data categories, use, storage, sharing, retention, deletion, and security practices.
+**Health Connect publication surfaces.** If Murph distributes a Google Health Connect integration through Google Play or another app-store surface, the store listing, Health Connect permission flow, and in-product legal links will point users to the same HTML Privacy Policy at [withmurph.ai/legal/privacy](https://withmurph.ai/legal/privacy). Murph will request only health and fitness permissions tied to a clear feature benefit, and the Privacy Policy will describe the collected data categories, use, storage, sharing, retention, deletion, and security practices.
 
-**Google Health API, Google Fit, Android Health Connect, and wearable APIs.** Murph uses data from Google Health API, Google Fit, Android Health Connect, wearable providers, device providers, and wellness apps only to provide the feature you enable; personalize, import, export, sync, summarize, secure, or troubleshoot that feature; or comply with law. Murph does not use that data for advertising, data-broker disclosure, insurance/employment/credit decisions, or general-purpose AI model training.
+**Health Connect and wearable APIs.** Murph uses data from Google Health Connect, wearable providers, device providers, and wellness apps only to provide the feature you enable; personalize, import, export, sync, summarize, secure, or troubleshoot that feature; or comply with law. Murph does not use that data for advertising, data-broker disclosure, insurance/employment/credit decisions, or general-purpose AI model training.
 
 **Permissions and revocation.** You can manage some health-data permissions through your device, browser, app, or connected-provider settings. Disconnecting a provider or revoking permissions stops future collection from that provider, but may not automatically delete data already stored by Murph or by independent third parties, unless deletion is required by law or requested through available privacy controls.
 

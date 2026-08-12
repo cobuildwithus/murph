@@ -14,16 +14,14 @@ import {
   lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
 
-export const HOSTED_TERMS_OF_SERVICE_VERSION = "2026-07-23";
+export const HOSTED_LEGAL_DOCUMENT_VERSION = "2026-07-23";
 export const HOSTED_PRIVACY_POLICY_VERSION = "2026-07-23";
-export const HOSTED_CONSUMER_HEALTH_DATA_NOTICE_VERSION = "2026-07-23";
-export const HOSTED_HEALTH_AI_SAFETY_DISCLOSURE_VERSION = "2026-07-23";
 
 export const HOSTED_CONSENT_DOCUMENTS = [
   {
     id: "terms-of-service",
     title: "Murph Terms of Service",
-    version: HOSTED_TERMS_OF_SERVICE_VERSION,
+    version: HOSTED_LEGAL_DOCUMENT_VERSION,
     href: "/legal/terms",
     pdfHref: "/legal/terms.pdf",
   },
@@ -37,14 +35,14 @@ export const HOSTED_CONSENT_DOCUMENTS = [
   {
     id: "consumer-health-data-notice",
     title: "Murph Consumer Health Data Notice",
-    version: HOSTED_CONSUMER_HEALTH_DATA_NOTICE_VERSION,
+    version: HOSTED_LEGAL_DOCUMENT_VERSION,
     href: "/consumer-health-data-privacy-policy",
     pdfHref: "/legal/consumer-health-data-notice.pdf",
   },
   {
     id: "health-ai-safety-disclosure",
     title: "Murph Health AI Safety Disclosure",
-    version: HOSTED_HEALTH_AI_SAFETY_DISCLOSURE_VERSION,
+    version: HOSTED_LEGAL_DOCUMENT_VERSION,
     href: "/legal/health-ai-safety-disclosure",
     pdfHref: "/legal/health-ai-safety-disclosure.pdf",
   },

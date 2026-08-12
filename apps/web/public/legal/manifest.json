@@ -7,19 +7,19 @@
       "effectiveDate": "2026-04-09",
       "id": "privacy-policy",
       "latest": {
-        "bytes": 85993,
+        "bytes": 85795,
         "path": "/legal/privacy.pdf",
-        "sha256": "0f1aba2cfe50c7df23268178ac99b67fac740012c860a4d38c86a856e0c85f80"
+        "sha256": "2a87e2b647608c40acf98aa04e68bb1da637d60ee7518f398886d90219deee01"
       },
-      "lastUpdated": "2026-08-11",
+      "lastUpdated": "2026-07-23",
       "source": "apps/web/legal/privacy-policy.md",
       "title": "Murph Privacy Policy",
-      "version": "2026-08-11",
+      "version": "2026-07-23",
       "versions": [
         {
-          "bytes": 85993,
-          "path": "/legal/privacy-2026-08-11.pdf",
-          "sha256": "0f1aba2cfe50c7df23268178ac99b67fac740012c860a4d38c86a856e0c85f80"
+          "bytes": 85795,
+          "path": "/legal/privacy-2026-07-23.pdf",
+          "sha256": "2a87e2b647608c40acf98aa04e68bb1da637d60ee7518f398886d90219deee01"
         }
       ]
     },
@@ -28,19 +28,19 @@
       "effectiveDate": "2026-07-23",
       "id": "terms-of-service",
       "latest": {
-        "bytes": 100032,
+        "bytes": 99943,
         "path": "/legal/terms.pdf",
-        "sha256": "3d5260f6c783db9bf406e73230a73a15e8fd003656de1008e7481ab5a0626aa0"
+        "sha256": "f0efe20c8eb0dd20f0b64b5f72a8a126948ea8b6f2113297f7b15563aba31484"
       },
-      "lastUpdated": "2026-08-11",
+      "lastUpdated": "2026-07-23",
       "source": "apps/web/legal/terms-of-service.md",
       "title": "Murph Terms of Service",
-      "version": "2026-08-11",
+      "version": "2026-07-23",
       "versions": [
         {
-          "bytes": 100032,
-          "path": "/legal/terms-2026-08-11.pdf",
-          "sha256": "3d5260f6c783db9bf406e73230a73a15e8fd003656de1008e7481ab5a0626aa0"
+          "bytes": 99943,
+          "path": "/legal/terms-2026-07-23.pdf",
+          "sha256": "f0efe20c8eb0dd20f0b64b5f72a8a126948ea8b6f2113297f7b15563aba31484"
         }
       ]
     },
@@ -120,7 +120,7 @@
       "latest": {
         "bytes": 4613,
         "path": "/legal/legal-documents.pdf",
-        "sha256": "ff5023a948cacfb1dbf1f754b30fbfff9822f288dce7eefd5d5a03ff6a5dc03b"
+        "sha256": "f60a06912b54547f1e1b8a72fc3fd8041300104364b61c5f2b83d342007d3b37"
       },
       "lastUpdated": "2026-08-11",
       "source": "apps/web/legal/legal-documents.md",
@@ -130,7 +130,7 @@
         {
           "bytes": 4613,
           "path": "/legal/legal-documents-2026-08-11.pdf",
-          "sha256": "ff5023a948cacfb1dbf1f754b30fbfff9822f288dce7eefd5d5a03ff6a5dc03b"
+          "sha256": "f60a06912b54547f1e1b8a72fc3fd8041300104364b61c5f2b83d342007d3b37"
         }
       ]
     }
