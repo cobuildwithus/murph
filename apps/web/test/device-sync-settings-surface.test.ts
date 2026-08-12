@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { PublicProviderDescriptor } from "@murphai/device-syncd/public-ingress";
 import {
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
-} from "@murphai/device-syncd/public-account";
+} from "@murphai/device-syncd/fitbit-migration";
 
 import { toHostedBrowserDeviceSyncConnectionSource } from "@/src/lib/device-sync/browser-connection-source";
 import type { HostedDeviceConnectionSource } from "@/src/lib/device-sync/prisma-store/sources";

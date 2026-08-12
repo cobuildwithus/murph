@@ -10,7 +10,7 @@ import {
 import {
   isGoogleHealthFitbitMigrationLegacyCoverageReady,
   isGoogleHealthFitbitMigrationLegacyTerminal,
-} from "@murphai/device-syncd/public-account";
+} from "@murphai/device-syncd/fitbit-migration";
 import {
   JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
   JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,

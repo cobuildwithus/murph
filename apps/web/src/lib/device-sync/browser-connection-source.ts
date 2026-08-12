@@ -1,6 +1,8 @@
 import {
   countAvailableDeviceSyncSourceResources,
   isDeviceSyncSourceHistoricalBackfillComplete,
+} from "@murphai/device-syncd/fitbit-migration";
+import {
   requiresHistoricalResetDeviceSyncSource,
 } from "@murphai/device-syncd/public-account";
 
@@ -8,7 +10,7 @@ import type { HostedDeviceConnectionSource } from "./prisma-store/sources";
 
 export {
   isAvailableDeviceSyncSourceResource as isAvailableConnectionSourceResource,
-} from "@murphai/device-syncd/public-account";
+} from "@murphai/device-syncd/fitbit-migration";
 
 export type HostedBrowserDeviceSyncConnectionSourceRecoveryKind = "connection_reset";
 

@@ -42,6 +42,10 @@
       "types": "./dist/errors.d.ts",
       "default": "./dist/errors.js"
     },
+    "./fitbit-migration": {
+      "types": "./dist/fitbit-migration.d.ts",
+      "default": "./dist/fitbit-migration.js"
+    },
     "./local-secret-codec": {
       "types": "./dist/local-secret-codec.d.ts",
       "default": "./dist/local-secret-codec.js"

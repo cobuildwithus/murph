@@ -14,14 +14,6 @@ import {
   resolveDeviceSyncStoreNextWakeAt,
   type DeviceSyncService,
 } from "@murphai/device-syncd/service";
-import {
-  countAvailableDeviceSyncSourceResources,
-  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
-  isDeviceSyncSourceHistoricalBackfillComplete,
-  isGoogleHealthFitbitMigrationLegacyTerminal,
-  isGoogleHealthFitbitMigrationLegacyCoverageReady,
-  isGoogleHealthFitbitMigrationSuccessorReady,
-} from "@murphai/device-syncd/public-account";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import {
   sanitizeHostedRuntimeErrorText,
@@ -372,6 +364,14 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
     return;
   }
 
+  const {
+    countAvailableDeviceSyncSourceResources,
+    DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+    isDeviceSyncSourceHistoricalBackfillComplete,
+    isGoogleHealthFitbitMigrationLegacyTerminal,
+    isGoogleHealthFitbitMigrationLegacyCoverageReady,
+    isGoogleHealthFitbitMigrationSuccessorReady,
+  } = await import("@murphai/device-syncd/fitbit-migration");
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
   const candidates: Array<{ hostedConnectionId: string; localAccountId: string }> = [];
   for (const [localAccountId, hostedConnectionId] of input.state.localToHostedAccountIds) {

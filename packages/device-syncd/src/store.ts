@@ -6,7 +6,7 @@ import {
   withImmediateTransaction,
 } from "@murphai/runtime-state/node";
 
-import { countAvailableDeviceSyncSourceResources } from "./public-account.ts";
+import { countAvailableDeviceSyncSourceResources } from "./fitbit-migration.ts";
 
 import {
   decodeDeviceSyncSummaryRow,

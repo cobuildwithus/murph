@@ -23,10 +23,12 @@ import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-defin
 import { DeviceSyncError } from "../src/errors.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
-  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
 } from "../src/public-account.ts";
+import {
+  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
+} from "../src/fitbit-migration.ts";
 import {
   buildJunctionClientUserId,
   createJunctionDeviceSyncProvider,

@@ -12,9 +12,11 @@ import {
 } from "@murphai/device-syncd/connect-config";
 import {
   DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
-  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
   isGoogleHealthFitbitMigrationLegacyTerminal,
   isGoogleHealthFitbitMigrationSuccessorReady,
+} from "@murphai/device-syncd/fitbit-migration";
+import {
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
 } from "@murphai/device-syncd/public-account";
 
 import { PageHeader } from "@/src/components/ui/page-header";

@@ -2,10 +2,12 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   isDeviceSyncDisconnectInProgress,
-  isDeviceSyncSourceResourceAvailabilityMetadataKey,
   requiresHistoricalResetDeviceSyncSource,
   sanitizeStoredDeviceSyncMetadata,
 } from "@murphai/device-syncd/public-account";
+import {
+  isDeviceSyncSourceResourceAvailabilityMetadataKey,
+} from "@murphai/device-syncd/fitbit-migration";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 import type {
   SerializableConfiguredDeviceSyncProviderConfigs,

@@ -61,17 +61,19 @@ import {
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   buildDeviceSyncSourceCanonicalCoverageBoundaryKey,
-  DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   DEVICE_SYNC_SOURCE_PROVIDER_DISCONNECTED_ERROR_CODE,
-  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
   isGoogleHealthFitbitMigrationLegacyTerminal,
   isGoogleHealthFitbitMigrationLegacyCoverageReady,
+  isDeviceSyncSourceResourceAvailabilityMetadataKey,
+  readDeviceSyncSourceCanonicalCoverageBoundary,
+} from "../fitbit-migration.ts";
+import {
+  DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
   isDeviceSyncSourceAdmitted,
   isDeviceSyncSourceDisconnectFenced,
-  isDeviceSyncSourceResourceAvailabilityMetadataKey,
   isJunctionHistoricalResetProviderSlug,
-  readDeviceSyncSourceCanonicalCoverageBoundary,
   requiresHistoricalResetDeviceSyncSource,
 } from "../public-account.ts";
 import {

@@ -237,9 +237,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // extend the existing hosted callback output without adding a forbidden boot
 // input. Exact current-main assembly measured 9,846,997B total on 2026-08-11,
 // so ratchet the total only and retain the 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_846_997 + 32_768;
+// Runtime-owned Fitbit-to-Google-Health cutover adds its signed Web operation,
+// bounded maintenance scan, and deferred migration-readiness helpers. Exact
+// local production assembly measured a 7,932,445B static closure and 9,933,016B
+// total on 2026-08-12. No forbidden subsystem entered the boot graph, so
+// ratchet both measurements and retain the established fixed allowances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_933_016 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_932_445;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

@@ -24,13 +24,15 @@ import {
 } from "@murphai/device-syncd/hosted-hints";
 import {
   countAvailableDeviceSyncSourceResources,
-  DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
-  DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isDeviceSyncSourceHistoricalBackfillComplete,
   isGoogleHealthFitbitMigrationLegacyCoverageReady,
   isGoogleHealthFitbitMigrationLegacyTerminal,
   isGoogleHealthFitbitMigrationSuccessorReady,
+} from "@murphai/device-syncd/fitbit-migration";
+import {
+  DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
   isDeviceSyncConnectionSetupPending,
   isDeviceSyncDisconnectInProgress,
