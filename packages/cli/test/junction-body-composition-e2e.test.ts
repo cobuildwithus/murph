@@ -37,6 +37,17 @@ import {
   runInProcessJsonCli,
 } from './cli-test-helpers.js'
 
+type DeviceBatchImportResult = Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function requireRecord(value: unknown): Record<string, unknown> {
+  assert.ok(isRecord(value))
+  return value
+}
+
 function createAccount(): DeviceSyncAccount {
   return {
     accessTokenExpiresAt: null,
@@ -224,12 +235,12 @@ test('Junction body data composes from provider jobs through canonical vault rea
         } })
       },
     })
-    const imports: Array<Awaited<ReturnType<typeof importDeviceProviderSnapshot>>> = []
+    const imports: DeviceBatchImportResult[] = []
     const account = createAccount()
     const context = (now: string): ProviderJobContext => ({
       account,
       importSnapshot: async (snapshot) => {
-        const result = await importDeviceProviderSnapshot(
+        const result = await importDeviceProviderSnapshot<DeviceBatchImportResult>(
           { provider: 'junction', snapshot, vaultRoot },
           { corePort: coreRuntime },
         )
@@ -316,17 +327,12 @@ test('Junction body data composes from provider jobs through canonical vault rea
       requestId: null,
       vault: vaultRoot,
     })
-    assert.equal(body.count, 1, JSON.stringify(persistedEvents.slice(0, 4).map((event) => ({
-      dataOrigin: event.dataOrigin,
-      externalRef: event.externalRef,
-      grain: event.observationGrain,
-      kind: event.kind,
-      metric: event.kind === 'observation' ? event.metric : null,
-    }))))
-    assert.equal(body.items[0]?.bodyWaterPercentage.value, 51.8)
-    assert.equal(body.items[0]?.boneMassPercentage.value, 4.2)
-    assert.equal(body.items[0]?.muscleMassPercentage.value, 63.4)
-    assert.equal(body.items[0]?.visceralFatIndex.value, 7)
+    assert.equal(body.count, 1)
+    const bodyItem = requireRecord(body.items[0])
+    assert.equal(requireRecord(bodyItem.bodyWaterPercentage).value, 51.8)
+    assert.equal(requireRecord(bodyItem.boneMassPercentage).value, 4.2)
+    assert.equal(requireRecord(bodyItem.muscleMassPercentage).value, 63.4)
+    assert.equal(requireRecord(bodyItem.visceralFatIndex).value, 7)
 
     const bmiLatest = await services.query.showWearableMetricLatest({
       metric: 'bmi',
@@ -344,7 +350,9 @@ test('Junction body data composes from provider jobs through canonical vault rea
       windowDays: 7,
     })
     assert.equal(waistTrend.summary?.value, 83.9)
-    assert.equal(waistTrend.summary?.points[0]?.value, 83.9)
+    const waistPoints = waistTrend.summary?.points
+    assert.ok(Array.isArray(waistPoints))
+    assert.equal(requireRecord(waistPoints[0]).value, 83.9)
 
     await markAssistantContextSnapshotDirty({
       domains: ['health_context'],
@@ -355,6 +363,7 @@ test('Junction body data composes from provider jobs through canonical vault rea
       vaultRoot,
     })
     const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+    assert.ok(prompt)
     assert.match(prompt, /Body\/scale measurement history is present/u)
     assert.match(prompt, /wearables metric latest <canonical-body-metric>/u)
     assert.match(prompt, /measurement entry list --metric <canonical-body-metric>/u)
