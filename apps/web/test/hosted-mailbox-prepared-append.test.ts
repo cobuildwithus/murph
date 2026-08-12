@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 
+import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -10,10 +11,17 @@ import {
 } from "@murphai/runtime-state";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const domainRootMocks = vi.hoisted(() => ({
-  lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(),
-  unwrapHostedDomainRootForWeb: vi.fn(),
-}));
+const domainRootMocks = vi.hoisted(() => {
+  class PreparationMismatchError extends Error {}
+  return {
+    lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(),
+    prepareHostedDomainRootForWeb: vi.fn(),
+    preparedRoots: new WeakMap<object, Promise<unknown>>(),
+    PreparationMismatchError,
+    revalidatePreparedHostedDomainRootForWebTx: vi.fn(),
+    unwrapHostedDomainRootForWeb: vi.fn(),
+  };
+});
 const mailboxEncryptionMocks = vi.hoisted(() => ({
   decryptHostedMailboxPayloadString: vi.fn(),
   encryptHostedMailboxPayloadString: vi.fn(),
@@ -21,8 +29,14 @@ const mailboxEncryptionMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/lib/hosted-crypto/domain-root-store", () => ({
+  HostedDomainRootPreparationMismatchError:
+    domainRootMocks.PreparationMismatchError,
   lockAndReadActiveHostedDomainRootKeyIdTx:
     domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx,
+  prepareHostedDomainRootForWeb:
+    domainRootMocks.prepareHostedDomainRootForWeb,
+  revalidatePreparedHostedDomainRootForWebTx:
+    domainRootMocks.revalidatePreparedHostedDomainRootForWebTx,
   unwrapHostedDomainRootForWeb: domainRootMocks.unwrapHostedDomainRootForWeb,
 }));
 
@@ -37,11 +51,14 @@ vi.mock("../src/lib/hosted-mailbox/encryption", () => ({
 
 import {
   getHostedDomainRootUnwrapCache,
+  runWithHostedDomainRootUnwrapCache,
 } from "../src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { hashHostedMailboxStoredPayload } from "../src/lib/hosted-mailbox/fingerprint";
 import {
   appendHostedMailboxItem,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   HostedMailboxAppendPreparationMismatchError,
+  prepareHostedMailboxItemAppendCrypto,
   type HostedMailboxItemRow,
 } from "../src/lib/hosted-mailbox/store";
 
@@ -150,6 +167,9 @@ interface MailboxFixture {
     hostedMailboxPayload: {
       create: ReturnType<typeof vi.fn>;
     };
+    hostedWorkspace: {
+      upsert: ReturnType<typeof vi.fn>;
+    };
   };
 }
 
@@ -228,6 +248,7 @@ function createMailboxFixture(input: {
     $queryRaw: queryRaw,
     hostedMailboxItem: { findUnique: txFindUnique },
     hostedMailboxPayload: { create: hostedMailboxPayloadCreate },
+    hostedWorkspace: { upsert: vi.fn(async () => undefined) },
   };
   const transaction = vi.fn(async (
     run: (transactionClient: MailboxFixture["tx"]) => Promise<unknown>,
@@ -271,6 +292,46 @@ function buildAppendInput(payloadSerializedJson = JSON.stringify({ body: "hello"
 beforeEach(() => {
   domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockReset();
   domainRootMocks.unwrapHostedDomainRootForWeb.mockReset();
+  domainRootMocks.prepareHostedDomainRootForWeb.mockReset();
+  domainRootMocks.revalidatePreparedHostedDomainRootForWebTx.mockReset();
+  domainRootMocks.preparedRoots = new WeakMap();
+  domainRootMocks.prepareHostedDomainRootForWeb.mockImplementation(
+    async (input: { domain: string; userId: string }) => {
+      const unwrapped = await domainRootMocks.unwrapHostedDomainRootForWeb(input);
+      const rootKeyId = unwrapped.envelope.rootKeyId as string;
+      const cached = getHostedDomainRootUnwrapCache()?.get(
+        `${input.userId}|${input.domain}|${rootKeyId}`,
+      );
+      if (!cached) {
+        throw new Error("Prepared root fixture did not retain its exact cache entry.");
+      }
+      const prepared = Object.freeze({
+        domain: input.domain,
+        rootKeyId,
+        userId: input.userId,
+      });
+      domainRootMocks.preparedRoots.set(prepared, cached);
+      return prepared;
+    },
+  );
+  domainRootMocks.revalidatePreparedHostedDomainRootForWebTx.mockImplementation(
+    async (input: { prepared: { domain: string; rootKeyId: string; userId: string } }) => {
+      const cached = getHostedDomainRootUnwrapCache()?.get(
+        `${input.prepared.userId}|${input.prepared.domain}|${input.prepared.rootKeyId}`,
+      );
+      const preparedRoot = domainRootMocks.preparedRoots.get(input.prepared);
+      if (!cached || cached !== preparedRoot) {
+        throw new TypeError(
+          "Hosted mailbox append prepared root is not the exact scoped cache entry.",
+        );
+      }
+      const activeRootKeyId = await domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx();
+      if (activeRootKeyId !== input.prepared.rootKeyId) {
+        throw new domainRootMocks.PreparationMismatchError();
+      }
+      return { root: cached, rootKeyId: input.prepared.rootKeyId };
+    },
+  );
   mailboxEncryptionMocks.decryptHostedMailboxPayloadString.mockReset();
   mailboxEncryptionMocks.encryptHostedMailboxPayloadString.mockReset();
   mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot.mockReset();
@@ -337,6 +398,54 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
       preparedRootKeyId: "root-prepared-1",
       userId: USER_ID,
     }));
+  });
+
+  it("keeps envelope projection on the transaction-local prepared path", async () => {
+    const fixture = createMailboxFixture();
+    installPreparedRootSequence({ rootKeyIds: ["root-prepared-envelope"] });
+    domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx
+      .mockResolvedValue("root-prepared-envelope");
+    const envelope = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:prepared-envelope",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
+      memberId: USER_ID,
+      occurredAt: FIXED_NOW.toISOString(),
+      signupWelcome: null,
+    });
+
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      const prepared = await prepareHostedMailboxItemAppendCrypto({
+        prisma: fixture.prisma as never,
+        userId: USER_ID,
+      });
+      await expect(appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+        envelope,
+        prepared,
+        tx: fixture.tx as never,
+      })).resolves.toMatchObject({
+        duplicate: false,
+        inserted: true,
+      });
+    });
+
+    expect(fixture.tx.hostedWorkspace.upsert).toHaveBeenCalledWith({
+      create: { userId: USER_ID },
+      update: {},
+      where: { userId: USER_ID },
+    });
+    expect(domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx)
+      .toHaveBeenCalledTimes(1);
+    expect(mailboxEncryptionMocks.encryptHostedMailboxPayloadString)
+      .not.toHaveBeenCalled();
+    expect(mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        preparedRootKeyId: "root-prepared-envelope",
+        userId: USER_ID,
+      }));
   });
 
   it("rejects a same-key cache replacement before taking mailbox locks", async () => {

@@ -2539,6 +2539,27 @@ performs no first-time provider/KMS unwrap. This exact-root contract belongs to
 the Linq reaction append path; it does not assert that every generic mailbox
 producer prewarms its root.
 
+The standalone generic mailbox-item append has its own narrower prepared
+boundary. It checks for an already-durable dedupe replay before crypto work and,
+on a miss, unwraps the exact active ingress root before opening its transaction.
+The transaction locks and re-reads root authority, seals only from the matching
+request-scoped cache entry, and permits one full reprepare after typed root
+drift. Its prepared envelope adapter retains the envelope owner's ordinary
+target and workspace checks. Existing transaction-owned envelope, identity,
+source-message, and specialized append adapters remain explicitly legacy and
+provider-capable until their owning flows migrate; they gain neither implicit
+preparation nor a second retry owner from the standalone append.
+
+Web identity reconciliation uses the same crypto-only root preparation
+boundary for the control domain. Privy live authority, the exact control root,
+and existing private projections settle outside the owner transaction; sibling
+work is drained while preserving the first observed failure. The transaction
+revalidates the exact root under the canonical root lock and member identity
+and verified-email writes seal from that local root. Exact winner drift rolls
+back and permits one fresh full attempt. The prepared root conveys no member,
+invite, email, routing, or provider authority, all of which remain revalidated
+by their owning stores.
+
 One case is actionable immediately: an affirmative added reaction from the
 active participant is adapted into the existing `message.received` planner
 input, using the reaction event as inbound identity and the reacted-to message

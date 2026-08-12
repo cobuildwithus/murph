@@ -40,11 +40,12 @@ import {
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
-  lockAndReadActiveHostedDomainRootKeyIdTx,
-  unwrapHostedDomainRootForWeb,
+  prepareHostedDomainRootForWeb,
+  revalidatePreparedHostedDomainRootForWebTx,
+  HostedDomainRootPreparationMismatchError,
+  type PreparedHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
 import {
-  getHostedDomainRootUnwrapCache,
   runWithFreshHostedDomainRootUnwrapCache,
   runWithHostedDomainRootUnwrapCache,
   type CachedUnwrappedHostedDomainRoot,
@@ -280,7 +281,7 @@ const HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN =
 const HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS = 2;
 const preparedHostedMailboxAppendRoots = new WeakMap<
   PreparedHostedMailboxItemAppendCrypto,
-  Promise<CachedUnwrappedHostedDomainRoot>
+  PreparedHostedDomainRootForWeb
 >();
 
 export interface PreparedHostedMailboxItemAppendCrypto {
@@ -309,53 +310,20 @@ export async function prepareHostedMailboxItemAppendCrypto(input: {
   userId: string;
 }): Promise<PreparedHostedMailboxItemAppendCrypto> {
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
-  const cache = getHostedDomainRootUnwrapCache();
-  if (!cache) {
-    throw new Error(
-      "Hosted mailbox append crypto preparation requires a request-scoped root cache.",
-    );
-  }
-
-  const unwrapped = await unwrapHostedDomainRootForWeb({
+  const preparedRoot = await prepareHostedDomainRootForWeb({
     domain: HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN,
+    prepareMissing: false,
     prisma: input.prisma,
-    retainFailureInScopedCache: true,
+    reason: "hosted-mailbox.append-payload",
     userId,
   });
-  try {
-    const rootKeyId = requireNonEmptyString(
-      unwrapped.envelope.rootKeyId,
-      "Hosted mailbox prepared rootKeyId",
-    );
-    const cached = cache.get(
-      `${userId}|${HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN}|${rootKeyId}`,
-    );
-    if (!cached) {
-      throw new Error(
-        "Hosted mailbox append root was not retained in the request-scoped cache.",
-      );
-    }
-    const cachedRoot = await cached;
-    if (
-      cachedRoot.envelope.domain !== HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN
-      || cachedRoot.envelope.rootKeyId !== rootKeyId
-      || cachedRoot.envelope.userId !== userId
-    ) {
-      throw new Error(
-        "Hosted mailbox append cached root does not match its prepared identity.",
-      );
-    }
-
-    const prepared = Object.freeze({
-      domain: HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN,
-      rootKeyId,
-      userId,
-    });
-    preparedHostedMailboxAppendRoots.set(prepared, cached);
-    return prepared;
-  } finally {
-    unwrapped.rootKey.fill(0);
-  }
+  const prepared = Object.freeze({
+    domain: HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN,
+    rootKeyId: preparedRoot.rootKeyId,
+    userId,
+  });
+  preparedHostedMailboxAppendRoots.set(prepared, preparedRoot);
+  return prepared;
 }
 
 async function revalidatePreparedHostedMailboxAppendCryptoTx(input: {
@@ -386,37 +354,22 @@ async function revalidatePreparedHostedMailboxAppendCryptoTx(input: {
   }
 
   const preparedRoot = preparedHostedMailboxAppendRoots.get(prepared);
-  const cached = getHostedDomainRootUnwrapCache()?.get(
-    `${prepared.userId}|${prepared.domain}|${prepared.rootKeyId}`,
-  );
-  if (!preparedRoot || cached !== preparedRoot) {
+  if (!preparedRoot) {
     throw new TypeError(
       "Hosted mailbox append prepared root is not the exact scoped cache entry.",
     );
   }
-  const cachedRoot = await preparedRoot;
-  if (
-    cachedRoot.envelope.domain !== prepared.domain
-    || cachedRoot.envelope.rootKeyId !== prepared.rootKeyId
-    || cachedRoot.envelope.userId !== prepared.userId
-  ) {
-    throw new TypeError(
-      "Hosted mailbox append cached root does not match its prepared identity.",
-    );
+  try {
+    return await revalidatePreparedHostedDomainRootForWebTx({
+      prepared: preparedRoot,
+      tx: input.tx,
+    });
+  } catch (error) {
+    if (error instanceof HostedDomainRootPreparationMismatchError) {
+      throw new HostedMailboxAppendPreparationMismatchError();
+    }
+    throw error;
   }
-
-  const activeRootKeyId = await lockAndReadActiveHostedDomainRootKeyIdTx({
-    domain: HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN,
-    tx: input.tx,
-    userId: input.userId,
-  });
-  if (activeRootKeyId !== prepared.rootKeyId) {
-    throw new HostedMailboxAppendPreparationMismatchError();
-  }
-  return {
-    root: preparedRoot,
-    rootKeyId: prepared.rootKeyId,
-  };
 }
 
 export async function appendHostedMailboxItem(
@@ -801,7 +754,30 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
-  return appendHostedMailboxEnvelopeInternalTx(input);
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
+  });
+}
+
+/**
+ * Transaction-safe envelope append surface for callers that prepared mailbox
+ * crypto before opening their owner transaction. Envelope target and workspace
+ * authority remain transaction-owned; the prepared token supplies only the
+ * exact local ingress-root capability used by the final append.
+ */
+export async function appendHostedMailboxEnvelopeWithPreparedCryptoTx(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  prepared: PreparedHostedMailboxItemAppendCrypto;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedMailboxItemResult> {
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: {
+      mode: "prepared-root",
+      prepared: input.prepared,
+    },
+  });
 }
 
 export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
@@ -809,7 +785,10 @@ export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
   sourceMessageLookupKey: string;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
-  return appendHostedMailboxEnvelopeInternalTx(input);
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
+  });
 }
 
 export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
@@ -822,10 +801,15 @@ export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
   if (itemId !== input.envelope.eventId) {
     throw new TypeError("Hosted mailbox item identity must equal the envelope event id.");
   }
-  return appendHostedMailboxEnvelopeInternalTx({ ...input, itemId });
+  return appendHostedMailboxEnvelopeInternalTx({
+    ...input,
+    encryption: { mode: "legacy-transaction" },
+    itemId,
+  });
 }
 
 async function appendHostedMailboxEnvelopeInternalTx(input: {
+  encryption: HostedMailboxAppendEncryptionOwner;
   envelope: HostedMailboxProducerEnvelope;
   expiresAt?: Date | string | null;
   itemId?: string;
@@ -861,7 +845,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
       )
     : null;
 
-  return appendHostedMailboxItemWithAssistantInputLookupKeyTx({
+  return appendHostedMailboxItemWithEncryptionTx({
     assistantInputLookupKey,
     dedupeKey: envelope.eventId,
     ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
@@ -873,6 +857,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
     ...(input.sourceMessageLookupKey === undefined
       ? {}
       : { sourceMessageLookupKey: input.sourceMessageLookupKey }),
+    encryption: input.encryption,
     tx: input.tx,
     userId: envelope.userId,
   });

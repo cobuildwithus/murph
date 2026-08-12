@@ -1499,6 +1499,38 @@ test("domain root unwraps are memoized inside the scoped cache and wiped at scop
   assert.ok(outside.readCount() > outsideFirst);
 });
 
+test("a prepared-only root scope rejects cache misses before KMS", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    HostedDomainRootPreparationMismatchError,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    unwrapHostedDomainRootForWeb,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const {
+    runWithHostedDomainRootProviderCallsDisabled,
+    runWithHostedDomainRootUnwrapCache,
+  } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const userId = "member-test-prepared-only-cache-miss";
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.prepared-only-cache-miss",
+    userId,
+  });
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(runWithHostedDomainRootProviderCallsDisabled(() =>
+      unwrapHostedDomainRootForWeb({
+        domain: "control",
+        prisma: tx.prisma,
+        userId,
+      })
+    )).rejects.toBeInstanceOf(HostedDomainRootPreparationMismatchError);
+  });
+
+  assert.equal(decryptMetrics.calls.length, 0);
+});
+
 test("a prepared domain root warms the scoped active key before its row exists", async () => {
   const { decryptMetrics, tx } =
     await createHostedWebCryptoTransactionFixture();
@@ -1536,6 +1568,76 @@ test("a prepared domain root warms the scoped active key before its row exists",
   assert.equal(counting.readCount(), 0);
   assert.equal(decryptMetrics.calls.length, 1);
   assert.equal(tx.persistedEnvelopes.length, 0);
+});
+
+test("the prepared Web root token commits and reuses only its exact scoped root", async () => {
+  const { tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    prepareHostedDomainRootForWeb,
+    readPreparedHostedDomainRootForWebLocal,
+    revalidatePreparedHostedDomainRootForWebTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const userId = "member-test-prepared-web-root";
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const prepared = await prepareHostedDomainRootForWeb({
+      domain: "control",
+      prisma: tx.prisma,
+      reason: "test.prepared-web-root",
+      userId,
+    });
+    const serializedClone = JSON.parse(JSON.stringify(prepared)) as typeof prepared;
+    expect(() => readPreparedHostedDomainRootForWebLocal(serializedClone)).toThrow(
+      /not the exact prepared scoped cache entry/u,
+    );
+    assert.equal(tx.persistedEnvelopes.length, 0);
+    const local = readPreparedHostedDomainRootForWebLocal(prepared);
+    const committed = await revalidatePreparedHostedDomainRootForWebTx({
+      prepared,
+      tx: tx.prisma as Prisma.TransactionClient,
+    });
+    assert.equal(committed.rootKeyId, prepared.rootKeyId);
+    assert.equal(committed.root, local.root);
+  });
+
+  assert.equal(tx.persistedEnvelopes.length, 1);
+});
+
+test("the prepared Web root token rejects an exact winner drift", async () => {
+  const { tx } = await createHostedWebCryptoTransactionFixture();
+  const {
+    HostedDomainRootPreparationMismatchError,
+    prepareHostedDomainRootForWeb,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    revalidatePreparedHostedDomainRootForWebTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const userId = "member-test-prepared-web-root-drift";
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const prepared = await prepareHostedDomainRootForWeb({
+      domain: "control",
+      prisma: tx.prisma,
+      reason: "test.prepared-web-root-drift",
+      userId,
+    });
+    const winner = await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+      domain: "control",
+      prisma: tx.prisma,
+      reason: "test.prepared-web-root-winner",
+      userId,
+    });
+    assert.notEqual(winner.rootKeyId, prepared.rootKeyId);
+    await expect(revalidatePreparedHostedDomainRootForWebTx({
+      prepared,
+      tx: tx.prisma as Prisma.TransactionClient,
+    })).rejects.toBeInstanceOf(HostedDomainRootPreparationMismatchError);
+  });
 });
 
 test("Stripe activation preflight keeps activation proof false and reuses KMS roots for private projection", async () => {

@@ -10,6 +10,7 @@ export interface CachedUnwrappedHostedDomainRoot {
 type HostedDomainRootUnwrapCache = Map<string, Promise<CachedUnwrappedHostedDomainRoot>>;
 
 const hostedDomainRootUnwrapCacheStorage = new AsyncLocalStorage<HostedDomainRootUnwrapCache>();
+const hostedDomainRootProviderCallsDisabledStorage = new AsyncLocalStorage<boolean>();
 
 /**
  * Scoped memo for domain-root envelope reads + KMS unwraps. Webhook plan
@@ -57,4 +58,20 @@ export async function runWithFreshHostedDomainRootUnwrapCache<TResult>(
 
 export function getHostedDomainRootUnwrapCache(): HostedDomainRootUnwrapCache | undefined {
   return hostedDomainRootUnwrapCacheStorage.getStore();
+}
+
+/**
+ * Marks a transaction-local consumer as cache-only. Provider-capable root
+ * owners use this after all exact root references have been prepared so a
+ * concurrent private-row change becomes a bounded preparation retry instead
+ * of a KMS call under database locks.
+ */
+export async function runWithHostedDomainRootProviderCallsDisabled<TResult>(
+  run: () => Promise<TResult>,
+): Promise<TResult> {
+  return hostedDomainRootProviderCallsDisabledStorage.run(true, run);
+}
+
+export function areHostedDomainRootProviderCallsDisabled(): boolean {
+  return hostedDomainRootProviderCallsDisabledStorage.getStore() === true;
 }
