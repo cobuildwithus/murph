@@ -9,6 +9,6 @@
     "summary": "Murph now syncs dated Oura sauna tags so repeated sauna entries can become Personal Patterns factors.",
     "details": "Wearable tags stay neutral notes. Personal Patterns currently treats only Oura's exact sauna tag as an action; symptoms, context, custom tags, and tags from other sources stay neutral. Murph does not retain or analyze the provider's free-text note value.",
     "relevanceTags": ["oura", "wearables", "patterns", "privacy"],
-    "sourcePullRequests": [1673]
+    "sourcePullRequests": [1673, 1697]
   }
 }
