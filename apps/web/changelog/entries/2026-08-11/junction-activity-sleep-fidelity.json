@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 100,
+  "item": {
+    "id": "junction-activity-sleep-fidelity",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Keep more connected activity and sleep detail",
+    "summary": "Connected health syncs now preserve more daily heart-rate, activity-intensity, and sleep-latency details as separate structured measurements.",
+    "details": "Murph keeps low, medium, and high activity minutes independent, preserves the existing total, and converts provider sleep latency into canonical minutes.",
+    "relevanceTags": ["wearables", "activity", "sleep"],
+    "sourcePullRequests": [1704]
+  }
+}

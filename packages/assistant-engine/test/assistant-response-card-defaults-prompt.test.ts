@@ -25,14 +25,14 @@ function createPromptInput(
 }
 
 describe('assistant response-card defaults', () => {
-  it('defaults eligible private cards without exposing private-card guidance to groups', () => {
+  it('defaults every verified private meal and live-workout update to its eligible card', () => {
     const directPrompt = buildAssistantSystemPrompt(createPromptInput('direct'))
     const groupPrompt = buildAssistantSystemPrompt(createPromptInput('group'))
 
     expect(directPrompt).toContain(
-      'Private cards: if its skill and tool allow it, attach now without another ask.',
+      'Private cards: verified meal/live-workout updates use the allowed card alone; meal intent never sets targets.',
     )
-    expect(directPrompt).toContain('No prose; routine logs stay concise.')
+    expect(directPrompt).not.toContain('routine logs stay concise')
     expect((directPrompt.match(/Private cards:/gu) ?? [])).toHaveLength(1)
     expect(groupPrompt).not.toContain('Private cards:')
   })

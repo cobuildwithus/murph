@@ -1,9 +1,16 @@
 import {
   chromium,
-  type BrowserContext,
   type Locator,
   type Page,
 } from "@playwright/test";
+
+import {
+  buildHostedLocalBrowserSessionCookie,
+  clearHostedLocalBrowserEnvironment,
+  formatHostedLocalBrowserResult,
+  readHostedLocalBrowserEnvironmentValue,
+  readHostedLocalBrowserTimeout,
+} from "./hosted-local-browser-process.ts";
 
 interface BrowserConfig {
   email: string;
@@ -19,6 +26,7 @@ interface BrowserConfig {
   webOrigin: string;
 }
 
+const RUNNER_NAME = "Hosted-local Junction wearable browser runner";
 const AUTH_ACTIONS = [
   /\baccept\b/i,
   /\bagree\b/i,
@@ -47,6 +55,30 @@ const PROVIDER_AUTHORIZATION_DOMAINS = {
 } as const;
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
+const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
+  "JUNCTION_API_KEY",
+  "JUNCTION_CLIENT_USER_ID_SECRET",
+  "JUNCTION_WEBHOOK_SECRET",
+  "MURPH_E2E_CONNECT_URL",
+  "MURPH_E2E_HOSTED_SESSION_COOKIE",
+  "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+  "MURPH_E2E_PROVIDER_EMAIL",
+  "MURPH_E2E_PROVIDER_HEADLESS",
+  "MURPH_E2E_PROVIDER_OTP",
+  "MURPH_E2E_PROVIDER_PASSWORD",
+  "MURPH_E2E_PROVIDER_SOURCE",
+  "MURPH_E2E_PROVIDER_TIMEOUT_MS",
+  "MURPH_E2E_OURA_EMAIL",
+  "MURPH_E2E_OURA_OTP",
+  "MURPH_E2E_OURA_PASSWORD",
+  "MURPH_E2E_WHOOP_EMAIL",
+  "MURPH_E2E_WHOOP_OTP",
+  "MURPH_E2E_WHOOP_PASSWORD",
+  "WHOOP_CLIENT_ID",
+  "WHOOP_CLIENT_SECRET",
+  "OURA_CLIENT_ID",
+  "OURA_CLIENT_SECRET",
+] as const;
 
 let stage = "configuration";
 let activePage: Page | null = null;
@@ -55,7 +87,7 @@ let activeConfig: BrowserConfig | null = null;
 async function main(): Promise<void> {
   const config = readBrowserConfig(process.env);
   activeConfig = config;
-  clearSensitiveBrowserEnvironment();
+  clearHostedLocalBrowserEnvironment(SENSITIVE_BROWSER_ENVIRONMENT_KEYS);
 
   stage = "browser_launch";
   const browser = await chromium.launch({ headless: config.headless });
@@ -64,7 +96,12 @@ async function main(): Promise<void> {
       locale: "en-US",
       reducedMotion: "reduce",
     });
-    await addHostedSessionCookie(context, config);
+    await context.addCookies([
+      buildHostedLocalBrowserSessionCookie({
+        sessionCookie: config.hostedSessionCookie,
+        webBaseUrl: config.webBaseUrl,
+      }),
+    ]);
     const page = await context.newPage();
     activePage = page;
     page.setDefaultTimeout(15_000);
@@ -113,42 +150,17 @@ async function main(): Promise<void> {
     stage = "junction_cleanup";
     await disconnectJunctionAccount(page, config);
 
-    process.stdout.write(`MURPH_E2E_RESULT=${JSON.stringify({
+    process.stdout.write(formatHostedLocalBrowserResult({
       callbackAutoCompleted: true,
       connectedAfterCallback: true,
       connectedAfterReload: true,
       disconnectedDuringCleanup: true,
       provider: "junction",
       source: config.source,
-    })}\n`);
+    }));
   } finally {
     await browser.close();
   }
-}
-
-async function addHostedSessionCookie(
-  context: BrowserContext,
-  config: BrowserConfig,
-): Promise<void> {
-  const pair = config.hostedSessionCookie.split(";", 1)[0]?.trim() ?? "";
-  const separatorIndex = pair.indexOf("=");
-  if (separatorIndex <= 0) {
-    throw new Error("Hosted session cookie was malformed.");
-  }
-  const cookieName = pair.slice(0, separatorIndex);
-  const cookieUrl = new URL(config.webBaseUrl);
-  if (cookieName.startsWith("__Host-")) {
-    cookieUrl.protocol = "https:";
-  }
-
-  await context.addCookies([{
-    httpOnly: true,
-    name: cookieName,
-    sameSite: "Lax",
-    secure: cookieName.startsWith("__Host-") || config.webBaseUrl.startsWith("https://"),
-    url: cookieUrl.toString(),
-    value: decodeURIComponent(pair.slice(separatorIndex + 1)),
-  }]);
 }
 
 async function completeExternalAuthorization(
@@ -328,12 +340,12 @@ async function disconnectJunctionAccount(
   await assertWearableConnectionState(page, config, "idle");
 }
 
-function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
-  const source = requireWearableSource(env.MURPH_E2E_PROVIDER_SOURCE);
+function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
+  const source = requireWearableSource(environment.MURPH_E2E_PROVIDER_SOURCE);
   const label = source === "oura" ? "Oura" : "WHOOP";
-  const headless = env.MURPH_E2E_PROVIDER_HEADLESS !== "0";
-  const otp = env.MURPH_E2E_PROVIDER_OTP?.trim() || null;
-  const password = env.MURPH_E2E_PROVIDER_PASSWORD?.trim() || null;
+  const headless = environment.MURPH_E2E_PROVIDER_HEADLESS !== "0";
+  const otp = environment.MURPH_E2E_PROVIDER_OTP?.trim() || null;
+  const password = environment.MURPH_E2E_PROVIDER_PASSWORD?.trim() || null;
   if (source === "whoop" && !password) {
     throw new Error(
       "Hosted-local Junction WHOOP browser runner requires MURPH_E2E_PROVIDER_PASSWORD.",
@@ -344,11 +356,17 @@ function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
       "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP or MURPH_E2E_PROVIDER_HEADLESS=0 for manual code entry.",
     );
   }
-  const webBaseUrl = requireEnvironmentValue(env, "MURPH_E2E_WEB_BASE_URL");
-  const parsedWebBaseUrl = new URL(webBaseUrl);
-  const startUrl = new URL(
-    requireEnvironmentValue(env, "MURPH_E2E_CONNECT_URL"),
+  const webBaseUrl = readHostedLocalBrowserEnvironmentValue(
+    environment,
+    "MURPH_E2E_WEB_BASE_URL",
+    RUNNER_NAME,
   );
+  const parsedWebBaseUrl = new URL(webBaseUrl);
+  const startUrl = new URL(readHostedLocalBrowserEnvironmentValue(
+    environment,
+    "MURPH_E2E_CONNECT_URL",
+    RUNNER_NAME,
+  ));
   const connectIntentParams = new URLSearchParams(startUrl.hash.slice(1));
   if (
     startUrl.origin !== parsedWebBaseUrl.origin
@@ -360,74 +378,35 @@ function readBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
       `MURPH_E2E_CONNECT_URL must be a signed ${label} /connect device intent on the hosted-local Web origin.`,
     );
   }
-  const timeoutMs = Number.parseInt(
-    env.MURPH_E2E_PROVIDER_TIMEOUT_MS ?? "180000",
-    10,
-  );
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 30_000 || timeoutMs > 600_000) {
-    throw new Error(
-      "MURPH_E2E_PROVIDER_TIMEOUT_MS must be between 30000 and 600000.",
-    );
-  }
 
   return {
-    email: requireEnvironmentValue(env, "MURPH_E2E_PROVIDER_EMAIL"),
+    email: readHostedLocalBrowserEnvironmentValue(
+      environment,
+      "MURPH_E2E_PROVIDER_EMAIL",
+      RUNNER_NAME,
+    ),
     headless,
-    hostedSessionCookie: requireEnvironmentValue(
-      env,
+    hostedSessionCookie: readHostedLocalBrowserEnvironmentValue(
+      environment,
       "MURPH_E2E_HOSTED_SESSION_COOKIE",
+      RUNNER_NAME,
     ),
     label,
     otp,
     password,
     source,
     startUrl: startUrl.toString(),
-    timeoutMs,
+    timeoutMs: readHostedLocalBrowserTimeout({
+      defaultMs: 180_000,
+      environment,
+      key: "MURPH_E2E_PROVIDER_TIMEOUT_MS",
+      maximumMs: 600_000,
+      minimumMs: 30_000,
+      runnerName: RUNNER_NAME,
+    }),
     webBaseUrl: parsedWebBaseUrl.toString().replace(/\/$/u, ""),
     webOrigin: parsedWebBaseUrl.origin,
   };
-}
-
-function clearSensitiveBrowserEnvironment(): void {
-  for (const key of [
-    "JUNCTION_API_KEY",
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "JUNCTION_WEBHOOK_SECRET",
-    "MURPH_E2E_CONNECT_URL",
-    "MURPH_E2E_HOSTED_SESSION_COOKIE",
-    "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
-    "MURPH_E2E_PROVIDER_EMAIL",
-    "MURPH_E2E_PROVIDER_HEADLESS",
-    "MURPH_E2E_PROVIDER_OTP",
-    "MURPH_E2E_PROVIDER_PASSWORD",
-    "MURPH_E2E_PROVIDER_SOURCE",
-    "MURPH_E2E_PROVIDER_TIMEOUT_MS",
-    "MURPH_E2E_OURA_EMAIL",
-    "MURPH_E2E_OURA_OTP",
-    "MURPH_E2E_OURA_PASSWORD",
-    "MURPH_E2E_WHOOP_EMAIL",
-    "MURPH_E2E_WHOOP_OTP",
-    "MURPH_E2E_WHOOP_PASSWORD",
-    "WHOOP_CLIENT_ID",
-    "WHOOP_CLIENT_SECRET",
-    "OURA_CLIENT_ID",
-    "OURA_CLIENT_SECRET",
-  ]) {
-    delete process.env[key];
-  }
-}
-
-function requireEnvironmentValue(
-  env: NodeJS.ProcessEnv,
-  key: string,
-): string {
-  const value = env[key]?.trim();
-  if (!value) {
-    throw new Error(
-      `Hosted-local Junction wearable browser runner requires ${key}.`,
-    );
-  }
-  return value;
 }
 
 function assertTrustedAuthorizationUrl(

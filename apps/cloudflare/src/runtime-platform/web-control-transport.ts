@@ -148,6 +148,7 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   fetchImpl: typeof fetch;
   method?: "GET" | "POST";
   path: string;
+  signal?: AbortSignal | null;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
@@ -163,13 +164,17 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
       attempt += 1;
       lastError = error;
       if (
-        attempt >= HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS
+        input.signal?.aborted
+        || attempt >= HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS
         || !isRetryableHostedWebControlReadError(error)
       ) {
         throw error;
       }
 
       await sleepHostedReplaySafeReadRetryDelay();
+      if (input.signal?.aborted) {
+        throw input.signal.reason;
+      }
     }
   }
 

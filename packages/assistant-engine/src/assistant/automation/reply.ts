@@ -144,6 +144,8 @@ const ASSISTANT_AUTO_REPLY_OUTBOX_CLOCK_SKEW_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH = 4_000
 const ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS = 30 * 1000
 const ASSISTANT_AUTO_REPLY_RECEIPT_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
+const ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED_CODE =
+  'ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED'
 const HOSTED_IMAGE_COMPLETION_SCHEMA = 'murph.hosted-image-completion.v1'
 const HOSTED_IMAGE_ORIGIN_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u
 const HOSTED_IMAGE_FAILURE_DIAGNOSTIC_MAX_LENGTH = 1_000
@@ -3627,7 +3629,8 @@ function isAssistantNoReplyWithCommittedDeliveryWork(
     result.delivery === null &&
     !result.deliveryDeferred &&
     result.deliveryIntentId !== null &&
-    result.deliveryError !== null
+    result.deliveryError !== null &&
+    result.deliveryError.code !== ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED_CODE
 }
 
 function markAssistantAutoReplyDeliveryFailureIfNeeded(error: unknown): unknown {

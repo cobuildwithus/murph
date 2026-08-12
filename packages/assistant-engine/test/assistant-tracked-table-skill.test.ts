@@ -158,6 +158,27 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).not.toContain('Complete workout exercise')
     expect(skill).toContain('Never infer weight, repetitions, effort, assistance')
     expect(skill).toContain(
+      'After every verified private workout mutation that changes the snapshot',
+    )
+    expect(skill).toContain(
+      'ordinary set log, correction, clear, exercise addition, start, resume, or finish',
+    )
+    expect(skill).toContain(
+      'Do not send a text-only acknowledgement or companion prose.',
+    )
+    expect(skill).toContain(
+      'After every verified ordinary free-form set log, correction, clear, or exercise addition',
+    )
+    expect(skill).toContain(
+      'When a request does not materially change canonical workout state',
+    )
+    expect(skill).not.toContain(
+      'Do not send a fresh table card after every ordinary set update.',
+    )
+    expect(skill).not.toContain(
+      'For ordinary free-form logging, prefer concise text',
+    )
+    expect(skill).toContain(
       'use one verified structured workout card as the complete response on a supported private card route',
     )
     expect(skill).toContain(

@@ -518,7 +518,10 @@ describe('murph.attach_response_card', () => {
 
   it('describes the private on-demand canonical-read contract', () => {
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'saved instructions for the exact scheduled automation occurrence explicitly request it',
+      'saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'a structured plan or schedule that the table alone can fully represent within its bounds',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Occurrence authority alone is not card intent',

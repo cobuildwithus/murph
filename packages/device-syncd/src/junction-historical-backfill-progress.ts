@@ -80,6 +80,13 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS = Object.freeze([
   "note",
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
 ] as const);
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<string, number>([
+  ["blood_pressure", 1],
+  ["note", 2],
+  ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES.map(
+    (resource) => [resource, 1] as const,
+  ),
+]);
 const JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
 );
@@ -422,6 +429,8 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOT_BY_NAME = new Map<strin
 if (
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOT_BY_NAME.size
     !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
+  || JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.size
+    !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length
   || JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length
     + JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH * 2
     > DEVICE_SYNC_METADATA_MAX_STRING_LENGTH
@@ -473,7 +482,7 @@ export function hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
   resource: string,
   version: number,
 ): boolean {
-  if (version !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION) {
+  if (version !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.get(resource)) {
     return false;
   }
   const bitIndex = resolveJunctionExtendedTimeseriesHistoryCoverageBitIndex(
@@ -491,12 +500,13 @@ export function canRepresentJunctionExtendedTimeseriesHistoryBackfillCoverage(
   metadata: Record<string, unknown>,
   providerSlug: string,
   resource: string,
+  version: number,
 ): boolean {
   return addJunctionExtendedTimeseriesHistoryBackfillCoverage({
     metadata,
     providerSlug,
     resource,
-    version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION,
+    version,
   }) !== null;
 }
 
@@ -518,7 +528,7 @@ export function canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfill
   version: number,
 ): boolean {
   if (
-    version !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION
+    version !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.get(resource)
     || !JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOT_BY_NAME.has(resource)
   ) {
     return false;
@@ -671,12 +681,16 @@ function readJunctionExtendedTimeseriesHistoryCoverageFacts(
       continue;
     }
     const legacy = readJunctionLegacyExtendedTimeseriesHistoryCoverage(metadata[metadataKey]);
-    if (legacy?.version !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION) {
-      continue;
-    }
     const resource = metadataKey === JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY
       ? "blood_pressure"
       : "note";
+    if (
+      !legacy
+      || legacy.version
+        !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.get(resource)
+    ) {
+      continue;
+    }
     for (const providerSlug of legacy.providerSlugs) {
       const bitIndex = resolveJunctionExtendedTimeseriesHistoryCoverageBitIndex(
         providerSlug,
@@ -760,14 +774,15 @@ function isJunctionExtendedTimeseriesHistoryCoverageSlotWritable(
     return true;
   }
   const legacy = readJunctionLegacyExtendedTimeseriesHistoryCoverage(value);
-  if (
-    legacy?.version !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION
-  ) {
-    return false;
-  }
   const resource = metadataKey === JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY
     ? "blood_pressure"
     : "note";
+  const currentVersion = JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.get(
+    resource,
+  );
+  if (!legacy || currentVersion === undefined || legacy.version > currentVersion) {
+    return false;
+  }
   return legacy.providerSlugs.every((providerSlug) =>
     resolveJunctionExtendedTimeseriesHistoryCoverageBitIndex(providerSlug, resource) !== null
   );

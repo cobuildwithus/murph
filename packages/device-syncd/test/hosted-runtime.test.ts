@@ -328,7 +328,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     })).toBeNull();
   });
 
-  it("preserves unpublished local sparse-timeseries source coverage", () => {
+  it("preserves current local coverage without certifying legacy note semantics", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: { hostedOnly: true },
       localConnectionStateUnpublished: true,
@@ -350,8 +350,8 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       result.metadata,
       "oura",
       "note",
-      1,
-    )).toBe(true);
+      2,
+    )).toBe(false);
     expect(result.preservedLocalProgress).toBe(true);
   });
 
@@ -2878,6 +2878,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           payload: {
             emptyBackfillAttempts: 2,
             historicalBackfill: true,
+            historicalBackfillVersion: 2,
             historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
             historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
@@ -2894,6 +2895,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(hint?.jobs?.[0]?.payload).toEqual({
       emptyBackfillAttempts: 2,
       historicalBackfill: true,
+      historicalBackfillVersion: 2,
       historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,

@@ -152,6 +152,21 @@ describe("Junction extended timeseries history coverage", () => {
     )).toBe(false);
   });
 
+  it("reopens legacy note v1 while accepting the deployed v2 generation", () => {
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      { junctionNoteHistoryBackfillCoverage: "v1|oura" },
+      "oura",
+      "note",
+      2,
+    )).toBe(false);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      { junctionNoteHistoryBackfillCoverage: "v2|oura" },
+      "oura",
+      "note",
+      2,
+    )).toBe(true);
+  });
+
   it("unions unpublished local resource bits without losing hosted coverage", () => {
     const result = mergeHostedJunctionHistoricalBackfillMetadata({
       hostedMetadata: addCoverage({}, "omron", "afib_burden"),
@@ -211,7 +226,7 @@ describe("Junction extended timeseries history coverage", () => {
           metadata,
           providerSlug,
           resource,
-          1,
+          historyCoverageVersion(resource),
         )).toBe(true);
       }
     }
@@ -258,7 +273,7 @@ describe("Junction extended timeseries history coverage", () => {
           result.metadata,
           providerSlug,
           resource,
-          1,
+          historyCoverageVersion(resource),
         )).toBe(true);
       }
     }
@@ -301,8 +316,9 @@ describe("Junction extended timeseries history coverage", () => {
       merged,
       "oura",
       "note",
-      1,
-    )).toBe(true);
+      2,
+    )).toBe(false);
+    expect(merged.junctionNoteHistoryBackfillCoverage).toBe("v1|oura");
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       merged,
       "omron",
@@ -320,6 +336,7 @@ describe("Junction extended timeseries history coverage", () => {
       metadata,
       "omron",
       "caffeine",
+      1,
     )).toBe(false);
     expect(addJunctionExtendedTimeseriesHistoryBackfillCoverage({
       metadata,
@@ -367,11 +384,15 @@ function requireCoverageUpdate(
     metadata,
     providerSlug,
     resource,
-    version: 1,
+    version: historyCoverageVersion(resource),
   });
   expect(update).not.toBeNull();
   if (!update) {
     throw new TypeError("Expected representable Junction extended-history coverage.");
   }
   return update;
+}
+
+function historyCoverageVersion(resource: string): number {
+  return resource === "note" ? 2 : 1;
 }

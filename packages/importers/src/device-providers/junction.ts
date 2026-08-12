@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import {
   extractIsoDatePrefix,
   ID_PREFIXES,
+  JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+  JUNCTION_WEARABLE_TAG_NOTE_TYPE,
   MEAL_MICRONUTRIENT_KEYS,
   parseCompanionHrvRmssdAdmissionId,
   parseCompanionHrvRmssdObservation,
@@ -13,6 +15,7 @@ import {
   type MealMicronutrientKey,
   type MealMicronutrients,
   type MealNutrition,
+  type MeasurementQualifiers,
   type WorkoutSession,
 } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
@@ -47,6 +50,8 @@ import {
   JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS,
   JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
   JUNCTION_SLEEP_HRV_PATHS,
+  JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
+  JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
   JUNCTION_SLEEP_LIGHT_MINUTE_PATHS,
   JUNCTION_SLEEP_LIGHT_SECOND_PATHS,
   JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,
@@ -250,6 +255,27 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
     paths: [],
     value: resolveJunctionDailyActivityMinutes,
   },
+  {
+    metric: "low-activity-minutes",
+    unit: "minutes",
+    title: "Junction low activity minutes",
+    paths: [],
+    value: (entry) => resolveJunctionActivityIntensityMinutes(entry, "low"),
+  },
+  {
+    metric: "medium-activity-minutes",
+    unit: "minutes",
+    title: "Junction medium activity minutes",
+    paths: [],
+    value: (entry) => resolveJunctionActivityIntensityMinutes(entry, "medium"),
+  },
+  {
+    metric: "high-activity-minutes",
+    unit: "minutes",
+    title: "Junction high activity minutes",
+    paths: [],
+    value: (entry) => resolveJunctionActivityIntensityMinutes(entry, "high"),
+  },
   { metric: "daily-steps", unit: "count", title: "Junction activity steps", paths: ["steps", "step_count", "daily_steps"] },
   { metric: "active-calories", unit: "kcal", title: "Junction active calories", paths: ["activeCalories", "active_calories", "calories_active"] },
   { metric: "total-calories", unit: "kcal", title: "Junction total calories", paths: ["calories", "totalCalories", "total_calories", "calories_total"] },
@@ -262,6 +288,9 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "percent-recorded", unit: "%", title: "Junction activity recording coverage", paths: [], percentRatioPaths: ["percentRecorded", "percent_recorded", "recordingCoverage", "recording_coverage", "recordedRatio", "recorded_ratio", "percentRecordedRatio", "percent_recorded_ratio"] },
   { metric: "workout-strain", unit: "score", title: "Junction workout strain", paths: ["workoutStrain", "workout_strain"] },
   { metric: "day-strain", unit: "score", title: "Junction day strain", paths: ["dayStrain", "day_strain", "strain"] },
+  { metric: "average-heart-rate", unit: "bpm", title: "Junction activity average heart rate", paths: ["heart_rate.avg_bpm"] },
+  { metric: "walking-average-heart-rate", unit: "bpm", title: "Junction activity walking average heart rate", paths: ["heart_rate.avg_walking_bpm"] },
+  { metric: "lowest-heart-rate", unit: "bpm", title: "Junction activity lowest heart rate", paths: ["heart_rate.min_bpm"] },
   { metric: "max-heart-rate", unit: "bpm", title: "Junction activity max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr", "heart_rate.max_bpm"] },
   { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"] },
 ];
@@ -270,6 +299,34 @@ const BODY_METRICS: readonly MetricDescriptor[] = [
   { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["weightKg", "weight_kg", "weight"] },
   { metric: "bmi", unit: "kg_m2", title: "Junction BMI", paths: ["bmi", "body_mass_index"] },
   { metric: "body-fat-percentage", unit: "%", title: "Junction body fat", paths: ["bodyFatPercentage", "body_fat_percentage", "body_fat_percent", "bodyFat", "body_fat", "fat"] },
+  {
+    metric: "bone-mass-percentage",
+    unit: "%",
+    title: "Junction bone mass percentage",
+    paths: [],
+    value: (entry) => firstNumberFromPaths(entry, ["boneMassPercentage", "bone_mass_percentage"]),
+  },
+  {
+    metric: "muscle-mass-percentage",
+    unit: "%",
+    title: "Junction muscle mass percentage",
+    paths: [],
+    value: (entry) => firstNumberFromPaths(entry, ["muscleMassPercentage", "muscle_mass_percentage"]),
+  },
+  {
+    metric: "visceral-fat-index",
+    unit: "index",
+    title: "Junction visceral fat index",
+    paths: [],
+    value: (entry) => firstNumberFromPaths(entry, ["visceralFatIndex", "visceral_fat_index"]),
+  },
+  {
+    metric: "body-water-percentage",
+    unit: "%",
+    title: "Junction body water percentage",
+    paths: [],
+    value: (entry) => firstNumberFromPaths(entry, ["waterPercentage", "water_percentage"]),
+  },
   { metric: "lean-body-mass", unit: "kg", title: "Junction lean body mass", paths: ["leanBodyMassKg", "lean_body_mass_kg", "leanBodyMassKilogram", "lean_body_mass_kilogram", "leanMassKg", "lean_mass_kg"] },
   { metric: "waist-circumference", unit: "cm", title: "Junction waist circumference", paths: ["waistCircumference", "waist_circumference", "waistCircumferenceCentimeter", "waist_circumference_centimeter", "waistCircumferenceCm", "waist_circumference_cm"] },
   { metric: "temperature", unit: "celsius", title: "Junction body temperature", paths: ["temperature", "bodyTemperature", "body_temperature", "temperatureCelsius", "temperature_celsius", "skin_temperature"] },
@@ -290,6 +347,13 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: JUNCTION_SLEEP_AWAKE_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_AWAKE_SECOND_PATHS },
   { metric: "time-in-bed-minutes", unit: "minutes", title: "Junction time in bed", paths: JUNCTION_SLEEP_TIME_IN_BED_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS },
   { metric: "sleep-efficiency", unit: "%", title: "Junction sleep efficiency", paths: [], percentRatioPaths: JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS },
+  {
+    metric: "sleep-latency-minutes",
+    unit: "minutes",
+    title: "Junction sleep latency",
+    paths: [],
+    value: resolveJunctionSleepLatencyMinutes,
+  },
   { metric: "sleep-consistency", unit: "%", title: "Junction sleep consistency", paths: JUNCTION_SLEEP_CONSISTENCY_PATHS },
   { metric: "sleep-performance", unit: "%", title: "Junction sleep performance", paths: JUNCTION_SLEEP_PERFORMANCE_PATHS },
   { metric: "hrv", unit: "ms", title: "Junction sleep HRV", paths: JUNCTION_SLEEP_HRV_PATHS },
@@ -1633,7 +1697,14 @@ function pushJunctionNoteTags(
   context: NormalizationContext,
 ): void {
   const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
-  const seenNoteHashes = new Set<string>();
+  type JunctionNoteSpine = {
+    entry: PlainObject;
+    resourceContext: ResourceContext;
+    resourceId: string;
+    tags: Set<string>;
+    timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  };
+  const noteSpines = new Map<string, JunctionNoteSpine>();
 
   for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
     const resourceContext = buildResourceContext({
@@ -1648,6 +1719,10 @@ function pushJunctionNoteTags(
     });
     if (!resourceContext) continue;
 
+    // A missing tag field is still a free-text-only provider note and stays
+    // canonical-no-op. An explicit empty tag set is retained so a later replay
+    // can clear the tag state on an existing neutral note spine.
+    if (!Object.hasOwn(entry, "tags")) continue;
     const tags = normalizeJunctionNoteTags(entry.tags);
     const start = firstStringFromPaths(entry, ["start", "startAt", "start_at"]);
     const baseTimestamp = resolveRecordTimestamp(
@@ -1658,20 +1733,45 @@ function pushJunctionNoteTags(
     const timestamp = withTimestampOverride(baseTimestamp, {
       dayKey: baseTimestamp.dayKey ?? extractIsoDatePrefix(start) ?? undefined,
     });
-    if (!timestamp.occurredAt || !timestamp.dayKey || tags.length === 0) continue;
+    if (!timestamp.occurredAt || !timestamp.dayKey) continue;
 
     const stableId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
-    const noteHash = stableId
-      ? shortHash([resourceContext.externalRefResourceType, stableId])
-      : shortHash([
-          resourceContext.externalRefResourceType,
-          timestamp.observedAtRaw ?? timestamp.occurredAt,
-          ...tags,
-        ]);
-    if (seenNoteHashes.has(noteHash)) continue;
-    seenNoteHashes.add(noteHash);
+    const resourceId = buildJunctionNoteResourceId(resourceContext, stableId, timestamp);
+    const spineKey = `${resourceContext.externalRefResourceType}:${resourceId}`;
+    const existing = noteSpines.get(spineKey);
+    if (existing) {
+      if (stableId) {
+        // Duplicate rows with an explicit provider identity describe one note.
+        // Keep the final row's current tag state rather than unioning revisions.
+        existing.entry = entry;
+        existing.resourceContext = resourceContext;
+        existing.tags = new Set(tags);
+        existing.timestamp = timestamp;
+      } else {
+        // Without an upstream id, source + timestamp is the narrowest stable
+        // spine available. Preserve every same-time tag while allowing a later
+        // replay to revise or clear that timestamp's aggregate tag state.
+        for (const tag of tags) existing.tags.add(tag);
+      }
+      continue;
+    }
 
-    const role = `${baseArtifactRole}:${timestamp.dayKey}:${noteHash}`;
+    noteSpines.set(spineKey, {
+      entry,
+      resourceContext,
+      resourceId,
+      tags: new Set(tags),
+      timestamp,
+    });
+  }
+
+  for (const spine of noteSpines.values()) {
+    const tags = [...spine.tags].sort();
+    const dayKey = spine.timestamp.dayKey;
+    const occurredAt = spine.timestamp.occurredAt;
+    if (!dayKey || !occurredAt) continue;
+
+    const role = `${baseArtifactRole}:${dayKey}:${spine.resourceId}`;
     pushEvidencePart(
       context.evidenceParts,
       withJunctionCompactTimeseriesMetadata(
@@ -1683,12 +1783,12 @@ function pushJunctionNoteTags(
             schema: "junction.note_tags.v1",
             provider: "junction",
             resource,
-            dayKey: timestamp.dayKey,
-            sourceProviderSlug: resourceContext.sourceProviderSlug,
-            sourceType: resourceContext.origin.sourceType,
-            sourceInstanceId: resourceContext.origin.sourceInstanceId,
-            occurredAt: timestamp.occurredAt,
-            recordedAt: timestamp.recordedAt,
+            dayKey,
+            sourceProviderSlug: spine.resourceContext.sourceProviderSlug,
+            sourceType: spine.resourceContext.origin.sourceType,
+            sourceInstanceId: spine.resourceContext.origin.sourceInstanceId,
+            occurredAt,
+            recordedAt: spine.timestamp.recordedAt,
             tags,
           }),
         ),
@@ -1696,31 +1796,54 @@ function pushJunctionNoteTags(
       ),
     );
 
-    for (const tag of tags) {
-      context.events.push(stripUndefined({
-        kind: "intervention_session",
-        occurredAt: timestamp.occurredAt,
-        recordedAt: timestamp.recordedAt,
-        dayKey: timestamp.dayKey,
-        source: "device",
-        title: `Wearable tag: ${tag.replaceAll("-", " ")}`,
-        tags: [tag],
-        evidenceRoles: [role],
-        externalRef: makeProviderExternalRef(
-          "junction",
-          resourceContext.externalRefResourceType,
-          noteHash,
-          undefined,
-          `tag-${tag}`,
-        ),
-        dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
-        fields: {
-          interventionType: tag,
-          sessionStatus: "completed",
-        },
-      }));
-    }
+    context.events.push(stripUndefined({
+      kind: "note",
+      occurredAt,
+      recordedAt: spine.timestamp.recordedAt,
+      dayKey,
+      source: "device",
+      title: "Wearable tags",
+      // The canonical note body is a product-owned marker. Provider free text
+      // never crosses the sanitizer; normalized tag facts live only in `tags`.
+      note: "Wearable tags",
+      tags,
+      evidenceRoles: [role],
+      // This facet is intentionally distinct from the legacy `tag-*`
+      // intervention facets. Core event spines are kind-stable, so any repair
+      // of already-persisted legacy rows must remain explicit.
+      externalRef: makeProviderExternalRef(
+        "junction",
+        spine.resourceContext.externalRefResourceType,
+        spine.resourceId,
+        undefined,
+        JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+      ),
+      dataOrigin: buildDataOrigin(spine.entry, spine.resourceContext, spine.timestamp),
+      fields: {
+        noteType: JUNCTION_WEARABLE_TAG_NOTE_TYPE,
+      },
+    }));
   }
+}
+
+function buildJunctionNoteResourceId(
+  resourceContext: ResourceContext,
+  stableId: string | undefined,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string {
+  if (stableId) {
+    // Junction ids are provider-local, not globally unique across two devices
+    // or accounts of the same provider. Preserve edit/clear stability while
+    // keeping each source instance on its own kind-stable note spine.
+    return shortHash([
+      resourceContext.externalRefResourceType,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      stableId,
+    ]);
+  }
+
+  return buildStableTimeseriesResourceId(resourceContext, timestamp);
 }
 
 function normalizeJunctionNoteTags(value: unknown): string[] {
@@ -2411,9 +2534,26 @@ function sanitizeProfilePayload(payload: unknown, connection?: PlainObject): Pla
   }
 
   const origin = resolveJunctionOrigin(profile, connection);
+  const gender = firstStringFromPaths(profile, JUNCTION_PROFILE_GENDER_PATHS);
+  const sourceProviderSlug = readJunctionSourceProviderSlug(profile, connection)
+    ?? origin.sourceProviderSlug;
+  const updatedAt = resolveSafeTimestamp(
+    firstValueFromPaths(profile, ["updatedAt", "updated_at", "createdAt", "created_at"]),
+    origin.sourceProviderSlug,
+  );
   const sanitized = stripUndefined({
-    sourceProviderSlug: readJunctionSourceProviderSlug(profile, connection) ?? origin.sourceProviderSlug,
+    gender: gender ? trimToLength(gender, 80) : undefined,
+    stableResourceId: buildStableProfileResourceId(
+      profile,
+      sourceProviderSlug,
+      origin.sourceType,
+      origin.sourceInstanceId,
+      updatedAt,
+    ),
+    sourceProviderSlug,
+    sourceInstanceId: origin.sourceInstanceId,
     sourceType: origin.sourceType,
+    updatedAt,
   });
 
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
@@ -3702,11 +3842,13 @@ const JUNCTION_PROFILE_SEX_PATHS = [
   "biologicalSex",
   "biological_sex",
 ] as const;
+const JUNCTION_PROFILE_GENDER_PATHS = ["gender"] as const;
 
 // Junction profile is a single current-state snapshot per source. Height
-// follows the body-summary observation pattern; birth date, biological sex,
-// and wheelchair use are categorical, so they land as one structured note
-// event keyed by a stable external ref instead of fake numeric observations.
+// follows the body-summary observation pattern; gender is a distinct
+// categorical measurement, while birth date, biological sex, and wheelchair
+// use remain one structured note. Gender must never be folded into or labeled
+// as biological sex.
 function pushProfileSummary(
   entry: PlainObject,
   resourceContext: ResourceContext,
@@ -3732,15 +3874,51 @@ function pushProfileSummary(
     occurredAt: pinnedOccurredAt,
     recordedAt: baseTimestamp.observedAtRaw ? baseTimestamp.recordedAt : providerTimestamp,
     dayKey: extractIsoDatePrefix(pinnedOccurredAt) ?? baseTimestamp.dayKey,
-    observedAtRaw: baseTimestamp.observedAtRaw
-      ?? stringId(providerTimestampRaw)
-      ?? "current",
+    observedAtRaw: pinnedOccurredAt,
   });
+  const legacyExternalRefs = (facet: string) => buildJunctionProfileLegacyExternalRefs(
+    resourceContext,
+    entry,
+    timestamp,
+    providerTimestampRaw,
+    facet,
+  );
 
-  pushObservationMetrics(entry, resourceContext, context, JUNCTION_PROFILE_METRICS, timestamp);
+  pushObservationMetrics(
+    entry,
+    resourceContext,
+    context,
+    JUNCTION_PROFILE_METRICS,
+    timestamp,
+    legacyExternalRefs,
+  );
 
   if (!timestamp.occurredAt) {
     return;
+  }
+
+  const gender = firstStringFromPaths(entry, JUNCTION_PROFILE_GENDER_PATHS);
+  if (gender) {
+    context.events.push(stripUndefined({
+      kind: "measurement",
+      occurredAt: timestamp.occurredAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey: timestamp.dayKey,
+      source: "device",
+      title: "Junction gender",
+      evidenceRoles: resourceContext.evidenceRoles,
+      externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "gender"),
+      legacyExternalRefs: legacyExternalRefs("gender"),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      fields: {
+        measurements: [{
+          metric: "gender",
+          value: 1,
+          unit: "recording",
+          qualifiers: { gender: trimToLength(gender, 80) },
+        }],
+      },
+    }));
   }
 
   const birthDate = firstIsoDateFromPaths(entry, JUNCTION_PROFILE_BIRTH_DATE_PATHS);
@@ -3766,6 +3944,7 @@ function pushProfileSummary(
     note: trimToLength(segments.join(" "), 4000),
     evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "profile-demographics"),
+    legacyExternalRefs: legacyExternalRefs("profile-demographics"),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
   }));
 }
@@ -3894,6 +4073,59 @@ function pushMenstrualCycleSummary(
     });
   }
 
+  for (const sub of junctionDatedSubEntries(entry, ["cervicalMucus", "cervical_mucus"])) {
+    const quality = firstStringFromPaths(sub.entry, ["quality"]);
+    if (!quality) {
+      continue;
+    }
+
+    const boundedQuality = trimToLength(quality, 80);
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `cervical-mucus-quality-${trimSlugToLength(slugify(boundedQuality, "quality"), 80)}-${sub.date}`,
+      measurement: {
+        metric: "cervical-mucus-quality",
+        value: 1,
+        unit: "recording",
+        qualifiers: { quality: boundedQuality },
+      },
+      title: "Junction cervical mucus quality",
+    });
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["intermenstrualBleeding", "intermenstrual_bleeding"])) {
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `intermenstrual-bleeding-${sub.date}`,
+      measurement: {
+        metric: "intermenstrual-bleeding",
+        value: 1,
+        unit: "flag",
+      },
+      title: "Junction intermenstrual bleeding",
+    });
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["contraceptive"])) {
+    const contraceptiveType = firstStringFromPaths(sub.entry, ["type"]);
+    if (!contraceptiveType) {
+      continue;
+    }
+
+    const boundedType = trimToLength(contraceptiveType, 80);
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `contraceptive-type-${trimSlugToLength(slugify(boundedType, "type"), 80)}-${sub.date}`,
+      measurement: {
+        metric: "contraceptive-type",
+        value: 1,
+        unit: "recording",
+        qualifiers: { type: boundedType },
+      },
+      title: "Junction contraceptive type",
+    });
+  }
+
   for (const test of [
     { metric: "ovulation-test", paths: ["ovulationTest", "ovulation_test"], title: "Junction ovulation test" },
     { metric: "pregnancy-test", paths: ["homePregnancyTest", "home_pregnancy_test"], title: "Junction pregnancy test" },
@@ -3920,6 +4152,51 @@ function pushMenstrualCycleSummary(
         title: test.title,
       });
     }
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["homeProgesteroneTest", "home_progesterone_test"])) {
+    const result = firstStringFromPaths(sub.entry, ["testResult", "test_result"]);
+    if (!result) {
+      continue;
+    }
+
+    const boundedResult = trimToLength(result, 80);
+    // This records the provider's categorical result rather than coercing it
+    // into a positive/negative scalar, so indeterminate and unknown remain
+    // truthful queryable values instead of being dropped or guessed.
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `home-progesterone-test-${trimSlugToLength(slugify(boundedResult, "result"), 80)}-${sub.date}`,
+      measurement: {
+        metric: "home-progesterone-test",
+        value: 1,
+        unit: "recording",
+        qualifiers: { result: boundedResult },
+      },
+      title: "Junction home progesterone test",
+    });
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["sexualActivity", "sexual_activity"])) {
+    const protectionUsedRaw = firstValueFromPaths(sub.entry, ["protectionUsed", "protection_used"]);
+    const protectionUsed = typeof protectionUsedRaw === "boolean" ? protectionUsedRaw : undefined;
+    const protectionFacet = protectionUsed === true
+      ? "protected"
+      : protectionUsed === false
+        ? "unprotected"
+        : "protection-unspecified";
+
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `sexual-activity-${protectionFacet}-${sub.date}`,
+      measurement: {
+        metric: "sexual-activity",
+        value: 1,
+        unit: "recording",
+        qualifiers: protectionUsed === undefined ? undefined : { "protection-used": protectionUsed },
+      },
+      title: "Junction sexual activity",
+    });
   }
 
   for (const sub of junctionDatedSubEntries(entry, ["detectedDeviations", "detected_deviations"])) {
@@ -3973,7 +4250,7 @@ function pushJunctionCycleDailyMeasurement(
       metric: string;
       value: number;
       unit: string;
-      qualifiers: Record<string, string>;
+      qualifiers?: MeasurementQualifiers;
     };
     title: string;
   },
@@ -3991,7 +4268,7 @@ function pushJunctionCycleDailyMeasurement(
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, input.facet),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
     fields: {
-      measurements: [input.measurement],
+      measurements: [stripUndefined(input.measurement)],
     },
   }));
 }
@@ -4650,6 +4927,7 @@ function pushObservationMetrics(
   context: NormalizationContext,
   metrics: readonly MetricDescriptor[],
   timestampOverride?: ReturnType<typeof resolveRecordTimestamp>,
+  legacyExternalRefs?: (facet: string) => DeviceExternalRefPayload[] | undefined,
 ): void {
   const timestamp = timestampOverride ?? resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const occurredAt = timestamp.occurredAt;
@@ -4681,6 +4959,7 @@ function pushObservationMetrics(
       // supersedes an existing generic Apple HRV event instead of duplicating
       // it under the corrected SDNN metric.
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
+      legacyExternalRefs: legacyExternalRefs?.(metric.metric),
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
       fields: {
         metric: metricKey,
@@ -4779,6 +5058,21 @@ function resolveMetricDescriptorValue(
   return null;
 }
 
+function resolveJunctionSleepLatencyMinutes(entry: PlainObject): number | undefined {
+  const explicitlyNamedMinutes = firstNumberFromPaths(
+    entry,
+    JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
+  );
+  if (explicitlyNamedMinutes !== undefined) {
+    return explicitlyNamedMinutes;
+  }
+
+  return secondsToMinutes(firstNumberFromPaths(
+    entry,
+    JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
+  ));
+}
+
 function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undefined {
   // Get Summary reports these buckets in minutes and `daily_movement` as
   // deprecated equivalent-walking meters. Sense's `*_second` query columns
@@ -4803,6 +5097,16 @@ function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undef
 
   return totalActivityMinutes <= 24 * 60
     ? totalActivityMinutes
+    : undefined;
+}
+
+function resolveJunctionActivityIntensityMinutes(
+  entry: PlainObject,
+  intensity: "low" | "medium" | "high",
+): number | undefined {
+  const minutes = firstNumberFromPaths(entry, [intensity]);
+  return minutes !== undefined && minutes >= 0 && minutes <= 24 * 60
+    ? minutes
     : undefined;
 }
 
@@ -4958,6 +5262,19 @@ function buildStableSummaryResourceId(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string {
+  if (resourceContext.resource === "profile") {
+    const profileResourceId = buildStableProfileResourceId(
+      entry,
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      timestamp.occurredAt,
+    );
+    if (profileResourceId) {
+      return profileResourceId;
+    }
+  }
+
   const explicitId = resourceContext.resource === "workouts"
     ? firstStringFromPaths(entry, JUNCTION_WORKOUT_STABLE_ID_PATHS)
     : resourceContext.resource === "meal"
@@ -4984,6 +5301,72 @@ function buildStableSummaryResourceId(
       ...(resourceContext.fallbackIdentityDisambiguator ? [resourceContext.fallbackIdentityDisambiguator] : []),
     ] : []),
   ])}`;
+}
+
+function buildStableProfileResourceId(
+  entry: PlainObject,
+  sourceProviderSlug: string | null | undefined,
+  sourceType: string | null | undefined,
+  sourceInstanceId: string | null | undefined,
+  updatedAt: string | undefined,
+): string | undefined {
+  const retainedResourceId = firstStringFromPaths(entry, ["stableResourceId"]);
+  if (retainedResourceId && /^profile-[a-f0-9]{16}$/u.test(retainedResourceId)) {
+    return retainedResourceId;
+  }
+
+  const explicitId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+  if (explicitId) {
+    return `profile-${shortHash([
+      sourceProviderSlug,
+      sourceType,
+      sourceInstanceId,
+      explicitId,
+    ])}`;
+  }
+
+  return updatedAt
+    ? `profile-${shortHash([
+        "profile",
+        sourceProviderSlug,
+        sourceType,
+        sourceInstanceId,
+        updatedAt,
+      ])}`
+    : undefined;
+}
+
+function buildJunctionProfileLegacyExternalRefs(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  providerTimestampRaw: unknown,
+  facet: string,
+): DeviceExternalRefPayload[] | undefined {
+  if (
+    firstStringFromPaths(entry, ["stableResourceId"])
+    || firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
+  ) {
+    return undefined;
+  }
+
+  const rawTimestamp = stringId(providerTimestampRaw);
+  if (!rawTimestamp) {
+    return undefined;
+  }
+
+  const primary = makeJunctionExternalRef(resourceContext, entry, timestamp, facet);
+  const legacyResourceId = `profile-${shortHash([
+    "profile",
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType,
+    resourceContext.origin.sourceInstanceId,
+    rawTimestamp,
+  ])}`;
+
+  return legacyResourceId === primary.resourceId
+    ? undefined
+    : [{ ...primary, resourceId: legacyResourceId }];
 }
 
 function buildStableTimeseriesResourceId(
