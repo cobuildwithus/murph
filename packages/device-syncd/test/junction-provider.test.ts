@@ -7195,25 +7195,62 @@ test("Junction reconcile keeps same-time Oura notes with different tags", async 
   );
 });
 
-test("Junction reconcile keeps distinct same-time sparse metabolic records", async () => {
+test("Junction reconcile applies metabolic corrections and anchors sparse intervals at start", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
     if (url.pathname === "/v2/user/providers/junction-user-1") {
       return createJsonResponse({
-        providers: [{
-          id: "provider-apple-health-1",
-          slug: "apple_health_kit",
-          name: "Apple Health",
-          status: "connected",
-          resource_availability: {
-            carbohydrates: true,
-            insulin_injection: true,
+        providers: [
+          {
+            id: "provider-apple-health-1",
+            slug: "apple_health_kit",
+            name: "Apple Health",
+            status: "connected",
+            resource_availability: {
+              carbohydrates: true,
+              insulin_injection: true,
+            },
           },
-        }],
+          {
+            id: "provider-libreview-1",
+            slug: "abbott_libreview",
+            name: "LibreView",
+            status: "connected",
+            resource_availability: { glucose: true },
+          },
+        ],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/glucose/grouped") {
+      const original = {
+        id: "glucose-provider-row-old",
+        source_device_id: "libre-device-old",
+        timestamp: "2026-04-03T01:00:00+00:00",
+        unit: "mmol/L",
+        value: 5,
+      };
+      return createJsonResponse({
+        groups: {
+          abbott_libreview: [{
+            data: [
+              original,
+              { ...original },
+              {
+                ...original,
+                id: "glucose-provider-row-correction",
+                source_device_id: "libre-device-correction",
+                value: 7,
+              },
+            ],
+            source: { provider: "abbott_libreview", type: "cgm" },
+          }],
+        },
       });
     }
     if (url.pathname === "/v2/timeseries/junction-user-1/carbohydrates/grouped") {
-      const first = {
+      const original = {
+        id: "carbohydrate-provider-row-old",
+        source_device_id: "apple-phone-old",
         start: "2026-04-02T18:00:00.000Z",
         end: "2026-04-02T18:01:00.000Z",
         unit: "g",
@@ -7222,14 +7259,32 @@ test("Junction reconcile keeps distinct same-time sparse metabolic records", asy
       return createJsonResponse({
         groups: {
           apple_health_kit: [{
-            data: [first, { ...first }, { ...first, value: 40 }],
+            data: [
+              original,
+              { ...original },
+              {
+                ...original,
+                id: "carbohydrate-provider-row-correction",
+                source_device_id: "apple-phone-correction",
+                end: "2026-04-02T18:02:00.000Z",
+                value: 40,
+              },
+              {
+                start: "2026-04-02T23:59:59.000Z",
+                end: "2026-04-03T00:00:01.000Z",
+                unit: "g",
+                value: 15,
+              },
+            ],
             source: { provider: "apple_health_kit", type: "phone" },
           }],
         },
       });
     }
     if (url.pathname === "/v2/timeseries/junction-user-1/insulin_injection/grouped") {
-      const first = {
+      const original = {
+        id: "insulin-provider-row-old",
+        source_device_id: "apple-phone-old",
         start: "2026-04-02T18:05:00.000Z",
         end: "2026-04-02T18:06:00.000Z",
         type: "rapid_acting",
@@ -7240,7 +7295,17 @@ test("Junction reconcile keeps distinct same-time sparse metabolic records", asy
       return createJsonResponse({
         groups: {
           apple_health_kit: [{
-            data: [first, { ...first }, { ...first, value: 4 }],
+            data: [
+              original,
+              { ...original },
+              {
+                ...original,
+                id: "insulin-provider-row-correction",
+                source_device_id: "apple-phone-correction",
+                end: "2026-04-02T18:07:00.000Z",
+                value: 4,
+              },
+            ],
             source: { provider: "apple_health_kit", type: "phone" },
           }],
         },
@@ -7252,7 +7317,7 @@ test("Junction reconcile keeps distinct same-time sparse metabolic records", asy
     throw new Error(`Unexpected request: ${url.toString()}`);
   }, {
     summaryResources: ["activity"],
-    timeseriesResources: ["carbohydrates", "insulin_injection"],
+    timeseriesResources: ["glucose", "carbohydrates", "insulin_injection"],
   });
   const importedSnapshots: unknown[] = [];
 
@@ -7271,18 +7336,28 @@ test("Junction reconcile keeps distinct same-time sparse metabolic records", asy
     }),
   );
 
-  const metabolicRecords = (resource: "carbohydrates" | "insulin_injection") =>
+  const metabolicRecords = (resource: "glucose" | "carbohydrates" | "insulin_injection") =>
     importedSnapshots.flatMap((snapshot) => {
       const timeseries = (snapshot as { timeseries?: Record<string, unknown[]> }).timeseries;
       return timeseries?.[resource] ?? [];
     });
   assert.deepEqual(
-    metabolicRecords("carbohydrates").map((record) => (record as { value?: number }).value).sort(),
-    [25, 40],
+    metabolicRecords("glucose").map((record) => (record as { value?: number }).value),
+    [7],
   );
   assert.deepEqual(
-    metabolicRecords("insulin_injection").map((record) => (record as { value?: number }).value).sort(),
-    [2, 4],
+    metabolicRecords("carbohydrates").map((record) => (record as { value?: number }).value).sort(),
+    [15, 40],
+  );
+  assert.deepEqual(
+    metabolicRecords("insulin_injection").map((record) => (record as { value?: number }).value),
+    [4],
+  );
+  assert.equal(
+    metabolicRecords("carbohydrates").some((record) =>
+      (record as { start?: string }).start === "2026-04-02T23:59:59.000Z"
+    ),
+    true,
   );
 });
 

@@ -2689,6 +2689,7 @@ export function createJunctionDeviceSyncProvider(
         records.push(
           ...filterJunctionTimeseriesRecordsToWindow(
             chunkRecords,
+            resource,
             chunkWindowStart,
             chunkWindowEnd,
           ),
@@ -5080,6 +5081,27 @@ function isBlockedJunctionImportSourceIdentityContainerKey(key: string): boolean
 }
 
 function dedupeJunctionTimeseriesRecords(resource: string, records: unknown[]): unknown[] {
+  if (isJunctionMetabolicTimeseriesResource(resource)) {
+    const latestByKey = new Map<string, { index: number; record: unknown }>();
+    const unkeyed: Array<{ index: number; record: unknown }> = [];
+
+    records.forEach((record, index) => {
+      const key = buildJunctionTimeseriesRecordKey(resource, record);
+      if (!key) {
+        unkeyed.push({ index, record });
+        return;
+      }
+
+      // Junction defines same-key later rows as corrections. Preserve the
+      // latest provider row and its provenance rather than the first value.
+      latestByKey.set(key, { index, record });
+    });
+
+    return [...unkeyed, ...latestByKey.values()]
+      .sort((left, right) => left.index - right.index)
+      .map(({ record }) => record);
+  }
+
   const seen = new Set<string>();
   const deduped: unknown[] = [];
 
@@ -5110,6 +5132,7 @@ function dedupeJunctionTimeseriesSnapshotRecords(
 
 function filterJunctionTimeseriesRecordsToWindow(
   records: readonly unknown[],
+  resource: string,
   windowStart: string,
   windowEnd: string,
 ): unknown[] {
@@ -5124,7 +5147,15 @@ function filterJunctionTimeseriesRecordsToWindow(
     if (!entry) {
       return true;
     }
-    const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry);
+    const sourceProviderSlug = normalizeProviderSlug(resolveJunctionOrigin(entry).sourceProviderSlug);
+    if (isJunctionFloatingTimestampSourceProvider(sourceProviderSlug)) {
+      // Libre timestamps are provider-local wall times whose serialized +00
+      // suffix is not UTC. The provider query is already bounded; a UTC
+      // comparison here would incorrectly discard local boundary records.
+      return true;
+    }
+
+    const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry, resource);
     if (!timestamp) {
       return true;
     }
@@ -5144,33 +5175,44 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
 
   const origin = resolveJunctionOrigin(entry);
   const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
-  const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry);
+  const rawTimestamp = resolveJunctionTimeseriesRecordTimestamp(entry, resource);
+  const timestamp = normalizeJunctionTimeseriesRecordTimestampIdentity(
+    rawTimestamp,
+    sourceProviderSlug,
+  );
   if (!sourceProviderSlug || !timestamp) {
     return null;
   }
 
-  return JSON.stringify([
+  const baseKey = [
     "junction-timeseries",
     resource,
     sourceProviderSlug,
     normalizeString(origin.sourceType) ?? "",
+    timestamp,
+  ];
+
+  if (isJunctionMetabolicTimeseriesResource(resource)) {
+    return JSON.stringify(baseKey);
+  }
+
+  return JSON.stringify([
+    ...baseKey.slice(0, 4),
     normalizeString(origin.sourceInstanceId) ?? "",
     timestamp,
     ...junctionTimeseriesRecordValueIdentity(resource, entry),
   ]);
 }
 
-// Sparse per-record resources can carry distinct values at the same timestamp,
-// so pre-import dedupe must use the same documented fields that the importer
-// uses for fallback identity. A stable provider row id wins when present.
+// Non-metabolic sparse resources can carry distinct values at the same
+// timestamp. Metabolic resources return above using Junction's documented
+// primary key, where a later same-key row is a correction.
 function junctionTimeseriesRecordValueIdentity(
   resource: string,
   entry: Record<string, unknown>,
 ): string[] {
   if (
     resource !== "blood_pressure"
-    && resource !== "carbohydrates"
-    && resource !== "insulin_injection"
     && resource !== "note"
   ) {
     return [];
@@ -5196,57 +5238,97 @@ function junctionTimeseriesRecordValueIdentity(
     ];
   }
 
-  if (resource === "carbohydrates") {
-    return [
-      String(entry.start ?? ""),
-      String(entry.end ?? ""),
-      String(entry.value ?? ""),
-      String(entry.unit ?? ""),
-    ];
-  }
-
-  if (resource === "insulin_injection") {
-    return [
-      String(entry.start ?? ""),
-      String(entry.end ?? ""),
-      String(entry.value ?? ""),
-      String(entry.unit ?? ""),
-      String(entry.type ?? ""),
-      String(entry.delivery_mode ?? ""),
-      String(entry.delivery_form ?? ""),
-      String(entry.bolus_purpose ?? ""),
-    ];
-  }
-
   // Field names mirror the importer's blood-pressure value paths.
   return [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
 }
 
-function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {
-  for (const key of [
-    "observedAt",
-    "observed_at",
-    "observed_at_utc",
-    "timestamp",
-    "time",
-    "date",
-    "day",
-    "end",
-    "endAt",
-    "end_at",
-    "start",
-    "startAt",
-    "start_at",
-  ]) {
+function resolveJunctionTimeseriesRecordTimestamp(
+  record: Record<string, unknown>,
+  resource?: string,
+): string | null {
+  const keys = resource === "carbohydrates" || resource === "insulin_injection"
+    ? ["start"]
+    : [
+        "observedAt",
+        "observed_at",
+        "observed_at_utc",
+        "timestamp",
+        "time",
+        "date",
+        "day",
+        "end",
+        "endAt",
+        "end_at",
+        "start",
+        "startAt",
+        "start_at",
+      ];
+
+  for (const key of keys) {
     const normalized = normalizeString(record[key]);
     if (!normalized) {
       continue;
     }
 
-    return toIsoTimestampIfValid(normalized) ?? normalized;
+    return normalized;
   }
 
   return null;
+}
+
+function isJunctionMetabolicTimeseriesResource(resource: string): boolean {
+  return resource === "glucose"
+    || resource === "carbohydrates"
+    || resource === "insulin_injection";
+}
+
+function isJunctionFloatingTimestampSourceProvider(
+  sourceProviderSlug: string | null | undefined,
+): boolean {
+  return sourceProviderSlug === "abbott_libreview" || sourceProviderSlug === "freestyle_libre";
+}
+
+function normalizeJunctionTimeseriesRecordTimestampIdentity(
+  value: string | null,
+  sourceProviderSlug: string | null,
+): string | null {
+  if (!value) return null;
+
+  if (isJunctionFloatingTimestampSourceProvider(sourceProviderSlug)) {
+    const floatingIdentity = normalizeJunctionFloatingTimestampIdentity(value);
+    return floatingIdentity;
+  }
+
+  return toIsoTimestampIfValid(value) ?? value;
+}
+
+function normalizeJunctionFloatingTimestampIdentity(value: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ t](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:z|[+-]00:?00)?$/iu.exec(
+    value.trim(),
+  );
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6] ?? "0");
+  const validation = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  if (
+    validation.getUTCFullYear() !== year
+    || validation.getUTCMonth() !== month - 1
+    || validation.getUTCDate() !== day
+    || validation.getUTCHours() !== hour
+    || validation.getUTCMinutes() !== minute
+    || validation.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+
+  const fraction = (match[7] ?? "").replace(/0+$/u, "");
+  return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${String(second).padStart(2, "0")}`
+    + (fraction ? `.${fraction}` : "");
 }
 
 function buildJunctionRedirectUrl(callbackUrl: string, state: string): string {

@@ -5,6 +5,7 @@ import {
   formatTimeZoneDateTimeParts,
   ID_PREFIXES,
   MEAL_MICRONUTRIENT_KEYS,
+  normalizeIanaTimeZone,
   parseCompanionHrvRmssdAdmissionId,
   parseCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
@@ -1407,6 +1408,7 @@ interface JunctionDailyTimeseriesObservationDescriptor {
 interface JunctionDailyTimeseriesDescriptor {
   normalizeValue: (value: unknown) => number | undefined;
   observations: readonly JunctionDailyTimeseriesObservationDescriptor[];
+  sourceUnit?: string;
   unit: string;
   valuePaths: readonly string[];
 }
@@ -1562,6 +1564,7 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
         unit: "%",
       },
     ],
+    sourceUnit: "mmol/L",
     unit: "mg/dL",
     valuePaths: JUNCTION_GLUCOSE_VALUE_PATHS,
   }],
@@ -1581,8 +1584,13 @@ const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
 // optional delivery qualifiers. Carbohydrates use `start`/`end`/`value` with
 // exact unit `g`; their documented `type` is always null.
 const JUNCTION_CARBOHYDRATES_RESOURCE = "carbohydrates";
+const JUNCTION_GLUCOSE_RESOURCE = "glucose";
 const JUNCTION_INSULIN_INJECTION_RESOURCE = "insulin_injection";
 const JUNCTION_NOTE_RESOURCE = "note";
+type JunctionMetabolicTimeseriesResource =
+  | typeof JUNCTION_CARBOHYDRATES_RESOURCE
+  | typeof JUNCTION_GLUCOSE_RESOURCE
+  | typeof JUNCTION_INSULIN_INJECTION_RESOURCE;
 
 // Derived from every bounded timeseries handler so receipt hashing cannot drift
 // from normalization. Inclusion here does not authorize array retention: every
@@ -1746,6 +1754,11 @@ interface JunctionSparseMetabolicInterval {
   value: number;
 }
 
+interface JunctionLatestMetabolicTimeseriesEntry extends JunctionResolvedResourceEntry {
+  index: number;
+  readingIdentityHash: string;
+}
+
 function pushJunctionInsulinInjectionReadings(
   payload: unknown,
   resource: string,
@@ -1753,21 +1766,15 @@ function pushJunctionInsulinInjectionReadings(
   context: NormalizationContext,
 ): void {
   const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
-  const seenReadingIdentityHashes = new Set<string>();
+  let readingCount = 0;
 
-  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
-    const resourceContext = buildResourceContext({
-      entry,
-      originFallback,
-      resource,
-      resourceSlug,
-      identityKind: "timeseries",
-      index,
-      fallbackArtifactRole: baseArtifactRole,
-      context,
-    });
-    if (!resourceContext) continue;
-
+  for (const { entry, readingIdentityHash, resourceContext } of latestJunctionMetabolicTimeseriesEntries({
+    payload,
+    resource: JUNCTION_INSULIN_INJECTION_RESOURCE,
+    resourceSlug,
+    fallbackArtifactRole: baseArtifactRole,
+    context,
+  })) {
     const interval = resolveJunctionSparseMetabolicInterval({
       context,
       entry,
@@ -1780,21 +1787,7 @@ function pushJunctionInsulinInjectionReadings(
     const deliveryMode = normalizeJunctionDocumentedLabel(entry.delivery_mode);
     const deliveryForm = normalizeJunctionDocumentedLabel(entry.delivery_form);
     const bolusPurpose = normalizeJunctionDocumentedLabel(entry.bolus_purpose);
-    const readingIdentityHash = buildJunctionSparseMetabolicReadingIdentityHash({
-      entry,
-      resourceContext,
-      fallbackParts: [
-        interval.occurredAt,
-        interval.endAt,
-        interval.value,
-        insulinType,
-        deliveryMode,
-        deliveryForm,
-        bolusPurpose,
-      ],
-    });
-    if (seenReadingIdentityHashes.has(readingIdentityHash)) continue;
-    seenReadingIdentityHashes.add(readingIdentityHash);
+    readingCount += 1;
 
     const role = `${baseArtifactRole}:${interval.dayKey}:${readingIdentityHash}`;
     pushEvidencePart(
@@ -1858,7 +1851,7 @@ function pushJunctionInsulinInjectionReadings(
     }));
   }
 
-  if (seenReadingIdentityHashes.size === 0) {
+  if (readingCount === 0) {
     pushJunctionEmptySparseTimeseriesArtifact(context, resource, resourceSlug, "junction.insulin_injection_reading.v1");
   }
 }
@@ -1870,21 +1863,15 @@ function pushJunctionCarbohydrateReadings(
   context: NormalizationContext,
 ): void {
   const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
-  const seenReadingIdentityHashes = new Set<string>();
+  let readingCount = 0;
 
-  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
-    const resourceContext = buildResourceContext({
-      entry,
-      originFallback,
-      resource,
-      resourceSlug,
-      identityKind: "timeseries",
-      index,
-      fallbackArtifactRole: baseArtifactRole,
-      context,
-    });
-    if (!resourceContext) continue;
-
+  for (const { entry, readingIdentityHash, resourceContext } of latestJunctionMetabolicTimeseriesEntries({
+    payload,
+    resource: JUNCTION_CARBOHYDRATES_RESOURCE,
+    resourceSlug,
+    fallbackArtifactRole: baseArtifactRole,
+    context,
+  })) {
     const interval = resolveJunctionSparseMetabolicInterval({
       context,
       entry,
@@ -1893,13 +1880,7 @@ function pushJunctionCarbohydrateReadings(
     });
     if (!interval) continue;
 
-    const readingIdentityHash = buildJunctionSparseMetabolicReadingIdentityHash({
-      entry,
-      resourceContext,
-      fallbackParts: [interval.occurredAt, interval.endAt, interval.value],
-    });
-    if (seenReadingIdentityHashes.has(readingIdentityHash)) continue;
-    seenReadingIdentityHashes.add(readingIdentityHash);
+    readingCount += 1;
 
     const role = `${baseArtifactRole}:${interval.dayKey}:${readingIdentityHash}`;
     pushEvidencePart(
@@ -1954,7 +1935,7 @@ function pushJunctionCarbohydrateReadings(
     }));
   }
 
-  if (seenReadingIdentityHashes.size === 0) {
+  if (readingCount === 0) {
     pushJunctionEmptySparseTimeseriesArtifact(context, resource, resourceSlug, "junction.carbohydrate_reading.v1");
   }
 }
@@ -1973,8 +1954,21 @@ function resolveJunctionSparseMetabolicInterval(input: {
     return null;
   }
 
-  const occurredAt = resolveSafeTimestamp(startRaw, input.resourceContext.sourceProviderSlug);
-  const endAt = resolveSafeTimestamp(endRaw, input.resourceContext.sourceProviderSlug);
+  const floatingTimeZone = hasFloatingTimestampSourceProvider(input.resourceContext.sourceProviderSlug)
+    ? resolveJunctionFloatingTimestampTimeZone(input.entry, input.context.defaultTimeZone)
+    : undefined;
+  const floatingStart = floatingTimeZone
+    ? resolveJunctionFloatingTimestamp(startRaw, floatingTimeZone)
+    : null;
+  const floatingEnd = floatingTimeZone
+    ? resolveJunctionFloatingTimestamp(endRaw, floatingTimeZone)
+    : null;
+  const occurredAt = floatingTimeZone
+    ? floatingStart?.timestamp
+    : resolveSafeTimestamp(startRaw, input.resourceContext.sourceProviderSlug);
+  const endAt = floatingTimeZone
+    ? floatingEnd?.timestamp
+    : resolveSafeTimestamp(endRaw, input.resourceContext.sourceProviderSlug);
   if (!occurredAt || !endAt || Date.parse(endAt) < Date.parse(occurredAt)) {
     return null;
   }
@@ -1984,7 +1978,7 @@ function resolveJunctionSparseMetabolicInterval(input: {
     input.context,
     input.resourceContext.sourceProviderSlug,
   );
-  const dayKey = resolveJunctionTimeseriesAggregateDayKey(
+  const dayKey = floatingStart?.dayKey ?? resolveJunctionTimeseriesAggregateDayKey(
     input.entry,
     timestamp,
     occurredAt,
@@ -1997,8 +1991,9 @@ function resolveJunctionSparseMetabolicInterval(input: {
     endAt,
     occurredAt,
     recordedAt: timestamp.recordedAt,
-    timestamp: withTimestampOverride(timestamp, { occurredAt, observedAtRaw: startRaw }),
-    timeZone: firstStringFromPaths(input.entry, ["timeZone", "timezone", "time_zone"]),
+    timestamp: withTimestampOverride(timestamp, { occurredAt, dayKey, observedAtRaw: startRaw }),
+    timeZone: floatingTimeZone
+      ?? firstStringFromPaths(input.entry, ["timeZone", "timezone", "time_zone"]),
     value: roundJunctionDailyAggregateValue(value),
   };
 }
@@ -2009,16 +2004,57 @@ function normalizeJunctionDocumentedLabel(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
-function buildJunctionSparseMetabolicReadingIdentityHash(input: {
-  entry: PlainObject;
-  fallbackParts: readonly unknown[];
-  resourceContext: ResourceContext;
-}): string {
-  const providerRecordId = firstStringFromPaths(input.entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
-  return shortHash([
-    input.resourceContext.externalRefResourceType,
-    ...(providerRecordId ? ["provider-id", providerRecordId] : ["content", ...input.fallbackParts]),
-  ]);
+function latestJunctionMetabolicTimeseriesEntries(input: {
+  context: NormalizationContext;
+  fallbackArtifactRole: string;
+  payload: unknown;
+  resource: JunctionMetabolicTimeseriesResource;
+  resourceSlug: string;
+}): JunctionLatestMetabolicTimeseriesEntry[] {
+  const latestByPrimaryKey = new Map<string, JunctionLatestMetabolicTimeseriesEntry>();
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(input.payload).entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource: input.resource,
+      resourceSlug: input.resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: input.fallbackArtifactRole,
+      context: input.context,
+    });
+    if (!resourceContext) continue;
+
+    const sampleTimestampRaw = input.resource === JUNCTION_GLUCOSE_RESOURCE
+      ? firstStringFromPaths(entry, ["timestamp"])
+      : firstStringFromPaths(entry, ["start"]);
+    const sampleTimestampIdentity = normalizeJunctionTimeseriesSampleTimestampIdentity(
+      sampleTimestampRaw,
+      resourceContext.sourceProviderSlug,
+    );
+    if (!sampleTimestampIdentity) continue;
+
+    // Junction's documented timeseries primary key is resource + source
+    // provider + source type + sample timestamp. Later rows with that exact
+    // key are corrections, even when provider row ids, source instances,
+    // interval ends, values, or qualifiers differ.
+    const primaryKeyParts = [
+      input.resource,
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType ?? "",
+      sampleTimestampIdentity,
+    ] as const;
+    const primaryKey = JSON.stringify(primaryKeyParts);
+    latestByPrimaryKey.set(primaryKey, {
+      entry,
+      index,
+      readingIdentityHash: shortHash(primaryKeyParts),
+      resourceContext,
+    });
+  }
+
+  return [...latestByPrimaryKey.values()].sort((left, right) => left.index - right.index);
 }
 
 function pushJunctionEmptySparseTimeseriesArtifact(
@@ -2056,6 +2092,7 @@ function pushJunctionDailyTimeseriesObservations(
     resource,
     resourceSlug,
     context,
+    sourceUnit: descriptor.sourceUnit,
     valuePaths: descriptor.valuePaths,
     normalizeValue: descriptor.normalizeValue,
   })) {
@@ -2114,24 +2151,41 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   payload: unknown;
   resource: string;
   resourceSlug: string;
+  sourceUnit?: string;
   valuePaths: readonly string[];
 }): JunctionDailyTimeseriesAggregate[] {
   const evidencePartRole = `junction-timeseries-daily-${input.resourceSlug}`;
   const aggregates = new Map<string, JunctionDailyTimeseriesAggregate>();
+  const resolvedEntries: JunctionResolvedResourceEntry[] = input.resource === JUNCTION_GLUCOSE_RESOURCE
+    ? latestJunctionMetabolicTimeseriesEntries({
+        context: input.context,
+        fallbackArtifactRole: evidencePartRole,
+        payload: input.payload,
+        resource: JUNCTION_GLUCOSE_RESOURCE,
+        resourceSlug: input.resourceSlug,
+      })
+    : timeseriesResourceEntries(input.payload).flatMap(
+        ({ entry, originFallback }, index): JunctionResolvedResourceEntry[] => {
+          const resourceContext = buildResourceContext({
+            entry,
+            originFallback,
+            resource: input.resource,
+            resourceSlug: input.resourceSlug,
+            identityKind: "timeseries",
+            index,
+            fallbackArtifactRole: evidencePartRole,
+            context: input.context,
+          });
 
-  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(input.payload).entries()) {
-    const resourceContext = buildResourceContext({
-      entry,
-      originFallback,
-      resource: input.resource,
-      resourceSlug: input.resourceSlug,
-      identityKind: "timeseries",
-      index,
-      fallbackArtifactRole: evidencePartRole,
-      context: input.context,
-    });
+          return resourceContext ? [{ entry, resourceContext }] : [];
+        },
+      );
 
-    if (!resourceContext) {
+  for (const { entry, resourceContext } of resolvedEntries) {
+    if (
+      input.sourceUnit !== undefined
+      && firstStringFromPaths(entry, ["unit"]) !== input.sourceUnit
+    ) {
       continue;
     }
 
@@ -2148,7 +2202,9 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const key = [
       resourceContext.externalRefResourceType,
       resourceContext.origin.sourceType ?? "",
-      resourceContext.origin.sourceInstanceId ?? "",
+      ...(input.resource === JUNCTION_GLUCOSE_RESOURCE
+        ? []
+        : [resourceContext.origin.sourceInstanceId ?? ""]),
       dayKey,
     ].join("\u0000");
     const existing = aggregates.get(key);
@@ -2208,6 +2264,13 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     }
 
     if (sampleAt >= existing.lastSampleAt) {
+      if (input.resource === JUNCTION_GLUCOSE_RESOURCE) {
+        // Glucose deliberately aggregates across provider device/source-instance
+        // churn, so keep the latest surviving sample's compact provenance.
+        existing.entry = entry;
+        existing.resourceContext = resourceContext;
+        existing.timeZone = timeZone;
+      }
       existing.lastSampleAt = sampleAt;
       existing.lastRecordedAt = recordedAt;
       existing.timestamp = timestamp;
@@ -2292,7 +2355,9 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
     const role = `${aggregate.evidencePartRole}:${aggregate.dayKey}:${shortHash([
       aggregate.resourceContext.sourceProviderSlug,
       aggregate.resourceContext.origin.sourceType ?? "",
-      aggregate.resourceContext.origin.sourceInstanceId ?? "",
+      ...(resource === JUNCTION_GLUCOSE_RESOURCE
+        ? []
+        : [aggregate.resourceContext.origin.sourceInstanceId ?? ""]),
     ])}`;
 
     aggregate.evidencePartRole = role;
@@ -5419,7 +5484,9 @@ function buildStableTimeseriesResourceId(
     resourceContext.resourceSlug,
     resourceContext.sourceProviderSlug,
     resourceContext.origin.sourceType,
-    resourceContext.origin.sourceInstanceId,
+    ...(resourceContext.resource === JUNCTION_GLUCOSE_RESOURCE
+      ? []
+      : [resourceContext.origin.sourceInstanceId]),
     timestamp.observedAtRaw ?? timestamp.occurredAt,
   ])}`;
 }
@@ -5924,6 +5991,145 @@ function normalizeTimestamp(value: unknown): string | undefined {
 
   const time = Date.parse(value);
   return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
+}
+
+interface JunctionFloatingTimestampParts {
+  day: number;
+  dayKey: string;
+  hour: number;
+  identity: string;
+  millisecond: number;
+  minute: number;
+  month: number;
+  second: number;
+  year: number;
+}
+
+function normalizeJunctionTimeseriesSampleTimestampIdentity(
+  value: string | undefined,
+  sourceProviderSlug: string | undefined,
+): string | undefined {
+  if (!value) return undefined;
+
+  if (
+    hasFloatingTimestampSourceProvider(sourceProviderSlug)
+    || inferTimestampSemantics(value) === "floating"
+  ) {
+    return parseJunctionFloatingTimestamp(value)?.identity;
+  }
+
+  return normalizeTimestamp(value);
+}
+
+function resolveJunctionFloatingTimestampTimeZone(
+  entry: PlainObject,
+  defaultTimeZone: string | undefined,
+): string | undefined {
+  return normalizeIanaTimeZone(
+    firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+  ) ?? normalizeIanaTimeZone(defaultTimeZone) ?? undefined;
+}
+
+function resolveJunctionFloatingTimestamp(
+  value: string,
+  timeZone: string,
+): { dayKey: string; timestamp: string } | null {
+  const parsed = parseJunctionFloatingTimestamp(value);
+  const normalizedTimeZone = normalizeIanaTimeZone(timeZone);
+  if (!parsed || !normalizedTimeZone) return null;
+
+  const targetLocalMs = Date.UTC(
+    parsed.year,
+    parsed.month - 1,
+    parsed.day,
+    parsed.hour,
+    parsed.minute,
+    parsed.second,
+    parsed.millisecond,
+  );
+  let candidateMs = targetLocalMs;
+
+  try {
+    for (let iteration = 0; iteration < 4; iteration += 1) {
+      const candidateParts = formatTimeZoneDateTimeParts(candidateMs, normalizedTimeZone);
+      const candidateLocalMs = Date.UTC(
+        candidateParts.year,
+        candidateParts.month - 1,
+        candidateParts.day,
+        candidateParts.hour,
+        candidateParts.minute,
+        candidateParts.second,
+        parsed.millisecond,
+      );
+      const adjustmentMs = targetLocalMs - candidateLocalMs;
+      candidateMs += adjustmentMs;
+      if (adjustmentMs === 0) break;
+    }
+
+    const resolvedParts = formatTimeZoneDateTimeParts(candidateMs, normalizedTimeZone);
+    if (
+      resolvedParts.year !== parsed.year
+      || resolvedParts.month !== parsed.month
+      || resolvedParts.day !== parsed.day
+      || resolvedParts.hour !== parsed.hour
+      || resolvedParts.minute !== parsed.minute
+      || resolvedParts.second !== parsed.second
+    ) {
+      // Nonexistent DST wall times never converge to the requested components.
+      return null;
+    }
+
+    return {
+      dayKey: parsed.dayKey,
+      timestamp: new Date(candidateMs).toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseJunctionFloatingTimestamp(value: string): JunctionFloatingTimestampParts | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ t](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:z|[+-]00:?00)?$/iu.exec(
+    value.trim(),
+  );
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6] ?? "0");
+  const fraction = match[7] ?? "";
+  const millisecond = Number(`${fraction}000`.slice(0, 3));
+  const validation = new Date(Date.UTC(year, month - 1, day, hour, minute, second, millisecond));
+  if (
+    validation.getUTCFullYear() !== year
+    || validation.getUTCMonth() !== month - 1
+    || validation.getUTCDate() !== day
+    || validation.getUTCHours() !== hour
+    || validation.getUTCMinutes() !== minute
+    || validation.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+
+  const dayKey = `${match[1]}-${match[2]}-${match[3]}`;
+  const normalizedFraction = fraction.replace(/0+$/u, "");
+  const identity = `${dayKey}T${match[4]}:${match[5]}:${String(second).padStart(2, "0")}`
+    + (normalizedFraction ? `.${normalizedFraction}` : "");
+
+  return {
+    day,
+    dayKey,
+    hour,
+    identity,
+    millisecond,
+    minute,
+    month,
+    second,
+    year,
+  };
 }
 
 function resolveSafeTimestamp(value: unknown, sourceProviderSlug?: string): string | undefined {
@@ -6500,13 +6706,14 @@ function normalizeAfibBurdenPercent(value: unknown): number | undefined {
 
 // Junction normalizes glucose timeseries to mmol/L
 // (docs.junction.com/api-reference/data/timeseries/glucose); the plausibility
-// window is therefore mmol/L-shaped (1-35 covers meter and CGM extremes, and
+// window is therefore mmol/L-shaped (>0-35 covers the documented positive
+// domain and meter/CGM extremes, and
 // mg/dL-scale values fail closed instead of corrupting the metric). Convert
 // to mg/dL to match the `glucose` metric-catalog canonical unit.
 function normalizeGlucoseMilligramsPerDeciliter(value: unknown): number | undefined {
   const numeric = finiteNumber(value);
 
-  if (numeric === undefined || numeric < 1 || numeric > 35) {
+  if (numeric === undefined || numeric <= 0 || numeric > 35) {
     return undefined;
   }
 
