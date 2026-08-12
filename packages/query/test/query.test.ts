@@ -63,7 +63,11 @@ import {
   listMetricTargetsRuntime,
   selectMetricGoalProgressRuntime,
   summarizeWearableActivityRuntime,
+  summarizeWearableBodyStateRuntime,
   summarizeWearableDayRuntime,
+  summarizeWearableLatestRuntime,
+  summarizeWearableMetricLatestRuntime,
+  summarizeWearableMetricTrendRuntime,
   summarizeWearableRecoveryRuntime,
   summarizeWearableSleepRuntime,
   summarizeWearableSourceHealthRuntime,
@@ -4580,6 +4584,192 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
     } finally {
       database.close();
     }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("ordinary wearable reads rebuild carried v20 body projections before serving them", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-body-v20-reset-"));
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const bodyMetrics = [
+    ["weight", 72.4, "kg"],
+    ["body-fat-percentage", 18.4, "%"],
+    ["bmi", 23.7, "kg/m^2"],
+    ["lean-body-mass", 59.1, "kg"],
+    ["waist-circumference", 83.9, "cm"],
+    ["body-water-percentage", 51.8, "%"],
+    ["bone-mass-percentage", 4.2, "%"],
+    ["muscle-mass-percentage", 63.4, "%"],
+    ["visceral-fat-index", 7, "index"],
+  ] as const;
+  const newSummaryMetricKeys = [
+    "body-water-percentage",
+    "bone-mass-percentage",
+    "muscle-mass-percentage",
+    "visceral-fat-index",
+  ] as const;
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-05.jsonl"),
+      bodyMetrics.map(([metric, value, unit], index) => JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: `evt_body_v20_upgrade_${index}`,
+        kind: "observation",
+        occurredAt: `2026-05-20T08:${String(index).padStart(2, "0")}:00.000Z`,
+        recordedAt: `2026-05-20T08:${String(index + 10).padStart(2, "0")}:00.000Z`,
+        dayKey: "2026-05-20",
+        source: "device",
+        title: `Withings ${metric}`,
+        metric,
+        observationGrain: "summary",
+        value,
+        unit,
+        externalRef: {
+          system: "withings",
+          resourceType: "body-summary",
+          resourceId: `withings-body-v20-upgrade-${index}`,
+        },
+      })).join("\n").concat("\n"),
+      "utf8",
+    );
+
+    await rebuildQueryProjection(vaultRoot);
+
+    const staleBuiltAt = "2026-05-20T09:00:00.000Z";
+    let unchangedSourceManifest: Array<{
+      mtimeMs: number;
+      relativePath: string;
+      sizeBytes: number;
+    }> = [];
+    const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      const bodyRow = staleDatabase.prepare(`
+        SELECT id, summary_json AS summaryJson
+        FROM query_wearable_summaries
+        WHERE summary_kind = 'body_state' AND summary_date = '2026-05-20'
+      `).get() as { id: string; summaryJson: string } | undefined;
+      assert.ok(bodyRow);
+      const legacyBodySummary = JSON.parse(bodyRow.summaryJson) as Record<string, unknown>;
+      for (const field of [
+        "bodyWaterPercentage",
+        "boneMassPercentage",
+        "muscleMassPercentage",
+        "visceralFatIndex",
+      ]) {
+        assert.equal(Object.hasOwn(legacyBodySummary, field), true);
+        delete legacyBodySummary[field];
+      }
+      staleDatabase.prepare(`
+        UPDATE query_wearable_summaries
+        SET summary_json = ?
+        WHERE id = ?
+      `).run(JSON.stringify(legacyBodySummary), bodyRow.id);
+      staleDatabase.prepare(`
+        DELETE FROM query_metric_points
+        WHERE source_kind = 'wearable-summary'
+          AND metric_key IN (?, ?, ?, ?)
+      `).run(...newSummaryMetricKeys);
+      staleDatabase.prepare(`
+        UPDATE query_meta SET value = ? WHERE key = 'built_at'
+      `).run(staleBuiltAt);
+      staleDatabase.exec("PRAGMA user_version = 20;");
+      unchangedSourceManifest = staleDatabase.prepare(`
+        SELECT
+          relative_path AS relativePath,
+          size_bytes AS sizeBytes,
+          mtime_ms AS mtimeMs
+        FROM query_source_manifest
+        ORDER BY relative_path ASC
+      `).all() as typeof unchangedSourceManifest;
+    } finally {
+      staleDatabase.close();
+    }
+
+    assert.ok(unchangedSourceManifest.length > 0);
+    const staleStatus = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(staleStatus.exists, true);
+    assert.equal(staleStatus.builtAt, staleBuiltAt);
+    assert.equal(staleStatus.fresh, false);
+
+    const body = await summarizeWearableBodyStateRuntime(vaultRoot);
+    const latest = await summarizeWearableLatestRuntime(vaultRoot);
+    const weightLatest = await summarizeWearableMetricLatestRuntime(vaultRoot, "weight");
+    const weightTrend = await summarizeWearableMetricTrendRuntime(vaultRoot, "weight");
+
+    assert.equal(body.length, 1);
+    assert.equal(body[0]?.weightKg.selection.value, 72.4);
+    assert.equal(body[0]?.bodyFatPercentage.selection.value, 18.4);
+    assert.equal(body[0]?.bmi.selection.value, 23.7);
+    assert.equal(body[0]?.leanBodyMassKg.selection.value, 59.1);
+    assert.equal(body[0]?.waistCircumference.selection.value, 83.9);
+    assert.equal(body[0]?.bodyWaterPercentage.selection.value, 51.8);
+    assert.equal(body[0]?.boneMassPercentage.selection.value, 4.2);
+    assert.equal(body[0]?.muscleMassPercentage.selection.value, 63.4);
+    assert.equal(body[0]?.visceralFatIndex.selection.value, 7);
+    assert.equal(latest?.bodyState?.weightKg.selection.value, 72.4);
+    assert.equal(weightLatest?.value, 72.4);
+    assert.deepEqual(weightTrend?.points.map((point) => point.value), [72.4]);
+
+    const summaryPoints = await listMetricPointsRuntime(vaultRoot, { limit: null });
+    assert.deepEqual(
+      summaryPoints
+        .filter((point) => point.source.kind === "wearable-summary")
+        .map((point) => point.metricKey)
+        .filter((metricKey) => newSummaryMetricKeys.includes(
+          metricKey as typeof newSummaryMetricKeys[number],
+        ))
+        .sort(),
+      [...newSummaryMetricKeys].sort(),
+    );
+
+    const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+    try {
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
+      const rebuiltManifest = reopened.prepare(`
+        SELECT
+          relative_path AS relativePath,
+          size_bytes AS sizeBytes,
+          mtime_ms AS mtimeMs
+        FROM query_source_manifest
+        ORDER BY relative_path ASC
+      `).all();
+      assert.deepEqual(rebuiltManifest, unchangedSourceManifest);
+
+      const rebuiltRow = reopened.prepare(`
+        SELECT summary_json AS summaryJson
+        FROM query_wearable_summaries
+        WHERE summary_kind = 'body_state' AND summary_date = '2026-05-20'
+      `).get() as { summaryJson: string } | undefined;
+      assert.ok(rebuiltRow);
+      const rebuiltBodySummary = parseStoredWearableSummary<Record<string, unknown>>(
+        "body_state",
+        rebuiltRow.summaryJson,
+      );
+      assert.ok(rebuiltBodySummary);
+      for (const field of [
+        "bodyWaterPercentage",
+        "boneMassPercentage",
+        "muscleMassPercentage",
+        "visceralFatIndex",
+      ]) {
+        const envelope = rebuiltBodySummary[field] as {
+          selection?: { value?: unknown };
+        } | undefined;
+        assert.equal(typeof envelope?.selection?.value, "number");
+      }
+    } finally {
+      reopened.close();
+    }
+
+    const rebuiltStatus = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(rebuiltStatus.fresh, true);
+    assert.notEqual(rebuiltStatus.builtAt, staleBuiltAt);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
