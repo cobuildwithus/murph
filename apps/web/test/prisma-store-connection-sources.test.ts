@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
+import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 
 import { readCompanionDeviceSyncStatus } from "@/src/lib/device-sync/companion";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
@@ -431,63 +432,6 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     }));
   });
 
-  it("lists runtime snapshot connection sources with a bounded provider projection", async () => {
-    const { findMany, store } = createSourceStore([
-      createSourceRecord({
-        id: "dcs_unrelated",
-        sourceInstanceKey: "src_garmin_a",
-        sourceProviderSlug: "garmin",
-        status: "error",
-        lastSeenAt: new Date("2026-03-25T04:00:00.000Z"),
-      }),
-      createSourceRecord({
-        id: "dcs_disconnected",
-        sourceInstanceKey: "src_whoop_disconnected",
-        sourceProviderSlug: "whoop_v2",
-        status: "disconnected",
-        lastSeenAt: new Date("2026-03-25T03:00:00.000Z"),
-      }),
-      createSourceRecord({
-        id: "dcs_whoop_error",
-        sourceInstanceKey: "src_whoop_error",
-        sourceProviderSlug: "whoop_v2",
-        status: "error",
-        lastErrorCode: "TOKEN_REFRESH_FAILED",
-        lastSeenAt: new Date("2026-03-25T02:00:00.000Z"),
-      }),
-      createSourceRecord({
-        id: "dcs_whoop_connected",
-        sourceInstanceKey: "src_whoop_connected",
-        sourceProviderSlug: "whoop_v2",
-        status: "connected",
-        lastSeenAt: new Date("2026-03-25T01:00:00.000Z"),
-      }),
-    ]);
-
-    await expect(store.listRuntimeSnapshotConnectionSources({
-      connectionId: "dsc_parent",
-      limit: 1,
-      sourceProviderSlugs: ["whoop", "whoop_v2", "whoop-v2"],
-    })).resolves.toEqual([
-      expect.objectContaining({
-        id: "dcs_whoop_error",
-        sourceProviderSlug: "whoop_v2",
-      }),
-    ]);
-    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: 1,
-      where: {
-        connectionId: "dsc_parent",
-        sourceProviderSlug: {
-          in: ["whoop", "whoop_v2", "whoop-v2"],
-        },
-        status: {
-          not: "disconnected",
-        },
-      },
-    }));
-  });
-
   it("marks all non-disconnected sources for one parent connection disconnected", async () => {
     const { records, store, updateMany } = createSourceStore([
       createSourceRecord({
@@ -634,6 +578,69 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     expect(afterReconcile.get("garmin")?.lastDataAt).toBe("2026-07-05T00:00:00.000Z");
   });
 
+  it("uses one hard-bounded set source projection and fails closed on saturation", async () => {
+    const projectedRows = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT },
+      (_, index) => ({
+        ...createSourceRecord({
+          id: `dcs_${String(index).padStart(2, "0")}`,
+          sourceInstanceKey: `src_${String(index).padStart(2, "0")}`,
+          sourceProviderSlug: index % 2 === 0 ? "whoop" : "whoop_v2",
+        }),
+        projectionRowNumber: BigInt(index + 1),
+      }),
+    );
+    const queryRaw = vi.fn(async (query: unknown) => {
+      void query;
+      return projectedRows;
+    });
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $queryRaw: queryRaw,
+      } as never,
+    });
+
+    await expect(store.listBoundedConnectionSourcesForConnections({
+      connectionIds: ["dsc_parent", "dsc_parent"],
+      excludeDisconnected: true,
+      limitPerConnection: 1_000,
+      sourceProviderSlugs: ["whoop", "whoop_v2"],
+    })).resolves.toHaveLength(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
+    );
+
+    expect(queryRaw).toHaveBeenCalledOnce();
+    const query = queryRaw.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+      values?: readonly unknown[];
+    };
+    expect(query.strings?.join(" ")).toContain("ROW_NUMBER() OVER");
+    expect(query.strings?.join(" ")).toContain("status <> 'disconnected'");
+    expect(query.values).toContain(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT + 1,
+    );
+    expect(query.values).not.toContain(1_001);
+
+    queryRaw.mockResolvedValueOnce([{
+      ...createSourceRecord({
+        id: "dcs_saturated",
+        sourceInstanceKey: "src_saturated",
+        sourceProviderSlug: "whoop",
+      }),
+      projectionRowNumber: 33n,
+    }]);
+
+    await expect(store.listBoundedConnectionSourcesForConnections({
+      connectionIds: ["dsc_parent"],
+      limitPerConnection: 32,
+      sourceProviderSlugs: ["whoop"],
+    })).rejects.toMatchObject({
+      code: "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
+      retryable: false,
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the same-request receipt authoritative after source-arrival bookkeeping", async () => {
     const acceptedAt = "2026-07-25T19:00:00.000Z";
     const { store } = createSourceStore([
@@ -668,7 +675,10 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       status: "active",
       updatedAt: acceptedAt,
     };
-    vi.spyOn(store, "listConnectionsForUser").mockResolvedValue([connection]);
+    vi.spyOn(store, "listMemberConnectionStatuses").mockResolvedValue([{
+      id: connection.id,
+      status: "active",
+    }]);
 
     // This is the production ordering after durable webhook acceptance: write
     // the receipt at T, then best-effort stamp source data arrival at the same
@@ -698,6 +708,9 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       status: "disconnected",
       updatedAt: acceptedAt,
     });
+    vi.spyOn(store, "listBoundedConnectionSourcesForConnections").mockResolvedValue(
+      source ? [source] : [],
+    );
     await expect(readCompanionDeviceSyncStatus({
       memberId: "member_1",
       now: () => new Date("2026-07-25T20:00:00.000Z"),
