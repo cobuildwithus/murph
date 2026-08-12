@@ -7,6 +7,8 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_SCHEMA,
   ID_PREFIXES,
+  JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+  JUNCTION_WEARABLE_TAG_NOTE_TYPE,
   eventRevisionFromLifecycle,
   isDeletedEventLifecycle,
   serializeCompanionHrvRmssdObservation,
@@ -3346,62 +3348,177 @@ test("Junction normalizer lands sparse paired blood pressure readings as measure
   assert.doesNotMatch(artifactText, /"value":350|"systolic":350|"diastolic":95/u);
 });
 
-test("Junction normalizer lands Oura note tags without retaining note text", async () => {
-  const snapshot = {
+test("Junction normalizer lands note tags on one neutral, revision-stable spine", async () => {
+  const snapshot = (entries: readonly Record<string, unknown>[]) => ({
     importedAt: "2026-04-23T12:00:00.000Z",
     timeseries: {
       note: {
         groups: {
           oura: [{
-            data: [
-              {
-                start: "2026-04-22T18:05:00+02:00",
-                end: "2026-04-22T18:10:00+02:00",
-                tags: ["Sauna", "late meal", "Sauna"],
-                unit: "text",
-                value: "SENSITIVE_VALUE_SENTINEL_A",
-              },
-              {
-                start: "2026-04-22T18:05:00+02:00",
-                end: "2026-04-22T18:10:00+02:00",
-                tags: ["Alcohol"],
-                unit: "text",
-                value: "SENSITIVE_VALUE_SENTINEL_B",
-              },
-            ],
+            data: entries,
             source: { provider: "oura", type: "ring" },
           }],
         },
       },
     },
-  };
+  });
+  const initialSnapshot = snapshot([
+    {
+      start: "2026-04-22T18:05:00+02:00",
+      end: "2026-04-22T18:10:00+02:00",
+      tags: ["Sauna", "late meal", "Sauna"],
+      unit: "text",
+      value: "SENSITIVE_VALUE_SENTINEL_A",
+    },
+    {
+      start: "2026-04-22T18:05:00+02:00",
+      end: "2026-04-22T18:10:00+02:00",
+      tags: ["Alcohol"],
+      unit: "text",
+      value: "SENSITIVE_VALUE_SENTINEL_B",
+    },
+  ]);
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     connectionId: "conn-junction-oura",
     sourceKind: "poll",
     deliveryMode: "scheduled_reconcile",
     normalizerVersion: "junction-normalizer.v1",
-    snapshot,
+    snapshot: initialSnapshot,
   });
-  const tagEvents = (payload.events ?? []).filter((event) => event.kind === "intervention_session");
+  const noteEvents = (payload.events ?? []).filter((event) => event.kind === "note");
+  const changed = normalizeJunctionSnapshot(snapshot([{
+    start: "2026-04-22T18:05:00+02:00",
+    end: "2026-04-22T18:10:00+02:00",
+    tags: ["Headache"],
+    value: "SENSITIVE_VALUE_SENTINEL_C",
+  }]));
+  const cleared = normalizeJunctionSnapshot(snapshot([{
+    start: "2026-04-22T18:05:00+02:00",
+    end: "2026-04-22T18:10:00+02:00",
+    tags: [],
+    value: "SENSITIVE_VALUE_SENTINEL_D",
+  }]));
+  const missingTags = normalizeJunctionSnapshot(snapshot([{
+    start: "2026-04-22T18:05:00+02:00",
+    end: "2026-04-22T18:10:00+02:00",
+    value: "SENSITIVE_VALUE_SENTINEL_E",
+  }]));
+  const stableInitial = normalizeJunctionSnapshot(snapshot([{
+    id: "provider-note-1",
+    start: "2026-04-22T18:05:00+02:00",
+    tags: ["Sauna"],
+    value: "SENSITIVE_VALUE_SENTINEL_F",
+  }]));
+  const stableChanged = normalizeJunctionSnapshot(snapshot([{
+    id: "provider-note-1",
+    start: "2026-04-22T19:05:00+02:00",
+    tags: ["Headache"],
+    value: "SENSITIVE_VALUE_SENTINEL_G",
+  }]));
+  const changedNote = changed.events?.find((event) => event.kind === "note");
+  const clearedNote = cleared.events?.find((event) => event.kind === "note");
+  const stableInitialNote = stableInitial.events?.find((event) => event.kind === "note");
+  const stableChangedNote = stableChanged.events?.find((event) => event.kind === "note");
 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["note"]);
-  assert.deepEqual(
-    tagEvents.map((event) => event.fields?.interventionType).sort(),
-    ["alcohol", "late-meal", "sauna"],
-  );
-  assert.ok(tagEvents.every((event) => event.fields?.sessionStatus === "completed"));
-  assert.ok(tagEvents.every((event) => event.dayKey === "2026-04-22"));
-  assert.ok(tagEvents.every((event) => event.dataOrigin?.sourceProviderSlug === "oura"));
-  assert.equal(new Set(tagEvents.map((event) => event.externalRef?.resourceId)).size, 2);
-  assert.equal(new Set(tagEvents.map((event) => event.externalRef?.facet)).size, 3);
-  assert.equal(findJunctionNoteArtifacts(payload).length, 2);
+  assert.equal(noteEvents.length, 1);
+  assert.equal((payload.events ?? []).some((event) => event.kind === "intervention_session"), false);
+  assert.equal(noteEvents[0]?.fields?.noteType, JUNCTION_WEARABLE_TAG_NOTE_TYPE);
+  assert.equal(noteEvents[0]?.note, "Wearable tags");
+  assert.deepEqual(noteEvents[0]?.tags, ["alcohol", "late-meal", "sauna"]);
+  assert.equal(noteEvents[0]?.dayKey, "2026-04-22");
+  assert.equal(noteEvents[0]?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.equal(noteEvents[0]?.externalRef?.facet, JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET);
+  assert.match(noteEvents[0]?.externalRef?.resourceId ?? "", /^note-[a-f0-9]{16}$/u);
+  assert.equal(findJunctionNoteArtifacts(payload).length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
-  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /SENSITIVE_VALUE_SENTINEL/u);
-  assert.doesNotMatch(
-    JSON.stringify(payload),
-    /SENSITIVE_VALUE_SENTINEL/u,
+
+  // Source + timestamp is the bounded fallback spine when Junction omits an
+  // upstream note id. A changed or cleared tag set revises that same note.
+  assert.deepEqual(changedNote?.externalRef, noteEvents[0]?.externalRef);
+  assert.deepEqual(clearedNote?.externalRef, noteEvents[0]?.externalRef);
+  assert.deepEqual(changedNote?.tags, ["headache"]);
+  assert.deepEqual(clearedNote?.tags, []);
+  assert.equal(changed.events?.some((event) => event.kind === "intervention_session"), false);
+  assert.equal(cleared.events?.some((event) => event.kind === "intervention_session"), false);
+  assert.equal(findJunctionNoteArtifacts(changed).length, 1);
+  assert.equal(findJunctionNoteArtifacts(cleared).length, 1);
+
+  // A free-text-only row with no tag field stays out of canonical storage. An
+  // explicit provider id wins over mutable timestamps for later revisions.
+  assert.deepEqual(missingTags.events, []);
+  assert.equal(findJunctionNoteArtifacts(missingTags).length, 0);
+  assert.deepEqual(stableChangedNote?.externalRef, stableInitialNote?.externalRef);
+  assert.deepEqual(stableInitialNote?.tags, ["sauna"]);
+  assert.deepEqual(stableChangedNote?.tags, ["headache"]);
+  assert.notEqual(stableChangedNote?.occurredAt, stableInitialNote?.occurredAt);
+  assert.equal(stableChanged.events?.some((event) => event.kind === "intervention_session"), false);
+  assert.equal(
+    stableInitialNote?.externalRef?.resourceId,
+    createHash("sha256")
+      .update(JSON.stringify(["junction-oura-note", "ring", undefined, "provider-note-1"]))
+      .digest("hex")
+      .slice(0, 16),
+  );
+
+  assert.doesNotMatch(JSON.stringify(payload), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(changed), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(cleared), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(missingTags), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(stableInitial), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(stableChanged), /SENSITIVE_VALUE_SENTINEL/u);
+});
+
+test("Junction note ids remain scoped to their same-provider source instance", () => {
+  const snapshot = (firstSourceTags: readonly string[]) => ({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      note: [{
+        id: "provider-local-note-1",
+        sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        start: "2026-04-22T18:05:00.000Z",
+        tags: firstSourceTags,
+      }, {
+        id: "provider-local-note-1",
+        sourceInstanceId: "source-bbbbbbbbbbbbbbbbbbbbbbbb",
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        start: "2026-04-22T18:05:00.000Z",
+        tags: ["sauna"],
+      }],
+    },
+  });
+  const initial = normalizeJunctionSnapshot(snapshot(["headache"]));
+  const edited = normalizeJunctionSnapshot(snapshot([]));
+  const initialNotes = initial.events?.filter((event) => event.kind === "note") ?? [];
+  const editedNotes = edited.events?.filter((event) => event.kind === "note") ?? [];
+
+  assert.equal(initialNotes.length, 2);
+  assert.equal(findJunctionNoteArtifacts(initial).length, 2);
+  assert.equal(new Set(initialNotes.map((event) => event.externalRef?.resourceId)).size, 2);
+  assert.deepEqual(
+    initialNotes.map((event) => event.dataOrigin?.sourceInstanceId).sort(),
+    ["source-aaaaaaaaaaaaaaaaaaaaaaaa", "source-bbbbbbbbbbbbbbbbbbbbbbbb"],
+  );
+  assert.deepEqual(
+    editedNotes.map((event) => event.externalRef?.resourceId).sort(),
+    initialNotes.map((event) => event.externalRef?.resourceId).sort(),
+  );
+  assert.deepEqual(
+    editedNotes.find((event) =>
+      event.dataOrigin?.sourceInstanceId === "source-aaaaaaaaaaaaaaaaaaaaaaaa"
+    )?.tags,
+    [],
+  );
+  assert.deepEqual(
+    editedNotes.find((event) =>
+      event.dataOrigin?.sourceInstanceId === "source-bbbbbbbbbbbbbbbbbbbbbbbb"
+    )?.tags,
+    ["sauna"],
   );
 });
 
