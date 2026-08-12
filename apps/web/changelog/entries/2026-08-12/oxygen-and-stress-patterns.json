@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 300,
+  "item": {
+    "id": "oxygen-and-stress-patterns",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Oxygen and stress patterns without raw timelines",
+    "summary": "Murph can now retain bounded within-day oxygen and stress patterns when connected-source timing evidence is sufficient.",
+    "details": "The feature keeps compact burden, run, variability, and morning-versus-evening context; raw samples and full timeseries remain excluded.",
+    "relevanceTags": ["wearables", "oxygen", "stress", "privacy"],
+    "sourcePullRequests": [1703]
+  }
+}
