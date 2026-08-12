@@ -502,7 +502,7 @@ test("Junction REST diagnostics canonicalize resource aliases before allowlist c
       resource: "body_weight",
       canonicalResource: "weight",
       category: "timeseries",
-      configuredResource: false,
+      configuredResource: true,
       path: /\/v2\/timeseries\/junction-user-1\/body_weight\/grouped/u,
     },
     {
@@ -549,7 +549,7 @@ test("Junction REST diagnostics canonicalize resource aliases before allowlist c
   }
 });
 
-test("Junction resource jobs re-infer category for dropped canonicalized timeseries aliases", async () => {
+test("Junction resource jobs re-infer category for configured canonicalized timeseries aliases", async () => {
   const seenUrls: string[] = [];
   const provider = createProvider(async (input) => {
     const url = readUrl(input);
@@ -565,6 +565,23 @@ test("Junction resource jobs re-infer category for dropped canonicalized timeser
             body_weight: true,
           },
         }],
+      });
+    }
+
+    if (url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")) {
+      const windowStart = new URL(url).searchParams.get("start_date");
+      assert.ok(windowStart);
+      return createJsonResponse({
+        groups: {
+          withings: [{
+            data: [{
+              timestamp: windowStart,
+              unit: "kg",
+              value: 82.1,
+            }],
+            source: { provider: "withings", type: "scale" },
+          }],
+        },
       });
     }
 
@@ -589,6 +606,10 @@ test("Junction resource jobs re-infer category for dropped canonicalized timeser
   );
 
   assert.equal(seenUrls.some((url) => url.includes("/v2/summary/weight/")), false);
-  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")), false);
-  assert.equal(importedSnapshots.length, 0);
+  assert.equal(seenUrls.some((url) => url.includes("/v2/timeseries/junction-user-1/body_weight/grouped")), true);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.equal(snapshot.timeseries?.weight?.length, 2);
 });
