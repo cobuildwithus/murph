@@ -20,6 +20,7 @@ import {
 } from "@/src/lib/hosted-onboarding/errors";
 import {
   findActiveHostedVaultShares,
+  buildHostedVaultShareGenerationToken,
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -58,6 +59,13 @@ export const POST = withJsonError(async (request: Request) => {
     projectionScope: body.projectionScope,
   });
   if (shares.length === 0) {
+    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
+  }
+  if (
+    body.expectedGenerationToken
+    && body.expectedGenerationToken
+      !== buildHostedVaultShareGenerationToken(shares.map((share) => share.id))
+  ) {
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
 

@@ -45,6 +45,12 @@ const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_ITEM_ID_PREFIX =
   "system_mailbox_item_device_sync_dense_raw_retention";
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY =
   "device-sync.wake:dense-raw-retention";
+const HOSTED_VAULT_SHARE_PROJECTION_MAILBOX_DEDUPE_KEY_PREFIX =
+  "runtime-control:group-share-projection:";
+
+type HostedSystemMailboxSerializationKey =
+  | HostedSystemMailboxRouteAction
+  | "apply-vault-share-projection";
 
 export type HostedSystemMailboxRouteAction =
   | "apply-member-activation"
@@ -337,25 +343,19 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
-  if (input.allowedRouteActions) {
-    const item = input.state.pending.find((pending) =>
-      systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
-    ) ?? null;
-    return item
-      && systemMailboxItemIsDue(item, input.now)
-      ? item
-      : null;
-  }
-
-  const blockedRouteActions = new Set<HostedSystemMailboxRouteAction>();
+  const blockedSerializationKeys = new Set<HostedSystemMailboxSerializationKey>();
   for (const item of input.state.pending) {
-    if (blockedRouteActions.has(item.routeAction)) {
+    if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
+      continue;
+    }
+    const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
+    if (blockedSerializationKeys.has(serializationKey)) {
       continue;
     }
     if (systemMailboxItemIsDue(item, input.now)) {
       return item;
     }
-    blockedRouteActions.add(item.routeAction);
+    blockedSerializationKeys.add(serializationKey);
   }
 
   return null;
@@ -682,22 +682,17 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem[] {
-  if (input.allowedRouteActions) {
-    const item = input.state.pending.find((pending) =>
-      systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
-    ) ?? null;
-    return item
-      ? [item]
-      : [];
-  }
-
-  const seenRouteActions = new Set<HostedSystemMailboxRouteAction>();
+  const seenSerializationKeys = new Set<HostedSystemMailboxSerializationKey>();
   const items: HostedSystemMailboxPendingItem[] = [];
   for (const item of input.state.pending) {
-    if (seenRouteActions.has(item.routeAction)) {
+    if (!systemMailboxItemRouteActionAllowed(item, input.allowedRouteActions)) {
       continue;
     }
-    seenRouteActions.add(item.routeAction);
+    const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
+    if (seenSerializationKeys.has(serializationKey)) {
+      continue;
+    }
+    seenSerializationKeys.add(serializationKey);
     items.push(item);
   }
   return items;
@@ -708,6 +703,17 @@ function systemMailboxItemRouteActionAllowed(
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null,
 ): boolean {
   return !allowedRouteActions || allowedRouteActions.includes(item.routeAction);
+}
+
+function resolveHostedSystemMailboxSerializationKey(
+  item: HostedSystemMailboxPendingItem,
+): HostedSystemMailboxSerializationKey {
+  return item.postCheckpointRecord?.kind === "vault-share.projection"
+    || item.mailboxDedupeKey.startsWith(
+      HOSTED_VAULT_SHARE_PROJECTION_MAILBOX_DEDUPE_KEY_PREFIX,
+    )
+    ? "apply-vault-share-projection"
+    : item.routeAction;
 }
 
 function systemMailboxItemIsDue(

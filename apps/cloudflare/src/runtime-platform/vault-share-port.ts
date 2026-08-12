@@ -32,7 +32,7 @@ export function createHostedWebVaultSharePort(input: {
         transport: input.transport,
       });
 
-      return parseHostedVaultShareActiveProjectionKindsResponse(payload).projectionScopes;
+      return parseHostedVaultShareActiveProjectionKindsResponse(payload);
     },
     async deliver(request: Parameters<NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]>[0]) {
       const payload = await fetchHostedWebControlPlaneJson({

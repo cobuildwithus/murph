@@ -11,7 +11,7 @@ import {
   requireHostedRuntimeActiveAccess,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
-  readDeliverableHostedVaultShareProjectionScopes,
+  readDeliverableHostedVaultShareProjectionScopeGenerations,
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
@@ -42,12 +42,16 @@ export const GET = withJsonError(async (request: Request) => {
 
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
-  const projectionScopes = filterHostedVaultShareProjectionScopesBySupportedKeys(
-    await readDeliverableHostedVaultShareProjectionScopes({
+  const generations = await readDeliverableHostedVaultShareProjectionScopeGenerations({
       grantorMemberId,
       prisma,
-    }),
+    });
+  const projectionScopes = filterHostedVaultShareProjectionScopesBySupportedKeys(
+    generations.map((generation) => generation.projectionScope),
     supportedProjectionScopeKeys,
+  );
+  const supportedScopeKeys = new Set(
+    projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
   );
 
   return jsonOk({
@@ -55,6 +59,18 @@ export const GET = withJsonError(async (request: Request) => {
     projectionScopes: projectionScopes.sort((left, right) =>
       buildHostedVaultShareProjectionScopeKey(left)
         .localeCompare(buildHostedVaultShareProjectionScopeKey(right))
+    ),
+    generationTokensByProjectionScopeKey: Object.fromEntries(
+      generations
+        .filter((generation) =>
+          supportedScopeKeys.has(
+            buildHostedVaultShareProjectionScopeKey(generation.projectionScope),
+          )
+        )
+        .map((generation) => [
+          buildHostedVaultShareProjectionScopeKey(generation.projectionScope),
+          generation.generationToken,
+        ]),
     ),
   } satisfies HostedVaultShareActiveProjectionKindsResponse);
 });

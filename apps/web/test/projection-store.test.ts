@@ -23,7 +23,8 @@ import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
 import {
-  readDeliverableHostedVaultShareProjectionScopes,
+  buildHostedVaultShareGenerationToken,
+  readDeliverableHostedVaultShareProjectionScopeGenerations,
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
 import {
@@ -233,36 +234,60 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
   });
 });
 
-describe("readDeliverableHostedVaultShareProjectionScopes", () => {
-  it("returns only strictly valid active projection rows", async () => {
+describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
+  it("returns only valid active projection rows grouped into opaque generations", async () => {
     const profileScope = hostedVaultShareProjectionKindToScope("profile-name.v0");
     const deviceScope = hostedVaultShareProjectionKindToScope("device-sync-status.v0");
     const findMany = vi.fn().mockResolvedValue([
       {
+        id: "share_sleep_2",
         projectionKind: SLEEP_SCOPE.projectionKind,
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
       {
+        id: "share_invalid",
         projectionKind: "unknown.v0",
         projectionScopeJson: { projectionKind: "unknown.v0" },
         projectionScopeKey: "unknown.v0",
       },
       {
+        id: "share_device",
         projectionKind: deviceScope.projectionKind,
         projectionScopeJson: deviceScope,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(deviceScope),
       },
       {
+        id: "share_profile",
         projectionKind: profileScope.projectionKind,
         projectionScopeJson: profileScope,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(profileScope),
       },
+      {
+        id: "share_sleep_1",
+        projectionKind: SLEEP_SCOPE.projectionKind,
+        projectionScopeJson: SLEEP_SCOPE,
+        projectionScopeKey: SLEEP_SCOPE_KEY,
+      },
     ]);
 
-    await expect(readDeliverableHostedVaultShareProjectionScopes({
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations({
       grantorMemberId: SHARE.grantorMemberId,
       prisma: createPrismaClientTestDouble({ hostedVaultShare: { findMany } }),
-    })).resolves.toEqual([SLEEP_SCOPE, profileScope]);
+    })).resolves.toEqual([
+      {
+        generationToken: buildHostedVaultShareGenerationToken([
+          "share_sleep_2",
+          "share_sleep_1",
+        ]),
+        projectionScope: SLEEP_SCOPE,
+      },
+      {
+        generationToken: buildHostedVaultShareGenerationToken(["share_profile"]),
+        projectionScope: profileScope,
+      },
+    ]);
+    expect(buildHostedVaultShareGenerationToken(["share_b", "share_a"]))
+      .toBe(buildHostedVaultShareGenerationToken(["share_a", "share_b"]));
   });
 });

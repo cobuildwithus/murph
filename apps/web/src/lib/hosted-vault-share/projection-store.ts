@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
@@ -47,6 +49,7 @@ export async function findActiveHostedVaultShares(input: {
       projectionScopeKey: true,
     },
     where: {
+      destination: activeHostedMemberAccessWhere(),
       grantorMemberId: input.grantorMemberId,
       projectionScopeKey,
       status: "granted",
@@ -71,15 +74,18 @@ export async function findActiveHostedVaultShares(input: {
   });
 }
 
-export async function readDeliverableHostedVaultShareProjectionScopes(input: {
+export async function readDeliverableHostedVaultShareProjectionScopeGenerations(input: {
   grantorMemberId: string;
   prisma?: PrismaClient;
-}): Promise<HostedVaultShareProjectionScope[]> {
+}): Promise<Array<{
+  projectionScope: HostedVaultShareProjectionScope;
+  generationToken: string;
+}>> {
   const prisma = input.prisma ?? getPrisma();
-  const rows = await prisma.hostedVaultShare.findMany({
-    distinct: ["projectionScopeKey"],
-    orderBy: { projectionScopeKey: "asc" },
+  const shares = await prisma.hostedVaultShare.findMany({
+    orderBy: [{ projectionScopeKey: "asc" }, { id: "asc" }],
     select: {
+      id: true,
       projectionKind: true,
       projectionScopeJson: true,
       projectionScopeKey: true,
@@ -90,14 +96,42 @@ export async function readDeliverableHostedVaultShareProjectionScopes(input: {
       status: "granted",
     },
   });
+  const generations = new Map<string, {
+    projectionScope: HostedVaultShareProjectionScope;
+    shareIds: string[];
+  }>();
+  for (const share of shares) {
+    const projectionScope = parseHostedVaultShareRowProjectionScope(share);
+    if (
+      !projectionScope
+      || projectionScope.projectionKind
+        === HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND
+    ) {
+      continue;
+    }
+    const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+    const current = generations.get(projectionScopeKey);
+    if (current) {
+      current.shareIds.push(share.id);
+    } else {
+      generations.set(projectionScopeKey, {
+        projectionScope,
+        shareIds: [share.id],
+      });
+    }
+  }
+  return [...generations.values()].map((generation) => ({
+    generationToken: buildHostedVaultShareGenerationToken(generation.shareIds),
+    projectionScope: generation.projectionScope,
+  }));
+}
 
-  return rows
-    .map(parseHostedVaultShareRowProjectionScope)
-    .filter((scope): scope is HostedVaultShareProjectionScope =>
-      scope !== null
-      && scope.projectionKind
-        !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND
-    );
+export function buildHostedVaultShareGenerationToken(
+  shareIds: readonly string[],
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify([...shareIds].sort()))
+    .digest("base64url");
 }
 
 /**

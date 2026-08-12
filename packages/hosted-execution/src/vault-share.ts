@@ -64,6 +64,7 @@ export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS = [
 const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
 const HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS = 1_000_000;
 const HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS = 100;
+const HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 
 export type HostedVaultShareDailyMetricProjectionKind =
   (typeof HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS)[number];
@@ -629,6 +630,12 @@ export interface HostedVaultShareDeliveryRecord {
 }
 
 export interface HostedVaultShareDeliverRequest {
+  /**
+   * Opaque digest of the active share generations resolved immediately before
+   * the runtime begins reading this scope. Web accepts delivery only while the
+   * digest still matches, so a rotated consent cannot receive stale records.
+   */
+  expectedGenerationToken?: string;
   projectionKind: HostedVaultShareProjectionKind;
   projectionScope: HostedVaultShareProjectionScope;
   records: HostedVaultShareDeliveryRecord[];
@@ -646,6 +653,7 @@ export interface HostedVaultShareDeliverResponse {
 export interface HostedVaultShareActiveProjectionKindsResponse {
   projectionKinds: HostedVaultShareProjectionKind[];
   projectionScopes: HostedVaultShareProjectionScope[];
+  generationTokensByProjectionScopeKey?: Record<string, string>;
 }
 
 export interface HostedVaultShareDeliveryPayload {
@@ -2076,6 +2084,20 @@ export function parseHostedVaultShareDeliverRequest(
     );
   }
   const records = requireArray(request.records, "Vault share deliver request records");
+  const expectedGenerationToken = request.expectedGenerationToken === undefined
+    ? undefined
+    : requireString(
+        request.expectedGenerationToken,
+        "Vault share deliver request expectedGenerationToken",
+      );
+  if (
+    expectedGenerationToken !== undefined
+    && !HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN.test(expectedGenerationToken)
+  ) {
+    throw new TypeError(
+      "Vault share deliver request expectedGenerationToken must be a SHA-256 base64url digest.",
+    );
+  }
 
   if (records.length > HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS) {
     throw new TypeError(
@@ -2105,6 +2127,7 @@ export function parseHostedVaultShareDeliverRequest(
   }
 
   return {
+    ...(expectedGenerationToken ? { expectedGenerationToken } : {}),
     projectionKind,
     projectionScope,
     records: parsedRecords,
@@ -2174,10 +2197,50 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
     uniqueProjectionScopes.push(scope);
   }
 
+  const generationTokensByProjectionScopeKey =
+    record.generationTokensByProjectionScopeKey === undefined
+    ? undefined
+    : parseHostedVaultShareGenerationTokensByProjectionScopeKey(
+        record.generationTokensByProjectionScopeKey,
+        uniqueScopeKeys,
+      );
+
   return {
     projectionKinds: uniqueProjectionKinds,
     projectionScopes: uniqueProjectionScopes,
+    ...(generationTokensByProjectionScopeKey
+      ? { generationTokensByProjectionScopeKey }
+      : {}),
   };
+}
+
+function parseHostedVaultShareGenerationTokensByProjectionScopeKey(
+  value: unknown,
+  activeScopeKeys: ReadonlySet<string>,
+): Record<string, string> {
+  const record = requireObject(
+    value,
+    "Vault share active projection kinds response generationTokensByProjectionScopeKey",
+  );
+  const result: Record<string, string> = {};
+  for (const [scopeKey, generationToken] of Object.entries(record)) {
+    if (!activeScopeKeys.has(scopeKey)) {
+      throw new TypeError(
+        "Vault share active projection generation tokens contain an inactive scope key.",
+      );
+    }
+    const token = requireString(
+      generationToken,
+      "Vault share active projection generation token",
+    );
+    if (!HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN.test(token)) {
+      throw new TypeError(
+        "Vault share active projection generation token must be a SHA-256 base64url digest.",
+      );
+    }
+    result[scopeKey] = token;
+  }
+  return result;
 }
 
 export function parseHostedVaultShareDeliveryPayload(

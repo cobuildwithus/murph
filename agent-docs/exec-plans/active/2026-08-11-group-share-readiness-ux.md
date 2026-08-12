@@ -170,3 +170,26 @@ Updated: 2026-08-11
 - Round-3 remediation proof currently passes 88 focused Web tests, 95 focused
   Assistant Runtime tests, and Web plus Assistant Runtime typechecks. The
   required final ReviewGPT remediation round and exact-head CI remain pending.
+- Final ReviewGPT round 4 accepted two review-induced gaps. A retained share
+  projection retry shared the generic runtime-control serialization key, so it
+  could starve later independent controls such as account disconnect. The
+  runtime now derives a projection-only serialization key from the existing
+  generation-stable wake and recomputes the earliest mailbox wake after a
+  failed record, preserving projection FIFO while letting independent controls
+  proceed.
+- The prior rollout also cleared legacy snapshots before the pending-aware Web
+  reader was deployed. The rollout is now explicit expand/backfill/contract:
+  deploy the runtime parser/retry consumer, deploy a Web compatibility release
+  containing only the pending reader and opaque generation fence, capture the
+  cutoff and drain the backfill, then deploy the consent-copy and
+  reaffirmation/atomic-admission writers. Production count-only proof confirmed
+  that orphaned pending projectable rows are not merely theoretical, so the
+  bounded backfill includes that class. Rotating its ID and appending fresh work
+  is idempotent under the stable cutoff; non-projectable live-derived pending
+  rows remain excluded by projection kind.
+- The delivery path now carries a fixed-width opaque digest of the exact active
+  scope generation resolved before the vault read. Web recomputes the digest
+  against the active destination set immediately before replacement. A consent
+  rotation during the read therefore produces the ordinary no-active result and
+  a fresh retry instead of writing old records into the new generation. Raw
+  share IDs and recipient cardinality remain outside the private runtime.

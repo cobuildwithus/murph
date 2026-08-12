@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+	buildHostedVaultShareGenerationToken: vi.fn(),
 	replaceHostedVaultShareProjectionSnapshot: vi.fn(),
 	findActiveHostedVaultShares: vi.fn(),
 	requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -11,6 +12,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-vault-share/projection-store", () => ({
+	buildHostedVaultShareGenerationToken: mocks.buildHostedVaultShareGenerationToken,
 	replaceHostedVaultShareProjectionSnapshot: mocks.replaceHostedVaultShareProjectionSnapshot,
 	findActiveHostedVaultShares: mocks.findActiveHostedVaultShares,
 }));
@@ -114,6 +116,8 @@ const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope("workouts.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const PROFILE_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
 const MAXIMUM_WIDTH_WORKOUT_MINUTES = 0.0000030024105450300988;
+const CURRENT_GENERATION_TOKEN = "a".repeat(43);
+const STALE_GENERATION_TOKEN = "b".repeat(43);
 
 const ACTIVE_SHARE = {
   destinationMemberId: "member_referee",
@@ -237,6 +241,7 @@ describe("vault-share deliver route", () => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_grantor");
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
+		mocks.buildHostedVaultShareGenerationToken.mockReturnValue(CURRENT_GENERATION_TOKEN);
 		mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("replaced");
   });
 
@@ -382,6 +387,20 @@ describe("vault-share deliver route", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "no-active-share" });
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("rejects records read under a share generation that rotated before delivery", async () => {
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY,
+      expectedGenerationToken: STALE_GENERATION_TOKEN,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "no-active-share" });
+    expect(mocks.buildHostedVaultShareGenerationToken).toHaveBeenCalledWith([
+      ACTIVE_SHARE.id,
+    ]);
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 

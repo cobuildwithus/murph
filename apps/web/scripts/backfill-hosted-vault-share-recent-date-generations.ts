@@ -18,7 +18,8 @@ Usage:
     apps/web/scripts/backfill-hosted-vault-share-recent-date-generations.ts \\
     --granted-before <consumer-deploy-ISO> [--batch-size 25]
 
-  # Apply one bounded batch only after the new runtime consumer is deployed:
+  # Apply one bounded batch only after the new runtime consumer and narrow Web
+  # pending-reader plus opaque-generation-fence compatibility release are deployed:
   NODE_OPTIONS=--conditions=react-server \\
     vercel env run --environment=production -- \\
     pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json \\
@@ -26,17 +27,19 @@ Usage:
     --apply --granted-before <consumer-deploy-ISO> [--batch-size 25]
 
 Options:
-  --apply                    Rotate legacy recent-date grants to pending and append
-                             their durable projection work atomically.
+  --apply                    Rotate legacy materialized or orphaned-pending
+                             recent-date grants and append their durable projection
+                             work atomically.
   --batch-size <1..100>      Maximum grantors in this invocation (default: 25).
   --granted-before <ISO>     Required stable cutoff captured after the new runtime
-                             consumer deploy; reuse it for every batch.
+                             consumer and Web pending-reader/generation-fence
+                             compatibility release; reuse it for every batch.
   --help                     Print this message.
 
 Output contains counts only. It never includes member, group, grant, or mailbox
 identifiers. Repeat apply batches with the exact same cutoff until selectedGrantors
 and hasMore are both zero, then confirm the durable maintenance backlog drains before
-deploying the Web consent/read changes.
+deploying the Web consent copy and reaffirmation/atomic-admission writers.
 `;
 
 async function main(): Promise<void> {

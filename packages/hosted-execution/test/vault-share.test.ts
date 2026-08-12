@@ -381,6 +381,28 @@ describe("vault-share contracts", () => {
     expect(parsed.projectionScope).toEqual(SLEEP_SCOPE);
   });
 
+  it("parses only fixed-width opaque share-generation tokens", () => {
+    const expectedGenerationToken = "a".repeat(43);
+    expect(parseHostedVaultShareDeliverRequest({
+      expectedGenerationToken,
+      projectionKind: "sleep-times.v0",
+      records: [VALID_RECORD],
+    }).expectedGenerationToken).toBe(expectedGenerationToken);
+
+    for (const invalidToken of ["short", "a".repeat(44), `${"a".repeat(42)}/`]) {
+      expect(() => parseHostedVaultShareDeliverRequest({
+        expectedGenerationToken: invalidToken,
+        projectionKind: "sleep-times.v0",
+        records: [VALID_RECORD],
+      })).toThrow(/SHA-256 base64url digest/u);
+    }
+    expect(() => parseHostedVaultShareDeliverRequest({
+      expectedGenerationToken: "",
+      projectionKind: "sleep-times.v0",
+      records: [VALID_RECORD],
+    })).toThrow(/non-empty string/u);
+  });
+
   it("parses an optional opaque source revision", () => {
     const parsed = parseHostedVaultShareDeliverRequest({
       projectionKind: "sleep-times.v0",
@@ -633,6 +655,33 @@ describe("vault-share contracts", () => {
         projectionScopes: [{ projectionKind: "future-challenge-kind.v0" }],
       })
     ).toThrow(/known vault-share projection kind/u);
+  });
+
+  it("parses only opaque tokens for active projection scopes", () => {
+    const scopeKey = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
+    const generationToken = "b".repeat(43);
+    expect(parseHostedVaultShareActiveProjectionKindsResponse({
+      generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toEqual({
+      generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    });
+
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      generationTokensByProjectionScopeKey: {
+        [buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE)]: generationToken,
+      },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toThrow(/inactive scope key/u);
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      generationTokensByProjectionScopeKey: { [scopeKey]: "not-a-digest" },
+      projectionKinds: ["sleep-times.v0"],
+      projectionScopes: [SLEEP_SCOPE],
+    })).toThrow(/SHA-256 base64url digest/u);
   });
 
   it("parses exact projection scope keys for capability negotiation", () => {

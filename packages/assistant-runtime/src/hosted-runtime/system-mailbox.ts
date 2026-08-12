@@ -543,20 +543,23 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     };
   } catch (error) {
     const normalized = normalizeHostedSystemMailboxError(error);
-    const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
+    const projectionRetryAt = new Date(Date.now() + 60_000).toISOString();
     await updateHostedSystemMailboxPendingItem({
       item: {
         ...input.item,
         lastErrorCode: normalized.code,
         lastErrorMessage: normalized.message,
-        nextAttemptAt: nextWakeAt,
+        nextAttemptAt: projectionRetryAt,
         status: "recording",
       },
       vaultRoot: input.vaultRoot,
     });
+    const nextWakeAt = await resolveHostedSystemMailboxNextWakeAt({
+      vaultRoot: input.vaultRoot,
+    });
     return {
       failed: 1,
-      nextWakeAt,
+      nextWakeAt: nextWakeAt ?? projectionRetryAt,
       recorded: 0,
     };
   }

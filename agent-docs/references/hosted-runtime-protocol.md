@@ -485,21 +485,40 @@ the control wake. It retains a `vault-share.projection` post-checkpoint record,
 runs the existing projection offer only after the source checkpoint, and removes
 the mailbox obligation only after delivery or a terminal no-active/no-projectable
 result. Missing ports and projection errors retain the same recording item with
-the existing bounded retry delay, so the system-lane handled watermark stays
-behind it and the scheduled sweep can resignal it. A crash, foreground
+the existing bounded retry delay. Projection work has its own serialization key:
+its FIFO and watermark remain ordered, while a not-yet-due projection retry
+cannot block independent runtime controls such as account disconnect. The next
+mailbox wake is always recomputed from the retained state after failure, so due
+independent work runs without waiting for the projection delay. A crash, foreground
 preemption, or partial multi-scope failure therefore cannot turn a pending share
 into permanently consumed work.
 
-The rollout is consumer-first. Deploy the runtime/Worker consumer, capture one
-stable cutoff, then run the bounded recent-date generation backfill under the
-production Web environment until its count-only result reports no selected
-grantors. Each grantor transaction rotates at most 25 materialized, pre-cutoff
-group health generations, clears their snapshots, and appends one durable
-maintenance row; exact signaling occurs after commit and its failure is
-recoverable from the row. Wait for that maintenance backlog to drain before deploying the Web
-consent/read producer. Reusing the same cutoff makes the command idempotent and
-leaves current-state, email, device-status, non-group, and newly created grants
-untouched.
+Before reading a projection, the runtime receives one fixed-width opaque digest
+of the active row generations for that exact scope. It returns the digest with
+the offer, and Web re-derives it from the active destination set before writing.
+A mismatch returns the ordinary `no-active-share` result, retains no stale
+records, and lets the durable maintenance obligation retry from a fresh active
+scope read. Raw share IDs and destination cardinality never cross into the
+member runtime. Requests without a digest remain accepted only for the bounded
+old-runtime compatibility window.
+
+The rollout uses an additive reader-first expansion. First deploy the
+runtime/Worker parser and retry consumer. Then deploy the narrow Web read
+compatibility release that maps an active null snapshot to `pending` and adds
+the opaque generation read/write fence; do not enable the new consent copy,
+atomic admission, or reaffirmation writer yet. Capture one stable
+cutoff only after both reader stages are live, then run the bounded recent-date
+generation backfill under the production Web environment until its count-only
+result reports no selected grantors. The configurable command fetches at most
+101 candidate grantors and processes at most 100; each grantor transaction
+rotates at most 25 pre-cutoff group health generations, including orphaned
+pending rows whose original wake is absent, clears their snapshots, and appends
+one durable maintenance row. Exact signaling
+occurs after commit and its failure is recoverable from the row. Wait for that
+maintenance backlog to drain before deploying the Web consent copy and
+reaffirmation/atomic-admission writer. Reusing the same cutoff makes the command
+idempotent and leaves current-state, email, device-status, non-group, and newly
+created grants untouched.
 
 Recent daily and sleep projection owners derive the member's current civil date
 from the validated vault timezone, admit only that date and the prior six civil
@@ -508,9 +527,10 @@ eighth member-local date, including around UTC midnight or daylight-saving
 changes. A missing or invalid vault timezone fails these civil-date scopes
 closed. `workouts.v0` retains its separate global calendar-close semantics.
 Deploy the Cloudflare runtime bundle with that producer bound and the additive
-`pending` parser/model status before Web begins emitting `pending` or the exact
-seven-day consent copy. Older Web remains compatible with the newer consumer
-because it emits only the prior status subset during that window.
+`pending` parser/model status before the Web compatibility release emits
+`pending`. Deploy that compatibility release before any backfill clears a legacy
+snapshot, and do not expose the exact seven-day consent copy or its refresh
+writer until the backfill has drained.
 
 This protocol is a consumer-first hard cut:
 

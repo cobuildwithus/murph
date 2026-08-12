@@ -36,7 +36,7 @@ describe("hosted vault-share recent-date generation backfill", () => {
     );
   });
 
-  it("rotates each legacy grant and admits one maintenance row in the same transaction", async () => {
+  it("rotates materialized and orphaned pending grants with one atomic maintenance row", async () => {
     const updateMany = vi.fn(async (input: {
       data: {
         grantedAt: Date;
@@ -50,7 +50,7 @@ describe("hosted vault-share recent-date generation backfill", () => {
     });
     const tx = {
       hostedVaultShare: {
-        findMany: vi.fn(async () => [{ id: "share_legacy_1" }, { id: "share_legacy_2" }]),
+        findMany: vi.fn(async () => [{ id: "share_legacy_1" }, { id: "share_pending_1" }]),
         updateMany,
       },
     };
@@ -89,7 +89,6 @@ describe("hosted vault-share recent-date generation backfill", () => {
           grantedAt: { lt: CUTOFF },
           grantorMemberId: "member_1",
           projectionKind: { in: [...HOSTED_VAULT_SHARE_RECENT_DATE_PROJECTION_KINDS] },
-          projectionSnapshotCiphertext: { not: null },
           status: "granted",
         }),
       });

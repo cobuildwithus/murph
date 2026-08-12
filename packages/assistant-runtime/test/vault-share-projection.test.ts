@@ -21,6 +21,7 @@ import {
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareDeliverRequest,
   type HostedVaultShareWorkoutsDayData,
+  type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
   selectMetricSeries,
@@ -99,6 +100,18 @@ const SAUNA_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
 const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
   "workouts.v0",
 );
+const GENERATION_TOKEN = "a".repeat(43);
+
+function activeProjectionResponse(
+  ...projectionScopes: HostedVaultShareProjectionScope[]
+) {
+  return {
+    projectionKinds: [...new Set(
+      projectionScopes.map((scope) => scope.projectionKind),
+    )],
+    projectionScopes,
+  };
+}
 
 const ACTIVITY_DAY = {
   date: "2026-07-03",
@@ -473,13 +486,19 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       vaultRoot,
       vaultSharePort: {
         deliver,
-        listActiveProjectionScopes: async () => [PROFILE_SCOPE],
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          generationTokensByProjectionScopeKey: {
+            [buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE)]: GENERATION_TOKEN,
+          },
+        }),
       },
     });
 
     expect(result.outcome).toBe("delivered");
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith({
+      expectedGenerationToken: GENERATION_TOKEN,
       projectionKind: "profile-name.v0",
       projectionScope: PROFILE_SCOPE,
       records: [{
@@ -497,7 +516,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       vaultRoot: "/nonexistent",
       vaultSharePort: {
         deliver,
-        listActiveProjectionScopes: async () => [],
+        listActiveProjectionScopes: async () => activeProjectionResponse(),
       },
     });
 
@@ -511,7 +530,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       vaultRoot: "/nonexistent",
       vaultSharePort: {
         deliver,
-        listActiveProjectionScopes: async () => [GROUP_EMAIL_SCOPE],
+        listActiveProjectionScopes: async () => activeProjectionResponse(GROUP_EMAIL_SCOPE),
       },
     });
 
@@ -526,7 +545,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       vaultRoot,
       vaultSharePort: {
         deliver,
-        listActiveProjectionScopes: async () => [PROFILE_SCOPE],
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
       },
     });
 
@@ -560,7 +579,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       vaultRoot: "/nonexistent",
       vaultSharePort: {
         deliver,
-        listActiveProjectionScopes: async () => [DEVICE_SYNC_STATUS_SCOPE],
+        listActiveProjectionScopes: async () => activeProjectionResponse(DEVICE_SYNC_STATUS_SCOPE),
       },
     });
 
@@ -2219,7 +2238,7 @@ describe("selectProjectableMealNutritionDays", () => {
         vaultRoot,
         vaultSharePort: {
           deliver,
-          listActiveProjectionScopes: async () => [PROTEIN_SCOPE],
+          listActiveProjectionScopes: async () => activeProjectionResponse(PROTEIN_SCOPE),
         },
       })).resolves.toEqual({ outcome: "delivered" });
       expect(deliver).toHaveBeenCalledTimes(1);
@@ -3705,7 +3724,7 @@ describe("selectProjectableActivityMinutesDays", () => {
         vaultRoot,
         vaultSharePort: {
           deliver,
-          listActiveProjectionScopes: async () => activeScopes,
+          listActiveProjectionScopes: async () => activeProjectionResponse(...activeScopes),
         },
       })).resolves.toEqual({ outcome: "delivered" });
       expect(deliver).toHaveBeenCalledTimes(4);
@@ -4490,7 +4509,7 @@ describe("readProjectableProfileName", () => {
       vaultRoot,
       vaultSharePort: {
         deliver,
-        listActiveProjectionScopes: async () => [PROFILE_SCOPE],
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
       },
     });
     expect(result.outcome).toBe("delivered");
@@ -4621,7 +4640,7 @@ describe("readProjectableProfileName", () => {
       vaultRoot,
       vaultSharePort: {
         deliver,
-        listActiveProjectionScopes: async () => [PROFILE_SCOPE],
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
       },
     });
     expect(result.outcome).toBe("delivered");

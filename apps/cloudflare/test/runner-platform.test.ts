@@ -4631,9 +4631,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         action: "read_current",
         result: { group: null, status: "none" },
       });
-    await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual([
-      { projectionKind: "activity-days.v0" },
-    ]);
+    await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual({
+      projectionKinds: ["activity-days.v0"],
+      projectionScopes: [{ projectionKind: "activity-days.v0" }],
+    });
     await platform.deviceSyncPort!.fetchSnapshot({
       connectionId: "conn_123",
     });

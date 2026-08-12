@@ -103,7 +103,6 @@ export function createHostedVaultShareRecentDateBackfillStore(
     },
     grantedAt: { lt: grantedBefore },
     projectionKind: { in: [...HOSTED_VAULT_SHARE_RECENT_DATE_PROJECTION_KINDS] },
-    projectionSnapshotCiphertext: { not: null },
     status: "granted",
   });
   return {

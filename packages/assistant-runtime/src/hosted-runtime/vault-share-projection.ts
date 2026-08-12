@@ -40,6 +40,7 @@ import {
   type HostedVaultShareActivitySessionCountProjectionSpec,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareDailyMetricProjectionSpec,
+  type HostedVaultShareActiveProjectionKindsResponse,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
   type HostedVaultShareSleepMetricSource,
@@ -196,15 +197,20 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
     return { outcome: "no-port" };
   }
 
-  let projectionScopes: HostedVaultShareProjectionScope[];
+  let activeProjections: HostedVaultShareActiveProjectionKindsResponse;
   try {
-    projectionScopes = uniqueHostedVaultShareProjectionScopes(
-      await port.listActiveProjectionScopes(),
-    );
+    activeProjections = await port.listActiveProjectionScopes();
+    activeProjections = {
+      ...activeProjections,
+      projectionScopes: uniqueHostedVaultShareProjectionScopes(
+        activeProjections.projectionScopes,
+      ),
+    };
   } catch {
     return { outcome: "error" };
   }
 
+  const projectionScopes = activeProjections.projectionScopes;
   if (projectionScopes.length === 0) {
     return { outcome: "no-active-share" };
   }
@@ -221,6 +227,9 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
       context,
       port,
       projectionScope,
+      generationToken: activeProjections.generationTokensByProjectionScopeKey?.[
+        buildHostedVaultShareProjectionScopeKey(projectionScope)
+      ],
       readRecords,
       vaultRoot: input.vaultRoot,
     }));
@@ -246,6 +255,7 @@ type ProjectableRecordReader = (input: {
 
 async function offerHostedVaultShareScopeBestEffort(input: {
   context: HostedVaultShareProjectionReadContext;
+  generationToken?: string;
   port: HostedRuntimeVaultSharePort;
   projectionScope: HostedVaultShareProjectionScope;
   readRecords: ProjectableRecordReader;
@@ -258,6 +268,9 @@ async function offerHostedVaultShareScopeBestEffort(input: {
     });
 
     const response = await input.port.deliver({
+      ...(input.generationToken
+        ? { expectedGenerationToken: input.generationToken }
+        : {}),
       projectionKind: input.projectionScope.projectionKind,
       projectionScope: input.projectionScope,
       records,
