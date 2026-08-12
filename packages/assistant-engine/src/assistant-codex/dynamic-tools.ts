@@ -83,6 +83,7 @@ import {
 import {
   exerciseRoutineResponseCardV1Schema,
   assistantResponseCardAuthoringSchema,
+  telegramRichContentResponseCardV1Schema,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -257,6 +258,7 @@ import {
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
@@ -304,6 +306,12 @@ const attachGroupChallengeResponseCardArgumentsSchema =
 const attachExerciseRoutineCardArgumentsSchema = z
   .object({
     card: exerciseRoutineResponseCardV1Schema,
+  })
+  .strict()
+
+const attachTelegramRichContentArgumentsSchema = z
+  .object({
+    card: telegramRichContentResponseCardV1Schema,
   })
   .strict()
 
@@ -1414,6 +1422,20 @@ export function readMurphDynamicToolRequest(
     }
     case MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name: {
       const parsed = parseAttachExerciseRoutineCardArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-response-card-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'attach-response-card',
+        card: parsed.card,
+      }
+    }
+    case MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name: {
+      const parsed = parseAttachTelegramRichContentArguments(request.arguments)
       if (!parsed.ok) {
         return {
           kind: 'invalid-response-card-arguments',
@@ -6748,6 +6770,35 @@ function parseAttachExerciseRoutineCardArguments(
         schemaName,
         schemaRootKeys: readZodObjectRootKeys(
           attachExerciseRoutineCardArgumentsSchema,
+        ),
+        toolName,
+      }),
+    }
+  }
+
+  return {
+    card: parsed.data.card,
+    ok: true,
+  }
+}
+
+function parseAttachTelegramRichContentArguments(
+  value: unknown,
+):
+  | { ok: true; card: AssistantResponseCard }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const schemaName = 'murph.attach_telegram_rich_content.input'
+  const toolName = 'murph.attach_telegram_rich_content'
+  const parsed = attachTelegramRichContentArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName,
+        schemaRootKeys: readZodObjectRootKeys(
+          attachTelegramRichContentArgumentsSchema,
         ),
         toolName,
       }),

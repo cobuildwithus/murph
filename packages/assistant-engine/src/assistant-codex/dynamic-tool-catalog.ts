@@ -51,6 +51,7 @@ import { assistantVaultImageMaxBytes } from '@murphai/operator-config/assistant-
 import {
   assistantResponseCardJsonSchema,
   exerciseRoutineResponseCardJsonSchema,
+  telegramRichContentResponseCardJsonSchema,
 } from '@murphai/operator-config/assistant-response-cards'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
@@ -282,6 +283,21 @@ export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
     additionalProperties: false,
     properties: {
       card: exerciseRoutineResponseCardJsonSchema,
+    },
+    required: ['card'],
+  },
+} as const
+
+export const MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL = {
+  namespace: 'murph',
+  name: 'attach_telegram_rich_content',
+  description:
+    'Attach one complete private Telegram Rich Message when structure makes the answer easier to scan. Good uses include a multi-step guide, non-catalog routine, checklist, schedule, real comparison, or multi-section summary. Keep short answers, one-paragraph advice, confirmations, urgent single actions, and casual chat as ordinary text. Prefer attach_response_card for nutrition, compact tables, and tracked workouts. Prefer attach_exercise_routine_card for catalog-backed movement routines. This tool fills the gaps; it does not replace those approved cards. The card replaces the entire final response, so send no duplicate final text and attach no response media. Keep it compact: usually one h2, two to six sections or steps, and under 1,500 visible characters. Add more only when the complete answer needs it. Do not repeat the same facts in a summary, table, and details. Use short labels instead of sentence-shaped table cells. Put optional detail in details, but keep safety limits and stop conditions visible. Use a table only for a real comparison or schedule, with at most five columns. Supported tags: h2, h3, p, footer, hr, ul, ol, li, blockquote, cite, aside, details, summary, table, caption, tr, th, td, b, strong, i, em, u, ins, s, strike, del, code, mark, sub, sup, tg-spoiler, and br. Tables allow bordered and striped. Cells allow align="left", "center", or "right". Details allow open. Escape text with &amp;, &lt;, &gt;, &quot;, or &apos;. Do not use links, images, media, maps, custom emoji, scripts, styles, unsupported attributes, or Markdown. These three examples mirror the approved compact-table, exercise-routine, and nutrition-target layouts. Follow their structure without copying their words: compact summary: <h2>Today</h2><table bordered striped><tr><th>Item</th><th>Status</th></tr><tr><td>Walk</td><td>Done</td></tr></table>; guided sequence: <h2>Short focus reset</h2><p>Low effort · about 5 min</p><details open><summary>1. Prepare</summary><p>Clear one small work area.</p></details><blockquote>Pause if this starts adding stress.</blockquote>; optional targets: <details><summary>Daily targets</summary><table bordered><tr><th>Metric</th><th>Target</th></tr><tr><td>Example</td><td align="right">Value</td></tr></table></details>.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      card: telegramRichContentResponseCardJsonSchema,
     },
     required: ['card'],
   },
@@ -1404,6 +1420,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
@@ -1477,6 +1494,7 @@ export interface MurphDynamicToolAvailability {
   productFeedbackAvailable?: boolean | null
   responseCardsAvailable?: boolean | null
   exerciseRoutineResponseCardsAvailable?: boolean | null
+  telegramRichContentResponseCardsAvailable?: boolean | null
   groupChallengeResponseCardsAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
@@ -1512,6 +1530,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
     [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) =>
       a.exerciseRoutineResponseCardsAvailable)],
+    [MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL, defaultOff((a) =>
+      a.telegramRichContentResponseCardsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],

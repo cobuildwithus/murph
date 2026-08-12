@@ -77,6 +77,16 @@ const ROUTINE_CARD: AssistantResponseCard = {
 
 const ROUTINE_CARD_TEXT = renderAssistantResponseCardText(ROUTINE_CARD)
 
+const TELEGRAM_RICH_CONTENT_CARD: AssistantResponseCard = {
+  kind: 'telegram_rich_content',
+  version: 1,
+  html: '<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol><blockquote>Keep the passport with you.</blockquote>',
+}
+
+const TELEGRAM_RICH_CONTENT_CARD_TEXT = renderAssistantResponseCardText(
+  TELEGRAM_RICH_CONTENT_CARD,
+)
+
 const LONG_ROUTINE_CARD = assistantResponseCardSchema.parse({
   ...ROUTINE_CARD,
   exercises: Array.from({ length: 8 }, (_, index) => ({
@@ -1378,12 +1388,12 @@ describe('assistant channels runtime seam', () => {
     await expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.send({
       actorId: null,
       bindingDelivery: createAssistantBindingDelivery('thread', '123'),
-      card: NUTRITION_CARD,
+      card: TELEGRAM_RICH_CONTENT_CARD,
       explicitTarget: null,
       idempotencyKey: 'rich-card-idempotency',
       identityId: null,
       media: [],
-      message: NUTRITION_CARD_TEXT,
+      message: TELEGRAM_RICH_CONTENT_CARD_TEXT,
       replyToMessageId: '42',
       threadIsDirect: true,
     }, {
@@ -1396,11 +1406,11 @@ describe('assistant channels runtime seam', () => {
     })
 
     expect(sendTelegramRich).toHaveBeenCalledWith(expect.objectContaining({
-      fallbackMessage: NUTRITION_CARD_TEXT,
+      fallbackMessage: TELEGRAM_RICH_CONTENT_CARD_TEXT,
       idempotencyKey: 'rich-card-idempotency',
       replyToMessageId: '42',
       richMessage: expect.objectContaining({
-        html: expect.stringContaining('<table bordered striped>'),
+        html: TELEGRAM_RICH_CONTENT_CARD.html,
       }),
       target: '123',
     }))
@@ -2282,6 +2292,35 @@ describe('assistant channels runtime seam', () => {
     }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
       fetchImplementation: undefined,
+    })
+  })
+
+  it('uses deterministic text if Telegram-only rich content reaches Linq', async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'telegram-rich-text-message-1' },
+    })
+
+    await expect(sendLinqMessage({
+      card: TELEGRAM_RICH_CONTENT_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'telegram-rich-card-delivery-1',
+      message: TELEGRAM_RICH_CONTENT_CARD_TEXT,
+      target: 'private-thread-telegram-rich',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      providerMessageId: 'telegram-rich-text-message-1',
+      target: 'private-thread-telegram-rich',
+    })
+
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: 'telegram-rich-card-delivery-1',
     })
   })
 

@@ -1,0 +1,45 @@
+# Model-authored Telegram rich content
+
+Status: active
+Created: 2026-08-12
+Updated: 2026-08-12
+
+## Goal
+
+- Let Murph author a bounded Telegram Rich Message when structured presentation improves the complete answer.
+- Cover structured guidance that does not fit the existing nutrition, compact-table, or exercise-routine cards.
+- Preserve those three approved cards and use their presentation choices as model-facing examples.
+
+## Success criteria
+
+- Private Telegram turns can attach one validated model-authored Rich Message.
+- Non-catalog routines, checklists, schedules, comparisons, and multi-section summaries can use the new path when structure helps.
+- Short answers, confirmations, casual chat, and incomplete card answers stay as ordinary text.
+- Existing semantic cards keep their current schemas, renderers, and tool priority.
+- The accepted HTML subset has bounded length, nesting, tables, and attributes, with no links or remote media.
+- Runtime derives one complete text fallback from the validated HTML and uses the existing response-card outbox and Telegram delivery owner.
+- Focused deterministic and real-model tests prove positive, negative, fallback, and channel-isolation journeys.
+
+## Evidence
+
+- The reported structured guidance used styled plain text because no current card could represent that content shape.
+- The generic compact-table card cannot carry detailed step instructions within its cell bounds.
+- The exercise-routine card requires catalog-backed movements and images.
+- Prior Telegram card iteration established compact sections, optional details, visible safety guidance, real tables, no repeated summary, and no duplicate final text.
+
+## Tasks
+
+1. [ ] Add a bounded Telegram rich-content card contract and deterministic text fallback.
+2. [ ] Add a private-Telegram-only authoring tool with Telegram rules and three approved presentation examples.
+3. [ ] Preserve semantic-card priority and route the new card through the existing response-card effect.
+4. [ ] Add contract, tool, planning, rendering, delivery, prompt, and real-model regression proof.
+5. [ ] Update durable product, architecture, security, reliability, and verification guidance.
+6. [ ] Run focused checks, inspect the full diff, push the candidate, complete required reviews and CI, then open the PR.
+
+## Decisions
+
+- Use user-approved option 3: the model authors constrained Telegram Rich HTML.
+- Keep existing semantic cards unchanged and prefer them when their contracts fit.
+- Accept presentation-only HTML. Reject links, media, maps, custom emoji, and provider-side fetches.
+- Derive fallback text in trusted code. Do not ask the model to author a second copy.
+- Reuse the existing response-card, outbox, retry, and provider-entry owners.

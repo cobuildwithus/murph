@@ -716,6 +716,7 @@ export async function sendLinqMessage(
   const shouldAttemptDirectNativeCard =
     card !== null &&
     card.kind !== 'exercise_routine' &&
+    card.kind !== 'telegram_rich_content' &&
     input.targetKind === 'thread' &&
     input.threadIsDirect === true &&
     input.nativeReplyRequested !== true &&

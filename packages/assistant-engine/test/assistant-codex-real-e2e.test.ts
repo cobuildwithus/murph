@@ -40,6 +40,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
+  MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -1247,6 +1248,84 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         })
         expect(repairedRoutine.responseMedia).toEqual([])
         expect(repairedRoutine.finalMessage.trim()).toBe('')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'uses model-authored Telegram rich content only when structure improves the answer',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-telegram-rich-content-e2e-'),
+      )
+
+      try {
+        const common = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildTelegramRichContentDeveloperInstructions(),
+          dynamicTools: [MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL],
+          env: config.env,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const voiceRoutine = await executeRealCodexAppServerTurn({
+          ...common,
+          prompt: 'Give me a brief vocal warm-up before a presentation. Organize preparation, sound, and recovery as ordered steps. Keep any limits visible. Make it easy to scan on Telegram.',
+        })
+        const voiceActions = readCapabilityRoutingActions(
+          voiceRoutine.jsonEvents,
+        )
+        expect(
+          voiceActions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
+          ),
+        ).toHaveLength(1)
+        expect(voiceRoutine.responseCard).toMatchObject({
+          kind: 'telegram_rich_content',
+          version: 1,
+          html: expect.stringMatching(/<h2>[\s\S]*<ol>[\s\S]*<blockquote>/iu),
+        })
+        expect(voiceRoutine.finalMessage.trim()).toBe('')
+        expect(voiceRoutine.responseMedia).toEqual([])
+
+        const comparison = await executeRealCodexAppServerTurn({
+          ...common,
+          prompt: 'Compare a short morning walk and a short evening walk. Show timing, main benefit, and one practical caution in a compact Telegram comparison.',
+        })
+        expect(comparison.responseCard).toMatchObject({
+          kind: 'telegram_rich_content',
+          html: expect.stringMatching(/<table bordered(?: striped)?>/iu),
+        })
+        expect(comparison.finalMessage.trim()).toBe('')
+
+        const shortReply = await executeRealCodexAppServerTurn({
+          ...common,
+          prompt: 'Reply with one short sentence confirming that 3:00 PM works.',
+        })
+        const shortActions = readCapabilityRoutingActions(shortReply.jsonEvents)
+        expect(shortActions.some((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL.name
+        )).toBe(false)
+        expect(shortReply.responseCard).toBeNull()
+        expect(shortReply.finalMessage.trim()).not.toBe('')
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -8212,6 +8291,29 @@ function buildRoutinePresentationDeveloperInstructions(input: {
     turnTrigger: input.scheduledOccurrenceAt
       ? 'automation-cron'
       : 'automation-auto-reply',
+  })
+}
+
+function buildTelegramRichContentDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'telegram',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-12',
+    currentTimeZone: 'Europe/Warsaw',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    ordinaryInboundTurn: true,
+    turnTrigger: 'automation-auto-reply',
   })
 }
 

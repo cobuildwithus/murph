@@ -1113,7 +1113,8 @@ describe('assistant Codex turn planning', () => {
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
       ordinaryToolNames.filter((name) =>
         name !== 'attach_response_card' &&
-        name !== 'attach_exercise_routine_card'
+        name !== 'attach_exercise_routine_card' &&
+        name !== 'attach_telegram_rich_content'
       ),
     )
 
@@ -2559,6 +2560,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -2616,6 +2618,9 @@ describe('assistant Codex turn planning', () => {
     expect(privateTools.map((tool) => tool.name)).toContain(
       'attach_exercise_routine_card',
     )
+    expect(privateTools.map((tool) => tool.name)).toContain(
+      'attach_telegram_rich_content',
+    )
     const privateSchema = JSON.stringify(privateTool!.inputSchema)
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
@@ -2638,6 +2643,9 @@ describe('assistant Codex turn planning', () => {
     expect(linqPrivateTools.map((tool) => tool.name)).not.toContain(
       'attach_exercise_routine_card',
     )
+    expect(linqPrivateTools.map((tool) => tool.name)).not.toContain(
+      'attach_telegram_rich_content',
+    )
 
     const scheduledPrivateOptions = {
       input: {
@@ -2654,6 +2662,7 @@ describe('assistant Codex turn planning', () => {
     await expect(dynamicToolsFor(scheduledPrivateOptions)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+        expect.objectContaining({ name: 'attach_telegram_rich_content' }),
       ]),
     )
 
@@ -3063,7 +3072,8 @@ describe('assistant Codex turn planning', () => {
         .map((tool) => tool.name)
         .filter((name) =>
           name !== 'attach_response_card' &&
-          name !== 'attach_exercise_routine_card'
+          name !== 'attach_exercise_routine_card' &&
+          name !== 'attach_telegram_rich_content'
         ),
     )
     expect(scheduled.systemPrompt).toContain('Lab test discovery:')
@@ -3147,6 +3157,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
@@ -3323,6 +3334,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3349,6 +3361,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3428,6 +3441,7 @@ describe('assistant Codex turn planning', () => {
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
+          telegramRichContentResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,

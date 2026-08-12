@@ -13,10 +13,12 @@ import {
   buildLinqIMessageAppLayout,
   buildTelegramRichMessage,
   exerciseRoutineResponseCardJsonSchema,
+  telegramRichContentResponseCardV1Schema,
   renderAssistantResponseCardText,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
   type ExerciseRoutineResponseCardV1,
+  type TelegramRichContentResponseCardV1,
   type AssistantResponseCard,
 } from '../src/assistant-response-cards.ts'
 
@@ -442,6 +444,39 @@ describe('assistant response cards', () => {
     expect(() => buildLinqIMessageAppCardUrl(ROUTINE_CARD)).toThrow(
       'do not have a native iMessage app URL',
     )
+  })
+
+  it('validates and renders model-authored Telegram rich content', () => {
+    const card: TelegramRichContentResponseCardV1 = {
+      kind: 'telegram_rich_content',
+      version: 1,
+      html: '<h2>Travel prep</h2><p>Two quick checks &amp; one optional note.</p><ol><li>Check the departure time.</li><li>Pack the charger.</li></ol><details><summary>Optional note</summary><p>Download the ticket.</p></details><blockquote>Keep the passport with you.</blockquote>',
+    }
+
+    expect(telegramRichContentResponseCardV1Schema.parse(card)).toEqual(card)
+    expect(buildTelegramRichMessage(card)).toEqual({ html: card.html })
+    expect(renderAssistantResponseCardText(card)).toBe(
+      'Travel prep\nTwo quick checks & one optional note.\n1. Check the departure time.\n2. Pack the charger.\nOptional note\nDownload the ticket.\n\n> Keep the passport with you.',
+    )
+    expect(() => buildLinqIMessageAppLayout(card)).toThrow(
+      'Telegram rich content cards do not have a native iMessage layout',
+    )
+  })
+
+  it('rejects unsafe or malformed model-authored Telegram rich content', () => {
+    const parseHtml = (html: string) => telegramRichContentResponseCardV1Schema.safeParse({
+      kind: 'telegram_rich_content',
+      version: 1,
+      html,
+    })
+
+    expect(parseHtml('<h2>Guide</h2><script>alert(1)</script>').success).toBe(false)
+    expect(parseHtml('<h2>Guide</h2><a href="https://example.test">Link</a>').success).toBe(false)
+    expect(parseHtml('<h2 style="color:red">Guide</h2>').success).toBe(false)
+    expect(parseHtml('<details><p>Hidden</p></details>').success).toBe(false)
+    expect(parseHtml('<table><tr><td>A</td></table>').success).toBe(false)
+    expect(parseHtml('<p>Unclosed').success).toBe(false)
+    expect(parseHtml('<p>A &copy; B</p>').success).toBe(false)
   })
 
   it('keeps a maximum-count routine within one rich message and one text fallback', () => {

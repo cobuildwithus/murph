@@ -189,9 +189,15 @@ default destination for every goal or the definition of activation.
   or improve that answer keeps the same owned presentation when it still fits.
 - Telegram Rich Messages support headings, paragraphs, lists, quotations,
   bordered or striped tables, expandable details, collages, slideshows, and
-  embedded media. Murph authors semantic cards through its tools; the Telegram
-  renderer owns provider HTML or blocks. Do not ask the model to write Telegram
-  markup. See the official [Telegram Bot API Rich Messages documentation](https://core.telegram.org/bots/api#rich-messages).
+  embedded media. Existing semantic cards remain the preferred presentation
+  for nutrition, compact tables, tracked workouts, and catalog-backed exercise
+  routines. A private Telegram turn may author validated Rich HTML when a
+  complete structured answer does not fit one of those cards. Use it for real
+  guides, checklists, schedules, comparisons, or multi-section summaries, not
+  short replies or decorative formatting. Keep optional detail collapsed and
+  safety limits visible. The contract rejects links, remote media, unsupported
+  tags or attributes, deep nesting, and content that cannot fit one text
+  fallback. See the official [Telegram Bot API Rich Messages documentation](https://core.telegram.org/bots/api#rich-messages).
 - iMessage presentation can use the Murph Messages extension's interactive
   cards, provider-owned static card layouts, and ordered response media. The
   current routine path uses response media rather than pretending Telegram's
