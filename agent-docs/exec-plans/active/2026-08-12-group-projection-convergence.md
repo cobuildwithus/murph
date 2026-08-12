@@ -197,3 +197,8 @@ Updated: 2026-08-12
   Every existing fixed tolerance and permission boundary remains unchanged.
   The canonical production bundle command passes with a 1,674,886-byte entry,
   7,936,584-byte static closure, and 9,905,760-byte total.
+- The exact-head app-verification shard then exposed its mirrored bundle-budget
+  assertion still carrying the prior three baselines. The implementation gate,
+  forbidden-input checks, and all 12,265 other Cloudflare/Web tests passed. The
+  mirrored assertion is updated to the same reviewed measurements and rerun
+  directly before pushing the test-only correction.
