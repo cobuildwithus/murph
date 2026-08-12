@@ -14,6 +14,7 @@ export type HostedBrowserDeviceSyncConnectionSourceRecoveryKind = "connection_re
 
 export interface HostedBrowserDeviceSyncConnectionSource {
   connectionId: string;
+  fitbitMigrationCoverageReady?: true;
   firstSeenAt: string;
   historicalBackfillComplete?: true;
   lastErrorCode?: string | null;
@@ -29,11 +30,15 @@ export interface HostedBrowserDeviceSyncConnectionSource {
 export function toHostedBrowserDeviceSyncConnectionSource(
   source: HostedDeviceConnectionSource,
   browserConnectionId: string,
+  options: { fitbitMigrationCoverageReady?: boolean } = {},
 ): HostedBrowserDeviceSyncConnectionSource {
   const recoveryKind = resolveConnectionSourceRecoveryKind(source);
 
   return {
     connectionId: browserConnectionId,
+    ...(options.fitbitMigrationCoverageReady
+      ? { fitbitMigrationCoverageReady: true as const }
+      : {}),
     firstSeenAt: source.firstSeenAt,
     ...(isDeviceSyncSourceHistoricalBackfillComplete(source)
       ? { historicalBackfillComplete: true as const }

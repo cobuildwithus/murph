@@ -14,8 +14,8 @@ import {
   lockHostedMemberRow,
 } from "../hosted-onboarding/shared";
 
-export const HOSTED_TERMS_OF_SERVICE_VERSION = "2026-08-11";
-export const HOSTED_PRIVACY_POLICY_VERSION = "2026-08-11";
+export const HOSTED_TERMS_OF_SERVICE_VERSION = "2026-07-23";
+export const HOSTED_PRIVACY_POLICY_VERSION = "2026-07-23";
 export const HOSTED_CONSUMER_HEALTH_DATA_NOTICE_VERSION = "2026-07-23";
 export const HOSTED_HEALTH_AI_SAFETY_DISCLOSURE_VERSION = "2026-07-23";
 

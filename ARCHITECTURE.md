@@ -1166,9 +1166,15 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Fitbit migration is likewise runtime-driven but Web-authoritative: the pass
   publishes successor verification, then requests one exact-connection cutover;
   Web rechecks its durable source rows and owns the fenced targeted provider
-  revoke. Failure keeps legacy Fitbit active, records the retry presentation
-  marker, and advances the existing local reconcile wake without creating a
-  migration queue or browser-owned lifecycle.
+  revoke. Device sync advances a per-resource legacy coverage boundary only
+  after the corresponding canonical import is durably accepted. Cutover
+  requires a boundary for every overlapping temporal successor resource, and
+  post-cutover Google Health imports admit only records whose interval end or
+  daily coverage end is beyond that resource's boundary; the current-state
+  `profile` snapshot is not temporal coverage. Failure keeps legacy Fitbit
+  active, records the retry presentation marker, and advances the existing
+  local reconcile wake without creating a migration queue or browser-owned
+  lifecycle.
 - Group sponsorship remains an extension of the existing Web-owned
   usage-credit purchase, not a second billing or entitlement system. A group
   purchase may own one encrypted participant-authored sponsorship moment.

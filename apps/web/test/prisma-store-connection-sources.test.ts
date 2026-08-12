@@ -353,6 +353,61 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     });
   });
 
+  it("resets an explicitly restarted source epoch and preserves canonical coverage markers", async () => {
+    const { store } = createSourceStore();
+
+    await store.upsertConnectionSource({
+      connectionId: "dsc_parent",
+      sourceInstanceKey: "src_fitbit",
+      sourceProviderSlug: "fitbit",
+      status: "connected",
+      resourceAvailabilitySummary: {
+        activity: true,
+        canonicalCoverageThrough_activity: "2026-08-10T00:00:00.000Z",
+        canonicalCoverageThrough_sleep: "2026-08-10T00:00:00Z",
+      },
+      firstSeenAt: "2026-08-01T00:00:00.000Z",
+      lastDataAt: "2026-08-10T01:00:00.000Z",
+      lastSeenAt: "2026-08-10T01:00:00.000Z",
+    });
+
+    const restarted = await store.upsertConnectionSource({
+      connectionId: "dsc_parent",
+      sourceInstanceKey: "src_fitbit",
+      sourceProviderSlug: "fitbit",
+      status: "disconnected",
+      resourceAvailabilitySummary: null,
+      firstSeenAt: "2026-08-11T00:00:00.000Z",
+      lastDataAt: null,
+      lastSeenAt: "2026-08-11T00:00:00.000Z",
+    });
+
+    expect(restarted).toMatchObject({
+      firstSeenAt: "2026-08-11T00:00:00.000Z",
+      lastDataAt: null,
+      resourceAvailabilitySummary: {},
+      status: "disconnected",
+    });
+
+    const covered = await store.upsertConnectionSource({
+      connectionId: "dsc_parent",
+      sourceInstanceKey: "src_fitbit",
+      sourceProviderSlug: "fitbit",
+      status: "connected",
+      resourceAvailabilitySummary: {
+        activity: true,
+        canonicalCoverageThrough_activity: "2026-08-12T00:00:00.000Z",
+        canonicalCoverageThrough_sleep: "2026-08-12T00:00:00Z",
+      },
+      lastSeenAt: "2026-08-12T00:00:00.000Z",
+    });
+
+    expect(covered.resourceAvailabilitySummary).toEqual({
+      activity: true,
+      canonicalCoverageThrough_activity: "2026-08-12T00:00:00.000Z",
+    });
+  });
+
   it("lists connection sources with deterministic ordering", async () => {
     const { findMany, store } = createSourceStore([
       createSourceRecord({

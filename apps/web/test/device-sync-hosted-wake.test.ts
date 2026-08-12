@@ -2047,7 +2047,14 @@ describe("hosted device-sync wakes", () => {
     });
     const storedConnection = buildProviderConfigStoredConnection(connection);
     let sources = [
-      buildHostedConnectionSource(connection.id, "fitbit"),
+      buildHostedConnectionSource(connection.id, "fitbit", {
+        resourceAvailabilitySummary: {
+          canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+          canonicalCoverageThrough_steps: "2026-08-11T10:05:00.000Z",
+          sleep: true,
+          steps: true,
+        },
+      }),
       buildHostedConnectionSource(connection.id, "google_health", {
         firstSeenAt: "2026-08-11T10:00:00.000Z",
         lastDataAt: "2026-08-11T10:05:00.000Z",
@@ -2109,7 +2116,12 @@ describe("hosted device-sync wakes", () => {
       setupPhase: "source_confirmed",
     });
     const sources = [
-      buildHostedConnectionSource(connection.id, "fitbit"),
+      buildHostedConnectionSource(connection.id, "fitbit", {
+        resourceAvailabilitySummary: {
+          canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+          sleep: true,
+        },
+      }),
       buildHostedConnectionSource(connection.id, "google_health", {
         firstSeenAt: "2026-08-11T10:00:00.000Z",
         lastDataAt: "2026-08-11T10:05:00.000Z",
@@ -2190,7 +2202,12 @@ describe("hosted device-sync wakes", () => {
     });
     const storedConnection = buildProviderConfigStoredConnection(connection);
     let sources = [
-      buildHostedConnectionSource(connection.id, "fitbit"),
+      buildHostedConnectionSource(connection.id, "fitbit", {
+        resourceAvailabilitySummary: {
+          canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+          sleep: true,
+        },
+      }),
       buildHostedConnectionSource(connection.id, "google_health", {
         firstSeenAt: "2026-08-11T10:00:00.000Z",
         lastDataAt: "2026-08-11T10:05:00.000Z",
@@ -3320,23 +3337,38 @@ describe("hosted device-sync wakes", () => {
     });
     const storedConnection = buildProviderConfigStoredConnection(connection);
     const legacySource = buildHostedConnectionSource(connection.id, "fitbit");
+    let successorSource = buildHostedConnectionSource(
+      connection.id,
+      "google_health",
+      {
+        firstSeenAt: "2026-08-01T00:00:00.000Z",
+        lastDataAt: "2026-08-10T00:00:00.000Z",
+        resourceAvailabilitySummary: {
+          historicalBackfillCompletedAt: "2026-08-02T00:00:00.000Z",
+          sleep: true,
+        },
+      },
+    );
     const revokeSourceAccess = vi.fn(async () => undefined);
     mocks.listConnectionsForUser.mockResolvedValue([connection]);
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
     mocks.listConnectionSources.mockImplementation(async (input) =>
-      input?.sourceProviderSlug === "google_health" ? [] : [legacySource]
+      input?.sourceProviderSlug === "google_health"
+        ? [successorSource]
+        : [legacySource, successorSource]
     );
     mocks.registryGet.mockReturnValue({
       connectionHandler: { revokeSourceAccess },
     });
-    mocks.upsertConnectionSource.mockImplementation(async (input) => ({
-      ...buildHostedConnectionSource(input.connectionId, input.sourceProviderSlug, {
-        lastSeenAt: input.lastSeenAt,
-        status: input.status,
-      }),
-      sourceInstanceKey: input.sourceInstanceKey,
-    }));
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      successorSource = {
+        ...successorSource,
+        ...input,
+        connectionId: connection.id,
+      };
+      return successorSource;
+    });
 
     await expect(controlPlane.prepareConnectionStart("user-123", {
       connectSourceId: "fitbit",
@@ -3355,6 +3387,9 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(
       expect.objectContaining({
         connectionId: connection.id,
+        firstSeenAt: expect.any(String),
+        lastDataAt: null,
+        resourceAvailabilitySummary: null,
         sourceProviderSlug: "google_health",
         status: "disconnected",
       }),

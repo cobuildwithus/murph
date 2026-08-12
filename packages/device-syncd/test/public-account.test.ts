@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import {
   countAvailableDeviceSyncSourceResources,
+  buildDeviceSyncSourceCanonicalCoverageThroughKey,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   isDeviceSyncConnectionSetupConfirmed,
@@ -12,6 +13,8 @@ import {
   isDeviceSyncSourceResourceAvailabilityMetadataKey,
   isEstablishedDeviceSyncConnection,
   isGoogleHealthFitbitMigrationSuccessorReady,
+  isGoogleHealthFitbitMigrationLegacyCoverageReady,
+  readDeviceSyncSourceCanonicalCoverageThrough,
   isJunctionHistoricalResetProviderSlug,
   redactPublicDeviceSyncMetadata,
   requiresHistoricalResetDeviceSyncSource,
@@ -180,8 +183,65 @@ test("Google Health Fitbit cutover requires verified history, resources, and a f
   }), false);
 });
 
+test("Google Health Fitbit cutover requires accepted legacy coverage for every overlapping resource", () => {
+  const coverageKey = buildDeviceSyncSourceCanonicalCoverageThroughKey("sleep");
+  assert.equal(coverageKey, "canonicalCoverageThrough_sleep");
+  assert.ok(coverageKey);
+  assert.equal(
+    buildDeviceSyncSourceCanonicalCoverageThroughKey(`s${"x".repeat(39)}`),
+    null,
+  );
+  assert.equal(readDeviceSyncSourceCanonicalCoverageThrough({
+    [coverageKey]: "2026-08-11T12:00:00.000Z",
+  }, "sleep"), "2026-08-11T12:00:00.000Z");
+  assert.equal(readDeviceSyncSourceCanonicalCoverageThrough({
+    [coverageKey]: "2026-08-11T12:00:00Z",
+  }, "sleep"), null);
+
+  const successorSummary = { activity: true, sleep: true };
+  assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
+    legacySummary: {
+      activity: true,
+      sleep: true,
+      canonicalCoverageThrough_activity: "2026-08-11T11:00:00.000Z",
+      canonicalCoverageThrough_sleep: "2026-08-11T12:00:00.000Z",
+    },
+    successorSummary,
+  }), true);
+  assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
+    legacySummary: {
+      activity: true,
+      sleep: true,
+      canonicalCoverageThrough_activity: "2026-08-11T11:00:00.000Z",
+    },
+    successorSummary,
+  }), false);
+  assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
+    legacySummary: { activity: false },
+    successorSummary,
+  }), false);
+  assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
+    legacySummary: {
+      activity: true,
+      profile: true,
+      provider_metadata: true,
+      canonicalCoverageThrough_activity: "2026-08-11T11:00:00.000Z",
+    },
+    successorSummary: {
+      activity: true,
+      profile: true,
+      provider_metadata: true,
+    },
+  }), true);
+  assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
+    legacySummary: { profile: true },
+    successorSummary: { profile: true },
+  }), false);
+});
+
 test("available source resource counts exclude lifecycle metadata and unavailable values", () => {
   assert.equal(countAvailableDeviceSyncSourceResources({
+    canonicalCoverageThrough_sleep: "2026-08-11T12:00:00.000Z",
     [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]:
       "2026-08-11T12:00:00.000Z",
     heartrate: null,

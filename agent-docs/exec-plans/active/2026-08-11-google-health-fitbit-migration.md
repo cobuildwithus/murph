@@ -90,9 +90,12 @@ Updated: 2026-08-12
 6. Completed: obtained the preliminary ReviewGPT specialist outcome, accepted
    its browser-lifecycle finding, and moved automatic verified cutover into the
    hosted runtime and signed Web control plane with bounded retries.
-7. In progress: push the corrected exact head, run final ReviewGPT concurrently
-   with required CI, and inspect current-base mergeability without spending a
-   second base-update attempt.
+7. Completed: triaged final ReviewGPT round 1 and remediated its accepted
+   runtime-port, source-epoch, per-resource coverage, polling, disclosure, and
+   legal-version findings with focused regression proof.
+8. In progress: push the round-one remediation head, run final ReviewGPT round
+   2 concurrently with required CI, and inspect current-base mergeability
+   without spending a second base-update attempt.
 
 ## Decisions
 
@@ -116,6 +119,10 @@ Updated: 2026-08-12
 - Corrected lifecycle remediation: 102 device-sync contract tests, 246 Web
   connect/control-plane tests, 82 hosted-runtime maintenance tests, 362
   Cloudflare transport/policy tests, and all affected package typechecks pass.
+- Final round-one remediation: all 979 device-sync tests, 2,193 assistant-runtime
+  tests (with four skips), and 296 affected Web tests pass. The final
+  temporal-resource edge correction passes 229 device-sync, 366 runtime, and
+  159 Web consumer tests plus the device-sync typecheck.
 - Affected device-sync, importer, and Web typechecks passed before the base-only
   update; exact-head release build/typecheck and app verification passed in CI.
 - Exact-head package coverage, host matrices, fixture coverage, sandbox,
@@ -123,13 +130,14 @@ Updated: 2026-08-12
 - The frontend design-proof test passes, and the pull request includes rendered
   desktop/mobile proof for authorization, verification, cutover, retry, and the
   provider disclosure.
-- Preliminary ReviewGPT returned one accepted finding. The corrected head must
-  still complete the independent final full-patch ReviewGPT round.
+- Preliminary ReviewGPT returned one accepted finding and final ReviewGPT round
+  1 returned six accepted findings. All are remediated locally; the corrected
+  exact head must still complete final ReviewGPT round 2.
 
 ## Remaining handoff
 
 - Keep the pull request draft.
-- Run final ReviewGPT round 1 against the corrected exact head while required CI
+- Run final ReviewGPT round 2 against the corrected exact head while required CI
   executes; resolve every accepted finding before archiving this plan.
 - Recheck the current base with `git merge-tree`. The one permitted base update
   is already consumed, so retain the draft PR and report a moving-base conflict

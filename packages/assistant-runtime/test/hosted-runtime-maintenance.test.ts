@@ -1728,7 +1728,14 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
     mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
       listConnectionSources: vi.fn(() => [
-        { sourceProviderSlug: "fitbit", status: "connected" },
+        {
+          resourceAvailabilitySummary: {
+            canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+            sleep: true,
+          },
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        },
         {
           firstSeenAt: "2026-08-11T10:00:00.000Z",
           lastDataAt: "2026-08-11T10:05:00.000Z",
@@ -1798,7 +1805,14 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
       getAccountById: vi.fn(() => account),
       listConnectionSources: vi.fn(() => [
-        { sourceProviderSlug: "fitbit", status: "connected" },
+        {
+          resourceAvailabilitySummary: {
+            canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+            sleep: true,
+          },
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        },
         {
           firstSeenAt: "2026-08-11T10:00:00.000Z",
           lastDataAt: "2026-08-11T10:05:00.000Z",
@@ -1889,7 +1903,14 @@ describe("runHostedDeviceSyncPass", () => {
     mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
       getAccountById: vi.fn((id: string) => accounts.get(id) ?? null),
       listConnectionSources: vi.fn(() => [
-        { sourceProviderSlug: "fitbit", status: "connected" },
+        {
+          resourceAvailabilitySummary: {
+            canonicalCoverageThrough_sleep: "2026-08-11T10:05:00.000Z",
+            sleep: true,
+          },
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        },
         {
           firstSeenAt: "2026-08-11T10:00:00.000Z",
           lastDataAt: "2026-08-11T10:05:00.000Z",

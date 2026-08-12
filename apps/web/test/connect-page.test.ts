@@ -2166,6 +2166,7 @@ test("ConnectPage exposes only the targeted automatic legacy cutover after Googl
           status: "connected",
         },
         {
+          fitbitMigrationCoverageReady: true,
           firstSeenAt: "2026-08-11T10:00:00.000Z",
           historicalBackfillComplete: true,
           lastDataAt: "2026-08-11T10:05:00.000Z",
@@ -2211,6 +2212,7 @@ test("ConnectPage projects durable Fitbit cutover failure as an explicit retry",
           status: "connected",
         },
         {
+          fitbitMigrationCoverageReady: true,
           firstSeenAt: "2026-08-11T10:00:00.000Z",
           historicalBackfillComplete: true,
           lastDataAt: "2026-08-11T10:05:00.000Z",
@@ -2260,6 +2262,7 @@ test("ConnectPage keeps provider-disconnected Fitbit migrations staged until aut
           status: "disconnected",
         },
         {
+          fitbitMigrationCoverageReady: true,
           firstSeenAt: "2026-08-11T10:00:00.000Z",
           historicalBackfillComplete: true,
           lastDataAt: "2026-08-11T10:05:00.000Z",
@@ -3720,7 +3723,7 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid explains Junction before redeeming an initial device connect intent", async () => {
+test("ConnectSourcesGrid redeems an initial Fitbit connect intent without a second confirmation", async () => {
   const claim = "dc_12345678901234567890123456789012";
   let resolveAuthorizationResponse:
     | ((response: Response) => void)
@@ -3765,28 +3768,10 @@ test("ConnectSourcesGrid explains Junction before redeeming an initial device co
   );
 
   await vi.waitFor(() => {
-    assert.match(
-      rendered.container.textContent ?? "",
-      /Connect Fitbit to Murph/u,
-    );
-  });
-  assert.equal(fetch.mock.calls.length, 0);
-  assert.equal(rendered.assign.mock.calls.length, 0);
-
-  const continueButton = [
-    ...rendered.container.querySelectorAll("button"),
-  ].find((button) => button.textContent === "Continue to Google");
-  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    continueButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
-  await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
     assert.match(rendered.container.textContent ?? "", /Connecting Fitbit/u);
   });
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connect Fitbit to Murph/u);
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
   assert.deepEqual(fetch.mock.calls[0]?.[1], {
@@ -3862,18 +3847,6 @@ test("ConnectSourcesGrid clears signed-intent progress when Junction redemption 
       },
     },
   );
-
-  await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /Connect Fitbit to Murph/u);
-  });
-  const continueButton = [...rendered.container.querySelectorAll("button")]
-    .find((button) => button.textContent === "Continue to Google");
-  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    continueButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
 
   await vi.waitFor(() => {
     assert.match(
@@ -6180,7 +6153,7 @@ test("resolveConfiguredConnectSources marks only Junction-backed actions", async
         source.requiresJunctionDisclosure === true,
       ]),
     ),
-    { fitbit: true, whoop: false },
+    { fitbit: false, whoop: false },
   );
 });
 
@@ -6406,8 +6379,64 @@ test("ConnectSourcesGrid refreshes while Fitbit migration verification is pendin
     );
     assert.match(
       rendered.container.textContent ?? "",
-      /check back after your next Fitbit or Pixel Watch sync/u,
+      /Murph will keep checking while this page is open/u,
     );
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 13);
+
+    await rendered.cleanup();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("ConnectSourcesGrid pauses Fitbit verification refreshes while hidden", async () => {
+  vi.useFakeTimers();
+
+  try {
+    const { ConnectSourcesGrid } = await import(
+      "../app/(dashboard)/connect/connect-page-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(ConnectSourcesGrid, {
+        sources: [{
+          description: "Fitbit data through Google authorization.",
+          id: "fitbit",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/fitbit.svg",
+            width: 44,
+          },
+          migrationState: "verifying_successor",
+          name: "Fitbit",
+        }],
+      }),
+      { requireButton: false },
+    );
+
+    Object.defineProperty(rendered.window.document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    rendered.window.document.dispatchEvent(new rendered.window.Event("visibilitychange"));
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+
+    Object.defineProperty(rendered.window.document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    rendered.window.document.dispatchEvent(new rendered.window.Event("visibilitychange"));
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
 
     await rendered.cleanup();
   } finally {
@@ -6471,13 +6500,18 @@ test("ConnectSourcesGrid replaces Fitbit authorization success after prolonged v
       /Keep legacy Fitbit connected/u,
     );
 
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 13);
+
     await rendered.cleanup();
   } finally {
     vi.useRealTimers();
   }
 });
 
-test("ConnectSourcesGrid explains Junction before a Junction-backed authorization", async () => {
+test("ConnectSourcesGrid shows inline Junction disclosure and starts Fitbit authorization in one click", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
@@ -6516,37 +6550,12 @@ test("ConnectSourcesGrid explains Junction before a Junction-backed authorizatio
     "button[aria-label='Connect Fitbit']",
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Google authorization is handled through Junction/u,
+  );
   await act(async () => {
     connectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
-  assert.equal(fetch.mock.calls.length, 0);
-  assert.match(
-    rendered.container.textContent ?? "",
-    /Connect Fitbit to Murph/u,
-  );
-  assert.match(
-    rendered.container.textContent ?? "",
-    /Google will ask you to authorize Fitbit and Pixel Watch health data\./u,
-  );
-  assert.match(
-    rendered.container.textContent ?? "",
-    /We use Junction to connect this health source to Murph\./u,
-  );
-  assert.doesNotMatch(
-    rendered.container.textContent ?? "",
-    /Turn on Historical Data/u,
-  );
-  assert.equal(rendered.container.querySelector("audio"), null);
-
-  const continueButton = [
-    ...rendered.container.querySelectorAll("button"),
-  ].find((button) => button.textContent === "Continue to Google");
-  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    continueButton.dispatchEvent(
       new rendered.window.Event("click", { bubbles: true }),
     );
   });
@@ -6574,16 +6583,16 @@ test("ConnectSourcesGrid dismisses a Junction handoff without starting a connect
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          connectTarget: "fitbit",
-          description: "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
-          id: "fitbit",
+          connectTarget: "garmin",
+          description: "Training, recovery, sleep, and activity data.",
+          id: "garmin",
           logo: {
             className: "size-11 object-contain",
             height: 44,
-            src: "/brand-logos/connect/fitbit.svg",
+            src: "/brand-logos/connect/garmin.svg",
             width: 44,
           },
-          name: "Fitbit",
+          name: "Garmin",
           requiresJunctionDisclosure: true,
         },
       ],
@@ -6591,7 +6600,7 @@ test("ConnectSourcesGrid dismisses a Junction handoff without starting a connect
   );
 
   const connectButton = rendered.container.querySelector(
-    "button[aria-label='Connect Fitbit']",
+    "button[aria-label='Connect Garmin']",
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
@@ -6602,7 +6611,7 @@ test("ConnectSourcesGrid dismisses a Junction handoff without starting a connect
 
   assert.match(
     rendered.container.textContent ?? "",
-    /Connect Fitbit to Murph/u,
+    /Connect Garmin to Murph/u,
   );
   const closeButton = rendered.container.querySelector(
     'button[aria-label="Close"]',
@@ -6618,10 +6627,10 @@ test("ConnectSourcesGrid dismisses a Junction handoff without starting a connect
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
-    /Connect Fitbit to Murph/u,
+    /Connect Garmin to Murph/u,
   );
   assert.ok(
-    rendered.container.querySelector("button[aria-label='Connect Fitbit']"),
+    rendered.container.querySelector("button[aria-label='Connect Garmin']"),
   );
 
   await rendered.cleanup();

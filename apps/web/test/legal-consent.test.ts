@@ -22,8 +22,8 @@ describe("hosted legal consent registry", () => {
     );
     expect(legalVersions).toEqual({
       "health-ai-safety-disclosure": "2026-07-23",
-      "privacy-policy": "2026-08-11",
-      "terms-of-service": "2026-08-11",
+      "privacy-policy": "2026-07-23",
+      "terms-of-service": "2026-07-23",
     });
     expect(parseHostedConsentAcceptRequest({
       acceptedDocumentVersions: legalVersions,
@@ -189,8 +189,8 @@ describe("hosted legal consent registry", () => {
         createdAt: new Date("2026-07-30T17:00:00.000Z"),
         documentVersionsJson: {
           "health-ai-safety-disclosure": "2026-07-23",
-          "privacy-policy": "2026-08-11",
-          "terms-of-service": "2026-08-11",
+          "privacy-policy": "2026-07-23",
+          "terms-of-service": "2026-07-23",
         },
         id: expect.stringMatching(/^hbce_[A-Za-z0-9_-]{24}$/u),
         memberId: "member_1",
@@ -300,8 +300,6 @@ describe("hosted legal consent registry", () => {
     const legalLaunchScope = status.launchScopes.find((s) => s.scope === "launch.legal");
     expect(legalLaunchScope?.granted).toBe(false);
     expect(legalLaunchScope?.missingDocuments.map((d) => d.id)).toEqual([
-      "terms-of-service",
-      "privacy-policy",
       "health-ai-safety-disclosure",
     ]);
     expect(status.launchGranted).toBe(false);

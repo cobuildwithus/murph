@@ -1,3 +1,8 @@
+import {
+  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+} from "@murphai/importers/device-providers/junction-resources";
+
 import type {
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncExistingAccountPolicy,
@@ -23,6 +28,8 @@ export const DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE =
 
 export const DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY =
   "historicalBackfillCompletedAt";
+export const DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_THROUGH_KEY_PREFIX =
+  "canonicalCoverageThrough_";
 
 export const DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE =
   "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED";
@@ -30,6 +37,14 @@ export const DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE =
 const DEVICE_SYNC_SOURCE_RESOURCE_AVAILABILITY_METADATA_KEYS = new Set([
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   "sourceInstanceKeyFallback",
+]);
+
+// Only resources that can produce dated canonical records need a handoff
+// boundary. `profile` is a current-state snapshot, and unknown provider
+// availability fields never enter the canonical import path.
+const DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_RESOURCES = new Set<string>([
+  ...JUNCTION_ALLOWED_SUMMARY_RESOURCES.filter((resource) => resource !== "profile"),
+  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
 ]);
 
 const DEVICE_SYNC_SOURCE_DISCONNECT_FENCE_CODES = new Set([
@@ -85,7 +100,61 @@ export function isDeviceSyncSourceHistoricalBackfillComplete(source: {
 export function isDeviceSyncSourceResourceAvailabilityMetadataKey(
   key: string,
 ): boolean {
-  return DEVICE_SYNC_SOURCE_RESOURCE_AVAILABILITY_METADATA_KEYS.has(key);
+  return DEVICE_SYNC_SOURCE_RESOURCE_AVAILABILITY_METADATA_KEYS.has(key)
+    || key.startsWith(
+      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_THROUGH_KEY_PREFIX,
+    );
+}
+
+export function buildDeviceSyncSourceCanonicalCoverageThroughKey(
+  resource: string,
+): string | null {
+  const normalized = resource.trim();
+  return /^[A-Za-z][A-Za-z0-9_-]{0,38}$/u.test(normalized)
+    ? `${DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_THROUGH_KEY_PREFIX}${normalized}`
+    : null;
+}
+
+export function readDeviceSyncSourceCanonicalCoverageThrough(
+  summary: Record<string, unknown> | null | undefined,
+  resource: string,
+): string | null {
+  const key = buildDeviceSyncSourceCanonicalCoverageThroughKey(resource);
+  const value = key ? summary?.[key] : undefined;
+  if (typeof value !== "string") {
+    return null;
+  }
+  const timestampMs = Date.parse(value);
+  return Number.isFinite(timestampMs)
+    && new Date(timestampMs).toISOString() === value
+    ? value
+    : null;
+}
+
+export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
+  legacySummary: Record<string, unknown> | null | undefined;
+  successorSummary: Record<string, unknown> | null | undefined;
+}): boolean {
+  const overlappingResources = Object.entries(input.successorSummary ?? {})
+    .filter(([key, value]) =>
+      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_RESOURCES.has(key)
+      && isAvailableDeviceSyncSourceResource(key, value)
+    )
+    .map(([key]) => key)
+    .filter((key) =>
+      isAvailableDeviceSyncSourceResource(
+        key,
+        input.legacySummary?.[key],
+      )
+    );
+
+  return overlappingResources.length > 0
+    && overlappingResources.every((resource) =>
+      readDeviceSyncSourceCanonicalCoverageThrough(
+        input.legacySummary,
+        resource,
+      ) !== null
+    );
 }
 
 export function countAvailableDeviceSyncSourceResources(

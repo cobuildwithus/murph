@@ -4,6 +4,10 @@ import type {
   DeviceConnectionSourceStatus,
 } from "@murphai/device-syncd/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
+import {
+  DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_THROUGH_KEY_PREFIX,
+  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
+} from "@murphai/device-syncd/public-account";
 
 import {
   generateHostedRandomPrefixedId,
@@ -119,6 +123,7 @@ export class PrismaHostedConnectionSourceStore {
     const hasLastErrorCode = hasOwnInputProperty(input, "lastErrorCode");
     const hasLastErrorMessage = hasOwnInputProperty(input, "lastErrorMessage");
     const hasLastDataAt = hasOwnInputProperty(input, "lastDataAt");
+    const hasFirstSeenAt = hasOwnInputProperty(input, "firstSeenAt");
     const lastDataAt = hasLastDataAt ? maybeDate(input.lastDataAt) ?? null : null;
     const displayName = hasDisplayName
       ? sanitizeSourceDisplayName(input.displayName)
@@ -140,6 +145,10 @@ export class PrismaHostedConnectionSourceStore {
 
     if (hasDisplayName) {
       update.displayName = displayName;
+    }
+
+    if (hasFirstSeenAt) {
+      update.firstSeenAt = firstSeenAt;
     }
 
     if (hasResourceAvailabilitySummary) {
@@ -493,7 +502,7 @@ function sanitizeResourceAvailabilitySummary(
       continue;
     }
 
-    const scalar = sanitizeSummaryScalar(rawValue);
+    const scalar = sanitizeSummaryScalar(key, rawValue);
 
     if (scalar !== undefined) {
       summary[key] = scalar;
@@ -518,7 +527,10 @@ function sanitizeSummaryKey(value: string): string | null {
   return key;
 }
 
-function sanitizeSummaryScalar(value: unknown): boolean | number | string | null | undefined {
+function sanitizeSummaryScalar(
+  key: string,
+  value: unknown,
+): boolean | number | string | null | undefined {
   if (value === null) {
     return null;
   }
@@ -536,6 +548,20 @@ function sanitizeSummaryScalar(value: unknown): boolean | number | string | null
   }
 
   const normalized = normalizeNullableString(value);
+
+  if (
+    key === DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
+    || key.startsWith(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_THROUGH_KEY_PREFIX)
+  ) {
+    if (!normalized || normalized.length > 64) {
+      return undefined;
+    }
+    const timestampMs = Date.parse(normalized);
+    return Number.isFinite(timestampMs)
+      && new Date(timestampMs).toISOString() === normalized
+      ? normalized
+      : undefined;
+  }
 
   if (
     !normalized

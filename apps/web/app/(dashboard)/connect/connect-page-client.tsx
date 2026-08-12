@@ -73,6 +73,7 @@ type JunctionConnectionRequest = {
 
 const FITBIT_MIGRATION_REFRESH_INTERVAL_MS = 15_000;
 const FITBIT_MIGRATION_REFRESH_ATTEMPT_LIMIT = 12;
+const FITBIT_MIGRATION_REFRESH_BACKOFF_MS = 60_000;
 
 export type {
   ConnectCallbackInput,
@@ -260,13 +261,36 @@ export function ConnectSourcesGrid({
       return;
     }
 
-    const intervalId = window.setInterval(() => {
+    let timeoutId: number | null = null;
+    let cancelled = false;
+    const canRefresh = () =>
+      document.visibilityState !== "hidden" && window.navigator.onLine !== false;
+    const pause = () => {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+    const schedule = () => {
+      if (cancelled || timeoutId !== null || !canRefresh()) {
+        return;
+      }
+      const delay =
+        fitbitMigrationRefreshAttemptsRef.current < FITBIT_MIGRATION_REFRESH_ATTEMPT_LIMIT
+          ? FITBIT_MIGRATION_REFRESH_INTERVAL_MS
+          : FITBIT_MIGRATION_REFRESH_BACKOFF_MS;
+      timeoutId = window.setTimeout(refresh, delay);
+    };
+    const refresh = () => {
+      timeoutId = null;
+      if (cancelled || !canRefresh()) {
+        return;
+      }
       const nextAttempt = fitbitMigrationRefreshAttemptsRef.current + 1;
       fitbitMigrationRefreshAttemptsRef.current = nextAttempt;
       router.refresh();
 
-      if (nextAttempt >= FITBIT_MIGRATION_REFRESH_ATTEMPT_LIMIT) {
-        window.clearInterval(intervalId);
+      if (nextAttempt === FITBIT_MIGRATION_REFRESH_ATTEMPT_LIMIT) {
         setNotice((current) =>
           current === null ||
           (current.kind === FITBIT_MIGRATION_AUTHORIZED_NOTICE.kind &&
@@ -275,9 +299,28 @@ export function ConnectSourcesGrid({
             : current,
         );
       }
-    }, FITBIT_MIGRATION_REFRESH_INTERVAL_MS);
+      schedule();
+    };
+    const handleRefreshAvailabilityChange = () => {
+      if (canRefresh()) {
+        schedule();
+      } else {
+        pause();
+      }
+    };
 
-    return () => window.clearInterval(intervalId);
+    document.addEventListener("visibilitychange", handleRefreshAvailabilityChange);
+    window.addEventListener("online", handleRefreshAvailabilityChange);
+    window.addEventListener("offline", handleRefreshAvailabilityChange);
+    schedule();
+
+    return () => {
+      cancelled = true;
+      pause();
+      document.removeEventListener("visibilitychange", handleRefreshAvailabilityChange);
+      window.removeEventListener("online", handleRefreshAvailabilityChange);
+      window.removeEventListener("offline", handleRefreshAvailabilityChange);
+    };
   }, [hasVerifyingFitbitMigration, router]);
 
   useEffect(() => {
@@ -720,6 +763,10 @@ export function requiresJunctionConnectionPreflight(
   source: ConnectSource,
   connectIntentProvider?: string | null,
 ): boolean {
+  if (source.id === "fitbit") {
+    return false;
+  }
+
   if (connectIntentProvider) {
     return connectIntentProvider === "junction";
   }

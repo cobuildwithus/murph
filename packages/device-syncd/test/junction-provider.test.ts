@@ -11539,6 +11539,10 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
       sourceProviderSlug: "fitbit",
     }), "Legacy Fitbit source key should be available."),
     sourceProviderSlug: "fitbit",
+    resourceAvailabilitySummary: {
+      activity: true,
+      canonicalCoverageThrough_activity: cutoverAt,
+    },
   });
   const googleHealth = createConnectionSource({
     id: "src-google-health",
@@ -11549,7 +11553,10 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
     }), "Google Health source key should be available."),
     sourceProviderSlug: "google_health",
   });
-  const buildJob = (observedAt: string) => createJob("resource", {
+  const buildJob = (
+    observedAt: string,
+    recordOverrides: Record<string, unknown> = {},
+  ) => createJob("resource", {
     eventType: "daily.data.activity.created",
     objectId: `google-health-activity-${observedAt}`,
     occurredAt: observedAt,
@@ -11561,6 +11568,7 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
       observedAt,
       sourceProviderSlug: "google_health",
       steps: 1234,
+      ...recordOverrides,
     }),
     windowStart: "2026-08-10T00:00:00.000Z",
     windowEnd: "2026-08-12T00:00:00.000Z",
@@ -11569,6 +11577,7 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
   const executeWithSources = (
     sources: DeviceConnectionSourceRecord[],
     observedAt = "2026-08-11T12:05:00.000Z",
+    recordOverrides: Record<string, unknown> = {},
   ) => {
     const sourceSummaries = sources.map(summarizeConnectionSource);
     return executeJunctionJob(
@@ -11581,7 +11590,7 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
         },
         listConnectionSources: async () => sourceSummaries,
       }),
-      buildJob(observedAt),
+      buildJob(observedAt, recordOverrides),
     );
   };
 
@@ -11636,6 +11645,97 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
   assert.equal(importedSnapshots.length, 1);
   assert.equal(fetchCalls, 0);
   assert.match(JSON.stringify(importedSnapshots[0]), /google_health/u);
+
+  importedSnapshots.length = 0;
+  await executeWithSources(
+    cutoverSources,
+    "2026-08-11T11:00:00.000Z",
+    {
+      end_time: "2026-08-11T13:00:00.000Z",
+      start_time: "2026-08-11T11:00:00.000Z",
+    },
+  );
+  assert.equal(importedSnapshots.length, 1);
+
+  importedSnapshots.length = 0;
+  await executeWithSources(
+    cutoverSources,
+    "2026-08-11T11:00:00.000Z",
+    { date: "2026-08-11" },
+  );
+  assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction records per-resource Fitbit coverage only after canonical import accepts the record", async () => {
+  const provider = createJunctionProvider(async () => {
+    throw new Error("Unexpected Junction request.");
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+  const legacyFitbit = createConnectionSource({
+    id: "src-fitbit-coverage",
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "fitbit",
+    })),
+    sourceProviderSlug: "fitbit",
+    resourceAvailabilitySummary: { activity: true },
+  });
+  const sourceSummaries = [summarizeConnectionSource(legacyFitbit)];
+  const upserts: Array<
+    Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]
+  > = [];
+  let durableDeliveryAccepted = false;
+  const context = createJunctionJobContext({
+      account: createAccount({ sources: sourceSummaries }),
+      importSnapshot: async () => ({ durableDeliveryAccepted }),
+      listConnectionSources: async () => sourceSummaries,
+      now: "2026-08-12T01:00:00.000Z",
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    });
+  const job = createJob("resource", {
+    eventType: "daily.data.activity.created",
+    objectId: "fitbit-activity-coverage",
+    occurredAt: "2026-08-11T23:30:00.000Z",
+    resource: "activity",
+    resourceCategory: "summary",
+    sourceProviderSlug: "fitbit",
+    webhookDataJson: JSON.stringify({
+      date: "2026-08-11",
+      id: "fitbit-activity-coverage",
+      sourceProviderSlug: "fitbit",
+      steps: 4321,
+    }),
+    windowStart: "2026-08-11T00:00:00.000Z",
+    windowEnd: "2026-08-12T00:00:00.000Z",
+  });
+
+  await executeJunctionJob(provider, context, job);
+  assert.equal(
+    upserts.some((source) =>
+      source.resourceAvailabilitySummary?.canonicalCoverageThrough_activity
+        !== undefined
+    ),
+    false,
+  );
+
+  upserts.length = 0;
+  durableDeliveryAccepted = true;
+  await executeJunctionJob(provider, context, job);
+
+  assert.equal(
+    upserts.at(-1)?.resourceAvailabilitySummary?.activity,
+    true,
+  );
+  assert.equal(
+    upserts.at(-1)?.resourceAvailabilitySummary
+      ?.canonicalCoverageThrough_activity,
+    "2026-08-12T00:00:00.000Z",
+  );
 });
 
 test("Junction imports multiple direct daily payloads via per-job execution without Junction HTTP requests", async () => {

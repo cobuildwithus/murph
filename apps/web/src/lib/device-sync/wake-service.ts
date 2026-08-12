@@ -28,6 +28,7 @@ import {
   DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isDeviceSyncSourceHistoricalBackfillComplete,
+  isGoogleHealthFitbitMigrationLegacyCoverageReady,
   isGoogleHealthFitbitMigrationSuccessorReady,
   isEstablishedDeviceSyncConnection,
   isDeviceSyncConnectionSetupPending,
@@ -491,9 +492,11 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
       sourceProviderSlug,
       status: "disconnected",
       firstSeenAt: sourceStartedAt,
+      lastDataAt: null,
       lastErrorCode: null,
       lastErrorMessage: null,
       lastSeenAt: sourceStartedAt,
+      resourceAvailabilitySummary: null,
       tx,
     });
   });
@@ -770,9 +773,12 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
             sourceInstanceKey: source.sourceInstanceKey,
             sourceProviderSlug,
             status: "disconnected",
+            firstSeenAt: sourceStartedAt,
+            lastDataAt: null,
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: sourceStartedAt,
+            resourceAvailabilitySummary: null,
             tx,
           });
           return { complete: true as const, source: preparedSource };
@@ -1559,6 +1565,10 @@ function isHostedGoogleHealthFitbitMigrationCutoverReady(
     && legacy.status !== "disconnected"
     && !isHostedSourceDisconnectFenced(legacy)
     && successor
+    && isGoogleHealthFitbitMigrationLegacyCoverageReady({
+      legacySummary: legacy.resourceAvailabilitySummary,
+      successorSummary: successor.resourceAvailabilitySummary,
+    })
     && isGoogleHealthFitbitMigrationSuccessorReady({
       firstSeenAt: successor.firstSeenAt,
       historicalBackfillComplete:

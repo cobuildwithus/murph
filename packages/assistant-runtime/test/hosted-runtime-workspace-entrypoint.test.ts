@@ -2680,6 +2680,86 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("preserves Fitbit cutover on the production abort-guarded device-sync port", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const completeFitbitMigration = vi.fn(async () => ({
+      connectionId: "device_sync_connection_fitbit",
+      status: "complete" as const,
+    }));
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      async ackDirtyStateProcessed() {
+        throw new Error("Device sync ack should not run.");
+      },
+      async applyUpdates() {
+        throw new Error("Device sync apply should not run.");
+      },
+      async createConnectLink() {
+        throw new Error("Device sync connect link should not run.");
+      },
+      completeFitbitMigration,
+      async fetchDirtyStates() {
+        throw new Error("Device sync dirty state should not run.");
+      },
+      async fetchSnapshot() {
+        throw new Error("Device sync snapshot should not run.");
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput(),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import" ? "5".repeat(64) : "6".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}-fitbit-cutover.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [createMailboxItem({
+                id: "mailbox_item_entrypoint_fitbit_cutover",
+                laneSeq: "1",
+              })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            const guardedCutover =
+              input.runtime.platform.deviceSyncPort?.completeFitbitMigration;
+            assert.ok(guardedCutover);
+            await guardedCutover({
+              connectionId: "device_sync_connection_fitbit",
+              signal: null,
+            });
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      expect(completeFitbitMigration).toHaveBeenCalledWith({
+        connectionId: "device_sync_connection_fitbit",
+        signal: null,
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("projects the trusted Android rollout gate into the assistant turn env", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const runtimeEnvs: Readonly<Record<string, string>>[] = [];

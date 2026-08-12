@@ -57,12 +57,15 @@ import {
 } from "../junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
+  buildDeviceSyncSourceCanonicalCoverageThroughKey,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
   isDeviceSyncSourceAdmitted,
   isDeviceSyncSourceDisconnectFenced,
+  isDeviceSyncSourceResourceAvailabilityMetadataKey,
   isJunctionHistoricalResetProviderSlug,
+  readDeviceSyncSourceCanonicalCoverageThrough,
   requiresHistoricalResetDeviceSyncSource,
 } from "../public-account.ts";
 import {
@@ -189,8 +192,12 @@ interface JunctionDirectSummaryImportResult {
 }
 
 interface JunctionImportAdmissionSource {
+  displayName?: string | null;
+  firstSeenAt?: string;
   lastErrorCode?: string | null;
-  lastSeenAt?: string;
+  lastErrorMessage?: string | null;
+  resourceAvailabilitySummary?: Record<string, string | number | boolean | null>;
+  sourceInstanceKey?: string;
   sourceProviderSlug: string;
   status: DeviceConnectionSourceStatus;
 }
@@ -1099,7 +1106,7 @@ export function createJunctionDeviceSyncProvider(
       ? maxIsoTimestamp(baseTimeseriesWindowStart, timeseriesCursor)
       : baseTimeseriesWindowStart;
     if (job.kind !== "backfill" || summaryHasFetchedRecords) {
-      await context.importSnapshot({
+      const receipt = await context.importSnapshot({
         provider: "junction",
         accountId: buildJunctionImportAccountId(context.account.externalAccountId),
         connectionId: context.account.id,
@@ -1110,6 +1117,11 @@ export function createJunctionDeviceSyncProvider(
         summaries: importSummaries,
         timeseries: {},
       });
+      await recordAcceptedJunctionFitbitCoverage(
+        context,
+        preparedSummaryImport.snapshots,
+        receipt,
+      );
     }
     // Current records are durable before the optional historical-status probe.
     // An unavailable introspection endpoint must not hold fresh ingestion hostage.
@@ -2146,7 +2158,7 @@ export function createJunctionDeviceSyncProvider(
       summaries,
       sourceProviders,
     );
-    await context.importSnapshot({
+    const receipt = await context.importSnapshot({
       provider: "junction",
       accountId: buildJunctionImportAccountId(context.account.externalAccountId),
       connectionId: context.account.id,
@@ -2157,6 +2169,11 @@ export function createJunctionDeviceSyncProvider(
       summaries: preparedImport.snapshots,
       timeseries: {},
     });
+    await recordAcceptedJunctionFitbitCoverage(
+      context,
+      preparedImport.snapshots,
+      receipt,
+    );
 
     return withJunctionHistoricalCoverageVerification(
       context,
@@ -2856,6 +2873,11 @@ export function createJunctionDeviceSyncProvider(
             summaries: {},
             timeseries: preparedImport.snapshots,
           });
+          await recordAcceptedJunctionFitbitCoverage(
+            context,
+            preparedImport.snapshots,
+            receipt,
+          );
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
           if (fetchedProviderRecordIdentityEvidence) {
             const resolutionEvidence =
@@ -2957,7 +2979,7 @@ export function createJunctionDeviceSyncProvider(
         sourceProviders,
       );
       if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-        await context.importSnapshot({
+        const receipt = await context.importSnapshot({
           provider: "junction",
           accountId: buildJunctionImportAccountId(context.account.externalAccountId),
           connectionId: context.account.id,
@@ -2968,6 +2990,11 @@ export function createJunctionDeviceSyncProvider(
           summaries: {},
           timeseries: preparedImport.snapshots,
         });
+        await recordAcceptedJunctionFitbitCoverage(
+          context,
+          preparedImport.snapshots,
+          receipt,
+        );
       }
     }
     return {
@@ -3021,6 +3048,11 @@ export function createJunctionDeviceSyncProvider(
       summaries,
       timeseries: {},
     });
+    await recordAcceptedJunctionFitbitCoverage(
+      context,
+      preparedImport.snapshots,
+      receipt,
+    );
     return {
       durableDeliveryAccepted: readProviderSnapshotDurableDeliveryAccepted(receipt),
       normalizationEvidence,
@@ -4787,6 +4819,7 @@ function filterJunctionImportSnapshots(
       records.filter((record) =>
         isJunctionImportRecordAdmitted(
           record,
+          resource,
           sourceReferences,
           sources,
           hasPendingSourceAdmission,
@@ -4798,8 +4831,122 @@ function filterJunctionImportSnapshots(
   );
 }
 
+async function recordAcceptedJunctionFitbitCoverage(
+  context: ProviderJobContext,
+  snapshots: Record<string, unknown[]>,
+  receipt: unknown,
+): Promise<void> {
+  if (
+    !readProviderSnapshotDurableDeliveryAccepted(receipt)
+    || !context.upsertConnectionSource
+  ) {
+    return;
+  }
+
+  const coverageByResource = new Map<string, string>();
+  for (const [resource, records] of Object.entries(snapshots)) {
+    if (!buildDeviceSyncSourceCanonicalCoverageThroughKey(resource)) {
+      continue;
+    }
+
+    for (const value of records) {
+      const record = readPlainObject(value);
+      if (
+        !record
+        || normalizeProviderSlug(
+          resolveJunctionOrigin(record, {}).sourceProviderSlug,
+        ) !== JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      ) {
+        continue;
+      }
+
+      const coverageThrough = resolveJunctionRecordCoverageThrough(record);
+      if (!coverageThrough) {
+        continue;
+      }
+      const existing = coverageByResource.get(resource);
+      coverageByResource.set(
+        resource,
+        existing ? maxIsoTimestamp(existing, coverageThrough) : coverageThrough,
+      );
+    }
+  }
+
+  if (coverageByResource.size === 0) {
+    return;
+  }
+
+  const sources: readonly JunctionImportAdmissionSource[] = context.listConnectionSources
+    ? await context.listConnectionSources({
+        sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+      })
+    : context.account.sources ?? [];
+  const legacy = sources.find((source) =>
+    normalizeProviderSlug(source.sourceProviderSlug)
+      === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+  );
+  if (!legacy || legacy.status === "disconnected") {
+    return;
+  }
+
+  const resourceAvailabilitySummary = {
+    ...(legacy.resourceAvailabilitySummary ?? {}),
+  };
+  let changed = false;
+  for (const [resource, coverageThrough] of coverageByResource) {
+    const key = buildDeviceSyncSourceCanonicalCoverageThroughKey(resource);
+    if (!key) {
+      continue;
+    }
+    const existingCoverage = readDeviceSyncSourceCanonicalCoverageThrough(
+      resourceAvailabilitySummary,
+      resource,
+    );
+    if (
+      existingCoverage
+      && Date.parse(existingCoverage) >= Date.parse(coverageThrough)
+    ) {
+      continue;
+    }
+    resourceAvailabilitySummary[key] = coverageThrough;
+    changed = true;
+  }
+
+  if (!changed) {
+    return;
+  }
+
+  const sourceInstanceKey = legacy.sourceInstanceKey
+    ?? buildJunctionProviderSourceInstanceKey({
+      connectionId: context.account.id,
+      sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+    });
+  if (!sourceInstanceKey) {
+    return;
+  }
+
+  await context.upsertConnectionSource({
+    sourceInstanceKey,
+    sourceProviderSlug: legacy.sourceProviderSlug,
+    ...(legacy.displayName === undefined
+      ? {}
+      : { displayName: legacy.displayName }),
+    status: legacy.status,
+    resourceAvailabilitySummary,
+    ...(legacy.lastErrorCode === undefined
+      ? {}
+      : { lastErrorCode: legacy.lastErrorCode }),
+    ...(legacy.lastErrorMessage === undefined
+      ? {}
+      : { lastErrorMessage: legacy.lastErrorMessage }),
+    ...(legacy.firstSeenAt ? { firstSeenAt: legacy.firstSeenAt } : {}),
+    lastSeenAt: context.now,
+  });
+}
+
 function isJunctionImportRecordAdmitted(
   value: unknown,
+  resource: string,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
   sources: readonly JunctionImportAdmissionSource[],
   hasPendingSourceAdmission: boolean,
@@ -4825,11 +4972,18 @@ function isJunctionImportRecordAdmitted(
       return false;
     }
 
-    const googleHealthCutoverAt = sourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-      ? resolveJunctionGoogleHealthCutoverAt(sources)
+    const googleHealthLegacyCoverageThrough =
+      sourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+      ? resolveJunctionGoogleHealthLegacyCoverageThrough(sources, resource)
       : undefined;
-    return typeof googleHealthCutoverAt !== "string"
-      || isJunctionGoogleHealthRecordAfterCutover(record, googleHealthCutoverAt);
+    return googleHealthLegacyCoverageThrough === undefined
+      || (
+        typeof googleHealthLegacyCoverageThrough === "string"
+        && isJunctionGoogleHealthRecordBeyondLegacyCoverage(
+          record,
+          googleHealthLegacyCoverageThrough,
+        )
+      );
   }
 
   return !hasPendingSourceAdmission || !hasJunctionSourceReferenceIdentity(record);
@@ -7316,6 +7470,11 @@ async function projectJunctionSources(
         : existing?.resourceAvailabilitySummary?.[
             DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
           ];
+    const existingSourceMetadata = Object.fromEntries(
+      Object.entries(existing?.resourceAvailabilitySummary ?? {}).filter(
+        ([key]) => isDeviceSyncSourceResourceAvailabilityMetadataKey(key),
+      ),
+    );
     await context.upsertConnectionSource({
       sourceInstanceKey: existing?.sourceInstanceKey ?? source.sourceInstanceKey,
       sourceProviderSlug: source.sourceProviderSlug,
@@ -7326,6 +7485,7 @@ async function projectJunctionSources(
         : source.status,
       resourceAvailabilitySummary: {
         ...source.resourceAvailabilitySummary,
+        ...existingSourceMetadata,
         ...(typeof historicalBackfillCompletedAt === "string"
           ? {
               [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]:
@@ -7349,8 +7509,9 @@ async function projectJunctionSources(
   }
 }
 
-function resolveJunctionGoogleHealthCutoverAt(
+function resolveJunctionGoogleHealthLegacyCoverageThrough(
   sources: readonly JunctionImportAdmissionSource[],
+  resource: string,
 ): string | null | undefined {
   const legacySources = sources.filter((source) =>
     normalizeProviderSlug(source.sourceProviderSlug) === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
@@ -7359,7 +7520,7 @@ function resolveJunctionGoogleHealthCutoverAt(
     return undefined;
   }
 
-  let latestCutoverMs = Number.NEGATIVE_INFINITY;
+  let latestCoverageMs = Number.NEGATIVE_INFINITY;
   for (const source of legacySources) {
     if (
       source.status !== "disconnected"
@@ -7368,40 +7529,92 @@ function resolveJunctionGoogleHealthCutoverAt(
       return null;
     }
 
-    const lastSeenAt = normalizeString(source.lastSeenAt);
-    const lastSeenAtMs = lastSeenAt ? Date.parse(lastSeenAt) : NaN;
-    if (!Number.isFinite(lastSeenAtMs)) {
+    const resourceAvailability = source.resourceAvailabilitySummary?.[resource];
+    if (
+      resourceAvailability === false
+      || resourceAvailability === null
+      || resourceAvailability === undefined
+    ) {
+      continue;
+    }
+    const coverageThrough = readDeviceSyncSourceCanonicalCoverageThrough(
+      source.resourceAvailabilitySummary,
+      resource,
+    );
+    const coverageThroughMs = coverageThrough
+      ? Date.parse(coverageThrough)
+      : Number.NaN;
+    if (!Number.isFinite(coverageThroughMs)) {
       return null;
     }
-    latestCutoverMs = Math.max(latestCutoverMs, lastSeenAtMs);
+    latestCoverageMs = Math.max(latestCoverageMs, coverageThroughMs);
   }
 
-  return new Date(latestCutoverMs).toISOString();
+  return latestCoverageMs === Number.NEGATIVE_INFINITY
+    ? undefined
+    : new Date(latestCoverageMs).toISOString();
 }
 
-function isJunctionGoogleHealthRecordAfterCutover(
+function isJunctionGoogleHealthRecordBeyondLegacyCoverage(
   record: Record<string, unknown>,
-  cutoverAt: string,
+  legacyCoverageThrough: string,
 ): boolean {
-  const recordTimestamp = resolveJunctionGoogleHealthRecordTimestamp(record);
-  if (!recordTimestamp) {
+  const recordCoverageThrough = resolveJunctionRecordCoverageThrough(record);
+  if (!recordCoverageThrough) {
     return false;
   }
 
-  const recordTimestampMs = Date.parse(recordTimestamp);
-  const cutoverAtMs = Date.parse(cutoverAt);
-  return Number.isFinite(recordTimestampMs)
-    && Number.isFinite(cutoverAtMs)
-    && recordTimestampMs > cutoverAtMs;
+  const recordCoverageThroughMs = Date.parse(recordCoverageThrough);
+  const legacyCoverageThroughMs = Date.parse(legacyCoverageThrough);
+  return Number.isFinite(recordCoverageThroughMs)
+    && Number.isFinite(legacyCoverageThroughMs)
+    && recordCoverageThroughMs > legacyCoverageThroughMs;
 }
 
-function resolveJunctionGoogleHealthRecordTimestamp(
+function resolveJunctionRecordCoverageThrough(
   record: Record<string, unknown>,
 ): string | null {
-  // Prefer the beginning of interval records so a sleep/workout that straddles
-  // the cutover stays on the legacy side instead of being duplicated by both
-  // provider identities. Date-only summaries on the cutover day also remain
-  // legacy-owned; the first unambiguous successor day is admitted.
+  for (const key of [
+    "end",
+    "endAt",
+    "end_at",
+    "endTime",
+    "end_time",
+    "endTimestamp",
+    "end_timestamp",
+    "timeEnd",
+    "time_end",
+    "bedtimeStop",
+    "bedtime_stop",
+  ]) {
+    const value = normalizeString(record[key]);
+    if (!value) {
+      continue;
+    }
+    const timestamp = toIsoTimestampIfValid(value);
+    if (timestamp) {
+      return timestamp;
+    }
+  }
+
+  for (const key of [
+    "date",
+    "day",
+    "calendarDate",
+    "calendar_date",
+    "localDate",
+    "local_date",
+  ]) {
+    const value = normalizeString(record[key]);
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+      continue;
+    }
+    const dayStartMs = Date.parse(`${value}T00:00:00.000Z`);
+    if (Number.isFinite(dayStartMs)) {
+      return new Date(dayStartMs + 24 * 60 * 60_000).toISOString();
+    }
+  }
+
   for (const key of [
     "observedAtRaw",
     "observed_at_raw",
@@ -7420,23 +7633,6 @@ function resolveJunctionGoogleHealthRecordTimestamp(
     "time_start",
     "bedtimeStart",
     "bedtime_start",
-    "date",
-    "day",
-    "calendarDate",
-    "calendar_date",
-    "localDate",
-    "local_date",
-    "end",
-    "endAt",
-    "end_at",
-    "endTime",
-    "end_time",
-    "endTimestamp",
-    "end_timestamp",
-    "timeEnd",
-    "time_end",
-    "bedtimeStop",
-    "bedtime_stop",
   ]) {
     const value = normalizeString(record[key]);
     if (!value) {
@@ -7469,7 +7665,14 @@ function isJunctionSourceAdmittedForImport(
   // leave a brief dual-writer interval before the legacy row is restored.
   if (
     normalizedSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-    && resolveJunctionGoogleHealthCutoverAt(sources) === null
+    && sources.some((source) =>
+      normalizeProviderSlug(source.sourceProviderSlug)
+        === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      && (
+        source.status !== "disconnected"
+        || source.lastErrorCode !== DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE
+      )
+    )
   ) {
     return false;
   }

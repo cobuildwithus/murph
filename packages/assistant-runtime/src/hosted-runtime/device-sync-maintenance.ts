@@ -17,6 +17,7 @@ import {
 import {
   countAvailableDeviceSyncSourceResources,
   isDeviceSyncSourceHistoricalBackfillComplete,
+  isGoogleHealthFitbitMigrationLegacyCoverageReady,
   isGoogleHealthFitbitMigrationSuccessorReady,
 } from "@murphai/device-syncd/public-account";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
@@ -369,7 +370,7 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
   const candidates: Array<{ hostedConnectionId: string; localAccountId: string }> = [];
   for (const [localAccountId, hostedConnectionId] of input.state.localToHostedAccountIds) {
     const sources = store.listConnectionSources({ connectionId: localAccountId });
-    const hasLegacy = sources.some((source) =>
+    const legacy = sources.find((source) =>
       normalizeJunctionProviderSlug(source.sourceProviderSlug)
         === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
       && source.status !== "disconnected"
@@ -390,7 +391,13 @@ async function completeHostedDeviceSyncFitbitMigrations(input: {
           status: successor.status,
         })
       : false;
-    if (hasLegacy && successorReady) {
+    const legacyCoverageReady = legacy && successor
+      ? isGoogleHealthFitbitMigrationLegacyCoverageReady({
+          legacySummary: legacy.resourceAvailabilitySummary,
+          successorSummary: successor.resourceAvailabilitySummary,
+        })
+      : false;
+    if (legacy && legacyCoverageReady && successorReady) {
       candidates.push({ hostedConnectionId, localAccountId });
     }
   }

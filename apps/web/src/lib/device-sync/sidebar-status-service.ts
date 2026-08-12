@@ -7,6 +7,14 @@ import {
 import {
   listConfiguredDeviceSyncPublicProviderDescriptors,
 } from "@murphai/device-syncd/public-provider-descriptors";
+import {
+  isGoogleHealthFitbitMigrationLegacyCoverageReady,
+} from "@murphai/device-syncd/public-account";
+import {
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+  normalizeJunctionProviderSlug,
+} from "@murphai/device-syncd/connect-config";
 
 import { getPrisma } from "../prisma";
 import { readHostedDeviceSyncEnvironment } from "./env";
@@ -143,11 +151,42 @@ function buildSettingsSources(input: {
     readConfiguredDeviceSyncProviderConfigs(process.env),
     { publicBaseUrl: input.publicBaseUrl },
   );
+  const fitbitMigrationCoverageByConnectionId = new Map<string, boolean>();
+  for (const connectionId of new Set(
+    input.connectionSources.map((source) => source.connectionId),
+  )) {
+    const connectionSources = input.connectionSources.filter(
+      (source) => source.connectionId === connectionId,
+    );
+    const legacy = connectionSources.find((source) =>
+      normalizeJunctionProviderSlug(source.sourceProviderSlug)
+        === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    );
+    const successor = connectionSources.find((source) =>
+      normalizeJunctionProviderSlug(source.sourceProviderSlug)
+        === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    );
+    fitbitMigrationCoverageByConnectionId.set(
+      connectionId,
+      Boolean(
+        legacy
+        && successor
+        && isGoogleHealthFitbitMigrationLegacyCoverageReady({
+          legacySummary: legacy.resourceAvailabilitySummary,
+          successorSummary: successor.resourceAvailabilitySummary,
+        }),
+      ),
+    );
+  }
   const sources = buildHostedDeviceSyncSettingsSources({
     connectionSources: input.connectionSources.map((source) =>
       toHostedBrowserDeviceSyncConnectionSource(
         source,
         createHostedBrowserConnectionId(input.routingIndexKey, source.connectionId),
+        {
+          fitbitMigrationCoverageReady:
+            fitbitMigrationCoverageByConnectionId.get(source.connectionId),
+        },
       )
     ),
     connections: input.browserConnections,

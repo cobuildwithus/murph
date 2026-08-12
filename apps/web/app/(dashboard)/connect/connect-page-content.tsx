@@ -693,7 +693,8 @@ export function resolveConfiguredConnectSources(
         : undefined;
       const requiresJunctionDisclosure =
         connectionAvailable &&
-        connectConfig?.provider === "junction";
+        connectConfig?.provider === "junction" &&
+        source.id !== "fitbit";
 
       return {
         ...source,
@@ -1026,6 +1027,7 @@ function resolveFitbitMigrationConnectionState(input: {
       isLiveJunctionUpstreamSource(source),
   );
   const successorReady = successor
+    && successor.fitbitMigrationCoverageReady === true
     ? isGoogleHealthFitbitMigrationSuccessorReady({
         firstSeenAt: successor.firstSeenAt,
         historicalBackfillComplete: successor.historicalBackfillComplete === true,

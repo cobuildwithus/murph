@@ -122,10 +122,12 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
         sourceProviderSlug: "google_health",
       }),
       "dspc_fitbit",
+      { fitbitMigrationCoverageReady: true },
     );
 
     expect(browserSource).toMatchObject({
       historicalBackfillComplete: true,
+      fitbitMigrationCoverageReady: true,
       resourceCount: 1,
       sourceProviderSlug: "google_health",
     });
@@ -141,6 +143,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     expect(settingsSource?.upstreamSources).toEqual([
       expect.objectContaining({
         historicalBackfillComplete: true,
+        fitbitMigrationCoverageReady: true,
         resourceCount: 1,
         sourceProviderSlug: "google_health",
       }),

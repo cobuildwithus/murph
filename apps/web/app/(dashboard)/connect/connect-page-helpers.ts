@@ -32,7 +32,7 @@ export const FITBIT_MIGRATION_STILL_VERIFYING_NOTICE = {
   kind: "warning",
   title: "Fitbit migration is still verifying",
   message:
-    "Google Health is authorized, but Murph has not seen a fresh supported update yet. Keep legacy Fitbit connected and check back after your next Fitbit or Pixel Watch sync.",
+    "Google Health is authorized, but Murph has not seen a fresh supported update yet. Keep legacy Fitbit connected; Murph will keep checking while this page is open.",
 } satisfies NonNullable<ConnectCallbackNotice>;
 
 export function filterConnectSourcesForSearch(
