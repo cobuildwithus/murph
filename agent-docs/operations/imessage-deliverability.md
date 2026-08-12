@@ -83,6 +83,12 @@ bounded queryless image path. The static renderer mirrors the native table or
 workout summary. Generic Linq provider chrome retains its title, optional
 subtitle, rows, and footer. Structured-workout provider chrome stays bounded to
 the title plus derived progress instead of repeating every rendered set.
+Workout authoring and native decoding admit up to 16 exercises and 16 sets per
+exercise, but the measured 2,048-character URL and image-path checks remain the
+final authority for each complete snapshot. The assistant must attempt the
+complete verified card instead of estimating capacity from counts or asking the
+member to simplify saved workout data; only an actual envelope rejection uses
+the complete deterministic text recovery.
 Generic static tables keep one shared header whenever exact intrinsic header and
 cell tracks plus gutters fit the raster, regardless of column count; only
 genuinely overwide content uses repeated full-width field labels.

@@ -211,6 +211,87 @@ describe("workout session compact-table contract", () => {
     expect(compactTableResponseCardV1Schema.parse(card)).toEqual(card);
   });
 
+  it("accepts complete higher-cardinality workouts when their actual envelope fits", () => {
+    if (!("workout" in TRACKED_WORKOUT_CARD)) {
+      throw new TypeError("Expected the workout card fixture.");
+    }
+
+    const exerciseNames = [
+      "Back squat",
+      "Romanian deadlift",
+      "Leg press",
+      "Leg extension",
+      "Hamstring curl",
+      "Walking lunge",
+      "Calf raise",
+      "Hip thrust",
+      "Cable row",
+      "Push-up",
+      "Farmer carry",
+    ];
+    const largerWorkoutCard: CompactTableResponseCardV1 = {
+      ...TRACKED_WORKOUT_CARD,
+      subtitle: null,
+      footer: "Reply with the exercise, set, and result.",
+      workout: {
+        version: 1,
+        state: "active",
+        exercises: exerciseNames.map((name, exerciseIndex) => ({
+          name,
+          sets: Array.from({ length: 3 }, (_, setIndex) => {
+            const isCompleted = exerciseIndex * 3 + setIndex < 30;
+            return isCompleted
+              ? {
+                  status: "completed" as const,
+                  target: "8 reps",
+                  actual: "8 reps",
+                }
+              : {
+                  status: "pending" as const,
+                  target: "8 reps",
+                  actual: null,
+                };
+          }),
+        })),
+      },
+    };
+
+    expect(compactTableResponseCardV1Schema.parse(largerWorkoutCard)).toEqual(
+      largerWorkoutCard,
+    );
+    expect(largerWorkoutCard.workout.exercises).toHaveLength(11);
+    expect(largerWorkoutCard.workout.exercises.flatMap(
+      (exercise) => exercise.sets,
+    )).toHaveLength(33);
+
+    const manySetCard: CompactTableResponseCardV1 = {
+      ...largerWorkoutCard,
+      workout: {
+        version: 1,
+        state: "active",
+        exercises: [{
+          name: "Pull-up",
+          sets: Array.from({ length: 12 }, (_, index) =>
+            index < 11
+              ? {
+                  status: "completed" as const,
+                  target: "5 reps",
+                  actual: "5 reps",
+                }
+              : {
+                  status: "pending" as const,
+                  target: "5 reps",
+                  actual: null,
+                }),
+        }],
+      },
+    };
+
+    expect(compactTableResponseCardV1Schema.parse(manySetCard)).toEqual(
+      manySetCard,
+    );
+  });
+
   it("keeps generic table fields out of the workout branch", () => {
     expect(
       compactTableResponseCardV1Schema.safeParse({

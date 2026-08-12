@@ -6,8 +6,8 @@ export const workoutSessionCardV1Bounds = {
   exerciseName: 60,
   setValue: 40,
   footer: 120,
-  exercises: 8,
-  setsPerExercise: 8,
+  exercises: 16,
+  setsPerExercise: 16,
 } as const;
 
 const singleLineTextPattern =

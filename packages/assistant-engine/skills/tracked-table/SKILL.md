@@ -109,7 +109,7 @@ Do not add `rowHeader`, `columns`, or `rows` to a structured workout card. Text,
 - `completed`: a corresponding actual result exists;
 - `skipped`: no corresponding actual result and the workout has ended.
 
-Also include every canonical event set with no matching format set. Use `target=null`; mark it `completed` when an actual result exists, `pending` while the workout is live and the slot is empty, or `skipped` after the workout ends and the slot remains empty. An empty targetless slot is a verified logging coordinate, not evidence of a planned set. Preserve canonical exercise and set order. Keep the card within its exercise, set, text, and encoded URL limits; use a compact table or readable text when the full workout cannot fit.
+Also include every canonical event set with no matching format set. Use `target=null`; mark it `completed` when an actual result exists, `pending` while the workout is live and the slot is empty, or `skipped` after the workout ends and the slot remains empty. An empty targetless slot is a verified logging coordinate, not evidence of a planned set. Preserve canonical exercise and set order. Build and attach the complete verified card without estimating its encoded size from exercise or set count. The card tool's validation of the actual encoded envelope is authoritative. Never ask the member to delete, merge, or simplify canonical workout data merely to fit the presentation.
 
 The outer card remains `compact_table` V1. Set `workout` to:
 
@@ -148,7 +148,7 @@ Set `tracking` to `{ "kind": "workout", "entityId": "<exact evt id>", "snapshotA
 ## Card refresh behavior
 
 - After successfully starting or resuming one canonical live workout, use one verified structured workout card as the complete response on a supported private card route. Do not send a text-only start acknowledgement or wait for a separate card request.
-- Fall back to truthful ordinary text only when the card tool is unavailable, the canonical event cannot be verified, any claimed planned targets cannot be verified from their matching format, the card would not completely answer the turn, or the bounded card contract cannot represent the workout.
+- Fall back to truthful ordinary text only when the card tool is unavailable, the canonical event cannot be verified, any claimed planned targets cannot be verified from their matching format, the card would not completely answer the turn, or the complete card is rejected by the card tool's actual encoded-envelope validation. Do not preempt that validation from an estimated exercise or set count, and do not ask the member to change the saved workout to make a card fit.
 - After every verified ordinary free-form set log, correction, clear, or exercise addition, send the refreshed card as the response; do not also repeat the update in prose.
 - After an accepted explicit card command, send the refreshed card as the response; do not also repeat the full workout in prose.
 - Do not send proactive cards without an existing authorized reminder or automation.

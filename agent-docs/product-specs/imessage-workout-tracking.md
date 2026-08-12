@@ -34,7 +34,7 @@ Tracked workout detail requires a canonical tracking marker in durable transcrip
 
 Generic compact tables keep the existing schema-version-3 native envelope. Enhanced workout tables use the bounded schema-version-4 envelope. Both stay under the existing 2,048-character URL ceiling.
 
-The readable response-card contract remains object-shaped for authoring and runtime validation. Only the immutable V4 native wire uses positional exercise tuples `[name, sets]` and set tuples `[status, target, actual]`; removing repeated wire keys keeps realistic six-exercise, four-set initial, late-active, and completed snapshots below the same URL ceiling without adding another projection owner.
+The readable response-card contract remains object-shaped for authoring and runtime validation. Only the immutable V4 native wire uses positional exercise tuples `[name, sets]` and set tuples `[status, target, actual]`. The logical reader and authoring bounds admit up to 16 exercises and 16 sets per exercise, while validation of the actual encoded fragment and image path remains the final capacity authority. This admits realistic higher-cardinality snapshots, including eleven-exercise, three-set late-active sessions, without adding another projection owner; a specific snapshot that exceeds the existing URL ceiling still uses the complete semantic text recovery instead of truncating or changing canonical workout data.
 
 ## Static fallback
 

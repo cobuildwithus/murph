@@ -189,7 +189,16 @@ describe('assistant tracked workout table skill', () => {
       'any claimed planned targets cannot be verified from their matching format',
     )
     expect(skill).toContain(
-      'the bounded card contract cannot represent the workout',
+      "The card tool's validation of the actual encoded envelope is authoritative",
+    )
+    expect(skill).toContain(
+      'Never ask the member to delete, merge, or simplify canonical workout data merely to fit the presentation',
+    )
+    expect(skill).toContain(
+      "the complete card is rejected by the card tool's actual encoded-envelope validation",
+    )
+    expect(skill).toContain(
+      'Do not preempt that validation from an estimated exercise or set count',
     )
   })
 

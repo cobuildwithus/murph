@@ -2881,7 +2881,12 @@ The provider request rejects encoded URLs at 2,048 characters, while the
 contract applies the tighter of the fragment and image-path bounds before
 delivery. Compact-table provider chrome uses only bounded title, optional
 generic subtitle, and derived workout-progress fields; complete detail remains
-owned by the semantic text renderer. Nutrition V1 and V2 cards use the
+owned by the semantic text renderer. V4 workout authoring and native decoding
+admit up to 16 exercises and 16 sets per exercise, but those logical bounds do
+not replace the measured fragment and image-path gates. A complete snapshot is
+attempted first; a real encoded-envelope rejection recovers through complete
+semantic text without truncating or rewriting the canonical workout. Nutrition
+V1 and V2 cards use the
 same bounded fragment and image-path family without a tracking field. The
 Messages extension remains offline and read-only. This adds no card API,
 database, background synchronization owner, authentication surface, or mutable

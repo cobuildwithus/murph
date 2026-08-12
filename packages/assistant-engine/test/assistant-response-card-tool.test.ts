@@ -548,6 +548,15 @@ describe('murph.attach_response_card', () => {
       'Workout footers span native and static cards; never promise native-only taps',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'let input validation decide whether its actual encoded envelope fits',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'never refuse from an estimated exercise or set count',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'use the full deterministic text recovery',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
