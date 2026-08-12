@@ -14294,7 +14294,7 @@ test("Junction sparse-history scheduling and live admission honor raw availabili
     environment: "sandbox",
     region: "us",
     summaryResources: ["activity"],
-    timeseriesResources: ["vo2_max"],
+    timeseriesResources: ["vo2_max", "weight", "fat"],
     fetchImpl: async (input) => {
       const url = readUrl(input);
       requests.push(url);
@@ -14305,10 +14305,18 @@ test("Junction sparse-history scheduling and live admission honor raw availabili
           slug: "garmin",
           name: "Garmin",
           status: "connected",
-          resource_availability: { vo2max: true },
+          resource_availability: {
+            body_fat: true,
+            body_weight: true,
+            vo2max: true,
+          },
         }] });
       }
-      if (parsed.pathname === "/v2/timeseries/junction-user-1/vo2_max/grouped") {
+      if (
+        parsed.pathname === "/v2/timeseries/junction-user-1/vo2_max/grouped"
+        || parsed.pathname === "/v2/timeseries/junction-user-1/body_weight/grouped"
+        || parsed.pathname === "/v2/timeseries/junction-user-1/body_fat/grouped"
+      ) {
         return createJsonResponse({ groups: {} });
       }
       throw new Error(`Unexpected request: ${url}`);
@@ -14318,8 +14326,12 @@ test("Junction sparse-history scheduling and live admission honor raw availabili
     sourceProviderSlug: "garmin",
     displayName: null,
     status: "connected" as const,
-    resourceCount: 1,
-    resourceAvailabilitySummary: { vo2max: true },
+    resourceCount: 3,
+    resourceAvailabilitySummary: {
+      body_fat: true,
+      body_weight: true,
+      vo2max: true,
+    },
     lastErrorCode: null,
     lastErrorMessage: null,
     firstSeenAt: "2026-04-03T00:00:00.000Z",
@@ -14330,20 +14342,26 @@ test("Junction sparse-history scheduling and live admission honor raw availabili
     createStoredAccount({ sources: [source] }),
     "2026-08-11T12:00:00.000Z",
   );
-  const job = requireValue(scheduled?.jobs.find((candidate) =>
-    candidate.payload?.resource === "vo2_max"
-  ));
-
-  await executeJunctionJob(
-    provider,
-    createJunctionJobContext({ account: createAccount({ sources: [source] }) }),
-    {
-      ...createJob("resource", job.payload ?? {}),
-      dedupeKey: job.dedupeKey ?? null,
-    },
+  const jobs = ["vo2_max", "weight", "fat"].map((resource) =>
+    requireValue(scheduled?.jobs.find((candidate) =>
+      candidate.payload?.resource === resource
+    ))
   );
 
+  for (const job of jobs) {
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({ account: createAccount({ sources: [source] }) }),
+      {
+        ...createJob("resource", job.payload ?? {}),
+        dedupeKey: job.dedupeKey ?? null,
+      },
+    );
+  }
+
   assert.equal(requests.some((url) => url.includes("/vo2_max/grouped")), true);
+  assert.equal(requests.some((url) => url.includes("/body_weight/grouped")), true);
+  assert.equal(requests.some((url) => url.includes("/body_fat/grouped")), true);
 });
 
 test("Junction sparse-history continuation fetches one bounded 30-day window", async () => {

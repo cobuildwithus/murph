@@ -946,7 +946,7 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         source: { provider: "garmin", type: "scale" },
         id: "body-expanded-fields",
         date: "2026-05-20T08:00:00Z",
-        body_water_percentage: 55.2,
+        water_percentage: 55.2,
         bone_mass_percentage: 4.1,
         body_temperature: 36.7,
         lean_body_mass_kilogram: 40.1,

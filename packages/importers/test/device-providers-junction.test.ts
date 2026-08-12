@@ -3414,7 +3414,7 @@ test("Junction normalizer lands sparse body readings as compact sample-grain obs
   assert.deepEqual(facts, [
     { metric: "weight", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "kg", value: 81.2 },
     { metric: "body-fat-percentage", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "%", value: 18.4 },
-    { metric: "bmi", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "kg_m2", value: 23.7 },
+    { metric: "bmi", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "kg/m^2", value: 23.7 },
     { metric: "lean-body-mass", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "kg", value: 66.3 },
     { metric: "waist-circumference", occurredAt: "2026-04-22T13:05:00.000Z", grain: "sample", unit: "cm", value: 84.6 },
   ]);

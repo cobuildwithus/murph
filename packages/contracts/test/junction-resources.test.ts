@@ -111,6 +111,7 @@ describe("Junction wearable resource policy", () => {
       expect(JUNCTION_RESOURCE_POLICIES[resource]).toMatchObject({
         admission: "default",
         frequency: "sparse",
+        historyAnchor: "schedule_time",
         historyChunkDays: 30,
         initialHistoryDays: 180,
         retention: "canonical_per_record",
