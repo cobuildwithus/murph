@@ -1,27 +1,24 @@
 {
   "importedAt": "2026-08-11T12:00:00.000Z",
   "summaries": {
-    "sleep": {
-      "data": [
-        {
-          "id": "synthetic-google-health-sleep-1",
-          "provider": {
-            "name": "Google Health"
-          },
-          "source": {
-            "type": "cloud"
-          },
-          "start": "2026-08-11T03:00:00.000Z",
-          "end": "2026-08-11T11:00:00.000Z",
-          "duration": 28800,
-          "stages": {
-            "awake": 1800,
-            "deep": 5400,
-            "light": 12600,
-            "rem": 9000
-          }
-        }
-      ]
-    }
+    "sleep": [
+      {
+        "id": "synthetic-google-health-sleep-1",
+        "source": {
+          "provider": "google_health",
+          "type": "unknown"
+        },
+        "bedtime_start": "2026-08-11T03:00:00.000Z",
+        "bedtime_stop": "2026-08-11T11:00:00.000Z",
+        "calendar_date": "2026-08-11",
+        "created_at": "2026-08-11T11:05:00.000Z",
+        "updated_at": "2026-08-11T11:10:00.000Z",
+        "duration": 28800,
+        "awake_duration": 1800,
+        "deep_sleep_duration": 5400,
+        "light_sleep_duration": 12600,
+        "rem_sleep_duration": 9000
+      }
+    ]
   }
 }

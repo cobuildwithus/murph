@@ -2124,8 +2124,8 @@ test("ConnectPage preserves legacy Fitbit while Google Health is still proving r
         },
         {
           firstSeenAt: "2026-08-11T10:00:00.000Z",
-          lastDataAt: "2026-08-11T10:00:00.000Z",
-          lastSeenAt: "2026-08-11T10:00:00.000Z",
+          lastDataAt: "2026-08-11T10:05:00.000Z",
+          lastSeenAt: "2026-08-11T10:06:00.000Z",
           providerLabel: "Fitbit",
           resourceCount: 3,
           sourceProviderSlug: "google_health",
@@ -2147,7 +2147,7 @@ test("ConnectPage preserves legacy Fitbit while Google Health is still proving r
   assert.equal(state?.disconnectSourceProviderSlug, undefined);
 });
 
-test("ConnectPage exposes only a targeted legacy disconnect after Google Health is receiving fresh updates", async () => {
+test("ConnectPage exposes only the targeted automatic legacy cutover after Google Health is receiving fresh updates", async () => {
   const { resolveConnectSourceConnectionStates } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
@@ -2167,6 +2167,7 @@ test("ConnectPage exposes only a targeted legacy disconnect after Google Health 
         },
         {
           firstSeenAt: "2026-08-11T10:00:00.000Z",
+          historicalBackfillComplete: true,
           lastDataAt: "2026-08-11T10:05:00.000Z",
           lastSeenAt: "2026-08-11T10:06:00.000Z",
           providerLabel: "Fitbit",
@@ -2190,7 +2191,7 @@ test("ConnectPage exposes only a targeted legacy disconnect after Google Health 
   });
 });
 
-test("ConnectPage keeps provider-disconnected Fitbit migrations staged until the user finishes cutover", async () => {
+test("ConnectPage keeps provider-disconnected Fitbit migrations staged until automatic cutover", async () => {
   const { resolveConnectSourceConnectionStates } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
@@ -2214,6 +2215,7 @@ test("ConnectPage keeps provider-disconnected Fitbit migrations staged until the
         },
         {
           firstSeenAt: "2026-08-11T10:00:00.000Z",
+          historicalBackfillComplete: true,
           lastDataAt: "2026-08-11T10:05:00.000Z",
           lastSeenAt: "2026-08-11T10:06:00.000Z",
           providerLabel: "Fitbit",
@@ -4649,7 +4651,7 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid finishes Fitbit migration with a targeted legacy disconnect", async () => {
+test("ConnectSourcesGrid automatically finishes Fitbit migration with a targeted legacy disconnect", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
@@ -4685,37 +4687,6 @@ test("ConnectSourcesGrid finishes Fitbit migration with a targeted legacy discon
     }),
   );
 
-  const finishButton = rendered.container.querySelector(
-    "button[aria-label='Finish Fitbit migration']",
-  );
-  assert.ok(finishButton instanceof rendered.window.HTMLButtonElement);
-
-  await act(async () => {
-    finishButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
-  assert.match(rendered.container.textContent ?? "", /Confirm Fitbit migration\?/u);
-  assert.match(
-    rendered.container.textContent ?? "",
-    /cannot prove historical completeness automatically/u,
-  );
-  assert.match(
-    rendered.container.textContent ?? "",
-    /last few days of sleep, activity, heart rate, exercise, and workouts/u,
-  );
-  const finishMigrationButtons = [...rendered.container.querySelectorAll("button")]
-    .filter((button) => button.textContent === "Finish migration");
-  const confirmButton = finishMigrationButtons[finishMigrationButtons.length - 1];
-  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
-
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
@@ -4736,83 +4707,32 @@ test("ConnectSourcesGrid finishes Fitbit migration with a targeted legacy discon
   );
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
-    /has not imported overlapping history/u,
+    /Finish migration/u,
   );
 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid preserves the staged Fitbit migration when cutover is cancelled", async () => {
-  const fetch = vi.fn();
-  vi.stubGlobal("fetch", fetch);
-
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
-  const rendered = await renderClientComponent(
-    createElement(ConnectSourcesGrid, {
-      sources: [{
-        description: "Fitbit data through Google authorization.",
-        disconnectConnectionId: "dsc_junction_fitbit",
-        disconnectSourceProviderSlug: "fitbit",
-        id: "fitbit",
-        logo: {
-          className: "size-11 object-contain",
-          height: 44,
-          src: "/brand-logos/connect/fitbit.svg",
-          width: 44,
-        },
-        migrationState: "cutover_ready",
-        name: "Fitbit",
-      }],
-    }),
-  );
-
-  const finishButton = rendered.container.querySelector(
-    "button[aria-label='Finish Fitbit migration']",
-  );
-  assert.ok(finishButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    finishButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
-  const cancelButton = [...rendered.container.querySelectorAll("button")]
-    .find((button) => button.textContent === "Cancel");
-  assert.ok(cancelButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    cancelButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
-  assert.equal(fetch.mock.calls.length, 0);
-  assert.ok(
-    rendered.container.querySelector("button[aria-label='Finish Fitbit migration']"),
-  );
-  assert.match(
-    rendered.container.textContent ?? "",
-    /has not imported overlapping history/u,
-  );
-  assert.doesNotMatch(rendered.container.textContent ?? "", /Fitbit connected/u);
-
-  await rendered.cleanup();
-});
-
-test("ConnectSourcesGrid preserves the legacy Fitbit migration when cutover fails", async () => {
+test("ConnectSourcesGrid preserves legacy Fitbit and offers a direct retry when automatic cutover fails", async () => {
+  let attempt = 0;
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
       void _init;
-      return Response.json({
-        error: {
-          code: "DEVICE_SYNC_SOURCE_DISCONNECT_FAILED",
-          message: "The legacy Fitbit connection could not be stopped.",
-        },
-      }, {
-        status: 502,
-      });
+      attempt += 1;
+      return attempt === 1
+        ? Response.json({
+            error: {
+              code: "DEVICE_SYNC_SOURCE_DISCONNECT_FAILED",
+              message: "The legacy Fitbit connection could not be stopped.",
+            },
+          }, {
+            status: 502,
+          })
+        : Response.json({
+            sourceProviderSlug: "fitbit",
+            status: "disconnected",
+          });
     },
   );
   vi.stubGlobal("fetch", fetch);
@@ -4839,26 +4759,6 @@ test("ConnectSourcesGrid preserves the legacy Fitbit migration when cutover fail
     }),
   );
 
-  const finishButton = rendered.container.querySelector(
-    "button[aria-label='Finish Fitbit migration']",
-  );
-  assert.ok(finishButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    finishButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
-  const finishMigrationButtons = [...rendered.container.querySelectorAll("button")]
-    .filter((button) => button.textContent === "Finish migration");
-  const confirmButton = finishMigrationButtons[finishMigrationButtons.length - 1];
-  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
-
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
@@ -4871,9 +4771,25 @@ test("ConnectSourcesGrid preserves the legacy Fitbit migration when cutover fail
   );
   assert.match(
     rendered.container.textContent ?? "",
-    /cannot prove historical completeness automatically/u,
+    /Fitbit keeps syncing until you retry/u,
   );
   assert.doesNotMatch(rendered.container.textContent ?? "", /Fitbit connected/u);
+
+  const retryButton = rendered.container.querySelector(
+    "button[aria-label='Retry Fitbit migration']",
+  );
+  assert.ok(retryButton instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    retryButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Fitbit migration complete/u);
+    assert.match(rendered.container.textContent ?? "", /Fitbit connected/u);
+  });
+  assert.equal(fetch.mock.calls.length, 2);
 
   await rendered.cleanup();
 });
@@ -5859,7 +5775,7 @@ test("ConnectPage maps a Google Health callback back to the Fitbit migration car
   assert.match(markup, /Google Health authorized/u);
   assert.match(
     markup,
-    /Murph is verifying Fitbit history before you finish the migration/u,
+    /Murph is verifying Google Health and will switch automatically/u,
   );
   assert.match(markup, /Google Health is authorized/u);
   assert.equal(markup.match(/<h2[^>]*>Fitbit<\/h2>/gu)?.length, 1);
@@ -5912,7 +5828,7 @@ test("ConnectPage leaves legacy Fitbit migration available after failed Google a
   );
 
   assert.match(markup, /Unable to finish connection/u);
-  assert.match(markup, /Murph will not change the legacy Fitbit connection/u);
+  assert.match(markup, /Murph will keep the legacy Fitbit connection active/u);
   assert.match(markup, /aria-label="Authorize Google for Fitbit"/u);
   assert.doesNotMatch(markup, /Finish Fitbit migration/u);
 });
@@ -6268,7 +6184,7 @@ test("Junction disclosure follows reconnect and fresh providers across local dis
   assert.equal(requiresJunctionConnectionPreflight(disconnectedWhoop), true);
 });
 
-test("A successful Google Health callback advances the Fitbit migration to verification", async () => {
+test("A successful Google Health callback advances the Fitbit migration to automatic verification", async () => {
   const { markCallbackConnectedSource } = await import(
     "../app/(dashboard)/connect/connect-page-helpers"
   );
@@ -6334,12 +6250,12 @@ test("A successful Google Health callback uses migration-specific notice copy", 
       kind: "success",
       title: "Google Health authorized",
       message:
-        "Murph is verifying Fitbit history before you finish the migration. The legacy Fitbit connection stays active for now.",
+        "Murph is verifying Google Health and will switch automatically when a fresh supported update arrives. The legacy Fitbit connection stays active for now.",
     },
   );
 });
 
-test("Finishing Fitbit migration keeps the successor card connected locally", async () => {
+test("Automatic Fitbit cutover keeps the successor card connected locally", async () => {
   const { markLocallyCompletedFitbitMigrations } = await import(
     "../app/(dashboard)/connect/connect-page-helpers"
   );

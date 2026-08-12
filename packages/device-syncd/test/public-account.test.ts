@@ -4,8 +4,11 @@ import { test } from "vitest";
 
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   isDeviceSyncConnectionSetupConfirmed,
   isDeviceSyncConnectionSetupPending,
+  isDeviceSyncSourceHistoricalBackfillComplete,
+  isDeviceSyncSourceResourceAvailabilityMetadataKey,
   isEstablishedDeviceSyncConnection,
   isJunctionHistoricalResetProviderSlug,
   redactPublicDeviceSyncMetadata,
@@ -111,4 +114,38 @@ test("historical connection reset recovery is limited to Garmin error sources", 
     sourceProviderSlug: "garmin",
     status: "connected",
   }), false);
+});
+
+test("source history readiness requires a valid completion marker no older than the source", () => {
+  assert.equal(isDeviceSyncSourceHistoricalBackfillComplete({
+    firstSeenAt: "2026-08-11T10:00:00.000Z",
+    resourceAvailabilitySummary: {
+      [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]:
+        "2026-08-11T12:00:00.000Z",
+    },
+  }), true);
+  assert.equal(isDeviceSyncSourceHistoricalBackfillComplete({
+    firstSeenAt: "2026-08-11T10:00:00.000Z",
+    resourceAvailabilitySummary: {
+      [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]:
+        "2026-08-11T09:59:59.000Z",
+    },
+  }), false);
+  assert.equal(isDeviceSyncSourceHistoricalBackfillComplete({
+    firstSeenAt: "2026-08-11T10:00:00.000Z",
+    resourceAvailabilitySummary: {
+      [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]: "not-a-date",
+    },
+  }), false);
+  assert.equal(isDeviceSyncSourceHistoricalBackfillComplete({
+    firstSeenAt: "2026-08-11T10:00:00.000Z",
+    resourceAvailabilitySummary: { sleep: true },
+  }), false);
+  assert.equal(
+    isDeviceSyncSourceResourceAvailabilityMetadataKey(
+      DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
+    ),
+    true,
+  );
+  assert.equal(isDeviceSyncSourceResourceAvailabilityMetadataKey("sleep"), false);
 });

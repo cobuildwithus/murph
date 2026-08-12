@@ -1,4 +1,8 @@
-import { requiresHistoricalResetDeviceSyncSource } from "@murphai/device-syncd/public-account";
+import {
+  isDeviceSyncSourceHistoricalBackfillComplete,
+  isDeviceSyncSourceResourceAvailabilityMetadataKey,
+  requiresHistoricalResetDeviceSyncSource,
+} from "@murphai/device-syncd/public-account";
 
 import type { HostedDeviceConnectionSource } from "./prisma-store/sources";
 
@@ -7,6 +11,7 @@ export type HostedBrowserDeviceSyncConnectionSourceRecoveryKind = "connection_re
 export interface HostedBrowserDeviceSyncConnectionSource {
   connectionId: string;
   firstSeenAt: string;
+  historicalBackfillComplete?: true;
   lastErrorCode?: string | null;
   lastDataAt?: string | null;
   lastSeenAt: string;
@@ -26,6 +31,9 @@ export function toHostedBrowserDeviceSyncConnectionSource(
   return {
     connectionId: browserConnectionId,
     firstSeenAt: source.firstSeenAt,
+    ...(isDeviceSyncSourceHistoricalBackfillComplete(source)
+      ? { historicalBackfillComplete: true as const }
+      : {}),
     lastDataAt: source.lastDataAt,
     ...(source.lastErrorCode ? { lastErrorCode: source.lastErrorCode } : {}),
     lastSeenAt: source.lastSeenAt,
@@ -37,9 +45,6 @@ export function toHostedBrowserDeviceSyncConnectionSource(
   };
 }
 
-const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
-  "sourceInstanceKeyFallback",
-]);
 const CONNECTION_SOURCE_RECONNECT_ERROR_CODES = new Set(["TOKEN_REFRESH_FAILED"]);
 
 /**
@@ -50,7 +55,7 @@ export function isAvailableConnectionSourceResource(
   key: string,
   value: unknown,
 ): boolean {
-  return !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
+  return !isDeviceSyncSourceResourceAvailabilityMetadataKey(key)
     && value !== false
     && value !== null
     && value !== undefined;

@@ -18,6 +18,7 @@ import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-defin
 import { DeviceSyncError } from "../src/errors.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
+  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
 } from "../src/public-account.ts";
@@ -1152,6 +1153,111 @@ test("Junction non-connect backfill window uses bounded job retry without histor
   assert.equal(retryResult.metadataPatch, undefined);
   assert.equal(retryResult.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
+});
+
+test("Junction records source-scoped Google Health history readiness only after a non-empty backfill", async () => {
+  let activityRecords: unknown[] = [];
+  const requestedProviders: Array<string | null> = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-fitbit-legacy",
+            slug: "fitbit",
+            name: "Fitbit",
+            status: "connected",
+            resource_availability: { activity: true },
+          },
+          {
+            id: "provider-google-health-1",
+            slug: "google_health",
+            name: "Google Health",
+            status: "connected",
+            resource_availability: { activity: true },
+          },
+        ],
+      });
+    }
+
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      requestedProviders.push(url.searchParams.get("provider"));
+      return createJsonResponse({ data: activityRecords });
+    }
+
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: [],
+  });
+  const legacyFitbit = createConnectionSource({
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "fitbit",
+    })),
+    sourceProviderSlug: "fitbit",
+  });
+  const googleHealth = createConnectionSource({
+    firstSeenAt: "2026-08-11T10:00:00.000Z",
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1",
+      sourceProviderSlug: "google_health",
+    })),
+    sourceProviderSlug: "google_health",
+  });
+  const sourceSummaries = [legacyFitbit, googleHealth].map(summarizeConnectionSource);
+  const upserts: Array<Parameters<NonNullable<ProviderJobContext["upsertConnectionSource"]>>[0]> = [];
+  const executeBackfill = (now: string) => executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: sourceSummaries }),
+      listConnectionSources: () => sourceSummaries,
+      now,
+      upsertConnectionSource: (input) => {
+        upserts.push(input);
+        return createConnectionSource(input);
+      },
+    }),
+    createJob("backfill", {
+      sourceProviderSlug: "google_health",
+      windowStart: "2026-05-13T00:00:00.000Z",
+      windowEnd: "2026-08-11T00:00:00.000Z",
+    }),
+  );
+
+  const emptyResult = await executeBackfill("2026-08-11T12:00:00.000Z");
+  assert.equal(
+    upserts.some((source) =>
+      source.resourceAvailabilitySummary?.[
+        DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
+      ] !== undefined
+    ),
+    false,
+  );
+  assert.equal(emptyResult.scheduledJobs?.[0]?.payload?.sourceProviderSlug, "google_health");
+
+  activityRecords = [{
+    connectionId: "provider-google-health-1",
+    id: "google-health-activity-1",
+    steps: 4321,
+  }];
+  upserts.length = 0;
+  const readyAt = "2026-08-11T12:15:00.000Z";
+  const readyResult = await executeBackfill(readyAt);
+  const googleHealthUpdates = upserts.filter((source) =>
+    source.sourceProviderSlug === "google_health"
+  );
+
+  assert.equal(readyResult.scheduledJobs, undefined);
+  assert.deepEqual(requestedProviders, ["google_health", "google_health"]);
+  assert.equal(
+    googleHealthUpdates.at(-1)?.resourceAvailabilitySummary?.[
+      DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
+    ],
+    readyAt,
+  );
 });
 
 test("Junction useful daily history completes when an available sparse body resource is empty", async () => {

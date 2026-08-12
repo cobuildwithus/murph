@@ -25,7 +25,7 @@ export const FITBIT_MIGRATION_AUTHORIZED_NOTICE = {
   kind: "success",
   title: "Google Health authorized",
   message:
-    "Murph is verifying Fitbit history before you finish the migration. The legacy Fitbit connection stays active for now.",
+    "Murph is verifying Google Health and will switch automatically when a fresh supported update arrives. The legacy Fitbit connection stays active for now.",
 } satisfies NonNullable<ConnectCallbackNotice>;
 
 export const FITBIT_MIGRATION_STILL_VERIFYING_NOTICE = {

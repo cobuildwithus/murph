@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "Fitbit connections move to Google Health",
     "summary": "New Fitbit and Pixel Watch connections now use Google authorization, while existing Fitbit connections get a staged migration that keeps the legacy connection active until the replacement is ready.",
-    "details": "Murph no longer promises Fitbit Sleep Score or Daily Readiness data that Google Health does not supply, and overlapping legacy and successor providers are fenced until the legacy connection is explicitly retired.",
+    "details": "Murph no longer promises Fitbit Sleep Score or Daily Readiness data that Google Health does not supply. Overlapping legacy and successor providers stay fenced until Google Health is verified, then Murph retires the legacy source automatically.",
     "relevanceTags": ["wearables", "fitbit", "reliability", "privacy"],
     "sourcePullRequests": [1690]
   }

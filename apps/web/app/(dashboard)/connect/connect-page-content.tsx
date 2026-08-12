@@ -1014,6 +1014,7 @@ function resolveFitbitMigrationConnectionState(input: {
       isLiveJunctionUpstreamSource(source),
   );
   const successorReady = successor?.status === "connected" &&
+    successor.historicalBackfillComplete === true &&
     successor.resourceCount > 0 &&
     compareIsoTimestamps(successor.lastDataAt ?? undefined, successor.firstSeenAt) > 0;
   const successorNeedsAuthorization =

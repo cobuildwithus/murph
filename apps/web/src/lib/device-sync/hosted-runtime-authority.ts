@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 
 import {
   isDeviceSyncDisconnectInProgress,
+  isDeviceSyncSourceResourceAvailabilityMetadataKey,
   requiresHistoricalResetDeviceSyncSource,
   sanitizeStoredDeviceSyncMetadata,
 } from "@murphai/device-syncd/public-account";
@@ -891,10 +892,6 @@ function buildPublicConnectionFromRuntimeSnapshot(
   };
 }
 
-const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
-  "sourceInstanceKeyFallback",
-]);
-
 function toHostedRuntimeConnectionSourceSnapshot(
   source: HostedDeviceConnectionSource,
 ): HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
@@ -1200,7 +1197,7 @@ function countHostedRuntimeConnectionSourceResources(
   }
 
   return Object.entries(summary).filter(([key, value]) =>
-    !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
+    !isDeviceSyncSourceResourceAvailabilityMetadataKey(key)
     && value !== false
     && value !== null
     && value !== undefined

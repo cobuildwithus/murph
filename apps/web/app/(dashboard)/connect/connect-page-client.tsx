@@ -149,6 +149,7 @@ export function ConnectSourcesGrid({
     useState(false);
   const initialConnectIntentAuthOpenedRef = useRef(false);
   const initialConnectIntentAttemptedRef = useRef(false);
+  const automaticFitbitCutoverAttemptsRef = useRef(new Set<string>());
   const fitbitMigrationRefreshAttemptsRef = useRef(0);
   const router = useRouter();
   const { openAuthDialog } = useAuth();
@@ -470,7 +471,7 @@ export function ConnectSourcesGrid({
     };
   }, [activeConnectIntent, authenticated, displaySources]);
 
-  async function disconnectConnection(source: ConnectSource) {
+  const disconnectConnection = useCallback(async (source: ConnectSource) => {
     const connectionId = source.disconnectConnectionId?.trim();
     if (
       !connectionId ||
@@ -527,7 +528,32 @@ export function ConnectSourcesGrid({
     } finally {
       setPendingDisconnectSourceId(null);
     }
-  }
+  }, [pendingDisconnectSourceId, pendingSourceId]);
+
+  useEffect(() => {
+    if (!authenticated) {
+      return;
+    }
+
+    const source = displaySources.find(
+      (candidate) =>
+        candidate.id === "fitbit" &&
+        candidate.migrationState === "cutover_ready",
+    );
+    const connectionId = source?.disconnectConnectionId?.trim();
+    const sourceProviderSlug = source?.disconnectSourceProviderSlug?.trim();
+    if (!source || !connectionId || !sourceProviderSlug) {
+      return;
+    }
+
+    const attemptKey = `${connectionId}:${sourceProviderSlug}`;
+    if (automaticFitbitCutoverAttemptsRef.current.has(attemptKey)) {
+      return;
+    }
+
+    automaticFitbitCutoverAttemptsRef.current.add(attemptKey);
+    void disconnectConnection(source);
+  }, [authenticated, disconnectConnection, displaySources]);
 
   return (
     <section className="flex min-w-0 flex-col gap-4">
@@ -605,6 +631,7 @@ export function ConnectSourcesGrid({
               pendingDisconnect={pendingDisconnectSourceId === source.id}
               source={source}
               onDisconnectTargetChange={setDisconnectSource}
+              onMigrationRetry={(retrySource) => void disconnectConnection(retrySource)}
               onSetupGuideOpen={setActiveSetupGuideId}
               onStartConnection={startConnection}
             />

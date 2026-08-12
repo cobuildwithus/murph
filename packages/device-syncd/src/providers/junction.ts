@@ -57,6 +57,7 @@ import {
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
   isDeviceSyncSourceAdmitted,
   isDeviceSyncSourceDisconnectFenced,
@@ -250,6 +251,7 @@ const JUNCTION_SDK_ISO_8601_DATE_PATTERN = /^([+-]?\d{4}(?!\d{2}\b))((-?)((0[1-9
 
 interface JunctionWindowFetchOptions {
   dateQueryFormat?: JunctionDateQueryFormat;
+  sourceProviderSlug?: string | null;
 }
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
@@ -1011,6 +1013,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);
+    const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
     const isConnectHistoricalBackfill = isConnectHistoricalBackfillWindow(context.account, window);
     const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
       signal: context.signal ?? null,
@@ -1031,8 +1034,12 @@ export function createJunctionDeviceSyncProvider(
       summaryWindow.windowStart,
       summaryWindow.windowEnd,
       skippedOptionalResources,
-      { dateQueryFormat: summaryDateQueryFormat },
+      {
+        dateQueryFormat: summaryDateQueryFormat,
+        sourceProviderSlug,
+      },
     );
+    const historicalSummaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
     const profileSummaryResult = await fetchProfileSummaryOnce(context, skippedOptionalResources);
     const profileMetadataPatch = profileSummaryResult.checked
       ? buildJunctionProfileSummaryCheckedMetadataPatch(context)
@@ -1122,6 +1129,7 @@ export function createJunctionDeviceSyncProvider(
         window.windowEnd,
         skippedOptionalResources,
         jobTimeseriesResources,
+        sourceProviderSlug,
       );
       if (timeseriesImport.yieldedAt) {
         return withJunctionSkippedResourceMetadata(
@@ -1156,7 +1164,9 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: window.windowEnd,
           })
         : buildNonConnectHistoricalBackfillFollowUp({
-            hasRecords: historicalSummaryHasRecords,
+            hasRecords: sourceProviderSlug
+              ? historicalSummaryHasFetchedRecords
+              : historicalSummaryHasRecords,
             job,
             now: context.now,
             windowStart: window.windowStart,
@@ -1221,6 +1231,15 @@ export function createJunctionDeviceSyncProvider(
       context.now,
       addMilliseconds(context.now, reconcileIntervalMs),
     );
+    const completedSourceBackfillProviderSlug = job.kind === "backfill"
+      && historicalSummaryHasFetchedRecords
+      ? sourceProviderSlug
+      : null;
+    if (completedSourceBackfillProviderSlug) {
+      await projectJunctionSources(context, sourceProviders, {
+        historicalBackfillCompletedProviderSlug: completedSourceBackfillProviderSlug,
+      });
+    }
     return withJunctionSkippedResourceMetadata(
       context,
       withJunctionMetadataPatch(
@@ -2513,6 +2532,7 @@ export function createJunctionDeviceSyncProvider(
       const request: JunctionWindowInput = {
         resource,
         signal: context.signal ?? null,
+        sourceProviderSlug: options.sourceProviderSlug,
         userId: context.account.externalAccountId,
         windowStart,
         windowEnd,
@@ -3094,8 +3114,12 @@ export function createJunctionDeviceSyncProvider(
         return null;
       }
       const emptyBackfillAttempts = readHistoricalBackfillJobEmptyAttempts(input.job);
+      const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
       const followUp = buildExactWindowJob({
         kind: "backfill",
+        payload: sourceProviderSlug
+          ? { sourceProviderSlug }
+          : undefined,
         priority: input.job.priority,
         windowEnd: input.windowEnd,
         windowStart: input.windowStart,
@@ -5770,8 +5794,12 @@ function buildNonConnectHistoricalBackfillFollowUp(input: {
   }
 
   const retryAt = addMilliseconds(input.now, retryDelayMs);
+  const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
   const retryJob = buildExactWindowJob({
     kind: "backfill",
+    payload: sourceProviderSlug
+      ? { sourceProviderSlug }
+      : undefined,
     priority: Math.max(input.job.priority, JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY),
     windowStart: input.windowStart,
     windowEnd: input.windowEnd,
@@ -7140,6 +7168,7 @@ async function projectJunctionSources(
   context: ProviderJobContext,
   providers: readonly JunctionProviderConnection[],
   options: {
+    historicalBackfillCompletedProviderSlug?: string;
     preserveHistoricalReconnect?: boolean;
     preserveHistoricalReconnectProviderSlugs?: readonly string[];
   } = {},
@@ -7219,6 +7248,12 @@ async function projectJunctionSources(
           : requiresHistoricalResetDeviceSyncSource(existing)
       );
     const historicalReconnectError = keepHistoricalReconnect ? existing : null;
+    const historicalBackfillCompletedAt =
+      source.sourceProviderSlug === options.historicalBackfillCompletedProviderSlug
+        ? context.now
+        : existing?.resourceAvailabilitySummary?.[
+            DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
+          ];
     await context.upsertConnectionSource({
       sourceInstanceKey: existing?.sourceInstanceKey ?? source.sourceInstanceKey,
       sourceProviderSlug: source.sourceProviderSlug,
@@ -7227,7 +7262,15 @@ async function projectJunctionSources(
       status: keepHistoricalReconnect
         ? "error"
         : source.status,
-      resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+      resourceAvailabilitySummary: {
+        ...source.resourceAvailabilitySummary,
+        ...(typeof historicalBackfillCompletedAt === "string"
+          ? {
+              [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]:
+                historicalBackfillCompletedAt,
+            }
+          : {}),
+      },
       // Only assert error fields when this projection saw an errored entry;
       // omitting the keys lets the store preserve existing detail while the
       // status stays "error" and auto-clear it once the status recovers.

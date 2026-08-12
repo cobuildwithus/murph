@@ -6,6 +6,8 @@ import {
   withImmediateTransaction,
 } from "@murphai/runtime-state/node";
 
+import { isDeviceSyncSourceResourceAvailabilityMetadataKey } from "./public-account.ts";
+
 import {
   decodeDeviceSyncSummaryRow,
   disconnectAccount as disconnectStoredAccount,
@@ -673,10 +675,6 @@ export class SqliteDeviceSyncStore {
   }
 }
 
-const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
-  "sourceInstanceKeyFallback",
-]);
-
 function normalizeAccountListInput(
   input: ListDeviceSyncAccountsInput | string,
 ): ListDeviceSyncAccountsInput {
@@ -694,7 +692,7 @@ function countConnectionSourceResources(
   summary: StoredDeviceConnectionSource["resourceAvailabilitySummary"],
 ): number {
   return Object.entries(summary).filter(([key, value]) =>
-    !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
+    !isDeviceSyncSourceResourceAvailabilityMetadataKey(key)
     && value !== false
     && value !== null
     && value !== undefined

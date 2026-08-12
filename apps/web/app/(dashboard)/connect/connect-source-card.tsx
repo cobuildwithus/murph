@@ -15,6 +15,7 @@ export function SourceCard({
   pendingDisconnect,
   source,
   onDisconnectTargetChange,
+  onMigrationRetry,
   onSetupGuideOpen,
   onStartConnection,
 }: {
@@ -24,6 +25,7 @@ export function SourceCard({
   pendingDisconnect: boolean;
   source: ConnectSource;
   onDisconnectTargetChange: (source: ConnectSource | null) => void;
+  onMigrationRetry?: (source: ConnectSource) => void;
   onSetupGuideOpen?: (setupGuideId: ConnectSourceSetupGuideId) => void;
   onStartConnection: (source: ConnectSource) => Promise<void>;
 }) {
@@ -140,10 +142,12 @@ export function SourceCard({
             {migrationState ? (
               <p className="max-w-[24rem] text-sm leading-relaxed text-pretty text-muted-foreground">
                 {migrationState === "authorization_required"
-                  ? "Authorize Google Health before September 2026. Murph will not change the legacy Fitbit connection until you explicitly finish the migration."
+                  ? "Authorize Google Health before September 2026. Murph will keep the legacy Fitbit connection active until Google Health is verified, then switch automatically."
                   : migrationState === "verifying_successor"
-                    ? "Google Health is authorized, but Murph cannot verify representative history yet. The legacy Fitbit connection stays active while Murph waits for supported resources and a fresh update."
-                    : "Google Health has reported supported resources and a fresh update. Murph has not imported overlapping history; open Fitbit or Pixel Watch first and check the last few days of sleep, activity, heart rate, exercise, and workouts before finishing."}
+                    ? "Google Health is authorized, but Murph cannot verify representative history yet. The legacy Fitbit connection stays active while Murph waits for the historical import, supported resources, and a fresh update."
+                    : errorMessage
+                      ? "Google Health is verified, but Murph could not stop the legacy Fitbit connection. Fitbit keeps syncing until you retry."
+                      : "Google Health is verified. Murph is switching from the legacy Fitbit connection automatically; your existing history is kept."}
               </p>
             ) : requiresConnectionReset ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
@@ -227,12 +231,12 @@ export function SourceCard({
             ) : migrationState === "cutover_ready" ? (
               <Button
                 type="button"
-                disabled={!canDisconnect || pendingDisconnect}
-                aria-label="Finish Fitbit migration"
-                onClick={() => onDisconnectTargetChange(source)}
+                disabled={!errorMessage || !canDisconnect || pendingDisconnect}
+                aria-label={errorMessage ? "Retry Fitbit migration" : "Switching Fitbit to Google Health"}
+                onClick={() => onMigrationRetry?.(source)}
                 className="self-end"
               >
-                {pendingDisconnect ? "Finishing..." : "Finish migration"}
+                {errorMessage ? "Retry migration" : "Switching..."}
               </Button>
             ) : migrationState === "verifying_successor" ? null
               : reconnectUnavailable
@@ -270,9 +274,6 @@ export function SourceCard({
 }
 
 function resolveDisconnectAriaLabel(source: ConnectSource): string {
-  if (source.migrationState === "cutover_ready") {
-    return "Finish Fitbit migration";
-  }
   return source.disconnectScope === "junction_account"
     ? "Disconnect account"
     : `Disconnect ${source.name}`;
@@ -317,7 +318,7 @@ function SourceStatusDot({
           : migrationState === "verifying_successor"
           ? "is verifying Google Health"
           : migrationState === "cutover_ready"
-          ? "is ready to finish migration"
+          ? "is switching to Google Health"
           : requiresReconnect
           ? "needs reconnect"
           : historicalResetIncomplete

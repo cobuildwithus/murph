@@ -21,6 +21,14 @@ export const DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE =
 export const DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE =
   "SOURCE_USER_DISCONNECTED";
 
+export const DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY =
+  "historicalBackfillCompletedAt";
+
+const DEVICE_SYNC_SOURCE_RESOURCE_AVAILABILITY_METADATA_KEYS = new Set([
+  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
+  "sourceInstanceKeyFallback",
+]);
+
 const DEVICE_SYNC_SOURCE_DISCONNECT_FENCE_CODES = new Set([
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
@@ -51,6 +59,30 @@ export function isDeviceSyncSourceAdmitted(
     || matchingSources.some(
       (source) => source.status === "connected" && !isDeviceSyncSourceDisconnectFenced(source),
     );
+}
+
+export function isDeviceSyncSourceHistoricalBackfillComplete(source: {
+  firstSeenAt?: string | null;
+  resourceAvailabilitySummary?: Record<string, unknown> | null;
+}): boolean {
+  const completedAt = source.resourceAvailabilitySummary?.[
+    DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
+  ];
+  if (typeof completedAt !== "string" || !source.firstSeenAt) {
+    return false;
+  }
+
+  const completedAtMs = Date.parse(completedAt);
+  const firstSeenAtMs = Date.parse(source.firstSeenAt);
+  return Number.isFinite(completedAtMs)
+    && Number.isFinite(firstSeenAtMs)
+    && completedAtMs >= firstSeenAtMs;
+}
+
+export function isDeviceSyncSourceResourceAvailabilityMetadataKey(
+  key: string,
+): boolean {
+  return DEVICE_SYNC_SOURCE_RESOURCE_AVAILABILITY_METADATA_KEYS.has(key);
 }
 
 // Garmin historical exports can only restart after the provider-side connection is

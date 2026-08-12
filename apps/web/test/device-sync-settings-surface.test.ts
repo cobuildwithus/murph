@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { PublicProviderDescriptor } from "@murphai/device-syncd/public-ingress";
+import {
+  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
+} from "@murphai/device-syncd/public-account";
 
 import { toHostedBrowserDeviceSyncConnectionSource } from "@/src/lib/device-sync/browser-connection-source";
 import type { HostedDeviceConnectionSource } from "@/src/lib/device-sync/prisma-store/sources";
@@ -105,6 +108,43 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       sourceProviderSlug: "fitbit",
       status: "disconnected",
     });
+  });
+
+  it("projects source history readiness without counting its bookkeeping marker as a resource", () => {
+    const browserSource = toHostedBrowserDeviceSyncConnectionSource(
+      buildConnectionSource({
+        firstSeenAt: "2026-08-11T10:00:00.000Z",
+        resourceAvailabilitySummary: {
+          [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]:
+            "2026-08-11T12:00:00.000Z",
+          sleep: true,
+        },
+        sourceProviderSlug: "google_health",
+      }),
+      "dspc_fitbit",
+    );
+
+    expect(browserSource).toMatchObject({
+      historicalBackfillComplete: true,
+      resourceCount: 1,
+      sourceProviderSlug: "google_health",
+    });
+
+    const [settingsSource] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [browserSource],
+      connections: [buildConnection({
+        id: "dspc_fitbit",
+        provider: "junction",
+      })],
+      providers: [JUNCTION_PROVIDER],
+    });
+    expect(settingsSource?.upstreamSources).toEqual([
+      expect.objectContaining({
+        historicalBackfillComplete: true,
+        resourceCount: 1,
+        sourceProviderSlug: "google_health",
+      }),
+    ]);
   });
 
   it("omits configured providers that do not have a connection yet", () => {

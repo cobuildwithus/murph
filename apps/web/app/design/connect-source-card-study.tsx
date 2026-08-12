@@ -396,6 +396,7 @@ export function ConnectSourceCardStudy({
               pendingDisconnect={false}
               source={source}
               onDisconnectTargetChange={() => {}}
+              onMigrationRetry={() => {}}
               onSetupGuideOpen={() => {}}
               onStartConnection={() => Promise.resolve()}
             />
@@ -436,6 +437,7 @@ export function ZeppAppleHealthSetupStudy() {
           pendingDisconnect={false}
           source={ZEPP_CONNECT_SOURCE}
           onDisconnectTargetChange={() => {}}
+          onMigrationRetry={() => {}}
           onSetupGuideOpen={() => {}}
           onStartConnection={() => Promise.resolve()}
         />
@@ -480,6 +482,7 @@ export function AppleHealthRelaySetupStudy() {
               pendingDisconnect={false}
               source={source}
               onDisconnectTargetChange={() => {}}
+              onMigrationRetry={() => {}}
               onSetupGuideOpen={() => {}}
               onStartConnection={() => Promise.resolve()}
             />
