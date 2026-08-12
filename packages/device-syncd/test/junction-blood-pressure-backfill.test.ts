@@ -822,6 +822,7 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
 
   assert.deepEqual(note.payload, {
     historicalBackfill: true,
+    historicalBackfillVersion: 2,
     historicalWindowStart: "2025-12-13T00:00:00.000Z",
     resource: "note",
     resourceCategory: "timeseries",
@@ -884,6 +885,79 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
     completed.jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
     false,
   );
+});
+
+test("in-flight unversioned note history cannot certify v2 coverage after upgrade", async () => {
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { note: true },
+      slug: "oura",
+    }],
+    includeNote: true,
+    requests: [],
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const legacyJob = toJobRecord({
+    kind: "resource",
+    payload: {
+      historicalBackfill: true,
+      historicalWindowStart: "2026-06-09T00:00:00.000Z",
+      resource: "note",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "oura",
+      windowEnd: "2026-06-11T00:00:00.000Z",
+      windowStart: "2026-06-09T00:00:00.000Z",
+    },
+  }, 1);
+
+  const firstResult = await executor.executeJob(createJobContext(), legacyJob);
+  const legacyContinuation = requireValue(firstResult.scheduledJobs?.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "note"
+  ));
+  assert.equal(Object.hasOwn(legacyContinuation.payload ?? {}, "historicalBackfillVersion"), false);
+
+  const completedLegacy = await executor.executeJob(
+    createJobContext(),
+    toJobRecord(legacyContinuation, 2),
+  );
+  assert.equal(completedLegacy.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v1|oura");
+
+  const sources = [createSourceSummary(
+    "oura",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { note: true },
+  )];
+  const scheduledV2 = requireValue(executor.createScheduledJobs)(
+    createStoredAccount({ metadata: completedLegacy.metadataPatch, sources }),
+    NOW,
+  ).jobs.find((job) => job.kind === "resource" && job.payload?.resource === "note");
+  assert.equal(scheduledV2?.payload?.historicalBackfillVersion, 2);
+
+  const lateLegacyCompletion = await executor.executeJob(
+    createJobContext({
+      account: createAccount({ metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v2|oura" } }),
+    }),
+    toJobRecord({
+      ...legacyContinuation,
+      payload: {
+        ...legacyContinuation.payload,
+        windowStart: "2026-06-10T00:00:00.000Z",
+      },
+    }, 3),
+  );
+  assert.equal(lateLegacyCompletion.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v2|oura");
+
+  const futureJob = toJobRecord({
+    ...legacyContinuation,
+    payload: {
+      ...legacyContinuation.payload,
+      historicalBackfillVersion: 3,
+      windowStart: "2026-06-10T00:00:00.000Z",
+    },
+  }, 4);
+  const futureResult = await executor.executeJob(createJobContext(), futureJob);
+  assert.equal(Object.hasOwn(futureResult.metadataPatch ?? {}, NOTE_HISTORY_COVERAGE_KEY), false);
 });
 
 test("empty Oura note history reaches terminal source coverage", async () => {

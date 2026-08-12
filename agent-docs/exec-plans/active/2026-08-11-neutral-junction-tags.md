@@ -105,6 +105,13 @@ Updated: 2026-08-11
   ids are local to a source instance. Explicit-id note spines therefore include
   source type and source-instance provenance, preserving edit stability without
   letting one same-provider device overwrite another.
+- Round two required an anomaly retrospective because the accepted history
+  mechanism recurred for v1 jobs in flight across deployment. Decision:
+  continue with the existing resource-job payload as the immutable semantic
+  generation owner. Unversioned durable work remains v1; all continuations and
+  retries preserve the admitted generation; completion cannot infer generation
+  from the currently deployed policy. No new queue, manager, migration service,
+  repair loop, or lifecycle enum is added.
 - Bump the Browser Vault replica generation so existing projections rebuild
   under the corrected factor interpretation.
 
@@ -121,6 +128,10 @@ Updated: 2026-08-11
 - Source-instance collision remediation: focused importer and canonical
   import/replay tests cover two Oura instances sharing one provider-local note
   id; editing or clearing one leaves the other intact.
+- Upgrade-fence remediation: focused device-sync tests cover unversioned v1
+  continuation across current code, v1 completion remaining v2-eligible, late
+  v1 completion preserving v2, future-generation fail-closed behavior, and
+  manifest/hosted-hint preservation. Three focused files passed, 178 tests.
 - Focused Web changelog tests: passed, 56 tests.
 - Contracts, importers, query, vault-usecases, device-syncd,
   hosted-execution, and full Web typechecks: passed.

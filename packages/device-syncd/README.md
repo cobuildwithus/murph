@@ -41,7 +41,10 @@ Current providers:
   Free-text note values are dropped before raw snapshot and compact evidence
   retention. Note-history coverage version 2 reopens sources completed under
   the legacy intervention normalizer for one bounded semantic reimport, then
-  records terminal source coverage again.
+  records terminal source coverage again. The admitted resource-job payload
+  freezes that generation across durable continuations and retries. Persisted
+  unversioned work remains v1 after an upgrade and cannot certify or downgrade
+  v2 coverage.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use

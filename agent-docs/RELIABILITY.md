@@ -684,6 +684,14 @@ Last verified: 2026-08-11
   idempotent target-only revoke. The initiating operation follows the newest
   same-purpose claim before returning, while separate start-cleanup and user-
   disconnect phase codes preserve the intended terminal state.
+- Junction sparse note-history jobs freeze their semantic generation in the
+  existing durable resource-job payload. Yielded and retry-delayed
+  continuations preserve it, completion derives source coverage from it, and
+  an unversioned queued or leased job remains generation 1 after an upgrade.
+  Only a complete generation-2 chain may certify generation-2 note coverage;
+  late generation-1 completion cannot downgrade newer coverage. This keeps the
+  rollout fence in the existing queue, scheduler, and account-metadata owners
+  without another repair loop or lifecycle manager.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
   id and revision; credential replacement is blocked while a bound connection
