@@ -34,9 +34,13 @@ Current providers:
 - Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`
   selects Link targets such as Garmin and Fitbit; recognized Junction SDK sources such
   as Apple Health participate independently of that Link-only filter.
-- Junction fetches the sparse `note` timeseries by default. Oura note tags become
-  completed intervention events for Personal Patterns. Free-text note values are
-  dropped before raw snapshot and compact evidence retention.
+- Junction fetches the sparse `note` timeseries by default. Normalized tags from
+  every admitted Junction source persist as neutral canonical notes. Personal
+  Patterns currently derives an action factor only from the exact Oura `sauna`
+  tag; other-source, symptom, context, outcome, and custom tags remain neutral.
+  Free-text note values are dropped before raw snapshot and compact evidence
+  retention. Coverage policy version 2 reopens note history completed under the
+  legacy intervention normalizer while preserving unrelated resource coverage.
 - Junction resource admission derives from the static 57-resource policy in
   `@murphai/contracts`. Sparse supported VO2 max, temperature, caffeine,
   one-minute heart-rate recovery, sleep-breathing-disturbance, and AFib-burden

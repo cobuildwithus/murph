@@ -1592,6 +1592,11 @@ function shouldUseRawHostedMetadataBaseline(input: {
   stored: StoredDeviceSyncAccount;
 }): boolean {
   return mergeHostedDeviceSyncConnectionMetadata({
+    authoritativeScheduleTimeCoverageClearProviderSlugs:
+      resolveReestablishedJunctionSourceProviderSlugs({
+        entry: input.entry,
+        existing: input.stored,
+      }),
     hostedMetadata: input.entry.connection.metadata,
     localConnectionStateUnpublished: Boolean(
       input.stored.hostedObservedUpdatedAt
@@ -1668,7 +1673,14 @@ function buildHostedAccountHydrationInput(input: {
       && !hostedConnectionEpochChanged
       && input.existing.localConnectionRevision !== input.existing.hostedObservedConnectionRevision,
   );
+  const reestablishedJunctionSourceProviderSlugs =
+    resolveReestablishedJunctionSourceProviderSlugs({
+      entry: input.entry,
+      existing: input.existing,
+    });
   const hydratedMetadata = mergeHostedDeviceSyncConnectionMetadata({
+    authoritativeScheduleTimeCoverageClearProviderSlugs:
+      reestablishedJunctionSourceProviderSlugs,
     hostedMetadata: hostedConnection.metadata,
     localConnectionStateUnpublished,
     localMetadata: hostedConnectionEpochChanged ? undefined : input.existing?.metadata,
@@ -1745,6 +1757,35 @@ function buildHostedAccountHydrationInput(input: {
         }
       : {}),
   };
+}
+
+function resolveReestablishedJunctionSourceProviderSlugs(input: {
+  entry: HostedDeviceSyncRuntimeConnectionSnapshot;
+  existing: StoredDeviceSyncAccount | null;
+}): string[] {
+  if (
+    input.entry.connection.provider !== "junction"
+    || input.existing?.provider !== "junction"
+  ) {
+    return [];
+  }
+
+  const reestablished = new Set<string>();
+  for (const hostedSource of input.entry.sources ?? []) {
+    if (hostedSource.status !== "connected") {
+      continue;
+    }
+    const previousSources = (input.existing.sources ?? []).filter(
+      (source) => source.sourceProviderSlug === hostedSource.sourceProviderSlug,
+    );
+    if (previousSources.some((source) =>
+      source.status === "disconnected"
+      && Date.parse(hostedSource.lastSeenAt) > Date.parse(source.lastSeenAt)
+    )) {
+      reestablished.add(hostedSource.sourceProviderSlug);
+    }
+  }
+  return [...reestablished].sort((left, right) => left.localeCompare(right));
 }
 
 function buildHostedAccountHydrationCredential(input: {

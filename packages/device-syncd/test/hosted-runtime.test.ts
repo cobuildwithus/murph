@@ -9,6 +9,7 @@ import {
   canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY,
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_SOURCE_SLUGS,
   readJunctionHistoricalBackfillEvidence,
@@ -340,7 +341,7 @@ describe("Junction extended-timeseries history coverage", () => {
           existingMetadata: metadata,
           providerSlug,
           resource,
-          version: 1,
+          version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
         });
         expect(patch).not.toBeNull();
         metadata = mergeStoredDeviceSyncMetadataPatch(metadata, patch);
@@ -360,7 +361,7 @@ describe("Junction extended-timeseries history coverage", () => {
           metadata,
           providerSlug,
           resource,
-          1,
+          JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
         )).toBe(true);
       }
     }
@@ -376,7 +377,7 @@ describe("Junction extended-timeseries history coverage", () => {
           existingMetadata: target,
           providerSlug,
           resource,
-          version: 1,
+          version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
         });
         expect(patch).not.toBeNull();
         Object.assign(target, mergeStoredDeviceSyncMetadataPatch(target, patch));
@@ -394,14 +395,14 @@ describe("Junction extended-timeseries history coverage", () => {
           merged.metadata,
           providerSlug,
           resource,
-          1,
+          JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
         )).toBe(true);
       }
     }
     expect(merged.preservedLocalProgress).toBe(true);
 
     const futureMetadata = {
-      [JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY]: "m2|opaque-future",
+      [JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY]: "m3|opaque-future",
     };
     expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
       futureMetadata,
@@ -419,34 +420,110 @@ describe("Junction extended-timeseries history coverage", () => {
       localConnectionStateUnpublished: true,
       localMetadata: merged.metadata,
     }).metadata[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY]).toBe(
-      "m2|opaque-future",
+      "m3|opaque-future",
     );
   });
 
-  it("reopens old matrix coverage when the coverage-policy version advances", () => {
-    const versionOne = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
-      existingMetadata: {},
-      providerSlug: "garmin",
-      resource: "caffeine",
-      version: 1,
-    });
-    expect(versionOne).not.toBeNull();
-    const storedVersionOne = mergeStoredDeviceSyncMetadataPatch({}, versionOne);
+  it("migrates v1 coverage while reopening only the note semantic generation", () => {
+    let storedVersionOne: Record<string, unknown> = {};
+    for (const resource of ["caffeine", "note"] as const) {
+      const patch = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+        existingMetadata: storedVersionOne,
+        providerSlug: "garmin",
+        resource,
+        version: 1,
+      });
+      expect(patch).not.toBeNull();
+      storedVersionOne = mergeStoredDeviceSyncMetadataPatch(storedVersionOne, patch);
+    }
 
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       storedVersionOne,
       "garmin",
       "caffeine",
-      2,
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      storedVersionOne,
+      "garmin",
+      "note",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     )).toBe(false);
-    const versionTwo = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
-      existingMetadata: storedVersionOne,
-      providerSlug: "garmin",
-      resource: "caffeine",
-      version: 2,
+
+    const migrated = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: storedVersionOne,
+      localConnectionStateUnpublished: false,
+      localMetadata: {},
     });
-    expect(versionTwo?.[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY])
+    expect(migrated.metadata[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY])
       .toMatch(/^m2\|/u);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      migrated.metadata,
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      migrated.metadata,
+      "garmin",
+      "note",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    )).toBe(false);
+  });
+
+  it("authoritatively reopens one reestablished source without restoring stale local bits", () => {
+    const addCoverage = (
+      metadata: Record<string, unknown>,
+      providerSlug: string,
+      resource: string,
+    ): Record<string, unknown> => {
+      const patch = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+        existingMetadata: metadata,
+        providerSlug,
+        resource,
+        version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+      });
+      expect(patch).not.toBeNull();
+      return mergeStoredDeviceSyncMetadataPatch(metadata, patch);
+    };
+    let hostedMetadata: Record<string, unknown> = {};
+    for (const resource of ["blood_pressure", "caffeine", "note"] as const) {
+      hostedMetadata = addCoverage(hostedMetadata, "garmin", resource);
+    }
+    hostedMetadata = addCoverage(hostedMetadata, "oura", "note");
+
+    let localMetadata = addCoverage(hostedMetadata, "garmin", "vo2_max");
+    localMetadata = addCoverage(localMetadata, "oura", "caffeine");
+    const merged = mergeHostedDeviceSyncConnectionMetadata({
+      authoritativeScheduleTimeCoverageClearProviderSlugs: ["garmin"],
+      hostedMetadata,
+      localConnectionStateUnpublished: true,
+      localMetadata,
+    });
+
+    for (const resource of ["caffeine", "note", "vo2_max"] as const) {
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        merged.metadata,
+        "garmin",
+        resource,
+        JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+      )).toBe(false);
+    }
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      merged.metadata,
+      "garmin",
+      "blood_pressure",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    )).toBe(true);
+    for (const resource of ["caffeine", "note"] as const) {
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        merged.metadata,
+        "oura",
+        resource,
+        JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+      )).toBe(true);
+    }
+    expect(merged.preservedLocalProgress).toBe(true);
   });
 });
 
@@ -472,7 +549,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     })).toBeNull();
   });
 
-  it("preserves unpublished local sparse-timeseries source coverage", () => {
+  it("preserves unpublished legacy blood-pressure coverage while reopening legacy notes", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: { hostedOnly: true },
       localConnectionStateUnpublished: true,
@@ -492,14 +569,14 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       result.metadata,
       "omron",
       "blood_pressure",
-      1,
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     )).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       result.metadata,
       "oura",
       "note",
-      1,
-    )).toBe(true);
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    )).toBe(false);
   });
 
   it("accepts hosted migration metadata after local state is published", () => {
@@ -533,13 +610,13 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       result.metadata,
       "omron",
       "blood_pressure",
-      1,
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     )).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       result.metadata,
       "withings",
       "blood_pressure",
-      1,
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     )).toBe(true);
     expect(result.preservedLocalProgress).toBe(true);
   });
@@ -1017,7 +1094,7 @@ describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
       merged,
       "omron",
       "blood_pressure",
-      1,
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     )).toBe(true);
   });
 
@@ -3029,6 +3106,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           payload: {
             emptyBackfillAttempts: 2,
             historicalBackfill: true,
+            historicalBackfillVersion: 2,
             historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
             historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
@@ -3045,6 +3123,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(hint?.jobs?.[0]?.payload).toEqual({
       emptyBackfillAttempts: 2,
       historicalBackfill: true,
+      historicalBackfillVersion: 2,
       historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,

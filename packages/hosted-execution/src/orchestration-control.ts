@@ -66,6 +66,7 @@ export const HOSTED_RUNTIME_PROCESSING_MODES =
 export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
 
 export interface HostedRuntimeReconciliationFactsWorkspace {
+  hostedMailboxSystemHandledThroughSeq?: string;
   inboxMediaRetentionWakeAt: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;

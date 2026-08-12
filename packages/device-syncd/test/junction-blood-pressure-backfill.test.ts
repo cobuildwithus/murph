@@ -3,7 +3,10 @@ import { junctionProviderAdapter } from "@murphai/importers/device-providers/jun
 import { test } from "vitest";
 
 import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
-import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
+import {
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+} from "../src/junction-historical-backfill-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import {
@@ -57,7 +60,7 @@ function assertHistoryCoveragePatch(
       metadata,
       providerSlug,
       resource,
-      1,
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     ),
     true,
   );
@@ -798,7 +801,7 @@ test("an existing source receives one migration anchored to its first-seen windo
   );
 });
 
-test("Oura notes receive one full summary-history migration while dense timeseries stay bounded", async () => {
+test("v1 Oura note coverage receives one v2 semantic reimport while dense timeseries stay bounded", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
     additionalProviders: [{
@@ -833,7 +836,10 @@ test("Oura notes receive one full summary-history migration while dense timeseri
     { blood_pressure: false, note: true, stress_level: true },
   )];
   const scheduled = createScheduledJobs(
-    createStoredAccount({ sources }),
+    createStoredAccount({
+      metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      sources,
+    }),
     NOW,
   );
   const note = requireValue(scheduled.jobs.find((job) =>
@@ -842,6 +848,7 @@ test("Oura notes receive one full summary-history migration while dense timeseri
 
   assert.deepEqual(note.payload, {
     historicalBackfill: true,
+    historicalBackfillVersion: 2,
     historicalWindowStart: "2025-12-13T00:00:00.000Z",
     resource: "note",
     resourceCategory: "timeseries",
@@ -852,7 +859,12 @@ test("Oura notes receive one full summary-history migration while dense timeseri
 
   const importedSnapshots: unknown[] = [];
   const { executionCount, result } = await executeImmediateResourceContinuations({
-    context: createJobContext({ importedSnapshots }),
+    context: createJobContext({
+      account: createAccount({
+        metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      }),
+      importedSnapshots,
+    }),
     job: toJobRecord(note, 1),
     provider,
     resource: "note",
@@ -867,7 +879,10 @@ test("Oura notes receive one full summary-history migration while dense timeseri
   );
 
   const nextDayPending = createScheduledJobs(
-    createStoredAccount({ sources }),
+    createStoredAccount({
+      metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      sources,
+    }),
     "2026-06-12T12:00:00.000Z",
   );
   const nextDayNote = requireValue(nextDayPending.jobs.find((job) =>
@@ -896,6 +911,97 @@ test("Oura notes receive one full summary-history migration while dense timeseri
     completed.jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
     false,
   );
+});
+
+test("in-flight unversioned note history cannot certify v2 coverage after upgrade", async () => {
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { note: true },
+      slug: "oura",
+    }],
+    includeNote: true,
+    requests: [],
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const legacyJob = toJobRecord({
+    kind: "resource",
+    payload: {
+      historicalBackfill: true,
+      historicalWindowStart: "2026-06-09T00:00:00.000Z",
+      resource: "note",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "oura",
+      windowEnd: "2026-06-11T00:00:00.000Z",
+      windowStart: "2026-06-09T00:00:00.000Z",
+    },
+  }, 1);
+
+  const firstResult = await executor.executeJob(createJobContext(), legacyJob);
+  const legacyContinuation = requireValue(firstResult.scheduledJobs?.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "note"
+  ));
+  assert.equal(Object.hasOwn(legacyContinuation.payload ?? {}, "historicalBackfillVersion"), false);
+
+  const completedLegacy = await executor.executeJob(
+    createJobContext(),
+    toJobRecord(legacyContinuation, 2),
+  );
+  const completedLegacyMetadata = mergeStoredDeviceSyncMetadataPatch(
+    {},
+    completedLegacy.metadataPatch,
+  );
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    completedLegacyMetadata,
+    "oura",
+    "note",
+    1,
+  ), true);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    completedLegacyMetadata,
+    "oura",
+    "note",
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+  ), false);
+
+  const sources = [createSourceSummary(
+    "oura",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { note: true },
+  )];
+  const scheduledV2 = requireValue(executor.createScheduledJobs)(
+    createStoredAccount({ metadata: completedLegacy.metadataPatch, sources }),
+    NOW,
+  ).jobs.find((job) => job.kind === "resource" && job.payload?.resource === "note");
+  assert.equal(scheduledV2?.payload?.historicalBackfillVersion, 2);
+
+  const lateLegacyCompletion = await executor.executeJob(
+    createJobContext({
+      account: createAccount({ metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v2|oura" } }),
+    }),
+    toJobRecord({
+      ...legacyContinuation,
+      payload: {
+        ...legacyContinuation.payload,
+        windowStart: "2026-06-10T00:00:00.000Z",
+      },
+    }, 3),
+  );
+  assert.equal(Object.hasOwn(
+    lateLegacyCompletion.metadataPatch ?? {},
+    NOTE_HISTORY_COVERAGE_KEY,
+  ), false);
+
+  const futureJob = toJobRecord({
+    ...legacyContinuation,
+    payload: {
+      ...legacyContinuation.payload,
+      historicalBackfillVersion: 3,
+      windowStart: "2026-06-10T00:00:00.000Z",
+    },
+  }, 4);
+  const futureResult = await executor.executeJob(createJobContext(), futureJob);
+  assert.equal(Object.hasOwn(futureResult.metadataPatch ?? {}, NOTE_HISTORY_COVERAGE_KEY), false);
 });
 
 test("empty Oura note history reaches terminal source coverage", async () => {
@@ -1399,7 +1505,7 @@ test("an older runtime does not reinterpret newer source-coverage semantics", ()
   );
   const scheduled = createScheduledJobs(
     createStoredAccount({
-      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v2|withings" },
+      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v3|withings" },
       sources: [createSourceSummary("omron")],
     }),
     NOW,

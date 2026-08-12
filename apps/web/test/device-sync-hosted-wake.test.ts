@@ -462,6 +462,7 @@ import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-r
 import { getPrisma } from "@/src/lib/prisma";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
+  buildHostedDeviceSyncScheduledReconcileWakeEventId,
   cleanupRejectedHostedDeviceSyncConnectionSource,
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncWebhookAccepted,
@@ -1158,6 +1159,16 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
+  });
+
+  it("versions scheduled wake identity past legacy unhashed envelopes", () => {
+    expect(buildHostedDeviceSyncScheduledReconcileWakeEventId({
+      connectionId: "dsc_123",
+      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
+      nextReconcileAt: "2026-03-26T12:30:00.000Z",
+    })).toBe(
+      "device-sync:scheduled-reconcile:v2:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:30:00.000Z",
+    );
   });
 
   it("does not append scheduled reconcile work after explicit consent withdrawal", async () => {
@@ -2033,6 +2044,78 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertConnectionSource).toHaveBeenCalledTimes(3);
     expect(mocks.createSignal).toHaveBeenCalledTimes(2);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+  });
+
+  it("reopens only schedule-time history when a disconnected Junction source reconnects", async () => {
+    let currentConnection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-reestablished",
+      id: "dsc_junction_reestablished",
+      metadata: {
+        junctionBloodPressureHistoryBackfillCoverage: "v2|garmin,oura",
+        junctionNoteHistoryBackfillCoverage: "v2|garmin,oura",
+      },
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    let sources = [
+      buildHostedConnectionSource(currentConnection.id, "garmin", {
+        lastSeenAt: "2026-03-26T12:01:00.000Z",
+        status: "disconnected",
+      }),
+      buildHostedConnectionSource(currentConnection.id, "oura"),
+    ];
+    mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.listConnectionSources.mockImplementation(async () => sources);
+    mocks.syncDurableConnectionState.mockImplementation(async (connection) => {
+      currentConnection = connection;
+    });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      const existing = sources.find((source) => source.sourceInstanceKey === input.sourceInstanceKey);
+      if (!existing) {
+        throw new Error("Test source was not found.");
+      }
+      const updated = {
+        ...existing,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        status: input.status ?? existing.status,
+      };
+      sources = sources.map((source) => source.id === existing.id ? updated : source);
+      return updated;
+    });
+    const establish = () =>
+      handleHostedDeviceSyncConnectionEstablished({
+        account: {
+          connectedAt: currentConnection.connectedAt,
+          id: currentConnection.id,
+          provider: "junction",
+          scopes: [],
+          status: "active",
+        },
+        connection: { initialJobs: [], nextReconcileAt: null },
+        now: "2026-03-26T12:02:00.000Z",
+        sourceProviderSlug: "garmin",
+        store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      });
+
+    await expect(establish()).resolves.toBeUndefined();
+
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+    expect(currentConnection.metadata).toMatchObject({
+      junctionBloodPressureHistoryBackfillCoverage: "v2|garmin,oura",
+      junctionNoteHistoryBackfillCoverage: "v2|oura",
+    });
+    expect(currentConnection.metadata.junctionExtendedHistoryCoverage).toMatch(/^m2\|/u);
+    expect(sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceProviderSlug: "garmin", status: "connected" }),
+      expect.objectContaining({ sourceProviderSlug: "oura", status: "connected" }),
+    ]));
+
+    await expect(establish()).resolves.toBeUndefined();
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(1);
   });
 
   it("restores the selected Junction source when provider revoke fails", async () => {

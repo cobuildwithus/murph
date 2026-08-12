@@ -31,6 +31,7 @@ import {
 } from "@murphai/device-syncd/public-account";
 import {
   bucketHostedDeviceSyncEventToProviderSendDelay,
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   measureHostedDeviceSyncProviderSendToWebhookMs,
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
@@ -82,7 +83,8 @@ import {
   toIsoTimestamp,
 } from "./shared";
 
-const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
+const HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA = "v1";
+const HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA = "v2";
 const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
@@ -1385,6 +1387,15 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
         ) {
           throw connectionEstablishmentStaleError();
         }
+        if (currentSource?.status === "disconnected") {
+          await input.store.syncDurableConnectionState({
+            ...current,
+            metadata: clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+              metadata: current.metadata,
+              providerSlug: linkedSource.sourceProviderSlug,
+            }),
+          }, tx);
+        }
         await input.store.upsertConnectionSource({
           connectionId: input.account.id,
           sourceInstanceKey: linkedSource.sourceInstanceKey,
@@ -2058,7 +2069,7 @@ export function buildHostedDeviceSyncScheduledReconcileWakeEventId(input: {
   return [
     "device-sync",
     "scheduled-reconcile",
-    HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
+    HOSTED_DEVICE_SYNC_SCHEDULED_RECONCILE_WAKE_EVENT_SCHEMA,
     input.connectionId,
     input.expectedConnectedAt,
     input.nextReconcileAt,
@@ -2386,7 +2397,7 @@ function buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {
   return [
     "device-sync",
     "dirty",
-    HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
+    HOSTED_DEVICE_SYNC_DIRTY_WAKE_EVENT_SCHEMA,
     input.userId,
     input.provider,
     input.connectionId,

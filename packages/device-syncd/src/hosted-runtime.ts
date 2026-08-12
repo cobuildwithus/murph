@@ -8,6 +8,7 @@ import {
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedJunctionHistoricalBackfillMetadata,
@@ -26,6 +27,7 @@ import type {
 
 export {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillProgress,
@@ -218,11 +220,18 @@ const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_SECRET_VALUE_PATTERN =
   /\b(?:authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|hmac|webhook[_-]?secret)\b|\bBearer\s+\S+/iu;
 
 export function mergeHostedDeviceSyncConnectionMetadata(input: {
+  authoritativeScheduleTimeCoverageClearProviderSlugs?: readonly string[];
   hostedMetadata: Record<string, unknown>;
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown> | null | undefined;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
   return mergeHostedJunctionHistoricalBackfillMetadata({
+    ...(input.authoritativeScheduleTimeCoverageClearProviderSlugs === undefined
+      ? {}
+      : {
+          authoritativeScheduleTimeCoverageClearProviderSlugs:
+            input.authoritativeScheduleTimeCoverageClearProviderSlugs,
+        }),
     hostedMetadata: input.hostedMetadata,
     localConnectionStateUnpublished: input.localConnectionStateUnpublished,
     localMetadata: input.localMetadata ?? {},
@@ -704,6 +713,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   emptyBackfillAttempts: "number",
   eventType: "string",
   historicalBackfill: "boolean",
+  historicalBackfillVersion: "number",
   historicalProviderRecordsSeen: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",

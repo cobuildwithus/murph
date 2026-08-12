@@ -39,12 +39,23 @@ new collection window when the feature ships.
 
 ## Inputs and comparison
 
-Eligible factors come from completed activity and intervention sessions.
-Missed and skipped intervention sessions do not count.
+Eligible factors come from completed activity and intervention sessions, plus
+one narrow query-owned wearable-tag rule. A neutral Junction wearable-tag note
+counts only when its canonical note type, external reference, and data origin all
+prove Oura, and only the exact product-owned `sauna` tag is admitted. The same
+tag from another Junction source, unknown/custom Oura tags, and symptom, context,
+or outcome tags remain neutral notes. Legacy Junction `tag-*` intervention rows
+are excluded from factor derivation. Junction note-history coverage version 2
+performs one bounded semantic reimport for sources covered by the legacy
+normalizer so neutral replacement notes restore eligible Oura sauna history
+without rewriting old event kinds. Missed and skipped intervention sessions do
+not count.
 
 Activity days use the existing canonical activity-evidence date. Intervention
 days use the existing scheduled/session local date before the generic event
-date. This keeps retroactively logged sessions on their intended day.
+date. Eligible Oura sauna notes use their canonical provider date. This keeps
+retroactively logged sessions on their intended day without assigning action
+semantics in canonical storage.
 
 Sleep outcomes use the sleep-analysis date and eligibility policy. Explicit
 naps do not count as next-day sleep outcomes.

@@ -1,3 +1,6 @@
+export const JUNCTION_WEARABLE_TAG_NOTE_TYPE = "junction_wearable_tags" as const;
+export const JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET = "wearable-tags" as const;
+
 export const JUNCTION_RESOURCE_INVENTORY = Object.freeze([
   "activity",
   "sleep",

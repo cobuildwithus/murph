@@ -25,7 +25,10 @@ import {
   createJunctionDeviceSyncProvider,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
 } from "../src/providers/junction.ts";
-import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
+import {
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+} from "../src/junction-historical-backfill-progress.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
@@ -1105,7 +1108,7 @@ test("persisted provider-projected disconnects can recover an evidence-bearing p
       store.getAccountById(account.id)?.metadata ?? {},
       "omron",
       "blood_pressure",
-      1,
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     ), true);
     assert.equal(
       Object.hasOwn(
@@ -1297,7 +1300,7 @@ test("hosted listed-only recovery publishes connected before pressure egress res
       store.getAccountById(account.id)?.metadata ?? {},
       "omron",
       "blood_pressure",
-      1,
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     ), true);
     assert.equal(
       Object.hasOwn(
@@ -1383,7 +1386,7 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
   const merged = mergeHostedDeviceSyncConnectionMetadata({
     hostedMetadata,
     localConnectionStateUnpublished: true,
-    localMetadata: { junctionNoteHistoryBackfillCoverage: "v1|oura" },
+    localMetadata: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
   });
   assert.equal(merged.preservedLocalProgress, true);
   assert.equal(Object.hasOwn(merged.metadata, "junctionBloodPressureHistoryBackfillCoverage"), false);
@@ -1392,13 +1395,13 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
     merged.metadata,
     "omron",
     "blood_pressure",
-    1,
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
   ), true);
   assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
     merged.metadata,
     "oura",
     "note",
-    1,
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
   ), true);
   const account = store.upsertAccount({
     provider: "junction",
@@ -1502,7 +1505,7 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
   await service.runWorkerOnce();
   const persisted = store.getAccountById(account.id);
   assert.ok(persisted);
-  assert.equal(Object.keys(persisted.metadata).length, 15);
+  assert.equal(Object.keys(persisted.metadata).length, 16);
   assert.equal(persisted.metadata.junctionProfileSummaryCheckedAt, "2026-08-11T12:00:00.000Z");
   for (const diagnosticKey of [
     "junctionSkippedResourceTotal",
@@ -1524,7 +1527,7 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
       persisted.metadata,
       source,
       resource,
-      1,
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     ), true);
   }
   assert.equal(Object.hasOwn(persisted.metadata, "junctionBloodPressureHistoryBackfillCoverage"), false);
@@ -1535,7 +1538,7 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
   try {
     const reloaded = reopenedStore.getAccountById(account.id);
     assert.ok(reloaded);
-    assert.equal(Object.keys(reloaded.metadata).length, 15);
+    assert.equal(Object.keys(reloaded.metadata).length, 16);
     const scheduledHistoryJobs = provider.jobExecutor?.createScheduledJobs?.(
       reloaded,
       "2026-08-12T00:00:00.000Z",

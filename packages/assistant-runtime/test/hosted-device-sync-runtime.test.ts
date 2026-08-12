@@ -19,7 +19,10 @@ import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/co
 import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
-import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
+import {
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+} from "@murphai/device-syncd/hosted-runtime";
 import {
   type DeviceSyncAccount,
   type DeviceSyncJobRecord,
@@ -1179,6 +1182,170 @@ describe("hosted device-sync runtime", () => {
         getStore(service).getAccountById(localAccountId)?.metadata
           .junctionHistoricalBackfillStatus,
         "coverage_v3_retrying",
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("sync makes Junction reconnect history clearing authoritative over stale local coverage", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async () => {
+          throw new Error("Junction network access is not expected during source hydration.");
+        },
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: ["activity", "sleep"],
+        timeseriesResources: [],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+    const hostedConnectionId = "hosted_conn_junction_reestablished";
+    const externalAccountId = "junction-reestablished";
+    const metadata = {
+      junctionBloodPressureHistoryBackfillCoverage: "v2|garmin,oura",
+      junctionNoteHistoryBackfillCoverage: "v2|garmin,oura",
+    };
+    const source = (
+      sourceProviderSlug: "garmin" | "oura",
+      status: "connected" | "disconnected",
+      lastSeenAt: string,
+    ) => {
+      const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: hostedConnectionId,
+        sourceProviderSlug,
+      });
+      assert.ok(sourceInstanceKey);
+      return {
+        displayName: sourceProviderSlug === "garmin" ? "Garmin" : "Oura",
+        firstSeenAt: "2026-04-01T09:00:00.000Z",
+        lastDataAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt,
+        resourceCount: 2,
+        resourceAvailabilitySummary: { blood_pressure: true, note: true },
+        sourceInstanceKey,
+        sourceProviderSlug,
+        status,
+      };
+    };
+    let hostedSnapshot = buildRuntimeSnapshot({
+      connectionId: hostedConnectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId,
+      hostedUpdatedAt: "2026-04-06T09:15:00.000Z",
+      metadata,
+      provider: "junction",
+      sources: [
+        source("garmin", "disconnected", "2026-04-06T09:15:00.000Z"),
+        source("oura", "connected", "2026-04-06T09:15:00.000Z"),
+      ],
+    });
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during source hydration.");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during source hydration.");
+      },
+      async fetchSnapshot() {
+        return hostedSnapshot;
+      },
+    };
+
+    try {
+      const initialState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:15:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = initialState.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      const beforeReconnect = getStore(service).getAccountById(localAccountId);
+      assert.ok(beforeReconnect);
+      assert.match(String(beforeReconnect.metadata.junctionExtendedHistoryCoverage), /^m2\|/u);
+
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:30:00.000Z",
+        metadata,
+        provider: "junction",
+        sources: [
+          source("garmin", "connected", "2026-04-06T09:30:00.000Z"),
+          source("oura", "connected", "2026-04-06T09:15:00.000Z"),
+        ],
+      });
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:30:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const afterReconnect = getStore(service).getAccountById(localAccountId);
+      assert.ok(afterReconnect);
+      assert.deepEqual(
+        afterReconnect.metadata,
+        clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+          metadata: beforeReconnect.metadata,
+          providerSlug: "garmin",
+        }),
+      );
+      assert.equal(
+        getStore(service).listConnectionSources({ connectionId: localAccountId })
+          .find((candidate) => candidate.sourceProviderSlug === "garmin")?.status,
+        "connected",
+      );
+
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId,
+        hostedUpdatedAt: "2026-04-06T09:30:00.000Z",
+        metadata: afterReconnect.metadata,
+        provider: "junction",
+        sources: [
+          source("garmin", "connected", "2026-04-06T09:30:00.000Z"),
+          source("oura", "connected", "2026-04-06T09:15:00.000Z"),
+        ],
+      });
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:35:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.deepEqual(
+        getStore(service).getAccountById(localAccountId)?.metadata,
+        afterReconnect.metadata,
       );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
