@@ -2529,6 +2529,7 @@ function buildHostedWebhookDirtyResources(input: {
       count: 1,
       ...buildHostedWebhookDirtyResourceTiming(input),
       jobKind: job.kind,
+      ...(typeof job.maxAttempts === "number" ? { maxAttempts: job.maxAttempts } : {}),
       payload: readHostedDirtyResourcePayload(payload),
       resource: readHostedDirtyResourceString(payload.resource),
       resourceCategory: readHostedDirtyResourceString(payload.resourceCategory),

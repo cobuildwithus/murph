@@ -1881,6 +1881,7 @@ function normalizeJunctionWorkoutFeatures(
     const feature = parseJunctionWorkoutFeatureEnvelope(rawFeature);
     const entry = stripUndefined({
       id: feature.workoutId,
+      authoritativeVersion: feature.sourceUpdatedAt,
       startAt: feature.startedAt,
       endAt: feature.endedAt,
       sourceProviderSlug: feature.sourceProviderSlug,
@@ -1930,8 +1931,9 @@ function normalizeJunctionWorkoutFeatures(
         }
       : null);
 
+    const emittedEvents: DeviceEventPayload[] = [];
     if (feature.measurements.length > 0) {
-      context.events.push(stripUndefined({
+      emittedEvents.push(stripUndefined({
         kind: "measurement",
         occurredAt: feature.startedAt,
         recordedAt: feature.endedAt,
@@ -1965,7 +1967,7 @@ function normalizeJunctionWorkoutFeatures(
         "split-index": split.index,
         sport: feature.sport,
       });
-      context.events.push(stripUndefined({
+      emittedEvents.push(stripUndefined({
         kind: "measurement",
         occurredAt: split.endedAt,
         recordedAt: feature.endedAt,
@@ -1990,6 +1992,34 @@ function normalizeJunctionWorkoutFeatures(
           ],
         },
       }));
+    }
+
+    context.events.push(...emittedEvents);
+    if (feature.sourceUpdatedAt) {
+      const identity = makeJunctionExternalRef(
+        resourceContext,
+        entry,
+        timestamp,
+        "stream-features",
+      );
+      context.authoritativeEventSets.push({
+        system: identity.system,
+        resourceType: identity.resourceType,
+        resourceId: identity.resourceId,
+        version: feature.sourceUpdatedAt,
+        facetPrefixes: ["stream-features", "stream-split"],
+        currentFacets: [...new Set(emittedEvents.flatMap((event) => {
+          const externalRef = event.externalRef;
+          if (
+            !externalRef
+            || externalRef.version !== feature.sourceUpdatedAt
+            || !externalRef.facet
+          ) {
+            return [];
+          }
+          return [externalRef.facet];
+        }))].sort(),
+      });
     }
   }
 }
@@ -5812,10 +5842,13 @@ function junctionAuthoritativeSummaryVersion(
   resourceContext: ResourceContext,
   entry: PlainObject,
 ): string | undefined {
-  if (
-    resourceContext.identityKind !== "summary"
-    || (resourceContext.resource !== "profile" && resourceContext.resource !== "menstrual_cycle")
-  ) {
+  if (resourceContext.identityKind !== "summary") {
+    return undefined;
+  }
+  if (resourceContext.resource === "workouts") {
+    return resolveSafeTimestamp(entry.authoritativeVersion, resourceContext.sourceProviderSlug);
+  }
+  if (resourceContext.resource !== "profile" && resourceContext.resource !== "menstrual_cycle") {
     return undefined;
   }
   return resolveSafeTimestamp(

@@ -5438,6 +5438,7 @@ describe("hosted device-sync wakes", () => {
             jobs: [
               {
                 kind: "reconcile",
+                maxAttempts: 1,
                 payload: {
                   Authorization: "Bearer job-auth-secret",
                   clientSecret: "job-client-secret",
@@ -5517,6 +5518,7 @@ describe("hosted device-sync wakes", () => {
         firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
         providerSendToWebhookMs: 30_000,
         jobKind: "reconcile",
+        maxAttempts: 1,
         payload: {
           windowStart: "2026-03-19T00:00:00.000Z",
         },

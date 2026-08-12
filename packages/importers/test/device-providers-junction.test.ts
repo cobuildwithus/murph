@@ -5856,6 +5856,7 @@ test("Junction exact workout IDs join stream features despite a distinct provide
     time: [1_776_859_200, 1_776_859_210, 1_776_859_220],
   }, {
     workoutId: "workout-stream-sibling-1",
+    sourceUpdatedAt: "2026-04-22T13:00:00.000Z",
     sourceProviderSlug: "garmin",
     sourceInstanceId: "source-0123456789abcdef01234567",
     sourceType: "watch",
@@ -5905,6 +5906,14 @@ test("Junction exact workout IDs join stream features despite a distinct provide
     workoutSessionSchema.parse(session?.fields?.workout).sourceWorkoutId,
     "provider-workout-sibling-1",
   );
+  assert.deepEqual(payload.authoritativeEventSets, [{
+    system: sessionExternalRef.system,
+    resourceType: sessionExternalRef.resourceType,
+    resourceId: sessionExternalRef.resourceId,
+    version: "2026-04-22T13:00:00.000Z",
+    facetPrefixes: ["stream-features", "stream-split"],
+    currentFacets: ["stream-features", "stream-split-1"],
+  }]);
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /"lat"|"lng"|"time"\s*:\s*\[/u);
 });

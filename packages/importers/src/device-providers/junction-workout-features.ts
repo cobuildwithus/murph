@@ -33,6 +33,7 @@ export interface JunctionWorkoutFeatureEnvelope {
   schema: "junction.workout_features.v1";
   workoutId: string;
   sourceProviderSlug: string;
+  sourceUpdatedAt?: string;
   sourceInstanceId?: string;
   sourceType?: string;
   sport?: string;
@@ -47,6 +48,7 @@ export interface JunctionWorkoutFeatureEnvelope {
 export interface ReduceJunctionWorkoutStreamInput {
   sourceInstanceId?: string;
   sourceProviderSlug?: string;
+  sourceUpdatedAt?: string;
   sourceType?: string;
   sport?: string;
   workoutId: string;
@@ -127,8 +129,11 @@ export function reduceJunctionWorkoutStream(
   input: ReduceJunctionWorkoutStreamInput,
 ): JunctionWorkoutFeatureEnvelope | null {
   const workoutId = trimIdentifier(input.workoutId, 200);
+  const sourceUpdatedAt = input.sourceUpdatedAt === undefined
+    ? undefined
+    : parseIsoTimestamp(input.sourceUpdatedAt);
   const record = unwrapWorkoutStreamRecord(payload);
-  if (!workoutId || !record) {
+  if (!workoutId || !record || (input.sourceUpdatedAt !== undefined && !sourceUpdatedAt)) {
     return null;
   }
 
@@ -168,6 +173,7 @@ export function reduceJunctionWorkoutStream(
     schema: "junction.workout_features.v1" as const,
     workoutId,
     sourceProviderSlug: origin.sourceProviderSlug,
+    sourceUpdatedAt: sourceUpdatedAt ?? undefined,
     sourceInstanceId: origin.sourceInstanceId ?? undefined,
     sourceType: origin.sourceType,
     sport,
@@ -190,6 +196,9 @@ export function parseJunctionWorkoutFeatureEnvelope(
 
   const workoutId = trimIdentifier(record.workoutId, 200);
   const sourceProviderSlug = normalizeSlug(record.sourceProviderSlug, 80);
+  const sourceUpdatedAt = record.sourceUpdatedAt === undefined
+    ? undefined
+    : parseIsoTimestamp(record.sourceUpdatedAt);
   const sourceInstanceId = optionalPatternedString(record.sourceInstanceId, 120);
   const sourceType = optionalSlug(record.sourceType, 80);
   const sport = optionalSlug(record.sport, 80);
@@ -205,6 +214,7 @@ export function parseJunctionWorkoutFeatureEnvelope(
   if (
     !workoutId
     || !sourceProviderSlug
+    || (record.sourceUpdatedAt !== undefined && !sourceUpdatedAt)
     || !startedAt
     || (record.endedAt !== undefined && !endedAt)
     || (record.splitDistanceMeters !== undefined && splitDistanceMeters === null)
@@ -231,6 +241,7 @@ export function parseJunctionWorkoutFeatureEnvelope(
     schema: "junction.workout_features.v1" as const,
     workoutId,
     sourceProviderSlug,
+    sourceUpdatedAt: sourceUpdatedAt ?? undefined,
     sourceInstanceId,
     sourceType,
     sport,

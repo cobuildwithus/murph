@@ -1055,6 +1055,7 @@ function hostedDirtyResourceToDeviceSyncJobInput(
     "hosted-dirty",
     dirtyState.provider,
     resource.jobKind,
+    ...(typeof resource.maxAttempts === "number" ? [`attempts-${resource.maxAttempts}`] : []),
     resource.sourceProviderSlug ?? "provider",
     resource.resourceCategory ?? "category",
     resource.resource ?? "resource",
@@ -1065,6 +1066,7 @@ function hostedDirtyResourceToDeviceSyncJobInput(
 
   return {
     kind: resource.jobKind,
+    ...(typeof resource.maxAttempts === "number" ? { maxAttempts: resource.maxAttempts } : {}),
     payload,
     priority: 60,
     dedupeKey,

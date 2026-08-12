@@ -166,6 +166,15 @@ function storedExternalRefResourceId(record: StoredJsonlRecord | undefined): str
   return typeof externalRef.resourceId === "string" ? externalRef.resourceId : undefined;
 }
 
+function storedExternalRefFacet(record: StoredJsonlRecord | undefined): string | undefined {
+  const externalRef = record?.externalRef;
+  if (!externalRef || typeof externalRef !== "object" || Array.isArray(externalRef)) {
+    return undefined;
+  }
+
+  return typeof externalRef.facet === "string" ? externalRef.facet : undefined;
+}
+
 function storedExternalRefVersion(record: StoredJsonlRecord | undefined): string | undefined {
   const externalRef = record?.externalRef;
   if (!externalRef || typeof externalRef !== "object" || Array.isArray(externalRef)) {
@@ -1618,6 +1627,7 @@ test("importDeviceProviderSnapshot persists bounded Junction workout features th
     time: [1_776_859_200, 1_776_859_260, 1_776_859_270],
   }, {
     workoutId: "workout-core-roundtrip-1",
+    sourceUpdatedAt: "2026-04-22T13:00:00.000Z",
     sourceProviderSlug: "garmin",
     sourceInstanceId: "source-0123456789abcdef01234567",
     sourceType: "watch",
@@ -1683,6 +1693,78 @@ test("importDeviceProviderSnapshot persists bounded Junction workout features th
   assert.deepEqual(storedSplitDurations.sort((left, right) => left - right), [30, 40]);
   assert.equal(result.sampleShardPaths.length, 0);
   assert.doesNotMatch(evidenceText, /"lat"|"lng"|"time"\s*:\s*\[/u);
+
+  const correctedFeature = reduceJunctionWorkoutStream({
+    cadence: [80, 82],
+    distance: [0, 1_000],
+    heartrate: [120, 130],
+    power: [180, 200],
+    time: [1_776_859_200, 1_776_859_260],
+  }, {
+    workoutId: "workout-core-roundtrip-1",
+    sourceUpdatedAt: "2026-04-22T13:05:00.000Z",
+    sourceProviderSlug: "garmin",
+    sourceInstanceId: "source-0123456789abcdef01234567",
+    sourceType: "watch",
+    sport: "running",
+  });
+  assert.ok(correctedFeature);
+  assert.equal(correctedFeature.splits.length, 1);
+  const importCorrection = () => importDeviceProviderSnapshot<
+    Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+  >(
+    {
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-workout-feature-user",
+        importedAt: "2026-04-22T13:05:00.000Z",
+        workoutFeatures: [correctedFeature],
+      },
+    },
+    { corePort: coreRuntime },
+  );
+  const correction = await importCorrection();
+  const correctedRecords = (
+    await Promise.all(correction.eventShardPaths.map((relativePath) =>
+      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+    ))
+  ).flat();
+  const correctedLiveRecords = latestLiveRecords(correctedRecords);
+  const correctedFacets = correctedLiveRecords
+    .filter((record) =>
+      record.kind === "measurement"
+      && storedExternalRefResourceId(record) === storedExternalRefResourceId(session)
+    )
+    .map(storedExternalRefFacet)
+    .sort();
+  assert.deepEqual(correctedFacets, ["stream-features", "stream-split-1"]);
+  const correctedFirstSplit = correctedLiveRecords.find((record) =>
+    storedExternalRefFacet(record) === "stream-split-1"
+  );
+  assert.equal(
+    storedExternalRefVersion(correctedFirstSplit),
+    "2026-04-22T13:05:00.000Z",
+  );
+
+  const replay = await importCorrection();
+  const replayRecords = (
+    await Promise.all(replay.eventShardPaths.map((relativePath) =>
+      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+    ))
+  ).flat();
+  assert.equal(replayRecords.length, correctedRecords.length);
+  assert.deepEqual(
+    latestLiveRecords(replayRecords)
+      .filter((record) =>
+        record.kind === "measurement"
+        && storedExternalRefResourceId(record) === storedExternalRefResourceId(session)
+      )
+      .map(storedExternalRefFacet)
+      .sort(),
+    ["stream-features", "stream-split-1"],
+  );
+  assert.equal(replay.sampleShardPaths.length, 0);
 });
 
 test("excluded Junction workout row feeds stay below core bounds at 25,000 provider records", async () => {

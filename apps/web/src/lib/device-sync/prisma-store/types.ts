@@ -51,6 +51,7 @@ export interface HostedDeviceSyncDirtyResource {
   dirtyPayloadId?: string;
   eventToProviderSendBucket?: HostedDeviceSyncEventToProviderSendBucket | null;
   firstWebhookReceivedAt?: string | null;
+  maxAttempts?: number;
   providerSendToWebhookMs?: number | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;

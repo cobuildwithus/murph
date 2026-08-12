@@ -3202,6 +3202,142 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("hosted workout dirty state preserves one durable execution around three client requests", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-workout-retry-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    let streamRequests = 0;
+    const externalAccountId = "junction-hosted-workout-retry";
+    const connectionId = "hosted_conn_workout_retry";
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        fetchImpl: async (input) => {
+          const url = new URL(readTestUrl(input));
+          if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+            return createTestJsonResponse({ providers: [{
+              slug: "garmin",
+              status: "connected",
+              resource_availability: { workouts: true },
+            }] });
+          }
+          if (url.pathname === "/v2/timeseries/workouts/workout-hosted-retry/stream") {
+            streamRequests += 1;
+            return new Response(JSON.stringify({ detail: "temporary" }), {
+              status: 503,
+              headers: { "content-type": "application/json", "retry-after": "0" },
+            });
+          }
+          throw new Error(`Unexpected Junction request: ${url.pathname}`);
+        },
+        region: "us",
+        summaryResources: [],
+        timeseriesResources: [],
+      },
+    });
+    assert.ok(provider);
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId,
+      provider: "junction",
+      sources: [{
+        displayName: "Garmin",
+        firstSeenAt: "2026-04-04T09:00:00.000Z",
+        lastDataAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-04T10:00:00.000Z",
+        resourceCount: 1,
+        resourceAvailabilitySummary: { workouts: true },
+        sourceInstanceKey: "garmin",
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      }],
+    });
+    const dirtyState = buildDirtyState({
+      connectionId,
+      dirtyResources: [{
+        count: 1,
+        jobKind: "resource",
+        maxAttempts: 1,
+        payload: {
+          eventType: "daily.data.workout_stream.created",
+          objectId: "workout-hosted-retry",
+          occurredAt: "2026-04-04T10:00:00.000Z",
+          resource: "workout_stream",
+          resourceCategory: "timeseries",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          sport: "running",
+          windowEnd: "2026-04-04T10:00:00.000Z",
+          windowStart: "2026-04-04T10:00:00.000Z",
+        },
+        resource: "workout_stream",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        windowEnd: "2026-04-04T10:00:00.000Z",
+        windowStart: "2026-04-04T10:00:00.000Z",
+      }],
+      provider: "junction",
+      resourceCategoryCounts: { timeseries: 1 },
+      sourceProviderCounts: { garmin: 1 },
+      windowEnd: "2026-04-04T10:00:00.000Z",
+      windowStart: "2026-04-04T10:00:00.000Z",
+    });
+
+    try {
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [dirtyState],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildCronWake("2026-04-04T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const accountId = state.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(accountId);
+      const [queued] = readJobsForAccount(service, accountId);
+      assert.equal(queued?.maxAttempts, 1);
+
+      assert.equal(await service.drainWorker(1), 1);
+
+      const [terminal] = readJobsForAccount(service, accountId);
+      assert.equal(streamRequests, 3);
+      assert.equal(terminal?.maxAttempts, 1);
+      assert.equal(terminal?.status, "dead");
+      assert.equal(terminal?.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("duplicate pending timing entries merge conservatively after local job deduplication", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-deduped-timing-",

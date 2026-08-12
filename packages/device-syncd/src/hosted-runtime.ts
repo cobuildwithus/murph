@@ -517,6 +517,7 @@ export interface HostedExecutionDeviceSyncDirtyResource {
   dirtyPayloadId?: string;
   eventToProviderSendBucket?: HostedDeviceSyncEventToProviderSendBucket | null;
   firstWebhookReceivedAt?: string | null;
+  maxAttempts?: number;
   providerSendToWebhookMs?: number | null;
   jobKind: string;
   payload?: Record<string, boolean | number | string>;
@@ -1504,6 +1505,9 @@ function parseHostedExecutionDeviceSyncDirtyResource(
         }
       : {}),
     jobKind: requireString(record.jobKind, `${label}.jobKind`),
+    ...(record.maxAttempts === undefined
+      ? {}
+      : { maxAttempts: requirePositiveInteger(record.maxAttempts, `${label}.maxAttempts`) }),
     payload: readHostedExecutionDeviceSyncDirtyPayload(record.payload, `${label}.payload`),
     resource: readNullableStringValue(record.resource, `${label}.resource`),
     resourceCategory: readNullableStringValue(record.resourceCategory, `${label}.resourceCategory`),

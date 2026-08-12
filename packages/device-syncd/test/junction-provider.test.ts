@@ -13895,6 +13895,7 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
   const importedSnapshots: Array<Record<string, unknown>> = [];
   const localAuthorityCheckPhases: string[] = [];
   let streamFetched = false;
+  let sourceCatalogMutations = 0;
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     requests.push(url);
@@ -13971,6 +13972,10 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
         localAuthorityCheckPhases.push(streamFetched ? "after-fetch" : "before-fetch");
         return account.sources ?? [];
       },
+      upsertConnectionSource: (input) => {
+        sourceCatalogMutations += 1;
+        return createConnectionSource(input);
+      },
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot as Record<string, unknown>);
         return { imported: true };
@@ -13993,10 +13998,11 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
   );
   assert.equal(requests.some((url) => url.includes("/v2/summary/workout_stream/")), false);
   assert.equal(importedSnapshots.length, 1);
-  assert.ok(localAuthorityCheckPhases.includes("before-fetch"));
-  assert.ok(localAuthorityCheckPhases.includes("after-fetch"));
+  assert.deepEqual(localAuthorityCheckPhases, ["before-fetch", "after-fetch"]);
+  assert.equal(sourceCatalogMutations, 0);
   const importedConnections = importedSnapshots[0]?.connections as Array<Record<string, unknown>> | undefined;
   const importedWorkoutFeatures = importedSnapshots[0]?.workoutFeatures as Array<Record<string, unknown>> | undefined;
+  assert.equal(importedWorkoutFeatures?.[0]?.sourceUpdatedAt, "2026-04-03T00:00:00.000Z");
   assert.equal(importedWorkoutFeatures?.[0]?.sourceInstanceId, importedConnections?.[0]?.sourceInstanceId);
   assert.notEqual(importedWorkoutFeatures?.[0]?.sourceInstanceId, jobPayload.sourceInstanceId);
   const importedText = JSON.stringify(importedSnapshots[0]);
@@ -14161,11 +14167,11 @@ test("Junction workout stream fences an import when its source disconnects after
     "/v2/timeseries/workouts/workout-post-fetch-revoked/stream",
     "/v2/user/providers/junction-user-1",
   ]);
-  assert.deepEqual(projectedStatuses, ["connected", "disconnected"]);
+  assert.deepEqual(projectedStatuses, []);
   assert.equal(importedSnapshots.length, 0);
 });
 
-test("Junction workout stream rechecks live local source authority after fetch", async () => {
+test("Junction source-less workout stream uses fetched identity for final local authority", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const localAuthorityCheckPhases: string[] = [];
@@ -14185,6 +14191,7 @@ test("Junction workout stream rechecks live local source authority after fetch",
       streamFetched = true;
       return createJsonResponse({
         distance: [0, 1_000],
+        source: { provider: "garmin", type: "watch" },
         time: [1_776_859_200, 1_776_859_260],
       });
     }
@@ -14200,7 +14207,7 @@ test("Junction workout stream rechecks live local source authority after fetch",
     resourceCount: 1,
     resourceAvailabilitySummary: { workouts: true },
     sourceProviderSlug: "garmin",
-    status: "connected" as const,
+    status: "disconnected" as const,
   }] });
 
   const result = await executeJunctionJob(
@@ -14215,8 +14222,8 @@ test("Junction workout stream rechecks live local source authority after fetch",
         localAuthorityCheckPhases.push(streamFetched ? "after-fetch" : "before-fetch");
         return [createConnectionSource({
           sourceProviderSlug: "garmin",
-          status: streamFetched ? "disconnected" : "connected",
-          lastErrorCode: streamFetched ? DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE : null,
+          status: "disconnected",
+          lastErrorCode: DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
         })];
       },
     }),
@@ -14224,17 +14231,14 @@ test("Junction workout stream rechecks live local source authority after fetch",
       objectId: "workout-locally-revoked",
       resource: "workout_stream",
       resourceCategory: "timeseries",
-      sourceProviderSlug: "garmin",
       windowStart: "2026-04-02T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
   assert.deepEqual(result, {});
-  assert.ok(localAuthorityCheckPhases.includes("before-fetch"));
-  assert.ok(localAuthorityCheckPhases.includes("after-fetch"));
+  assert.deepEqual(localAuthorityCheckPhases, ["after-fetch"]);
   assert.deepEqual(requests.map((url) => new URL(url).pathname), [
-    "/v2/user/providers/junction-user-1",
     "/v2/timeseries/workouts/workout-locally-revoked/stream",
     "/v2/user/providers/junction-user-1",
   ]);

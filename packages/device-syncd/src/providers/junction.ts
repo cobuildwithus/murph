@@ -1852,9 +1852,8 @@ export function createJunctionDeviceSyncProvider(
         return {};
       }
 
-      const sourceProviders = await loadAndProjectSourceProviders();
       const matchingProviders = sourceProviderSlug
-        ? sourceProviders.filter((provider) =>
+        ? (await loadSourceProviders()).filter((provider) =>
             normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug) === sourceProviderSlug
             && provider.status.trim().toLowerCase() === "connected"
           )
@@ -1884,6 +1883,7 @@ export function createJunctionDeviceSyncProvider(
       try {
         workoutFeatures = reduceJunctionWorkoutStream(streamPayload, {
           workoutId,
+          sourceUpdatedAt: normalizeString(job.payload.occurredAt) ?? context.now,
           sourceProviderSlug: sourceProviderSlug ?? undefined,
           sourceInstanceId,
           sourceType: normalizeString(job.payload.sourceType) ?? undefined,
@@ -1928,18 +1928,18 @@ export function createJunctionDeviceSyncProvider(
       const postFetchProviders = await client.listUserProviders(context.account.externalAccountId, {
         signal: context.signal ?? null,
       });
-      await projectJunctionSources(context, postFetchProviders);
-      const sourceStillConnected = postFetchProviders.some((provider) =>
+      const fetchedSourceProviderSlug = normalizeProviderSlug(workoutFeatures.sourceProviderSlug);
+      const connectedFetchedSourceProviders = postFetchProviders.filter((provider) =>
         normalizeProviderSlug(provider.origin.sourceProviderSlug ?? provider.slug)
-          === normalizeProviderSlug(workoutFeatures.sourceProviderSlug)
+          === fetchedSourceProviderSlug
         && provider.status.trim().toLowerCase() === "connected"
       );
-      if (!sourceStillConnected) {
+      if (connectedFetchedSourceProviders.length === 0) {
         return {};
       }
       if (
-        sourceProviderSlug
-        && await resolveJunctionCurrentSourceAdmission(context, sourceProviderSlug) !== "admitted"
+        !fetchedSourceProviderSlug
+        || await resolveJunctionCurrentSourceAdmission(context, fetchedSourceProviderSlug) !== "admitted"
       ) {
         return {};
       }
@@ -1951,7 +1951,7 @@ export function createJunctionDeviceSyncProvider(
         importedAt: context.now,
         windowStart: window.windowStart,
         windowEnd: window.windowEnd,
-        connections: sanitizeJunctionImportConnections(postFetchProviders),
+        connections: sanitizeJunctionImportConnections(connectedFetchedSourceProviders),
         summaries: {},
         timeseries: {},
         workoutFeatures: [workoutFeatures],

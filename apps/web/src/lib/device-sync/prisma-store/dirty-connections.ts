@@ -1848,6 +1848,7 @@ function normalizeDirtyResource(
 ): HostedDeviceSyncDirtyResource {
   const eventToProviderSendBucket = resource.eventToProviderSendBucket ?? null;
   const firstWebhookReceivedAt = normalizeIso(resource.firstWebhookReceivedAt);
+  const maxAttempts = normalizeDirtyResourceMaxAttempts(resource.maxAttempts);
   const providerSendToWebhookMs = normalizeDurationMs(resource.providerSendToWebhookMs);
   return {
     count: Math.max(1, Math.min(1_000_000, Math.trunc(resource.count))),
@@ -1862,6 +1863,7 @@ function normalizeDirtyResource(
         }
       : {}),
     jobKind: truncateDirtyKey(normalizeNullableString(resource.jobKind) ?? "reconcile") ?? "reconcile",
+    ...(maxAttempts === undefined ? {} : { maxAttempts }),
     payload: readDirtyResourcePayload(resource.payload),
     resource: truncateDirtyKey(normalizeNullableString(resource.resource)),
     resourceCategory: truncateDirtyKey(normalizeNullableString(resource.resourceCategory)),
@@ -1932,6 +1934,7 @@ function buildDirtyResourceKey(resource: HostedDeviceSyncDirtyResource): string 
   return [
     resource.dirtyPayloadId ?? "marker",
     buildDirtyResourcePayloadKey(resource.payload),
+    resource.maxAttempts ?? "attempts",
     resource.sourceProviderSlug ?? "provider",
     resource.resourceCategory ?? "category",
     resource.resource ?? resource.jobKind,
@@ -2009,6 +2012,7 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
         : null,
       providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
       jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
+      maxAttempts: normalizeDirtyResourceMaxAttempts(record.maxAttempts),
       payload: readDirtyResourcePayload(record.payload),
       resource: typeof record.resource === "string" ? record.resource : null,
       resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
@@ -2061,6 +2065,7 @@ async function readDirtyPayloadResourceJson(input: {
       : null,
     providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
     jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
+    maxAttempts: normalizeDirtyResourceMaxAttempts(record.maxAttempts),
     payload: readDirtyResourcePayload(record.payload),
     resource: typeof record.resource === "string" ? record.resource : null,
     resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
@@ -2125,6 +2130,12 @@ function readDirtyResourcePayload(value: unknown): HostedDeviceSyncDirtyResource
   }
 
   return Object.keys(payload).length > 0 ? payload : undefined;
+}
+
+function normalizeDirtyResourceMaxAttempts(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined;
 }
 
 function normalizeDirtyResourcePayloadString(key: string, value: string): string | null {

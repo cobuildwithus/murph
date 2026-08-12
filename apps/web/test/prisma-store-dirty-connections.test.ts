@@ -1401,6 +1401,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
           providerSendToWebhookMs: 60_000,
           jobKind: "resource",
+          maxAttempts: 1,
           payload: {
             ordinary: "y".repeat(1_000),
             webhookDataJson,
@@ -1425,6 +1426,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
 
     expect(dirtyResource?.payload?.webhookDataJson).toBe(webhookDataJson);
     expect(dirtyResource?.dirtyPayloadId).toBe(createdPayloadData?.[0]?.id);
+    expect(dirtyResource?.maxAttempts).toBe(1);
     expect(dirtyResource?.payload?.ordinary).toHaveLength(512);
     expect(compactDirtyJson).not.toContain("webhookDataJson");
     expect(compactDirtyJson.length).toBeLessThan(128);
@@ -1445,6 +1447,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     })).resolves.toMatchObject({
       eventToProviderSendBucket: "under_5_minutes",
       firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
+      maxAttempts: 1,
       providerSendToWebhookMs: 60_000,
       timingSourceProviderSlug: "garmin",
     });

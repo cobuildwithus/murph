@@ -40,12 +40,17 @@ Current providers:
 - Junction fetches sparse `workout_duration` facts with stable interval
   identity; duration is never linked by time overlap. The high-frequency
   `workout_distance` and `workout_swimming_stroke` row feeds remain excluded.
-  Shallow `workout_stream` webhooks use one exact
-  `/v2/timeseries/workouts/{workout_id}/stream` request, then discard the raw
-  response after reducing it to a capped feature envelope and at most 64
-  fixed-distance splits. The request is capped at 8 MiB/50,000 points and raw
-  arrays, route coordinates, inferred zones, and snapshot fallback never enter
-  the importer.
+  Shallow `workout_stream` webhooks schedule one durable exact
+  `/v2/timeseries/workouts/{workout_id}/stream` execution with the provider
+  client's bounded three-request attempt budget and no outer job retry. The
+  fetched stream's source identity is revalidated against local and remote
+  connection authority before import without projecting or mutating the full
+  source catalog. The raw response is then discarded after reduction to a
+  capped feature envelope and at most 64 fixed-distance splits. A newer exact
+  correction authoritatively replaces those feature and split facets, so
+  omitted stale splits are withdrawn. The response is capped at 8 MiB/50,000
+  points and raw arrays, route coordinates, inferred zones, and snapshot
+  fallback never enter the importer.
 - Junction resource admission derives from the static 57-resource policy in
   `@murphai/contracts`. Sparse supported VO2 max, temperature, caffeine,
   one-minute heart-rate recovery, sleep-breathing-disturbance, AFib-burden, and
