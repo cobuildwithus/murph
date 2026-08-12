@@ -64,8 +64,8 @@ Updated: 2026-08-11
 1. [completed] Add failing scheduler and completion tests for every sparse policy member.
 2. [completed] Replace the two-resource special case with one typed sparse-history policy.
 3. [completed] Extend the generic coverage metadata merge owner to all policy resources.
-4. [in progress] Update owning behavior docs and add a concise public changelog item.
-5. [pending] Run focused verification and inspect the candidate diff for privacy and
+4. [completed] Update owning behavior docs and add a concise public changelog item.
+5. [completed] Run focused verification and inspect the candidate diff for privacy and
    simplicity.
 6. [pending] Commit, push, open the PR, run CI and both ReviewGPT lanes, then apply and
    verify accepted findings or returned patches.
@@ -93,3 +93,8 @@ Updated: 2026-08-11
 - Current focused proof: the Junction backfill file passes 64 tests, and the
   historical metadata file passes 6 tests, including source-scoped bitmask
   union and future-version immutability.
+- The four changelog suites pass 56 tests, and the Web typecheck passes.
+- The first diff-aware verification run stopped on a readonly test-fixture
+  list passed to the mutable provider config. Copying that list resolved the
+  boundary; the device-sync package typecheck and all 64 focused backfill tests
+  pass afterward.

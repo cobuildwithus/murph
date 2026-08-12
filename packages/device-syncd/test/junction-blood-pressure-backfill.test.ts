@@ -329,9 +329,11 @@ function createProvider(input: {
     region: "us",
     summaryResources: ["activity"],
     summaryBackfillDays: input.summaryBackfillDays ?? 30,
-    timeseriesResources: input.timeseriesResources ?? (input.includeNote
-      ? ["blood_pressure", "stress_level", "note"]
-      : ["blood_pressure", "stress_level"]),
+    timeseriesResources: input.timeseriesResources
+      ? [...input.timeseriesResources]
+      : input.includeNote
+        ? ["blood_pressure", "stress_level", "note"]
+        : ["blood_pressure", "stress_level"],
     ...(input.timeseriesBackfillDays === undefined
       ? {}
       : { timeseriesBackfillDays: input.timeseriesBackfillDays }),
