@@ -126,9 +126,17 @@ const modelTarget = createAssistantModelTarget({
   reasoningEffort: 'medium',
   sandbox: 'danger-full-access',
 })
+const continuityCompatiblePreviousModelTarget = createAssistantModelTarget({
+  provider: 'codex-cli',
+  approvalPolicy: 'never',
+  model: 'gpt-5.4',
+  modelProvider: 'vercel-ai-gateway',
+  reasoningEffort: 'low',
+  sandbox: 'danger-full-access',
+})
 
-if (!modelTarget) {
-  throw new Error('Expected a test assistant model target.')
+if (!modelTarget || !continuityCompatiblePreviousModelTarget) {
+  throw new Error('Expected test assistant model targets.')
 }
 
 beforeEach(() => {
@@ -385,7 +393,7 @@ describe('notification audience authority integration', () => {
     expect(attended.session.providerOptions.sandbox).toBe('danger-full-access')
   })
 
-  it('keeps a queued private completion detached until provider acceptance', async () => {
+  it('binds a queued private completion to a continuity-compatible ordinary session without mutating it before provider acceptance', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'linq-private-completion-continuity-',
     )
@@ -404,6 +412,13 @@ describe('notification audience authority integration', () => {
       threadId: 'h1_cccccccccccccccccccccccc',
       threadIsDirect: true,
     } as const
+    const previousExecutionContext = {
+      hosted: {
+        defaultTarget: continuityCompatiblePreviousModelTarget,
+        memberId: 'member-private-completion-continuity',
+        userEnvKeys: [],
+      },
+    } as const
     const executionContext = {
       hosted: {
         defaultTarget: modelTarget,
@@ -412,11 +427,11 @@ describe('notification audience authority integration', () => {
       },
     } as const
     const ordinary = await resolveAssistantSessionForMessage({
-      boundaryDefaultTarget: modelTarget,
+      boundaryDefaultTarget: continuityCompatiblePreviousModelTarget,
       defaults: null,
       message: {
         ...locator,
-        executionContext,
+        executionContext: previousExecutionContext,
         prompt: 'Start the ordinary direct conversation.',
         vault: vaultRoot,
       },
@@ -490,6 +505,7 @@ describe('notification audience authority integration', () => {
       codexResume: nativeResume,
       resumeState: nativeResume,
       sessionId: ordinaryWithResume.sessionId,
+      target: continuityCompatiblePreviousModelTarget,
       turnCount: ordinaryWithResume.turnCount,
     }))
     await expect(
@@ -612,14 +628,21 @@ describe('notification audience authority integration', () => {
           userEnvKeys: [],
         },
       } as const
+      const previousExecutionContext = {
+        hosted: {
+          defaultTarget: continuityCompatiblePreviousModelTarget,
+          memberId: 'member_private_continuity_scheduled_provider',
+          userEnvKeys: [],
+        },
+      } as const
       const ordinary = await resolveAssistantSessionForMessage({
-        boundaryDefaultTarget: modelTarget,
+        boundaryDefaultTarget: continuityCompatiblePreviousModelTarget,
         defaults: null,
         message: {
           ...locator,
           bindingDeliveryTarget: locator.threadId,
           deliveryKind: 'thread',
-          executionContext,
+          executionContext: previousExecutionContext,
           prompt: 'Start the ordinary direct conversation.',
           vault: vaultRoot,
         },
@@ -640,6 +663,46 @@ describe('notification audience authority integration', () => {
         codexResume: nativeResume,
         resumeState: nativeResume,
       })
+      boundaries.deliverMessage.mockResolvedValueOnce({
+        delivery: null,
+        deliveryError: null,
+        intent: {
+          intentId: 'intent-private-continuity-model-change',
+        },
+        kind: 'queued',
+        session: null,
+      })
+      await sendAssistantNotificationLocal({
+        ...locator,
+        answeredMailboxItemIds: [completionEventId],
+        bindingDeliveryTarget: locator.threadId,
+        deliveryDedupeToken: deliveryKey,
+        deliveryDispatchMode: 'queue-only',
+        deliveryIdempotencyKey: deliveryKey,
+        deliveryKind: 'thread',
+        deliveryTarget: locator.threadId,
+        executionContext,
+        instructions: 'Deliver the reviewed private Assistant Ask answer exactly.',
+        responsePolicy: {
+          kind: 'require_send_exact_text',
+          text: privateText,
+        },
+        reviewedAssistantAskCompletionExpiresAt: '2099-01-01T00:00:00.000Z',
+        vault: vaultRoot,
+      })
+      const queuedDeliveryInput = boundaries.deliverMessage.mock.calls.at(-1)?.[0]
+      expect(queuedDeliveryInput).toMatchObject({
+        privateCompletionContinuitySessionId: ordinaryWithResume.sessionId,
+      })
+      await expect(listAssistantSessions(vaultRoot)).resolves.toEqual([
+        expect.objectContaining({
+          codexResume: nativeResume,
+          resumeState: nativeResume,
+          sessionId: ordinaryWithResume.sessionId,
+          target: continuityCompatiblePreviousModelTarget,
+          turnCount: ordinaryWithResume.turnCount,
+        }),
+      ])
       const pending = await createAssistantOutboxIntent({
         ...locator,
         answeredMailboxItemIds: [completionEventId],
@@ -650,7 +713,8 @@ describe('notification audience authority integration', () => {
         deliveryIdempotencyKey: deliveryKey,
         deliveryTransportIdempotent: true,
         message: privateText,
-        privateCompletionContinuitySessionId: ordinaryWithResume.sessionId,
+        privateCompletionContinuitySessionId:
+          queuedDeliveryInput?.privateCompletionContinuitySessionId,
         reviewedAssistantAskCompletionExpiresAt: '2099-01-01T00:00:00.000Z',
         sessionId: ordinaryWithResume.sessionId,
         turnId: 'turn_private_continuity_scheduled_provider',

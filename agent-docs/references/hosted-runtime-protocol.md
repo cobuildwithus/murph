@@ -672,9 +672,11 @@ live-authorized same-channel delivery reaches the durable outbox's canonical
 `sent` state, the hosted runtime uses its intent as the recovery journal. Partial or ambiguous
 provider receipts remain retryable or abandoned and never participate, even
 when they retain message metadata. If queue-time resolution found an
-existing ordinary direct session, the intent binds that exact session ID before
-the notification target is projected read-only; otherwise the target stays
-unbound until the first attended direct turn. An omitted binding identifies a
+existing ordinary direct session, the intent binds the exact ID returned by the
+hosted-default continuity lookup before the notification target is projected
+read-only. Supported model or reasoning changes do not erase that causal
+binding; only fallback resolution without an ordinary session stays unbound
+until the first attended direct turn. An omitted binding identifies a
 pre-rollout intent and fails closed; only an explicit current-writer null may
 wait for that first session. No route-sibling heuristic may choose the owner.
 A canonically sent field-present obligation is exempt from ordinary terminal outbox

@@ -1,5 +1,4 @@
 import {
-  assistantModelTargetsEqual,
   normalizeAssistantBackendTarget,
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
@@ -201,11 +200,12 @@ export async function resolveAssistantSessionForMessage(input: {
       normalizeAssistantExecutionContext(input.message.executionContext).hosted
         ?.defaultTarget ?? null,
     )
-  const resolved = await resolveAssistantSessionForMessageInput({
+  const sessionResolution = await resolveAssistantSessionForMessageInput({
     hostedDefaultTarget,
     messageOverride,
     sessionInput,
   })
+  const resolved = sessionResolution.resolved
   const effectiveTarget = resolveEffectiveTargetForResolvedSession({
     hostedDefaultTarget,
     messageOverride,
@@ -213,9 +213,7 @@ export async function resolveAssistantSessionForMessage(input: {
   })
   const privateCompletionContinuitySessionId =
     sessionInput.threadIsDirect === true
-    && hostedDefaultTarget
-    && assistantModelTargetsEqual(resolved.session.target, hostedDefaultTarget)
-      ? resolved.session.sessionId
+      ? sessionResolution.hostedDefaultSessionId
       : null
   const effectiveResolved = effectiveTarget
     ? applyEffectiveTargetToResolvedSession({
@@ -272,22 +270,38 @@ async function resolveAssistantSessionForMessageInput(input: {
   hostedDefaultTarget: AssistantModelTarget | null
   messageOverride: AssistantProviderConfigInput | null
   sessionInput: ResolveAssistantSessionInput
-}): Promise<ResolvedAssistantSession> {
+}): Promise<{
+  hostedDefaultSessionId: string | null
+  resolved: ResolvedAssistantSession
+}> {
   if (!input.messageOverride) {
-    return await resolveAssistantSession(input.sessionInput)
+    const resolved = await resolveAssistantSession(input.sessionInput)
+    return {
+      hostedDefaultSessionId: null,
+      resolved,
+    }
   }
 
   try {
-    return await resolveAssistantSession(
+    const resolved = await resolveAssistantSession(
       buildAssistantSessionLookupInputForMessageOverride(input),
     )
+    return {
+      hostedDefaultSessionId: input.hostedDefaultTarget
+        ? resolved.session.sessionId
+        : null,
+      resolved,
+    }
   } catch (error) {
     if (!isAssistantSessionNotFoundError(error)) {
       throw error
     }
   }
 
-  return await resolveAssistantSession(input.sessionInput)
+  return {
+    hostedDefaultSessionId: null,
+    resolved: await resolveAssistantSession(input.sessionInput),
+  }
 }
 
 function buildAssistantSessionLookupInputForMessageOverride(input: {

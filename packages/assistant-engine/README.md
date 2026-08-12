@@ -68,9 +68,11 @@ deterministic exception. It starts no formatter or provider turn and does not
 mutate the member's ordinary conversation when the notification is queued.
 Only after the hosted outbox reaches canonical `sent` does the hosted runtime
 import the exact reviewed assistant text into the exact ordinary direct session
-bound at queue time. If none existed, the intent remains unbound until the first
-canonical attended direct turn; another same-route detached session is never
-inferred as the owner. The import advances that session once and clears its
+returned by the queue-time hosted-default continuity lookup. Compatible model
+or reasoning changes preserve that binding. If no ordinary session existed,
+the intent remains unbound until the first canonical attended direct turn;
+another same-route detached session is never inferred as the owner. The import
+advances that session once and clears its
 stale native provider-resume aliases. The outbox intent journals an interrupted
 import, and nested hosted direct route plus accepted assistant-input authority
 repairs it before provider-resume selection even for text-only payloads.
