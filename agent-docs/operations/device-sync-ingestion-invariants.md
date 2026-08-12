@@ -199,10 +199,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    offset timestamps on opposite sides of UTC midnight reach the importer
    together. A provider-bearing date that produces no canonical observation
    retries only that date on the existing bounded ladder before it becomes
-   terminal. Explicit nonterminal historical-pull status holds the first date
-   pending; explicit `not_pulled` remains no obligation. Before coverage closes,
-   a delayed migration appends one segment through the current reconcile-window
-   boundary so the stable dedupe identity cannot freeze a middle gap.
+   terminal. Historical-pull status is re-read at the first date and before
+   coverage: `success` permits terminal empty history, explicit `not_pulled`
+   remains no obligation, nonterminal state waits, and explicit failure remains
+   uncovered. Unavailable, malformed, or unmatched introspection can close only
+   after a canonical historical observation. Before coverage closes, the
+   migration recomputes the live reconcile-window boundary and appends the
+   uncovered segment; delayed continuations repeat that same derivation, so
+   stable dedupe cannot freeze a middle gap.
    Blood pressure and notes retain their existing extended policies. An
    explicit timeseries-window override governs both classes.
 

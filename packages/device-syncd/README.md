@@ -109,10 +109,13 @@ connection metadata; they do not add another queue or lifecycle. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. Sparse aggregates fetch one complete provider calendar date at a
 time; a provider-bearing date with no canonical observation retries only that
-date on the existing bounded ladder. Explicit nonterminal historical-pull state
-holds the first date pending, and delayed work catches up once to the current
-reconcile boundary before coverage closes. An explicit timeseries backfill
-override still governs every timeseries resource.
+date on the existing bounded ladder. Historical-pull status is re-read before
+coverage: success permits terminal empty history, explicit `not_pulled` is no
+obligation, nonterminal state waits, explicit failure remains uncovered, and
+unavailable status requires canonical history evidence. Delayed work derives
+the live reconcile boundary after every completed segment and continues until
+no middle gap remains. An explicit timeseries backfill override still governs
+every timeseries resource.
 
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero

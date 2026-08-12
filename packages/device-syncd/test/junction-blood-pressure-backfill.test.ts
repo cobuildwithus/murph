@@ -333,6 +333,10 @@ function createProvider(input: {
     active: boolean;
     status: number;
   };
+  historicalPullRequestFailure?: {
+    active: boolean;
+    status: number;
+  };
   providerListRequests?: { count: number };
   providerState?: MutableProviderState;
   historicalPullState?: MutableHistoricalPullState;
@@ -405,6 +409,12 @@ function createProvider(input: {
         return createJsonResponse({ data: [] });
       }
       if (url.pathname === "/v2/introspect/historical_pull") {
+        if (input.historicalPullRequestFailure?.active === true) {
+          return createJsonResponse(
+            { error: "temporary_historical_pull_failure" },
+            input.historicalPullRequestFailure.status,
+          );
+        }
         const state = input.historicalPullState;
         return createJsonResponse(state
           ? {
@@ -520,6 +530,7 @@ async function executeImmediateBloodPressureContinuations(input: {
 }): Promise<{
   executionCount: number;
   result: ProviderJobResult;
+  results: ProviderJobResult[];
 }> {
   return executeImmediateResourceContinuations({
     ...input,
@@ -536,20 +547,23 @@ async function executeImmediateResourceContinuations(input: {
 }): Promise<{
   executionCount: number;
   result: ProviderJobResult;
+  results: ProviderJobResult[];
 }> {
   const executor = requireValue(input.provider.jobExecutor);
   let currentJob = input.job;
   let executionCount = 0;
   let nextIndex = input.startingIndex ?? 10_000;
+  const results: ProviderJobResult[] = [];
 
   while (executionCount < 400) {
     const result = await executor.executeJob(input.context, currentJob);
+    results.push(result);
     executionCount += 1;
     const continuation = result.scheduledJobs?.find((job) =>
       job.kind === "resource" && job.payload?.resource === input.resource
     );
     if (!continuation || continuation.availableAt) {
-      return { executionCount, result };
+      return { executionCount, result, results };
     }
     currentJob = toJobRecord(continuation, nextIndex);
     nextIndex += 1;
@@ -1090,7 +1104,7 @@ test("a sparse daily aggregate retries a provider-bearing day with no canonical 
   );
   assert.equal(delayedRetry.availableAt, "2026-06-11T12:15:00.000Z");
   assert.equal(delayedRetry.payload?.windowStart, "2026-06-09T00:00:00.000Z");
-  assert.equal(delayedRetry.payload?.historicalPullReady, true);
+  assert.equal(delayedRetry.payload?.historicalPullReady, undefined);
 
   timeseriesRecords[0] = {
     ...timeseriesRecords[0],
@@ -1277,6 +1291,105 @@ test("successful upstream pull with no sparse rows completes after one scan", as
   );
 });
 
+test("unavailable upstream status cannot certify zero-row sparse history", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const historicalPullRequestFailure = { active: true, status: 503 };
+  const provider = createProvider({
+    historicalPullRequestFailure,
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    summaryBackfillDays: 2,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const first = await executeImmediateResourceContinuations({
+    context: createJobContext(),
+    job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+    provider,
+    resource: "caffeine",
+  });
+  const retry = findResourceJob(first.result.scheduledJobs ?? [], "caffeine");
+
+  assert.equal(first.executionCount, 2);
+  assert.equal(requests.length, 2);
+  assert.equal(
+    first.result.metadataPatch?.junctionSparseDailyTimeseriesHistoryBackfillCoverage,
+    undefined,
+  );
+  assert.equal(retry.availableAt, "2026-06-12T12:00:00.000Z");
+  assert.equal(retry.payload?.historicalPullReady, undefined);
+
+  historicalPullRequestFailure.active = false;
+  const second = await executeImmediateResourceContinuations({
+    context: createJobContext({ now: "2026-06-12T12:00:00.000Z" }),
+    job: toJobRecord(retry, 2),
+    provider,
+    resource: "caffeine",
+  });
+
+  assert.equal(requests.length, 4);
+  assert.equal(
+    second.result.metadataPatch?.junctionSparseDailyTimeseriesHistoryBackfillCoverage,
+    undefined,
+  );
+  assert.equal(
+    findResourceJob(second.result.scheduledJobs ?? [], "caffeine").availableAt,
+    "2026-06-13T12:00:00.000Z",
+  );
+});
+
+test("explicit historical-pull failure stays uncovered without timeseries egress", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    historicalPullState: { resource: "caffeine", status: "failure" },
+    providerState: {
+      resourceAvailability: { caffeine: true },
+      status: "connected",
+    },
+    requests,
+    summaryBackfillDays: 2,
+    timeseriesResources: ["caffeine"],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "omron",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { caffeine: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+  );
+
+  assert.equal(requests.length, 0);
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assert.equal(
+    result.metadataPatch?.junctionSparseDailyTimeseriesHistoryBackfillCoverage,
+    undefined,
+  );
+  assert.equal(
+    createScheduledJobs(createStoredAccount({ sources }), "2026-06-11T13:00:00.000Z")
+      .jobs.some((job) => job.payload?.resource === "caffeine"),
+    true,
+  );
+});
+
 test("explicitly not-pulled sparse history closes without provider egress", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
@@ -1314,6 +1427,7 @@ test("explicitly not-pulled sparse history closes without provider egress", asyn
 test("a persistently malformed sparse day exhausts only its bounded day retry", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
+    historicalPullState: { resource: "caffeine", status: "success" },
     providerState: {
       resourceAvailability: { caffeine: true },
       status: "connected",
@@ -1368,6 +1482,7 @@ test("a queued sparse migration keeps its frozen payload and catches up to curre
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
+    historicalPullState: { resource: "caffeine", status: "success" },
     providerState: {
       resourceAvailability: { caffeine: true },
       status: "connected",
@@ -1474,17 +1589,27 @@ test("a queued sparse migration keeps its frozen payload and catches up to curre
     assert.equal(catchUp.payload?.windowEnd, "2026-07-04T00:00:00.000Z");
 
     const completed = await executeImmediateResourceContinuations({
-      context,
+      context: createJobContext({
+        account: createAccount({ now: "2026-07-22T12:00:00.000Z", sources }),
+        now: "2026-07-22T12:00:00.000Z",
+      }),
       job: toJobRecord(catchUp, 3),
       provider,
       resource: "caffeine",
       startingIndex: 4,
     });
 
-    assert.equal(completed.executionCount, 23);
-    assert.equal(requests.length, 25);
+    assert.equal(completed.executionCount, 34);
+    assert.equal(requests.length, 36);
     assert.equal(requests[0]?.start, "2026-06-09");
-    assert.equal(requests.at(-1)?.end, "2026-07-03");
+    assert.equal(requests.at(-1)?.end, "2026-07-14");
+    assert.equal(
+      completed.results.slice(0, -1).some((result) =>
+        result.metadataPatch
+          ?.junctionSparseDailyTimeseriesHistoryBackfillCoverage !== undefined
+      ),
+      false,
+    );
     assert.equal(
       completed.result.metadataPatch?.junctionSparseDailyTimeseriesHistoryBackfillCoverage,
       "v1|omron:16",
