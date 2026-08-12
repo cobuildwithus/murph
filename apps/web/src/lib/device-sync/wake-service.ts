@@ -84,6 +84,15 @@ import {
 
 const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
 const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
+const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
+  "junctionWeightHistoryBackfillCoverage";
+const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_PREFIX = "v1|";
+const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_SOURCE_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
+const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_BLOCKED_SOURCES = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
@@ -686,6 +695,20 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
             lastSeenAt: sourceStartedAt,
             tx,
           });
+          const connection = await input.store.getConnectionForUser(
+            input.userId,
+            input.connectionId,
+            tx,
+          );
+          if (!connection) {
+            connectionChangedDuringDisconnectError();
+          }
+          await resetHostedJunctionWeightHistoryCoverageForSource({
+            connection,
+            sourceProviderSlug,
+            store: input.store,
+            tx,
+          });
           return { complete: true as const, source: preparedSource };
         },
       );
@@ -746,6 +769,12 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
+    await resetHostedJunctionWeightHistoryCoverageForSource({
+      connection,
+      sourceProviderSlug,
+      store: input.store,
+      tx,
+    });
     return {
       connectionId: input.connectionId,
       lastSeenAt: preparedSource.lastSeenAt,
@@ -753,6 +782,73 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       sourceProviderSlug,
     };
   });
+}
+
+async function resetHostedJunctionWeightHistoryCoverageForSource(input: {
+  connection: PublicDeviceSyncAccount;
+  sourceProviderSlug: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  tx: HostedPrismaTransactionClient;
+}): Promise<void> {
+  const reset = removeCurrentJunctionWeightHistoryCoverage({
+    existingValue:
+      input.connection.metadata[JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY],
+    providerSlug: input.sourceProviderSlug,
+  });
+  if (!reset.changed) {
+    return;
+  }
+
+  const metadata = { ...input.connection.metadata };
+  if (reset.value === null) {
+    delete metadata[JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY];
+  } else {
+    metadata[JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY] = reset.value;
+  }
+  await input.store.syncDurableConnectionState({
+    ...input.connection,
+    metadata,
+  }, input.tx);
+}
+
+function removeCurrentJunctionWeightHistoryCoverage(input: {
+  existingValue: unknown;
+  providerSlug: string;
+}): { changed: boolean; value: string | null } {
+  if (
+    typeof input.existingValue !== "string"
+    || !input.existingValue.startsWith(JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_PREFIX)
+  ) {
+    return { changed: false, value: null };
+  }
+
+  const encodedProviderSlugs = input.existingValue.slice(
+    JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_PREFIX.length,
+  );
+  const providerSlugs = encodedProviderSlugs.split(",");
+  const canonicalProviderSlugs = [...new Set(providerSlugs)]
+    .sort((left, right) => left.localeCompare(right));
+  if (
+    providerSlugs.length === 0
+    || canonicalProviderSlugs.join(",") !== encodedProviderSlugs
+    || providerSlugs.some((providerSlug) =>
+      !JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_SOURCE_PATTERN.test(providerSlug)
+      || JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_BLOCKED_SOURCES.has(providerSlug)
+    )
+    || !providerSlugs.includes(input.providerSlug)
+  ) {
+    return { changed: false, value: input.existingValue };
+  }
+
+  const remainingProviderSlugs = providerSlugs.filter(
+    (providerSlug) => providerSlug !== input.providerSlug,
+  );
+  return {
+    changed: true,
+    value: remainingProviderSlugs.length > 0
+      ? `${JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_PREFIX}${remainingProviderSlugs.join(",")}`
+      : null,
+  };
 }
 
 /**

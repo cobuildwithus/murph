@@ -11,6 +11,10 @@ import {
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 } from "@murphai/importers/device-providers/junction-resources";
 import {
+  normalizeJunctionSnapshot,
+  type JunctionSnapshotInput,
+} from "@murphai/importers/device-providers/junction";
+import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
@@ -737,6 +741,187 @@ test("Junction dense opt-in resource jobs import only complete closed UTC days",
     [["2026-04-22", "2026-04-22"], ["2026-04-23", "2026-04-23"]],
   );
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
+});
+
+test("Junction daily opt-ins preserve floating days through fetch and import off UTC", async () => {
+  const originalTimeZone = process.env.TZ;
+  process.env.TZ = "America/Los_Angeles";
+
+  try {
+    assert.equal(
+      new Date("2026-04-22T18:30:00").toISOString(),
+      "2026-04-23T01:30:00.000Z",
+    );
+    const windows = {
+      "2026-04-22": "2026-04-23",
+      "2026-04-23": "2026-04-24",
+    } as const;
+    const providerRows = {
+      steps: [
+        { day: "2026-04-22", unit: "count", value: 10 },
+        { timestamp: "2026-04-22T18:30:00", unit: "count", value: 20 },
+        { timestamp: "2026-04-22T22:00:00Z", unit: "count", value: 30 },
+        { timestamp: "2026-04-22T23:30:00-02:00", unit: "count", value: 40 },
+        { day: "2026-04-23", unit: "count", value: 50 },
+        { timestamp: "2026-04-23T18:30:00", unit: "count", value: 60 },
+        { timestamp: "2026-04-23T22:00:00Z", unit: "count", value: 70 },
+      ],
+      distance: [
+        { day: "2026-04-22", unit: "m", value: 1_000 },
+        { timestamp: "2026-04-22T18:30:00", unit: "m", value: 2_000 },
+        { timestamp: "2026-04-22T22:00:00Z", unit: "m", value: 3_000 },
+        { timestamp: "2026-04-22T23:30:00-02:00", unit: "m", value: 4_000 },
+        { day: "2026-04-23", unit: "m", value: 5_000 },
+        { timestamp: "2026-04-23T18:30:00", unit: "m", value: 6_000 },
+        { timestamp: "2026-04-23T22:00:00Z", unit: "m", value: 7_000 },
+      ],
+    } as const;
+
+    const runInOrder = async (days: readonly (keyof typeof windows)[]) => {
+      const requests: string[] = [];
+      const normalizedEvents: NonNullable<ReturnType<typeof normalizeJunctionSnapshot>["events"]> = [];
+      const provider = createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: [],
+        timeseriesResources: ["steps", "distance"],
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+          requests.push(url);
+          if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [{
+                id: "provider-oura-1",
+                slug: "oura",
+                name: "Oura",
+                status: "connected",
+                resource_availability: { distance: true, steps: true },
+              }],
+            });
+          }
+
+          const resource = new URL(url).pathname.match(
+            /^\/v2\/timeseries\/junction-user-1\/(steps|distance)\/grouped$/u,
+          )?.[1] as keyof typeof providerRows | undefined;
+          if (resource) {
+            return createJsonResponse({
+              groups: {
+                oura: [{
+                  data: providerRows[resource],
+                  source: { provider: "oura", type: "ring" },
+                }],
+              },
+            });
+          }
+
+          throw new Error(`Unexpected request: ${url}`);
+        },
+      });
+      const context = createJunctionJobContext({
+        now: "2026-04-24T12:00:00.000Z",
+        importSnapshot: async (snapshot) => {
+          const normalized = normalizeJunctionSnapshot(snapshot as JunctionSnapshotInput);
+          normalizedEvents.push(...(normalized.events ?? []).filter((event) =>
+            event.fields?.metric === "daily-steps"
+            || event.fields?.metric === "distance-km"
+          ));
+          return { imported: true };
+        },
+      });
+
+      for (const day of days) {
+        for (const resource of ["steps", "distance"] as const) {
+          await executeJunctionJob(
+            provider,
+            context,
+            createJob("resource", {
+              resource,
+              resourceCategory: "timeseries",
+              windowStart: `${day}T00:00:00.000Z`,
+              windowEnd: `${windows[day]}T00:00:00.000Z`,
+            }),
+          );
+        }
+      }
+
+      assert.deepEqual(
+        requests
+          .filter((url) => url.includes("/v2/timeseries/"))
+          .map((url) => {
+            const parsed = new URL(url);
+            return [
+              parsed.pathname.split("/").at(-2),
+              parsed.searchParams.get("start_date"),
+              parsed.searchParams.get("end_date"),
+            ];
+          }),
+        days.flatMap((day) => [
+          ["steps", day, day],
+          ["distance", day, day],
+        ]),
+      );
+      return normalizedEvents;
+    };
+
+    const forward = await runInOrder(["2026-04-22", "2026-04-23"]);
+    const reverse = await runInOrder(["2026-04-23", "2026-04-22"]);
+    const eventShape = (event: (typeof forward)[number]) => ({
+      dayKey: event.dayKey,
+      externalRef: event.externalRef,
+      metric: event.fields?.metric,
+      occurredAt: event.occurredAt,
+      value: event.fields?.value,
+    });
+    const sortEvents = (events: typeof forward) => events
+      .map(eventShape)
+      .sort((left, right) => JSON.stringify(left.externalRef).localeCompare(JSON.stringify(right.externalRef)));
+    const forwardEvents = sortEvents(forward);
+
+    assert.deepEqual(forwardEvents, sortEvents(reverse));
+    assert.equal(
+      new Set(forwardEvents.map((event) => JSON.stringify(event.externalRef))).size,
+      4,
+    );
+    assert.deepEqual(
+      forwardEvents
+        .map(({ dayKey, metric, occurredAt, value }) => ({ dayKey, metric, occurredAt, value }))
+        .sort((left, right) => `${left.dayKey}:${left.metric}`.localeCompare(`${right.dayKey}:${right.metric}`)),
+      [
+        {
+          dayKey: "2026-04-22",
+          metric: "daily-steps",
+          occurredAt: "2026-04-22T23:59:59.999Z",
+          value: 60,
+        },
+        {
+          dayKey: "2026-04-22",
+          metric: "distance-km",
+          occurredAt: "2026-04-22T23:59:59.999Z",
+          value: 6,
+        },
+        {
+          dayKey: "2026-04-23",
+          metric: "daily-steps",
+          occurredAt: "2026-04-23T23:59:59.999Z",
+          value: 220,
+        },
+        {
+          dayKey: "2026-04-23",
+          metric: "distance-km",
+          occurredAt: "2026-04-23T23:59:59.999Z",
+          value: 22,
+        },
+      ],
+    );
+  } finally {
+    if (originalTimeZone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTimeZone;
+    }
+  }
 });
 
 function buildExpectedJunctionDedupeKey(

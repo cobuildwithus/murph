@@ -3096,6 +3096,77 @@ describe("hosted device-sync wakes", () => {
     }));
   });
 
+  it("reopens only the reconnected source's weight history after provider cleanup", async () => {
+    let currentConnection = buildHostedConnection({
+      displayName: "Junction",
+      externalAccountId: "junction-user-established",
+      metadata: {
+        junctionWeightHistoryBackfillCoverage: "v1|renpho",
+      },
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+    });
+    const storedConnection = buildProviderConfigStoredConnection(currentConnection);
+    let currentSource = buildHostedConnectionSource(currentConnection.id, "withings");
+    const revokeSourceAccess = vi.fn(async () => {
+      currentConnection = {
+        ...currentConnection,
+        metadata: {
+          ...currentConnection.metadata,
+          junctionWeightHistoryBackfillCoverage: "v1|renpho,withings",
+        },
+      };
+    });
+    mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
+    mocks.listConnectionsForUser.mockImplementation(async () => [currentConnection]);
+    mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.listConnectionSources.mockImplementation(async () => [currentSource]);
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      currentSource = {
+        ...currentSource,
+        lastErrorCode: input.lastErrorCode,
+        lastErrorMessage: input.lastErrorMessage,
+        lastSeenAt: input.lastSeenAt,
+        status: input.status,
+      };
+      return currentSource;
+    });
+    mocks.syncDurableConnectionState.mockImplementation(async (connection) => {
+      currentConnection = {
+        ...connection,
+        updatedAt: "2026-03-26T12:00:01.000Z",
+      };
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/connect-sources/withings/start", {
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.prepareConnectionStart("user-123", {
+      connectSourceId: "withings",
+      connectTarget: "withings",
+      label: "Withings",
+      provider: "junction",
+      sourceProviderSlug: "withings",
+    })).resolves.toBeUndefined();
+
+    expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "withings");
+    expect(currentConnection.metadata).toEqual({
+      junctionWeightHistoryBackfillCoverage: "v1|renpho",
+    });
+    expect(mocks.syncDurableConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          junctionWeightHistoryBackfillCoverage: "v1|renpho",
+        },
+      }),
+      mocks.prismaTx,
+    );
+  });
+
   it("does not issue a new Link while exact-source provider cleanup is in progress", async () => {
     const connection = buildHostedConnection({
       displayName: "Junction",
