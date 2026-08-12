@@ -9,6 +9,6 @@
     "summary": "Exercise routines, training plans, schedules, and other structured answers now use the available card or movement media instead of a long plain-text message.",
     "details": "Telegram uses Rich Messages when a suitable card can carry the complete answer. Messages uses its available card or ordered movement media. Murph sends concise text only when the current channel has no suitable presentation.",
     "relevanceTags": ["assistant", "telegram", "imessage", "workouts", "cards"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [1727]
   }
 }
