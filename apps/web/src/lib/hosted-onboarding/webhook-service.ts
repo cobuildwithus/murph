@@ -136,7 +136,11 @@ import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
 import {
+  projectHostedMemberRoutingState,
+  readHostedMemberRoutingRecord,
   resolveHostedMemberCoreByTelegramUserId,
+  type HostedMemberRoutingRecord,
+  type HostedMemberRoutingStateSnapshot,
 } from "./hosted-member-routing-store";
 import {
   isHostedMemberSuspended,
@@ -558,6 +562,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 ? {
                     failedPendingGroupSetupPreparationClaim:
                       preparation.failedPendingGroupSetupPreparationClaim,
+                  }
+                : {}),
+              ...("preparedDirectMailboxPayloadRoot" in preparation
+                ? {
+                    preparedDirectMailboxPayloadRoot:
+                      preparation.preparedDirectMailboxPayloadRoot ?? null,
                   }
                 : {}),
               ...(preparation.preparedPendingGroupSetupClaim
@@ -1926,6 +1936,13 @@ async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
 interface HostedThreadRoutingCryptoPreparation {
   failedPendingGroupSetupPreparationClaim?: PreparedHostedPendingGroupSetupClaim;
   pendingGroupSetupPreparationFailure?: unknown;
+  preparedDirectMailboxPayloadRoot?: {
+    activeControlRootKeyId: string;
+    memberId: string;
+    routingRecord: HostedMemberRoutingRecord | null;
+    routingState: HostedMemberRoutingStateSnapshot | null;
+    rootKeyId: string;
+  } | null;
   threadContainerPreparationFailure?: unknown;
   preparedPendingGroupSetupClaim?: PreparedHostedPendingGroupSetupClaim;
   preparedSenderMemberId?: string;
@@ -1933,9 +1950,19 @@ interface HostedThreadRoutingCryptoPreparation {
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
 }
 
+class RequiredHostedWebhookPreparationError extends Error {
+  readonly preparationError: unknown;
+
+  constructor(preparationError: unknown) {
+    super("Required hosted webhook preparation failed.");
+    this.name = "RequiredHostedWebhookPreparationError";
+    this.preparationError = preparationError;
+  }
+}
+
 async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
   prepareDeliveryRoute: () => Promise<PreparedHostedThreadContainerDeliveryRoute>;
-  warmMailboxRoot: () => Promise<void>;
+  warmMailboxRoot: () => Promise<unknown>;
 }): Promise<PreparedHostedThreadContainerDeliveryRoute> {
   let firstError: unknown;
   let hasError = false;
@@ -2082,12 +2109,20 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
       "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
     );
   }
-  await warmHostedLinqMailboxPayloadRoot({
-    event: input.event,
-    prisma: input.prisma,
-    threadRoute: null,
-  });
-  return {};
+  try {
+    return {
+      preparedDirectMailboxPayloadRoot:
+        await prepareHostedLinqDirectMailboxPayloadRoot({
+          event: input.event,
+          prisma: input.prisma,
+        }),
+    };
+  } catch (error) {
+    // A direct append cannot safely enter the transaction after its exact
+    // member/root package failed to prepare: doing so would either repeat KMS
+    // under locks or encrypt against an unbound winner.
+    throw new RequiredHostedWebhookPreparationError(error);
+  }
 }
 
 async function prepareHostedTelegramThreadRoutingCrypto(input: {
@@ -2277,32 +2312,141 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
  * without decrypting private identity or routing fields. Both remain hints:
  * the planner repeats every authority check inside the transaction.
  * `laneSeq` is authenticated metadata allocated inside the transaction, so
- * only the root is warmed; the payload is still encrypted in place.
+ * only required roots are warmed; the payload is still encrypted in place.
  */
 export async function warmHostedLinqMailboxPayloadRoot(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   prisma: PrismaClient | Prisma.TransactionClient;
   threadRoute: Pick<HostedThreadRouteSnapshot, "containerMemberId"> | null;
-}): Promise<void> {
+}): Promise<{
+  memberId: string;
+  rootKeyId: string;
+} | null> {
   const memberId = await resolveHostedLinqMailboxPayloadRootPrewarmMemberId({
     event: input.event,
     prisma: input.prisma,
     threadRoute: input.threadRoute,
   });
   if (!memberId) {
-    return;
+    return null;
   }
 
+  return {
+    memberId,
+    rootKeyId: await warmHostedDomainRootForWeb({
+      domain: getHostedCryptoDomainForLane("mailbox-payload"),
+      memberId,
+      prisma: input.prisma,
+    }),
+  };
+}
+
+async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  prisma: PrismaClient;
+}): Promise<{
+  activeControlRootKeyId: string;
+  memberId: string;
+  routingRecord: HostedMemberRoutingRecord | null;
+  routingState: HostedMemberRoutingStateSnapshot | null;
+  rootKeyId: string;
+} | null> {
+  const memberId = await resolveHostedLinqMailboxPayloadRootPrewarmMemberId({
+    event: input.event,
+    prisma: input.prisma,
+    threadRoute: null,
+  });
+  if (!memberId) {
+    return null;
+  }
+
+  const routingRecord = await readHostedMemberRoutingRecord({
+    memberId,
+    prisma: input.prisma,
+  });
+
+  // The direct planner encrypts the mailbox payload under ingress and may
+  // rewrite the member's private Linq routing under control. Project the exact
+  // persisted routing row here as well: this warms every historical control
+  // root it references and keeps the decrypt itself outside the transaction.
+  // Warm the active control root before projecting historical ciphertext so a
+  // route already on the active generation cannot race a duplicate unwrap.
+  let firstPreparationError: unknown;
+  let hasPreparationError = false;
+  const preserveFirstPreparationError = async <T>(
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!hasPreparationError) {
+        firstPreparationError = error;
+        hasPreparationError = true;
+      }
+      throw error;
+    }
+  };
+  const [ingressRootResult, controlRoutingResult] = await Promise.allSettled([
+    preserveFirstPreparationError(() => warmHostedDomainRootForWeb({
+      domain: getHostedCryptoDomainForLane("mailbox-payload"),
+      memberId,
+      prisma: input.prisma,
+    })),
+    preserveFirstPreparationError(async () => {
+      const activeControlRootKeyId = await warmHostedDomainRootForWeb({
+        domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
+        memberId,
+        prisma: input.prisma,
+      });
+      return {
+        activeControlRootKeyId,
+        routingState: routingRecord
+          ? await projectHostedMemberRoutingState(
+              routingRecord,
+              input.prisma,
+              true,
+            )
+          : null,
+      };
+    }),
+  ]);
+  if (hasPreparationError) {
+    throw firstPreparationError;
+  }
+  if (ingressRootResult.status === "rejected") {
+    throw ingressRootResult.reason;
+  }
+  if (controlRoutingResult.status === "rejected") {
+    throw controlRoutingResult.reason;
+  }
+  return {
+    activeControlRootKeyId: controlRoutingResult.value.activeControlRootKeyId,
+    memberId,
+    routingRecord,
+    routingState: controlRoutingResult.value.routingState,
+    rootKeyId: ingressRootResult.value,
+  };
+}
+
+async function warmHostedDomainRootForWeb(input: {
+  domain: ReturnType<typeof getHostedCryptoDomainForLane>;
+  memberId: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
+}): Promise<string> {
   const root = await unwrapHostedDomainRootForWeb({
-    domain: getHostedCryptoDomainForLane("mailbox-payload"),
+    domain: input.domain,
     prisma: input.prisma,
     retainFailureInScopedCache: true,
-    userId: memberId,
+    userId: input.memberId,
   });
   // The scoped cache hands every caller its own copy and expects that copy to
   // be wiped; the cached master is zeroized separately when the scope closes.
   // Warming needs the unwrap, not the plaintext, so wipe it immediately.
-  root.rootKey.fill(0);
+  try {
+    return root.envelope.rootKeyId;
+  } finally {
+    root.rootKey.fill(0);
+  }
 }
 
 export async function runHostedOnboardingWebhookTransaction<TResult>(
@@ -2312,7 +2456,7 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
    * Runs inside the unwrap cache but before the transaction opens, so a root
    * this planner is certain to need is unwrapped without a connection held.
    */
-  warmUnwrapCache?: () => Promise<void>,
+  warmUnwrapCache?: () => Promise<unknown>,
 ): Promise<TResult> {
   const operations: PrismaOperationTiming[] = [];
   let transactionMs = 0;
@@ -2325,6 +2469,9 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
           try {
             await warmUnwrapCache();
           } catch (error) {
+            if (error instanceof RequiredHostedWebhookPreparationError) {
+              throw error.preparationError;
+            }
             // A failed preflight must not suppress branches that never need
             // this root. If the planner does request it, the scoped cache
             // returns the retained rejection instead of repeating KMS while a

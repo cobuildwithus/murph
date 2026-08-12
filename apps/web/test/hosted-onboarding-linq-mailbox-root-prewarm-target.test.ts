@@ -93,14 +93,28 @@ function buildPrisma(input: {
   pendingMemberIds?: string[];
   phoneMemberIds?: string[];
 } = {}) {
+  const buildMemberCore = (memberId: string) => ({
+    billingStatus: "active",
+    createdAt: new Date("2026-07-01T00:00:00.000Z"),
+    id: memberId,
+    suspendedAt: null,
+    updatedAt: new Date("2026-07-01T00:00:00.000Z"),
+  });
   const hostedMemberIdentity = {
     findMany: vi.fn(async () =>
-      (input.phoneMemberIds ?? []).map((memberId) => ({ memberId }))
+      (input.phoneMemberIds ?? []).map((memberId) => ({
+        member: buildMemberCore(memberId),
+        memberId,
+      }))
     ),
   };
   const hostedMemberEmailAuthorization = {
     findMany: vi.fn(async () =>
-      (input.emailMemberIds ?? []).map((memberId) => ({ memberId }))
+      (input.emailMemberIds ?? []).map((memberId) => ({
+        member: buildMemberCore(memberId),
+        memberId,
+        verifiedEmailVerifiedAt: new Date("2026-07-01T00:00:00.000Z"),
+      }))
     ),
   };
   const hostedMemberRouting = {
@@ -108,7 +122,10 @@ function buildPrisma(input: {
       const memberIds = "linqChatLookupKey" in where
         ? input.homeMemberIds ?? []
         : input.pendingMemberIds ?? [];
-      return memberIds.map((memberId) => ({ memberId }));
+      return memberIds.map((memberId) => ({
+        member: buildMemberCore(memberId),
+        memberId,
+      }));
     }),
   };
 
@@ -141,7 +158,11 @@ describe("hosted Linq mailbox-root prewarm target", () => {
       select: {
         member: {
           select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
             suspendedAt: true,
+            updatedAt: true,
           },
         },
         memberId: true,
@@ -156,6 +177,15 @@ describe("hosted Linq mailbox-root prewarm target", () => {
     });
     expect(prisma.hostedMemberRouting.findMany).toHaveBeenCalledWith({
       select: {
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
         memberId: true,
       },
       where: {
@@ -190,6 +220,15 @@ describe("hosted Linq mailbox-root prewarm target", () => {
 
     expect(prisma.hostedMemberRouting.findMany).toHaveBeenCalledWith({
       select: {
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
         memberId: true,
       },
       where: {
@@ -258,10 +297,15 @@ describe("hosted Linq mailbox-root prewarm target", () => {
       select: {
         member: {
           select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
             suspendedAt: true,
+            updatedAt: true,
           },
         },
         memberId: true,
+        verifiedEmailVerifiedAt: true,
       },
       where: {
         verifiedEmailLookupKey: {

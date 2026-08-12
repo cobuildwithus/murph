@@ -53,6 +53,32 @@ export interface HostedMemberIdentityLookup {
   matchedBy: HostedMemberIdentityLookupMatch;
 }
 
+const hostedMemberIdentityCoreLookupSelect =
+  Prisma.validator<Prisma.HostedMemberIdentitySelect>()({
+    memberId: true,
+    member: {
+      select: {
+        billingStatus: true,
+        createdAt: true,
+        id: true,
+        suspendedAt: true,
+        updatedAt: true,
+      },
+    },
+  });
+
+export interface HostedMemberIdentityCoreLookup {
+  core: Prisma.HostedMemberIdentityGetPayload<{
+    select: typeof hostedMemberIdentityCoreLookupSelect;
+  }>["member"];
+  matchedBy: "phoneNumber";
+}
+
+type HostedMemberIdentityCoreLookupRecord =
+  Prisma.HostedMemberIdentityGetPayload<{
+    select: typeof hostedMemberIdentityCoreLookupSelect;
+  }>;
+
 type HostedMemberIdentityRecordWithMember = HostedMemberIdentity & {
   member: HostedMember;
 };
@@ -125,14 +151,36 @@ export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
     : null;
 }
 
-export async function lookupHostedMemberIdentityByPhoneNumber(input: {
+type HostedMemberIdentityByPhoneNumberInput = {
   phoneNumber: string;
   prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberIdentityLookup | null> {
+};
+
+export async function lookupHostedMemberIdentityByPhoneNumber(
+  input: HostedMemberIdentityByPhoneNumberInput & { projection: "core" },
+): Promise<HostedMemberIdentityCoreLookup | null>;
+export async function lookupHostedMemberIdentityByPhoneNumber(
+  input: HostedMemberIdentityByPhoneNumberInput,
+): Promise<HostedMemberIdentityLookup | null>;
+export async function lookupHostedMemberIdentityByPhoneNumber(
+  input: HostedMemberIdentityByPhoneNumberInput & { projection?: "core" },
+): Promise<HostedMemberIdentityCoreLookup | HostedMemberIdentityLookup | null> {
   const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(input.phoneNumber);
 
   if (phoneLookupKeys.length === 0) {
     return null;
+  }
+
+  if (input.projection === "core") {
+    const records = await input.prisma.hostedMemberIdentity.findMany({
+      where: {
+        phoneLookupKey: {
+          in: phoneLookupKeys,
+        },
+      },
+      select: hostedMemberIdentityCoreLookupSelect,
+    });
+    return resolveHostedMemberIdentityCoreLookup(records, "phoneNumber");
   }
 
   const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
@@ -330,6 +378,36 @@ async function resolveHostedMemberIdentityLookup(
   }
 
   return projectHostedMemberIdentityLookup(identityRecord, matchedBy, prisma);
+}
+
+function resolveHostedMemberIdentityCoreLookup(
+  records: readonly HostedMemberIdentityCoreLookupRecord[],
+  matchedBy: "phoneNumber",
+): HostedMemberIdentityCoreLookup | null {
+  const coreByMemberId = new Map<string, HostedMemberIdentityCoreLookup["core"]>();
+  for (const record of records) {
+    coreByMemberId.set(record.memberId, record.member);
+  }
+  if (coreByMemberId.size === 0) {
+    return null;
+  }
+  if (coreByMemberId.size !== 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS",
+      details: {
+        matchCount: coreByMemberId.size,
+        matchedBy,
+      },
+      httpStatus: 500,
+      message:
+        "Hosted member identity lookup matched multiple accounts during blind-index rotation. Repair the duplicate binding before retrying.",
+      retryable: true,
+    });
+  }
+  return {
+    core: coreByMemberId.values().next().value!,
+    matchedBy,
+  };
 }
 
 async function buildHostedMemberIdentityCreateData(

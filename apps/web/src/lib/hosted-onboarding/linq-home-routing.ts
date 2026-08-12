@@ -313,6 +313,7 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   incomingRecipientPhone: string | null;
   memberAuthority?: HostedLinqHomeLineRouteBindingAuthority | null;
   memberId: string;
+  preparedRoutingState?: HostedMemberRoutingStateSnapshot | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
   // One member owns one home route. Serializing only that member keeps
@@ -353,12 +354,15 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
   incomingRecipientPhone: string | null;
   memberAuthority?: HostedLinqHomeLineRouteBindingAuthority | null;
   memberId: string;
+  preparedRoutingState?: HostedMemberRoutingStateSnapshot | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingDecision> {
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
+  const routing = input.preparedRoutingState === undefined
+    ? await readHostedMemberRoutingState({
+        memberId: input.memberId,
+        prisma: input.prisma,
+      })
+    : input.preparedRoutingState;
   const authority = readHostedLinqHomeLineAuthority(routing);
 
   if (!hostedLinqRouteBindingAuthorityMatchesCurrentRoute({

@@ -1,6 +1,7 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { unwrapHostedDomainRootForWeb } from "@/src/lib/hosted-crypto/domain-root-store";
 import type { HostedAiUsageGateDecision } from "@/src/lib/hosted-execution/usage-allowance";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -46,6 +47,7 @@ const mocks = vi.hoisted(() => {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
     finishHostedOnboardingTiming: vi.fn(),
+    enforceDirectMailboxPreparation: false,
     hostedOnboardingEnvironment: {
       contactPrivacyKeyring: {
         currentVersion: "v1",
@@ -155,7 +157,11 @@ const mocks = vi.hoisted(() => {
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
     resolveHostedFamilyInviteTokenForInbound: vi.fn(),
-    resolveHostedLinqMailboxPayloadRootPrewarmMemberId: vi.fn(async () => null),
+    resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
+      vi.fn<() => Promise<string | null>>(async () => null),
+    lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(async () =>
+      "root-control-active"
+    ),
     resolveHostedLinqTypingPrewarmMemberId:
       vi.fn(async (): Promise<string | null> => null),
   };
@@ -202,6 +208,16 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
   >();
   return {
     ...actual,
+    planHostedOnboardingLinqWebhook: vi.fn(async (input: Parameters<
+      typeof actual.planHostedOnboardingLinqWebhook
+    >[0]) => {
+      if (mocks.enforceDirectMailboxPreparation) {
+        return actual.planHostedOnboardingLinqWebhook(input);
+      }
+      const legacyInput = { ...input };
+      delete legacyInput.preparedDirectMailboxPayloadRoot;
+      return actual.planHostedOnboardingLinqWebhook(legacyInput);
+    }),
     planHostedLinqMessageEditedWebhook:
       mocks.planHostedLinqMessageEditedWebhook,
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
@@ -375,16 +391,43 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   hasHostedPrivyPhoneAuthConfig: vi.fn(() => false),
 }));
 
-vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
-  prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
-  prewarmPreparedHostedCryptoDomainRootForWeb: vi.fn(async () => undefined),
-  provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
-  provisionPreparedHostedCryptoDomainRootsTx: vi.fn(async () => undefined),
-  unwrapHostedDomainRootForWeb: vi.fn(async () => ({
-    envelope: { rootKeyId: "root-control-active" },
-    rootKey: new Uint8Array(32),
-  })),
-}));
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
+  const { getHostedDomainRootUnwrapCache } = await vi.importActual<
+    typeof import("@/src/lib/hosted-crypto/domain-root-unwrap-cache")
+  >("@/src/lib/hosted-crypto/domain-root-unwrap-cache");
+  return {
+    lockAndReadActiveHostedDomainRootKeyIdTx:
+      mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
+    prepareHostedCryptoDomainRootCandidates: vi.fn(async () => new Map()),
+    prewarmPreparedHostedCryptoDomainRootForWeb: vi.fn(async () => undefined),
+    provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
+    provisionPreparedHostedCryptoDomainRootsTx: vi.fn(async () => undefined),
+    unwrapHostedDomainRootForWeb: vi.fn(async (input: {
+      domain: "control" | "ingress";
+      userId: string;
+    }) => {
+      const root = {
+        envelope: {
+          domain: input.domain,
+          rootKeyId: "root-control-active",
+          userId: input.userId,
+        },
+        rootKey: new Uint8Array(32),
+      };
+      const pendingRoot = Promise.resolve(root as never);
+      const cache = getHostedDomainRootUnwrapCache();
+      cache?.set(`${input.userId}|${input.domain}|@active`, pendingRoot);
+      cache?.set(
+        `${input.userId}|${input.domain}|root-control-active`,
+        pendingRoot,
+      );
+      return {
+        envelope: root.envelope,
+        rootKey: Uint8Array.from(root.rootKey),
+      };
+    }),
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
   handleHostedStripeWebhook: vi.fn(),
@@ -480,6 +523,7 @@ type HostedMemberFixture = {
   findUnique?: (input: {
     where?: Record<string, unknown>;
     include?: Record<string, unknown>;
+    select?: Record<string, unknown>;
   }) => Promise<unknown>;
   updateMany?: MockedFunction;
 };
@@ -488,14 +532,17 @@ type HostedMemberIdentityFixture = {
   createMany?: MockedFunction;
   findFirst?: (input: {
     include?: Record<string, unknown>;
+    select?: Record<string, unknown>;
     where: Record<string, unknown>;
   }) => Promise<unknown>;
   findMany?: (input: {
     include?: Record<string, unknown>;
+    select?: Record<string, unknown>;
     where: Record<string, unknown>;
   }) => Promise<unknown[]>;
   findUnique?: (input: {
     include?: Record<string, unknown>;
+    select?: Record<string, unknown>;
     where: Record<string, unknown>;
   }) => Promise<unknown>;
   upsert?: (input: {
@@ -511,9 +558,9 @@ type HostedMemberEmailAuthorizationFixture = {
 
 type HostedMemberRoutingFixture = {
   createMany?: MockedFunction;
-  findFirst?: (input: { where: Record<string, unknown> }) => Promise<unknown>;
-  findMany?: (input: { where: Record<string, unknown> }) => Promise<unknown[]>;
-  findUnique?: (input: { where: Record<string, unknown> }) => Promise<unknown>;
+  findFirst?: (input: { select?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>;
+  findMany?: (input: { select?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown[]>;
+  findUnique?: (input: { select?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>;
   groupBy?: MockedFunction;
   updateMany?: (input: {
     data: Record<string, unknown>;
@@ -588,6 +635,15 @@ async function handleHostedOnboardingLinqWebhook(input: HostedOnboardingLinqWebh
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.enforceDirectMailboxPreparation = false;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockReset();
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      null,
+    );
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockReset();
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockResolvedValue(
+      "root-control-active",
+    );
     const actualReadHostedRuntimeAiAccessDecision =
       mocks.readHostedRuntimeAiAccessDecisionActual;
     if (!actualReadHostedRuntimeAiAccessDecision) {
@@ -2090,7 +2146,113 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      code: "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS",
+      identityMemberIds: ["member_phone_a", "member_phone_b"],
+      matchedBy: "phoneNumber",
+      name: "phone identities",
+      queryField: "phoneLookupKey",
+      routingMemberIds: [],
+      target: "identity",
+    },
+    {
+      code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
+      identityMemberIds: [],
+      matchedBy: "linqChatLookupKey",
+      name: "home-chat owners",
+      queryField: "linqChatLookupKey",
+      routingMemberIds: ["member_home_a", "member_home_b"],
+      target: "routing",
+    },
+  ] as const)(
+    "keeps rotating direct $name ambiguous without private-field crypto",
+    async ({
+      code,
+      identityMemberIds,
+      matchedBy,
+      queryField,
+      routingMemberIds,
+      target,
+    }) => {
+      const buildCore = (memberId: string) => ({
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-03-26T00:00:00.000Z"),
+        id: memberId,
+        suspendedAt: null,
+        updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+      });
+      const hostedMemberIdentity = {
+        findFirst: vi.fn(),
+        findMany: vi.fn().mockResolvedValue(
+          identityMemberIds.map((memberId) => ({
+            member: buildCore(memberId),
+            memberId,
+          })),
+        ),
+        findUnique: vi.fn(),
+      };
+      const hostedMemberRouting = {
+        findFirst: vi.fn(),
+        findMany: vi.fn().mockResolvedValue(
+          routingMemberIds.map((memberId) => ({
+            member: buildCore(memberId),
+            memberId,
+          })),
+        ),
+        findUnique: vi.fn(),
+        upsert: vi.fn(),
+      };
+      const prisma = asPrismaTransactionClient({
+        hostedMemberIdentity,
+        hostedMemberRouting,
+        hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      });
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          eventId: `evt_direct_${target}_ambiguous`,
+        }),
+        signature: null,
+        timestamp: null,
+      })).rejects.toMatchObject({
+        code,
+        details: {
+          matchCount: 2,
+          matchedBy,
+        },
+        retryable: true,
+      });
+
+      const findMany = target === "identity"
+        ? hostedMemberIdentity.findMany
+        : hostedMemberRouting.findMany;
+      expect(findMany).toHaveBeenCalledWith({
+        select: {
+          member: {
+            select: {
+              billingStatus: true,
+              createdAt: true,
+              id: true,
+              suspendedAt: true,
+              updatedAt: true,
+            },
+          },
+          memberId: true,
+        },
+        where: {
+          [queryField]: {
+            in: expect.any(Array),
+          },
+        },
+      });
+      expect(unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
+    },
+  );
 
   it("offers unbound Linq group chats from non-members setup without signup side effects", async () => {
     const prisma = asPrismaTransactionClient({
@@ -3502,6 +3664,20 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           suspendedAt: new Date("2026-03-26T12:00:00.000Z"),
         }),
       },
+      hostedMemberIdentity: {
+        findFirst: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([{
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            createdAt: new Date("2026-03-26T00:00:00.000Z"),
+            id: "member_123",
+            suspendedAt: new Date("2026-03-26T12:00:00.000Z"),
+            updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+          },
+          memberId: "member_123",
+        }]),
+        findUnique: vi.fn(),
+      },
     });
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -3831,6 +4007,354 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("re-prepares once when the direct mailbox ingress root changes under lock", async () => {
+    mocks.enforceDirectMailboxPreparation = true;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx
+      .mockResolvedValueOnce("root-control-active")
+      .mockResolvedValueOnce("root-ingress-stale")
+      .mockResolvedValueOnce("root-control-active")
+      .mockResolvedValueOnce("root-control-active");
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey(
+        "+15551234567",
+      ),
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-03-26T00:00:00.000Z"),
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+          updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    prisma.$transaction = vi.fn(async (
+      callback: (transaction: typeof prisma) => Promise<unknown>,
+    ) => callback(prisma));
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_direct_ingress_root_drift",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
+      .toHaveBeenCalledTimes(2);
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
+      .toHaveBeenCalledTimes(4);
+    expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
+      isFullHostedMemberRoutingRecordQuery(query)
+    )).toHaveLength(4);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      activeRootKeyIds: [
+        "root-control-stale",
+        "root-control-active",
+        "root-control-active",
+      ],
+      expectedAppendCount: 1,
+      expectedRootLockCount: 3,
+      label: "re-prepares once when the direct control root changes under lock",
+      succeeds: true,
+    },
+    {
+      activeRootKeyIds: [
+        "root-control-stale-1",
+        "root-control-stale-2",
+      ],
+      expectedAppendCount: 0,
+      expectedRootLockCount: 2,
+      label: "fails closed after repeated direct control-root drift",
+      succeeds: false,
+    },
+  ])("$label", async ({
+    activeRootKeyIds,
+    expectedAppendCount,
+    expectedRootLockCount,
+    succeeds,
+  }) => {
+    mocks.enforceDirectMailboxPreparation = true;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx
+      .mockResolvedValueOnce(activeRootKeyIds[0] ?? "root-control-stale")
+      .mockResolvedValueOnce(activeRootKeyIds[1] ?? "root-control-stale");
+    if (activeRootKeyIds[2]) {
+      mocks.lockAndReadActiveHostedDomainRootKeyIdTx
+        .mockResolvedValueOnce(activeRootKeyIds[2]);
+    }
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey(
+        "+15551234567",
+      ),
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-03-26T00:00:00.000Z"),
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+          updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    prisma.$transaction = vi.fn(async (
+      callback: (transaction: typeof prisma) => Promise<unknown>,
+    ) => callback(prisma));
+
+    const outcome = handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: succeeds
+          ? "evt_direct_control_root_retry"
+          : "evt_direct_control_root_drift",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+    if (succeeds) {
+      await expect(outcome).resolves.toMatchObject({
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+    } else {
+      await expect(outcome).rejects.toMatchObject({
+        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+        details: {
+          preparationTarget: "direct_linq_mailbox",
+          reason: "control-root",
+        },
+        retryable: true,
+      });
+    }
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
+      .toHaveBeenCalledTimes(expectedRootLockCount);
+    expect(mocks.appendHostedMailboxEnvelopeTx)
+      .toHaveBeenCalledTimes(expectedAppendCount);
+  });
+
+  it("re-prepares once when the direct routing ciphertext changes under its lock", async () => {
+    mocks.enforceDirectMailboxPreparation = true;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey(
+        "+15551234567",
+      ),
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const defaultFindUnique = hostedMemberRouting.findUnique.getMockImplementation();
+    if (!defaultFindUnique) {
+      throw new Error("Expected a stateful hosted member routing lookup.");
+    }
+    let fullRoutingRecordReadCount = 0;
+    hostedMemberRouting.findUnique.mockImplementation(async (query) => {
+      const record = await defaultFindUnique(query);
+      if (isFullHostedMemberRoutingRecordQuery(query)) {
+        fullRoutingRecordReadCount += 1;
+        if (fullRoutingRecordReadCount === 2 && record) {
+          return {
+            ...record,
+            pendingLinqChatIdEncrypted: "changed-under-lock",
+          };
+        }
+      }
+      return record;
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-03-26T00:00:00.000Z"),
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+          updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    prisma.$transaction = vi.fn(async (
+      callback: (transaction: typeof prisma) => Promise<unknown>,
+    ) => callback(prisma));
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_direct_routing_drift",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(fullRoutingRecordReadCount).toBe(4);
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
+      .toHaveBeenCalledTimes(3);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries once and fails closed when a thread route appears under the direct chat lock", async () => {
+    mocks.enforceDirectMailboxPreparation = true;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey(
+        "+15551234567",
+      ),
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const hostedThreadRoute = {
+      findFirst: vi.fn().mockResolvedValue({
+        containerMemberId: "member_thread_container_123",
+      }),
+      findMany: vi.fn().mockResolvedValue([]),
+    };
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-03-26T00:00:00.000Z"),
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+          updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+        }),
+      },
+      hostedMemberRouting,
+      hostedThreadRoute,
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    prisma.$transaction = vi.fn(async (
+      callback: (transaction: typeof prisma) => Promise<unknown>,
+    ) => callback(prisma));
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_direct_thread_route_drift",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      details: {
+        preparationTarget: "direct_linq_mailbox",
+        reason: "thread-route",
+      },
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
+      .toHaveBeenCalledTimes(2);
+    expect(hostedThreadRoute.findFirst).toHaveBeenCalledTimes(2);
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledTimes(2);
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("binds an active member's bare home-line recipient even when the line left the assignable pool", async () => {
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: null,
@@ -3962,6 +4486,76 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
+  });
+
+  it("retries once and fails closed when the prepared direct home-chat owner changes", async () => {
+    mocks.enforceDirectMailboxPreparation = true;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId
+      .mockResolvedValueOnce("member_123")
+      .mockResolvedValueOnce(null);
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_other",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone",
+        memberId: "member_other",
+        value: "+15550000000",
+      }),
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      memberId: "member_other",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildHostedLinqLineFixture({
+        phoneNumber: "+15550000000",
+      }),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    prisma.$transaction = vi.fn(async (
+      callback: (transaction: typeof prisma) => Promise<unknown>,
+    ) => callback(prisma));
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_prepared_home_chat_owner_mismatch",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      details: {
+        preparationTarget: "direct_linq_mailbox",
+        reason: "home-chat-owner",
+      },
+      retryable: true,
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
+      .toHaveBeenCalledTimes(2);
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).not.toHaveBeenCalled();
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("prefers the canonical home owner over another member's stale pending contact", async () => {
@@ -12866,9 +13460,21 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     && !hostedMemberEmailAuthorization.findMany
     && hostedMemberEmailAuthorization.findUnique
   ) {
-    hostedMemberEmailAuthorization.findMany = vi.fn(async () => {
-      const record = await hostedMemberEmailAuthorization.findUnique?.({});
-      return record ? [record] : [];
+    hostedMemberEmailAuthorization.findMany = vi.fn(async (input) => {
+      const record = await hostedMemberEmailAuthorization.findUnique?.(input);
+      if (!record || typeof record !== "object") {
+        return [];
+      }
+      if (!input.select?.member || "member" in record) {
+        return [record];
+      }
+      const member = await hostedMember?.findUnique?.({
+        select: input.select.member as Record<string, unknown>,
+        where: {
+          id: (record as { memberId?: unknown }).memberId,
+        },
+      });
+      return [{ ...record, member }];
     });
   }
 
@@ -12876,12 +13482,17 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     Object.defineProperty(prisma, "hostedMemberIdentity", {
       configurable: true,
       value: {
-        findFirst: vi.fn(async ({ include, where }: { include?: Record<string, unknown>; where: Record<string, unknown> }) => {
+        findFirst: vi.fn(async ({ include, select, where }: {
+          include?: Record<string, unknown>;
+          select?: Record<string, unknown>;
+          where: Record<string, unknown>;
+        }) => {
           const phoneLookupKey = Array.isArray((where.phoneLookupKey as { in?: unknown[] } | undefined)?.in)
             ? (where.phoneLookupKey as { in: unknown[] }).in[0]
             : undefined;
           const member = await hostedMember?.findUnique?.({
             include,
+            select: select?.member as Record<string, unknown> | undefined,
             where: {
               ...(typeof phoneLookupKey === "string"
                 ? {
@@ -12896,20 +13507,28 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
             return null;
           }
 
-          return include?.member ? { ...identity, member } : identity;
+          return include?.member || select?.member
+            ? { ...identity, member }
+            : identity;
         }),
         findMany: vi.fn(async (
           input: {
             include?: Record<string, unknown>;
+            select?: Record<string, unknown>;
             where: Record<string, unknown>;
           },
         ) => {
           const identity = await prisma.hostedMemberIdentity?.findFirst?.(input);
           return identity ? [identity] : [];
         }),
-        findUnique: vi.fn(async ({ include, where }: { include?: Record<string, unknown>; where: Record<string, unknown> }) => {
+        findUnique: vi.fn(async ({ include, select, where }: {
+          include?: Record<string, unknown>;
+          select?: Record<string, unknown>;
+          where: Record<string, unknown>;
+        }) => {
           const member = await hostedMember?.findUnique?.({
             include,
+            select: select?.member as Record<string, unknown> | undefined,
             where,
           });
           const identity = readHostedMemberIdentityFromMockMember(member, where.phoneLookupKey);
@@ -12918,7 +13537,9 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
             return null;
           }
 
-          return include?.member ? { ...identity, member } : identity;
+          return include?.member || select?.member
+            ? { ...identity, member }
+            : identity;
         }),
         upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
           ...create,
@@ -12930,9 +13551,11 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   } else if (!hostedMemberIdentity.findFirst && hostedMemberIdentity.findUnique) {
     hostedMemberIdentity.findFirst = vi.fn(async ({
       include,
+      select,
       where,
     }: {
       include?: Record<string, unknown>;
+      select?: Record<string, unknown>;
       where: Record<string, unknown>;
     }) => {
       const phoneLookupKey = Array.isArray((where.phoneLookupKey as { in?: unknown[] } | undefined)?.in)
@@ -12947,6 +13570,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
 
       return findUnique({
         include,
+        select,
         where: {
           ...(typeof phoneLookupKey === "string"
             ? {
@@ -12965,6 +13589,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     prisma.hostedMemberIdentity.findMany = vi.fn(async (
       input: {
         include?: Record<string, unknown>;
+        select?: Record<string, unknown>;
         where: Record<string, unknown>;
       },
     ) => {
@@ -12994,13 +13619,21 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     prisma.hostedMemberRouting.groupBy = vi.fn().mockResolvedValue([]);
   }
   if (prisma.hostedMemberRouting && !prisma.hostedMemberRouting.findMany) {
-    prisma.hostedMemberRouting.findMany = vi.fn(async (input: { where: Record<string, unknown> }) => {
+    prisma.hostedMemberRouting.findMany = vi.fn(async (input: {
+      select?: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => {
       const record = await readHostedMemberRoutingFromMockLookup({
         findFirst: prisma.hostedMemberRouting?.findFirst,
         findUnique: prisma.hostedMemberRouting?.findUnique,
         input,
       });
-      return record ? [record] : [];
+      if (!record || typeof record !== "object") {
+        return [];
+      }
+      return [input.select?.member
+        ? withHostedMemberRoutingMember(record as Record<string, unknown>)
+        : record];
     });
   }
 
@@ -13205,11 +13838,11 @@ function createSingleHostedMemberRoutingMock(record: Record<string, unknown>) {
   return {
     createMany: vi.fn().mockResolvedValue({ count: 1 }),
     findFirst: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) =>
-      matchesWhere(where) ? record : null),
+      matchesWhere(where) ? withHostedMemberRoutingMember(record) : null),
     findMany: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) =>
-      matchesWhere(where) ? [record] : []),
+      matchesWhere(where) ? [withHostedMemberRoutingMember(record)] : []),
     findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) =>
-      matchesWhere(where) ? record : null),
+      matchesWhere(where) ? withHostedMemberRoutingMember(record) : null),
     groupBy: vi.fn().mockResolvedValue([]),
     updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     upsert: vi.fn(),
@@ -13270,6 +13903,18 @@ function createStatefulHostedMemberRoutingMock(initialRecord: Record<string, unk
   };
 }
 
+function isFullHostedMemberRoutingRecordQuery(query: unknown): boolean {
+  if (!query || typeof query !== "object") {
+    return false;
+  }
+  const select = (query as { select?: unknown }).select;
+  return Boolean(
+    select
+    && typeof select === "object"
+    && "pendingLinqParticipantContactEncrypted" in select,
+  );
+}
+
 function withHostedMemberRoutingMember(
   record: Record<string, unknown> | null,
 ): Record<string, unknown> | null {
@@ -13315,9 +13960,9 @@ function withPrismaTransaction<
 }
 
 async function readHostedMemberRoutingFromMockLookup(input: {
-  findFirst?: (query: { where: Record<string, unknown> }) => Promise<unknown>;
-  findUnique?: (query: { where: Record<string, unknown> }) => Promise<unknown>;
-  input: { where: Record<string, unknown> };
+  findFirst?: (query: { select?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>;
+  findUnique?: (query: { select?: Record<string, unknown>; where: Record<string, unknown> }) => Promise<unknown>;
+  input: { select?: Record<string, unknown>; where: Record<string, unknown> };
 }): Promise<unknown> {
   if (input.findFirst) {
     return await input.findFirst(input.input);
@@ -13334,6 +13979,7 @@ async function readHostedMemberRoutingFromMockLookup(input: {
   );
 
   return await input.findUnique({
+    select: input.input.select,
     where: {
       ...(typeof linqChatLookupKey === "string" ? { linqChatLookupKey } : {}),
       ...(typeof pendingLinqParticipantContactLookupKey === "string"

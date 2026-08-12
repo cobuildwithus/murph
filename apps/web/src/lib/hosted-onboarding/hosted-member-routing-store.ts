@@ -42,6 +42,7 @@ export {
   projectHostedMemberRoutingState,
   type HostedMemberRoutingLookupMatch,
   type HostedMemberRoutingLookupSnapshot,
+  type HostedMemberRoutingRecord,
   type HostedMemberRoutingStateSnapshot,
 } from "./hosted-member-routing-state";
 
@@ -323,13 +324,56 @@ export async function lookupHostedMemberCoreByPendingLinqParticipantContact(inpu
   return resolution.status === "found" ? resolution.core : null;
 }
 
-export async function lookupHostedMemberRoutingByHomeLinqChatId(input: {
+export interface HostedMemberHomeLinqCoreLookup {
+  core: HostedMemberRoutingLookup["core"];
+  matchedBy: "linqChatLookupKey";
+}
+
+type HostedMemberRoutingByHomeLinqChatIdInput = {
   linqChatId: string | null | undefined;
   prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberRoutingLookup | null> {
+};
+
+export async function lookupHostedMemberRoutingByHomeLinqChatId(
+  input: HostedMemberRoutingByHomeLinqChatIdInput & { projection: "core" },
+): Promise<HostedMemberHomeLinqCoreLookup | null>;
+export async function lookupHostedMemberRoutingByHomeLinqChatId(
+  input: HostedMemberRoutingByHomeLinqChatIdInput,
+): Promise<HostedMemberRoutingLookup | null>;
+export async function lookupHostedMemberRoutingByHomeLinqChatId(
+  input: HostedMemberRoutingByHomeLinqChatIdInput & { projection?: "core" },
+): Promise<HostedMemberHomeLinqCoreLookup | HostedMemberRoutingLookup | null> {
   const lookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
   if (lookupKeys.length === 0) {
     return null;
+  }
+
+  if (input.projection === "core") {
+    const resolution = resolveHostedMemberCoreLookup(
+      await input.prisma.hostedMemberRouting.findMany({
+        where: {
+          linqChatLookupKey: {
+            in: lookupKeys,
+          },
+        },
+        select: hostedMemberRoutingCoreLookupSelect,
+      }),
+    );
+    if (resolution.status === "ambiguous") {
+      throw hostedOnboardingError({
+        code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
+        details: {
+          matchCount: resolution.memberIds.length,
+          matchedBy: "linqChatLookupKey",
+        },
+        httpStatus: 500,
+        message: "Hosted member routing lookup matched multiple members.",
+        retryable: true,
+      });
+    }
+    return resolution.status === "found"
+      ? { core: resolution.core, matchedBy: "linqChatLookupKey" }
+      : null;
   }
 
   const routingRecords = await input.prisma.hostedMemberRouting.findMany({
@@ -540,6 +584,23 @@ export async function readHostedMemberRoutingState(input: {
         input.retainFailureInScopedCache,
       )
     : null;
+}
+
+/**
+ * Reads the exact persisted routing snapshot without decrypting it. Prepared
+ * webhook paths use this to bind an outside-transaction projection to the row
+ * re-read under their routing lock.
+ */
+export async function readHostedMemberRoutingRecord(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}) {
+  return input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: hostedMemberRoutingStateSelect,
+  });
 }
 
 export async function lockHostedMemberRoutingStateTx(input: {

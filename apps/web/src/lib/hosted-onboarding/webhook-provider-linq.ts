@@ -6,6 +6,7 @@ import {
   isHostedLinqConversationMessageWake,
   readHostedLinqConversationMessageContact,
 } from "@murphai/hosted-execution";
+import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
   createHostedMailboxAssistantInputId,
   readHostedConversationAssistantIdentifierSecret,
@@ -38,13 +39,17 @@ import {
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import {
   lookupHostedMemberByVerifiedEmailAddress,
+  type HostedMemberCoreState,
 } from "./hosted-member-store";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
   demoteHostedMemberLinqGroupChatBindingsTx,
-  lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberCoreByPendingLinqParticipantContact,
+  lookupHostedMemberRoutingByHomeLinqChatId,
+  readHostedMemberRoutingRecord,
   readHostedMemberRoutingState,
+  type HostedMemberRoutingRecord,
+  type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "./hosted-member-routing-store";
@@ -121,8 +126,7 @@ import {
 } from "./linq-routing-policy";
 import {
   createHostedEmailLookupKey,
-  createHostedEmailLookupKeyReadCandidates,
-  createHostedLinqChatLookupKeyReadCandidates,
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
@@ -186,7 +190,17 @@ import {
 } from "./shared";
 import {
   hasActiveHostedCryptoDomainRootsForUserTx,
+  lockAndReadActiveHostedDomainRootKeyIdTx,
 } from "../hosted-crypto/domain-root-store";
+import {
+  getHostedDomainRootUnwrapCache,
+} from "../hosted-crypto/domain-root-unwrap-cache";
+import {
+  readHostedUserSecureBoxStringRootReference,
+} from "../hosted-crypto/secure-box";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
 import { getHostedOnboardingEnvironment } from "./runtime";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
@@ -223,10 +237,10 @@ export async function resolveHostedLinqTypingPrewarmMemberId(input: {
   event: HostedLinqTypingIndicatorStartedEvent;
   prisma: HostedOnboardingReadClient;
 }): Promise<string | null> {
-  const memberId = await lookupHostedLinqPrewarmHomeChatMemberId({
+  const memberId = (await lookupHostedLinqHomeChatCoreCandidate({
     chatId: input.event.data.chat_id,
     prisma: input.prisma,
-  });
+  }))?.memberId ?? null;
   return memberId && await isHostedLinqMailboxRootPrewarmEligible({
     memberId,
     prisma: input.prisma,
@@ -277,16 +291,18 @@ export async function resolveHostedLinqMailboxPayloadRootPrewarmMemberId(input: 
     return null;
   }
 
-  const [identityMemberId, homeChatMemberId] = await Promise.all([
-    lookupHostedLinqPrewarmIdentityMemberId({
+  const [identityCandidate, homeChatCandidate] = await Promise.all([
+    lookupHostedLinqIdentityCoreCandidate({
       contact: participantContact,
       prisma: input.prisma,
     }),
-    lookupHostedLinqPrewarmHomeChatMemberId({
+    lookupHostedLinqHomeChatCoreCandidate({
       chatId: summary.chatId,
       prisma: input.prisma,
     }),
   ]);
+  const identityMemberId = identityCandidate?.memberId ?? null;
+  const homeChatMemberId = homeChatCandidate?.memberId ?? null;
   const pendingContactMemberId = identityMemberId || homeChatMemberId
     ? null
     : await lookupHostedLinqPrewarmPendingContactMemberId({
@@ -394,7 +410,7 @@ export async function resolveHostedLinqThreadContainerCryptoPreparationTarget(
     return null;
   }
 
-  const senderCandidate = await lookupHostedLinqPrewarmIdentityCandidate({
+  const senderCandidate = await lookupHostedLinqIdentityCoreCandidate({
     contact: participantContact,
     prisma: input.prisma,
   });
@@ -408,11 +424,11 @@ export async function resolveHostedLinqThreadContainerCryptoPreparationTarget(
       });
   const candidateSender = senderCandidate ?? (pendingSenderLookup
     ? {
+        core: pendingSenderLookup,
         memberId: pendingSenderLookup.id,
-        suspendedAt: pendingSenderLookup.suspendedAt,
       }
     : null);
-  if (candidateSender?.suspendedAt) {
+  if (candidateSender?.core.suspendedAt) {
     return null;
   }
   const candidateSenderAccess = candidateSender
@@ -556,172 +572,318 @@ export async function resolveHostedLinqThreadContainerCryptoPreparationTarget(
     : null;
 }
 
-type HostedLinqPrewarmIdentityCandidate = {
+type HostedLinqMemberCoreCandidate = {
+  core: HostedMemberCoreState;
   memberId: string;
-  suspendedAt: Date | null;
 };
 
-async function lookupHostedLinqPrewarmIdentityMemberId(input: {
+async function lookupHostedLinqIdentityCoreCandidate(input: {
   contact: HostedLinqParticipantContact;
   prisma: HostedOnboardingReadClient;
-}): Promise<string | null> {
-  return (await lookupHostedLinqPrewarmIdentityCandidate(input))?.memberId
-    ?? null;
-}
-
-async function lookupHostedLinqPrewarmIdentityCandidate(input: {
-  contact: HostedLinqParticipantContact;
-  prisma: HostedOnboardingReadClient;
-}): Promise<HostedLinqPrewarmIdentityCandidate | null> {
+}): Promise<HostedLinqMemberCoreCandidate | null> {
   if (input.contact.kind === "phone") {
-    const lookupKeys = createHostedPhoneLookupKeyReadCandidates(input.contact.value);
-    if (lookupKeys.length === 0) {
-      return null;
-    }
-    const records = await input.prisma.hostedMemberIdentity.findMany({
-      select: {
-        member: {
-          select: {
-            suspendedAt: true,
-          },
-        },
-        memberId: true,
-      },
-      where: {
-        phoneLookupKey: {
-          in: lookupKeys,
-        },
-      },
+    const lookup = await lookupHostedMemberIdentityCoreByPhoneNumberForLinqWebhook({
+      phoneNumber: input.contact.value,
+      prisma: input.prisma,
     });
-    const memberId = resolveUniqueHostedLinqPrewarmMemberId({
-      ambiguityCode: "HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS",
-      matchedBy: "phoneNumber",
-      records,
-    });
-    if (!memberId) {
-      return null;
-    }
-    return {
-      memberId,
-      suspendedAt:
-        records.find((record) => record.memberId === memberId)?.member?.suspendedAt
-        ?? null,
-    };
+    return lookup ? { core: lookup.core, memberId: lookup.core.id } : null;
   }
 
-  const lookupKeys = createHostedEmailLookupKeyReadCandidates(input.contact.value);
-  if (lookupKeys.length === 0) {
-    return null;
-  }
-  const records = await input.prisma.hostedMemberEmailAuthorization.findMany({
-    select: {
-      member: {
-        select: {
-          suspendedAt: true,
-        },
-      },
-      memberId: true,
-    },
-    where: {
-      verifiedEmailLookupKey: {
-        in: lookupKeys,
-      },
-      verifiedEmailVerifiedAt: {
-        not: null,
-      },
-    },
+  const lookup = await lookupHostedMemberByVerifiedEmailAddress({
+    address: input.contact.value,
+    prisma: input.prisma,
+    projection: "core",
   });
-  const memberId = resolveUniqueHostedLinqPrewarmMemberId({
-    ambiguityCode: "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS",
-    matchedBy: "verifiedEmail",
-    records,
-  });
-  if (!memberId) {
-    return null;
-  }
-  return {
-    memberId,
-    suspendedAt:
-      records.find((record) => record.memberId === memberId)?.member?.suspendedAt
-      ?? null,
-  };
+  return lookup ? { core: lookup.core, memberId: lookup.core.id } : null;
 }
 
-async function lookupHostedLinqPrewarmHomeChatMemberId(input: {
+async function lookupHostedLinqHomeChatCoreCandidate(input: {
   chatId: string;
   prisma: HostedOnboardingReadClient;
-}): Promise<string | null> {
-  const lookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.chatId);
-  if (lookupKeys.length === 0) {
-    return null;
+}): Promise<HostedLinqMemberCoreCandidate | null> {
+  const lookup = await lookupHostedMemberRoutingByHomeLinqChatId({
+    linqChatId: input.chatId,
+    prisma: input.prisma,
+    projection: "core",
+  });
+  return lookup ? { core: lookup.core, memberId: lookup.core.id } : null;
+}
+
+async function lookupHostedMemberIdentityCoreByPhoneNumberForLinqWebhook(input: {
+  phoneNumber: string;
+  prisma: HostedOnboardingReadClient;
+}) {
+  try {
+    return await lookupHostedMemberIdentityByPhoneNumber({
+      ...input,
+      projection: "core",
+    });
+  } catch (error) {
+    if (isLocalHostedDomainRootAuthorityMismatch(error)) {
+      return null;
+    }
+    throw error;
   }
-  const records = await input.prisma.hostedMemberRouting.findMany({
-    select: {
-      memberId: true,
-    },
-    where: {
-      linqChatLookupKey: {
-        in: lookupKeys,
-      },
-    },
-  });
-  return resolveUniqueHostedLinqPrewarmMemberId({
-    ambiguityCode: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
-    matchedBy: "linqChatLookupKey",
-    records,
-  });
 }
 
 async function lookupHostedLinqPrewarmPendingContactMemberId(input: {
   contact: HostedLinqParticipantContact;
   prisma: HostedOnboardingReadClient;
 }): Promise<string | null> {
-  const lookupKeys = createHostedLinqParticipantContactLookupKeyReadCandidates({
-    kind: input.contact.kind,
-    value: input.contact.value,
-  });
-  if (lookupKeys.length === 0) {
-    return null;
-  }
-  const records = await input.prisma.hostedMemberRouting.findMany({
-    select: {
-      memberId: true,
+  return (
+    await lookupHostedMemberCoreByPendingLinqParticipantContact(input)
+  )?.id ?? null;
+}
+
+function hostedLinqDirectMailboxPreparationRequired(
+  reason:
+    | "control-root"
+    | "home-chat-owner"
+    | "ingress-root"
+    | "member"
+    | "routing"
+    | "thread-route",
+) {
+  return hostedOnboardingError({
+    code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+    details: {
+      preparationTarget: "direct_linq_mailbox",
+      reason,
     },
-    where: {
-      pendingLinqParticipantContactLookupKey: {
-        in: lookupKeys,
-      },
-    },
-  });
-  return resolveUniqueHostedLinqPrewarmMemberId({
-    ambiguityCode: "LINQ_PENDING_CONTACT_ROUTING_LOOKUP_AMBIGUOUS",
-    matchedBy: "pendingLinqParticipantContactLookupKey",
-    records,
+    httpStatus: 503,
+    message: "Hosted Linq direct mailbox preparation is stale.",
+    retryable: true,
   });
 }
 
-function resolveUniqueHostedLinqPrewarmMemberId(input: {
-  ambiguityCode: string;
-  matchedBy: string;
-  records: Array<{ memberId: string }>;
-}): string | null {
-  const memberIds = new Set(input.records.map((record) => record.memberId));
-  if (memberIds.size === 0) {
-    return null;
+interface PreparedHostedLinqDirectMailboxPayloadRoot {
+  activeControlRootKeyId: string;
+  memberId: string;
+  routingRecord: HostedMemberRoutingRecord | null;
+  routingState: HostedMemberRoutingStateSnapshot | null;
+  rootKeyId: string;
+}
+
+async function revalidatePreparedHostedLinqDirectMailboxTx(input: {
+  chatId: string;
+  contact: HostedLinqParticipantContact;
+  memberId: string;
+  prepared: PreparedHostedLinqDirectMailboxPayloadRoot | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<PreparedHostedLinqDirectMailboxPayloadRoot> {
+  if (!input.prepared || input.prepared.memberId !== input.memberId) {
+    throw hostedLinqDirectMailboxPreparationRequired("member");
   }
-  if (memberIds.size !== 1) {
-    throw hostedOnboardingError({
-      code: input.ambiguityCode,
-      details: {
-        matchCount: memberIds.size,
-        matchedBy: input.matchedBy,
-      },
-      httpStatus: 500,
-      message: "Hosted Linq prewarm lookup matched multiple members.",
-      retryable: true,
+
+  // Domain-root lifecycle code takes this authority lock before member rows.
+  // Hold it through any route rewrite so the prepared active control root
+  // remains the encrypt authority for the whole transaction.
+  const activeControlRootKeyId =
+    await lockAndReadActiveHostedDomainRootKeyIdTx({
+      domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
+      tx: input.prisma,
+      userId: input.memberId,
+    });
+  if (activeControlRootKeyId !== input.prepared.activeControlRootKeyId) {
+    throw hostedLinqDirectMailboxPreparationRequired("control-root");
+  }
+  await assertPreparedHostedLinqRootCached({
+    cacheRootKey: "@active",
+    expectedRootKeyId: input.prepared.activeControlRootKeyId,
+    lane: "hosted-member-private-field",
+    memberId: input.memberId,
+    reason: "control-root",
+  });
+
+  // Match the durable route-binding lock order so the exact direct identity and
+  // chat winner cannot change between the re-read and mailbox encryption.
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: input.chatId,
+    tx: input.prisma,
+  });
+
+  const routingRecord = await readHostedMemberRoutingRecord({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  if (!hasSameHostedMemberRoutingRecord(
+    routingRecord,
+    input.prepared.routingRecord,
+  )) {
+    throw hostedLinqDirectMailboxPreparationRequired("routing");
+  }
+  const existingControlRootKeyIds = readHostedMemberRoutingControlRootKeyIds(
+    routingRecord,
+  );
+  for (const rootKeyId of existingControlRootKeyIds) {
+    await assertPreparedHostedLinqRootCached({
+      cacheRootKey: rootKeyId,
+      expectedRootKeyId: rootKeyId,
+      lane: "hosted-member-private-field",
+      memberId: input.memberId,
+      reason: "routing",
     });
   }
-  return memberIds.values().next().value ?? null;
+
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.chatId,
+    });
+  const threadRoute = threadIdentityLookupKeys.length === 0
+    ? null
+    : await input.prisma.hostedThreadRoute.findFirst({
+        select: {
+          containerMemberId: true,
+        },
+        where: {
+          channel: "linq",
+          threadIdentityLookupKey: {
+            in: threadIdentityLookupKeys,
+          },
+        },
+      });
+  if (threadRoute) {
+    throw hostedLinqDirectMailboxPreparationRequired("thread-route");
+  }
+
+  const identityCandidate = await lookupHostedLinqIdentityCoreCandidate({
+    contact: input.contact,
+    prisma: input.prisma,
+  });
+  const homeChatCandidate = await lookupHostedLinqHomeChatCoreCandidate({
+    chatId: input.chatId,
+    prisma: input.prisma,
+  });
+  const pendingContactCandidate = identityCandidate || homeChatCandidate
+    ? null
+    : await lookupHostedMemberCoreByPendingLinqParticipantContact({
+        contact: input.contact,
+        prisma: input.prisma,
+      });
+  const revalidatedMemberId =
+    identityCandidate?.memberId
+    ?? homeChatCandidate?.memberId
+    ?? pendingContactCandidate?.id
+    ?? null;
+
+  if (revalidatedMemberId !== input.memberId) {
+    throw hostedLinqDirectMailboxPreparationRequired("member");
+  }
+  if (homeChatCandidate && homeChatCandidate.memberId !== input.memberId) {
+    throw hostedLinqDirectMailboxPreparationRequired("home-chat-owner");
+  }
+
+  const activeRootKeyId = await lockAndReadActiveHostedDomainRootKeyIdTx({
+    domain: "ingress",
+    tx: input.prisma,
+    userId: input.memberId,
+  });
+  if (activeRootKeyId !== input.prepared.rootKeyId) {
+    throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
+  }
+  await assertPreparedHostedLinqRootCached({
+    cacheRootKey: "@active",
+    expectedRootKeyId: input.prepared.rootKeyId,
+    lane: "mailbox-payload",
+    memberId: input.memberId,
+    reason: "ingress-root",
+  });
+  return input.prepared;
+}
+
+const HOSTED_MEMBER_ROUTING_RECORD_KEYS = [
+  "linqChatIdEncrypted",
+  "linqChatLookupKey",
+  "linqHomeLineAssignedAt",
+  "linqParticipantContactKind",
+  "linqParticipantContactLookupKey",
+  "linqRecipientPhoneEncrypted",
+  "linqRecipientPhoneLookupKey",
+  "memberId",
+  "pendingLinqChatIdEncrypted",
+  "pendingLinqChatLookupKey",
+  "pendingLinqParticipantContactEncrypted",
+  "pendingLinqParticipantContactKind",
+  "pendingLinqParticipantContactLookupKey",
+  "pendingLinqParticipantContactObservedAt",
+  "pendingLinqRecipientPhoneEncrypted",
+  "pendingLinqRecipientPhoneLookupKey",
+  "replyAliasLookupKey",
+  "telegramUserIdEncrypted",
+  "telegramUserLookupKey",
+] as const satisfies readonly (keyof HostedMemberRoutingRecord)[];
+
+function hasSameHostedMemberRoutingRecord(
+  current: HostedMemberRoutingRecord | null,
+  prepared: HostedMemberRoutingRecord | null,
+): boolean {
+  if (!current || !prepared) {
+    return current === prepared;
+  }
+  return HOSTED_MEMBER_ROUTING_RECORD_KEYS.every((key) => {
+    const currentValue = current[key];
+    const preparedValue = prepared[key];
+    return currentValue instanceof Date && preparedValue instanceof Date
+      ? currentValue.getTime() === preparedValue.getTime()
+      : currentValue === preparedValue;
+  });
+}
+
+function readHostedMemberRoutingControlRootKeyIds(
+  routing: HostedMemberRoutingRecord | null,
+): string[] {
+  if (!routing) {
+    return [];
+  }
+  const encryptedValues = [
+    routing.linqChatIdEncrypted,
+    routing.linqRecipientPhoneEncrypted,
+    routing.pendingLinqChatIdEncrypted,
+    routing.pendingLinqParticipantContactEncrypted,
+    routing.pendingLinqRecipientPhoneEncrypted,
+    routing.telegramUserIdEncrypted,
+  ];
+  return [...new Set(encryptedValues.flatMap((value) => {
+    const reference = readHostedUserSecureBoxStringRootReference({
+      lane: "hosted-member-private-field",
+      value,
+    });
+    return reference ? [reference.rootKeyId] : [];
+  }))];
+}
+
+async function assertPreparedHostedLinqRootCached(input: {
+  cacheRootKey: string;
+  expectedRootKeyId: string;
+  lane: "hosted-member-private-field" | "mailbox-payload";
+  memberId: string;
+  reason: "control-root" | "ingress-root" | "routing";
+}): Promise<void> {
+  const domain = getHostedCryptoDomainForLane(input.lane);
+  const pendingRoot = getHostedDomainRootUnwrapCache()?.get(
+    `${input.memberId}|${domain}|${input.cacheRootKey}`,
+  );
+  if (!pendingRoot) {
+    throw hostedLinqDirectMailboxPreparationRequired(input.reason);
+  }
+  let root: Awaited<NonNullable<typeof pendingRoot>>;
+  try {
+    root = await pendingRoot;
+  } catch {
+    throw hostedLinqDirectMailboxPreparationRequired(input.reason);
+  }
+  if (
+    root.envelope.domain !== domain
+    || root.envelope.rootKeyId !== input.expectedRootKeyId
+    || root.envelope.userId !== input.memberId
+  ) {
+    throw hostedLinqDirectMailboxPreparationRequired(input.reason);
+  }
 }
 
 async function isHostedLinqMailboxRootPrewarmEligible(input: {
@@ -1120,6 +1282,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   instantStartAllowed?: boolean;
   pendingGroupParticipantMemberIds?: readonly string[] | null;
   pendingGroupRosterUnavailable?: boolean;
+  preparedDirectMailboxPayloadRoot?: PreparedHostedLinqDirectMailboxPayloadRoot | null;
   preparedPendingGroupSetupClaim?: PreparedHostedPendingGroupSetupClaim;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
@@ -1147,6 +1310,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
     recipientPhoneNumber,
     summary,
   } = context;
+
+  const directMailboxPreparationProvided = Object.prototype.hasOwnProperty.call(
+    input,
+    "preparedDirectMailboxPayloadRoot",
+  );
 
   const accountLookupKey = createHostedPhoneLookupKey(recipientPhoneNumber);
   const threadRouteAccountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
@@ -1246,17 +1414,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
     });
   }
 
-  const existingMemberLookup = participantContact.kind === "phone"
-    ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
-        phoneNumber: participantContact.value,
-        prisma: input.prisma,
-      })
-    : await lookupHostedMemberByVerifiedEmailAddress({
-        address: participantContact.value,
-        prisma: input.prisma,
-      });
-  const incomingHomeLinqChatOwnerLookup = await lookupHostedMemberRoutingByHomeLinqChatId({
-    linqChatId: summary.chatId,
+  const existingMemberLookup = await lookupHostedLinqIdentityCoreCandidate({
+    contact: participantContact,
+    prisma: input.prisma,
+  });
+  const incomingHomeLinqChatOwnerLookup = await lookupHostedLinqHomeChatCoreCandidate({
+    chatId: summary.chatId,
     prisma: input.prisma,
   });
   const existingHomeLinqChatLookup = existingMemberLookup
@@ -1289,8 +1452,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
   if (
     existingMember
     && incomingHomeLinqChatOwnerLookup
-    && incomingHomeLinqChatOwnerLookup.routing.memberId !== existingMember.id
+    && incomingHomeLinqChatOwnerLookup.memberId !== existingMember.id
   ) {
+    if (directMailboxPreparationProvided) {
+      throw hostedLinqDirectMailboxPreparationRequired("home-chat-owner");
+    }
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("home-chat-owner-mismatch"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -1781,7 +1947,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   if (
     existingMember
     && !existingMemberEffectiveActive
-    && incomingHomeLinqChatOwnerLookup?.routing.memberId === existingMember.id
+    && incomingHomeLinqChatOwnerLookup?.memberId === existingMember.id
   ) {
     const accessDecision = await readHostedRuntimeAiAccessDecision({
       memberId: existingMember.id,
@@ -1857,12 +2023,25 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }
     }
 
+    const preparedDirectMailbox = directMailboxPreparationProvided
+      ? await revalidatePreparedHostedLinqDirectMailboxTx({
+        chatId: summary.chatId,
+        contact: participantContact,
+        memberId: existingMember.id,
+        prepared: input.preparedDirectMailboxPayloadRoot ?? null,
+        prisma: input.prisma,
+      })
+      : null;
+
     const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
       incomingChatId: summary.chatId,
       incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
       incomingRecipientPhone: recipientPhoneNumber,
       memberAuthority: memberRouteBindingAuthority,
       memberId: existingMember.id,
+      ...(preparedDirectMailbox
+        ? { preparedRoutingState: preparedDirectMailbox.routingState }
+        : {}),
       prisma: input.prisma,
     });
     const blockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
@@ -2527,6 +2706,7 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
   incomingRecipientPhone: string | null;
   memberAuthority?: HostedLinqHomeLineRouteBindingAuthority | null;
   memberId?: string | null;
+  preparedRoutingState?: HostedMemberRoutingStateSnapshot | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
   if (input.memberId) {
@@ -2536,6 +2716,9 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
       incomingRecipientPhone: input.incomingRecipientPhone,
       memberAuthority: input.memberAuthority ?? null,
       memberId: input.memberId,
+      ...(input.preparedRoutingState === undefined
+        ? {}
+        : { preparedRoutingState: input.preparedRoutingState }),
       prisma: input.prisma,
     });
   }
