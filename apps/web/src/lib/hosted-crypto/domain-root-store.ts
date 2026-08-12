@@ -1055,7 +1055,9 @@ async function readActiveHostedDomainRootEnvelopeRecordOrThrow(input: {
     userId: input.userId,
   });
   if (!row) {
-    throw new Error(`Hosted ${input.domain} domain root envelope is not provisioned.`);
+    throw new HostedDomainRootEnvelopeUnavailableError({
+      domain: input.domain,
+    });
   }
   return {
     envelope: await parseAssertAndVerifyEnvelope(row, input),

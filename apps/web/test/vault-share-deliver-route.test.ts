@@ -41,6 +41,9 @@ import {
 import {
   HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
 } from "@/src/lib/hosted-vault-share/delivery-limits";
+import {
+  HostedDomainRootEnvelopeUnavailableError,
+} from "@/src/lib/hosted-crypto/domain-root-store";
 
 type DeliverRouteModule =
   typeof import("../app/api/internal/hosted-runtime/vault-share/deliver/route");
@@ -689,13 +692,15 @@ describe("vault-share deliver route", () => {
     });
   });
 
-  it("keeps delivering to later shares but returns retryable failure when an active delivery fails", async () => {
+  it("keeps delivering to later shares when one destination root is unavailable", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     try {
       mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE, SECOND_SHARE]);
       mocks.replaceHostedVaultShareProjectionSnapshot
-        .mockRejectedValueOnce(new Error("destination mailbox down"))
+        .mockRejectedValueOnce(new HostedDomainRootEnvelopeUnavailableError({
+          domain: "ingress",
+        }))
         .mockResolvedValueOnce("replaced");
 
       const response = await deliverRoute.POST(buildRequest(VALID_BODY));
@@ -716,8 +721,8 @@ describe("vault-share deliver route", () => {
         "Hosted vault-share delivery to a destination share failed.",
         {
           errorCode: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
-          errorMessage: "destination mailbox down",
-          errorType: "Error",
+          errorMessage: "Hosted ingress domain root envelope is not available for decrypt.",
+          errorType: "HostedDomainRootEnvelopeUnavailableError",
         },
       );
       expect(consoleError).toHaveBeenCalledWith(
@@ -733,12 +738,20 @@ describe("vault-share deliver route", () => {
     }
   });
 
-  it("returns retryable failure when authoritative replacement access checking errors", async () => {
+  it("stops maximum destination fanout on an unclassified shared failure", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     try {
+      mocks.findActiveHostedVaultShares.mockResolvedValue(Array.from(
+        { length: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX },
+        (_, index) => ({
+          ...ACTIVE_SHARE,
+          destinationMemberId: `member_destination_${index}`,
+          id: `share_generation_${index}`,
+        }),
+      ));
       mocks.replaceHostedVaultShareProjectionSnapshot.mockRejectedValue(
-        new Error("runtime access query failed"),
+        new Error("synthetic shared KMS provider failure"),
       );
 
       const response = await deliverRoute.POST(buildRequest(VALID_BODY));
@@ -746,7 +759,7 @@ describe("vault-share deliver route", () => {
       expect(response.status).toBe(503);
       expect(await response.json()).toEqual({
         error: {
-          code: HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
+          code: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
           details: undefined,
           message: "Hosted vault-share delivery failed. Retry the request.",
           retryable: true,
@@ -757,7 +770,7 @@ describe("vault-share deliver route", () => {
         "Hosted vault-share delivery to a destination share failed.",
         {
           errorCode: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
-          errorMessage: "runtime access query failed",
+          errorMessage: "synthetic shared KMS provider failure",
           errorType: "Error",
         },
       );

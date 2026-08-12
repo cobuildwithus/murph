@@ -361,12 +361,16 @@ preemption is local to that active delivery owner. If any owner-ending condition
 skips later captured scopes, the offer reports preempted;
 the next opportunity starts with a fresh stop state and cannot acknowledge the
 dirty or recording obligation until its complete scope set succeeds. No
-projection work outlives that owner. A marked actual-Web scope failure received
-before its effect deadline is a terminal disposition for that scope: the same
-sequential owner continues the healthy captured suffix, aggregates the attempt
-as failed, and therefore retains the existing dirty or recording continuation.
-Deadline exhaustion, an unmarked proxy response, transport loss, or an
-owner-ending condition stops the undispatched suffix. Web performs
+projection work outlives that owner. A marked actual-Web failure received before
+its effect deadline is a terminal disposition for that scope only when Web has
+classified an explicitly typed missing destination ingress-root envelope. The
+same sequential owner continues the healthy captured suffix, aggregates the
+attempt as failed, and therefore retains the existing dirty or recording
+continuation. Unknown crypto/provider, access-query, database, or transaction
+errors use the ordinary delivery-failed response and stop current destination
+fanout plus the undispatched scope suffix. Deadline exhaustion, an unmarked proxy
+response, transport loss, or an owner-ending condition likewise stops the suffix.
+Web performs
 encryption before taking a short `hosted_workspace` row lock, then replaces the
 exact active share generation only when the locked version still matches. The
 workspace lock serializes the final replacement with checkpoint CAS: an older

@@ -18,6 +18,9 @@ import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "@/src/lib/hosted-execution/logging";
 import {
+  isHostedDomainRootEnvelopeUnavailableError,
+} from "@/src/lib/hosted-crypto/domain-root-store";
+import {
   HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
 } from "@/src/lib/hosted-vault-share/delivery-limits";
 import {
@@ -103,15 +106,23 @@ export const POST = withJsonError(async (request: Request) => {
         deliveryFailed = true;
         break;
       }
-      scopeFailed = true;
+      if (isHostedDomainRootEnvelopeUnavailableError(error)) {
+        scopeFailed = true;
+      } else {
+        deliveryFailed = true;
+      }
       // Best-effort per destination: one failing share must not block replacement for
-      // the others. Log only redacted error details — never payload fields, timestamps,
-      // or raw share ids.
+      // the others when its member-specific root is absent. Unknown crypto, access,
+      // database, and transaction failures stop fanout because they may be systemic.
+      // Log only redacted error details — never payload fields, timestamps, or raw ids.
       console.error("Hosted vault-share delivery to a destination share failed.", {
         ...formatHostedExecutionSafeLogErrorDetails(error, {
           code: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
         }),
       });
+      if (deliveryFailed) {
+        break;
+      }
     }
   }
 

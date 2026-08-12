@@ -23,6 +23,9 @@ import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
 import {
+  HostedDomainRootEnvelopeUnavailableError,
+} from "@/src/lib/hosted-crypto/domain-root-store";
+import {
   readDeliverableHostedVaultShareProjectionScopes,
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
@@ -121,6 +124,24 @@ function createPrisma(events?: string[]) {
 }
 
 describe("replaceHostedVaultShareProjectionSnapshot", () => {
+  it("preserves a typed destination-local failure when its ingress root is absent", async () => {
+    setHostedSecureBoxStringTestCodecForTests(null);
+    const transaction = vi.fn();
+    const prisma = createPrismaClientTestDouble({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      $transaction: transaction,
+    });
+
+    await expect(replaceHostedVaultShareProjectionSnapshot({
+      prisma,
+      records: [RECORD],
+      share: SHARE,
+      sourceWorkspaceVersion: SOURCE_WORKSPACE_VERSION,
+    })).rejects.toBeInstanceOf(HostedDomainRootEnvelopeUnavailableError);
+
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it("persists only ciphertext with destination-root AAD bound to the share generation", async () => {
     const events: string[] = [];
     const codec = createSnapshotTestCodec(events);

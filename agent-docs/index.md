@@ -9,7 +9,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 
 Personal-to-group projection convergence, including attempt-local foreground
 preemption, abort/shutdown admission before every scope, its single forwarded deadline, and
-authoritative Web-response ownership, terminal per-scope failure isolation,
+authoritative Web-response ownership, typed destination-failure isolation,
 and deterministic maximum-cardinality proof, is specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
@@ -41,8 +41,9 @@ permanent-versus-transient credential failure handling are jointly specified by
 Checkpointed personal health state gets one wake-raced share-projection
 opportunity before device-sync maintenance or dirty acknowledgement resumes;
 conversation work still preempts, projection failure retains the existing
-device continuation, a definitive failed scope cannot starve healthy later
-scopes, complete capture binds projected bytes to the vault owner before any
+device continuation, one destination's typed missing-root failure cannot starve
+healthy later scopes while shared-infrastructure errors stop fanout, complete
+capture binds projected bytes to the vault owner before any
 detached delivery, and source-workspace fencing makes an older in-flight
 replacement a no-op after a newer checkpoint. Group reads use the current
 Web-owned snapshot without per-group fanout or another freshness owner.

@@ -231,3 +231,12 @@ Updated: 2026-08-12
   retry after recovery, and peak-one work. The projection suite passes 103
   tests, the Cloudflare port suite passes 7, the focused runtime-owner suite
   passes 2, and the full assistant-runtime suite passes 2,217 with four skipped.
+- ReviewGPT round 11 found the terminal scope-failure code was too broad because
+  every pre-deadline crypto, access, database, or transaction exception could
+  advance to all later scopes and amplify a shared outage across maximum fanout.
+  Web now emits that code only for the existing typed missing destination
+  ingress-root envelope. Unknown or shared-infrastructure errors stop remaining
+  destination and scope fanout through the original delivery-failed code. The
+  typed production encryption path, 25-destination systemic failure bound,
+  actual-Web port classification, and A/B/C continuation/recovery proofs cover
+  the narrowed boundary without adding an owner or state.
