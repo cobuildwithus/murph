@@ -1163,6 +1163,90 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             expect(result.finalMessage, `${scenario.label} safety`).toMatch(/pain/iu)
           }
         }
+
+        const repairInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [
+            buildRoutinePresentationDeveloperInstructions({
+              channel: 'telegram',
+            }),
+            exerciseGuidance,
+          ].join('\n\n'),
+          env: {
+            ...config.env,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const plainRoutine = await executeRealCodexAppServerTurn({
+          ...repairInput,
+          dynamicTools: [],
+          prompt: 'Give me a short plain-text doorway stretch routine: 8 repetitions over 60 seconds, with a stop rule for increasing pain.',
+        })
+        expect(plainRoutine.finalMessage).toMatch(/doorway|stretch/iu)
+        expect(plainRoutine.finalMessage).toMatch(/8/iu)
+        expect(plainRoutine.finalMessage).toMatch(/60|minute/iu)
+        expect(plainRoutine.finalMessage).toMatch(/pain/iu)
+        expect(plainRoutine.responseCard).toBeNull()
+
+        const repairedRoutine = await executeRealCodexAppServerTurn({
+          ...repairInput,
+          dynamicTools: [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL],
+          prompt: [
+            'Recent conversation history for context only; do not answer these prior messages:',
+            'User:',
+            'Give me a short plain-text doorway stretch routine: 8 repetitions over 60 seconds, with a stop rule for increasing pain.',
+            '',
+            'Assistant:',
+            plainRoutine.finalMessage,
+            '',
+            'User message:',
+            'Resend the routine from your previous reply with the channel-native visual presentation.',
+          ].join('\n'),
+        })
+        const repairActions = readCapabilityRoutingActions(
+          repairedRoutine.jsonEvents,
+        )
+        expect(repairActions).toContainEqual(expect.objectContaining({
+          command: expect.stringMatching(
+            /vault-cli exercise show (?:doorway-stretch|ST170) --format json/iu,
+          ),
+          kind: 'command',
+        }))
+        expect(
+          repairActions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name
+          ),
+          'Telegram presentation-repair routine-card calls',
+        ).toHaveLength(1)
+        expect(repairedRoutine.responseCard).toMatchObject({
+          exercises: [{
+            dose: expect.stringMatching(/8/iu),
+            images: [{
+              alt: 'Person with a forearm resting on a door frame.',
+              source: 'exercise_catalog:ST170:1',
+              step: 'Setup',
+              url: 'https://cdn.example.test/doorway-stretch.png',
+            }],
+            name: expect.stringMatching(/doorway|stretch/iu),
+          }],
+          kind: 'exercise_routine',
+          safety: expect.stringMatching(/pain/iu),
+          totalSeconds: 60,
+        })
+        expect(repairedRoutine.responseMedia).toEqual([])
+        expect(repairedRoutine.finalMessage.trim()).toBe('')
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

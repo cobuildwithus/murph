@@ -517,6 +517,12 @@ describe('murph.attach_response_card', () => {
   })
 
   it('describes the private on-demand canonical-read contract', () => {
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'repeat, resend, or improve the presentation of a movement routine already present in the committed conversation',
+    )
+    expect(MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.description).toContain(
+      'not styled plain text',
+    )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent',
     )

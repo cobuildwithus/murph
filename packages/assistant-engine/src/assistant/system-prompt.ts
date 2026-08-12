@@ -1633,11 +1633,15 @@ function buildAssistantEvidenceAndReplyStyleText(
 Otherwise, keep the reply natural and direct.`;
   }
 
+  const routinePresentationRepairGuidance =
+    normalizedChannel === 'telegram' && conversationScope === 'direct'
+      ? ` A private Telegram movement routine keeps its exercise-routine card when the member repeats it or improves its layout and that available card still carries the complete answer. Text styling is not a Rich Message.`
+      : ''
   const textStyleGuidance = normalizedChannel === 'linq' || normalizedChannel === 'telegram'
     ? `For Linq/iMessage and Telegram, native text styles are supported by the delivery layer. Prefer plain text. Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability, and keep styling to short labels or key phrases.
 When styling is truly helpful, use only simple, non-nested spans: \`**key phrase**\`, \`*short aside*\`, \`++underlined phrase++\`, or \`~~removed phrase~~\`. Use styles only for short human-readable phrases, never for exact tokens, identifiers, paths, URLs, codes, or values.
 Do not use styling as decoration or on whole paragraphs.
-When an owning workflow authorizes a response card or response media, use the current channel's available presentation for structured visual answers such as exercise routines, training plans, nutrition, progress summaries, schedules, or compact tables. A semantic card that carries the complete answer replaces final text. Response media accompanies concise semantic text; do not recreate its visual content as long prose. Telegram Rich Messages can present headings, paragraphs, lists, bordered or striped tables, expandable details, slideshows, collages, and embedded media through the available card tools. iMessage can present Messages-extension cards, provider static card layouts, and ordered response media when those tools are available. Attach semantic content through the available tool; never write provider markup yourself. Telegram and iMessage have different capabilities: adapt the result to the current channel, and never imitate or promise another platform's UI. If no owned presentation fits, send concise text.`
+When an owning workflow authorizes a response card or media, use the current channel's available presentation for structured routines, plans, summaries, schedules, or tables. A semantic card that carries the complete answer replaces final text. Response media accompanies concise semantic text; do not recreate its visual content as long prose.${routinePresentationRepairGuidance} Telegram Rich Messages support bordered or striped tables, expandable details, slideshows, collages, and embedded media. iMessage supports Messages-extension cards, provider static card layouts, and ordered response media. Use the available tool; never write provider markup. Telegram and iMessage have different capabilities. Adapt to the current channel; never imitate another platform's UI. If no owned presentation fits, send concise text.`
     : `Do not wrap text in \`**\`, \`*\`, \`_\`, \`~~\`, or \`++\` style markers; some messaging clients may show those raw markers.`
   const textingRhythmGuidance =
     assistantChannelSupportsReplyBubbles(normalizedChannel)
