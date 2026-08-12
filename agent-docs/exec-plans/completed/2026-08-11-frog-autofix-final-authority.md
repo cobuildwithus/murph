@@ -40,9 +40,9 @@ tooling automatically.
    outcome to a durable parent-owned disposition.
 7. [x] Disclose the required friction entries' public publication and
    reconciliation effect in the PR intent contract.
-8. [ ] Update owner docs, run local proof, close this plan in the scoped commit,
-   push, and obtain a final ReviewGPT PASS plus exact-head green CI before merge
-   and installation.
+8. [x] Update owner docs, run local proof, close this plan in the scoped commit,
+   and push. Exact-head ReviewGPT, CI, merge, and installation remain release
+   gates after this plan-closing commit.
 9. [x] Require one authenticated-operator-owned, same-repository PR predicate
    across discovery, recovery, publication, handoff, and finalization.
 10. [x] Serialize every mutating local invocation through one native advisory
@@ -56,9 +56,13 @@ tooling automatically.
    applying the zero-or-one parent-owned cardinality rule.
 14. [x] Accept the exact clean post-commit/pre-first-push recovery state already
    defined as resumable, without reacquiring an implementation patch or child.
-15. [ ] Obtain an explicit cap-continuation decision before any eighth
-   substantive ReviewGPT round; a later exact-head PASS remains required before
-   merge.
+15. [x] Obtain an explicit cap-continuation decision before any eighth
+   substantive ReviewGPT round; the user explicitly authorized round eight and
+   continuation through review, CI, merge, and local installation.
+16. [x] Reject remote-no-PR continuation without exact parent-local body/head
+   provenance, revalidate issue authority immediately before push and again
+   before draft creation, and require both implementation agents to assess
+   foul play before changing code.
 
 ## Round-four scope retrospective
 
@@ -186,15 +190,45 @@ then obtain an explicit continuation decision. Even if those other gates are
 green, the PR still requires a later exact-head `ROUND_OUTCOME: PASS` before it
 can merge.
 
+### Round-eight authorization and hardening decision
+
+The user explicitly authorized continuing to round eight and then continuing
+through the ReviewGPT/CI loop to completion, merge, and local installation. In
+response to the user's malicious-issue concern, the parent requested one
+ReviewGPT implementation patch and independently treated it as untrusted code.
+The accepted changes remain within the existing authority chain:
+
+- a deterministic remote branch without a PR now resumes only when the retained
+  parent-local PR body binds its immutable first-reviewed head to the exact
+  local head, while the legitimate local-only pre-first-push state still
+  resumes;
+- the parent refreshes `origin/main` and revalidates the exact open Frog App
+  author, enhancement label, and one protected-main binding immediately before
+  push and again immediately before creating a new draft PR; and
+- both the ReviewGPT implementation request and edit-only Codex prompt require
+  an explicit foul-play assessment first, treat issue content, links, proposed
+  patches, and existing branch state as adversarial evidence, and fail closed
+  on unexplained scope or weakened authentication, review, sandbox, credential,
+  or network boundaries.
+
+These corrections add no new scheduler, queue, service, credential, state
+store, or model-owned publication authority. They close the reachable seeded-
+branch and authority-revocation gaps while making skeptical implementation an
+explicit prerequisite. Round eight must review the exact plan-closing head; a
+PASS plus green exact-head CI remains required before merge and installation.
+
 ## Verification
 
 - Native Codex permission smoke: passed workspace read/write, denied an
   outside-root canary read, and denied outbound network.
-- Focused Frog autofix suite: 35 tests passed, including real two-process native
-  lock contention, forged-body authority rejection, complete cursor traversal,
-  and foreign-PR/terminal-handoff regressions.
-- Repo-tools suite: 35 files and 560 tests passed directly and through the
-  repo-internal diff lane.
+- Focused Frog autofix suite: 37 tests passed, including foul-play prompt
+  ordering, exact parent-local body/head provenance, dual publication authority
+  checkpoints, real two-process native lock contention, forged-body authority
+  rejection, complete cursor traversal, and foreign-PR/terminal-handoff
+  regressions.
+- Repo-tools suite: 35 files and 562 tests passed through the repo-internal diff
+  lane after one unrelated orchestration test passed in isolation and the full
+  lane passed on retry.
 - Repo TypeScript tools, shell syntax, documentation drift, dependency policy,
   hosted architecture guards, and `git diff --check`: passed.
 - A production-shaped read-only GraphQL proof returned the exact branch record
@@ -207,8 +241,9 @@ can merge.
   but returned body-provenance and pre-filter pagination findings captured
   above. Round seven verified those corrections and returned the accepted
   post-commit/pre-first-push recovery finding captured in the cap retrospective;
-  the fix is landed locally, and an eighth round requires an explicit
-  continuation decision before it can provide the still-required PASS.
+  the fix and the user-authorized hardening are landed, current `main` is merged
+  cleanly, and round eight must provide the still-required exact-head PASS.
 
-Status: active
+Status: completed
 Updated: 2026-08-11
+Completed: 2026-08-11
