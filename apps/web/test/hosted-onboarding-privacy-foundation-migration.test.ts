@@ -2301,7 +2301,7 @@ describe("hosted Prisma baseline migration", () => {
       .toHaveLength(2);
   });
 
-  it("adds an exact-source reconnect epoch with a rolling-compatible default", () => {
+  it("expands an exact-source reconnect epoch with a rolling-compatible default", () => {
     const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
     const migrationSql = readFileSync(
       new URL(
@@ -2312,11 +2312,12 @@ describe("hosted Prisma baseline migration", () => {
     );
 
     expect(schema).toContain(
-      'lifecycleEpoch                  Int              @default(1) @map("lifecycle_epoch")',
+      'lifecycleEpoch                  Int?             @default(1) @map("lifecycle_epoch")',
     );
     expect(migrationSql).toContain(
-      'ADD COLUMN "lifecycle_epoch" INTEGER NOT NULL DEFAULT 1',
+      'ADD COLUMN "lifecycle_epoch" INTEGER DEFAULT 1',
     );
+    expect(migrationSql).not.toMatch(/not null/iu);
     expect(migrationSql).not.toMatch(/update|delete|drop/iu);
   });
 

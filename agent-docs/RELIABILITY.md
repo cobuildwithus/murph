@@ -702,6 +702,11 @@ Last verified: 2026-08-11
   runtime connected projection is discarded so the existing hosted
   connection-established owner remains the only path that clears that source's
   schedule-time coverage and advances its lifecycle epoch atomically.
+- The hosted lifecycle-epoch column is an expand-only nullable/defaulted
+  Postgres addition. The source mapper treats legacy missing, null, and zero
+  values as epoch 1, but every explicit write still requires a positive safe
+  integer. This preserves rolling compatibility without weakening the runtime
+  reconnect fence; local SQLite remains non-null after its owned migration.
 - Junction schedule-time history retries retain one stable logical identity and
   fixed target window. Terminal matrix publication requires that fixed end to
   still touch the current ordinary daily reconcile interval. If a long outage

@@ -64,6 +64,9 @@ Current providers:
   to connected and clears only that source's schedule-time coverage in the same
   admission lock. A same-epoch runtime projection cannot move a disconnected
   Junction source to connected, so provider polling cannot preempt that owner.
+  Hosted Postgres adds this field as a nullable, defaulted expansion: reads map
+  legacy missing, null, or zero state to epoch 1, while explicit writes still
+  require a positive integer. Local SQLite owns a direct non-null migration.
   Hosted hydration accepts the newer epoch before merging coverage, and the
   runner rereads it before import and again before publishing progress. A queued
   or in-flight job from an older epoch therefore cannot block the replacement

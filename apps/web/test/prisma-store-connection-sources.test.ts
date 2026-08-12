@@ -14,6 +14,7 @@ type MutableConnectionSourceRecord = {
   resourceAvailabilitySummaryJson: Record<string, unknown> | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  lifecycleEpoch?: number | null;
   firstSeenAt: Date;
   lastSeenAt: Date;
   lastDataAt: Date | null;
@@ -351,6 +352,34 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       },
       status: "error",
     });
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["zero", 0],
+  ])("reads a legacy %s lifecycle epoch as the original epoch", async (_label, lifecycleEpoch) => {
+    const { store } = createSourceStore([
+      createSourceRecord({ lifecycleEpoch }),
+    ]);
+
+    await expect(store.listConnectionSources("dsc_parent")).resolves.toEqual([
+      expect.objectContaining({ lifecycleEpoch: 1 }),
+    ]);
+  });
+
+  it("rejects an explicit nonpositive lifecycle epoch before a new write", async () => {
+    const { store, upsert } = createSourceStore();
+
+    await expect(store.upsertConnectionSource({
+      connectionId: "dsc_parent",
+      lifecycleEpoch: 0,
+      sourceInstanceKey: "src_oura_hash_a",
+      sourceProviderSlug: "oura",
+    })).rejects.toMatchObject({
+      code: "CONNECTION_SOURCE_LIFECYCLE_EPOCH_INVALID",
+    });
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it("lists connection sources with deterministic ordering", async () => {

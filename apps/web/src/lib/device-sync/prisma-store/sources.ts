@@ -355,7 +355,7 @@ export function mapHostedConnectionSourceRecord(
     id: record.id,
     lastErrorCode: sanitizeSourceErrorCode(record.lastErrorCode),
     lastErrorMessage: omitHostedSqlErrorText(record.lastErrorMessage),
-    lifecycleEpoch: requireSourceLifecycleEpoch(record.lifecycleEpoch),
+    lifecycleEpoch: readSourceLifecycleEpoch(record.lifecycleEpoch),
     lastSeenAt: record.lastSeenAt.toISOString(),
     lastDataAt: record.lastDataAt?.toISOString() ?? null,
     resourceAvailabilitySummary: sanitizeResourceAvailabilitySummary(
@@ -376,6 +376,17 @@ function requireSourceLifecycleEpoch(value: unknown): number {
     );
   }
   return value;
+}
+
+function readSourceLifecycleEpoch(value: unknown): number {
+  // The expand-only hosted migration leaves the column nullable, and legacy
+  // projections can omit it or expose the pre-invariant zero sentinel. All
+  // three represent the original lifecycle, while explicit writes continue to
+  // pass through the strict positive-integer validator above.
+  if (value === null || value === undefined || value === 0) {
+    return 1;
+  }
+  return requireSourceLifecycleEpoch(value);
 }
 
 function requireConnectionId(value: string): string {
