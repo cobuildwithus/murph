@@ -81,6 +81,7 @@ import {
   normalizeJunctionSleepStageValue,
   normalizeJunctionResourceName,
   resolveJunctionTimeseriesResourcePolicy,
+  usesJunctionTimeseriesIntervalStartOwnership,
   type JunctionSleepStageValue,
   type JunctionTimeseriesResource,
 } from "./junction-resources.ts";
@@ -457,7 +458,7 @@ const JUNCTION_RECORD_TIMESTAMP_PATHS = [
   ...JUNCTION_RECORD_INTERVAL_END_TIMESTAMP_PATHS,
   ...JUNCTION_RECORD_INTERVAL_START_TIMESTAMP_PATHS,
 ] as const;
-const JUNCTION_DAILY_AGGREGATE_TIMESTAMP_PATHS = [
+const JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS = [
   ...JUNCTION_RECORD_POINT_TIMESTAMP_PATHS,
   ...JUNCTION_RECORD_INTERVAL_START_TIMESTAMP_PATHS,
   ...JUNCTION_RECORD_INTERVAL_END_TIMESTAMP_PATHS,
@@ -2619,7 +2620,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       entry,
       input.context,
       resourceContext.sourceProviderSlug,
-      JUNCTION_DAILY_AGGREGATE_TIMESTAMP_PATHS,
+      JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS,
     );
     const sampleAt = resolveJunctionDailyAggregateSampleAt(
       timestamp,
@@ -3013,6 +3014,11 @@ function buildJunctionFeatureTimeseriesAggregates(input: {
 }): JunctionFeatureTimeseriesAggregate[] {
   const evidencePartRole = `junction-timeseries-feature-${input.resourceSlug}`;
   const aggregates = new Map<string, JunctionFeatureTimeseriesAggregate>();
+  const timestampPaths = usesJunctionTimeseriesIntervalStartOwnership(
+    resolveJunctionTimeseriesResourcePolicy(input.resource),
+  )
+    ? JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS
+    : JUNCTION_RECORD_TIMESTAMP_PATHS;
 
   for (const [index, { entry, originFallback }] of timeseriesResourceEntries(input.payload).entries()) {
     const resourceContext = buildResourceContext({
@@ -3033,13 +3039,18 @@ function buildJunctionFeatureTimeseriesAggregates(input: {
       firstNumberFromPaths(entry, input.descriptor.valuePaths),
       entry,
     );
-    const rawSampleAt = firstValueFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS);
+    const rawSampleAt = firstValueFromPaths(entry, timestampPaths);
     const sampleAt = resolveSafeTimestamp(rawSampleAt, resourceContext.sourceProviderSlug);
     if (value === undefined || !sampleAt) {
       continue;
     }
 
-    const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
+    const timestamp = resolveRecordTimestamp(
+      entry,
+      input.context,
+      resourceContext.sourceProviderSlug,
+      timestampPaths,
+    );
     const dayKey = extractIsoDatePrefix(sampleAt) ?? undefined;
     if (!dayKey) {
       continue;

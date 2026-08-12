@@ -12,6 +12,7 @@ export {
   JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES,
   normalizeJunctionResourceName,
   resolveJunctionTimeseriesResourcePolicy,
+  usesJunctionTimeseriesIntervalStartOwnership,
   type JunctionTimeseriesHistoryWindow,
   type JunctionTimeseriesNormalizationMode,
   type JunctionTimeseriesResource,
