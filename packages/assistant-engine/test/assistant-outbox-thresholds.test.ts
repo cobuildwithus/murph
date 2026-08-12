@@ -869,7 +869,7 @@ describe('assistant outbox thresholds', () => {
     })
   })
 
-  it('runs the persist hook only after the canonical sent mark', async () => {
+  it('runs required delivery persistence before the canonical sent mark', async () => {
     const delivery = createDelivery({
       providerMessageId: 'provider-raced-send',
       sentAt: '2026-04-08T13:01:00.000Z',
@@ -892,16 +892,13 @@ describe('assistant outbox thresholds', () => {
     const persistDeliveredIntent = vi.fn(async ({ intent }) => {
       expect(intent).toMatchObject({
         delivery,
-        sentAt: '2026-04-08T13:01:00.000Z',
-        status: 'sent',
-        updatedAt: '2026-04-08T13:01:00.000Z',
+        deliveryConfirmationPending: false,
+        sentAt: null,
+        status: 'sending',
       })
     })
-
     const dispatched = await outbox.dispatchAssistantOutboxIntent({
-      dispatchHooks: {
-        persistDeliveredIntent,
-      },
+      dispatchHooks: { persistDeliveredIntent },
       force: true,
       intentId: seeded.intentId,
       now: new Date('2026-04-08T13:01:00.000Z'),

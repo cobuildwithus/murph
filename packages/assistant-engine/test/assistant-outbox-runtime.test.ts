@@ -3149,6 +3149,7 @@ describe('assistant outbox runtime', () => {
     }))
 
     const sent = await deliverAssistantOutboxReaction({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-1'],
       channel: 'linq',
       dependencies: {
         setLinqMessageReaction,
@@ -3164,6 +3165,9 @@ describe('assistant outbox runtime', () => {
     expect(sent.kind).toBe('sent')
     expect(sent.intent.status).toBe('sent')
     expect(sent.intent.deliveryTransportIdempotent).toBe(false)
+    expect(sent.intent.answeredMailboxItemIds).toEqual([
+      'mailbox-linq-reaction-1',
+    ])
     expect(sent.intent.operation).toEqual({
       kind: 'message-reaction',
       reaction: 'heart',
@@ -3201,6 +3205,171 @@ describe('assistant outbox runtime', () => {
       kind: 'message-reaction',
       reaction: 'laugh',
     })
+  })
+
+  it('retains an accepted Linq reaction receipt while exact-consume confirmation retries', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-reaction-confirmation-',
+    )
+    const setLinqMessageReaction = vi.fn(async (input: {
+      reaction: 'heart' | 'thumbs_up' | 'laugh'
+      target: string
+      targetMessageId: string
+    }) => ({
+      reaction: input.reaction,
+      target: input.target,
+      targetKind: 'thread' as const,
+      targetMessageId: input.targetMessageId,
+    }))
+    const persistDeliveredIntent = vi.fn(async (input: {
+      intent: AssistantOutboxIntent
+    }) => {
+      expect(input.intent.answeredMailboxItemIds).toEqual([
+        'mailbox-linq-reaction-confirmation',
+      ])
+      expect(input.intent.delivery).toMatchObject({
+        channel: 'linq',
+        kind: 'message-reaction',
+        targetMessageId: 'linq-message-confirmation',
+      })
+      throw new Error('Web confirmation unavailable')
+    })
+
+    const first = await deliverAssistantOutboxReaction({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-confirmation'],
+      channel: 'linq',
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      dispatchHooks: {
+        persistDeliveredIntent,
+      },
+      explicitTarget: 'linq-chat-confirmation',
+      reaction: 'thumbs_up',
+      sessionId: 'session-linq-reaction-confirmation',
+      targetMessageId: 'linq-message-confirmation',
+      turnId: 'turn-linq-reaction-confirmation',
+      vault: vaultRoot,
+    })
+
+    expect(first.kind).toBe('queued')
+    expect(first.intent).toMatchObject({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-confirmation'],
+      delivery: {
+        channel: 'linq',
+        kind: 'message-reaction',
+        targetMessageId: 'linq-message-confirmation',
+      },
+      deliveryConfirmationPending: true,
+      deliveryTransportIdempotent: false,
+      status: 'retryable',
+    })
+    expect(first.deliveryError).toMatchObject({
+      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    })
+    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
+    expect(persistDeliveredIntent).toHaveBeenCalledTimes(1)
+
+    const stillAwaitingConfirmation = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      force: true,
+      intentId: first.intent.intentId,
+      now: new Date('2026-04-08T01:24:00.000Z'),
+      vault: vaultRoot,
+    })
+    expect(stillAwaitingConfirmation.intent).toMatchObject({
+      deliveryConfirmationPending: true,
+      status: 'retryable',
+    })
+    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
+
+    const resolveDeliveredIntent = vi.fn(async (input: {
+      intent: AssistantOutboxIntent
+    }) => input.intent.delivery)
+    const confirmed = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      dispatchHooks: {
+        resolveDeliveredIntent,
+      },
+      force: true,
+      intentId: first.intent.intentId,
+      now: new Date('2026-04-08T01:25:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(confirmed.intent.status).toBe('sent')
+    expect(confirmed.intent.answeredMailboxItemIds).toEqual([
+      'mailbox-linq-reaction-confirmation',
+    ])
+    expect(resolveDeliveredIntent).toHaveBeenCalledTimes(1)
+    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('recovers a stale accepted Linq reaction receipt without replaying the provider', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-reaction-crash-recovery-',
+    )
+    const queued = await deliverAssistantOutboxReaction({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-crash'],
+      channel: 'linq',
+      dispatchMode: 'queue-only',
+      explicitTarget: 'linq-chat-crash',
+      reaction: 'heart',
+      sessionId: 'session-linq-reaction-crash',
+      targetMessageId: 'linq-message-crash',
+      turnId: 'turn-linq-reaction-crash',
+      vault: vaultRoot,
+    })
+    const deliveryIdempotencyKey =
+      `assistant-outbox:${queued.intent.intentId}`
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      attemptCount: 1,
+      delivery: {
+        channel: 'linq',
+        idempotencyKey: deliveryIdempotencyKey,
+        kind: 'message-reaction',
+        reaction: 'heart',
+        sentAt: '2026-04-08T01:00:01.000Z',
+        target: 'linq-chat-crash',
+        targetKind: 'thread',
+        targetMessageId: 'linq-message-crash',
+      },
+      deliveryIdempotencyKey,
+      deliveryTransportIdempotent: false,
+      lastAttemptAt: '2026-04-08T01:00:00.000Z',
+      lastError: null,
+      nextAttemptAt: null,
+      status: 'sending',
+      updatedAt: '2026-04-08T01:00:01.000Z',
+    })
+    const setLinqMessageReaction = vi.fn()
+    const resolveDeliveredIntent = vi.fn(async (input: {
+      intent: AssistantOutboxIntent
+    }) => input.intent.delivery)
+
+    const recovered = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        setLinqMessageReaction,
+      },
+      dispatchHooks: {
+        resolveDeliveredIntent,
+      },
+      intentId: queued.intent.intentId,
+      now: new Date('2026-04-08T01:20:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(recovered.intent.status).toBe('sent')
+    expect(recovered.intent.answeredMailboxItemIds).toEqual([
+      'mailbox-linq-reaction-crash',
+    ])
+    expect(resolveDeliveredIntent).toHaveBeenCalledTimes(1)
+    expect(setLinqMessageReaction).not.toHaveBeenCalled()
   })
 
   it('keeps deduped Linq reaction updates non-idempotent', async () => {
@@ -3246,6 +3415,7 @@ describe('assistant outbox runtime', () => {
     })
 
     const sent = await deliverAssistantOutboxReaction({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-update'],
       channel: 'linq',
       dedupeToken: 'linq-reaction-slot',
       dependencies: {
@@ -3261,6 +3431,9 @@ describe('assistant outbox runtime', () => {
 
     expect(sent.kind).toBe('sent')
     expect(sent.intent.intentId).toBe(queued.intent.intentId)
+    expect(sent.intent.answeredMailboxItemIds).toEqual([
+      'mailbox-linq-reaction-update',
+    ])
     expect(sent.intent.deliveryTransportIdempotent).toBe(false)
     expect(sent.intent.operation).toEqual({
       kind: 'message-reaction',
@@ -3270,6 +3443,7 @@ describe('assistant outbox runtime', () => {
     await expect(
       readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
     ).resolves.toMatchObject({
+      answeredMailboxItemIds: ['mailbox-linq-reaction-update'],
       deliveryTransportIdempotent: false,
       operation: {
         kind: 'message-reaction',

@@ -67,7 +67,7 @@ export async function reconcileAssistantPrivateCompletionContinuityForSession(
 }
 
 /**
- * Runs from the hosted outbox's post-sent hook. If exactly one
+ * Runs from the hosted delivery's post-sent runtime step. If exactly one
  * pre-existing ordinary direct session matches the authenticated delivery
  * route, join immediately. Otherwise the next direct session resolution owns
  * the same replay-safe reconciliation before provider resume selection.

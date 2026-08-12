@@ -965,8 +965,12 @@ function bodyStateResolvedMetrics(summary: ProjectedWearableBodyStateSummary): W
   return [
     summary.bmi,
     summary.bodyFatPercentage,
+    summary.bodyWaterPercentage,
+    summary.boneMassPercentage,
     summary.leanBodyMassKg,
+    summary.muscleMassPercentage,
     summary.temperature,
+    summary.visceralFatIndex,
     summary.waistCircumference,
     summary.weightKg,
   ];

@@ -66,7 +66,7 @@ identity or persist a resumable notification thread.
 An authenticated current-sender private Assistant Ask completion is the narrow
 deterministic exception. It starts no formatter or provider turn and does not
 mutate the member's ordinary conversation when the notification is queued.
-Only after the hosted outbox reaches canonical `sent` does the durable delivery
+Only after the hosted outbox reaches canonical `sent` does the hosted runtime
 import the exact reviewed assistant text into the exact ordinary direct session
 bound at queue time. If none existed, the intent remains unbound until the first
 canonical attended direct turn; another same-route detached session is never

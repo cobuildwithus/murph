@@ -238,18 +238,19 @@ describe('private completion continuity', () => {
               targetKind: 'thread',
             }),
           },
-          dispatchHooks: {
-            persistDeliveredIntent: async ({ intent, vault }) =>
-              persistAssistantPrivateCompletionContinuityAfterDelivery({
-                intent,
-                vault,
-              }),
-          },
           force: true,
           intentId: partial.intentId,
           vault: fixture.vaultRoot,
         })
         expect(recovered.intent.status).toBe('sent')
+        await expect(listAssistantTranscriptEntries(
+          fixture.vaultRoot,
+          fixture.ordinarySession.sessionId,
+        )).resolves.toEqual([])
+        await persistAssistantPrivateCompletionContinuityAfterDelivery({
+          intent: recovered.intent,
+          vault: fixture.vaultRoot,
+        })
         await expect(listAssistantTranscriptEntries(
           fixture.vaultRoot,
           fixture.ordinarySession.sessionId,
@@ -270,7 +271,7 @@ describe('private completion continuity', () => {
     },
   )
 
-  it('keeps provider delivery sent when the continuity hook fails and repairs on the next direct turn', async () => {
+  it('repairs a canonically sent completion on the next direct turn without provider resend', async () => {
     const fixture = await createBoundContinuityFixture(
       'private-continuity-post-send-repair-',
     )
@@ -286,24 +287,14 @@ describe('private completion continuity', () => {
       target: locator.bindingDeliveryTarget,
       targetKind: 'thread' as const,
     }))
-    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
     const dispatched = await dispatchAssistantOutboxIntent({
       dependencies: { sendLinq },
-      dispatchHooks: {
-        persistDeliveredIntent: async () => {
-          throw new Error('Synthetic continuity interruption.')
-        },
-      },
       force: true,
       intentId: pending.intentId,
       vault: fixture.vaultRoot,
     })
     expect(dispatched.intent.status).toBe('sent')
     expect(sendLinq).toHaveBeenCalledOnce()
-    expect(warning).toHaveBeenCalledWith(
-      'Assistant best-effort outbox post-send persistence failed (Error).',
-    )
     await expect(listAssistantTranscriptEntries(
       fixture.vaultRoot,
       fixture.ordinarySession.sessionId,
@@ -382,13 +373,6 @@ describe('private completion continuity', () => {
           target: locator.bindingDeliveryTarget,
           targetKind: 'thread',
         }),
-      },
-      dispatchHooks: {
-        persistDeliveredIntent: async ({ intent, vault }) =>
-          persistAssistantPrivateCompletionContinuityAfterDelivery({
-            intent,
-            vault,
-          }),
       },
       force: true,
       intentId: persistedLegacy.intentId,
@@ -620,13 +604,6 @@ describe('private completion continuity', () => {
           target: locator.bindingDeliveryTarget,
           targetKind: 'thread',
         }),
-      },
-      dispatchHooks: {
-        persistDeliveredIntent: async ({ intent, vault }) =>
-          persistAssistantPrivateCompletionContinuityAfterDelivery({
-            intent,
-            vault,
-          }),
       },
       force: true,
       intentId: pending.intentId,
