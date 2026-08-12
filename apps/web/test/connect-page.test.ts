@@ -2698,6 +2698,29 @@ test("SourceCard shows modern Dexcom as coming soon without hiding existing-acco
 
   assert.match(connectedMarkup, /aria-label="Disconnect account"/u);
   assert.doesNotMatch(connectedMarkup, />Coming soon<\/button>/u);
+
+  const recoveryMarkup = renderToStaticMarkup(
+    createElement(SourceCard, {
+      ...cardProps,
+      authenticated: true,
+      source: {
+        ...source,
+        connected: true,
+        disconnectConnectionId: "dsc_dexcom_recovery",
+        disconnectScope: "junction_account" as const,
+        requiresReconnect: true,
+      },
+    }),
+  );
+
+  assert.match(
+    recoveryMarkup,
+    /Dexcom reconnects are not available yet\. Your existing history is still available\./u,
+  );
+  assert.match(recoveryMarkup, />Coming soon<\/button>/u);
+  assert.match(recoveryMarkup, /aria-label="Disconnect account"/u);
+  assert.doesNotMatch(recoveryMarkup, /connected app/u);
+  assert.doesNotMatch(recoveryMarkup, /aria-label="Reconnect Dexcom"/u);
 });
 
 test("SourceCard does not promise unavailable Strava recovery connections", async () => {
@@ -4600,6 +4623,110 @@ test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconne
     "https://apps.apple.com/us/app/murph-ai/id6786145859",
   );
   assert.doesNotMatch(rendered.container.textContent ?? "", /Not available/u);
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid warns before disconnecting unavailable Dexcom and stays fail-closed afterward", async () => {
+  const fetch = vi.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return Response.json({});
+    },
+  );
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [
+        {
+          connectionAvailable: false,
+          connected: true,
+          description: "CGM glucose readings and trends.",
+          disconnectConnectionId: "dsc_dexcom_existing",
+          disconnectScope: "junction_account",
+          id: "dexcom",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/dexcom.png",
+            width: 44,
+          },
+          name: "Dexcom",
+          unavailableActionLabel: "Coming soon",
+          unavailableMessage: "Dexcom connections are coming soon.",
+        },
+      ],
+    }),
+  );
+
+  const disconnectButton = rendered.container.querySelector(
+    "button[aria-label='Disconnect account']",
+  );
+  assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  assert.match(
+    rendered.container.textContent ?? "",
+    /You won't be able to reconnect Dexcom yet\./u,
+  );
+  const cancelButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Cancel");
+  assert.ok(cancelButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    cancelButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  assert.match(rendered.container.textContent ?? "", /Dexcom connected/u);
+  assert.equal(fetch.mock.calls.length, 0);
+
+  await act(async () => {
+    disconnectButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+  const confirmButton = [...rendered.container.querySelectorAll("button")]
+    .filter((button) => button.textContent === "Disconnect")
+    .at(-1);
+  assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    confirmButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Dexcom not connected/u);
+    assert.match(rendered.container.textContent ?? "", /Dexcom connections are coming soon\./u);
+  });
+  assert.equal(
+    fetch.mock.calls[0]?.[0],
+    "/api/settings/device-sync/connections/dsc_dexcom_existing/disconnect",
+  );
+  assert.ok(
+    rendered.container.querySelector("button[aria-label='Dexcom web setup is not available yet']"),
+  );
+  assert.equal(
+    rendered.container.querySelector("button[aria-label='Connect Dexcom']"),
+    null,
+  );
+  assert.equal(
+    rendered.container.querySelector("button[aria-label='Reconnect Dexcom']"),
+    null,
+  );
 
   await rendered.cleanup();
 });

@@ -7677,7 +7677,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         providerConfigs: {
           junction: {
             environment: "sandbox",
-            providerFilter: ["fitbit"],
+            providerFilter: ["fitbit", "dexcom_v3", "dexcom"],
             region: "us",
           },
           strava: {
@@ -7701,6 +7701,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectProviders: [
           { label: "WHOOP", provider: "whoop" },
           { label: "Fitbit", provider: "fitbit" },
+          { label: "Dexcom (G6 and older)", provider: "dexcom" },
         ],
         deviceTool: expect.objectContaining({ request: expect.any(Function) }),
         memberId: "member_synthetic_phase",
@@ -7773,7 +7774,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       action: "connect",
       provider: "strava",
     })).rejects.toThrow("not available to connect");
-    expect(connectLinkRequests).toHaveLength(1);
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom_v3",
+    })).rejects.toThrow("not available to connect");
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom",
+    })).resolves.toEqual({
+      action: "connect",
+      link: expect.objectContaining({ provider: "dexcom" }),
+    });
+    expect(connectLinkRequests).toEqual([
+      { connectTarget: "whoop", messagingReturnTarget: "telegram" },
+      { connectTarget: "dexcom", messagingReturnTarget: "telegram" },
+    ]);
     await Promise.resolve();
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
@@ -7782,8 +7797,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         deviceConnectIssueLinkAvailable: true,
         deviceConnectPortPresent: true,
-        deviceConnectProviderCount: 2,
-        deviceConnectProviders: ["whoop", "fitbit"],
+        deviceConnectProviderCount: 3,
+        deviceConnectProviders: ["whoop", "fitbit", "dexcom"],
         deviceConnectStage: "context",
         deviceConnectStatus: "available",
       }),
@@ -7799,6 +7814,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectReturnTarget: "telegram",
         expiresAtPresent: true,
         provider: "whoop",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "requested",
+        deviceConnectReturnTarget: "telegram",
+        provider: "dexcom",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "issued",
+        deviceConnectReturnTarget: "telegram",
+        expiresAtPresent: true,
+        provider: "dexcom",
       }),
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
@@ -8154,7 +8182,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).toContain("generic device-connect command is ambiguous");
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
     expect(prompt).toContain("Strava currently needs reconnect");
-    expect(prompt).toContain("No hosted reconnect target is configured for this wearable/source");
+    expect(prompt).toContain("Reconnect is not currently available for this wearable/source");
+    expect(prompt).toContain("Do not offer or issue a reconnect link");
     expect(prompt).not.toContain("vault-cli device connect strava --format json");
   });
 

@@ -126,6 +126,28 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     authenticated: true,
     errorMessage: null,
     source: {
+      connectionAvailable: false,
+      connected: true,
+      description: "CGM glucose readings and trends.",
+      disconnectConnectionId: "design-dexcom-recovery",
+      disconnectScope: "junction_account",
+      id: "dexcom-recovery",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/dexcom.png",
+        width: 128,
+      },
+      name: "Dexcom",
+      requiresReconnect: true,
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage: "Dexcom connections are coming soon.",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
       connectTarget: "whoop",
       description: "Recovery, strain, sleep, heart rate, and daily readiness.",
       disconnectConnectionId: "design-whoop-recovery",
@@ -233,7 +255,11 @@ export function ConnectSourceCardStudy({
   const studyState = searchParams?.get("connectDisconnectStudy") ?? null;
   const disconnectDialogSource = studyState === "source"
     ? DESIGN_CONNECT_SOURCE_CASES[0]?.source ?? null
-    : null;
+    : studyState === "dexcom-disconnect"
+      ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) =>
+          source.id === "dexcom-recovery"
+        )?.source ?? null
+      : null;
   const defaultStudyCases = androidAppAvailable
     ? DESIGN_CONNECT_SOURCE_CASES
     : DESIGN_CONNECT_SOURCE_CASES.filter(

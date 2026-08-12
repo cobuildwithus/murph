@@ -194,3 +194,40 @@ test("Vital handoff omits Garmin's Historical Data reminder during reconnect", a
   assert.doesNotMatch(markup, /Turn on Historical Data/u);
   assert.doesNotMatch(markup, /Garmin Historical Data reminder/u);
 });
+
+test("Dexcom disconnect warns that reconnect is not available", async () => {
+  const { ConnectDisconnectDialog } = await import(
+    "../app/(dashboard)/connect/connect-page-dialogs"
+  );
+  const markup = renderToStaticMarkup(
+    createElement(ConnectDisconnectDialog, {
+      errorMessage: null,
+      onConfirm: vi.fn(),
+      onOpenChange: vi.fn(),
+      pending: false,
+      source: {
+        connectionAvailable: false,
+        connected: true,
+        description: "CGM glucose readings and trends.",
+        disconnectConnectionId: "dsc_dexcom_existing",
+        disconnectScope: "junction_account",
+        id: "dexcom",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/dexcom.png",
+          width: 44,
+        },
+        name: "Dexcom",
+      },
+    }),
+  );
+
+  assert.match(markup, /Disconnect account\?/u);
+  assert.match(
+    markup,
+    /Your history is kept\. You won&#x27;t be able to reconnect Dexcom yet\./u,
+  );
+  assert.match(markup, />Disconnect<\/button>/u);
+  assert.match(markup, />Cancel<\/button>/u);
+});

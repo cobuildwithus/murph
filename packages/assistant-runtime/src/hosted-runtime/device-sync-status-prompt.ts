@@ -31,6 +31,7 @@ export interface HostedDeviceSyncStatusPromptReconnectTarget {
 interface HostedDeviceSyncReconnectNotice {
   commandConnectTarget: string | null;
   commandConnectTargetSafe: boolean;
+  connectionAvailable: boolean | null;
   errorCode: string;
   label: string;
   sourceProviderSlug: string | null;
@@ -343,6 +344,7 @@ function buildHostedDeviceSyncSourceReconnectNotice(input: {
       ? null
       : reconnectTarget?.connectTarget ?? null,
     commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(reconnectTarget),
+    connectionAvailable: reconnectTarget?.connectionAvailable ?? null,
     errorCode,
     label: reconnectTarget?.label
       ?? formatHostedDeviceSyncProviderLabel(input.source.sourceProviderSlug),
@@ -379,6 +381,7 @@ function buildHostedDeviceSyncAccountReconnectNotice(input: {
       ? null
       : reconnectTarget?.connectTarget ?? null,
     commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(reconnectTarget),
+    connectionAvailable: reconnectTarget?.connectionAvailable ?? null,
     errorCode,
     label: reconnectTarget?.label
       ?? (provider === "junction"
@@ -418,7 +421,9 @@ function renderHostedDeviceSyncReconnectNoticeLine(
   const subjectText = notice.sourceProviderSlug
     ? `source \`${notice.sourceProviderSlug}\` is`
     : "account is";
-  const reconnectText = notice.commandConnectTarget && notice.commandConnectTargetSafe
+  const reconnectText = notice.connectionAvailable === false
+    ? " Reconnect is not currently available for this wearable/source. Do not offer or issue a reconnect link."
+    : notice.commandConnectTarget && notice.commandConnectTargetSafe
     ? ` To send a reconnect link, run \`vault-cli device connect ${notice.commandConnectTarget} --format json\` and use the returned \`connectUrl\`.`
     : notice.commandConnectTarget
       ? " A reconnect target is configured, but the generic device-connect command is ambiguous for this wearable/source; use an exact reconnect flow instead of `vault-cli device connect`."
