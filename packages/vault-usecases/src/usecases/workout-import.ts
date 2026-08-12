@@ -1,13 +1,14 @@
+import type {
+  WorkoutCsvDistanceUnit,
+  WorkoutCsvImportPlan,
+  WorkoutCsvWeightUnit,
+} from '@murphai/importers'
+
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path, { basename, extname } from 'node:path'
 
 import { ID_PREFIXES, type JsonObject } from '@murphai/contracts'
-import {
-  type WorkoutCsvDistanceUnit,
-  type WorkoutCsvImportPlan,
-  type WorkoutCsvWeightUnit,
-} from '@murphai/importers'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { loadRuntimeModule } from '../runtime-import.js'
