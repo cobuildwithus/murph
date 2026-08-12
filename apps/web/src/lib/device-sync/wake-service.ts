@@ -422,6 +422,7 @@ function hostedConnectionSourceMatchesReconnectProof(
   return expected.id === current.id
     && expected.lastErrorCode === current.lastErrorCode
     && expected.lastErrorMessage === current.lastErrorMessage
+    && expected.lifecycleEpoch === current.lifecycleEpoch
     && expected.lastSeenAt === current.lastSeenAt
     && expected.sourceInstanceKey === current.sourceInstanceKey
     && expected.status === current.status;
@@ -507,11 +508,19 @@ export async function reconcileHostedDeviceSyncConnectionSourceRegistration(inpu
         return "admitted" as const;
       }
       if (source.status === "disconnected" && source.lastErrorCode === null) {
+        await input.store.syncDurableConnectionState({
+          ...connection,
+          metadata: clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+            metadata: connection.metadata,
+            providerSlug: sourceProviderSlug,
+          }),
+        }, tx);
         await input.store.upsertConnectionSource({
           connectionId: input.account.id,
           sourceInstanceKey: source.sourceInstanceKey,
           sourceProviderSlug,
           status: "connected",
+          lifecycleEpoch: nextHostedSourceLifecycleEpoch(source.lifecycleEpoch),
           lastErrorCode: null,
           lastErrorMessage: null,
           lastSeenAt: nextHostedSourceLifecycleAt(source.lastSeenAt),
@@ -1401,6 +1410,13 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
           sourceInstanceKey: linkedSource.sourceInstanceKey,
           sourceProviderSlug: linkedSource.sourceProviderSlug,
           status: "connected",
+          ...(currentSource?.status === "disconnected"
+            ? {
+                lifecycleEpoch: nextHostedSourceLifecycleEpoch(
+                  currentSource.lifecycleEpoch,
+                ),
+              }
+            : {}),
           firstSeenAt: input.now,
           lastSeenAt: input.now,
           tx,
@@ -1605,6 +1621,18 @@ function nextHostedSourceLifecycleAt(previous: string | null): string {
     Date.now(),
     Number.isFinite(previousMs) ? previousMs + 1 : 0,
   )));
+}
+
+function nextHostedSourceLifecycleEpoch(previous: number): number {
+  if (!Number.isSafeInteger(previous) || previous < 1 || previous >= Number.MAX_SAFE_INTEGER) {
+    throw deviceSyncError({
+      code: "CONNECTION_SOURCE_LIFECYCLE_EPOCH_INVALID",
+      message: "Device source lifecycle state was invalid. Reconnect the parent connection.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  return previous + 1;
 }
 
 function isHostedSourceConnectionStartOlder(

@@ -1094,6 +1094,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260810150000_hosted_usage_credit_grant_slot_release",
       "20260811160000_add_group_sponsorship_funding_alias_publication",
       "20260811190000_hosted_linq_provider_event_diagnostics_retention_index",
+      "20260812080000_device_source_lifecycle_epoch",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(
@@ -2298,6 +2299,25 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedVaultShareActiveIndexesMigrationSql.match(/WHERE "status" = 'granted'/gu))
       .toHaveLength(2);
+  });
+
+  it("adds an exact-source reconnect epoch with a rolling-compatible default", () => {
+    const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
+    const migrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260812080000_device_source_lifecycle_epoch/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(schema).toContain(
+      'lifecycleEpoch                  Int              @default(1) @map("lifecycle_epoch")',
+    );
+    expect(migrationSql).toContain(
+      'ADD COLUMN "lifecycle_epoch" INTEGER NOT NULL DEFAULT 1',
+    );
+    expect(migrationSql).not.toMatch(/update|delete|drop/iu);
   });
 
   it("makes eligible stuck device connections due even when their reconcile is scheduled in the future", () => {

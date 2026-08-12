@@ -115,14 +115,6 @@ export const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES = Object
   "afib_burden",
   "blood_pressure",
   "note",
-  "insulin_injection",
-  "carbohydrates",
-  "workout_duration",
-  "weight",
-  "fat",
-  "body_mass_index",
-  "lean_body_mass",
-  "waist_circumference",
 ] as const satisfies readonly JunctionResourceName[]);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_SOURCE_INDEX = new Map(
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_SOURCE_SLUGS.map((providerSlug, index) =>

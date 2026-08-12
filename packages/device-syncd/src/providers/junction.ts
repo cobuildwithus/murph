@@ -8,7 +8,6 @@ import {
   JUNCTION_DEFAULT_TIMESERIES_HISTORY_DAYS,
   JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
   JUNCTION_KNOWN_WEBHOOK_RESOURCES,
-  JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES,
   JUNCTION_TIMESERIES_RESOURCES,
   parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
@@ -182,6 +181,7 @@ interface JunctionPreciseTimeseriesImportOptions {
   historicalProviderRecordsSeen?: boolean;
   historyChunkDays?: number;
   preservePartialRetryableFailure?: boolean;
+  sourceLifecycleEpoch?: number;
   sourceStatusRequirement?: JunctionImportSourceStatusRequirement;
 }
 
@@ -197,7 +197,7 @@ interface JunctionImportAdmissionSource {
 }
 
 type JunctionImportSourceStatusRequirement = "connected" | "not_disconnected";
-type JunctionCurrentSourceAdmission = "admitted" | "fenced" | "pending";
+type JunctionCurrentSourceAdmission = "admitted" | "fenced" | "pending" | "superseded";
 
 interface JunctionHistoricalUnresolvedProviderRecords {
   identities: readonly string[];
@@ -341,14 +341,6 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = new Map(
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
 );
-const JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCE_SET = new Set<string>(
-  JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES,
-);
-// The importer applies this after validation and stable-identity deduplication.
-// Keeping the remaining budget in the existing daily invocation makes replay
-// consume the same deterministic configured-resource prefix without persisting
-// another progress owner or admitting full timeseries payloads.
-const JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_DAY = 100;
 const JUNCTION_MAX_EXTENDED_HISTORY_SOURCES_PER_RESOURCE = JUNCTION_CONNECT_SOURCE_TARGETS.length;
 const JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE = 8;
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
@@ -686,7 +678,10 @@ export function createJunctionDeviceSyncProvider(
         return [];
       }
 
-      const scheduledSources = new Map<string, string>();
+      const scheduledSources = new Map<
+        string,
+        { firstSeenAt: string; lifecycleEpoch: number }
+      >();
       for (const source of account.sources ?? []) {
         const sourceProviderSlug = normalizeProviderSlug(source.sourceProviderSlug);
         if (
@@ -709,25 +704,34 @@ export function createJunctionDeviceSyncProvider(
         ) {
           continue;
         }
-        const existingFirstSeenAt = scheduledSources.get(sourceProviderSlug);
-        if (!existingFirstSeenAt || Date.parse(source.firstSeenAt) < Date.parse(existingFirstSeenAt)) {
-          scheduledSources.set(sourceProviderSlug, source.firstSeenAt);
+        const existingSource = scheduledSources.get(sourceProviderSlug);
+        if (
+          !existingSource
+          || Date.parse(source.firstSeenAt) < Date.parse(existingSource.firstSeenAt)
+        ) {
+          scheduledSources.set(sourceProviderSlug, {
+            firstSeenAt: source.firstSeenAt,
+            lifecycleEpoch: source.lifecycleEpoch ?? 1,
+          });
         }
       }
 
       return [...scheduledSources.entries()]
         .sort(([left], [right]) => left.localeCompare(right))
         .slice(0, JUNCTION_MAX_EXTENDED_HISTORY_SOURCES_PER_RESOURCE)
-        .map(([sourceProviderSlug, firstSeenAt]) => {
+        .map(([sourceProviderSlug, source]) => {
           const window = buildExtendedTimeseriesBackfillWindow(
             resource,
-            policy.historyAnchor === "schedule_time" ? now : firstSeenAt,
+            policy.historyAnchor === "schedule_time" ? now : source.firstSeenAt,
           );
           return buildExtendedTimeseriesBackfillJob({
             availableAt: now,
             ...(resource === "note" ? { historicalBackfillVersion: policy.version } : {}),
             historicalWindowStart: window.windowStart,
             resource,
+            ...(policy.historyAnchor === "schedule_time"
+              ? { sourceLifecycleEpoch: source.lifecycleEpoch }
+              : {}),
             sourceProviderSlug,
             windowEnd: window.windowEnd,
             windowStart: window.windowStart,
@@ -1957,14 +1961,30 @@ export function createJunctionDeviceSyncProvider(
       if (inferredCategory === "timeseries") {
         const extendedHistoricalBackfill =
           isJunctionExtendedTimeseriesBackfillJob(job, effectiveResource);
+        const extendedHistoryPolicy = extendedHistoricalBackfill
+          ? resolveJunctionExtendedTimeseriesBackfillPolicy(effectiveResource)
+          : null;
+        const sourceLifecycleEpoch = extendedHistoryPolicy?.historyAnchor === "schedule_time"
+          ? readJunctionSourceLifecycleEpoch(job.payload)
+          : null;
+        if (
+          extendedHistoryPolicy?.historyAnchor === "schedule_time"
+          && sourceLifecycleEpoch === null
+        ) {
+          // Pre-epoch schedule-time jobs cannot certify a current source
+          // lifecycle. Complete them without import so the current scheduler
+          // can offer an epoch-bound replacement.
+          return {};
+        }
         let sourceProviders: readonly JunctionProviderConnection[];
-        let currentSourceAdmission: "admitted" | "fenced" | "pending" = "admitted";
+        let currentSourceAdmission: JunctionCurrentSourceAdmission = "admitted";
         try {
           sourceProviders = await loadAndProjectSourceProviders();
           if (extendedHistoricalBackfill && sourceProviderSlug) {
             currentSourceAdmission = await resolveJunctionCurrentSourceAdmission(
               context,
               sourceProviderSlug,
+              sourceLifecycleEpoch ?? undefined,
             );
           }
         } catch (error) {
@@ -1999,6 +2019,9 @@ export function createJunctionDeviceSyncProvider(
           throw error;
         }
         if (currentSourceAdmission === "fenced") {
+          return {};
+        }
+        if (currentSourceAdmission === "superseded") {
           return {};
         }
         if (
@@ -2056,6 +2079,9 @@ export function createJunctionDeviceSyncProvider(
                 ?.historyChunkDays
               : undefined,
             preservePartialRetryableFailure: extendedHistoricalBackfill,
+            sourceLifecycleEpoch: extendedHistoricalBackfill
+              ? sourceLifecycleEpoch ?? undefined
+              : undefined,
             sourceStatusRequirement: extendedHistoricalBackfill
               ? "connected"
               : undefined,
@@ -2064,6 +2090,12 @@ export function createJunctionDeviceSyncProvider(
         if (
           extendedHistoricalBackfill
           && timeseriesImport.postFetchSourceAdmission === "fenced"
+        ) {
+          return {};
+        }
+        if (
+          extendedHistoricalBackfill
+          && timeseriesImport.postFetchSourceAdmission === "superseded"
         ) {
           return {};
         }
@@ -2357,6 +2389,12 @@ export function createJunctionDeviceSyncProvider(
           historicalUnresolvedProviderRecordCount: unresolvedProviderRecordCount,
           historicalWindowStart,
           resource: input.resource,
+          ...(readJunctionSourceLifecycleEpoch(input.job.payload) === null
+            ? {}
+            : {
+                sourceLifecycleEpoch:
+                  readJunctionSourceLifecycleEpoch(input.job.payload) ?? undefined,
+              }),
           sourceProviderSlug,
           windowEnd: input.window.windowEnd,
           windowStart: input.importResult.fetchComplete
@@ -2876,6 +2914,7 @@ export function createJunctionDeviceSyncProvider(
           postFetchSourceAdmission = await resolveJunctionCurrentSourceAdmission(
             context,
             sourceProviderSlug,
+            options.sourceLifecycleEpoch,
           );
           if (postFetchSourceAdmission !== "admitted") {
             return {
@@ -2931,6 +2970,16 @@ export function createJunctionDeviceSyncProvider(
               + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
           }
         }
+        if (
+          sourceProviderSlug
+          && options.sourceStatusRequirement === "connected"
+        ) {
+          postFetchSourceAdmission = await resolveJunctionCurrentSourceAdmission(
+            context,
+            sourceProviderSlug,
+            options.sourceLifecycleEpoch,
+          );
+        }
       } catch (error) {
         if (
           options.preservePartialRetryableFailure === true
@@ -2983,13 +3032,7 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug?: string | null,
   ): Promise<JunctionTimeseriesImportResult> {
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
-      let remainingSparseClinicalReadings = JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_DAY;
       for (const resource of resources ?? timeseriesResources) {
-        const sparseClinicalResource =
-          JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCE_SET.has(resource);
-        if (sparseClinicalResource && remainingSparseClinicalReadings === 0) {
-          continue;
-        }
         if (context.shouldYield?.()) {
           return {
             yieldedAt: window.windowStart,
@@ -3014,7 +3057,7 @@ export function createJunctionDeviceSyncProvider(
           sourceProviders,
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-          const receipt = await context.importSnapshot({
+          await context.importSnapshot({
             provider: "junction",
             accountId: buildJunctionImportAccountId(context.account.externalAccountId),
             connectionId: context.account.id,
@@ -3024,21 +3067,7 @@ export function createJunctionDeviceSyncProvider(
             connections: preparedImport.connections,
             summaries: {},
             timeseries: preparedImport.snapshots,
-            ...(sparseClinicalResource
-              ? { sparseClinicalReadingLimit: remainingSparseClinicalReadings }
-              : {}),
           });
-          if (sparseClinicalResource) {
-            const admittedReadingCount = readProviderSnapshotCanonicalEventCount(receipt);
-            if (admittedReadingCount > remainingSparseClinicalReadings) {
-              throw deviceSyncError({
-                code: "JUNCTION_SPARSE_CLINICAL_IMPORT_LIMIT_EXCEEDED",
-                message: "Junction sparse clinical import exceeded its daily admission limit.",
-                retryable: false,
-              });
-            }
-            remainingSparseClinicalReadings -= admittedReadingCount;
-          }
         }
       }
     }
@@ -6195,6 +6224,7 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
       "extended-timeseries-backfill",
       normalizeProviderSlug(payload.sourceProviderSlug),
       resource,
+      readJunctionSourceLifecycleEpoch(payload),
       resource === "note"
         ? readJunctionNoteHistoryBackfillVersion(payload)
         : policy.version,
@@ -6222,6 +6252,7 @@ function buildExtendedTimeseriesBackfillJob(input: {
   historicalUnresolvedProviderRecordCount?: number;
   historicalWindowStart: string;
   resource: string;
+  sourceLifecycleEpoch?: number;
   sourceProviderSlug: string | null;
   windowEnd: string;
   windowStart: string;
@@ -6256,6 +6287,9 @@ function buildExtendedTimeseriesBackfillJob(input: {
     historicalWindowStart: input.historicalWindowStart,
     resource: input.resource,
     resourceCategory: "timeseries",
+    ...(input.sourceLifecycleEpoch === undefined
+      ? {}
+      : { sourceLifecycleEpoch: input.sourceLifecycleEpoch }),
     ...(input.sourceProviderSlug
       ? { sourceProviderSlug: input.sourceProviderSlug }
       : {}),
@@ -6284,6 +6318,15 @@ function readJunctionNoteHistoryBackfillVersion(
   return typeof version === "number" && Number.isSafeInteger(version) && version >= 1
     ? version
     : 1;
+}
+
+function readJunctionSourceLifecycleEpoch(
+  payload: Record<string, unknown>,
+): number | null {
+  const epoch = payload.sourceLifecycleEpoch;
+  return typeof epoch === "number" && Number.isSafeInteger(epoch) && epoch >= 1
+    ? epoch
+    : null;
 }
 
 function buildJunctionWebhookJobs(input: {
@@ -7487,12 +7530,23 @@ function hasJunctionSourceListing(
 async function resolveJunctionCurrentSourceAdmission(
   context: ProviderJobContext,
   sourceProviderSlug: string,
-): Promise<"admitted" | "fenced" | "pending"> {
+  expectedLifecycleEpoch?: number,
+): Promise<JunctionCurrentSourceAdmission> {
   const sources = context.listConnectionSources
     ? await context.listConnectionSources({ sourceProviderSlug })
     : context.account.sources ?? [];
   if (isJunctionSourceProjectionFenced(sources, sourceProviderSlug)) {
     return "fenced";
+  }
+  if (
+    expectedLifecycleEpoch !== undefined
+    && (sources.length > 0 || context.connectionSourceAdmissionMode === "listed_only")
+    && !sources.some((source) =>
+      normalizeProviderSlug(source.sourceProviderSlug) === sourceProviderSlug
+      && (source.lifecycleEpoch ?? 1) === expectedLifecycleEpoch
+    )
+  ) {
+    return "superseded";
   }
   return isJunctionSourceAdmittedForImport(
     sources,

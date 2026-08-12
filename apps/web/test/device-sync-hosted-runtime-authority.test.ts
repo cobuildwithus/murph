@@ -178,6 +178,7 @@ function createAuthorityHarness(input: {
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
     lastSeenAt: string | null;
+    lifecycleEpoch?: number;
     resourceAvailabilitySummary: Record<string, unknown>;
     sourceInstanceKey?: string;
     sourceProviderSlug: string;
@@ -266,6 +267,7 @@ function createAuthorityHarness(input: {
 
   const connectionSources = (input.connectionSources ?? []).map((source) => ({
     ...source,
+    lifecycleEpoch: source.lifecycleEpoch ?? 1,
     sourceInstanceKey: source.sourceInstanceKey ?? source.sourceProviderSlug,
   }));
   const store = {
@@ -1001,6 +1003,74 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       .toHaveBeenCalledWith(
         expect.objectContaining({ lastDataAt: "2026-04-09T00:00:00.000Z" }),
       );
+  });
+
+  it("rejects a runtime source projection from an older reconnect epoch", async () => {
+    const connectionId = "conn_junction_epoch";
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId,
+      sourceProviderSlug: "oura",
+    });
+    if (!sourceInstanceKey) {
+      throw new Error("Expected a canonical Junction source instance key.");
+    }
+    const harness = createAuthorityHarness({
+      connectionSources: [{
+        connectionId,
+        displayName: "Oura",
+        firstSeenAt: "2026-04-06T09:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-06T10:00:00.000Z",
+        lifecycleEpoch: 2,
+        resourceAvailabilitySummary: { note: true },
+        sourceInstanceKey,
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }],
+      record: buildHostedRecord({
+        id: connectionId,
+        provider: "junction",
+      }),
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{
+            connectionId,
+            observedConnectedAt: "2026-04-06T09:00:00.000Z",
+            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+            sources: [{
+              displayName: "Oura",
+              firstSeenAt: "2026-04-06T09:00:00.000Z",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-04-06T10:05:00.000Z",
+              lifecycleEpoch: 1,
+              observedLifecycleEpoch: 1,
+              observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+              resourceAvailabilitySummary: { note: true },
+              sourceInstanceKey,
+              sourceProviderSlug: "oura",
+              status: "connected",
+            }],
+          }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(response.updates[0]).toMatchObject({
+      connectionId,
+      writeUpdate: "skipped_version_mismatch",
+    });
+    expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -2720,6 +2790,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       lastErrorCode: null,
       lastErrorMessage: null,
       lastSeenAt: `2026-04-06T10:0${index}:00.000Z`,
+      lifecycleEpoch: 1,
       resourceAvailabilitySummary: {},
       sourceInstanceKey: `source-${index + 1}`,
       sourceProviderSlug: `source_${index + 1}`,

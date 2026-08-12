@@ -14120,6 +14120,7 @@ test("Junction sparse-history policy keeps schedule-time retry identity stable a
       "extended-timeseries-backfill",
       "garmin",
       "caffeine",
+      1,
       JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     ]))
     .digest("hex");
@@ -14129,6 +14130,7 @@ test("Junction sparse-history policy keeps schedule-time retry identity stable a
       "extended-timeseries-backfill",
       "garmin",
       "caffeine",
+      1,
       JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION + 1,
     ]))
     .digest("hex");

@@ -312,6 +312,7 @@ function buildHostedConnectionSource(
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
     lastSeenAt: string;
+    lifecycleEpoch: number;
     status: "connected" | "disconnected" | "error" | "unavailable";
   }> = {},
 ) {
@@ -333,6 +334,7 @@ function buildHostedConnectionSource(
     lastErrorCode: null,
     lastErrorMessage: null,
     lastSeenAt: "2026-03-26T12:00:00.000Z",
+    lifecycleEpoch: 1,
     resourceAvailabilitySummary: { sleep: true },
     sourceInstanceKey,
     sourceProviderSlug,
@@ -1914,6 +1916,7 @@ describe("hosted device-sync wakes", () => {
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? existing.lifecycleEpoch,
         status: input.status ?? existing.status,
       };
       sources = sources.map((source) => source.id === existing.id ? updated : source);
@@ -2081,6 +2084,7 @@ describe("hosted device-sync wakes", () => {
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        lifecycleEpoch: input.lifecycleEpoch ?? existing.lifecycleEpoch,
         status: input.status ?? existing.status,
       };
       sources = sources.map((source) => source.id === existing.id ? updated : source);
@@ -2110,12 +2114,21 @@ describe("hosted device-sync wakes", () => {
     });
     expect(currentConnection.metadata.junctionExtendedHistoryCoverage).toMatch(/^m2\|/u);
     expect(sources).toEqual(expect.arrayContaining([
-      expect.objectContaining({ sourceProviderSlug: "garmin", status: "connected" }),
-      expect.objectContaining({ sourceProviderSlug: "oura", status: "connected" }),
+      expect.objectContaining({
+        lifecycleEpoch: 2,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      }),
+      expect.objectContaining({
+        lifecycleEpoch: 1,
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }),
     ]));
 
     await expect(establish()).resolves.toBeUndefined();
     expect(mocks.syncDurableConnectionState).toHaveBeenCalledTimes(1);
+    expect(sources.find((source) => source.sourceProviderSlug === "garmin")?.lifecycleEpoch).toBe(2);
   });
 
   it("restores the selected Junction source when provider revoke fails", async () => {

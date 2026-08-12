@@ -132,6 +132,7 @@ function createSourceSummary(
   resourceAvailabilitySummary: Record<string, string | number | boolean | null> = {
     blood_pressure: true,
   },
+  lifecycleEpoch = 1,
 ): NonNullable<DeviceSyncAccount["sources"]>[number] {
   return {
     displayName: sourceProviderSlug,
@@ -140,6 +141,7 @@ function createSourceSummary(
     lastErrorCode: null,
     lastErrorMessage: null,
     lastSeenAt: NOW,
+    lifecycleEpoch,
     resourceCount: 1,
     resourceAvailabilitySummary,
     sourceProviderSlug,
@@ -852,6 +854,7 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
     historicalWindowStart: "2025-12-13T00:00:00.000Z",
     resource: "note",
     resourceCategory: "timeseries",
+    sourceLifecycleEpoch: 1,
     sourceProviderSlug: "oura",
     windowEnd: BACKFILL_WINDOW_END,
     windowStart: "2025-12-13T00:00:00.000Z",
@@ -913,7 +916,7 @@ test("v1 Oura note coverage receives one v2 semantic reimport while dense timese
   );
 });
 
-test("in-flight unversioned note history cannot certify v2 coverage after upgrade", async () => {
+test("pre-epoch schedule-time history cannot import or certify current coverage", async () => {
   const provider = createProvider({
     additionalProviders: [{
       resourceAvailability: { note: true },
@@ -936,32 +939,15 @@ test("in-flight unversioned note history cannot certify v2 coverage after upgrad
     },
   }, 1);
 
-  const firstResult = await executor.executeJob(createJobContext(), legacyJob);
-  const legacyContinuation = requireValue(firstResult.scheduledJobs?.find((job) =>
-    job.kind === "resource" && job.payload?.resource === "note"
-  ));
-  assert.equal(Object.hasOwn(legacyContinuation.payload ?? {}, "historicalBackfillVersion"), false);
-
-  const completedLegacy = await executor.executeJob(
-    createJobContext(),
-    toJobRecord(legacyContinuation, 2),
-  );
-  const completedLegacyMetadata = mergeStoredDeviceSyncMetadataPatch(
-    {},
-    completedLegacy.metadataPatch,
-  );
-  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-    completedLegacyMetadata,
-    "oura",
-    "note",
-    1,
-  ), true);
-  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-    completedLegacyMetadata,
-    "oura",
-    "note",
-    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
-  ), false);
+  let importCount = 0;
+  const firstResult = await executor.executeJob(createJobContext({
+    importSnapshot: async () => {
+      importCount += 1;
+      return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+    },
+  }), legacyJob);
+  assert.deepEqual(firstResult, {});
+  assert.equal(importCount, 0);
 
   const sources = [createSourceSummary(
     "oura",
@@ -970,38 +956,148 @@ test("in-flight unversioned note history cannot certify v2 coverage after upgrad
     { note: true },
   )];
   const scheduledV2 = requireValue(executor.createScheduledJobs)(
-    createStoredAccount({ metadata: completedLegacy.metadataPatch, sources }),
+    createStoredAccount({ sources }),
     NOW,
   ).jobs.find((job) => job.kind === "resource" && job.payload?.resource === "note");
   assert.equal(scheduledV2?.payload?.historicalBackfillVersion, 2);
+  assert.equal(scheduledV2?.payload?.sourceLifecycleEpoch, 1);
+});
 
-  const lateLegacyCompletion = await executor.executeJob(
-    createJobContext({
-      account: createAccount({ metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v2|oura" } }),
-    }),
-    toJobRecord({
-      ...legacyContinuation,
-      payload: {
-        ...legacyContinuation.payload,
-        windowStart: "2026-06-10T00:00:00.000Z",
-      },
-    }, 3),
+test("a queued pre-reconnect job cannot block or certify the current source epoch", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { note: true },
+      slug: "oura",
+    }],
+    includeNote: true,
+    requests,
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const createScheduledJobs = requireValue(executor.createScheduledJobs);
+  const epochOneSource = createSourceSummary(
+    "oura",
+    "2026-01-01T12:00:00.000Z",
+    "connected",
+    { note: true },
+    1,
   );
-  assert.equal(Object.hasOwn(
-    lateLegacyCompletion.metadataPatch ?? {},
-    NOTE_HISTORY_COVERAGE_KEY,
-  ), false);
+  const oldJob = requireValue(createScheduledJobs(
+    createStoredAccount({ sources: [epochOneSource] }),
+    NOW,
+  ).jobs.find((job) => job.kind === "resource" && job.payload?.resource === "note"));
+  let importCount = 0;
+  const epochTwoSource = { ...epochOneSource, lifecycleEpoch: 2 };
 
-  const futureJob = toJobRecord({
-    ...legacyContinuation,
-    payload: {
-      ...legacyContinuation.payload,
-      historicalBackfillVersion: 3,
-      windowStart: "2026-06-10T00:00:00.000Z",
+  const staleResult = await executor.executeJob(createJobContext({
+    account: createAccount({ sources: [epochOneSource] }),
+    connectionSourceAdmissionMode: "listed_only",
+    importSnapshot: async () => {
+      importCount += 1;
+      return { canonicalEventCount: 0, durableDeliveryAccepted: true };
     },
-  }, 4);
-  const futureResult = await executor.executeJob(createJobContext(), futureJob);
-  assert.equal(Object.hasOwn(futureResult.metadataPatch ?? {}, NOTE_HISTORY_COVERAGE_KEY), false);
+    listConnectionSources: async () => [epochTwoSource],
+  }), toJobRecord(oldJob, 2));
+
+  assert.deepEqual(staleResult, {});
+  assert.equal(importCount, 0);
+  assert.equal(requests.filter((request) => request.resource === "note").length, 0);
+
+  const currentJob = requireValue(createScheduledJobs(
+    createStoredAccount({ sources: [epochTwoSource] }),
+    SAME_DAY_LATER,
+  ).jobs.find((job) => job.kind === "resource" && job.payload?.resource === "note"));
+  assert.equal(currentJob.payload?.sourceLifecycleEpoch, 2);
+  assert.notEqual(currentJob.dedupeKey, oldJob.dedupeKey);
+
+  const { result: completed } = await executeImmediateResourceContinuations({
+    context: createJobContext({
+      account: createAccount({ sources: [epochTwoSource] }),
+      connectionSourceAdmissionMode: "listed_only",
+      listConnectionSources: async () => [epochTwoSource],
+      now: SAME_DAY_LATER,
+    }),
+    job: toJobRecord(currentJob, 3),
+    provider,
+    resource: "note",
+  });
+  assertHistoryCoveragePatch(completed, "oura", "note");
+  assert.equal(
+    createScheduledJobs(
+      createStoredAccount({ metadata: completed.metadataPatch, sources: [epochTwoSource] }),
+      "2026-06-12T12:00:00.000Z",
+    ).jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
+    false,
+  );
+});
+
+test("an in-flight pre-reconnect import cannot publish terminal coverage", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { note: true },
+      slug: "oura",
+    }],
+    includeNote: true,
+    noteRecords: [{
+      end: "2026-01-05T20:05:00.000Z",
+      id: "note-before-source-epoch-advanced",
+      sourceProviderSlug: "oura",
+      sourceType: "ring",
+      start: "2026-01-05T20:00:00.000Z",
+      tags: ["sauna"],
+    }],
+    requests,
+  });
+  const oldJob = requireValue(requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  )(createStoredAccount({
+    sources: [createSourceSummary(
+      "oura",
+      "2026-01-01T12:00:00.000Z",
+      "connected",
+      { note: true },
+      1,
+    )],
+  }), NOW).jobs.find((job) => job.kind === "resource" && job.payload?.resource === "note"));
+  let lifecycleEpoch = 1;
+  let importCount = 0;
+
+  const result = await requireValue(provider.jobExecutor).executeJob(createJobContext({
+    account: createAccount({
+      sources: [createSourceSummary(
+        "oura",
+        "2026-01-01T12:00:00.000Z",
+        "connected",
+        { note: true },
+        1,
+      )],
+    }),
+    connectionSourceAdmissionMode: "listed_only",
+    importSnapshot: async () => {
+      importCount += 1;
+      lifecycleEpoch = 2;
+      return { canonicalEventCount: 1, durableDeliveryAccepted: true };
+    },
+    listConnectionSources: async () => [createSourceSummary(
+      "oura",
+      "2026-01-01T12:00:00.000Z",
+      "connected",
+      { note: true },
+      lifecycleEpoch,
+    )],
+  }), toJobRecord({
+    ...oldJob,
+    payload: {
+      ...oldJob.payload,
+      windowEnd: "2026-01-06T00:00:00.000Z",
+      windowStart: "2026-01-05T00:00:00.000Z",
+    },
+  }, 4));
+
+  assert.equal(importCount, 1);
+  assert.equal(requests.filter((request) => request.resource === "note").length, 1);
+  assert.deepEqual(result, {});
 });
 
 test("empty Oura note history reaches terminal source coverage", async () => {

@@ -241,6 +241,7 @@ export class SqliteDeviceSyncStore {
       firstSeenAt: source.firstSeenAt,
       lastErrorCode: source.lastErrorCode,
       lastErrorMessage: source.lastErrorMessage,
+      lifecycleEpoch: source.lifecycleEpoch,
       lastDataAt: source.lastDataAt,
       lastSeenAt: source.lastSeenAt,
       resourceCount: countConnectionSourceResources(source.resourceAvailabilitySummary),

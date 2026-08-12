@@ -150,7 +150,10 @@ export interface OAuthStateRecord {
 
 export type PublicDeviceSyncAccount = DeviceSyncAccountRecord;
 export type PublicDeviceConnectionSource = DeviceConnectionSourceRecord;
-export type StoredDeviceConnectionSource = PublicDeviceConnectionSource;
+export type StoredDeviceConnectionSource = Omit<
+  PublicDeviceConnectionSource,
+  "lifecycleEpoch"
+> & { lifecycleEpoch: number };
 
 export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
   externalAccountId: string;
@@ -388,6 +391,7 @@ export interface DeviceSyncPublicIngressStore {
     PublicDeviceConnectionSource,
     | "connectionId"
     | "lastErrorCode"
+    | "lifecycleEpoch"
     | "lastSeenAt"
     | "sourceInstanceKey"
     | "sourceProviderSlug"
@@ -397,6 +401,7 @@ export interface DeviceSyncPublicIngressStore {
       PublicDeviceConnectionSource,
       | "connectionId"
       | "lastErrorCode"
+      | "lifecycleEpoch"
       | "lastSeenAt"
       | "sourceInstanceKey"
       | "sourceProviderSlug"
@@ -744,6 +749,7 @@ export interface ProviderSnapshotImportReceipt {
 export interface ProviderJobConnectionSource {
   displayName: string | null;
   firstSeenAt?: string;
+  lifecycleEpoch?: number;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;

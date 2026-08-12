@@ -1221,6 +1221,7 @@ describe("hosted device-sync runtime", () => {
       sourceProviderSlug: "garmin" | "oura",
       status: "connected" | "disconnected",
       lastSeenAt: string,
+      lifecycleEpoch: number,
     ) => {
       const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
         connectionId: hostedConnectionId,
@@ -1234,6 +1235,7 @@ describe("hosted device-sync runtime", () => {
         lastErrorCode: null,
         lastErrorMessage: null,
         lastSeenAt,
+        lifecycleEpoch,
         resourceCount: 2,
         resourceAvailabilitySummary: { blood_pressure: true, note: true },
         sourceInstanceKey,
@@ -1253,8 +1255,8 @@ describe("hosted device-sync runtime", () => {
       metadata,
       provider: "junction",
       sources: [
-        source("garmin", "disconnected", "2026-04-06T09:15:00.000Z"),
-        source("oura", "connected", "2026-04-06T09:15:00.000Z"),
+        source("garmin", "connected", "2026-04-06T09:15:00.000Z", 1),
+        source("oura", "connected", "2026-04-06T09:15:00.000Z", 1),
       ],
     });
     const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
@@ -1282,6 +1284,15 @@ describe("hosted device-sync runtime", () => {
       const beforeReconnect = getStore(service).getAccountById(localAccountId);
       assert.ok(beforeReconnect);
       assert.match(String(beforeReconnect.metadata.junctionExtendedHistoryCoverage), /^m2\|/u);
+      getStore(service).patchAccount(localAccountId, {
+        displayName: beforeReconnect.displayName,
+      });
+      const dirtyBeforeReconnect = getStore(service).getAccountById(localAccountId);
+      assert.ok(dirtyBeforeReconnect);
+      assert.notEqual(
+        dirtyBeforeReconnect.localConnectionRevision,
+        dirtyBeforeReconnect.hostedObservedConnectionRevision,
+      );
 
       hostedSnapshot = buildRuntimeSnapshot({
         connectionId: hostedConnectionId,
@@ -1292,11 +1303,14 @@ describe("hosted device-sync runtime", () => {
         },
         externalAccountId,
         hostedUpdatedAt: "2026-04-06T09:30:00.000Z",
-        metadata,
+        metadata: clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+          metadata,
+          providerSlug: "garmin",
+        }),
         provider: "junction",
         sources: [
-          source("garmin", "connected", "2026-04-06T09:30:00.000Z"),
-          source("oura", "connected", "2026-04-06T09:15:00.000Z"),
+          source("garmin", "connected", "2026-04-06T09:30:00.000Z", 2),
+          source("oura", "connected", "2026-04-06T09:15:00.000Z", 1),
         ],
       });
       await syncHostedDeviceSyncControlPlaneState({
@@ -1320,6 +1334,11 @@ describe("hosted device-sync runtime", () => {
           .find((candidate) => candidate.sourceProviderSlug === "garmin")?.status,
         "connected",
       );
+      assert.equal(
+        getStore(service).listConnectionSources({ connectionId: localAccountId })
+          .find((candidate) => candidate.sourceProviderSlug === "garmin")?.lifecycleEpoch,
+        2,
+      );
 
       hostedSnapshot = buildRuntimeSnapshot({
         connectionId: hostedConnectionId,
@@ -1333,8 +1352,8 @@ describe("hosted device-sync runtime", () => {
         metadata: afterReconnect.metadata,
         provider: "junction",
         sources: [
-          source("garmin", "connected", "2026-04-06T09:30:00.000Z"),
-          source("oura", "connected", "2026-04-06T09:15:00.000Z"),
+          source("garmin", "connected", "2026-04-06T09:30:00.000Z", 2),
+          source("oura", "connected", "2026-04-06T09:15:00.000Z", 1),
         ],
       });
       await syncHostedDeviceSyncControlPlaneState({

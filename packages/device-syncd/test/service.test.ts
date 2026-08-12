@@ -1677,6 +1677,159 @@ test("Junction schedule-time history keeps one durable retry chain across UTC da
   }
 });
 
+test("a queued pre-reconnect history job cannot block the exact-source replacement", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-source-epoch-retry");
+  const now = new Date("2026-08-11T12:00:00.000Z");
+  let caffeineRequestCount = 0;
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 1,
+    reconcileIntervalMs: 60 * 60_000,
+    summaryBackfillDays: 1,
+    summaryResources: [],
+    timeseriesResources: ["caffeine"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-source-epoch") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-source-epoch",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true },
+        }] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-source-epoch/caffeine/grouped") {
+        caffeineRequestCount += 1;
+        return createJsonResponse({ groups: {} });
+      }
+      if (
+        url.pathname.startsWith("/v2/summary/")
+        && url.pathname.endsWith("/junction-user-source-epoch")
+      ) {
+        return createJsonResponse({ data: [] });
+      }
+      throw new Error(`Unexpected Junction source-epoch request: ${url.pathname}`);
+    },
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(snapshot) {
+        const prepared = await prepareDeviceProviderSnapshotImport(snapshot);
+        return { events: prepared.events ?? [] };
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      connectedAt: "2026-04-03T12:00:00.000Z",
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-user-source-epoch",
+      metadata: { junctionHistoricalBackfillStatus: "coverage_v3_complete" },
+      nextReconcileAt: "2026-08-12T12:00:00.000Z",
+      provider: "junction",
+      scopes: [],
+      status: "active",
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      lastSeenAt: now.toISOString(),
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { caffeine: true },
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    const activeHistoryJobs = () => readJobsForAccountForTesting(store, account.id)
+      .flatMap((row) => {
+        const job = store.getJobById(row.id);
+        return job
+          && job.kind === "resource"
+          && job.payload.historicalBackfill === true
+          && (job.status === "queued" || job.status === "running")
+          ? [job]
+          : [];
+      });
+
+    const scheduledAccount = store.getAccountById(account.id);
+    assert.ok(scheduledAccount);
+    const oldJobInput = provider.jobExecutor?.createScheduledJobs?.(
+      scheduledAccount,
+      now.toISOString(),
+    ).jobs.find((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "caffeine"
+      && job.payload?.historicalBackfill === true
+    );
+    assert.ok(oldJobInput);
+    const oldJob = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-08-11T11:59:00.000Z",
+      dedupeKey: oldJobInput.dedupeKey,
+      kind: oldJobInput.kind,
+      payload: oldJobInput.payload,
+      priority: oldJobInput.priority,
+      provider: "junction",
+    });
+    assert.equal(oldJob.payload.sourceLifecycleEpoch, 1);
+
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      lastSeenAt: "2026-08-11T12:01:00.000Z",
+      lifecycleEpoch: 2,
+      resourceAvailabilitySummary: { caffeine: true },
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await service.runSchedulerOnce();
+
+    const beforeWorker = activeHistoryJobs();
+    assert.equal(beforeWorker.length, 2);
+    assert.deepEqual(
+      beforeWorker.map((job) => job.payload.sourceLifecycleEpoch).sort(),
+      [1, 2],
+    );
+    assert.equal(new Set(beforeWorker.map((job) => job.dedupeKey)).size, 2);
+
+    assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+    const caffeineRequestsAfterReconcile = caffeineRequestCount;
+    assert.equal((await service.runWorkerOnce())?.id, oldJob.id);
+    assert.equal(caffeineRequestCount, caffeineRequestsAfterReconcile);
+    const currentJob = activeHistoryJobs()[0];
+    assert.equal(currentJob?.payload.sourceLifecycleEpoch, 2);
+
+    for (
+      let attempt = 0;
+      attempt < 3 && caffeineRequestCount === caffeineRequestsAfterReconcile;
+      attempt += 1
+    ) {
+      await service.runWorkerOnce();
+    }
+    assert.ok(caffeineRequestCount > caffeineRequestsAfterReconcile);
+  } finally {
+    close();
+  }
+});
+
 test("device sync job context lets providers update source projections", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-source-projection-context");
   let listedInsideJob = 0;
