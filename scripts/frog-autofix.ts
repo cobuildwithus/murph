@@ -281,7 +281,7 @@ function fetchMain(root: string) {
   requireCommand("git", ["fetch", "--quiet", "origin", "main"], root);
 }
 
-function committedBindingCount(root: string, issueNumber: number): number {
+function committedBindingPaths(root: string, issueNumber: number): string[] {
   const needle = `issue: '${FROG_AUTOFIX_REPOSITORY}#${issueNumber}'`;
   const result = runCommand(
     "git",
@@ -296,11 +296,49 @@ function committedBindingCount(root: string, issueNumber: number): number {
     ],
     root,
   );
-  if (result.status === 1) return 0;
+  if (result.status === 1) return [];
   if (result.status !== 0) {
     throw new Error(`git failed with status ${result.status}`);
   }
-  return result.stdout.split("\n").filter(Boolean).length;
+  return result.stdout.split("\n").filter(Boolean).map((entry) => {
+    const prefix = "origin/main:";
+    const candidate = entry.startsWith(prefix) ? entry.slice(prefix.length) : entry;
+    if (!/^\.agents\/friction-log\/[^/]+\/friction\.md$/u.test(candidate)) {
+      throw new Error("committed Frog binding resolved an invalid task path");
+    }
+    return candidate;
+  });
+}
+
+function committedBindingCount(root: string, issueNumber: number): number {
+  return committedBindingPaths(root, issueNumber).length;
+}
+
+export interface CommittedFrictionTask {
+  content: string;
+  path: string;
+  sha256: string;
+}
+
+export function committedFrictionTask(
+  root: string,
+  issueNumber: number,
+): CommittedFrictionTask {
+  const paths = committedBindingPaths(root, issueNumber);
+  if (paths.length !== 1 || !paths[0]) {
+    throw new Error("trusted Frog issue does not have one exact committed task");
+  }
+  const taskPath = paths[0];
+  const blob = runCommand("git", ["show", `origin/main:${taskPath}`], root);
+  if (blob.status !== 0) throw new Error(`git failed with status ${blob.status}`);
+  if (!blob.stdout || Buffer.byteLength(blob.stdout) > 64 * 1024) {
+    throw new Error("committed Frog task blob is empty or exceeds its bound");
+  }
+  const needle = `issue: '${FROG_AUTOFIX_REPOSITORY}#${issueNumber}'`;
+  if (blob.stdout.split(needle).length !== 2) {
+    throw new Error("committed Frog task blob has an invalid issue binding");
+  }
+  return { content: blob.stdout, path: taskPath, sha256: sha256(blob.stdout) };
 }
 
 export interface DiscoveryDependencies {
@@ -362,10 +400,6 @@ export function completedHandoffIssueNumbers(
       operator,
       `${FROG_AUTOFIX_BRANCH_PREFIX}${issueNumber}`,
     )) continue;
-    if (record.state === "MERGED") {
-      completed.add(issueNumber);
-      continue;
-    }
     if (!hasParentOwnedPullRequestBody(record, operator)) continue;
     if (!hasExactFrogIssueBinding(record.body, issueNumber)) continue;
     const matches = record.body.match(
@@ -385,6 +419,62 @@ export function closedPullRequestForHandoff(
   return pullRequests.length === 1 && pullRequests[0]?.state === "CLOSED"
     ? pullRequests[0]
     : null;
+}
+
+export function mergedPullRequestForClosure(
+  pullRequests: readonly BranchPullRequestRecord[],
+): BranchPullRequestRecord | null {
+  return pullRequests.length === 1 && pullRequests[0]?.state === "MERGED"
+    ? pullRequests[0]
+    : null;
+}
+
+export function mergedIssueClosureAction(
+  mergedAt: string,
+  rawEvents: string,
+): "close" | "handoff" {
+  const mergedTime = Date.parse(mergedAt);
+  if (!Number.isFinite(mergedTime)) throw new Error("merged PR time is invalid");
+  const response: unknown = JSON.parse(rawEvents);
+  const timeline = (response as {
+    data?: {
+      repository?: {
+        issue?: {
+          timelineItems?: { nodes?: unknown; totalCount?: unknown };
+        };
+      };
+    };
+  })?.data?.repository?.issue?.timelineItems;
+  if (
+    !timeline
+    || !Array.isArray(timeline.nodes)
+    || !Number.isSafeInteger(timeline.totalCount)
+    || Number(timeline.totalCount) < 0
+    || Number(timeline.totalCount) > 100
+    || timeline.nodes.length !== timeline.totalCount
+  ) {
+    throw new Error("GitHub returned invalid issue event history");
+  }
+  const terminal = timeline.nodes.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("GitHub returned invalid issue event history");
+    }
+    const event = entry as { __typename?: unknown; createdAt?: unknown };
+    const kind = event.__typename === "ClosedEvent"
+      ? "closed"
+      : event.__typename === "ReopenedEvent"
+        ? "reopened"
+        : null;
+    if (!kind || typeof event.createdAt !== "string") {
+      throw new Error("GitHub returned invalid issue event history");
+    }
+    const at = Date.parse(event.createdAt);
+    if (!Number.isFinite(at)) throw new Error("GitHub returned invalid issue event history");
+    return at >= mergedTime ? [{ at, event: kind }] : [];
+  }).sort((left, right) => left.at - right.at);
+  if (terminal.length === 0) return "close";
+  if (terminal.at(-1)?.event === "reopened") return "handoff";
+  throw new Error("open issue conflicts with its post-merge event history");
 }
 
 export function closedPullRequestHandoffBody(
@@ -559,6 +649,130 @@ function findBranchWorktree(root: string, branch: string): string | null {
     }
   }
   return null;
+}
+
+function samePullRequestProjection(
+  left: BranchPullRequestRecord,
+  right: BranchPullRequestRecord,
+): boolean {
+  return left.number === right.number
+    && left.state === right.state
+    && left.isDraft === right.isDraft
+    && left.headRefOid === right.headRefOid
+    && left.body === right.body
+    && left.author?.login === right.author?.login
+    && left.editor?.login === right.editor?.login
+    && left.lastEditedAt === right.lastEditedAt
+    && left.mergedAt === right.mergedAt
+    && left.baseRefName === right.baseRefName
+    && left.headRefName === right.headRefName
+    && left.headRepositoryOwner?.login === right.headRepositoryOwner?.login
+    && left.isCrossRepository === right.isCrossRepository;
+}
+
+export interface EarlyHandoffDependencies {
+  authenticatedOperator: (root: string) => string;
+  currentPullRequest: (
+    root: string,
+    branch: string,
+    issueNumber: number,
+  ) => BranchPullRequestRecord | null;
+  fetchRemoteBranch: (worktree: string, branch: string) => void;
+  findWorktree: (root: string, branch: string) => string | null;
+  refreshAndVerifyIssue: (root: string, issueNumber: number) => void;
+  restampBody: (
+    primary: string,
+    worktree: string,
+    pullRequest: number,
+    body: string,
+  ) => void;
+}
+
+export function restoreRecoveredHandoffBeforeWorktreeRecovery(
+  primary: string,
+  branch: string,
+  issueNumber: number,
+  dependencies: EarlyHandoffDependencies = {
+    authenticatedOperator: recoveryCommands.authenticatedOperator,
+    currentPullRequest: (root, expectedBranch, expectedIssue) => (
+      branchOpenPullRequest(
+        root,
+        expectedBranch,
+        expectedIssue,
+        recoveryCommands,
+      )
+    ),
+    fetchRemoteBranch: (worktree, expectedBranch) => requireCommand(
+      "git",
+      ["fetch", "--quiet", "origin", `refs/heads/${expectedBranch}`],
+      worktree,
+    ),
+    findWorktree: findBranchWorktree,
+    refreshAndVerifyIssue: refreshAndVerifyExactIssue,
+    restampBody: updateParentPullRequestBody,
+  },
+): boolean {
+  const worktree = dependencies.findWorktree(primary, branch);
+  if (!worktree) return false;
+  const existing = dependencies.currentPullRequest(primary, branch, issueNumber);
+  if (!existing) return false;
+  const authenticatedOperator = parseAuthenticatedGitHubOperator(
+    dependencies.authenticatedOperator(primary),
+  );
+  const bodyPath = path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH);
+  const recoveredExistingBody = hasParentOwnedPullRequestBody(
+    existing,
+    authenticatedOperator,
+  )
+    ? existing.body
+    : existsSync(bodyPath)
+      ? validatedWorkerPrBody(worktree, issueNumber)
+      : null;
+  if (!recoveredExistingBody) return false;
+
+  dependencies.fetchRemoteBranch(worktree, branch);
+  requireCommand("git", ["cat-file", "-e", `${existing.headRefOid}^{commit}`], worktree);
+  const recoveredHandoffBody = recoveredReviewHandoffBody({
+    authenticatedOperator,
+    currentHead: existing.headRefOid,
+    existing,
+    recoveredExistingBody,
+    worktree,
+  });
+  if (!recoveredHandoffBody) return false;
+  validatePullRequestBody(
+    recoveredHandoffBody,
+    issueNumber,
+    homedir(),
+    userInfo().username,
+  );
+  dependencies.refreshAndVerifyIssue(primary, issueNumber);
+  const current = dependencies.currentPullRequest(primary, branch, issueNumber);
+  if (
+    !current
+    || !samePullRequestProjection(current, existing)
+    || !isParentOwnedPullRequest(current, authenticatedOperator, branch)
+  ) {
+    throw new Error("pull request authority changed before handoff restamp");
+  }
+  dependencies.restampBody(
+    primary,
+    worktree,
+    existing.number,
+    recoveredHandoffBody,
+  );
+  const restamped = dependencies.currentPullRequest(primary, branch, issueNumber);
+  if (
+    !restamped
+    || restamped.number !== existing.number
+    || restamped.headRefOid !== existing.headRefOid
+    || restamped.body !== recoveredHandoffBody
+    || !isParentOwnedPullRequest(restamped, authenticatedOperator, branch)
+    || !hasParentOwnedPullRequestBody(restamped, authenticatedOperator)
+  ) {
+    throw new Error("pull request handoff restamp did not persist");
+  }
+  return true;
 }
 
 function gitRefExists(root: string, ref: string): boolean {
@@ -1348,6 +1562,31 @@ function prepareTrustedReviewCheckout(
   return realpathSync(checkout);
 }
 
+export function materializeCommittedFrictionTask(
+  primary: string,
+  checkout: string,
+  issueNumber: number,
+): string[] {
+  const task = committedFrictionTask(primary, issueNumber);
+  const taskRelative = "audit-packages/frog-autofix-task.md";
+  writePrivateFileAtomically(
+    path.join(checkout, taskRelative),
+    task.content,
+    0o600,
+  );
+  const manifestRelative = "audit-packages/frog-autofix-task.json";
+  writePrivateFileAtomically(
+    path.join(checkout, manifestRelative),
+    `${JSON.stringify({
+      issue: `${FROG_AUTOFIX_REPOSITORY}#${issueNumber}`,
+      path: task.path,
+      sha256: task.sha256,
+    }, null, 2)}\n`,
+    0o600,
+  );
+  return [taskRelative, manifestRelative];
+}
+
 function removeTrustedReviewCheckout(primary: string, checkout: string) {
   const result = runCommand(
     "git",
@@ -1364,6 +1603,7 @@ export function buildParentReviewArchive(
   worktree: string,
   transient: string,
   label: string,
+  issueNumber: number,
 ) {
   const reviewRoot = path.join(transient, label);
   mkdirSync(reviewRoot, { mode: 0o700, recursive: true });
@@ -1376,6 +1616,11 @@ export function buildParentReviewArchive(
     `${label}-package`,
   );
   try {
+    const taskPaths = materializeCommittedFrictionTask(
+      primary,
+      checkout,
+      issueNumber,
+    );
     requireCommand(
       "bash",
       [
@@ -1387,7 +1632,7 @@ export function buildParentReviewArchive(
         "codebase",
       ],
       checkout,
-      {},
+      { COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS: taskPaths.join("\n") },
       30 * 60 * 1_000,
     );
   } finally {
@@ -1437,6 +1682,7 @@ function runParentReview(options: {
     options.worktree,
     options.transient,
     options.label,
+    options.issueNumber,
   );
   const promptPath = path.join(reviewRoot, "prompt.md");
   const responsePath = path.join(reviewRoot, "response.md");
@@ -1525,6 +1771,41 @@ export function assertExpectedPullRequestBody(options: {
   }
 }
 
+export function expectedPullRequestBodyDisposition(options: {
+  authenticatedOperator: string;
+  branch: string;
+  expectedBody: string;
+  head: string;
+  issueNumber: number;
+  pullRequest: number;
+  record: BranchPullRequestRecord | null;
+}): "operator-handoff" | "unchanged" {
+  const operator = parseAuthenticatedGitHubOperator(
+    options.authenticatedOperator,
+  );
+  const record = options.record;
+  if (
+    !record
+    || record.number !== options.pullRequest
+    || record.state !== "OPEN"
+    || record.headRefOid !== options.head
+    || !isParentOwnedPullRequest(record, operator, options.branch)
+    || !hasParentOwnedPullRequestBody(record, operator)
+    || !hasExactFrogIssueBinding(record.body, options.issueNumber)
+  ) {
+    throw new Error("pull request body authority changed during review");
+  }
+  if (record.body === options.expectedBody) return "unchanged";
+  validatePullRequestBody(
+    record.body,
+    options.issueNumber,
+    homedir(),
+    userInfo().username,
+  );
+  if (bodyHandoff(record.body, options.head)) return "operator-handoff";
+  throw new Error("pull request body changed during review");
+}
+
 function runCanonicalPullRequestReview(options: {
   branch: string;
   expectedBody: string;
@@ -1536,7 +1817,7 @@ function runCanonicalPullRequestReview(options: {
   pullRequest: number;
   transient: string;
   worktree: string;
-}): "findings" | "pass" | "retrospective-required" {
+}): "findings" | "operator-handoff" | "pass" | "retrospective-required" {
   const operator = recoveryCommands.authenticatedOperator(options.primary);
   assertExpectedPullRequestBody({
     authenticatedOperator: operator,
@@ -1565,6 +1846,11 @@ function runCanonicalPullRequestReview(options: {
   const expectedBodyPath = path.join(checkout, FROG_AUTOFIX_PR_BODY_PATH);
   mkdirSync(path.dirname(expectedBodyPath), { mode: 0o700, recursive: true });
   writePrivateFileAtomically(expectedBodyPath, options.expectedBody, 0o600);
+  const taskPaths = materializeCommittedFrictionTask(
+    options.primary,
+    checkout,
+    options.issueNumber,
+  );
   const marker = options.kind === "specialist"
     ? "SPECIALIST_REVIEW_COMPLETE"
     : "REVIEW_COMPLETE";
@@ -1572,6 +1858,7 @@ function runCanonicalPullRequestReview(options: {
     ? "completion-specialists"
     : "pr-review";
   const environment: NodeJS.ProcessEnv = {
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS: taskPaths.join("\n"),
     REVIEW_GPT_EXPECTED_PR_BODY_PATH: FROG_AUTOFIX_PR_BODY_PATH,
     REVIEW_GPT_EXPECTED_PR_BODY_SHA256: sha256(options.expectedBody),
     REVIEW_GPT_PR_URL: String(options.pullRequest),
@@ -1582,6 +1869,7 @@ function runCanonicalPullRequestReview(options: {
     environment.REVIEW_GPT_FIRST_REVIEWED_HEAD = options.head;
     environment.REVIEW_GPT_CONTEXT_ANCHOR_HEAD = options.head;
   }
+  let postReviewDisposition: "operator-handoff" | "unchanged";
   try {
     requireCommand(
       "pnpm",
@@ -1600,9 +1888,24 @@ function runCanonicalPullRequestReview(options: {
       environment,
       3 * 60 * 60 * 1_000,
     );
+    postReviewDisposition = expectedPullRequestBodyDisposition({
+      authenticatedOperator: recoveryCommands.authenticatedOperator(options.primary),
+      branch: options.branch,
+      expectedBody: options.expectedBody,
+      head: options.head,
+      issueNumber: options.issueNumber,
+      pullRequest: options.pullRequest,
+      record: branchOpenPullRequest(
+        options.primary,
+        options.branch,
+        options.issueNumber,
+        recoveryCommands,
+      ),
+    });
   } finally {
     removeTrustedReviewCheckout(options.primary, checkout);
   }
+  if (postReviewDisposition === "operator-handoff") return "operator-handoff";
   const response = readBoundedParentFile(responsePath, 1024 * 1024);
   const modelVerification = readBoundedParentFile(
     `${responsePath}.model-verification.json`,
@@ -2141,6 +2444,109 @@ function issueIsClosed(root: string, issueNumber: number): boolean {
   ) === "CLOSED";
 }
 
+function recoverMergedIssueClosure(
+  primary: string,
+  issueNumber: number,
+  merged: BranchPullRequestRecord,
+): "closed" | "handoff" {
+  const operator = parseAuthenticatedGitHubOperator(
+    recoveryCommands.authenticatedOperator(primary),
+  );
+  const branch = `${FROG_AUTOFIX_BRANCH_PREFIX}${issueNumber}`;
+  const localHead = requireCommand(
+    "git",
+    ["rev-parse", `refs/heads/${branch}`],
+    primary,
+  );
+  if (
+    !merged.mergedAt
+    || merged.headRefOid !== localHead
+    || !isParentOwnedPullRequest(merged, operator, branch)
+  ) {
+    throw new Error("merged issue closure lacks exact parent authority");
+  }
+  const [owner, name] = FROG_AUTOFIX_REPOSITORY.split("/");
+  if (!owner || !name) throw new Error("invalid Frog autofix repository");
+  const issueHistory = requireCommand(
+    "gh",
+    [
+      "api",
+      "graphql",
+      "-f",
+      `query=query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){timelineItems(itemTypes:[CLOSED_EVENT,REOPENED_EVENT],first:100){nodes{__typename ... on ClosedEvent{createdAt} ... on ReopenedEvent{createdAt}} totalCount}}}}`,
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `name=${name}`,
+      "-F",
+      `number=${issueNumber}`,
+    ],
+    primary,
+  );
+  if (mergedIssueClosureAction(merged.mergedAt, issueHistory) === "handoff") {
+    const handoffBody = bodyWithParentMetadata(
+      renderRecoveredPullRequestBody(issueNumber),
+      {
+        firstHead: merged.headRefOid,
+        handoff: "review-findings",
+        handoffHead: merged.headRefOid,
+      },
+    );
+    validatePullRequestBody(
+      handoffBody,
+      issueNumber,
+      homedir(),
+      userInfo().username,
+    );
+    const transientRoot = path.join(supportRoot, "transient");
+    mkdirSync(transientRoot, { mode: 0o700, recursive: true });
+    const transient = mkdtempSync(path.join(transientRoot, "run-"));
+    try {
+      const bodyPath = path.join(transient, "merged-pr-body.md");
+      writePrivateFileAtomically(bodyPath, handoffBody, 0o600);
+      requireCommand(
+        "gh",
+        [
+          "pr",
+          "edit",
+          String(merged.number),
+          "--repo",
+          FROG_AUTOFIX_REPOSITORY,
+          "--body-file",
+          bodyPath,
+        ],
+        primary,
+      );
+    } finally {
+      if (existsSync(transient)) {
+        safeRemoveTransientDirectory(transientRoot, transient);
+      }
+    }
+    const refreshed = branchPullRequests(primary, branch, recoveryCommands);
+    if (!completedHandoffIssueNumbers(refreshed, operator).has(issueNumber)) {
+      throw new Error("merged issue reopen handoff did not persist");
+    }
+    return "handoff";
+  }
+  requireCommand(
+    "gh",
+    [
+      "issue",
+      "close",
+      String(issueNumber),
+      "--repo",
+      FROG_AUTOFIX_REPOSITORY,
+      "--comment",
+      `Closed after verified merge of PR #${merged.number}.`,
+    ],
+    primary,
+  );
+  if (!issueIsClosed(primary, issueNumber)) {
+    throw new Error("issue did not close during merged repair recovery");
+  }
+  return "closed";
+}
+
 interface RequiredCheckRecord {
   bucket: string;
   name: string;
@@ -2415,8 +2821,24 @@ async function reviewPublishAndFinalize(options: {
     options.issueNumber,
   );
 
-  const persistMetadata = () => {
-    body = bodyWithParentMetadata(body, {
+  const persistMetadata = (): boolean => {
+    const expectedBody = body;
+    const disposition = expectedPullRequestBodyDisposition({
+      authenticatedOperator: recoveryCommands.authenticatedOperator(options.primary),
+      branch: options.branch,
+      expectedBody,
+      head,
+      issueNumber: options.issueNumber,
+      pullRequest,
+      record: branchOpenPullRequest(
+        options.primary,
+        options.branch,
+        options.issueNumber,
+        recoveryCommands,
+      ),
+    });
+    if (disposition === "operator-handoff") return false;
+    const nextBody = bodyWithParentMetadata(body, {
       finalHead: finalPassed ? head : undefined,
       firstHead: baseline.firstHead,
       handoff: handoff ?? undefined,
@@ -2427,8 +2849,24 @@ async function reviewPublishAndFinalize(options: {
       options.primary,
       options.worktree,
       pullRequest,
-      body,
+      nextBody,
     );
+    assertExpectedPullRequestBody({
+      authenticatedOperator: recoveryCommands.authenticatedOperator(options.primary),
+      branch: options.branch,
+      expectedBody: nextBody,
+      head,
+      issueNumber: options.issueNumber,
+      pullRequest,
+      record: branchOpenPullRequest(
+        options.primary,
+        options.branch,
+        options.issueNumber,
+        recoveryCommands,
+      ),
+    });
+    body = nextBody;
+    return true;
   };
 
   if (baseline.requiresHumanHandoff) return "awaiting-human";
@@ -2437,7 +2875,7 @@ async function reviewPublishAndFinalize(options: {
     options.worktree,
   )) {
     handoff = "review-findings";
-    persistMetadata();
+    if (!persistMetadata()) return "awaiting-human";
     return "awaiting-human";
   }
 
@@ -2454,13 +2892,14 @@ async function reviewPublishAndFinalize(options: {
       transient: options.transient,
       worktree: options.worktree,
     });
+    if (specialist === "operator-handoff") return "awaiting-human";
     if (reviewRequiresHumanHandoff(specialist)) {
       handoff = "review-findings";
-      persistMetadata();
+      if (!persistMetadata()) return "awaiting-human";
       return "awaiting-human";
     }
     specialistPassed = true;
-    persistMetadata();
+    if (!persistMetadata()) return "awaiting-human";
   }
 
   if (!finalPassed) {
@@ -2476,13 +2915,14 @@ async function reviewPublishAndFinalize(options: {
       transient: options.transient,
       worktree: options.worktree,
     });
+    if (finalReview === "operator-handoff") return "awaiting-human";
     if (reviewRequiresHumanHandoff(finalReview)) {
       handoff = "review-findings";
-      persistMetadata();
+      if (!persistMetadata()) return "awaiting-human";
       return "awaiting-human";
     }
     finalPassed = true;
-    persistMetadata();
+    if (!persistMetadata()) return "awaiting-human";
   }
 
   const draft = requireCommand(
@@ -2539,7 +2979,7 @@ async function reviewPublishAndFinalize(options: {
     );
     if (checkHandoff) {
       handoff = checkHandoff;
-      persistMetadata();
+      if (!persistMetadata()) return "awaiting-human";
       return "awaiting-human";
     }
   }
@@ -2553,12 +2993,12 @@ async function reviewPublishAndFinalize(options: {
   );
   if (result === "awaiting-human-conflict") {
     handoff = "review-findings";
-    persistMetadata();
+    if (!persistMetadata()) return "awaiting-human";
     return "awaiting-human";
   }
   if (result === "awaiting-human-product") {
     handoff = "product-runtime";
-    persistMetadata();
+    if (!persistMetadata()) return "awaiting-human";
     return "awaiting-human";
   }
   return "merged";
@@ -2612,14 +3052,46 @@ async function runOnce() {
     }
     verifyExactIssue(primary, issue.number);
     const branch = `${FROG_AUTOFIX_BRANCH_PREFIX}${issue.number}`;
+    const repairPullRequests = branchPullRequests(
+      primary,
+      branch,
+      recoveryCommands,
+    );
+    const mergedPullRequest = mergedPullRequestForClosure(repairPullRequests);
+    if (mergedPullRequest) {
+      const closure = recoverMergedIssueClosure(
+        primary,
+        issue.number,
+        mergedPullRequest,
+      );
+      recordEvent(
+        closure === "closed" ? "repair_closed_issue" : "awaiting_human_merge",
+        issue.number,
+      );
+      console.log(closure === "closed"
+        ? "Recovered the exact merged repair and closed its bound issue."
+        : "The merged repair issue was deliberately reopened; leaving it for a human.");
+      return;
+    }
     const closedPullRequest = closedPullRequestForHandoff(
-      branchPullRequests(primary, branch, recoveryCommands),
+      repairPullRequests,
     );
     if (closedPullRequest) {
       persistClosedPullRequestHandoff(primary, closedPullRequest, issue.number);
       recordEvent("awaiting_human_merge", issue.number);
       console.log(
         "Closed repair reached a durable human-review handoff; continuing with later issues on the next run.",
+      );
+      return;
+    }
+    if (restoreRecoveredHandoffBeforeWorktreeRecovery(
+      primary,
+      branch,
+      issue.number,
+    )) {
+      recordEvent("awaiting_human_merge", issue.number);
+      console.log(
+        "Repair reached a durable human-review handoff; continuing with later issues on the next run.",
       );
       return;
     }
@@ -2675,15 +3147,11 @@ async function runOnce() {
         !currentPullRequest
         || currentPullRequest.number !== existingPullRequest.number
         || currentPullRequest.headRefOid !== currentHead
-        || currentPullRequest.body !== existingPullRequest.body
+        || !samePullRequestProjection(currentPullRequest, existingPullRequest)
         || !isParentOwnedPullRequest(
           currentPullRequest,
           authenticatedOperator,
           branch,
-        )
-        || !hasParentOwnedPullRequestBody(
-          currentPullRequest,
-          authenticatedOperator,
         )
       ) {
         throw new Error("pull request authority changed before handoff restamp");

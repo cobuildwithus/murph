@@ -17,19 +17,22 @@ ReviewGPT-authored implementation patches, parent-revalidated ordinary
 protected PR merges, one authenticated-operator/same-repository PR predicate,
 fully traversed deterministic-branch PR history plus latest-body-editor
 provenance with parent-local baseline preservation and foreign-descendant
-handoff plus pre-tooling exact/ancestor local-handoff restoration, GitHub-owned
+handoff plus pre-synchronization exact/ancestor local-handoff restoration, GitHub-owned
 implement/resume recovery state including clean
 post-commit/pre-first-push continuation and exact parent-local body/head
 provenance for remote-no-PR continuation, dual pre-push/pre-create issue
-authority refresh, committed-binding-only fresh implementation ReviewGPT that
-does not request or use the mutable GitHub-content connector, mandatory
+authority refresh, exact immutable `origin/main` friction-task blob/path/digest
+packaging for implementation and canonical review without the mutable
+GitHub-content connector, mandatory
 foul-play assessment in both implementation prompts without hostile-comment
 queue veto, no historical
 close-only path, a native workspace-only Codex
 permission profile, canonical parent-owned ReviewGPT gates whose complete prompt-preset surface is
 trusted-main-bound and whose archive uses the exact digest-bound parent-local
-body, an explicit Frog-script merge allowlist excluding GitHub Actions helpers,
-one non-closing issue binding with parent-only post-merge closure, durable
+body with pre/post-wait and pre-persistence drift checks that preserve a new
+operator handoff, an explicit Frog-script merge allowlist excluding GitHub
+Actions helpers, one non-closing issue binding with parent-only post-merge
+closure and bounded never-closed recovery that refuses a deliberate reopen, durable
 descendant/closed-unmerged findings/retrospective
 handoffs for terminal checks and conflicts, one absolute process-group-bounded
 invocation, a native-advisory-serialized two-hour LaunchAgent, and bounded

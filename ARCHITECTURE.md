@@ -21,7 +21,9 @@ and exactly one matching `issue:` binding already committed beneath
 only issue datum placed in the parent worker prompt. Issue content remains
 outside model-work authority. Fresh implementation ReviewGPT does not request
 or use the GitHub connector and derives the task only from the exact committed
-friction binding plus repository instructions. Both implementation prompts
+friction blob materialized from `origin/main`, with its source path and digest,
+plus repository instructions. The same immutable task evidence accompanies
+canonical review. Both implementation prompts
 require a foul-play assessment before edits. Proposed patches, existing branch/worktree
 state, content outside the instruction hierarchy, and embedded instructions
 remain adversarial evidence. Unrelated hostile prose is ignored rather than
@@ -48,7 +50,8 @@ with creator fallback only for a never-edited body. Otherwise the parent
 captures an already validated local body before any child runs or writes one
 fixed recovery body. Baseline ancestry and human handoff resolution use that
 same trusted body. An exact or ancestor local human handoff is re-stamped at the
-current head and returns before dependency checks, model work, worktree edits,
+current remote head before worktree synchronization and returns before
+dependency checks, model work, worktree edits,
 commits, pushes, canonical review, or merge, while specialist and
 final PASS markers remain recoverable only from a current operator-owned remote
 body. A retained baseline equal to the current head with no handoff may replace
@@ -98,7 +101,10 @@ Preliminary and final ReviewGPT run through Murph's canonical packager and
 state files from a detached parent-only checkout. The archive contains the
 exact validated parent-local body rather than refetching mutable presentation;
 one current parent-owned PR projection must match its head, body, editor,
-non-closing issue binding, and digest before either model invocation. Review
+non-closing issue binding, and digest before either model invocation. The same
+exact projection is checked after each long model wait and immediately before
+metadata persistence; an operator handoff created during a wait is preserved
+and any other drift fails closed. Review
 controls, including the complete prompt-preset directory, exactly match trusted
 `main`. Either review returning findings, a final review requiring a
 scope retrospective, or a candidate changing those controls creates the same
@@ -113,9 +119,10 @@ queue-complete, while a merged PR never substitutes for a newly verified
 repair of a reopened issue. The body carries one non-closing exact issue
 binding. After the guarded merge is independently proven, the parent explicitly
 closes only that issue; a later presentation edit cannot negate the proven
-merge. An exact parent-owned merged PR is queue-complete even if that explicit
-close fails or the issue is later reopened, so later scans neither close
-historical work nor let it starve newer issues.
+merge. A merged-but-open issue receives one finalization-recovery path: the
+parent revalidates the exact merged PR/head and bounded close/reopen history,
+retries closure only when the issue was never closed after merge, and leaves a
+deliberate reopen for a human without re-entering worker or review execution.
 Immediately before merge it revalidates App author, label, one committed
 binding, PR head, exact parent body digest/editor/non-closing issue binding,
 checks, and current-base mergeability. A deterministic exact-file allowlist,

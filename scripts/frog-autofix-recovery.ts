@@ -33,6 +33,7 @@ export interface BranchPullRequestRecord extends PullRequestAuthorityRecord {
   body: string;
   headRefOid: string;
   isDraft: boolean;
+  mergedAt: string | null;
   number: number;
   state: "CLOSED" | "MERGED" | "OPEN";
 }
@@ -117,6 +118,9 @@ export function parseBranchPullRequestPages(
       || typeof record.body !== "string"
       || typeof record.isCrossRepository !== "boolean"
       || typeof record.isDraft !== "boolean"
+      || (record.mergedAt !== null
+        && (typeof record.mergedAt !== "string"
+          || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u.test(record.mergedAt)))
       || (record.lastEditedAt !== null
         && (typeof record.lastEditedAt !== "string"
           || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u.test(record.lastEditedAt)))
@@ -176,6 +180,7 @@ const pullRequestPaginationQuery = `query(
         isCrossRepository
         isDraft
         lastEditedAt
+        mergedAt
         number
         state
       }

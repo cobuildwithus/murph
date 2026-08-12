@@ -1121,8 +1121,12 @@ Last verified: 2026-08-12
   when the one open parent-owned PR, remote branch, and local committed head
   match exactly; mutable body text is not needed to preserve the worktree. It
   returns to an edit-only child and every parent gate reruns.
-  A merged PR with an open or reopened issue, ambiguous state, or
-  multiply-owned state grants no worker mode and no automatic issue closure.
+  Before worktree synchronization, an existing validated parent-local exact or
+  ancestor handoff may be restored onto the unchanged exact PR projection even
+  when another actor edited its presentation; that repair revalidates issue and
+  PR authority but does not require the presentation being repaired to already
+  be parent-owned. A merged PR with a deliberately reopened issue, ambiguous
+  state, or multiply-owned state grants no worker mode or automatic closure.
   One exact closed-unmerged parent PR receives only the fixed recovery body and
   parent-authored review-findings handoff; it is never reopened, reviewed, or
   merged by that path.
@@ -1132,7 +1136,10 @@ Last verified: 2026-08-12
   `git apply --check` before applying it, then rejects credential-shaped or
   direct-identifier content before committing. An absent or rejected patch is
   terminal; the edit-only Codex child cannot request a replacement. Recovery
-  cannot request a second implementation patch.
+  cannot request a second implementation patch. Both implementation and
+  canonical-review archives contain one parent-materialized task blob read
+  directly from its exact `origin/main` friction path, plus a path/digest
+  manifest. They include neither the whole friction tree nor a candidate copy.
 - The child may edit only the issue worktree and a private ignored PR draft. It
   cannot run Git, GitHub, ReviewGPT, browser automation, or network clients and
   cannot author readiness, response, model-verification, or GitHub-state
@@ -1156,6 +1163,9 @@ Last verified: 2026-08-12
   as the intent contract. Immediately before either model invocation, one
   current PR projection must match the expected parent author/branch/repository,
   exact head and body, latest body editor, and single non-closing issue binding.
+  The same projection is checked after every long model wait and immediately
+  before each metadata write. An authenticated-operator handoff created during
+  the wait is preserved byte-for-byte; other drift fails closed.
   Review findings, a final `RETROSPECTIVE_REQUIRED` result, and changed review
   controls produce the same exact-head human handoff; review prose is never
   delegated to another autonomous editing turn.
@@ -1175,9 +1185,10 @@ Last verified: 2026-08-12
   runtime surface remains open for a human merge decision and does not close its
   issue. The PR body contains only one non-closing issue binding. After proving
   the exact merge independently of mutable presentation, the parent explicitly
-  closes only that issue. The exact parent-owned merged PR remains
-  queue-complete after a failed close or later reopen, but supplies no authority
-  to close the issue in a later invocation. Neither owner uses admin
+  closes only that issue. If merge succeeded but closure did not, a later run
+  revalidates the exact merged PR/head and bounded close/reopen history, then
+  retries closure only when no post-merge reopen exists. A deliberate
+  post-merge reopen is human-owned. Neither owner uses admin
   merge, self-approval, ruleset bypass, branch-protection mutation, or
   skipped/missing gate reinterpretation. Merge-authority inventories include
   both source and destination paths for detected renames and copies. Exact-head

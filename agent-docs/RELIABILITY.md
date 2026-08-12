@@ -201,8 +201,8 @@ Last verified: 2026-08-12
   immutable first-reviewed head to the exact local head. This preserves a crash
   after push but before PR creation, including a subsequently deleted remote
   ref, while a same-repository branch seeded without local provenance fails
-  closed. A merged PR paired with an open or reopened
-  issue, multiple parent-owned PRs, branch divergence, mismatched ownership or
+  closed. A merged PR paired with a deliberately reopened issue, multiple
+  parent-owned PRs, branch divergence, mismatched ownership or
   head, and every other dirty state fail
   closed rather than guessing a continuation point or closing historical state.
   One exact closed-unmerged parent PR without a trusted handoff is a separate
@@ -266,9 +266,10 @@ Last verified: 2026-08-12
   human-owned. The body has no closing keyword. Once the exact merge is proven,
   the parent explicitly closes only the bound issue, and subsequent
   presentation edits cannot invalidate that merge proof. If the explicit close
-  call still fails, the exact parent-owned merged PR remains queue-complete so
-  later issues advance; a later interval neither closes a reopened issue nor
-  re-enters the historical branch.
+  call still fails, a later interval revalidates the exact merged PR/head and
+  bounded close/reopen timeline, then retries only a never-completed close. A
+  deliberate post-merge reopen remains human-owned and never re-enters worker,
+  review, check, or merge execution.
 - A successful pass verifies both a merged PR for the deterministic branch and
   the closed issue before attempting ordinary worktree retirement. Retirement
   still uses `scripts/retire-worktree` and silently preserves the checkout when
