@@ -14,7 +14,8 @@ function buildPrisma(input: {
   return {
     $queryRaw: vi.fn(async () => input.members ?? []),
     deviceConnection: {
-      findFirst: vi.fn(async (_args?: { where?: unknown }) => {
+      findFirst: vi.fn(async (args?: { where?: unknown }) => {
+        void args;
         const existing = existingResults[
           Math.min(existingReadIndex, existingResults.length - 1)
         ];
