@@ -27,6 +27,12 @@ describe('assistant reply bubble prompt guidance', () => {
         "use the current channel's available presentation",
       )
       expect(layers.threadContextPrompt).toContain(
+        'If it fits the complete answer, use it alone; never send that content as long plain text.',
+      )
+      expect(layers.threadContextPrompt).toContain(
+        'If no owned presentation fits, send concise text.',
+      )
+      expect(layers.threadContextPrompt).toContain(
         'Telegram and iMessage have different capabilities',
       )
       expect(layers.threadContextPrompt).toContain(

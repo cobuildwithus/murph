@@ -97,6 +97,12 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('GPT-5 execution bias:')
     expect(prompt).toContain('Lead the final reply with the result')
     expect(prompt).toContain(
+      'Structured plans, routines, schedules, summaries, and tables use an allowed card or response media alone when it fits.',
+    )
+    expect(prompt).toContain(
+      'Use `murph.generate_image` only if no card fits',
+    )
+    expect(prompt).toContain(
       'trim introductions, repetition, reassurance, and optional background first',
     )
     expect(prompt).not.toContain('Final replies should briefly state')
