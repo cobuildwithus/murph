@@ -1,6 +1,6 @@
 # Conversation mailbox progress repair
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -76,6 +76,14 @@ Updated: 2026-08-11
 - Ownership decision: keep the outbox receipt, existing auto-reply outcome owner, pending-input evidence, signed callback, and Web checkpoint transaction. Make only the uncovered-items error ineligible for committed no-reply classification so the existing failed-group path retains `advanceCursor: false`, writes no terminal reply/suppression evidence for the replay-only item, and leaves it runnable while receipt confirmation for the original item proceeds independently.
 - Regression decision: cover the actual reaction-only result shape through auto-reply outcome evidence, pending-input compaction, and checkpoint ownership. Prove no terminal evidence or handled-ID checkpoint is produced for the uncovered item, the original receipt confirms exactly once without provider or route replay, and the extra item remains runnable for its own effect.
 
+## Review round 5 retrospective
+
+- Original requirement: a provider-accepted reaction owns one frozen answered-item set, retries only its exact-consume confirmation, and cannot make a replay-only item terminal through higher evidence or checkpoint handling.
+- Shape comparison: the first-reviewed head contained 259 source additions and 48 source deletions; the current behavior head contains 278 source additions and 49 source deletions. Review remediation added 19 source lines and removed one, all within existing outbox, callback, and auto-reply classifiers; tests and documentation carry the larger proof expansion.
+- Growth and mechanism: rounds 2 through 4 successively exposed post-provider revocation, receipt-set widening, and downstream terminal-evidence classification at the same effect-membership boundary. Round 5 verified those production corrections and found only that the required affected-surface disclosure omitted the final auto-reply evidence, pending frontier, and Web checkpoint consequences.
+- Ownership decision: retain the existing outbox receipt, auto-reply evidence, pending-index frontier, signed callback, and Web checkpoint transaction. Add no owner, state machine, queue, or compatibility path.
+- Continuation decision: continue this indivisible repair and correct only the PR intent contract. The same pushed code head and fully green CI remain valid; the disclosure-only retry verifies that the non-obvious surface, necessity, and existing regression proof are explicit.
+
 ## Verification
 
 - Passed locally: assistant outbox (101 tests), hosted callbacks plus the real Linq outbox regression (255 tests), focused Web route/store/monitor coverage (158 tests), assistant-engine/runtime/Web typechecks, assistant-engine/runtime builds, runner-bundle assembly, runner-bundle policy tests (50 tests), docs drift, and diff/privacy checks.
@@ -89,4 +97,8 @@ Updated: 2026-08-11
 - Exact-head GitHub Actions passed for candidate `75ded338d91c`; Review GPT round 4 verified the prior repairs and found that uncovered replay was still terminalized by higher auto-reply checkpoint evidence as documented above.
 - Round-4 remediation excludes `ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED` from the committed no-reply classifier. The real auto-reply evidence path now proves that neither member of the reconstructed A+B group receives terminal evidence, while the pending-index/checkpoint path proves independently confirmed A is selectable without B, B remains wakeable, and the handled frontier does not advance through B.
 - Round-4 remediation verification passed assistant automation runtime plus outbox coverage (353 tests), real auto-reply event/evidence coverage (78 tests), hosted pending-index/callback/Linq coverage (299 tests), assistant-engine/runtime typechecks, assistant-engine/runtime builds, and focused corrected-path checks.
-- Remaining: inspect and push the corrected candidate, obtain a passing final Review GPT round, finish its exact-head GitHub Actions, and close this plan.
+- Exact-head GitHub Actions passed for behavior candidate `5adbddc19c48` with 16 successful checks and one intentional skip.
+- Review GPT round 5 verified all production corrections and returned one Purpose Drift finding requiring the PR body's non-obvious affected-surface disclosure to name the auto-reply evidence, pending frontier, and Web checkpoint consequences. The disclosure was corrected without a code or head change.
+- The first disclosure verification response completed in 126 seconds and was discarded as untrusted under the five-minute floor. Same-thread recovery confirmed it as diagnostic `PASS` output only. The independent retry ran for 10 minutes 14 seconds, carried compatible `gpt-5.6-sol` response metadata, cross-checked the named production owners and tests, and returned `ROUND_OUTCOME: PASS` with `REVIEW_COMPLETE`.
+- Remaining: archive this plan in an explanatory-only closure commit, push it, wait for exact-head GitHub Actions, verify a clean current-base merge tree, and leave the PR open.
+Completed: 2026-08-11
