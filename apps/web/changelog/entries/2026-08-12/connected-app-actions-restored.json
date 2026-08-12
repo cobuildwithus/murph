@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 100,
+  "item": {
+    "id": "connected-app-actions-restored",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Connected app actions work again",
+    "summary": "Murph can send approved Gmail and Outlook messages and add primary-calendar events through the selected connected account again.",
+    "details": "Email still requires a current private request. Primary-calendar actions can also follow an exact direct automation the member saved. Every action uses a selected account, and Murph does not repeat an uncertain provider result.",
+    "relevanceTags": ["assistant", "connected-apps", "email", "calendar", "reliability"],
+    "sourcePullRequests": [1722]
+  }
+}

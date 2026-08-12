@@ -9,6 +9,6 @@
     "summary": "Pending wearable updates can now finish their sync work even while scheduled assistant automations are paused.",
     "details": "Fresh messages still take priority. Murph checkpoints recovered health-data changes before marking them handled, retries safely when a source remains pending, and does not start an AI response just to finish the sync.",
     "relevanceTags": ["wearables", "connections", "health-data", "reliability"],
-    "sourcePullRequests": [1597]
+    "sourcePullRequests": [1597, 1721]
   }
 }

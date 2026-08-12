@@ -63,6 +63,37 @@ Read and apply this guide when touching any of these surfaces:
    - Do not send to purchased, scraped, or otherwise untrusted contact lists.
    - Only message people with a clear user/product relationship and an expected reason to hear from Murph.
 
+## Assistant response media
+
+Linq's messaging contract allows up to 100 total parts and up to 40 public-URL
+media parts in one message, but Murph does not treat that provider ceiling as a
+normal authoring budget. A newly authored assistant response may attach at most
+eight images. Exercise walkthroughs preserve complete start, transition, and
+end sequences for the most useful movements within that budget; Murph teaches
+fewer movements instead of sending an unsolicited sequence of image messages.
+The broader 40-item persisted-media contract remains readable for rollout and
+replay compatibility. See Linq's
+[sending-message](https://docs.linqapp.com/guides/messaging/sending-messages/)
+and [attachment](https://docs.linqapp.com/guides/messaging/attachments/)
+limits.
+
+The Linq adapter includes distinct image alternative text in the provider text
+part for accessibility. It must reject a rendered text part over Linq's 10,000
+character limit before private vault bytes are loaded or uploaded and before
+message-provider entry, with `deliveryMayHaveSucceeded: false`.
+An ordinary failed direct-chat image response remains outstanding image work:
+its terminal failure input must not offer or send a text-only substitute. This
+rule does not change the separately persisted, deterministic text recovery
+owned by an iMessage app card.
+
+Every hosted outbox drain records only bounded payload aggregates: base message
+lengths, media counts and kinds, image-alt length, and public/private image
+counts. A Linq rejection additionally retains the request part counts and body
+shape, safe provider code and request id tokens, and the response body's kind,
+field-name summary, length, and SHA-256 signature. Never retain the message,
+alternative text, media URL, recipient, route, provider prose, or raw response
+body in these diagnostics.
+
 ## Assistant response cards
 
 Response cards are optional outbox-owned presentation siblings of response media, not a direct-send surface or a separate delivery owner. The general attachment tool serves explicit current private-direct requests, exact private-direct scheduled turns whose saved instructions explicitly request a card, and the managed meal closeout; it remains unavailable in groups. Occurrence authority alone is not card intent. A card replaces the whole final response, so it is eligible only when that card alone completely satisfies the current request. The outbox continues to own the semantic message, target, status, receipt, retry, and idempotency lifecycle, and a card cannot coexist with media.

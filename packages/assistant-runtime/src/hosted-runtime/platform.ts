@@ -113,6 +113,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncReconcileResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotCursor,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
@@ -441,6 +442,7 @@ export interface HostedRuntimeDeviceSyncPort {
   }): Promise<HostedExecutionDeviceSyncReconcileResponse>;
   fetchSnapshot(input?: {
     connectionId?: string | null;
+    cursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
     includeCredentialMaterial?: boolean | null;
     limit?: number | null;
     provider?: string | null;

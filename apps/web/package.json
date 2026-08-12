@@ -50,6 +50,7 @@
   },
   "dependencies": {
     "@base-ui/react": "1.4.1",
+    "@composio/client": "0.1.0-alpha.76",
     "@murphai/clinical-records": "workspace:*",
     "@murphai/cloudflare-hosted-control": "workspace:*",
     "@murphai/contracts": "workspace:*",
@@ -93,6 +94,7 @@
   },
   "devDependencies": {
     "@linqapp/sdk": "0.34.0",
+    "@murphai/assistant-runtime": "workspace:*",
     "@murphai/hosted-local-harness": "workspace:*",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.3.0",
