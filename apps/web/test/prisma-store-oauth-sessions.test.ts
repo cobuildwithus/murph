@@ -386,3 +386,15 @@ function createStore(tx: ReturnType<typeof createTransaction>) {
     ) => callback(tx),
   } as never);
 }
+
+describe("PrismaHostedOAuthSessionStore.deleteExpiredOAuthStates", () => {
+  it("leaves hosted expiry deletion to the background retention owner", async () => {
+    const tx = createTransaction({});
+    const store = createStore(tx);
+
+    await expect(
+      store.deleteExpiredOAuthStates(),
+    ).resolves.toBe(0);
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+});

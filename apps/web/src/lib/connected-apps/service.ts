@@ -610,9 +610,6 @@ async function createHostedConnectedAppIntent(input: {
       memberId: input.memberId,
       prisma: tx,
     });
-    await tx.hostedConnectedAppConnectIntent.deleteMany({
-      where: { expiresAt: { lte: now } },
-    });
     await tx.hostedConnectedAppConnectIntent.create({
       data: {
         alias: input.alias,

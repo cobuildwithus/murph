@@ -250,6 +250,9 @@ describe("connected-app service", () => {
   it("binds connect intents to the member and keeps provider-link attempts visible", async () => {
     const harness = installPrismaHarness();
     const claim = await createConnectClaim("hbm_member");
+    expect(
+      harness.prisma.hostedConnectedAppConnectIntent.deleteMany,
+    ).not.toHaveBeenCalled();
     const wrongMemberFetch = vi.fn(async (): Promise<Response> =>
       jsonResponse({ unexpected: true })
     );

@@ -23,15 +23,13 @@ export class PrismaHostedOAuthSessionStore {
     this.prisma = prisma;
   }
 
-  async deleteExpiredOAuthStates(now: string): Promise<number> {
-    const result = await this.prisma.deviceOauthSession.deleteMany({
-      where: {
-        expiresAt: {
-          lte: new Date(now),
-        },
-      },
-    });
-    return result.count;
+  /**
+   * Shared ingress requires its local-store maintenance hook. Hosted cleanup
+   * has a separate hourly owner, so the hosted implementation is deliberately
+   * free of foreground database work.
+   */
+  async deleteExpiredOAuthStates(): Promise<number> {
+    return 0;
   }
 
   async createOAuthState(input: OAuthStateRecord): Promise<OAuthStateRecord> {

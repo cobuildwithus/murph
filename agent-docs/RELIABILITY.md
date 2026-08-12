@@ -370,6 +370,16 @@ Last verified: 2026-08-11
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
 - Add tests for failure modes before relying on production-side recovery logic.
+- Short-lived connected-app, sensitive-action, device-connect, device OAuth,
+  Clinical Records connect, and Clinical Records OAuth rows never trigger a
+  global expiry sweep from foreground creation or provider admission. Exact
+  reads and consumes fail closed when the addressed row is expired; the hourly
+  retention owner owns deletion. It deletes expiry-indexed rows serially in
+  expiry-and-primary-key order under the smaller control-artifact batch and
+  max-batch ceilings, with `FOR UPDATE SKIP LOCKED`. The unbound
+  sensitive-action lane has a partial expiry-and-token index so durable
+  approval history cannot enlarge its transient claim scan. Approval-backed
+  rows remain with their approval owner.
 - Account deletion must not discard its only external-cleanup owner. The
   canonical account transaction persists the KMS-encrypted, foreign-key-free
   receipt before deleting the member. The existing hourly retention sweep

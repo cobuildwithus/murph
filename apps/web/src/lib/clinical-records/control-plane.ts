@@ -95,25 +95,22 @@ export async function startClinicalRecordConnection(input: {
       value: pkce.verifier,
     });
 
-    await prisma.$transaction(async (tx) => {
-      await tx.clinicalRecordOauthSession.deleteMany({ where: { expiresAt: { lte: now } } });
-      await tx.clinicalRecordOauthSession.create({
-        data: {
-          clientId,
-          codeVerifierEncrypted,
-          connectIntentClaimHash: intent.claimHash,
-          createdAt: now,
-          expiresAt,
-          fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
-          memberId: auth.member.id,
-          providerDirectoryEntryId: provider.id,
-          redirectUri,
-          requestedScopesJson: toClinicalJsonArray(smart.requestedScopes),
-          stateHash: state.stateHash,
-          tokenEndpoint: smart.tokenEndpoint,
-          webSessionId: auth.sessionId,
-        },
-      });
+    await prisma.clinicalRecordOauthSession.create({
+      data: {
+        clientId,
+        codeVerifierEncrypted,
+        connectIntentClaimHash: intent.claimHash,
+        createdAt: now,
+        expiresAt,
+        fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
+        memberId: auth.member.id,
+        providerDirectoryEntryId: provider.id,
+        redirectUri,
+        requestedScopesJson: toClinicalJsonArray(smart.requestedScopes),
+        stateHash: state.stateHash,
+        tokenEndpoint: smart.tokenEndpoint,
+        webSessionId: auth.sessionId,
+      },
     });
 
     return {
@@ -230,7 +227,6 @@ async function consumeClinicalOauthSession(input: {
       || session.webSessionId !== input.auth.sessionId
     ) throw invalidOauthStateError();
     if (session.expiresAt.getTime() <= now.getTime()) {
-      await tx.clinicalRecordOauthSession.deleteMany({ where: { stateHash, expiresAt: { lte: now } } });
       throw clinicalRecordsError({
         code: "CLINICAL_RECORD_OAUTH_STATE_EXPIRED",
         httpStatus: 410,

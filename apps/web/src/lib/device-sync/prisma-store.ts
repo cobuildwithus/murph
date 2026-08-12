@@ -142,8 +142,8 @@ export class PrismaDeviceSyncControlPlaneStore
     this.tokenAudits = new PrismaHostedTokenAuditStore(this.prisma);
   }
 
-  async deleteExpiredOAuthStates(now: string): Promise<number> {
-    return this.oauthSessions.deleteExpiredOAuthStates(now);
+  async deleteExpiredOAuthStates(): Promise<number> {
+    return this.oauthSessions.deleteExpiredOAuthStates();
   }
 
   async createOAuthState(input: OAuthStateRecord): Promise<OAuthStateRecord> {

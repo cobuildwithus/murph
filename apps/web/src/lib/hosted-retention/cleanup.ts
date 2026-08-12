@@ -29,6 +29,11 @@ export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
 // the production pool.
 export const HOSTED_RETENTION_BATCH_SIZE = 5_000;
 export const HOSTED_RETENTION_MAX_BATCHES = 4;
+// Short-lived control artifacts are normally tiny and should never inherit the
+// high-volume diagnostic drain budget. Across the six owners below this caps
+// one hourly pass at 12 statements and 3,000 deleted rows.
+export const HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE = 250;
+export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 5;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS = 10_000;
 
@@ -42,12 +47,18 @@ export interface HostedRetentionCleanupResult {
   compactedLinqProviderEventDiagnostics: number;
   expiredAssistantRuntimeIssuesDeleted: number;
   expiredCallbackRequestNoncesDeleted: number;
+  expiredClinicalRecordConnectIntentsDeleted: number;
+  expiredClinicalRecordOauthSessionsDeleted: number;
   expiredComputerRunsCleanedUp: number;
+  expiredConnectedAppConnectIntentsDeleted: number;
   expiredConversationPolicyNonRepliesRecorded: number;
+  expiredDeviceConnectIntentsDeleted: number;
+  expiredDeviceOauthSessionsDeleted: number;
   expiredDeviceWebhookTracesDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
+  expiredSensitiveActionChallengesDeleted: number;
   inboxMediaRetentionRuntimeSignalFailures: number;
   inboxMediaRetentionRuntimeSignalsSent: number;
   oldRuntimeLogsDeleted: number;
@@ -65,12 +76,26 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
+  // Serial by design: short-lived control-plane artifacts are retired only by
+  // this background owner, never by a member-facing creation transaction.
+  const expiredConnectedAppConnectIntentsDeleted =
+    await deleteExpiredConnectedAppConnectIntents({ now, prisma });
+  const expiredSensitiveActionChallengesDeleted =
+    await deleteExpiredSensitiveActionChallenges({ now, prisma });
+  const expiredDeviceConnectIntentsDeleted =
+    await deleteExpiredDeviceConnectIntents({ now, prisma });
+  const expiredDeviceOauthSessionsDeleted =
+    await deleteExpiredDeviceOauthSessions({ now, prisma });
+  const expiredClinicalRecordConnectIntentsDeleted =
+    await deleteExpiredClinicalRecordConnectIntents({ now, prisma });
+  const expiredClinicalRecordOauthSessionsDeleted =
+    await deleteExpiredClinicalRecordOauthSessions({ now, prisma });
   const expiredMailboxItems = await retireExpiredMailboxContent({
     now,
     prisma,
   });
-  // Serial by design: these are background deletes and must never fan out
-  // across the same pool that serves user-facing control-plane work.
+  // These background deletes must never fan out across the same pool that
+  // serves user-facing control-plane work.
   const expiredCallbackRequestNoncesDeleted =
     await deleteExpiredHostedCallbackRequestNonces({ prisma });
   const expiredIngressLatencyTracesDeleted = await deleteExpiredIngressLatencyTraces({
@@ -108,13 +133,19 @@ export async function runHostedRetentionCleanup(input: {
     compactedLinqProviderEventDiagnostics,
     expiredAssistantRuntimeIssuesDeleted,
     expiredCallbackRequestNoncesDeleted,
+    expiredClinicalRecordConnectIntentsDeleted,
+    expiredClinicalRecordOauthSessionsDeleted,
     expiredComputerRunsCleanedUp,
+    expiredConnectedAppConnectIntentsDeleted,
     expiredConversationPolicyNonRepliesRecorded:
       expiredMailboxItems.policyNonReplies,
+    expiredDeviceConnectIntentsDeleted,
+    expiredDeviceOauthSessionsDeleted,
     expiredDeviceWebhookTracesDeleted,
     expiredIngressLatencyTracesDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
+    expiredSensitiveActionChallengesDeleted,
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
     oldRuntimeLogsDeleted: 0,
@@ -183,6 +214,7 @@ async function claimDueInboxMediaRetentionSignalWorkspaces(input: {
         "inbox_media_retention_wake_at" ASC,
         "user_id" ASC
       LIMIT ${HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE}
+      FOR UPDATE SKIP LOCKED
     )
     UPDATE "hosted_workspace"
     SET "inbox_media_retention_signal_attempted_at" = ${input.now}
@@ -287,7 +319,7 @@ export async function retireExpiredMailboxContent(input: {
           )
         ORDER BY "created_at" ASC, "id" ASC
         LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-        FOR UPDATE
+        FOR UPDATE SKIP LOCKED
       ),
       legacy_consumed_preferences AS MATERIALIZED (
         SELECT eligible."id"
@@ -418,7 +450,7 @@ export async function retireExpiredMailboxContent(input: {
           )
         ORDER BY item."created_at" ASC, item."id" ASC
         LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-        FOR UPDATE
+        FOR UPDATE SKIP LOCKED
       ),
       pruned AS (
         DELETE FROM "hosted_mailbox_item" AS item
@@ -476,6 +508,121 @@ export async function deleteExpiredHostedCallbackRequestNonces(input: {
   `);
 }
 
+async function deleteExpiredConnectedAppConnectIntents(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT intent."claim_hash"
+      FROM "hosted_connected_app_connect_intent" AS intent
+      WHERE intent."expires_at" <= ${input.now}
+      ORDER BY intent."expires_at" ASC, intent."claim_hash" ASC
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF intent SKIP LOCKED
+    )
+    DELETE FROM "hosted_connected_app_connect_intent" AS intent
+    USING doomed
+    WHERE intent."claim_hash" = doomed."claim_hash"
+  `);
+}
+
+async function deleteExpiredSensitiveActionChallenges(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT challenge."token_hash"
+      FROM "hosted_sensitive_action_challenge" AS challenge
+      WHERE challenge."approval_key" IS NULL
+        AND challenge."expires_at" <= ${input.now}
+      ORDER BY challenge."expires_at" ASC, challenge."token_hash" ASC
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF challenge SKIP LOCKED
+    )
+    DELETE FROM "hosted_sensitive_action_challenge" AS challenge
+    USING doomed
+    WHERE challenge."token_hash" = doomed."token_hash"
+  `);
+}
+
+async function deleteExpiredDeviceConnectIntents(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT intent."claim_hash"
+      FROM "device_connect_intent" AS intent
+      WHERE intent."expires_at" <= ${input.now}
+      ORDER BY intent."expires_at" ASC, intent."claim_hash" ASC
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF intent SKIP LOCKED
+    )
+    DELETE FROM "device_connect_intent" AS intent
+    USING doomed
+    WHERE intent."claim_hash" = doomed."claim_hash"
+  `);
+}
+
+export async function deleteExpiredDeviceOauthSessions(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT oauth_session."state"
+      FROM "device_oauth_session" AS oauth_session
+      WHERE oauth_session."expires_at" <= ${input.now}
+      ORDER BY oauth_session."expires_at" ASC, oauth_session."state" ASC
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF oauth_session SKIP LOCKED
+    )
+    DELETE FROM "device_oauth_session" AS oauth_session
+    USING doomed
+    WHERE oauth_session."state" = doomed."state"
+  `);
+}
+
+async function deleteExpiredClinicalRecordConnectIntents(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT intent."claim_hash"
+      FROM "clinical_record_connect_intent" AS intent
+      WHERE intent."expires_at" <= ${input.now}
+      ORDER BY intent."expires_at" ASC, intent."claim_hash" ASC
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF intent SKIP LOCKED
+    )
+    DELETE FROM "clinical_record_connect_intent" AS intent
+    USING doomed
+    WHERE intent."claim_hash" = doomed."claim_hash"
+  `);
+}
+
+async function deleteExpiredClinicalRecordOauthSessions(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT oauth_session."state_hash"
+      FROM "clinical_record_oauth_session" AS oauth_session
+      WHERE oauth_session."expires_at" <= ${input.now}
+      ORDER BY oauth_session."expires_at" ASC, oauth_session."state_hash" ASC
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF oauth_session SKIP LOCKED
+    )
+    DELETE FROM "clinical_record_oauth_session" AS oauth_session
+    USING doomed
+    WHERE oauth_session."state_hash" = doomed."state_hash"
+  `);
+}
+
 export async function deleteExpiredIngressLatencyTraces(input: {
   now: Date;
   prisma: Pick<PrismaClient, "$executeRaw">;
@@ -484,13 +631,14 @@ export async function deleteExpiredIngressLatencyTraces(input: {
     input.now.getTime() - HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS,
   );
   return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_ingress_latency_trace"
-      WHERE "accepted_at" < ${cutoff}
-        AND "updated_at" < ${cutoff}
-      ORDER BY "accepted_at" ASC, "id" ASC
+    WITH doomed AS MATERIALIZED (
+      SELECT trace."id"
+      FROM "hosted_ingress_latency_trace" AS trace
+      WHERE trace."accepted_at" < ${cutoff}
+        AND trace."updated_at" < ${cutoff}
+      ORDER BY trace."accepted_at" ASC, trace."id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF trace SKIP LOCKED
     )
     DELETE FROM "hosted_ingress_latency_trace" AS trace
     USING doomed
@@ -504,12 +652,13 @@ async function deleteExpiredAssistantRuntimeIssues(input: {
   prisma: PrismaClient;
 }): Promise<number> {
   return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_assistant_runtime_issue"
-      WHERE "expires_at" <= ${input.now}
-      ORDER BY "expires_at" ASC, "id" ASC
+    WITH doomed AS MATERIALIZED (
+      SELECT issue."id"
+      FROM "hosted_assistant_runtime_issue" AS issue
+      WHERE issue."expires_at" <= ${input.now}
+      ORDER BY issue."expires_at" ASC, issue."id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF issue SKIP LOCKED
     )
     DELETE FROM "hosted_assistant_runtime_issue" AS issue
     USING doomed
@@ -530,13 +679,17 @@ async function deleteExpiredDeviceWebhookTraces(input: {
     input.now.getTime() - HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
   );
   return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "provider", "trace_id"
-      FROM "device_webhook_trace"
-      WHERE "status" = 'processed'
-        AND "received_at" < ${cutoff}
-      ORDER BY "received_at" ASC, "provider" ASC, "trace_id" ASC
+    WITH doomed AS MATERIALIZED (
+      SELECT trace."provider", trace."trace_id"
+      FROM "device_webhook_trace" AS trace
+      WHERE trace."status" = 'processed'
+        AND trace."received_at" < ${cutoff}
+      ORDER BY
+        trace."received_at" ASC,
+        trace."provider" ASC,
+        trace."trace_id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF trace SKIP LOCKED
     )
     DELETE FROM "device_webhook_trace" AS trace
     USING doomed
@@ -555,17 +708,18 @@ async function compactOldLinqProviderEventDiagnostics(input: {
     input.now.getTime() - HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS,
   );
   return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH compactable AS (
-      SELECT "event_id"
-      FROM "hosted_linq_provider_event"
-      WHERE "received_at" < ${cutoff}
+    WITH compactable AS MATERIALIZED (
+      SELECT provider_event."event_id"
+      FROM "hosted_linq_provider_event" AS provider_event
+      WHERE provider_event."received_at" < ${cutoff}
         AND (
-          "extraction_json" IS NOT NULL
-          OR "payload_sanitized_json" IS NOT NULL
-          OR "payload_shape_json" IS NOT NULL
+          provider_event."extraction_json" IS NOT NULL
+          OR provider_event."payload_sanitized_json" IS NOT NULL
+          OR provider_event."payload_shape_json" IS NOT NULL
         )
-      ORDER BY "received_at" ASC, "event_id" ASC
+      ORDER BY provider_event."received_at" ASC, provider_event."event_id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF provider_event SKIP LOCKED
     )
     UPDATE "hosted_linq_provider_event" AS provider_event
     SET
@@ -624,30 +778,51 @@ async function runRetentionBatches(
   return affected;
 }
 
+async function runControlArtifactRetentionBatches(
+  mutateBatch: () => Promise<number>,
+): Promise<number> {
+  let affected = 0;
+  for (
+    let batch = 0;
+    batch < HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES;
+    batch += 1
+  ) {
+    const count = await mutateBatch();
+    affected += count;
+    if (count < HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  return affected;
+}
+
 async function deleteStaleHostedWebSessions(input: {
   now: Date;
   prisma: PrismaClient;
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS);
   const expired = await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_web_session"
-      WHERE "expires_at" < ${cutoff}
-      ORDER BY "expires_at" ASC, "id" ASC
+    WITH doomed AS MATERIALIZED (
+      SELECT web_session."id"
+      FROM "hosted_web_session" AS web_session
+      WHERE web_session."expires_at" < ${cutoff}
+      ORDER BY web_session."expires_at" ASC, web_session."id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF web_session SKIP LOCKED
     )
     DELETE FROM "hosted_web_session" AS web_session
     USING doomed
     WHERE web_session."id" = doomed."id"
   `);
   const revoked = await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "hosted_web_session"
-      WHERE "revoked_at" < ${cutoff}
-      ORDER BY "revoked_at" ASC, "id" ASC
+    WITH doomed AS MATERIALIZED (
+      SELECT web_session."id"
+      FROM "hosted_web_session" AS web_session
+      WHERE web_session."revoked_at" < ${cutoff}
+      ORDER BY web_session."revoked_at" ASC, web_session."id" ASC
       LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF web_session SKIP LOCKED
     )
     DELETE FROM "hosted_web_session" AS web_session
     USING doomed

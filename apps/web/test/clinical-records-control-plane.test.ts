@@ -801,6 +801,7 @@ function createHarness(
     }),
     clinicalRecordConnectIntent: tx.clinicalRecordConnectIntent,
     clinicalRecordConnection: tx.clinicalRecordConnection,
+    clinicalRecordOauthSession: tx.clinicalRecordOauthSession,
   };
   return {
     callOrder,

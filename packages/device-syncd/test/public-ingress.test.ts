@@ -58,12 +58,14 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   lastRecordedWebhookTrace: DeviceSyncWebhookTraceRecord | null = null;
   claimWebhookTraceCalls = 0;
   completedWebhookTraceCalls = 0;
+  deleteExpiredOAuthStatesCalls = 0;
   markConnectionSetupFailedError: Error | null = null;
   lastCreatedOAuthState: OAuthStateRecord | null = null;
   upsertConnectionCalls = 0;
   private accountCounter = 0;
 
   deleteExpiredOAuthStates(now: string): number {
+    this.deleteExpiredOAuthStatesCalls += 1;
     let deleted = 0;
 
     for (const [state, record] of this.oauthStates.entries()) {
@@ -755,6 +757,7 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
   });
   assert.match(begin.authorizationUrl, /^https:\/\/example\.test\/oauth\?state=/u);
   assert.match(begin.authorizationUrl, /redirect_uri=https%3A%2F%2Fsync\.example\.test%2Fdevice-sync%2Foauth%2Fdemo%2Fcallback/u);
+  assert.equal(store.deleteExpiredOAuthStatesCalls, 1);
 
   const connected = await ingress.handleOAuthCallback({
     provider: "demo",
