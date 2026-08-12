@@ -119,6 +119,97 @@ describe("hosted device-sync runtime port", () => {
     expect(received.length).toBe(2);
   });
 
+  it("aborts the active split request on lane cancellation and converges on retry", async () => {
+    const attempts: HostedExecutionDeviceSyncRuntimeApplyRequest[][] = [[], []];
+    const committedConnectionIds = new Set<string>();
+    let attemptIndex = 0;
+    let resolveSecondRequestStarted: (() => void) | null = null;
+    const secondRequestStarted = new Promise<void>((resolve) => {
+      resolveSecondRequestStarted = resolve;
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const body = await request.json() as HostedExecutionDeviceSyncRuntimeApplyRequest;
+      const attempt = attempts[attemptIndex];
+      if (!attempt) {
+        throw new Error("Unexpected runtime apply attempt.");
+      }
+      attempt.push(body);
+
+      if (attemptIndex === 0 && attempt.length === 2) {
+        resolveSecondRequestStarted?.();
+        return await new Promise<Response>((_resolve, reject) => {
+          const rejectForAbort = () => reject(request.signal.reason);
+          if (request.signal.aborted) {
+            rejectForAbort();
+            return;
+          }
+          request.signal.addEventListener("abort", rejectForAbort, { once: true });
+        });
+      }
+
+      const responseUpdates = body.updates.map((update) => {
+        const alreadyCommitted = committedConnectionIds.has(update.connectionId);
+        committedConnectionIds.add(update.connectionId);
+        return {
+          connection: null,
+          connectionId: update.connectionId,
+          status: "updated" as const,
+          tokenUpdate: "unchanged" as const,
+          writeUpdate: alreadyCommitted ? "unchanged" as const : "applied" as const,
+        };
+      });
+      return Response.json({
+        appliedAt: "2026-08-11T12:00:00.000Z",
+        updates: responseUpdates,
+        userId: body.userId,
+      });
+    });
+    const updates = Array.from(
+      { length: 100 },
+      (_, index) => buildRuntimeApplyUpdate(index, {
+        sourceCount: 64,
+        sourceKeyPadding: "x".repeat(80),
+      }),
+    );
+    const port = createHostedWebDeviceSyncPort({
+      boundUserId: "member_device_sync_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 45_000,
+      transport: { mode: "proxy" },
+    });
+    const firstCancellation = new AbortController();
+
+    const firstApply = port.applyUpdates({
+      signal: firstCancellation.signal,
+      updates,
+    });
+    await secondRequestStarted;
+    firstCancellation.abort(
+      new DOMException("Background maintenance yielded to foreground input.", "AbortError"),
+    );
+
+    await expect(firstApply).rejects.toMatchObject({
+      hostedRuntimeFetchCallerSignalAborted: true,
+      hostedRuntimeFetchCauseKind: "abort",
+      hostedRuntimeFetchRequestSignalAborted: true,
+      hostedRuntimeFetchTimeoutSignalAborted: false,
+    });
+    expect(attempts[0]).toHaveLength(2);
+    expect(committedConnectionIds.size).toBe(attempts[0]?.[0]?.updates.length);
+
+    attemptIndex = 1;
+    const retryResponse = await port.applyUpdates({ updates });
+
+    expect(attempts[1].length).toBeGreaterThan(2);
+    expect(attempts[1].flatMap((body) => body.updates).map((update) => update.connectionId))
+      .toEqual(updates.map((update) => update.connectionId));
+    expect(retryResponse.updates.map((update) => update.connectionId))
+      .toEqual(updates.map((update) => update.connectionId));
+    expect(retryResponse.updates.some((update) => update.writeUpdate === "unchanged")).toBe(true);
+    expect(committedConnectionIds.size).toBe(updates.length);
+  });
+
   it("rejects one independently oversized update before transport retry loops", async () => {
     const fetchMock = vi.fn();
     const port = createHostedWebDeviceSyncPort({

@@ -144,6 +144,16 @@ application authority checks.
   paths remain deleted. Further expansion beyond byte partitioning, ordered
   aggregation, independently oversized-update rejection, and fail-closed
   later-chunk semantics requires a new retrospective.
+- The exact-head round-four audit at `72efcd2aa4` accepted the retrospective
+  and prior architecture corrections, then found one review-induced foreground-
+  priority failure: split callbacks reused a per-request timeout and the
+  system-mailbox signal did not reach the complete callback loop. Accepted.
+  `runHostedDeviceSyncWakeLane` now owns the existing background-maintenance
+  cancellation primitive for the entire lane, combining the outer abort,
+  foreground-yield predicate, and one timeout. The system-mailbox path forwards
+  its existing signal, the idle caller no longer adds a duplicate wrapper, and
+  transport-wrapped aborts are recognized through their preserved cause. This
+  adds no queue, retry state, service, lifecycle, or authority owner.
 
 ## Verification
 
@@ -220,3 +230,16 @@ application authority checks.
   code finding. The required original-versus-current comparison, continuation
   decision, retained/removed owner inventory, smallest architecture, and
   no-expansion validation boundary are recorded above and in the PR body.
+- After the round-four foreground-priority finding, 92 focused assistant-runtime
+  maintenance/event tests and all four Cloudflare device-sync port tests pass.
+  The direct split proof holds callback two after callback one commits, aborts
+  it through the shared lane signal, proves callback three never starts, then
+  retries the full ordered snapshot and converges all 100 updates. A fake-timer
+  proof shows a transport-wrapped in-flight request returns the existing
+  yielded/retry disposition at one lane-wide deadline. Assistant-runtime and
+  Cloudflare package typechecks pass. The diff-aware repository gate also passes
+  the complete affected assistant-runtime inventory (2,185 passed, 4 skipped),
+  Cloudflare Node inventory (2,402 passed, 2 skipped), and Workers-runtime
+  inventory (10 passed), together with the routed architecture, logging,
+  provider-request, dependency, and workspace-boundary guards. No-JS, docs-
+  drift, diff, and privacy checks remain clean.
