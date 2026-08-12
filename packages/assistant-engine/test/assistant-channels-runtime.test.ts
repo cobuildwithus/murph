@@ -52,7 +52,7 @@ const NUTRITION_CARD: AssistantResponseCard = {
 
 const NUTRITION_CARD_TEXT = renderAssistantResponseCardText(NUTRITION_CARD)
 
-const EXPANDED_WORKOUT_CARD = assistantResponseCardSchema.parse({
+const EXPANDED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
   footer: 'Reply with the exercise, set, and result.',
   kind: 'compact_table',
   subtitle: null,
@@ -75,7 +75,7 @@ const EXPANDED_WORKOUT_CARD = assistantResponseCardSchema.parse({
     state: 'active',
     version: 1,
   },
-})
+}
 
 const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
   ...EXPANDED_WORKOUT_CARD,
