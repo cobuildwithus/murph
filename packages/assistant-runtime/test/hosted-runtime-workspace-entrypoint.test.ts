@@ -23424,22 +23424,27 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase() {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint: async () => {
+                    events.push("device-sync.dirty-ack");
+                  },
+                  checkpointReason: "assistant_runtime_commit" as const,
+                }),
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
             return {
-              ...(assistantPhaseCalls === 1
-                ? {
-                    afterCheckpoint: async () => ({
-                      afterDurableCheckpoint: async () => {
-                        events.push("device-sync.dirty-ack");
-                      },
-                      checkpointReason: "assistant_runtime_commit" as const,
-                    }),
-                    checkpointReason: "assistant_runtime_commit" as const,
-                  }
-                : {}),
               nextWakeAt: null,
-              progressed: assistantPhaseCalls === 1,
+              progressed: false,
               redactedStatus: {
-                hostedAssistantProgressed: assistantPhaseCalls === 1,
+                hostedAssistantProgressed: false,
               },
             };
           },
