@@ -37,6 +37,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
   const mediumActivityMinutes = projectWearableResolvedMetricPublicSources(day.mediumActivityMinutes);
   const highActivityMinutes = projectWearableResolvedMetricPublicSources(day.highActivityMinutes);
   const activeCalories = projectWearableResolvedMetricPublicSources(day.activeCalories);
+  const activityAverageHeartRate = projectWearableResolvedMetricPublicSources(day.activityAverageHeartRate);
   const totalCalories = projectWearableResolvedMetricPublicSources(day.totalCalories);
   const distanceKm = projectWearableResolvedMetricPublicSources(day.distanceKm);
   const floorsClimbed = projectWearableResolvedMetricPublicSources(day.floorsClimbed);
@@ -60,6 +61,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     ["mediumActivityMinutes", mediumActivityMinutes],
     ["highActivityMinutes", highActivityMinutes],
     ["activeCalories", activeCalories],
+    ["activityAverageHeartRate", activityAverageHeartRate],
     ["totalCalories", totalCalories],
     ["distanceKm", distanceKm],
     ["floorsClimbed", floorsClimbed],
@@ -85,6 +87,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
 
   return {
     ...day,
+    activityAverageHeartRate,
     activityScore,
     activeCalories,
     activityMinutes,
@@ -121,6 +124,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     totalElevationGainMeters,
     walkingAverageHeartRate,
     workoutStrain,
+    walkingAverageHeartRate,
   };
 }
 

@@ -1397,9 +1397,9 @@ function normalizeSummaries(
 
   for (const [resource, payload] of summaryEntries) {
     const preparedMenstrualCycle = resource === "menstrual_cycle"
-      ? prepareJunctionMenstrualCycleSummary(payload)
+      ? prepareJunctionMenstrualCycleSummary(payload, context.connectionsByKey)
       : undefined;
-    const entries = preparedMenstrualCycle?.entries ?? resourceEntries(payload, resource);
+    const entries = preparedMenstrualCycle ? [] : resourceEntries(payload, resource);
     const resourceSlug = slugify(resource, "summary");
     const evidencePartRole = `junction-summary-${resourceSlug}`;
     const fallbackIdentityDisambiguators = resource === "meal"
@@ -1420,6 +1420,34 @@ function normalizeSummaries(
           ?? buildRawResourcePayload(resource, payload, context.connectionsByKey),
       ),
     );
+
+    if (preparedMenstrualCycle) {
+      preparedMenstrualCycle.cycles.forEach((cycle, index) => {
+        const resourceContext = buildResourceContext({
+          entry: cycle.entry,
+          originFallback: cycle.originFallback,
+          resource,
+          resourceSlug,
+          identityKind: "summary",
+          index,
+          fallbackArtifactRole: evidencePartRole,
+          context,
+        });
+        if (!resourceContext) {
+          return;
+        }
+
+        const firstEventIndex = context.events.length;
+        pushMenstrualCycleSummary(cycle, resourceContext, context);
+        pushJunctionAuthoritativeSummaryEventSet(
+          cycle.entry,
+          resourceContext,
+          context,
+          context.events.slice(firstEventIndex),
+        );
+      });
+      continue;
+    }
 
     const resolvedEntries = entries.flatMap(({ entry, originFallback }, index): JunctionResolvedResourceEntry[] => {
       const resourceContext = buildResourceContext({
@@ -1466,9 +1494,6 @@ function normalizeSummaries(
           break;
         case "profile":
           pushProfileSummary(entry, resourceContext, context);
-          break;
-        case "menstrual_cycle":
-          pushMenstrualCycleSummary(entry, resourceContext, context);
           break;
         case "electrocardiogram":
           pushElectrocardiogramSummary(entry, resourceContext, context);
@@ -3904,7 +3929,7 @@ function buildRawResourcePayload(
   connectionsByKey?: ReadonlyMap<string, PlainObject>,
 ): unknown {
   if (resource === "menstrual_cycle") {
-    return prepareJunctionMenstrualCycleSummary(payload).evidence;
+    return prepareJunctionMenstrualCycleSummary(payload, connectionsByKey).evidence;
   }
 
   if (resource === JUNCTION_NOTE_RESOURCE) {
@@ -5629,27 +5654,6 @@ const JUNCTION_PROGESTERONE_TEST_RESULT_VALUES: Readonly<Record<string, number>>
 });
 const JUNCTION_MENSTRUAL_CYCLE_LIMIT = 64;
 const JUNCTION_MENSTRUAL_FACT_LIMIT = 512;
-const JUNCTION_MENSTRUAL_FACT_ARRAY_KEYS = [
-  "basalBodyTemperature",
-  "basal_body_temperature",
-  "cervicalMucus",
-  "cervical_mucus",
-  "contraceptive",
-  "detectedDeviations",
-  "detected_deviations",
-  "homePregnancyTest",
-  "home_pregnancy_test",
-  "homeProgesteroneTest",
-  "home_progesterone_test",
-  "intermenstrualBleeding",
-  "intermenstrual_bleeding",
-  "menstrualFlow",
-  "menstrual_flow",
-  "ovulationTest",
-  "ovulation_test",
-  "sexualActivity",
-  "sexual_activity",
-] as const;
 
 type JunctionMenstrualFactKind =
   | "basal_body_temperature"
@@ -5684,23 +5688,30 @@ interface JunctionPreparedMenstrualCycle {
   evidence: PlainObject;
   facts: JunctionPreparedMenstrualFact[];
   isPredicted: boolean;
-  originFallback?: JunctionOriginFallback;
+  originFallback: JunctionOriginFallback;
   recordHash: string;
-  sortKey: string;
+  sortDate?: string;
 }
 
 interface JunctionPreparedMenstrualCycleSummary {
-  entries: JunctionResourceEntry[];
+  cycles: JunctionPreparedMenstrualCycle[];
   evidence: PlainObject;
 }
 
 function prepareJunctionMenstrualCycleSummary(
   payload: unknown,
+  connectionsByKey?: ReadonlyMap<string, PlainObject>,
 ): JunctionPreparedMenstrualCycleSummary {
   const sortedSourceCycles = resourceEntries(payload, "menstrual_cycle")
-    .map(({ entry, originFallback }) =>
-      prepareJunctionMenstrualCycle(entry, originFallback)
-    )
+    .map(({ entry, originFallback }) => {
+      const connection = connectionsByKey
+        ? resolveEntryConnection(entry, connectionsByKey)
+        : undefined;
+      return prepareJunctionMenstrualCycle(
+        entry,
+        buildJunctionOriginFallback(connection, originFallback),
+      );
+    })
     .sort(comparePreparedJunctionMenstrualCycles);
   const sourceCyclesByHash = new Map<string, JunctionPreparedMenstrualCycle>();
   for (const cycle of sortedSourceCycles) {
@@ -5732,12 +5743,9 @@ function prepareJunctionMenstrualCycleSummary(
   }
 
   return {
-    entries: admittedCycles.map((cycle) => ({
-      entry: buildPreparedJunctionMenstrualCycleEntry(
-        cycle.entry,
-        factsByCycle.get(cycle.recordHash) ?? [],
-      ),
-      originFallback: cycle.originFallback,
+    cycles: admittedCycles.map((cycle) => ({
+      ...cycle,
+      facts: factsByCycle.get(cycle.recordHash) ?? [],
     })),
     evidence: {
       schema: "junction.menstrual_cycle_evidence.v1",
@@ -5758,23 +5766,28 @@ function prepareJunctionMenstrualCycleSummary(
 
 function prepareJunctionMenstrualCycle(
   entry: PlainObject,
-  originFallback: JunctionOriginFallback | undefined,
+  originFallback: JunctionOriginFallback,
 ): JunctionPreparedMenstrualCycle {
   const isPredicted = firstValueFromPaths(entry, ["isPredicted", "is_predicted"]) === true;
   const drafts = collectJunctionMenstrualFactDrafts(entry);
-  const sourceProviderSlug = readJunctionSourceProviderSlug(entry, originFallback);
-  const sourceType = firstStringFromPaths(entry, ["sourceType", "source_type", "source.type"])
-    ?? firstStringFromPaths(originFallback, ["sourceType", "source_type", "source.type"]);
+  const origin = resolveJunctionOrigin(entry, originFallback);
+  const sourceProviderSlug = origin.sourceProviderSlug;
+  const sourceType = origin.sourceType;
   const explicitId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
   const periodStart = firstIsoDateFromPaths(entry, ["periodStart", "period_start"]);
   const periodEnd = firstIsoDateFromPaths(entry, ["periodEnd", "period_end"]);
   const cycleEnd = firstIsoDateFromPaths(entry, ["cycleEnd", "cycle_end"]);
   const createdAt = trimOptionalToLength(firstStringFromPaths(entry, ["createdAt", "created_at"]), 80);
   const updatedAt = trimOptionalToLength(firstStringFromPaths(entry, ["updatedAt", "updated_at"]), 80);
+  const legacyCycleStart = firstIsoDateFromPaths(entry, ["cycleStart", "cycle_start"]);
+  const legacyCycleDay = firstNumberFromPaths(entry, ["cycleDay", "cycle_day"]);
+  const legacyPeriodLengthDays = firstNumberFromPaths(entry, ["periodLengthDays", "period_length_days"]);
+  const legacyCycleLengthDays = firstNumberFromPaths(entry, ["cycleLengthDays", "cycle_length_days"]);
   const recordHash = shortHash([
     "menstrual-cycle",
     sourceProviderSlug,
     sourceType,
+    origin.sourceInstanceId,
     explicitId,
     periodStart,
     periodEnd,
@@ -5782,6 +5795,10 @@ function prepareJunctionMenstrualCycle(
     createdAt,
     updatedAt,
     isPredicted,
+    legacyCycleStart,
+    legacyCycleDay,
+    legacyPeriodLengthDays,
+    legacyCycleLengthDays,
   ]);
   const facts = drafts.map((fact) => ({
     ...fact,
@@ -5798,24 +5815,35 @@ function prepareJunctionMenstrualCycle(
     cycleEnd,
     createdAt,
     updatedAt,
-    legacyCycleStart: firstIsoDateFromPaths(entry, ["cycleStart", "cycle_start"]),
-    legacyCycleDay: firstNumberFromPaths(entry, ["cycleDay", "cycle_day"]),
-    legacyPeriodLengthDays: firstNumberFromPaths(entry, ["periodLengthDays", "period_length_days"]),
-    legacyCycleLengthDays: firstNumberFromPaths(entry, ["cycleLengthDays", "cycle_length_days"]),
+    legacyCycleStart,
+    legacyCycleDay,
+    legacyPeriodLengthDays,
+    legacyCycleLengthDays,
+  });
+  const scalarEntry = stripUndefined({
+    id: explicitId,
+    period_start: periodStart,
+    period_end: periodEnd,
+    cycle_end: cycleEnd,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    is_predicted: isPredicted,
   });
 
   return {
-    entry,
+    entry: scalarEntry,
     evidence,
     facts,
     isPredicted,
-    originFallback,
+    originFallback: { ...origin },
     recordHash,
-    sortKey: JSON.stringify([
-      isPredicted ? 1 : 0,
-      periodStart ?? "",
-      cycleEnd ?? "",
-      recordHash,
+    sortDate: firstStrictIsoDateFromPaths(entry, [
+      "periodStart",
+      "period_start",
+      "cycleEnd",
+      "cycle_end",
+      "periodEnd",
+      "period_end",
     ]),
   };
 }
@@ -5925,70 +5953,13 @@ function collectJunctionMenstrualFactDrafts(entry: PlainObject): JunctionMenstru
   return facts;
 }
 
-function buildPreparedJunctionMenstrualCycleEntry(
-  entry: PlainObject,
-  facts: readonly JunctionPreparedMenstrualFact[],
-): PlainObject {
-  const prepared: PlainObject = { ...entry };
-  for (const key of JUNCTION_MENSTRUAL_FACT_ARRAY_KEYS) {
-    delete prepared[key];
-  }
-
-  const grouped = new Map<JunctionMenstrualFactKind, PlainObject[]>();
-  for (const fact of [...facts].sort(compareJunctionMenstrualFacts)) {
-    const value = junctionMenstrualFactProviderEntry(fact);
-    const entries = grouped.get(fact.kind) ?? [];
-    entries.push(value);
-    grouped.set(fact.kind, entries);
-  }
-
-  const providerKeyByKind: Readonly<Record<JunctionMenstrualFactKind, string>> = {
-    basal_body_temperature: "basal_body_temperature",
-    cervical_mucus: "cervical_mucus",
-    contraceptive: "contraceptive",
-    detected_deviation: "detected_deviations",
-    home_pregnancy_test: "home_pregnancy_test",
-    home_progesterone_test: "home_progesterone_test",
-    intermenstrual_bleeding: "intermenstrual_bleeding",
-    menstrual_flow: "menstrual_flow",
-    ovulation_test: "ovulation_test",
-    sexual_activity: "sexual_activity",
-  };
-  for (const [kind, entries] of grouped) {
-    prepared[providerKeyByKind[kind]] = entries;
-  }
-
-  return prepared;
-}
-
-function junctionMenstrualFactProviderEntry(fact: JunctionPreparedMenstrualFact): PlainObject {
-  switch (fact.kind) {
-    case "basal_body_temperature":
-      return { date: fact.date, value: fact.value };
-    case "cervical_mucus":
-      return { date: fact.date, quality: fact.value };
-    case "contraceptive":
-      return { date: fact.date, type: fact.value };
-    case "detected_deviation":
-      return { date: fact.date, deviation: fact.value };
-    case "home_pregnancy_test":
-    case "home_progesterone_test":
-    case "ovulation_test":
-      return { date: fact.date, test_result: fact.value };
-    case "intermenstrual_bleeding":
-      return { date: fact.date };
-    case "menstrual_flow":
-      return { date: fact.date, flow: fact.value };
-    case "sexual_activity":
-      return stripUndefined({ date: fact.date, protection_used: fact.value });
-  }
-}
-
 function comparePreparedJunctionMenstrualCycles(
   left: JunctionPreparedMenstrualCycle,
   right: JunctionPreparedMenstrualCycle,
 ): number {
-  return left.sortKey.localeCompare(right.sortKey);
+  return Number(left.isPredicted) - Number(right.isPredicted)
+    || compareNewestOptionalIsoDates(left.sortDate, right.sortDate)
+    || left.recordHash.localeCompare(right.recordHash);
 }
 
 function compareJunctionMenstrualFacts(
@@ -5997,7 +5968,21 @@ function compareJunctionMenstrualFacts(
 ): number {
   return Number(left.isPredicted) - Number(right.isPredicted)
     || Number(!left.canonical) - Number(!right.canonical)
+    || compareNewestOptionalIsoDates(
+      isStrictIsoDate(left.date) ? left.date : undefined,
+      isStrictIsoDate(right.date) ? right.date : undefined,
+    )
     || junctionMenstrualFactSortKey(left).localeCompare(junctionMenstrualFactSortKey(right));
+}
+
+function compareNewestOptionalIsoDates(
+  left: string | undefined,
+  right: string | undefined,
+): number {
+  if (left && right) {
+    return right.localeCompare(left);
+  }
+  return left ? -1 : right ? 1 : 0;
 }
 
 function junctionMenstrualFactSortKey(fact: JunctionMenstrualEvidenceFact): string {
@@ -6015,17 +6000,18 @@ function normalizeJunctionMenstrualEvidenceLabel(value: string | undefined): str
 }
 
 // One Junction menstrual cycle summary per cycle (~13/year). The caller has
-// already replaced provider arrays with the deterministic admitted fact set.
-// Predicted cycles are upstream forecasts, not canonical facts.
+// already selected the deterministic admitted flat fact set. Predicted cycles
+// are upstream forecasts, not canonical facts.
 function pushMenstrualCycleSummary(
-  entry: PlainObject,
+  cycle: JunctionPreparedMenstrualCycle,
   resourceContext: ResourceContext,
   context: NormalizationContext,
 ): void {
-  if (firstValueFromPaths(entry, ["isPredicted", "is_predicted"]) === true) {
+  if (cycle.isPredicted) {
     return;
   }
 
+  const entry = cycle.entry;
   const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const periodStart = firstStrictIsoDateFromPaths(entry, ["periodStart", "period_start"]);
   const periodEnd = firstStrictIsoDateFromPaths(entry, ["periodEnd", "period_end"]);
@@ -6080,16 +6066,11 @@ function pushMenstrualCycleSummary(
     }
   }
 
-  // Basal body temperature deliberately stays raw-only here: the dedicated
-  // `basal_body_temperature` daily timeseries (a default resource) is the
-  // canonical seam for the `basal-body-temperature` metric, and mapping the
-  // cycle sub-array too would land duplicate same-day observations under a
-  // different resourceType that dedupe cannot collapse.
-
-  for (const sub of junctionDatedSubEntries(entry, ["menstrualFlow", "menstrual_flow"])) {
-    const flow = normalizeJunctionMenstrualEvidenceLabel(firstStringFromPaths(sub.entry, ["flow"]));
-    const value = flow ? JUNCTION_MENSTRUAL_FLOW_ORDINALS[flow] : undefined;
-    if (!flow || value === undefined) {
+  // Basal temperature stays evidence-only here because the dedicated sparse
+  // daily resource is its canonical owner. Every other event is emitted from
+  // the same admitted fact used by bounded evidence and receipt hashing.
+  for (const fact of cycle.facts) {
+    if (!fact.canonical || fact.kind === "basal_body_temperature") {
       continue;
     }
 
@@ -7123,9 +7104,8 @@ function resolveJunctionSleepLatencyMinutes(entry: PlainObject): number | undefi
 }
 
 function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undefined {
-  // Junction activity summary intensity buckets are seconds. Keeping the
-  // conversion here shared with the individual bucket metrics prevents the
-  // aggregate from silently inflating a day by 60x.
+  // Junction activity summary intensity buckets are already minutes. Keeping
+  // the shared resolver here also applies the same per-bucket and daily caps.
   const lowActivityMinutes = resolveJunctionActivityBucketMinutes(entry, "low");
   const mediumActivityMinutes = resolveJunctionActivityBucketMinutes(entry, "medium");
   const highActivityMinutes = resolveJunctionActivityBucketMinutes(entry, "high");

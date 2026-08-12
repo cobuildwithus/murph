@@ -56,6 +56,7 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     makeResolvedMetric(metric, provider, value, metric === "steps" ? conflictingProviders : []);
 
   return {
+    activityAverageHeartRate: makeMetric("activityAverageHeartRate", 112),
     activityScore: makeMetric("activityScore", 91),
     activeCalories: makeMetric("activeCalories", 315),
     activityMinutes: makeMetric("activityMinutes", 78),
@@ -89,6 +90,7 @@ function makeActivityDay(date: string, provider: string, conflictingProviders: s
     totalElevationGainMeters: makeMetric("totalElevationGainMeters", 42),
     walkingAverageHeartRate: makeMetric("walkingAverageHeartRate", 101),
     workoutStrain: makeMetric("workoutStrain", 11.1),
+    walkingAverageHeartRate: makeMetric("walkingAverageHeartRate", 83),
   };
 }
 

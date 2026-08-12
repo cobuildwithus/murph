@@ -249,6 +249,74 @@ function makeVaultFromJunctionSnapshot(snapshot: Parameters<typeof normalizeJunc
   return makeVault([...events, ...samples]);
 }
 
+test("Junction activity heart-rate and intensity metrics stay out of sleep and support latest/trend queries", () => {
+  const activityOnly = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-08-11T12:00:00.000Z",
+    summaries: {
+      activity: [{
+        id: "activity-one",
+        observed_at: "2026-08-10T12:00:00.000Z",
+        average_heart_rate: 101,
+        walking_average_heart_rate: 78,
+        minimum_heart_rate: 49,
+        low: 70,
+        medium: 25,
+        high: 10,
+        source: { provider: "garmin", type: "watch" },
+      }, {
+        id: "activity-two",
+        observed_at: "2026-08-11T12:00:00.000Z",
+        average_heart_rate: 106,
+        walking_average_heart_rate: 81,
+        minimum_heart_rate: 52,
+        low: 75,
+        medium: 30,
+        high: 15,
+        source: { provider: "garmin", type: "watch" },
+      }],
+    },
+  });
+  const activityLatest = summarizeWearableLatest(activityOnly);
+  const activityTrend = summarizeWearableMetricTrend(
+    activityOnly,
+    "activity-average-heart-rate",
+    { windowDays: 2 },
+  );
+
+  assert.equal(activityLatest?.sleep, null);
+  assert.equal(activityLatest?.activity?.activityAverageHeartRate.selection.value, 106);
+  assert.equal(activityLatest?.activity?.walkingAverageHeartRate.selection.value, 81);
+  assert.equal(activityLatest?.activity?.minimumHeartRate.selection.value, 52);
+  assert.equal(activityLatest?.activity?.lowActivityMinutes.selection.value, 75);
+  assert.equal(activityLatest?.activity?.mediumActivityMinutes.selection.value, 30);
+  assert.equal(activityLatest?.activity?.highActivityMinutes.selection.value, 15);
+  assert.deepEqual(activityTrend?.points.map((point) => point.value), [106, 101]);
+
+  const activityAndSleep = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-08-11T12:00:00.000Z",
+    summaries: {
+      activity: [{
+        id: "activity-two",
+        observed_at: "2026-08-11T12:00:00.000Z",
+        average_heart_rate: 106,
+        source: { provider: "garmin", type: "watch" },
+      }],
+      sleep: [{
+        id: "sleep-two",
+        calendar_date: "2026-08-11",
+        bedtime_start: "2026-08-11T02:00:00.000Z",
+        bedtime_stop: "2026-08-11T10:00:00.000Z",
+        average_heart_rate: 51,
+        source: { provider: "garmin", type: "watch" },
+      }],
+    },
+  });
+  const distinctLatest = summarizeWearableLatest(activityAndSleep);
+
+  assert.equal(distinctLatest?.activity?.activityAverageHeartRate.selection.value, 106);
+  assert.equal(distinctLatest?.sleep?.averageHeartRate.selection.value, 51);
+});
+
 test("Junction Oura lowest sleep heart rate backs resting-heart-rate biomarker projection", () => {
   const vault = makeVaultFromJunctionSnapshot({
     importedAt: "2026-06-05T12:00:00.000Z",
