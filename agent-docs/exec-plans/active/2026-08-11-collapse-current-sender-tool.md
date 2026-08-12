@@ -113,8 +113,15 @@ Updated: 2026-08-11
   makes unfamiliar audience wording fail closed, persists a fresh group
   fallback after expiry or provider-entry route loss, and deletes those
   compatibility paths.
-- Remaining work is focused remediation proof, a new exact-head final ReviewGPT
-  round, CI, plan closure, and merge-tree proof.
+- ReviewGPT round four found three further concrete gaps. The exact-source
+  classifier now recognizes common confidentiality clauses without treating
+  substantive privacy words as delivery instructions; expired retries recover
+  an exact retained group terminal instead of colliding with it; the detached
+  queue regression proves that replay releases the following ask; and the stale
+  runtime expiry integration now exercises the live Web-persisted fallback
+  handshake.
+- Remaining work is the new exact-head final ReviewGPT round, CI, plan closure,
+  and merge-tree proof.
 
 ## Verification
 

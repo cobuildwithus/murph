@@ -845,6 +845,16 @@ async function appendExpiredHostedCurrentSenderFallbackTx(input: {
   const canonicalCompletionId = createHostedAssistantAskCompletionId(
     input.requestId,
   );
+  const existingCompletion =
+    await readExpiredHostedCurrentSenderExistingGroupCompletionMailboxWakeTx({
+      authority: completionAuthority,
+      completionId: canonicalCompletionId,
+      requireFallbackResult: wake.ask.target.kind === "group_sender_private",
+      tx: input.tx,
+    });
+  if (existingCompletion) {
+    return existingCompletion;
+  }
   const canonicalFallback =
     await appendHostedGroupCurrentSenderFallbackCompletionTx({
       authority: completionAuthority,
@@ -882,6 +892,55 @@ async function appendExpiredHostedCurrentSenderFallbackTx(input: {
     now: input.now,
     tx: input.tx,
   });
+}
+
+async function readExpiredHostedCurrentSenderExistingGroupCompletionMailboxWakeTx(
+  input: {
+    authority: HostedGroupCurrentSenderCompletionAuthority;
+    completionId: string;
+    requireFallbackResult: boolean;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<HostedAssistantAskMailboxWake | null> {
+  const item = await readHostedMailboxItemById({
+    mailboxItemId: input.completionId,
+    prisma: input.tx,
+  });
+  if (
+    !item
+    || item.dedupeKey !== input.completionId
+    || item.kind !== "assistant.ask.completed"
+    || item.userId !== input.authority.groupRuntimeMemberId
+  ) {
+    return null;
+  }
+  const wake = await readHostedMailboxWakeByDedupeKey({
+    dedupeKey: input.completionId,
+    prisma: input.tx,
+    userId: input.authority.groupRuntimeMemberId,
+  });
+  if (
+    !wake
+    || !isHostedExecutionAssistantAskCompletedWake(wake)
+    || wake.eventId !== input.completionId
+    || wake.userId !== input.authority.groupRuntimeMemberId
+    || wake.ask.expiresAt !== readHostedAssistantAskItemExpiresAt(item.expiresAt)
+    || wake.ask.requestId !== input.authority.requestId
+    || wake.ask.question !== input.authority.question
+    || wake.ask.targetLabel !== null
+    || !("origin" in wake.ask)
+    || !hostedAssistantAskOriginsEqual(wake.ask.origin, input.authority.origin)
+    || (
+      input.requireFallbackResult
+      && !isHostedCurrentSenderGroupFallbackResult(wake.ask.result)
+    )
+  ) {
+    return null;
+  }
+  return {
+    expectedUserId: input.authority.groupRuntimeMemberId,
+    mailboxItemId: input.completionId,
+  };
 }
 
 async function hasExactlyOneHostedCurrentSenderRequestAliasTx(input: {

@@ -377,12 +377,21 @@ describe("hosted current-sender Assistant Ask authority", () => {
       "Murph, ask my Murph what synthetic medications I take and send me the answer.",
       "Murph, ask my Murph what synthetic medications I take and text me.",
       "Murph, ask my Murph what synthetic medications I take and answer me.",
+      "Murph, ask my Murph how my synthetic activity changed and keep this private.",
+      "Murph, ask my Murph how my synthetic activity changed, not for the group.",
+      "Murph, ask my Murph how my synthetic activity changed, just between us.",
+      "Murph, ask my Murph how my synthetic activity changed, confidentially.",
     ]) {
       expect(classifyHostedGroupCurrentSenderRequest({
         hasNativeReplyContext: false,
         text,
       })).toEqual({ audience: "current_sender" });
     }
+
+    expect(classifyHostedGroupCurrentSenderRequest({
+      hasNativeReplyContext: false,
+      text: "Murph, ask my Murph what private insurance coverage I have?",
+    })).toEqual({ audience: "group" });
 
     for (const text of [
       "Murph, ask my Murph what synthetic medications I take and let me know privately.",
@@ -843,7 +852,16 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
   });
 
-  it("does not create another terminal when an answered group completion later expires", async () => {
+  it.each([
+    {
+      label: "answered",
+      result: { answer: "Synthetic group answer.", outcome: "answered" as const },
+    },
+    {
+      label: "cannot-answer",
+      result: { answer: null, outcome: "cannot_answer" as const },
+    },
+  ])("replays an expired $label group terminal after a lost completion response", async ({ result }) => {
     const { requestId } = await admit({
       text: "Murph, ask my Murph how my synthetic activity has changed?",
     });
@@ -854,7 +872,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
       request: {
         action: "complete",
         requestId,
-        result: { answer: "Synthetic group answer.", outcome: "answered" },
+        result,
       },
     })).resolves.toMatchObject({
       response: { action: "complete", status: "completed" },
@@ -865,18 +883,14 @@ describe("hosted current-sender Assistant Ask authority", () => {
       now: new Date(NOW.getTime() + 10 * 60 * 1_000),
       request: { action: "prepare", requestId },
     })).resolves.toEqual({
-      mailboxWake: null,
-      response: {
-        action: "prepare",
-        status: "terminal",
-        terminalReason: "expired",
+      mailboxWake: {
+        expectedUserId: GROUP_RUNTIME_MEMBER_ID,
+        mailboxItemId: completionId,
       },
+      response: { action: "prepare", status: "already_completed" },
     });
     expect(storedItems.size).toBe(2);
-    expect(requireCompletedWake(completionId).ask.result).toEqual({
-      answer: "Synthetic group answer.",
-      outcome: "answered",
-    });
+    expect(requireCompletedWake(completionId).ask.result).toEqual(result);
   });
 
   it("persists the group terminal when private delivery authority is lost", async () => {

@@ -157,6 +157,18 @@ describe.skipIf(!runPostgresProof)(
         })).resolves.toMatchObject({
           response: { status: "already_completed" },
         });
+        await expect(handleHostedRuntimeAssistantAskControl({
+          boundRuntimeMemberId: fixture.senderMemberId,
+          now: new Date(now.getTime() + 10 * 60 * 1_000),
+          prisma,
+          request: { action: "prepare", requestId },
+        })).resolves.toEqual({
+          mailboxWake: {
+            expectedUserId: fixture.groupRuntimeMemberId,
+            mailboxItemId: completionId,
+          },
+          response: { action: "prepare", status: "already_completed" },
+        });
 
         const completionWake = await readHostedMailboxWakeByItemId({
           availableAt: now,

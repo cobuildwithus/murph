@@ -87,7 +87,7 @@ const HOSTED_CURRENT_SENDER_NEGATED_REQUEST_PATTERN =
 const HOSTED_CURRENT_SENDER_DELIVERY_BOUNDARY =
   String.raw`(?:^|[,;.!?—-]\s*|\s+(?:and|then)\s+)`;
 const HOSTED_CURRENT_SENDER_PRIVATE_DELIVERY_CLAUSE_PATTERN = new RegExp(
-  String.raw`${HOSTED_CURRENT_SENDER_DELIVERY_BOUNDARY}(?:please\s+)?(?:privately|in\s+(?:a\s+)?(?:private\s+(?:message|reply|response)|direct\s+message|dm)|directly\s+to\s+me|only\s+to\s+me|(?:reply|respond|answer)(?:\s+(?:to\s+)?me)?\s+(?:privately|in\s+private|in\s+(?:a\s+)?(?:direct\s+message|dm))|(?:reply|respond|answer)\s+me|(?:send|message|text|dm|direct\s+message)\s+me(?:\s+(?:the\s+)?answer|\s+it|\s+(?:a\s+)?direct\s+message)?(?:\s+(?:privately|directly|in\s+private))?|(?:send|reply|respond|answer)\s+(?:the\s+answer|it)\s+(?:only\s+)?to\s+me(?:\s+privately)?)[.!?]*$`,
+  String.raw`${HOSTED_CURRENT_SENDER_DELIVERY_BOUNDARY}(?:please\s+)?(?:privately|confidentially|in\s+(?:a\s+)?(?:private\s+(?:message|reply|response)|direct\s+message|dm)|directly\s+to\s+me|only\s+to\s+me|just\s+between\s+us|not\s+for\s+(?:the\s+)?group(?:\s+chat)?|keep\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|(?:reply|respond|answer)(?:\s+(?:to\s+)?me)?\s+(?:privately|in\s+private|in\s+(?:a\s+)?(?:direct\s+message|dm))|(?:reply|respond|answer)\s+me|(?:send|message|text|dm|direct\s+message)\s+me(?:\s+(?:the\s+)?answer|\s+it|\s+(?:a\s+)?direct\s+message)?(?:\s+(?:privately|directly|in\s+private))?|(?:send|reply|respond|answer)\s+(?:the\s+answer|it)\s+(?:only\s+)?to\s+me(?:\s+privately)?)[.!?]*$`,
   "iu",
 );
 const HOSTED_CURRENT_SENDER_GROUP_DELIVERY_CLAUSE_PATTERN = new RegExp(
@@ -99,7 +99,7 @@ const HOSTED_CURRENT_SENDER_DELIVERY_CLAUSE_PATTERN = new RegExp(
   "iu",
 );
 const HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_MENTION_PATTERN =
-  /\b(?:privately|in\s+private|direct\s+message|dm\s+me|text\s+me|send\s+me|answer\s+me|only\s+to\s+me|directly\s+to\s+me)\b/iu;
+  /\b(?:privately|confidentially|in\s+private|direct\s+message|dm\s+me|text\s+me|send\s+me|answer\s+me|only\s+to\s+me|directly\s+to\s+me|just\s+between\s+us|not\s+for\s+(?:the\s+)?group(?:\s+chat)?|keep\s+(?:this|it|the\s+answer)\s+(?:private|confidential))\b/iu;
 const HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_MENTION_PATTERN =
   /\b(?:(?:in|to)\s+(?:the\s+)?group(?:\s+chat)?|in\s+this\s+(?:chat|thread)|(?:reply|respond|answer|post|share|send)(?:\s+(?:it|the\s+answer))?\s+here|tell\s+(?:the\s+)?group|(?:tell|share\s+with)\s+everyone)\b/iu;
 
