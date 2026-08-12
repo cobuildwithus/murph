@@ -419,7 +419,11 @@ describe('assistant context snapshot device availability', () => {
   it.each([
     { metric: 'bmi', unit: 'kg/m2', value: 21.7 },
     { metric: 'body-fat-pct', unit: '%', value: 18.4 },
+    { metric: 'body-water-percentage', unit: '%', value: 55.3 },
+    { metric: 'bone-mass-percentage', unit: '%', value: 4.2 },
     { metric: 'lean-body-mass', unit: 'kg', value: 61.4 },
+    { metric: 'muscle-mass-percentage', unit: '%', value: 42.7 },
+    { metric: 'visceral-fat-index', unit: 'index', value: 7 },
     { metric: 'waist-circumference', unit: 'cm', value: 81 },
   ] as const)(
     'recognizes canonical $metric body history without injecting its value',
