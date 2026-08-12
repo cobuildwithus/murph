@@ -87,7 +87,7 @@ const HOSTED_CURRENT_SENDER_NEGATED_REQUEST_PATTERN =
 const HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN =
   /(?:[,;.!?](?:\s+|$)|—\s*|\s+-\s+|(?<!between\s+you)\s+(?:and|then)\s+)/iu;
 const HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_CLAUSE =
-  String.raw`(?:please\s+)?(?:privately|confidentially|in\s+confidence|in\s+(?:a\s+)?(?:private\s+(?:message|reply|response)|direct\s+message|dm)|directly\s+to\s+me|only\s+to\s+me|for\s+(?:my\s+eyes|me)\s+only|just\s+between\s+us|between\s+you\s+and\s+me|not\s+for\s+(?:the\s+)?group(?:\s+chat)?|keep\s+it\s+between\s+us|keep\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|make\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|(?:reply|respond|answer)(?:\s+(?:to\s+)?me)?\s+(?:privately|in\s+private|in\s+(?:a\s+)?(?:direct\s+message|dm))|(?:reply|respond|answer)\s+me|(?:send|message|text|dm|direct\s+message)\s+me(?:\s+(?:the\s+)?answer|\s+it|\s+(?:a\s+)?direct\s+message)?(?:\s+(?:privately|directly|in\s+private))?|(?:send|reply|respond|answer)\s+(?:the\s+answer|it)\s+(?:only\s+)?to\s+me(?:\s+privately)?)`;
+  String.raw`(?:please\s+)?(?:privately|confidentially|in\s+confidence|in\s+(?:a\s+)?(?:private\s+(?:message|reply|response)|direct\s+message|dm)|directly\s+to\s+me|only\s+to\s+me|for\s+(?:my\s+eyes|me)\s+only|just\s+between\s+us|between\s+you\s+and\s+me|not\s+for\s+(?:the\s+)?group(?:\s+chat)?|keep\s+it\s+between\s+us|keep\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|make\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|one(?:\s*-\s*|\s+)on(?:\s*-\s*|\s+)one|one\s+to\s+one|(?:reply|respond|answer)(?:\s+(?:to\s+)?me)?\s+(?:privately|in\s+private|in\s+(?:a\s+)?(?:direct\s+message|dm)|one(?:\s*-\s*|\s+)on(?:\s*-\s*|\s+)one|one\s+to\s+one)|(?:reply|respond|answer)\s+me|(?:send|message|text|dm|direct\s+message)\s+me(?:\s+(?:the\s+)?answer|\s+it|\s+(?:a\s+)?direct\s+message)?(?:\s+(?:privately|directly|in\s+private))?|(?:send|message|reply|respond|answer)\s+(?:(?:the\s+)?answer|it)\s+(?:only\s+)?to\s+(?:me|my\s+dms?)(?:\s+privately)?)`;
 const HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_CLAUSE =
   String.raw`(?:please\s+)?(?:(?:in|to)\s+(?:the\s+)?group(?:\s+chat)?|in\s+this\s+(?:chat|thread)|(?:reply|respond|answer|post|share|send)(?:\s+(?:it|the\s+answer))?\s+(?:here|in\s+(?:the\s+)?group(?:\s+chat)?|to\s+(?:the\s+)?group)|tell\s+(?:the\s+)?group|(?:tell|share\s+with)\s+everyone)`;
 const HOSTED_CURRENT_SENDER_PRIVATE_TERMINAL_CLAUSE_PATTERN = new RegExp(
@@ -105,10 +105,10 @@ const HOSTED_CURRENT_SENDER_LEADING_AUDIENCE_CLAUSE_PATTERN = new RegExp(
     String.raw`(?:[,;:—-]\s*|\s+)(\S[\s\S]*)$`,
   "iu",
 );
-const HOSTED_CURRENT_SENDER_AUDIENCE_SIGNAL_PATTERN =
-  /\b(?:private|privately|confidential|confidentially|confidence|direct|dm|group|chat|thread|everyone|here|only|between|eyes|secret|public|publicly|record|me|us)\b/iu;
-const HOSTED_CURRENT_SENDER_AUDIENCE_CLAUSE_START_PATTERN =
-  /^(?:please\s+)?(?:let|reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show|keep|make|for|to|between|in|off|not|only|just|no|this)\b/iu;
+const HOSTED_CURRENT_SENDER_UNSUPPORTED_EDGE_DELIVERY_CLAUSE_PATTERN =
+  /^(?:please\s+)?(?=[\s\S]{1,120}$)(?:(?:let|reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show|keep|make)\b|(?:for|to|between|in|off|on|outside|inside|under|just|only|no)\b|(?:do\s+not|don['’]?t|never|not)\b|(?:this|that|it)\s+(?:is|stays|remains)\b|[\p{L}'’-]+ly\b)[\s\S]*$/iu;
+const HOSTED_CURRENT_SENDER_UNSEPARATED_DELIVERY_DIRECTIVE_PATTERN =
+  /^(?:please\s+)?(?:reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show)\b/iu;
 
 for (const [label, permissionText] of [
   ["Hosted current-sender group permission", HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT],
@@ -252,13 +252,21 @@ function readHostedCurrentSenderLeadingAudience(
       question: remainingQuestion,
     };
   }
-  const firstClause = question
-    .split(HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN, 1)[0]
-    ?.trim() ?? "";
-  return readHostedCurrentSenderAudienceClause({
+  const leadingClauses = question.split(
+    HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN,
+  );
+  const firstClause = leadingClauses[0]?.trim() ?? "";
+  const leadingAudience = readHostedCurrentSenderAudienceClause({
     clause: firstClause,
-    separatedFromQuestion: false,
-  }) === "ambiguous"
+    separatedFromQuestion: leadingClauses.length > 1,
+  });
+  return leadingAudience === "ambiguous"
+    || (
+      leadingClauses.length === 1
+      && HOSTED_CURRENT_SENDER_UNSEPARATED_DELIVERY_DIRECTIVE_PATTERN.test(
+        firstClause,
+      )
+    )
     ? "ambiguous"
     : null;
 }
@@ -280,11 +288,9 @@ function readHostedCurrentSenderAudienceClause(input: {
       return "group";
     }
     if (
-      HOSTED_CURRENT_SENDER_AUDIENCE_SIGNAL_PATTERN.test(suffix)
-      && (
-        input.separatedFromQuestion
-        || index > 0
-        || HOSTED_CURRENT_SENDER_AUDIENCE_CLAUSE_START_PATTERN.test(suffix)
+      (input.separatedFromQuestion || index > 0)
+      && HOSTED_CURRENT_SENDER_UNSUPPORTED_EDGE_DELIVERY_CLAUSE_PATTERN.test(
+        suffix,
       )
     ) {
       return "ambiguous";

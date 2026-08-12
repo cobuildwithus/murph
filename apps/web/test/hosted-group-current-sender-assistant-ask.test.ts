@@ -394,6 +394,12 @@ describe("hosted current-sender Assistant Ask authority", () => {
       "Murph, ask my Murph in a private message, what synthetic medications do I take?",
       "Murph, ask my Murph for my eyes only, what synthetic medications do I take?",
       "Murph, ask my Murph privately what synthetic medications do I take?",
+      "Murph, ask my Murph what synthetic medications do I take, one-on-one.",
+      "Murph, ask my Murph what synthetic medications do I take, one to one.",
+      "Murph, ask my Murph one-on-one what synthetic medications do I take?",
+      "Murph, ask my Murph what synthetic medications do I take, reply one-on-one.",
+      "Murph, ask my Murph what synthetic medications do I take, send it to my DMs.",
+      "Murph, ask my Murph what synthetic medications do I take, send the answer to my DM.",
     ]) {
       expect(classifyHostedGroupCurrentSenderRequest({
         hasNativeReplyContext: false,
@@ -412,6 +418,8 @@ describe("hosted current-sender Assistant Ask authority", () => {
       "Murph, ask my Murph what synthetic medications I take, off the record.",
       "Murph, ask my Murph what synthetic medications I take, don't make it public.",
       "Murph, ask my Murph what synthetic medications I take, this is a secret.",
+      "Murph, ask my Murph what synthetic medications I take, answer by carrier pigeon.",
+      "Murph, ask my Murph answer by carrier pigeon, what synthetic medications I take?",
     ]) {
       expect(classifyHostedGroupCurrentSenderRequest({
         hasNativeReplyContext: false,

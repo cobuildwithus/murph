@@ -54,7 +54,8 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
 - [x] ReviewGPT round 5 findings remediated: a bounded terminal-clause parser recognizes explicit confidentiality or fails closed, and newly persisted group/private terminals retain one fresh import window while private provider authority remains bound to the original request deadline.
 - [x] Round 5 remediation proof covers late answered/cannot-answer group terminals, delayed PostgreSQL import after the request deadline, and late private provider entry producing only a fresh non-disclosing fallback.
 - [x] ReviewGPT round 6 finding remediated: recognized leading confidentiality clauses select the same private authority as trailing clauses, while leading/trailing conflicts reject before enqueue.
-- [ ] Exact pushed-head GitHub Actions and final ReviewGPT gate.
+- [x] ReviewGPT round 7 finding remediated: one-to-one and singular/plural DM edge clauses select private authority, while unsupported bounded delivery directives reject instead of defaulting to the group.
+- [ ] Hard-cap retrospective and explicit continuation decision before any round 8; exact pushed-head GitHub Actions and a later ReviewGPT `PASS` remain required.
 
 ## Rollout And Removal
 

@@ -132,6 +132,12 @@ Updated: 2026-08-11
   clauses. The same owner now extracts one recognized leading clause before
   inspecting the trailing edge, rejects leading/trailing conflicts, and keeps
   substantive privacy words out of audience authority.
+- ReviewGPT round seven found that explicit one-to-one and plural-DM directions
+  still escaped the edge grammar. The bounded grammar now recognizes those
+  private forms and rejects separated or leading delivery directives it cannot
+  map exactly. The hard seven-round cap is reached; after this fix the loop is
+  paused pending the required cap retrospective and explicit continuation
+  decision. The PR is not merge-ready without a later ReviewGPT pass.
 - Remaining work is the new exact-head final ReviewGPT round, CI, plan closure,
   and merge-tree proof.
 
