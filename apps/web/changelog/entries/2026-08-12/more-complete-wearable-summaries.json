@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 200,
+  "item": {
+    "id": "more-complete-wearable-summaries",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More complete connected-health summaries",
+    "summary": "Murph can now use sleep latency, separate activity-intensity minutes, additional heart-rate fields, and bounded profile and cycle facts from connected health sources.",
+    "details": "Reported gender stays distinct from canonical sex, and predictions or unknown fields remain supporting evidence rather than promoted health truth.",
+    "relevanceTags": ["wearables", "sleep", "activity", "heart-rate", "cycle"],
+    "sourcePullRequests": [1702]
+  }
+}
