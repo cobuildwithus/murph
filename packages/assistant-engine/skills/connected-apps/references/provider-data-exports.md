@@ -138,8 +138,18 @@ Run the write only when inspection says the file is importable:
 vault-cli workout import csv <file> --vault "$VAULT" --source strong --format json
 ```
 
-Claim completion only from the durable import result. This imports historical
-workouts; it does not keep Strong continuously synced.
+If inspection returns `requiresWeightUnit: true` or
+`requiresDistanceUnit: true`, ask one concise question for the missing unit or
+units. Never infer them from locale, exercise names, or value size. Rerun
+inspection and the import with the confirmed `--weight-unit lb|kg` and/or
+`--distance-unit m|km|mi` options. Do not run the structured write while any
+unit requirement or unsafe skipped row remains.
+
+Claim completion only from the durable import result and its aggregate counts.
+`lookupIds` and `ledgerFiles` are intentionally capped, so use the count and
+truncation fields instead of requesting or repeating every imported id. A pure
+replay reports skipped existing workouts and does not store another raw copy.
+This imports historical workouts; it does not keep Strong continuously synced.
 
 https://help.strongapp.io/article/235-export-workout-data
 

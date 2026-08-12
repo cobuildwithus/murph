@@ -157,6 +157,15 @@ describe('assistant manual provider export guidance', () => {
     expect(reference).toContain(
       'vault-cli workout import csv <file> --vault "$VAULT" --source strong --format json',
     )
+    expect(normalizedReference).toContain(
+      'Never infer them from locale, exercise names, or value size',
+    )
+    expect(normalizedReference).toContain(
+      '`--distance-unit m|km|mi`',
+    )
+    expect(normalizedReference).toContain(
+      '`lookupIds` and `ledgerFiles` are intentionally capped',
+    )
 
     expect(reference).toContain('`Export Workouts`')
     expect(reference).toContain('`Export Measurements`')

@@ -327,8 +327,8 @@ declare module 'incur' {
       'workout format log': { args: { name: string }; options: { requestId?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'workout format save': { args: { name?: string; text?: string }; options: { requestId?: string; workoutFormatId?: string; slug?: string; status?: "active" | "archived"; summary?: string; tag?: string[]; note?: string; templateText?: string; routineNote?: string; exercise?: string[]; setTemplate?: string[]; duration?: number; type?: string; distanceKm?: number } }
       'workout format show': { args: { name: string }; options: { requestId?: string } }
-      'workout import csv': { args: { file: string }; options: { requestId?: string; source?: string; delimiter?: string; storeRawOnly?: boolean } }
-      'workout import inspect': { args: { file: string }; options: { requestId?: string; source?: string; delimiter?: string } }
+      'workout import csv': { args: { file: string }; options: { requestId?: string; source?: string; delimiter?: string; weightUnit?: "lb" | "kg"; distanceUnit?: "m" | "km" | "mi"; storeRawOnly?: boolean } }
+      'workout import inspect': { args: { file: string }; options: { requestId?: string; source?: string; delimiter?: string; weightUnit?: "lb" | "kg"; distanceUnit?: "m" | "km" | "mi" } }
       'workout import-json': { args: { text?: string }; options: { requestId?: string; input: string; note?: string; title?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'workout list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'workout manifest': { args: { id: string }; options: { requestId?: string } }

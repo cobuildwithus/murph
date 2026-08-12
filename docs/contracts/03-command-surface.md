@@ -154,6 +154,8 @@ vault-cli encounter payload-schema
 vault-cli workout add <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli workout import-json --vault <path> --input @file.json|- [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]
 vault-cli workout payload-schema
+vault-cli workout import inspect <file> --vault <path> [--source strong|hevy] [--delimiter <char>] [--weight-unit lb|kg] [--distance-unit m|km|mi]
+vault-cli workout import csv <file> --vault <path> [--source strong|hevy] [--delimiter <char>] [--weight-unit lb|kg] [--distance-unit m|km|mi] [--store-raw-only]
 vault-cli workout edit <id> --vault <path> [--title <title>] [--note <text>] [--occurred-at <ts>] [--time-zone <zone>] [--day-key <YYYY-MM-DD>] [--source <source>] [--tag <tag> ...] [--duration <minutes>] [--type <type>] [--distance-km <km>] [--workout-source-app <slug>] [--workout-source-workout-id <id>] [--workout-started-at <ts>] [--workout-ended-at <ts>] [--workout-routine-id <id>] [--workout-routine-name <text>] [--workout-session-note <text>] [--workout-media <fields> ...] [--workout-exercise <fields> ...] [--workout-set <fields> ...] [--clear-title] [--clear-note] [--clear-time-zone] [--clear-day-key] [--clear-source] [--clear-tags] [--clear-duration] [--clear-distance] [--clear-workout] [--day-key-policy keep|recompute] [--request-id <id>]
 vault-cli workout format save <name> <text> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--request-id <id>]
 vault-cli workout format show <name> --vault <path> [--request-id <id>]
@@ -546,6 +548,16 @@ The freeform note is preserved verbatim in `note`. Top-level `activityType`, `du
 For freeform capture, Murph only infers `durationMinutes` when the note states one clear total workout duration. Mixed-activity notes, segmented notes, or notes without a clear total duration must pass `--duration`.
 
 For structured agent writes, `workout payload-schema --format json` emits the import file-body contract used by `workout import-json --input @file.json|-`. Its `strengthExercises` form is the compact path for repeated strength sets such as `setCount` plus `repsPerSet`; ambiguous load text belongs in `loadDescription` so the note is preserved without inventing a numeric weight.
+
+### `workout import inspect` and `workout import csv`
+
+`workout import inspect` is the non-mutating planner for Strong and Hevy-style workout exports. It parses timestamps in the vault timezone, reports aggregate row repair and omission counts, estimates the workout count, and returns explicit weight or distance unit requirements without writing raw evidence or canonical events. Unitless positive values make the plan non-importable until the caller supplies the matching unit option; Murph must not infer those units from locale or value magnitude.
+
+`workout import csv` validates the complete structured batch before writing. A malformed mapped workout rejects the whole structured import without storing its raw batch. A valid import stores one immutable raw CSV and manifest, then commits all canonical `activity_session` decisions through one batch operation. Replaying the same source sessions returns skipped-existing counts and does not store another raw copy. Response identifier and ledger-path lists are capped at ten entries with explicit truncation flags, so large history imports do not expand assistant context in proportion to the workout count.
+
+Workout CSVs do not carry a source revision. Murph therefore assigns one fixed legacy source revision per stable source workout identity: an unchanged replay is a no-op, while changed content for that identity fails as an equal-revision conflict instead of guessing which version is newer. This also prevents a later vault-timezone preference change from silently revising already imported history.
+
+Current Strong exports may include `W`, `D`, and `F` set tags, rest-timer metadata rows, unitless weight and distance values, timezone-less timestamps, and text fields with an unquoted comma. The importer preserves the three set tags, omits rest-timer metadata with an aggregate warning, uses the vault timezone, and repairs only a uniquely supported current-header row shape. Rows that cannot be mapped without guessing block the structured write. A duration outside the canonical 24-hour range is omitted with a warning while its otherwise valid sets remain importable.
 
 ### `workout format save`
 

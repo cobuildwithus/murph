@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, rm, writeFile } from 'node:fs/promises'
+import { access, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { Cli } from 'incur'
@@ -564,6 +564,205 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
   assert.deepEqual(imported.lookupIds, [])
   await access(path.join(vaultRoot, imported.rawFile))
   await access(path.join(vaultRoot, imported.manifestFile))
+})
+
+test('Strong CSV import requires weight provenance, commits once, and returns bounded replay output', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-strong-import-')
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutSliceCli()
+
+  await runWorkoutCli<{ created: boolean }>(cli, [
+    'init',
+    '--vault',
+    vaultRoot,
+    '--timezone',
+    'America/Los_Angeles',
+  ])
+
+  const header = 'Date,Workout Name,Duration,Exercise Name,Set Order,Weight,Reps,Distance,Seconds,Notes,Workout Notes,RPE'
+  const rows = Array.from({ length: 12 }, (_, index) => {
+    const day = String(index + 1).padStart(2, '0')
+    const distance = index === 0 ? 1.5 : 0
+    return `2026-04-${day} 07:00:00,Session ${index + 1},45m,Press,1,50,8,${distance},0,,Direct proof,7`
+  })
+  const csvPath = path.join(parentRoot, 'strong.csv')
+  await writeFile(csvPath, [header, ...rows, ''].join('\n'), 'utf8')
+
+  const inspection = requireData(
+    (
+      await runWorkoutCli<{
+        importable: boolean
+        requiresDistanceUnit: boolean
+        requiresWeightUnit: boolean
+        timeZone: string
+      }>(cli, [
+        'workout',
+        'import',
+        'inspect',
+        csvPath,
+        '--vault',
+        vaultRoot,
+      ])
+    ).envelope,
+  )
+  assert.equal(inspection.importable, false)
+  assert.equal(inspection.requiresWeightUnit, true)
+  assert.equal(inspection.requiresDistanceUnit, true)
+  assert.equal(inspection.timeZone, 'America/Los_Angeles')
+
+  const missingUnit = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(missingUnit.envelope.ok, false)
+  if (missingUnit.envelope.ok) {
+    throw new Error('Expected Strong CSV import to require an explicit weight unit.')
+  }
+  assert.equal(missingUnit.envelope.error.code, 'invalid_option')
+  assert.deepEqual(await readdir(path.join(vaultRoot, 'raw', 'workouts')), [])
+
+  const missingDistanceUnit = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'lb',
+  ])
+  assert.equal(missingDistanceUnit.envelope.ok, false)
+  if (missingDistanceUnit.envelope.ok) {
+    throw new Error('Expected Strong CSV import to require an explicit distance unit.')
+  }
+  assert.equal(missingDistanceUnit.envelope.error.code, 'invalid_option')
+  assert.deepEqual(await readdir(path.join(vaultRoot, 'raw', 'workouts')), [])
+
+  const invalidCsvPath = path.join(parentRoot, 'strong-invalid.csv')
+  await writeFile(
+    invalidCsvPath,
+    [
+      header,
+      rows[0],
+      `2026-05-01 07:00:00,${'X'.repeat(161)},45m,Press,1,50,8,0,0,,Direct proof,7`,
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+  const invalidBatch = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    invalidCsvPath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'lb',
+    '--distance-unit',
+    'km',
+  ])
+  assert.equal(invalidBatch.envelope.ok, false)
+  if (invalidBatch.envelope.ok) {
+    throw new Error('Expected one invalid workout to reject the complete batch.')
+  }
+  assert.equal(invalidBatch.envelope.error.code, 'invalid_payload')
+  assert.deepEqual(await readdir(path.join(vaultRoot, 'raw', 'workouts')), [])
+
+  const imported = requireData(
+    (
+      await runWorkoutCli<{
+        createdCount: number
+        importedCount: number
+        lookupIds: string[]
+        lookupIdsTruncated: boolean
+        rawStored: boolean
+        receivedCount: number
+      }>(cli, [
+        'workout',
+        'import',
+        'csv',
+        csvPath,
+        '--vault',
+        vaultRoot,
+        '--weight-unit',
+        'lb',
+        '--distance-unit',
+        'km',
+      ])
+    ).envelope,
+  )
+  assert.equal(imported.receivedCount, 12)
+  assert.equal(imported.createdCount, 12)
+  assert.equal(imported.importedCount, 12)
+  assert.equal(imported.rawStored, true)
+  assert.equal(imported.lookupIds.length, 10)
+  assert.equal(imported.lookupIdsTruncated, true)
+
+  const replay = requireData(
+    (
+      await runWorkoutCli<{
+        importedCount: number
+        manifestFile: string | null
+        rawFile: string | null
+        rawStored: boolean
+        skippedExistingCount: number
+      }>(cli, [
+        'workout',
+        'import',
+        'csv',
+        csvPath,
+        '--vault',
+        vaultRoot,
+        '--weight-unit',
+        'lb',
+        '--distance-unit',
+        'km',
+      ])
+    ).envelope,
+  )
+  assert.equal(replay.importedCount, 0)
+  assert.equal(replay.skippedExistingCount, 12)
+  assert.equal(replay.rawStored, false)
+  assert.equal(replay.rawFile, null)
+  assert.equal(replay.manifestFile, null)
+
+  const rawFilesBeforeConflict = await readdir(
+    path.join(vaultRoot, 'raw', 'workouts'),
+    { recursive: true },
+  )
+  const changedCsvPath = path.join(parentRoot, 'strong-changed.csv')
+  const firstRow = rows[0]
+  assert.ok(firstRow)
+  await writeFile(
+    changedCsvPath,
+    [header, firstRow.replace('Session 1', 'Renamed session'), ...rows.slice(1), ''].join('\n'),
+    'utf8',
+  )
+  const changedSameRevision = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    changedCsvPath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'lb',
+    '--distance-unit',
+    'km',
+  ])
+  assert.equal(changedSameRevision.envelope.ok, false)
+  if (changedSameRevision.envelope.ok) {
+    throw new Error('Expected changed content at the same source revision to fail closed.')
+  }
+  assert.equal(changedSameRevision.envelope.error.code, 'conflict')
+  assert.deepEqual(
+    await readdir(path.join(vaultRoot, 'raw', 'workouts'), { recursive: true }),
+    rawFilesBeforeConflict,
+  )
 })
 
 test('workout format save rejects missing name or text when --input is absent', async () => {

@@ -6783,6 +6783,23 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 1
+                                },
+                                "weightUnit": {
+                                  "description": "Required when positive CSV weights do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "lb",
+                                    "kg"
+                                  ]
+                                },
+                                "distanceUnit": {
+                                  "description": "Required when positive CSV distances do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "m",
+                                    "km",
+                                    "mi"
+                                  ]
                                 }
                               }
                             }
@@ -6813,6 +6830,23 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 1
+                                },
+                                "weightUnit": {
+                                  "description": "Required when positive CSV weights do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "lb",
+                                    "kg"
+                                  ]
+                                },
+                                "distanceUnit": {
+                                  "description": "Required when positive CSV distances do not include unit metadata.",
+                                  "type": "string",
+                                  "enum": [
+                                    "m",
+                                    "km",
+                                    "mi"
+                                  ]
                                 },
                                 "storeRawOnly": {
                                   "description": "Store the raw CSV + manifest without creating workout events.",
