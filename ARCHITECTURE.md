@@ -72,7 +72,11 @@ effect deadline and carries it unchanged through the proxy to Web. Transport
 timeouts add a fixed settlement margin. Only a proxy response marked after an
 actual Web response can prove terminal settlement; an unmarked proxy response
 or transport failure retains the invocation owner until the absolute settlement
-boundary. Finalization drains that owner
+boundary. A marked actual-Web scope failure received before the effect deadline
+is terminal for that scope only: the same sequential owner records the attempt
+as failed and offers later independent scopes. Deadline exhaustion, transport
+ambiguity, and owner-ending conditions still stop the undispatched suffix.
+Finalization drains that owner
 before release or retry, so projection work never overlaps a successor
 invocation. Local capture is bounded and likewise drains before its result is
 either delivered or discarded. Every captured offer names
@@ -80,9 +84,11 @@ the committed personal-workspace version that produced those bytes. Web
 serializes only the final replacement against that existing workspace row; an
 older in-flight offer becomes a no-op after a newer checkpoint instead of
 overwriting the newer group snapshot. One opportunity has at most one active
-request; a failed scope or foreground preemption terminates the remaining
-delivery chain. Exact host abort and shutdown likewise drain only the active
-request before leaving the undispatched suffix to the existing continuation.
+request. A definitive scope failure does not starve healthy scopes behind it;
+the aggregate failure retains the durable retry. Foreground preemption, exact
+host abort, shutdown, deadline exhaustion, or ambiguous transport instead drain
+only the active request before leaving the undispatched suffix to the existing
+continuation.
 Projection
 failure retains the existing dirty or recording obligation and its bounded
 continuation rather than creating a projection-specific queue or watermark.

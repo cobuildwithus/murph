@@ -1,7 +1,9 @@
 import {
   isHostedVaultShareCurrentStateProjectionKind,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+  HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
   parseHostedVaultShareDeliverRequest,
   parseHostedVaultShareEffectDeadlineAtEpochMs,
   type HostedVaultShareDeliverResponse,
@@ -80,6 +82,7 @@ export const POST = withJsonError(async (request: Request) => {
   const records = filterDeliverableRecords(body.records, body.projectionKind);
   let delivered = false;
   let deliveryFailed = false;
+  let scopeFailed = false;
 
   for (const share of shares) {
     if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
@@ -96,7 +99,11 @@ export const POST = withJsonError(async (request: Request) => {
       });
       delivered ||= outcome === "replaced";
     } catch (error) {
-      deliveryFailed = true;
+      if (effectSignal.aborted || Date.now() >= effectDeadlineAtEpochMs) {
+        deliveryFailed = true;
+        break;
+      }
+      scopeFailed = true;
       // Best-effort per destination: one failing share must not block replacement for
       // the others. Log only redacted error details — never payload fields, timestamps,
       // or raw share ids.
@@ -109,15 +116,26 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   if (deliveryFailed) {
-    throw createHostedVaultShareDeliveryFailedError();
+    throw createHostedVaultShareDeliveryError(
+      HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
+    );
+  }
+  if (scopeFailed) {
+    throw createHostedVaultShareDeliveryError(
+      HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
+    );
   }
 
   return jsonOk(delivered ? DELIVERED_RESPONSE : NO_ACTIVE_SHARE_RESPONSE);
 });
 
-function createHostedVaultShareDeliveryFailedError(): Error {
+function createHostedVaultShareDeliveryError(
+  code:
+    | typeof HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE
+    | typeof HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
+): Error {
   return hostedOnboardingError({
-    code: "HOSTED_VAULT_SHARE_DELIVERY_FAILED",
+    code,
     httpStatus: 503,
     message: "Hosted vault-share delivery failed. Retry the request.",
     retryable: true,

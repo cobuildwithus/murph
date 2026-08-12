@@ -22,7 +22,9 @@ import {
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+  HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
   HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -508,6 +510,9 @@ describe("vault-share deliver route", () => {
       const response = await deliverRoute.POST(request);
 
       expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        error: { code: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE },
+      });
       expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
     } finally {
       consoleError.mockRestore();
@@ -549,6 +554,9 @@ describe("vault-share deliver route", () => {
       const response = await responsePromise;
 
       expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        error: { code: HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE },
+      });
       expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
       expect(
         mocks.replaceHostedVaultShareProjectionSnapshot.mock.calls[0]?.[0].signal.aborted,
@@ -695,7 +703,7 @@ describe("vault-share deliver route", () => {
       expect(response.status).toBe(503);
       expect(await response.json()).toEqual({
         error: {
-          code: "HOSTED_VAULT_SHARE_DELIVERY_FAILED",
+          code: HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
           details: undefined,
           message: "Hosted vault-share delivery failed. Retry the request.",
           retryable: true,
@@ -715,7 +723,7 @@ describe("vault-share deliver route", () => {
       expect(consoleError).toHaveBeenCalledWith(
         "Hosted onboarding route failed.",
         expect.objectContaining({
-          errorResponseCode: "HOSTED_VAULT_SHARE_DELIVERY_FAILED",
+          errorResponseCode: HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
           errorResponseRetryable: true,
           errorResponseStatus: 503,
         }),
@@ -738,7 +746,7 @@ describe("vault-share deliver route", () => {
       expect(response.status).toBe(503);
       expect(await response.json()).toEqual({
         error: {
-          code: "HOSTED_VAULT_SHARE_DELIVERY_FAILED",
+          code: HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
           details: undefined,
           message: "Hosted vault-share delivery failed. Retry the request.",
           retryable: true,

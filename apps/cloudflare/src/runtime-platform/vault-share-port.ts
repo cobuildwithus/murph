@@ -5,6 +5,7 @@ import {
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverResponse,
 } from "@murphai/hosted-execution/vault-share";
@@ -26,7 +27,7 @@ export function createHostedWebVaultSharePort(input: {
   fetchImpl: typeof fetch;
   timeoutMs: number;
   transport: HostedWebControlTransport;
-}) {
+}): NonNullable<HostedRuntimePlatform["vaultSharePort"]> {
   return {
     async listActiveProjectionScopes(
       context?: Parameters<
@@ -74,6 +75,13 @@ export function createHostedWebVaultSharePort(input: {
           transport: input.transport,
         });
       } catch (error) {
+        if (isDefinitiveHostedVaultShareScopeFailure({
+          effectDeadlineAtEpochMs,
+          error,
+          transport: input.transport,
+        })) {
+          return { status: "scope-failed" };
+        }
         if (
           !(error instanceof HostedWebControlPlaneResponseError)
           || (
@@ -91,6 +99,20 @@ export function createHostedWebVaultSharePort(input: {
       return parseHostedVaultShareDeliverResponse(payload);
     },
   };
+}
+
+function isDefinitiveHostedVaultShareScopeFailure(input: {
+  effectDeadlineAtEpochMs: number;
+  error: unknown;
+  transport: HostedWebControlTransport;
+}): boolean {
+  return input.error instanceof HostedWebControlPlaneResponseError
+    && input.error.code === HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE
+    && Date.now() < input.effectDeadlineAtEpochMs
+    && (
+      input.transport.mode === "direct"
+      || input.error.forwardedFromWeb
+    );
 }
 
 async function waitForHostedVaultShareAmbiguousDeliverySettlement(

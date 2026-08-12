@@ -652,8 +652,8 @@ Last verified: 2026-08-12
   the existing dirty or recording owner retries every undispatched scope before
   acknowledgement. The same between-scope predicate observes exact host abort
   and shutdown before every scope, so those owner-ending conditions drain an
-  active request but never admit a request that has not started. The invocation starts no second projection
-  and does not release its
+  active request but never admit a request that has not started. The invocation
+  starts no second projection and does not release its
   runner ownership until the real proxy-to-Web response is terminal. Web owns a
   finite effect deadline for each delivery, stops admitting destination
   replacements on deadline or request cancellation, and gives the final
@@ -664,7 +664,13 @@ Last verified: 2026-08-12
   receiving the actual Web response. A transport failure or unmarked
   proxy-local response remains ambiguous, so invocation ownership stays
   occupied until the absolute effect-deadline-plus-margin boundary; a marked
-  Web response settles immediately. Abort, shutdown, and normal
+  Web response settles immediately. When that marked response is the known
+  terminal scope-delivery failure and arrives before the effect deadline, the
+  same sequential owner records an aggregate error and continues with later
+  independent scopes. This prevents one persistently broken scope from starving
+  a healthy suffix while retaining the dirty or recording retry obligation.
+  Deadline exhaustion, an unmarked response, transport loss, or an owner-ending
+  condition still stops the undispatched suffix. Abort, shutdown, and normal
   finalization join that same owner before a successor invocation or the
   existing continuation may retry. No projection stage continues detached.
   Every delivery carries the committed source
@@ -680,8 +686,10 @@ Last verified: 2026-08-12
   and at most 25 sequential share-replacement transactions per delivery under
   the existing grant cap: 2,450 replacement transactions at maximum admitted
   cardinality. There is at most one active scope-resolution or delivery request
-  per opportunity. An error stops the remaining scopes; a foreground wake,
-  exact host abort, or shutdown finishes only the already-started scope; and the
+  per opportunity. A definitive actual-Web scope failure continues to later
+  scopes sequentially and leaves the aggregate attempt failed. An ambiguous
+  error, deadline exhaustion, foreground wake, exact host abort, or shutdown
+  finishes only the already-started scope; and the
   existing continuation cannot retry until that request reaches its server-owned
   terminal boundary. Repeated
   wakes may admit conversation work but cannot start another projection. Each

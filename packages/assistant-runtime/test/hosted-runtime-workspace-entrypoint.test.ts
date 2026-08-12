@@ -12321,7 +12321,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("wake-interrupted vault-share projection retains dirty recording for a later system pass", async () => {
+  test("system projection retries a preempted suffix and a definitive failed scope without starving later scopes", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -12357,6 +12357,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let projectionCalls = 0;
     let activeProjectionCalls = 0;
     let peakActiveProjectionCalls = 0;
+    const projectedKinds: string[] = [];
     const projectedWorkspaceVersions: string[] = [];
 
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -12428,10 +12429,12 @@ describe("hosted workspace runtime entrypoint", () => {
               return [
                 { projectionKind: "profile-name.v0" as const },
                 { projectionKind: "time-zone.v0" as const },
+                { projectionKind: "sleep-times.v0" as const },
               ];
             },
             async deliver(request) {
               projectionCalls += 1;
+              projectedKinds.push(request.projectionKind);
               projectedWorkspaceVersions.push(request.sourceWorkspaceVersion);
               events.push(`vault-share.deliver:start:${projectionCalls}`);
               activeProjectionCalls += 1;
@@ -12444,8 +12447,11 @@ describe("hosted workspace runtime entrypoint", () => {
                   projectionStarted.resolve();
                   await projectionRelease.promise;
                 }
-                events.push(`vault-share.deliver:done:${projectionCalls}`);
-                return { status: "delivered" as const };
+                const status = projectionCalls === 3
+                  ? "scope-failed" as const
+                  : "delivered" as const;
+                events.push(`vault-share.deliver:done:${projectionCalls}:${status}`);
+                return { status };
               } finally {
                 activeProjectionCalls -= 1;
               }
@@ -12524,7 +12530,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 1);
       assert.equal(projectionCalls, 1);
       assert.equal(activeProjectionCalls, 0);
-      assert.ok(events.includes("vault-share.deliver:done:1"), events.join(","));
+      assert.ok(
+        events.includes("vault-share.deliver:done:1:delivered"),
+        events.join(","),
+      );
       const durableRecordingCheckpoint = checkpointRequests[0];
       assert.ok(durableRecordingCheckpoint);
       const resumedWorkspace = createWorkspaceState({
@@ -12545,17 +12554,64 @@ describe("hosted workspace runtime entrypoint", () => {
         createRunOptions(createCoalescingRuntimeWakeSignal(), resumedWorkspace),
       );
 
-      assert.equal(projectionCalls, 3);
-      assert.deepEqual(projectedWorkspaceVersions, ["1", "2", "2"]);
+      assert.equal(projectionCalls, 4);
+      assert.deepEqual(projectedKinds, [
+        "profile-name.v0",
+        "profile-name.v0",
+        "time-zone.v0",
+        "sleep-times.v0",
+      ]);
+      assert.deepEqual(projectedWorkspaceVersions, ["1", "2", "2", "2"]);
       assert.equal(peakActiveProjectionCalls, 1);
-      assert.equal(dirtyAckCalls, 1);
+      assert.equal(dirtyAckCalls, 0);
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:done:1")
+        requireEventIndex(events, "vault-share.deliver:done:1:delivered")
           < requireEventIndex(events, "vault-share.deliver:start:2"),
         events.join(","),
       );
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:done:3")
+        requireEventIndex(events, "vault-share.deliver:done:3:scope-failed")
+          < requireEventIndex(events, "vault-share.deliver:start:4"),
+        events.join(","),
+      );
+      const failedState = await readHostedSystemMailboxState(vaultRoot);
+      const failedItem = failedState.pending.find((item) => item.itemId === deviceItem.id);
+      assert.equal(failedItem?.status, "recording");
+      assert.equal(typeof failedItem?.nextAttemptAt, "string");
+      assert.ok(failedItem?.postCheckpointRecord);
+      assert.equal(checkpointRequests.length, 2);
+      const failedRecordingCheckpoint = checkpointRequests[1];
+      assert.ok(failedRecordingCheckpoint);
+      const recoveredWorkspace = createWorkspaceState({
+        inboxMediaRetentionWakeAt:
+          failedRecordingCheckpoint.inboxMediaRetentionWakeAt ?? null,
+        nextWakeAt: failedRecordingCheckpoint.nextWakeAt ?? null,
+        nextWakeReason: failedRecordingCheckpoint.nextWakeReason ?? null,
+        redactedStatus: failedRecordingCheckpoint.redactedStatus ?? null,
+        snapshotRef: failedRecordingCheckpoint.snapshotRef,
+        version: "2",
+      });
+
+      vi.setSystemTime(new Date(Date.parse(TEST_NOW) + 60_000));
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createRuntimeInput(
+          "attempt_synthetic_system_mailbox_projection_recovery_recording",
+          "2",
+        ),
+        createRunOptions(createCoalescingRuntimeWakeSignal(), recoveredWorkspace),
+      );
+
+      assert.equal(projectionCalls, 7);
+      assert.deepEqual(projectedKinds.slice(4), [
+        "profile-name.v0",
+        "time-zone.v0",
+        "sleep-times.v0",
+      ]);
+      assert.deepEqual(projectedWorkspaceVersions.slice(4), ["3", "3", "3"]);
+      assert.equal(peakActiveProjectionCalls, 1);
+      assert.equal(dirtyAckCalls, 1);
+      assert.ok(
+        requireEventIndex(events, "vault-share.deliver:done:7:delivered")
           < requireEventIndex(events, "device-sync.dirty-ack"),
         events.join(","),
       );
@@ -23815,7 +23871,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("projection failure withholds its checkpoint effect and schedules the existing retry wake", async () => {
+  test("a definitive scope failure does not starve later scopes and withholds checkpoint effects", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-runtime-vault-share-projection-retry-"),
     );
@@ -23825,6 +23881,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let activeScopeReads = 0;
     let assistantPhaseCalls = 0;
     let checkpointEffectCalls = 0;
+    const projectedKinds: string[] = [];
     const projectedWorkspaceVersions: string[] = [];
 
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -23862,13 +23919,20 @@ describe("hosted workspace runtime entrypoint", () => {
               async listActiveProjectionScopes() {
                 activeScopeReads += 1;
                 return activeScopeReads === 1
-                  ? [{ projectionKind: "sleep-times.v0" as const }]
+                  ? [
+                      { projectionKind: "profile-name.v0" as const },
+                      { projectionKind: "time-zone.v0" as const },
+                      { projectionKind: "sleep-times.v0" as const },
+                    ]
                   : [];
               },
               async deliver(request) {
+                projectedKinds.push(request.projectionKind);
                 projectedWorkspaceVersions.push(request.sourceWorkspaceVersion);
-                events.push("vault-share.deliver:error");
-                throw new Error("Synthetic projection failure.");
+                events.push(`vault-share.deliver:${request.projectionKind}`);
+                return request.projectionKind === "time-zone.v0"
+                  ? { status: "scope-failed" as const }
+                  : { status: "delivered" as const };
               },
             },
             workspacePort: createWorkspacePort({
@@ -23916,10 +23980,20 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(checkpointEffectCalls, 0);
       assert.equal(events.includes("device-sync.dirty-ack"), false);
-      assert.deepEqual(projectedWorkspaceVersions, ["5"]);
+      assert.deepEqual(projectedKinds, [
+        "profile-name.v0",
+        "time-zone.v0",
+        "sleep-times.v0",
+      ]);
+      assert.deepEqual(projectedWorkspaceVersions, ["5", "5", "5"]);
       assert.ok(
         requireEventIndex(events, "workspace.checkpoint")
-          < requireEventIndex(events, "vault-share.deliver:error"),
+          < requireEventIndex(events, "vault-share.deliver:profile-name.v0"),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(events, "vault-share.deliver:time-zone.v0")
+          < requireEventIndex(events, "vault-share.deliver:sleep-times.v0"),
         events.join(","),
       );
       assert.equal(result.status, "scheduled");

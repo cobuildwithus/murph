@@ -592,7 +592,36 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     });
   });
 
-  it("stops the captured delivery chain after the first failed scope", async () => {
+  it("continues after a definitive scope failure and aggregates the attempt as failed", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    const deliver = vi.fn().mockImplementation(async (
+      request: HostedVaultShareDeliverRequest,
+    ) => request.projectionKind === "time-zone.v0"
+      ? { status: "scope-failed" as const }
+      : { status: "delivered" as const });
+
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => [
+          PROFILE_SCOPE,
+          TIME_ZONE_SCOPE,
+          SLEEP_SCOPE,
+        ],
+      },
+    });
+
+    expect(result).toEqual({ outcome: "error" });
+    expect(deliver).toHaveBeenCalledTimes(3);
+    expect(deliver.mock.calls.map(([request]) => request.projectionKind)).toEqual([
+      "profile-name.v0",
+      "time-zone.v0",
+      "sleep-times.v0",
+    ]);
+  });
+
+  it("stops the captured delivery chain after an ambiguous failure", async () => {
     const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
     const deliver = vi.fn().mockRejectedValue(new Error("synthetic delivery failure"));
 

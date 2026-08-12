@@ -113,7 +113,7 @@ Updated: 2026-08-12
 
 - Local proof completed:
   - `@murphai/assistant-runtime` typecheck and full Vitest suite: 86 files,
-    2,210 passed and 4 skipped. The remediation proof mutates a released warm
+    2,217 passed and 4 skipped. The remediation proof mutates a released warm
     vault root between two captured-scope deliveries and proves the older
     immutable payload remains bound to its checkpoint generation.
   - `@murphai/device-syncd` typecheck and full Vitest suite: 46 files and 979
@@ -219,3 +219,15 @@ Updated: 2026-08-12
   active scope A, with complete A/B/C replacement before dirty acknowledgement.
   The projection suite passes 102 tests, the focused owner-ending suite passes
   four tests, and the full assistant-runtime suite passes 2,216 with four skipped.
+- ReviewGPT round 10 found deterministic starvation when the stable scope order
+  repeatedly placed one persistently failing scope before healthy scopes. The
+  transport port now returns one internal `scope-failed` disposition only for
+  the known terminal Web delivery error received from the actual Web hop before
+  its effect deadline. The same sequential owner records the aggregate attempt
+  as failed and continues later scopes; deadline exhaustion, unmarked proxy
+  responses, transport loss, and owner-ending conditions still stop the suffix.
+  Ordinary and system-mailbox regressions prove A/B/C delivery through a
+  definitive B failure, retained dirty/recording acknowledgement, complete
+  retry after recovery, and peak-one work. The projection suite passes 103
+  tests, the Cloudflare port suite passes 7, the focused runtime-owner suite
+  passes 2, and the full assistant-runtime suite passes 2,217 with four skipped.

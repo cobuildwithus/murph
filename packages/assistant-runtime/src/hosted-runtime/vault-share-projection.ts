@@ -303,6 +303,10 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
         sourceWorkspaceVersion: input.capture.sourceWorkspaceVersion,
       };
       const response = await input.vaultSharePort.deliver(request);
+      if (response.status === "scope-failed") {
+        outcomes.push("error");
+        continue;
+      }
       outcomes.push(
         response.status === "delivered" ? "delivered" : "no-active-share",
       );

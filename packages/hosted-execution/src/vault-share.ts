@@ -31,6 +31,12 @@ export {
   parseHostedVaultShareEffectDeadlineAtEpochMs,
 };
 
+export const HOSTED_VAULT_SHARE_DELIVERY_FAILED_ERROR_CODE =
+  "HOSTED_VAULT_SHARE_DELIVERY_FAILED";
+
+export const HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE =
+  "HOSTED_VAULT_SHARE_SCOPE_FAILED";
+
 /**
  * VaultShare v0: a member grants a standing share of a fixed vault projection to a
  * destination member. The grantor's runtime offers projected records through the signed

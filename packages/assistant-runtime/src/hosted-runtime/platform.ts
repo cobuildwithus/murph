@@ -689,8 +689,17 @@ export interface HostedRuntimeVaultSharePort {
   listActiveProjectionScopes(
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedVaultShareProjectionScope[]>;
-  deliver(request: HostedVaultShareDeliverRequest): Promise<HostedVaultShareDeliverResponse>;
+  deliver(
+    request: HostedVaultShareDeliverRequest,
+  ): Promise<HostedRuntimeVaultShareDeliverResult>;
 }
+
+export type HostedRuntimeVaultShareDeliverResult =
+  | HostedVaultShareDeliverResponse
+  | {
+    /** Web reached a terminal response, but this scope still needs retry. */
+    status: "scope-failed";
+  };
 
 export interface HostedRuntimePlatform {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;

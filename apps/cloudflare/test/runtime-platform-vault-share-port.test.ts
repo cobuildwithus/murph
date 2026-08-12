@@ -2,6 +2,7 @@ import {
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+  HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
   hostedVaultShareProjectionKindToScope,
 } from "@murphai/hosted-execution/vault-share";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +26,7 @@ import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
   HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import type { RunnerOutboundEnvironmentSource } from "../src/runner-outbound/shared.ts";
@@ -171,11 +173,11 @@ describe("createHostedWebVaultSharePort", () => {
     expect(deliverySettled).toBe(true);
   });
 
-  it("settles immediately after a marked Web failure response is terminal", async () => {
+  it("classifies a marked terminal Web failure so later scopes can proceed", async () => {
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
       Response.json({
         error: {
-          code: "HOSTED_VAULT_SHARE_DELIVERY_FAILED",
+          code: HOSTED_VAULT_SHARE_SCOPE_FAILED_ERROR_CODE,
           message: "Hosted vault-share delivery failed. Retry the request.",
           retryable: true,
         },
@@ -223,10 +225,48 @@ describe("createHostedWebVaultSharePort", () => {
       projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
       records: [],
       sourceWorkspaceVersion: "7",
-    })).rejects.toMatchObject({
-      forwardedFromWeb: true,
-      status: 503,
-    });
+    })).resolves.toEqual({ status: "scope-failed" });
+  });
+
+  it("does not advance past a marked failure after the effect deadline", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-08-12T12:00:00.000Z"));
+      const fetchImpl = vi.fn(async () => {
+        vi.setSystemTime(Date.now() + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS);
+        return Response.json({
+          error: {
+            code: "HOSTED_VAULT_SHARE_DELIVERY_FAILED",
+            message: "Hosted vault-share delivery failed. Retry the request.",
+            retryable: true,
+          },
+        }, {
+          headers: {
+            [HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER]: "1",
+          },
+          status: 503,
+        });
+      });
+      const vaultSharePort = createHostedWebVaultSharePort({
+        boundUserId: "member_projection_expired_web_failure",
+        fetchImpl: fetchImpl as typeof fetch,
+        timeoutMs: 2_000,
+        transport: { mode: "proxy" },
+      });
+
+      await expect(vaultSharePort.deliver({
+        projectionKind: "profile-name.v0",
+        projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
+        records: [],
+        sourceWorkspaceVersion: "7",
+      })).rejects.toMatchObject({
+        code: "HOSTED_VAULT_SHARE_DELIVERY_FAILED",
+        forwardedFromWeb: true,
+        status: 503,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("retains ownership when the production proxy propagates second-hop transport failure", async () => {
