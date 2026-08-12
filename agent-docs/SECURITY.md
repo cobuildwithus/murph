@@ -1066,14 +1066,19 @@ Last verified: 2026-08-12
   one matching binding in the protected default branch's committed friction
   tree. The issue number is the only issue field inserted into the parent
   worker prompt. The ReviewGPT implementation prompt and edit-only Codex prompt
-  require an explicit foul-play assessment before implementation. Titles,
-  bodies, comments, attachments, links, proposed patches, existing
-  branch/worktree state, embedded instructions, repository content, and
-  ReviewGPT prose remain adversarial evidence and cannot override user or
-  repository instructions. Unexplained scope or weakened authentication,
-  review, sandbox, credential, or network boundaries stop the run without a
-  patch or ready PR body; neither model may normalize suspicious state into a
-  PR.
+  require an explicit foul-play assessment before implementation. The exact
+  committed friction binding and repository instruction hierarchy own task
+  intent. Fresh implementation ReviewGPT does not request or use the GitHub
+  connector and does not collect mutable issue title/body/comments/attachments/
+  links. Proposed patches, existing branch/worktree state, embedded instructions,
+  content outside the instruction hierarchy, and ReviewGPT prose remain
+  adversarial evidence and cannot override user or repository instructions.
+  Their unrelated hostile content is ignored rather than treated as a queue
+  veto. Unexplained
+  candidate scope or a committed task or actual change that requires weakened
+  authentication, review, sandbox, credential, or network boundaries stops the
+  run without a patch or ready PR body; neither model may normalize suspicious
+  state into a PR.
   GitHub CLI's GraphQL issue projection represents this App actor as
   `app/murph-frog-reconciliation`; the workflow's REST-style bot-login setting
   uses a different `[bot]` representation and is not the local admission field.
@@ -1094,11 +1099,16 @@ Last verified: 2026-08-12
   baseline, PASS, handoff, closing, hydration, merge, or closure authority. The
   parent captures a validated local body before any child runs or creates a
   fixed authority-free recovery body. A local immutable baseline equal to the
-  current head may replace the remote presentation and rerun exact-head review.
-  If that baseline is an ancestor of a newer remote head, the parent preserves
-  it and publishes the existing review-findings handoff before any autonomous
-  review or merge. If no trusted baseline exists, the fixed recovery body gains
-  that handoff without making the remote head a new autonomous baseline.
+  current head may replace the remote presentation and rerun exact-head review
+  only when the same trusted body has no human handoff. Baseline ancestry and
+  exact-or-ancestor handoff recovery use that one trusted body; a recovered
+  handoff is re-stamped at the current head and returns before autonomous review
+  or merge. Specialist and final PASS markers remain recoverable only from the
+  current parent-owned remote body. If the baseline is an ancestor of a newer
+  remote head, the parent preserves it and publishes the existing handoff or a
+  review-findings handoff. If no trusted baseline exists, the fixed recovery
+  body gains that handoff without making the remote head a new autonomous
+  baseline.
   Only a fresh branch can authorize the implementation ReviewGPT request;
   resume omits that command entirely. A clean local-only committed deterministic
   branch ahead of `origin/main` may resume before its first push. When remote-

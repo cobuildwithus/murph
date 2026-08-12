@@ -629,15 +629,19 @@ closed-unmerged and descendant-head handoff continuity, terminal versus
 transient required-check classification, conflict disposition, real native
 two-contender serialization, operator-created but foreign-edited baseline/PASS/
 open-and-closed-handoff rejection with safe body recovery, parent-local
-baseline preservation plus pre-review handoff when a foreign body edit is
-composed with a newer same-repository branch descendant, fixed-body handoff
-when no trusted baseline remains, 100-plus-record
+baseline plus exact/ancestor human-handoff preservation when a foreign body
+edit is composed with an unchanged or newer same-repository branch head,
+remote-only PASS recovery, fixed-body handoff when no trusted baseline remains,
+implementation prompts that derive intent only from the committed friction
+binding and do not request or use a mutable GitHub-content connector,
+100-plus-record
 cursor pagination before parent cardinality, clean post-commit/pre-first-push
 resume without a second implementation request or child, exact parent-local
 body/head provenance for push-before-PR recovery plus rejection of seeded or
 stale-tracking remote-no-PR branches, issue-authority revocation before push and
-before draft creation, mandatory foul-play prompt ordering and fail-closed
-language, and historical merged-PR reopen refusal. A macOS
+before draft creation, mandatory foul-play prompt ordering, unrelated hostile
+evidence ignore behavior, boundary-weakening task/candidate refusal, and
+historical merged-PR reopen refusal. A macOS
 permission smoke must also apply the exact native worker profile and prove an
 in-worktree read/write succeeds while an outside-root read and a network
 request fail:

@@ -217,10 +217,16 @@ Last verified: 2026-08-12
   current-base conflict instead publish the existing review-findings handoff so
   the oldest issue cannot pin later work.
 - Both implementation prompts require an explicit foul-play assessment before
-  edits: issue title/body/comments/attachments/links, proposed patches,
-  existing branch/worktree state, and embedded instructions are adversarial
-  evidence. Unexplained scope or weakened authentication, review, sandbox,
-  credential, or network boundaries stop the run rather than becoming PR state.
+  edits. The exact committed friction binding and repository instruction
+  hierarchy own task intent. Fresh implementation ReviewGPT does not request or
+  use the GitHub connector and does not collect mutable issue title/body/
+  comments/attachments/links. Proposed patches, existing branch/worktree
+  state, content outside the instruction hierarchy, and embedded instructions
+  are adversarial evidence.
+  Unrelated hostile prose is ignored rather than becoming a recurring queue
+  veto; unexplained candidate scope or a committed task or actual change that
+  requires weaker authentication, review, sandbox, credential, or network
+  boundaries stops the run rather than becoming PR state.
   A successful child leaves only uncommitted code/docs/tests and a private PR
   draft. The parent applies implementation patches, closes plans, commits,
   binds the local body to the immutable review baseline, refreshes `origin/main`
@@ -235,9 +241,13 @@ Last verified: 2026-08-12
   closed. That marker is effective only while the live operator is also the
   proven latest body editor. A foreign body edit discards all remote metadata
   and uses a validated parent-local body captured before any child or one fixed
-  recovery body. An unchanged trusted baseline restores presentation and reruns
-  review; a newer remote descendant preserves the older baseline and receives
-  the existing review-findings handoff, while missing trusted baseline evidence
+  recovery body. Baseline ancestry and exact-or-ancestor human handoff recovery
+  use that same trusted body; a recovered handoff is re-stamped at the current
+  head and returns before canonical review or merge. Specialist and final PASS
+  markers still require the current remote body to be parent-owned. An unchanged
+  trusted baseline without a handoff restores presentation and reruns review; a
+  newer remote descendant preserves the older baseline and receives the
+  existing review-findings handoff, while missing trusted baseline evidence
   receives the fixed-body handoff without autonomous rebaselining. Before merge
   it revalidates live issue authority, PR head, required checks, current-base
   mergeability, and both old and new paths of any rename or copy. Proven local

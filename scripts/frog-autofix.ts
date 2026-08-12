@@ -1419,7 +1419,6 @@ export function reviewGptEntry(primary: string): string {
 }
 
 function runParentReview(options: {
-  connector?: "github";
   head?: string;
   issueNumber: number;
   kind?: "final" | "specialist";
@@ -1462,7 +1461,6 @@ function runParentReview(options: {
     "--response-file",
     responsePath,
   ];
-  if (options.connector) args.push("--connector", options.connector);
   const output = requireCommand(
     process.execPath,
     args,
@@ -1932,6 +1930,7 @@ export function carriedForwardBodyHandoff(
 
 export interface ReviewBaselineState {
   firstHead?: string;
+  handoff: BodyHandoffRecord["kind"] | null;
   requiresHumanHandoff: boolean;
 }
 
@@ -1946,7 +1945,11 @@ export function resolveReviewBaselineState(
     if (recoveredExistingBody) {
       throw new Error("existing pull request changed during review recovery");
     }
-    return { firstHead: currentHead, requiresHumanHandoff: false };
+    return {
+      firstHead: currentHead,
+      handoff: null,
+      requiresHumanHandoff: false,
+    };
   }
   const trustedBody = hasParentOwnedPullRequestBody(
     existing,
@@ -1954,22 +1957,42 @@ export function resolveReviewBaselineState(
   )
     ? existing.body
     : recoveredExistingBody;
-  if (!trustedBody) return { requiresHumanHandoff: true };
-  const firstHead = extractFirstReviewedHead(trustedBody);
-  if (!firstHead) return { requiresHumanHandoff: true };
-  requireCommand("git", ["cat-file", "-e", `${firstHead}^{commit}`], worktree);
-  if (
-    runCommand(
+  if (!trustedBody) {
+    return { handoff: "review-findings", requiresHumanHandoff: true };
+  }
+  const isAncestor = (priorHead: string, candidateHead: string) => {
+    requireCommand("git", ["cat-file", "-e", `${priorHead}^{commit}`], worktree);
+    const ancestry = runCommand(
       "git",
-      ["merge-base", "--is-ancestor", firstHead, currentHead],
+      ["merge-base", "--is-ancestor", priorHead, candidateHead],
       worktree,
-    ).status !== 0
-  ) {
+    );
+    if (![0, 1].includes(ancestry.status)) {
+      throw new Error(`git failed with status ${ancestry.status}`);
+    }
+    return ancestry.status === 0;
+  };
+  const carriedHandoff = carriedForwardBodyHandoff(
+    trustedBody,
+    currentHead,
+    isAncestor,
+  );
+  const firstHead = extractFirstReviewedHead(trustedBody);
+  if (!firstHead) {
+    return {
+      handoff: carriedHandoff ?? "review-findings",
+      requiresHumanHandoff: true,
+    };
+  }
+  if (!isAncestor(firstHead, currentHead)) {
     throw new Error("ReviewGPT baseline is not an ancestor of the current head");
   }
+  const handoff = carriedHandoff
+    ?? (firstHead === currentHead ? null : "review-findings");
   return {
     firstHead,
-    requiresHumanHandoff: firstHead !== currentHead,
+    handoff,
+    requiresHumanHandoff: handoff !== null,
   };
 }
 
@@ -2279,30 +2302,9 @@ async function reviewPublishAndFinalize(options: {
     existingBeforePublish && existingBodyIsParentOwned
     && bodyHasExactReviewPass(existingBeforePublish.body, "final", head),
   );
-  let handoff = existingBeforePublish && existingBodyIsParentOwned
-    ? carriedForwardBodyHandoff(
-      existingBeforePublish.body,
-      head,
-      (priorHead, currentHead) => {
-        requireCommand(
-          "git",
-          ["cat-file", "-e", `${priorHead}^{commit}`],
-          options.worktree,
-        );
-        const ancestry = runCommand(
-          "git",
-          ["merge-base", "--is-ancestor", priorHead, currentHead],
-          options.worktree,
-        );
-        if (![0, 1].includes(ancestry.status)) {
-          throw new Error(`git failed with status ${ancestry.status}`);
-        }
-        return ancestry.status === 0;
-      },
-    )
-    : null;
-  if (!handoff && baseline.requiresHumanHandoff) {
-    handoff = "review-findings";
+  let handoff = baseline.handoff;
+  if (baseline.requiresHumanHandoff !== (handoff !== null)) {
+    throw new Error("review recovery handoff state is inconsistent");
   }
   body = bodyWithParentMetadata(body, {
     finalHead: finalPassed ? head : undefined,
@@ -2339,7 +2341,7 @@ async function reviewPublishAndFinalize(options: {
     );
   };
 
-  if (handoff) return "awaiting-human";
+  if (baseline.requiresHumanHandoff) return "awaiting-human";
   if (!baseline.firstHead || !trustedReviewControlsMatch(
     options.primary,
     options.worktree,
@@ -2554,7 +2556,6 @@ async function runOnce() {
         : null;
       if (workerMode === "implement") {
         const implementation = runParentReview({
-          connector: "github",
           issueNumber: issue.number,
           label: "implementation",
           marker: "IMPLEMENTATION_PATCH_COMPLETE",

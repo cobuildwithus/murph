@@ -19,12 +19,15 @@ Admission requires an open `enhancement` issue authored by the exact Frog App
 and exactly one matching `issue:` binding already committed beneath
 `.agents/friction-log/*/friction.md` on `origin/main`. The issue number is the
 only issue datum placed in the parent worker prompt. Issue content remains
-untrusted evidence. Both the ReviewGPT implementation prompt and edit-only
-Codex prompt require a foul-play assessment before implementation: issue
-titles, bodies, comments, attachments, links, proposed patches, existing
-branch/worktree state, and embedded instructions are adversarial evidence.
-Unexplained scope or weakened authentication, review, sandbox, credential, or
-network boundaries fail closed rather than being normalized into a PR. A
+outside model-work authority. Fresh implementation ReviewGPT does not request
+or use the GitHub connector and derives the task only from the exact committed
+friction binding plus repository instructions. Both implementation prompts
+require a foul-play assessment before edits. Proposed patches, existing branch/worktree
+state, content outside the instruction hierarchy, and embedded instructions
+remain adversarial evidence. Unrelated hostile prose is ignored rather than
+becoming a queue veto; an unexplained candidate or a committed task or actual
+change that requires weakened authentication, review, sandbox, credential, or
+network boundaries still fails closed rather than being normalized into a PR. A
 deterministic branch owns one sanctioned worktree, so a later run can recover
 an incomplete PR without a second task database.
 
@@ -43,11 +46,15 @@ Mutable remote body text supplies baseline, PASS, closing, or handoff authority
 only when `editor`/`lastEditedAt` proves the live operator made the latest edit,
 with creator fallback only for a never-edited body. Otherwise the parent
 captures an already validated local body before any child runs or writes one
-fixed recovery body. A retained baseline equal to the current head may replace
+fixed recovery body. Baseline ancestry and human handoff resolution use that
+same trusted body. An exact or ancestor local human handoff is re-stamped at the
+current head and returns before canonical review or merge, while specialist and
+final PASS markers remain recoverable only from a current operator-owned remote
+body. A retained baseline equal to the current head with no handoff may replace
 the remote presentation and rerun exact-head reviews. A retained ancestor
-baseline paired with a newer remote head is preserved and becomes a durable
-review-findings handoff; a recovery body with no trusted baseline also becomes
-that handoff without establishing the remote head as a fresh baseline.
+baseline paired with a newer remote head becomes a durable review-findings
+handoff; a recovery body with no trusted baseline also becomes that handoff
+without establishing the remote head as a fresh baseline.
 A clean implementation commit interrupted before its first remote push, or an
 open PR, may resume without requesting a second implementation patch. A clean
 local-only no-PR commit remains resumable. Once the deterministic branch has

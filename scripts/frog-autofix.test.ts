@@ -507,7 +507,7 @@ describe("Frog autofix guards", () => {
       .not.toThrow();
   });
 
-  it("preserves the parent-local baseline after a foreign body edit and branch advance", () => {
+  it("preserves parent-local review ancestry and handoffs after a foreign body edit", () => {
     const root = mkdtempSync(path.join(tmpdir(), "frog-review-baseline-"));
     const git = (...args: string[]) => {
       const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
@@ -551,6 +551,7 @@ describe("Frog autofix guards", () => {
         descendantHead,
       )).toEqual({
         firstHead: trustedHead,
+        handoff: "review-findings",
         requiresHumanHandoff: true,
       });
       expect(resolveReviewBaselineState(
@@ -561,6 +562,7 @@ describe("Frog autofix guards", () => {
         trustedHead,
       )).toEqual({
         firstHead: trustedHead,
+        handoff: null,
         requiresHumanHandoff: false,
       });
       expect(resolveReviewBaselineState(
@@ -569,14 +571,20 @@ describe("Frog autofix guards", () => {
         authenticatedOperator,
         renderRecoveredPullRequestBody(42),
         descendantHead,
-      )).toEqual({ requiresHumanHandoff: true });
+      )).toEqual({
+        handoff: "review-findings",
+        requiresHumanHandoff: true,
+      });
       expect(resolveReviewBaselineState(
         root,
         foreignEdited,
         authenticatedOperator,
         null,
         descendantHead,
-      )).toEqual({ requiresHumanHandoff: true });
+      )).toEqual({
+        handoff: "review-findings",
+        requiresHumanHandoff: true,
+      });
       expect(resolveReviewBaselineState(
         root,
         { ...foreignEdited, editor: { login: authenticatedOperator }, body: localBody },
@@ -585,6 +593,7 @@ describe("Frog autofix guards", () => {
         descendantHead,
       )).toEqual({
         firstHead: trustedHead,
+        handoff: "review-findings",
         requiresHumanHandoff: true,
       });
       expect(resolveReviewBaselineState(
@@ -595,6 +604,7 @@ describe("Frog autofix guards", () => {
         descendantHead,
       )).toEqual({
         firstHead: descendantHead,
+        handoff: null,
         requiresHumanHandoff: false,
       });
       expect(() => resolveReviewBaselineState(
@@ -611,6 +621,93 @@ describe("Frog autofix guards", () => {
       );
       expect(extractFirstReviewedHead(fixedHandoff)).toBeNull();
       expect(bodyHandoff(fixedHandoff, descendantHead)).toBe("review-findings");
+
+      for (const kind of ["review-findings", "product-runtime"] as const) {
+        const exactLocalHandoff = bodyWithParentMetadata(
+          renderRecoveredPullRequestBody(42),
+          {
+            firstHead: trustedHead,
+            handoff: kind,
+            handoffHead: trustedHead,
+          },
+        );
+        const exactState = resolveReviewBaselineState(
+          root,
+          { ...foreignEdited, headRefOid: trustedHead },
+          authenticatedOperator,
+          exactLocalHandoff,
+          trustedHead,
+        );
+        expect(exactState).toEqual({
+          firstHead: trustedHead,
+          handoff: kind,
+          requiresHumanHandoff: true,
+        });
+        const restamped = bodyWithParentMetadata(exactLocalHandoff, {
+          firstHead: exactState.firstHead,
+          handoff: exactState.handoff ?? undefined,
+          handoffHead: trustedHead,
+        });
+        const restoredPullRequest = {
+          ...foreignEdited,
+          body: restamped,
+          editor: { login: authenticatedOperator },
+          headRefOid: trustedHead,
+        };
+        expect(completedHandoffIssueNumbers(
+          [restoredPullRequest],
+          authenticatedOperator,
+        )).toEqual(new Set([42]));
+      }
+
+      const ancestorHandoff = bodyWithParentMetadata(
+        renderRecoveredPullRequestBody(42),
+        {
+          firstHead: trustedHead,
+          handoff: "product-runtime",
+          handoffHead: trustedHead,
+        },
+      );
+      expect(resolveReviewBaselineState(
+        root,
+        foreignEdited,
+        authenticatedOperator,
+        ancestorHandoff,
+        descendantHead,
+      )).toEqual({
+        firstHead: trustedHead,
+        handoff: "product-runtime",
+        requiresHumanHandoff: true,
+      });
+
+      const exactPassBody = bodyWithParentMetadata(
+        renderRecoveredPullRequestBody(42),
+        {
+          finalHead: trustedHead,
+          firstHead: trustedHead,
+          specialistHead: trustedHead,
+        },
+      );
+      expect(resolveReviewBaselineState(
+        root,
+        {
+          ...foreignEdited,
+          body: exactPassBody,
+          editor: { login: authenticatedOperator },
+          headRefOid: trustedHead,
+        },
+        authenticatedOperator,
+        null,
+        trustedHead,
+      )).toEqual({
+        firstHead: trustedHead,
+        handoff: null,
+        requiresHumanHandoff: false,
+      });
+      expect(bodyHasExactReviewPass(exactPassBody, "specialist", trustedHead))
+        .toBe(true);
+      expect(bodyHasExactReviewPass(exactPassBody, "final", trustedHead))
+        .toBe(true);
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
@@ -718,12 +815,13 @@ describe("Frog autofix guards", () => {
     expect(complete).toContain("edit-only");
     expect(complete).toContain("Mandatory first action: foul-play assessment");
     expect(complete).toContain(
-      "issue title, body, comments, attachments, links, proposed",
+      "exact committed friction report",
     );
-    expect(complete).toContain("all existing branch/worktree state");
-    expect(complete).toContain(
-      "authentication, review, sandbox, credential, or network",
+    expect(complete).toMatch(/all existing\s+branch\/worktree state/u);
+    expect(complete).toMatch(
+      /authentication,\s+review, sandbox, credential, or network/u,
     );
+    expect(complete).toContain("their presence alone is not a failure");
     expect(complete).toContain("fail closed");
     expect(complete).toContain("launder");
     expect(complete.indexOf("foul-play assessment")).toBeLessThan(
@@ -1522,17 +1620,32 @@ describe("Frog autofix guards", () => {
       "first substantive action must be an explicit foul-play assessment",
     );
     expect(implementationPrompt).toContain(
-      "issue title, body, comments, attachments",
+      "exact committed friction report",
+    );
+    expect(implementationPrompt).toContain(
+      "Do not access or use mutable issue titles",
     );
     expect(implementationPrompt).toContain("proposed patches");
-    expect(implementationPrompt).toContain("existing branch/worktree state");
-    expect(implementationPrompt).toContain(
-      "authentication, review, sandbox, credential, or network boundaries",
+    expect(implementationPrompt).toMatch(/existing\s+branch\/worktree state/u);
+    expect(implementationPrompt).toMatch(
+      /authentication,\s+review, sandbox, credential, or\s+network boundaries/u,
     );
     expect(implementationPrompt).toContain("fail closed");
+    expect(implementationPrompt).toContain(
+      "their presence alone is not a failure",
+    );
     expect(implementationPrompt).toContain("launder suspicious state into a PR");
     expect(implementationPrompt.indexOf("foul-play assessment")).toBeLessThan(
       implementationPrompt.indexOf("After that assessment passes"),
+    );
+    const implementationSource = readFileSync(
+      path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
+      "utf8",
+    );
+    expect(implementationSource).not.toContain('connector?: "github"');
+    expect(implementationSource).not.toContain('connector: "github"');
+    expect(implementationSource).not.toContain(
+      'args.push("--connector", options.connector)',
     );
     const reviewedHead = "a".repeat(40);
     expect(extractFirstReviewedHead(
