@@ -1,4 +1,7 @@
-import { JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES } from "@murphai/contracts";
+import {
+  JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
+  type JunctionResourceName,
+} from "@murphai/contracts";
 
 import { JUNCTION_CONNECT_SOURCE_TARGETS } from "./config/junction-connect-sources.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "./metadata.ts";
@@ -107,13 +110,22 @@ export const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES = Object
   "afib_burden",
   "blood_pressure",
   "note",
-] as const);
+  "insulin_injection",
+  "carbohydrates",
+  "workout_duration",
+  "weight",
+  "fat",
+  "body_mass_index",
+  "lean_body_mass",
+  "waist_circumference",
+] as const satisfies readonly JunctionResourceName[]);
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_SOURCE_INDEX = new Map(
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_SOURCE_SLUGS.map((providerSlug, index) =>
     [providerSlug, index] as const
   ),
 );
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_RESOURCE_INDEX = new Map(
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_RESOURCE_INDEX:
+  ReadonlyMap<string, number> = new Map(
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES.map((resource, index) =>
     [resource, index] as const
   ),
@@ -424,8 +436,9 @@ if (
     !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES.length
   || JSON.stringify(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_SOURCE_SLUGS)
     !== JSON.stringify(JUNCTION_CONNECT_SOURCE_TARGETS.map((target) => target.providerSlug))
-  || JSON.stringify(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES)
-    !== JSON.stringify(JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES)
+  || JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.some(
+    (resource) => !JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_RESOURCE_INDEX.has(resource),
+  )
 ) {
   throw new TypeError(
     "Junction extended-history coverage v1 coordinates drifted; bump the encoding version.",
