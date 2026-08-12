@@ -223,6 +223,7 @@ function buildDeviceSyncWake(input: {
       priority?: number;
     }>;
     nextReconcileAt?: string | null;
+    memberEditConflictResolution?: "keep_member" | "use_provider";
     reason?: string | null;
   };
   occurredAt: string;
@@ -6227,7 +6228,10 @@ describe("hosted device-sync runtime", () => {
         deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
         wake: buildDeviceSyncWake({
           connectionId: "hosted_conn_manual_reconcile",
-          hint: { reason: "manual_reconcile" },
+          hint: {
+            memberEditConflictResolution: "keep_member",
+            reason: "manual_reconcile",
+          },
           occurredAt: "2026-04-04T10:00:00.000Z",
           reason: "reconcile_due",
         }),
@@ -6239,6 +6243,10 @@ describe("hosted device-sync runtime", () => {
       assert.equal(jobs.length, 1);
       assert.equal(jobs[0]?.kind, "reconcile");
       assert.equal(jobs[0]?.priority, 80);
+      assert.equal(
+        JSON.parse(jobs[0]?.payloadJson ?? "{}").memberEditConflictResolution,
+        "keep_member",
+      );
       assert.equal(jobs[0]?.status, "queued");
       assert.equal(
         getStore(service).getAccountById(connected.account.id)?.nextReconcileAt,

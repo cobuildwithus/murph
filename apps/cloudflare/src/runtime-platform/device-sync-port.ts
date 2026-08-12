@@ -25,11 +25,15 @@ export function createHostedWebDeviceSyncPort(input: {
   return {
     async reconcileAccount(runtimeInput: {
       connectionId: string;
+      memberEditConflictResolution?: "keep_member" | "use_provider";
       signal?: AbortSignal | null;
     }) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
           connectionId: runtimeInput.connectionId,
+          ...(runtimeInput.memberEditConflictResolution
+            ? { memberEditConflictResolution: runtimeInput.memberEditConflictResolution }
+            : {}),
         },
         boundUserId: input.boundUserId,
         description: "Hosted device-sync reconcile",

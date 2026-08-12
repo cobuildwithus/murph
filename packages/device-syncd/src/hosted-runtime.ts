@@ -23,6 +23,7 @@ import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
 } from "./client.ts";
+import type { DeviceMemberEditConflictResolution } from "./types.ts";
 
 export {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
@@ -239,6 +240,7 @@ export interface HostedExecutionDeviceSyncConnectLinkResponse {
 
 export interface HostedExecutionDeviceSyncReconcileRequest {
   connectionId: string;
+  memberEditConflictResolution?: DeviceMemberEditConflictResolution;
 }
 
 export interface HostedExecutionDeviceSyncReconcileResponse {
@@ -677,6 +679,7 @@ export interface HostedExecutionDeviceSyncWakeHint {
   nextReconcileAt?: string | null;
   occurredAt?: string | null;
   reason?: string | null;
+  memberEditConflictResolution?: DeviceMemberEditConflictResolution;
   resourceCategory?: string | null;
   revokeWarning?: {
     code: string;
@@ -768,7 +771,7 @@ export function parseHostedExecutionDeviceSyncReconcileRequest(
   assertSupportedFields(
     record,
     "Hosted device-sync reconcile request",
-    ["connectionId"],
+    ["connectionId", "memberEditConflictResolution"],
   );
 
   return {
@@ -776,6 +779,14 @@ export function parseHostedExecutionDeviceSyncReconcileRequest(
       record.connectionId,
       "Hosted device-sync reconcile request connectionId",
     ),
+    ...(record.memberEditConflictResolution === undefined
+      ? {}
+      : {
+          memberEditConflictResolution: requireDeviceMemberEditConflictResolution(
+            record.memberEditConflictResolution,
+            "Hosted device-sync reconcile request memberEditConflictResolution",
+          ),
+        }),
   };
 }
 
@@ -1232,6 +1243,13 @@ export function parseHostedExecutionDeviceSyncWakeHint(
     next.reason = readNullableStringValue(
       record.reason,
       "Hosted execution device-sync.wake hint reason",
+    );
+  }
+
+  if (record.memberEditConflictResolution !== undefined) {
+    next.memberEditConflictResolution = requireDeviceMemberEditConflictResolution(
+      record.memberEditConflictResolution,
+      "Hosted execution device-sync.wake hint memberEditConflictResolution",
     );
   }
 
@@ -2559,6 +2577,16 @@ function requireString(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a non-empty string.`);
   }
 
+  return value;
+}
+
+function requireDeviceMemberEditConflictResolution(
+  value: unknown,
+  label: string,
+): DeviceMemberEditConflictResolution {
+  if (value !== "keep_member" && value !== "use_provider") {
+    throw new TypeError(`${label} must be keep_member or use_provider.`);
+  }
   return value;
 }
 

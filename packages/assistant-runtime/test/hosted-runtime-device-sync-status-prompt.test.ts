@@ -224,6 +224,47 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).not.toContain("vault-cli device connect strava --format json");
   });
 
+  it("presents both member-edit conflict choices without exposing conflict values", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [{
+        connectTarget: "whoop",
+        label: "WHOOP",
+        provider: "junction",
+        sourceProviderSlug: "whoop_v2",
+      }],
+      snapshot: buildSnapshot({
+        localState: {
+          lastErrorCode: "DEVICE_DATA_MEMBER_EDIT_CONFLICT",
+          lastErrorMessage: "private provider payload must not be rendered",
+          lastSyncCompletedAt: "2026-06-08T00:00:00.000Z",
+          lastSyncErrorAt: "2026-06-29T00:00:00.000Z",
+          lastSyncStartedAt: "2026-06-29T00:00:00.000Z",
+          lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
+        sources: [{
+          displayName: null,
+          firstSeenAt: "2026-06-01T00:00:00.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-06-29T00:00:00.000Z",
+          lastDataAt: "2026-06-28T00:00:00.000Z",
+          resourceCount: 1,
+          sourceProviderSlug: "whoop_v2",
+          status: "connected",
+        }],
+      }),
+    });
+
+    expect(prompt).toContain("keep my correction");
+    expect(prompt).toContain("use the connected source");
+    expect(prompt).toContain('resolution: "keep_member"');
+    expect(prompt).toContain('resolution: "use_provider"');
+    expect(prompt).toContain("do not choose a resolution for the member");
+    expect(prompt).not.toContain("private provider payload");
+    expect(prompt).not.toContain("external-account-id");
+  });
+
   it("guides Garmin historical recovery through the confirmed connection reset", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [

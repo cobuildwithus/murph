@@ -174,6 +174,7 @@ const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const
 const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   backfill: {
     payload: {
+      memberEditConflictResolution: stringJobField(),
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
@@ -183,6 +184,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   },
   reconcile: {
     payload: {
+      memberEditConflictResolution: stringJobField(),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
@@ -190,12 +192,14 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
   },
   push_source_recovery: {
     payload: {
+      memberEditConflictResolution: stringJobField(),
       silentSinceAt: stringJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
     },
   },
   resource: {
     payload: {
+      memberEditConflictResolution: stringJobField(),
       companionAdmissionId: stringJobField({ includeInHostedHint: true }),
       companionObservationJson: stringJobField({ includeInHostedHint: true }),
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),

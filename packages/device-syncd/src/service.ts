@@ -51,6 +51,7 @@ import type {
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
   DeviceSyncLogger,
+  DeviceMemberEditConflictResolution,
   DeviceSyncProvider,
   DeviceSyncRegistry,
   DeviceSyncServiceConfig,
@@ -185,7 +186,10 @@ export interface DeviceSyncService {
   handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult>;
   handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult>;
   handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
-  queueManualReconcile(accountId: string): QueueManualReconcileResult;
+  queueManualReconcile(
+    accountId: string,
+    options?: { memberEditConflictResolution?: DeviceMemberEditConflictResolution },
+  ): QueueManualReconcileResult;
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
   getNextWakeAt(now?: string): string | null;
   runSchedulerOnce(): Promise<void>;
@@ -532,7 +536,10 @@ class DeviceSyncServiceController {
     return this.publicIngress.handleWebhook(providerName, headers, rawBody);
   }
 
-  queueManualReconcile(accountId: string): QueueManualReconcileResult {
+  queueManualReconcile(
+    accountId: string,
+    options: { memberEditConflictResolution?: DeviceMemberEditConflictResolution } = {},
+  ): QueueManualReconcileResult {
     const account = this.requireStoredAccount(accountId);
 
     if (
@@ -573,11 +580,22 @@ class DeviceSyncServiceController {
       account,
       jobs.map((job) => ({
         ...job,
+        payload: {
+          ...(job.payload ?? {}),
+          ...(options.memberEditConflictResolution
+            ? { memberEditConflictResolution: options.memberEditConflictResolution }
+            : {}),
+        },
         priority: job.kind === "reconcile" ? Math.max(job.priority ?? 0, 80) : job.priority,
         availableAt: job.kind === "reconcile" ? now : job.availableAt ?? now,
         dedupeKey:
           job.dedupeKey ??
-          `manual-reconcile:${job.kind}:${sha256Text(stringifyJson(job.payload ?? {}))}`,
+          `manual-reconcile:${job.kind}:${sha256Text(stringifyJson({
+            ...(job.payload ?? {}),
+            ...(options.memberEditConflictResolution
+              ? { memberEditConflictResolution: options.memberEditConflictResolution }
+              : {}),
+          }))}`,
       })),
     );
     const primary = queuedJobs[0];
@@ -978,12 +996,14 @@ class DeviceSyncServiceController {
           ? { shouldYield: this.shouldYieldJobExecution }
           : {}),
         throwIfAborted: assertJobExecutionNotYielded,
+        ...resolveDeviceMemberEditConflictResolution(normalizedJobs),
         importSnapshot: async (snapshot: unknown) => {
           ensureExecutionActive();
           const importResult = await this.importer.importDeviceProviderSnapshot({
             provider: provider.provider,
             snapshot,
             vaultRoot: this.vaultRoot,
+            ...resolveDeviceMemberEditConflictResolution(normalizedJobs),
           });
           const receipt: ProviderSnapshotImportReceipt = {
             canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
@@ -1654,7 +1674,7 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     handleConnectionCallback: (callbackInput) => controller.handleConnectionCallback(callbackInput),
     handleOAuthCallback: (callbackInput) => controller.handleOAuthCallback(callbackInput),
     handleWebhook: (providerName, headers, rawBody) => controller.handleWebhook(providerName, headers, rawBody),
-    queueManualReconcile: (accountId) => controller.queueManualReconcile(accountId),
+    queueManualReconcile: (accountId, options) => controller.queueManualReconcile(accountId, options),
     disconnectAccount: (accountId, expectedConnectedAt) =>
       controller.disconnectAccount(accountId, expectedConnectedAt),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
@@ -1801,6 +1821,50 @@ function connectionChangedDuringDisconnectError(): DeviceSyncError {
   });
 }
 
+function resolveDeviceMemberEditConflictResolution(
+  jobs: readonly Pick<DeviceSyncJobRecord, "payload">[],
+): { memberEditConflictResolution?: DeviceMemberEditConflictResolution } {
+  const resolutions = new Set<DeviceMemberEditConflictResolution>();
+  for (const job of jobs) {
+    const value = job.payload.memberEditConflictResolution;
+    if (value === undefined) {
+      continue;
+    }
+    if (value !== "keep_member" && value !== "use_provider") {
+      throw deviceSyncError({
+        code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+        message: "Device sync member-edit conflict resolution is invalid.",
+        retryable: false,
+      });
+    }
+    resolutions.add(value);
+  }
+  if (resolutions.size > 1) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
+      message: "A device job batch cannot mix member-edit conflict resolutions.",
+      retryable: false,
+    });
+  }
+  const memberEditConflictResolution = [...resolutions][0];
+  return memberEditConflictResolution ? { memberEditConflictResolution } : {};
+}
+
+function isVaultMemberEditConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const record = error as { code?: unknown; details?: unknown };
+  if (
+    record.code !== "EVENT_EXTERNAL_REF_ALIAS_CONFLICT"
+    || !record.details
+    || typeof record.details !== "object"
+  ) {
+    return false;
+  }
+  return (record.details as { reason?: unknown }).reason === "member_edit_conflict";
+}
+
 function normalizeExecutionError(error: unknown): {
   code: string;
   details: DeviceSyncJobFailureDiagnostic["details"];
@@ -1808,6 +1872,15 @@ function normalizeExecutionError(error: unknown): {
   retryable: boolean;
   accountStatus?: "reauthorization_required" | "disconnected" | null;
 } {
+  if (isVaultMemberEditConflict(error)) {
+    return {
+      code: "DEVICE_DATA_MEMBER_EDIT_CONFLICT",
+      details: {},
+      message: "Connected health data conflicts with a member correction and needs an explicit choice.",
+      retryable: false,
+    };
+  }
+
   if (isDeviceSyncError(error)) {
     return {
       code: error.code,

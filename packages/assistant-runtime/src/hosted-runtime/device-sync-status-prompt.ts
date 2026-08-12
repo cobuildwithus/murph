@@ -36,6 +36,10 @@ interface HostedDeviceSyncReconnectNotice {
   sourceProviderSlug: string | null;
 }
 
+interface HostedDeviceSyncMemberEditConflictNotice {
+  label: string;
+}
+
 const HOSTED_DEVICE_SYNC_RECONNECT_REQUIRED_SOURCE_ERROR_CODES = new Set([
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   "INVALID_GRANT",
@@ -45,6 +49,8 @@ const HOSTED_DEVICE_SYNC_RECONNECT_REQUIRED_SOURCE_ERROR_CODES = new Set([
   "TOKEN_REFRESH_FAILED",
 ]);
 const HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT = 4;
+const HOSTED_DEVICE_SYNC_MEMBER_EDIT_CONFLICT_ERROR_CODE =
+  "DEVICE_DATA_MEMBER_EDIT_CONFLICT";
 
 export async function buildHostedDeviceSyncStatusPrompt(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
@@ -191,6 +197,10 @@ export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {
     reconnectTargets: input.reconnectTargets,
     snapshot: input.snapshot,
   });
+  const memberEditConflictNotices = collectHostedDeviceSyncMemberEditConflictNotices({
+    reconnectTargets: input.reconnectTargets,
+    snapshot: input.snapshot,
+  });
   const reconnectLabels = new Set(
     notices.map((notice) => notice.label.trim().toLowerCase()),
   );
@@ -201,7 +211,12 @@ export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {
   const noticeLines = notices
     .slice(0, HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT)
     .map(renderHostedDeviceSyncReconnectNoticeLine);
-  const statusLines = [...activeConnectionLines, ...noticeLines];
+  const memberEditConflictLines = memberEditConflictNotices
+    .slice(0, HOSTED_DEVICE_SYNC_STATUS_NOTICE_LIMIT)
+    .map(({ label }) =>
+      `- ${label} has a connected-data conflict with a member correction (error \`${HOSTED_DEVICE_SYNC_MEMBER_EDIT_CONFLICT_ERROR_CODE}\`). Ask the member to choose either “keep my correction” or “use the connected source.” Only after an explicit choice, call \`murph.device\` with \`action: "list_accounts"\`, select the matching account whose \`lastErrorCode\` is \`${HOSTED_DEVICE_SYNC_MEMBER_EDIT_CONFLICT_ERROR_CODE}\`, then call \`action: "reconcile"\` with \`resolution: "keep_member"\` or \`resolution: "use_provider"\`. Do not expose internal event identities or provider payload values.`,
+    );
+  const statusLines = [...activeConnectionLines, ...noticeLines, ...memberEditConflictLines];
   if (statusLines.length === 0) {
     return null;
   }
@@ -218,9 +233,43 @@ export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {
           "- Do not treat missing wearable data after the latest imported day as no sleep, no workouts, no activity, or failed adherence.",
         ]
       : []),
+    ...(memberEditConflictNotices.length > 0
+      ? [
+          "- A member-edit conflict pauses only the conflicting atomic import. Do not imply either value won, and do not choose a resolution for the member.",
+        ]
+      : []),
     "- When the exact latest imported data day matters, verify it with `vault-cli wearables sources list --format json` or the relevant normalized `vault-cli wearables ... --format json` command before naming a date.",
     "- In user-facing replies, use product labels such as WHOOP. Never name the internal sync provider; for low-level problems, say device connection or sync service.",
   ].join("\n");
+}
+
+function collectHostedDeviceSyncMemberEditConflictNotices(input: {
+  reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
+  snapshot: HostedDeviceSyncRuntimeSnapshot;
+}): HostedDeviceSyncMemberEditConflictNotice[] {
+  const notices = new Map<string, HostedDeviceSyncMemberEditConflictNotice>();
+  for (const entry of input.snapshot.connections) {
+    if (
+      !isEstablishedDeviceSyncConnection(entry.connection)
+      || normalizeHostedDeviceSyncErrorCode(entry.localState.lastErrorCode)
+        !== HOSTED_DEVICE_SYNC_MEMBER_EDIT_CONFLICT_ERROR_CODE
+    ) {
+      continue;
+    }
+    const reconnectTarget = resolveHostedDeviceSyncReconnectTargetForConnectionSources({
+      connection: entry,
+      reconnectTargets: input.reconnectTargets,
+    }) ?? resolveHostedDeviceSyncReconnectTargetForProvider({
+      provider: entry.connection.provider,
+      reconnectTargets: input.reconnectTargets,
+    });
+    const label = reconnectTarget?.label
+      ?? (normalizeHostedDeviceSyncKey(entry.connection.provider) === "junction"
+        ? "Wearable connection"
+        : formatHostedDeviceSyncProviderLabel(entry.connection.provider));
+    notices.set(label.trim().toLowerCase(), { label });
+  }
+  return [...notices.values()];
 }
 
 function collectHostedDeviceSyncActiveConnections(input: {

@@ -574,7 +574,11 @@ async function applyHostedDeviceSyncWakeHint(input: {
     input.wake.reason === "reconcile_due"
     && wake.hint?.reason === "manual_reconcile"
   ) {
-    input.service.queueManualReconcile(localAccountId);
+    input.service.queueManualReconcile(localAccountId, {
+      ...(wake.hint.memberEditConflictResolution
+        ? { memberEditConflictResolution: wake.hint.memberEditConflictResolution }
+        : {}),
+    });
     return false;
   }
 

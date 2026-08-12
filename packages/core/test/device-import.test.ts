@@ -12,6 +12,7 @@ import type {
   IntegrationIngestRecord,
   SampleRecord,
 } from "@murphai/contracts";
+import { isDeletedEventLifecycle } from "@murphai/contracts";
 
 import {
   compactIntegrationIngestReceipt,
@@ -94,6 +95,17 @@ function invalidTestValue<T>(value: unknown): T {
 
 function eventObservationValue(record: EventRecord | undefined): unknown {
   return record?.kind === "observation" ? record.value : undefined;
+}
+
+function collapseEventSpines(records: readonly EventRecord[]): EventRecord[] {
+  const latestById = new Map<string, EventRecord>();
+  for (const record of records) {
+    const current = latestById.get(record.id);
+    if ((record.lifecycle?.revision ?? 1) >= (current?.lifecycle?.revision ?? 0)) {
+      latestById.set(record.id, record);
+    }
+  }
+  return [...latestById.values()];
 }
 
 const DENSE_TELEMETRY_NOT_ALLOWED_CODE = "VAULT_DENSE_DEVICE_TELEMETRY_NOT_ALLOWED";
@@ -8180,6 +8192,270 @@ test("importDeviceBatch rejects primary provider refs after user-authored same-e
     2,
     "provider re-import must not append a superseding revision over user edits",
   );
+});
+
+test("importDeviceBatch resolves retained member-edit conflicts atomically and retry-safely", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-member-edit-resolution-retained");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const resourceType = "junction-apple-health-profile";
+  const resourceId = "profile-stable";
+  const buildInput = (input: {
+    editedValue: number;
+    importedAt: string;
+    memberEditConflictResolution?: "keep_member" | "use_provider";
+    siblingValue: number;
+    version: string;
+  }) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-account",
+    importedAt: input.importedAt,
+    memberEditConflictResolution: input.memberEditConflictResolution,
+    events: [
+      {
+        kind: "observation" as const,
+        occurredAt: "2026-06-01T00:00:00.000Z",
+        title: "Edited fact",
+        externalRef: {
+          system: "junction",
+          resourceType,
+          resourceId,
+          version: input.version,
+          facet: "edited-fact",
+        },
+        dataOrigin: {
+          version: 1 as const,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "apple-health",
+          sourceType: "phone",
+          observedAtRaw: input.version,
+          timestampSemantics: "utc" as const,
+        },
+        fields: {
+          metric: "edited-fact",
+          observationGrain: "summary" as const,
+          value: input.editedValue,
+          unit: "score",
+        },
+      },
+      {
+        kind: "observation" as const,
+        occurredAt: "2026-06-01T00:00:00.000Z",
+        title: "Sibling fact",
+        externalRef: {
+          system: "junction",
+          resourceType,
+          resourceId,
+          version: input.version,
+          facet: "sibling-fact",
+        },
+        fields: {
+          metric: "sibling-fact",
+          observationGrain: "summary" as const,
+          value: input.siblingValue,
+          unit: "score",
+        },
+      },
+    ],
+    authoritativeEventSets: [{
+      system: "junction",
+      resourceType,
+      resourceId,
+      version: input.version,
+      facetPrefixes: ["edited-fact", "sibling-fact"],
+      currentFacets: ["edited-fact", "sibling-fact"],
+    }],
+  });
+  const first = await importDeviceBatch(buildInput({
+    editedValue: 1,
+    importedAt: "2026-06-10T10:00:00.000Z",
+    siblingValue: 10,
+    version: "2026-06-10T09:00:00.000Z",
+  }));
+  const edited = first.events.find((event) =>
+    event.kind === "observation" && event.metric === "edited-fact"
+  );
+  assert.ok(edited);
+  await upsertEvent({
+    vaultRoot,
+    payload: { ...edited, note: "member correction", value: 7, source: "manual" },
+  });
+  const correction = buildInput({
+    editedValue: 2,
+    importedAt: "2026-06-11T10:00:00.000Z",
+    siblingValue: 11,
+    version: "2026-06-11T09:00:00.000Z",
+  });
+  const beforeConflict = await snapshotVaultFiles(vaultRoot);
+  await assert.rejects(
+    importDeviceBatch(correction),
+    (error) => error instanceof VaultError
+      && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT"
+      && error.details.reason === "member_edit_conflict",
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
+
+  const keep = await importDeviceBatch({
+    ...correction,
+    memberEditConflictResolution: "keep_member",
+  });
+  assert.ok(keep.applied);
+  const shardPath = first.eventShardPaths[0] as string;
+  const keptRows = (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[];
+  const keptLive = collapseEventSpines(keptRows);
+  const keptEdited = keptLive.find((event) => event.id === edited.id);
+  const keptSibling = keptLive.find((event) =>
+    event.kind === "observation" && event.metric === "sibling-fact"
+  );
+  assert.equal(keptEdited?.source, "manual");
+  assert.equal(keptEdited?.note, "member correction");
+  assert.equal(eventObservationValue(keptEdited), 7);
+  assert.equal(eventObservationValue(keptSibling), 11);
+  assert.ok(keptRows.some((event) =>
+    event.id === edited.id
+    && event.source === "device"
+    && event.externalRef?.version === "2026-06-11T09:00:00.000Z"
+    && eventObservationValue(event) === 2
+  ));
+
+  const replay = await importDeviceBatch(correction);
+  assert.equal(replay.applied, false);
+  const useProvider = await importDeviceBatch({
+    ...buildInput({
+      editedValue: 3,
+      importedAt: "2026-06-12T10:00:00.000Z",
+      siblingValue: 12,
+      version: "2026-06-12T09:00:00.000Z",
+    }),
+    memberEditConflictResolution: "use_provider",
+  });
+  assert.ok(useProvider.applied);
+  const finalLive = collapseEventSpines(
+    (await readJsonlRecords({ vaultRoot, relativePath: shardPath })) as EventRecord[],
+  );
+  const finalEdited = finalLive.find((event) => event.id === edited.id);
+  assert.equal(finalEdited?.source, "device");
+  assert.equal(eventObservationValue(finalEdited), 3);
+});
+
+test("importDeviceBatch resolves omitted member-edit conflicts through the existing event spine", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-member-edit-resolution-omitted");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const resourceType = "junction-apple-health-menstrual-cycle";
+  const resourceId = "cycle-stable";
+  const editedFacet = "cervical-mucus-2026-06-03-fingerprint";
+  const buildEditedEvent = (version: string) => ({
+    kind: "observation" as const,
+    occurredAt: "2026-06-03T00:00:00.000Z",
+    title: "Edited cycle fact",
+    externalRef: {
+      system: "junction",
+      resourceType,
+      resourceId,
+      version,
+      facet: editedFacet,
+    },
+    fields: {
+      metric: "cycle-fact",
+      observationGrain: "summary" as const,
+      value: 1,
+      unit: "score",
+    },
+  });
+  const firstVersion = "2026-06-10T09:00:00.000Z";
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-06-10T10:00:00.000Z",
+    events: [buildEditedEvent(firstVersion)],
+    authoritativeEventSets: [{
+      system: "junction",
+      resourceType,
+      resourceId,
+      version: firstVersion,
+      facetPrefixes: ["cervical-mucus"],
+      currentFacets: [editedFacet],
+    }],
+  });
+  const edited = first.events[0];
+  assert.ok(edited);
+  await upsertEvent({
+    vaultRoot,
+    payload: { ...edited, note: "member context", source: "manual" },
+  });
+  const omission = (input: {
+    memberEditConflictResolution?: "keep_member" | "use_provider";
+    version: string;
+  }) => ({
+    vaultRoot,
+    provider: "junction",
+    importedAt: input.version,
+    memberEditConflictResolution: input.memberEditConflictResolution,
+    events: [{
+      kind: "observation" as const,
+      occurredAt: "2026-06-04T00:00:00.000Z",
+      title: "Unrelated update",
+      externalRef: {
+        system: "junction",
+        resourceType: "junction-apple-health-activity",
+        resourceId: "activity-2026-06-04",
+        version: input.version,
+        facet: "steps",
+      },
+      fields: {
+        metric: "steps",
+        observationGrain: "summary" as const,
+        value: 4000,
+        unit: "count",
+      },
+    }],
+    authoritativeEventSets: [{
+      system: "junction",
+      resourceType,
+      resourceId,
+      version: input.version,
+      facetPrefixes: ["cervical-mucus"],
+      currentFacets: [],
+    }],
+  });
+  const secondVersion = "2026-06-11T09:00:00.000Z";
+  const beforeConflict = await snapshotVaultFiles(vaultRoot);
+  await assert.rejects(importDeviceBatch(omission({ version: secondVersion })));
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeConflict);
+
+  const keep = await importDeviceBatch(omission({
+    memberEditConflictResolution: "keep_member",
+    version: secondVersion,
+  }));
+  assert.ok(keep.applied);
+  const rows = (
+    await Promise.all(keep.eventShardPaths.map((relativePath) =>
+      readJsonlRecords({ vaultRoot, relativePath })
+    ))
+  ).flat() as EventRecord[];
+  const keptEdited = collapseEventSpines(rows).find((event) => event.id === edited.id);
+  assert.equal(keptEdited?.note, "member context");
+  assert.equal(keptEdited?.source, "manual");
+  assert.ok(rows.some((event) =>
+    event.id === edited.id
+    && event.source === "device"
+    && isDeletedEventLifecycle(event.lifecycle)
+    && event.externalRef?.version === secondVersion
+  ));
+  assert.equal(await importDeviceBatch(omission({ version: secondVersion })).then((result) => result.applied), false);
+
+  const thirdVersion = "2026-06-12T09:00:00.000Z";
+  await importDeviceBatch(omission({
+    memberEditConflictResolution: "use_provider",
+    version: thirdVersion,
+  }));
+  const finalRows = (
+    await Promise.all(keep.eventShardPaths.map((relativePath) =>
+      readJsonlRecords({ vaultRoot, relativePath })
+    ))
+  ).flat() as EventRecord[];
+  const finalEdited = collapseEventSpines(finalRows).find((event) => event.id === edited.id);
+  assert.equal(isDeletedEventLifecycle(finalEdited?.lifecycle), true);
 });
 
 test("importDeviceBatch rejects historical provider refs after user-authored no-externalRef edits", async () => {
