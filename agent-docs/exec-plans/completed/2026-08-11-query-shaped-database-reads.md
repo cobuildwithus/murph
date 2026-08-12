@@ -1,6 +1,6 @@
 # Bound residual database read shapes
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-12
 
@@ -61,7 +61,7 @@ Updated: 2026-08-12
    reads.
 4. [complete] Add deterministic migration/query contracts and focused behavior
    tests.
-5. [in progress] Finish the trusted ReviewGPT correction loop, inspect/redact
+5. [complete] Finish the trusted ReviewGPT correction loop, inspect/redact
    the final diff, close the plan, and publish the closing plan commit.
 
 ## Decisions
@@ -116,3 +116,7 @@ Updated: 2026-08-12
   sweep and canonical access recheck, proving that two expired participant
   leases or two retention-old Clinical Records rows cannot consume the bounded
   page ahead of a live candidate. The disposable database was removed.
+- Exact-head pull-request CI passed the full Web verification, build/typecheck,
+  release package coverage, CLI host, billing, layout, fixture, artifact,
+  frontend, and deployment gates after the coverage-only corrections.
+Completed: 2026-08-12
