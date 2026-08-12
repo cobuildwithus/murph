@@ -162,6 +162,7 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
+      slug: 'spring-reminder',
       title: 'Spring reminder',
     }, referenceWindow('2026-03-08T04:59:00.000Z'))
     if (gapRequest?.kind !== 'invalid-automation-arguments') {
@@ -171,6 +172,7 @@ describe('hosted domain dynamic tools', () => {
       resolvedLocalDate: '2026-03-08',
       safeFailureCode: 'local_at_gap',
     })
+    expect(gapRequest.localAtTargetKey).toMatch(/^[a-f0-9]{64}$/u)
     const gapResult = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
@@ -182,7 +184,7 @@ describe('hosted domain dynamic tools', () => {
     expect(gapResult.rpcResult.contentItems[0]?.text).toContain(
       'schedule.localAt.date=2026-03-08 instead of relativeDay',
     )
-    expect(readToolRequest('automation', {
+    const gapRecoveryRequest = readToolRequest('automation', {
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
       schedule: {
@@ -193,12 +195,18 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/New_York',
         },
       },
+      slug: 'spring-reminder',
       title: 'Spring reminder',
     }, {
       earliestAt: '2026-03-08T04:59:00.000Z',
       latestAt: '2026-03-08T05:01:00.000Z',
-    })).toMatchObject({
+    })
+    expect(gapRecoveryRequest).toMatchObject({
       kind: 'automation',
+      localAtRecovery: {
+        resolvedLocalDate: '2026-03-08',
+        targetKey: gapRequest.localAtTargetKey,
+      },
       request: {
         schedule: { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
       },
@@ -224,6 +232,7 @@ describe('hosted domain dynamic tools', () => {
       resolvedLocalDate: '2026-11-01',
       safeFailureCode: 'local_at_fold',
     })
+    expect(foldRequest.localAtTargetKey).toMatch(/^[a-f0-9]{64}$/u)
     const foldResult = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
@@ -235,7 +244,7 @@ describe('hosted domain dynamic tools', () => {
     expect(foldResult.rpcResult.contentItems[0]?.text).toContain(
       'schedule.localAt.date=2026-11-01 and schedule.localAt.fold instead of relativeDay',
     )
-    expect(readToolRequest('automation', {
+    const foldRecoveryRequest = readToolRequest('automation', {
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
       schedule: {
@@ -251,12 +260,86 @@ describe('hosted domain dynamic tools', () => {
     }, {
       earliestAt: '2026-11-01T03:59:00.000Z',
       latestAt: '2026-11-01T04:01:00.000Z',
-    })).toMatchObject({
+    })
+    expect(foldRecoveryRequest).toMatchObject({
       kind: 'automation',
+      localAtRecovery: {
+        resolvedLocalDate: '2026-11-01',
+        targetKey: foldRequest.localAtTargetKey,
+      },
       request: {
         schedule: { at: '2026-11-01T06:30:00.000Z', kind: 'at' },
       },
     })
+  })
+
+  it('binds patch DST recovery to the stored automation lookup', () => {
+    const failedPatch = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      lookup: 'medication-reminder',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+    }, referenceWindow('2026-03-08T04:59:00.000Z'))
+    if (failedPatch?.kind !== 'invalid-automation-arguments') {
+      throw new TypeError('Expected a daylight-saving gap failure.')
+    }
+
+    const matchingRecovery = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      lookup: 'medication-reminder',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+    })
+    const unrelatedRecovery = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      lookup: 'breakfast-reminder',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+    })
+
+    expect(matchingRecovery).toMatchObject({
+      kind: 'automation',
+      localAtRecovery: {
+        resolvedLocalDate: '2026-03-08',
+        targetKey: failedPatch.localAtTargetKey,
+      },
+    })
+    expect(unrelatedRecovery).toMatchObject({
+      kind: 'automation',
+      localAtRecovery: {
+        resolvedLocalDate: '2026-03-08',
+      },
+    })
+    if (
+      matchingRecovery?.kind !== 'automation' ||
+      unrelatedRecovery?.kind !== 'automation'
+    ) {
+      throw new TypeError('Expected explicit-date automation recoveries.')
+    }
+    expect(unrelatedRecovery.localAtRecovery?.targetKey).not.toBe(
+      matchingRecovery.localAtRecovery?.targetKey,
+    )
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {
@@ -330,7 +413,7 @@ describe('hosted domain dynamic tools', () => {
         },
       },
       title: 'One-shot reminder',
-    })).toEqual({
+    })).toMatchObject({
       kind: 'automation',
       request: {
         action: 'save',

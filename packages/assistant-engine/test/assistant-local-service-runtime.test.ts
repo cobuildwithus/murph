@@ -988,6 +988,43 @@ test('sendAssistantMessageLocal persists the provider transcript for a final tra
     .not.toContain('evt_')
 })
 
+test('sendAssistantMessageLocal delivers an unresolved DST clarification after App Server suppresses its card', async () => {
+  const session = createAssistantSession()
+  const response = [
+    'Strength session\n\nBench press: Set 1: 185 lb × 8',
+    'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+  ].join('\n\n')
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: createDirectSharedPlan(),
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        response,
+        responseCard: null,
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: response,
+        route: { routeId: 'route-unresolved-dst-clarification' },
+        session,
+      },
+    },
+    session,
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Show my workout and remind me tomorrow at 2:30 AM.',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe(response)
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.assistantTranscriptText,
+  ).toBe(response)
+})
+
 test('sendAssistantMessageLocal keeps manual chat on the session Codex thread', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
 

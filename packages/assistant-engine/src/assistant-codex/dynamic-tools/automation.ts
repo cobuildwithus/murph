@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import * as z from '@murphai/contracts/zod-runtime'
 
 import {
@@ -13,6 +15,7 @@ import {
   normalizeIanaTimeZone,
   type AutomationSchedule,
 } from '@murphai/contracts'
+import { resolveAutomationUpsertSlug } from '@murphai/core'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
@@ -318,11 +321,16 @@ export const MURPH_AUTOMATION_TOOL = {
 export type AutomationDynamicToolRequest =
   | {
       kind: 'automation'
+      localAtRecovery?: {
+        resolvedLocalDate: string
+        targetKey: string
+      }
       onboardingFirstReadCompletionRequested?: true
       request: AssistantHostedAutomationToolRequest
     }
   | {
       kind: 'invalid-automation-arguments'
+      localAtTargetKey?: string
       resolvedLocalDate?: string
       safeFailureCode?: AutomationLocalAtFailureCode
       validationDigest: SafeToolCallValidationDigest
@@ -351,9 +359,18 @@ export function readAutomationDynamicToolRequest(input: {
     }
   }
 
+  const localAtAttempt = readAutomationLocalAtAttempt(parsed.args)
   try {
     return {
       kind: 'automation',
+      ...(localAtAttempt?.explicitLocalDate
+        ? {
+            localAtRecovery: {
+              resolvedLocalDate: localAtAttempt.explicitLocalDate,
+              targetKey: localAtAttempt.targetKey,
+            },
+          }
+        : {}),
       ...(parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
         ? { onboardingFirstReadCompletionRequested: true as const }
         : {}),
@@ -367,6 +384,9 @@ export function readAutomationDynamicToolRequest(input: {
       kind: 'invalid-automation-arguments',
       ...(error instanceof AutomationLocalAtResolutionError
         ? {
+            ...(localAtAttempt
+              ? { localAtTargetKey: localAtAttempt.targetKey }
+              : {}),
             ...(error.resolvedLocalDate
               ? { resolvedLocalDate: error.resolvedLocalDate }
               : {}),
@@ -389,6 +409,34 @@ export function readAutomationDynamicToolRequest(input: {
         toolName: 'murph.automation',
       }),
     }
+  }
+}
+
+function readAutomationLocalAtAttempt(
+  args: z.infer<typeof automationArgumentsSchema>,
+): {
+  explicitLocalDate: string | null
+  targetKey: string
+} | null {
+  if (args.action !== 'save' && args.action !== 'patch') {
+    return null
+  }
+  const schedule = args.schedule
+  if (schedule === undefined || !('localAt' in schedule)) {
+    return null
+  }
+
+  const targetIdentity = args.action === 'patch'
+    ? ['patch', args.lookup]
+    : ['save', resolveAutomationUpsertSlug({
+        slug: args.slug,
+        title: args.title,
+      })]
+  return {
+    explicitLocalDate: schedule.localAt.date ?? null,
+    targetKey: createHash('sha256')
+      .update(JSON.stringify(targetIdentity))
+      .digest('hex'),
   }
 }
 

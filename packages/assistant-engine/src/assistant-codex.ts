@@ -683,24 +683,33 @@ function appendRequiredVaultFileApprovalUrls(
   ].filter((part): part is string => part !== null).join('\n\n')
 }
 
+interface RequiredAutomationLocalAtClarification {
+  code: 'local_at_fold' | 'local_at_gap'
+  resolvedLocalDate: string
+  targetKey: string
+}
+
+function buildRequiredAutomationLocalAtClarification(
+  requirement: RequiredAutomationLocalAtClarification,
+): string {
+  return requirement.code === 'local_at_gap'
+    ? `The trusted reminder date is ${requirement.resolvedLocalDate}. What other local time on ${requirement.resolvedLocalDate} should I use?`
+    : `The trusted reminder date is ${requirement.resolvedLocalDate}. Should I use the earlier or later occurrence on ${requirement.resolvedLocalDate}?`
+}
+
 function appendRequiredAutomationLocalAtClarification(
   message: string | null,
-  requirement: {
-    code: 'local_at_fold' | 'local_at_gap'
-    resolvedLocalDate: string
-  } | null,
+  requirement: RequiredAutomationLocalAtClarification | null,
 ): string | null {
   if (requirement === null) {
     return message
   }
   const normalizedMessage = normalizeNullableString(message)
-  if (normalizedMessage?.includes(requirement.resolvedLocalDate)) {
+  const clarification = buildRequiredAutomationLocalAtClarification(requirement)
+  if (normalizedMessage?.includes(clarification)) {
     return message
   }
 
-  const clarification = requirement.code === 'local_at_gap'
-    ? `The trusted reminder date is ${requirement.resolvedLocalDate}. What other local time on ${requirement.resolvedLocalDate} should I use?`
-    : `The trusted reminder date is ${requirement.resolvedLocalDate}. Should I use the earlier or later occurrence on ${requirement.resolvedLocalDate}?`
   return [normalizedMessage, clarification]
     .filter((part): part is string => part !== null)
     .join('\n\n')
@@ -3184,10 +3193,8 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
   const requiredVaultFileApprovalUrls: string[] = []
-  let requiredAutomationLocalAtClarification: {
-    code: 'local_at_fold' | 'local_at_gap'
-    resolvedLocalDate: string
-  } | null = null
+  let requiredAutomationLocalAtClarification:
+    RequiredAutomationLocalAtClarification | null = null
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -4219,11 +4226,13 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolRequest.safeFailureCode === 'local_at_gap' ||
           dynamicToolRequest.safeFailureCode === 'local_at_fold'
         ) &&
-        dynamicToolRequest.resolvedLocalDate
+        dynamicToolRequest.resolvedLocalDate &&
+        dynamicToolRequest.localAtTargetKey
       ) {
         requiredAutomationLocalAtClarification = {
           code: dynamicToolRequest.safeFailureCode,
           resolvedLocalDate: dynamicToolRequest.resolvedLocalDate,
+          targetKey: dynamicToolRequest.localAtTargetKey,
         }
       }
     }
@@ -4619,6 +4628,17 @@ async function runCodexAppServerTurnOnProcess(
         markExternallyVisibleAssistantOutput(
           dynamicToolDeliveryContextOrdinal ?? 0,
         )
+      }
+      if (
+        dynamicToolRequest.kind === 'automation' &&
+        result.rpcResult.success &&
+        dynamicToolRequest.localAtRecovery &&
+        requiredAutomationLocalAtClarification?.resolvedLocalDate ===
+          dynamicToolRequest.localAtRecovery.resolvedLocalDate &&
+        requiredAutomationLocalAtClarification.targetKey ===
+          dynamicToolRequest.localAtRecovery.targetKey
+      ) {
+        requiredAutomationLocalAtClarification = null
       }
       const writeFailure = tryWriteRpcMessage({
         id: requestId,
@@ -5594,6 +5614,8 @@ async function runCodexAppServerTurnOnProcess(
   const semanticFinalMessage = finalResponseCard
     ? renderAssistantResponseCardText(finalResponseCard)
     : modelFinalMessage
+  const deliveredFinalResponseCard =
+    requiredAutomationLocalAtClarification === null ? finalResponseCard : null
   const finalMessage = appendRequiredVaultFileApprovalUrls(
     appendRequiredAutomationLocalAtClarification(
       semanticFinalMessage,
@@ -5603,7 +5625,9 @@ async function runCodexAppServerTurnOnProcess(
   )
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
     finalResponseCard
-      ? renderAssistantResponseCardTranscriptText(finalResponseCard)
+      ? requiredAutomationLocalAtClarification === null
+        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
+        : renderAssistantResponseCardText(finalResponseCard)
       : normalizeNullableString(modelFinalMessage) ??
         (finalResponseMedia.length > 0 ? '' : null),
     requiredAutomationLocalAtClarification,
@@ -5625,7 +5649,8 @@ async function runCodexAppServerTurnOnProcess(
     ))
   const finalHasDeliverableOutput =
     normalizeNullableString(finalMessage) !== null ||
-    (!noReplySelected && (finalResponseMedia.length > 0 || finalResponseCard !== null))
+    (!noReplySelected &&
+      (finalResponseMedia.length > 0 || deliveredFinalResponseCard !== null))
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
@@ -5657,7 +5682,7 @@ async function runCodexAppServerTurnOnProcess(
       resolveReplyTargetPatch(finalDeliveryContextOrdinal)?.targetInputId ?? null,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
-    responseCard: finalHasDeliverableOutput ? finalResponseCard : null,
+    responseCard: finalHasDeliverableOutput ? deliveredFinalResponseCard : null,
     jsonEvents,
     providerActionCount,
     runtimeIssueInputs,

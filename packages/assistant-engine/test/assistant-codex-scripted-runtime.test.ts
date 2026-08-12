@@ -1908,7 +1908,8 @@ text(JSON.stringify(result));
     {
       expectedClarification:
         'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?',
-      finalMessage: 'That local time does not exist. What other time should I use?',
+      finalMessage:
+        '2:30 AM does not exist on 2026-03-08 because of daylight saving time.',
       referenceAt: '2026-03-08T04:59:00.000Z',
       time: '02:30',
       title: 'Gap reminder',
@@ -1916,7 +1917,8 @@ text(JSON.stringify(result));
     {
       expectedClarification:
         'The trusted reminder date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
-      finalMessage: 'That local time occurs twice. Which occurrence should I use?',
+      finalMessage:
+        '1:30 AM occurs twice on 2026-11-01 because of daylight saving time.',
       referenceAt: '2026-11-01T03:59:00.000Z',
       time: '01:30',
       title: 'Fold reminder',
@@ -1984,6 +1986,371 @@ text(JSON.stringify(result));
     expect(result.transcriptMessage).toBe(
       `${finalMessage}\n\n${expectedClarification}`,
     )
+  })
+
+  it.each([
+    {
+      expectedAt: '2026-03-08T07:30:00.000Z',
+      failedTime: '02:30',
+      finalMessage: 'Done — your reminder is set for 3:30 AM on March 8.',
+      kind: 'gap',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      retryLocalAt: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
+      staleClarification:
+        'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+      steerAt: '2026-03-08T05:01:00.000Z',
+      steerPrompt: 'Actually, use 3:30 AM.',
+      title: 'Spring reminder',
+    },
+    {
+      expectedAt: '2026-11-01T05:30:00.000Z',
+      failedTime: '01:30',
+      finalMessage:
+        'Done — your reminder is set for the earlier 1:30 AM on November 1.',
+      kind: 'fold',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      retryLocalAt: {
+        date: '2026-11-01',
+        fold: 'earlier' as const,
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+      staleClarification:
+        'The trusted reminder date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+      steerAt: '2026-11-01T04:01:00.000Z',
+      steerPrompt: 'Use the earlier occurrence.',
+      title: 'Fall reminder',
+    },
+  ])('clears a matching $kind clarification after a successful live-steered retry', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    expectedAt,
+    failedTime,
+    finalMessage,
+    referenceAt,
+    retryLocalAt,
+    staleClarification,
+    steerAt,
+    steerPrompt,
+    title,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    let steered: Promise<void> | null = null
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      title,
+    }
+    const retryRequest = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: retryLocalAt,
+      },
+      title,
+    }
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        delayMs: 4_000,
+        text: 'Tell me the missing DST choice and I can finish this reminder.',
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(retryRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: finalMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: referenceAt,
+        latestAt: referenceAt,
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: `automation-${title.toLowerCase().replace(/\s+/gu, '-')}`,
+              created: true,
+              effectiveTimeZone: null,
+              lookupId: title.toLowerCase().replace(/\s+/gu, '-'),
+              nextOccurrenceAt: expectedAt,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              timingVerified: true,
+              updatedAt: steerAt,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = delay(1_000).then(() =>
+          turn.steer({
+            prompt: steerPrompt,
+            relativeDateReferenceWindow: {
+              earliestAt: steerAt,
+              latestAt: steerAt,
+            },
+          }))
+      },
+      prompt: `Remind me tomorrow at ${failedTime} in New York.`,
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: { at: expectedAt, kind: 'at' },
+      title,
+    }])
+    expect(result.finalMessage).toBe(finalMessage)
+    expect(result.transcriptMessage).toBe(finalMessage)
+    expect(result.finalMessage).not.toContain(staleClarification)
+    expect(result.transcriptMessage).not.toContain(staleClarification)
+  })
+
+  it('does not clear a pending DST clarification for an unrelated automation', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Medication reminder',
+    }
+    const unrelatedRequest = {
+      action: 'save',
+      instructions: 'Send the breakfast reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '04:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Breakfast reminder',
+    }
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(failedRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(unrelatedRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'The breakfast reminder is set for 4 AM on March 8.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-breakfast-reminder',
+              created: true,
+              effectiveTimeZone: null,
+              lookupId: 'breakfast-reminder',
+              nextOccurrenceAt: '2026-03-08T08:00:00.000Z',
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              timingVerified: true,
+              updatedAt: '2026-03-08T05:01:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Set two reminders for tomorrow.',
+    })
+
+    const requiredClarification =
+      'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send the breakfast reminder tomorrow.',
+      schedule: { at: '2026-03-08T08:00:00.000Z', kind: 'at' },
+      title: 'Breakfast reminder',
+    }])
+    expect(result.finalMessage).toBe(
+      `The breakfast reminder is set for 4 AM on March 8.\n\n${requiredClarification}`,
+    )
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+  })
+
+  it('suppresses a response card until the trusted DST clarification is delivered', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const responseCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Strength session',
+      subtitle: null,
+      rowHeader: 'Exercise',
+      columns: ['Set 1'],
+      rows: [{ label: 'Bench press', values: ['185 lb × 8'] }],
+      footer: null,
+      tracking: {
+        kind: 'workout',
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        snapshotAt: '2026-08-04T21:30:00.000Z',
+      },
+    } satisfies AssistantResponseCard
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tomorrow.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "02:30",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Gap reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: { card: responseCard },
+          name: 'attach_response_card',
+          namespace: 'murph',
+        },
+      },
+      {
+        text:
+          '2:30 AM does not exist on 2026-03-08 because of daylight saving time.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [
+        MURPH_AUTOMATION_TOOL,
+        MURPH_ATTACH_RESPONSE_CARD_TOOL,
+      ],
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: {
+          request: async () => {
+            throw new Error('DST clarification must not mutate an automation.')
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Show my workout and remind me tomorrow at 2:30 AM.',
+    })
+
+    const publicCardText =
+      'Strength session\n\nBench press: Set 1: 185 lb × 8'
+    const requiredClarification =
+      'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+    const expectedDeliveredText = `${publicCardText}\n\n${requiredClarification}`
+    expect(result.responseCard).toBeNull()
+    expect(result.finalMessage).toBe(expectedDeliveredText)
+    expect(result.transcriptMessage).toBe(expectedDeliveredText)
+    expect(result.transcriptMessage).not.toContain('Murph tracked workout source')
   })
 
   it('overrides finish-without-reply when a trusted DST date must be clarified', {
