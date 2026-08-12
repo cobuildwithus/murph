@@ -222,7 +222,7 @@ describe.skipIf(!runPostgresProof)(
         fixture = await seedHostedCurrentSenderAssistantAskFixture({
           now,
           prisma,
-          question: "Murph, ask my Murph about my synthetic activity and DM me.",
+          question: "Murph, ask my Murph one-on-one what is my synthetic activity?",
         });
         await prisma.hostedMemberRouting.deleteMany({
           where: { memberId: fixture.senderMemberId },
@@ -262,7 +262,7 @@ describe.skipIf(!runPostgresProof)(
         fixture = await seedHostedCurrentSenderAssistantAskFixture({
           now,
           prisma,
-          question: "Murph, ask my Murph how my synthetic activity changed and DM me.",
+          question: "Murph, ask my Murph send the answer to my DMs, how did my synthetic activity change?",
         });
         const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,

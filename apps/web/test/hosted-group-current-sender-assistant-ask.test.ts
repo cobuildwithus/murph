@@ -614,7 +614,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
 
   it("fixes private audience only after resolving a same-channel direct route", async () => {
     const { admission, requestId } = await admit({
-      text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
+      text: "Murph, ask my Murph one-on-one how my synthetic activity changed?",
     });
     expect(admission.result).toEqual({ status: "accepted" });
     expect(requireRequestedWake(requestId).ask.target).toEqual({
@@ -629,7 +629,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     storedWakes.clear();
     directRouteAvailable = false;
     const unavailable = await admit({
-      text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
+      text: "Murph, ask my Murph send the answer to my DMs, how did my synthetic activity change?",
     });
     expect(unavailable.admission).toMatchObject({
       mailboxWake: null,

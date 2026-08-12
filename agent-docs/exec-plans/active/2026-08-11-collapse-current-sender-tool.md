@@ -138,6 +138,26 @@ Updated: 2026-08-11
   map exactly. The hard seven-round cap is reached; after this fix the loop is
   paused pending the required cap retrospective and explicit continuation
   decision. The PR is not merge-ready without a later ReviewGPT pass.
+- Hard-cap retrospective: the original requirement remains one argument-free
+  personal read whose sender and audience are fixed by exact-source Web
+  authority before model work, with every accepted request converging to one
+  visible terminal. The immutable first-reviewed head carried 460 added/433
+  deleted source lines, 697/317 test lines, and 232/76 docs lines; the current
+  head carries 1,997/801 source, 2,023/1,722 tests, and 552/175 docs. Most growth
+  came from review-driven removal of model audience authority, deployed-only
+  compatibility fencing, distinct private/group completion identities, expiry
+  and provider-entry convergence, retained-terminal replay, and the edge
+  audience grammar. The repeated round-5 through round-7 mechanism was a
+  phrase-enumeration approach that could still default explicit privacy intent
+  to the group. The current correction closes that mechanism at the grammar
+  boundary: known one-to-one/DM clauses map private, while bounded separated or
+  leading delivery directives that are not recognized exactly reject. It adds
+  no model turn, service, schema, queue, state owner, reconciliation path, or
+  compatibility surface. Deleting or reverting would restore the original
+  model-owned privacy boundary; splitting would separate an indivisible
+  admission/completion invariant. The recommended explicit continuation is one
+  full-snapshot round 8 after exact-head CI, solely to obtain the required PASS
+  on the corrected architecture.
 - Remaining work is the new exact-head final ReviewGPT round, CI, plan closure,
   and merge-tree proof.
 
