@@ -178,3 +178,10 @@ Updated: 2026-08-12
   known bug is corrected; round 8 requires an explicit continuation decision
   after focused verification, required GitHub Actions, parent final review, and
   the cap retrospective are complete.
+- The corrected preliminary specialist pass returned no product, prompt, or
+  frontend finding and confirmed the earlier failure-retention, group-read, and
+  system-mailbox replay gaps are resolved. Its one coverage finding requested
+  deterministic maximum-cardinality proof. Added tests derive the complete 98
+  projectable scopes and 25 destinations from their owning constants, prove
+  ordered peak-one scope and destination work, and assert each replacement's
+  encryption, two access revalidations, source lock, and exact-generation update.

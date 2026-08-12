@@ -124,7 +124,7 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
   it("persists only ciphertext with destination-root AAD bound to the share generation", async () => {
     const events: string[] = [];
     const codec = createSnapshotTestCodec(events);
-    const { prisma, updateMany } = createPrisma(events);
+    const { prisma, queryRaw, transaction, updateMany } = createPrisma(events);
 
     await expect(replaceHostedVaultShareProjectionSnapshot({
       prisma,
@@ -134,6 +134,21 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
     })).resolves.toBe("replaced");
 
     expect(events.slice(0, 2)).toEqual(["encrypt", "transaction"]);
+    expect(codec.encryptInputs).toHaveLength(1);
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledTimes(2);
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenNthCalledWith(
+      1,
+      SHARE.grantorMemberId,
+      { prisma: expect.any(Object) },
+    );
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenNthCalledWith(
+      2,
+      SHARE.destinationMemberId,
+      { prisma: expect.any(Object) },
+    );
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(updateMany).toHaveBeenCalledOnce();
     expect(codec.encryptInputs).toEqual([expect.objectContaining({
       aad: {
         field: "projection_snapshot_ciphertext",

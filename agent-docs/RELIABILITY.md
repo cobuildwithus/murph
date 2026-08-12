@@ -684,7 +684,11 @@ Last verified: 2026-08-12
   replacement adds one source-workspace row lock/check at its final write
   boundary. The runtime starts no concurrent per-scope or per-share transactions,
   and publication wakes no destination group runtime. Ordinary load is
-  proportional only to scopes and destinations with active grants.
+  proportional only to scopes and destinations with active grants. Boundary
+  tests derive the 98-scope and 25-destination composition from the owning
+  registries, prove ordered peak-one delivery/replacement work, and assert the
+  per-replacement encryption, two access checks, source lock, and exact-generation
+  update.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;

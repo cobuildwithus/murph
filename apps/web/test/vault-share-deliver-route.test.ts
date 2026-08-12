@@ -32,6 +32,9 @@ import {
   type HostedVaultShareDeliverRequest,
   type HostedVaultShareDeliveryRecord,
 } from "@murphai/hosted-execution/vault-share";
+import {
+  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
@@ -421,6 +424,53 @@ describe("vault-share deliver route", () => {
 		expect(await response.json()).toEqual({ status: "no-active-share" });
 		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
 	});
+
+  it("serializes the maximum destination fanout through the replacement boundary", async () => {
+    const shares = Array.from(
+      { length: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX },
+      (_, index) => ({
+        ...ACTIVE_SHARE,
+        destinationMemberId: `member_destination_${index}`,
+        id: `share_generation_${index}`,
+      }),
+    );
+    const replacementOrder: string[] = [];
+    let activeReplacements = 0;
+    let peakActiveReplacements = 0;
+    mocks.findActiveHostedVaultShares.mockResolvedValue(shares);
+    mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementation(
+      async ({ share }: { share: (typeof shares)[number] }) => {
+        activeReplacements += 1;
+        peakActiveReplacements = Math.max(
+          peakActiveReplacements,
+          activeReplacements,
+        );
+        try {
+          await Promise.resolve();
+          replacementOrder.push(share.id);
+          return "replaced";
+        } finally {
+          activeReplacements -= 1;
+        }
+      },
+    );
+
+    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledTimes(1);
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
+      grantorMemberId: "member_grantor",
+      projectionScope: SLEEP_SCOPE,
+    });
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(
+      HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+    );
+    expect(replacementOrder).toEqual(shares.map(({ id }) => id));
+    expect(peakActiveReplacements).toBe(1);
+    expect(activeReplacements).toBe(0);
+  });
 
 	it("treats an inactive grantor runtime exactly like a missing grant", async () => {
 		mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("no-active-share");

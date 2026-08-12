@@ -14,6 +14,7 @@ import {
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
@@ -22,6 +23,9 @@ import {
   type HostedVaultShareDeliverRequest,
   type HostedVaultShareWorkoutsDayData,
 } from "@murphai/hosted-execution/vault-share";
+import {
+  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   selectMetricSeries,
   type MealNutritionDayTotal,
@@ -633,6 +637,53 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     expect(deliver.mock.calls[0]?.[0]).toMatchObject({
       projectionKind: "profile-name.v0",
     });
+  });
+
+  it("delivers the maximum projectable registry sequentially", async () => {
+    const projectableScopes = HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.filter(
+      ({ projectionKind }) =>
+        projectionKind !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND
+        && projectionKind !== "group-email.v0",
+    );
+    const deliveredScopeKeys: string[] = [];
+    let activeDeliveries = 0;
+    let peakActiveDeliveries = 0;
+
+    const result = await offerCapturedHostedVaultShareProjectionBestEffort({
+      capture: {
+        snapshots: projectableScopes.map((projectionScope) => ({
+          projectionScope,
+          records: [],
+        })),
+        sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+      },
+      vaultSharePort: {
+        async deliver(request) {
+          activeDeliveries += 1;
+          peakActiveDeliveries = Math.max(peakActiveDeliveries, activeDeliveries);
+          await Promise.resolve();
+          deliveredScopeKeys.push(
+            buildHostedVaultShareProjectionScopeKey(request.projectionScope),
+          );
+          activeDeliveries -= 1;
+          return { status: "delivered" };
+        },
+        async listActiveProjectionScopes() {
+          throw new Error("Immutable delivery must not resolve scopes again.");
+        },
+      },
+    });
+
+    expect(projectableScopes).toHaveLength(98);
+    expect(
+      projectableScopes.length * HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
+    ).toBe(2_450);
+    expect(result).toEqual({ outcome: "delivered" });
+    expect(deliveredScopeKeys).toEqual(
+      projectableScopes.map(buildHostedVaultShareProjectionScopeKey),
+    );
+    expect(peakActiveDeliveries).toBe(1);
+    expect(activeDeliveries).toBe(0);
   });
 
   it("does not read or deliver payloads when the control plane reports no active kinds", async () => {

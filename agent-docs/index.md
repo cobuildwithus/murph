@@ -9,7 +9,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 
 Personal-to-group projection convergence, including attempt-local foreground
 preemption, its single forwarded deadline, and authoritative Web-response
-ownership, is specified by
+ownership plus deterministic maximum-cardinality proof, is specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
