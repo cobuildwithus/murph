@@ -2548,13 +2548,14 @@ function buildLinqTextPartWithinLimit(input: {
     })
   }
 
-  return {
+  const textPart: TextPart = {
     type: 'text',
     value: renderedText.text,
-    ...(renderedText.decorations.length > 0
-      ? { text_decorations: renderedText.decorations }
-      : {}),
   }
+  if (renderedText.decorations.length > 0) {
+    textPart.text_decorations = renderedText.decorations
+  }
+  return textPart
 }
 
 function normalizeLinqMediaList(

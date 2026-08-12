@@ -134,3 +134,10 @@ diagnostics when Linq rejects a request.
   were removed and verified absent.
 - Frog entry `20260812122351-changelog-guide-omits` records that the completion
   guide omits the Markdown list marker required by the changelog CI parser.
+- Exact-head CI found two patch-related integration gaps. The provider-request
+  boundary guard rejected an object spread in the SDK-typed Linq text part;
+  explicit field assignment now passes the guard. CLI coverage still expected
+  the former smaller HTTP diagnostic object; its exact assertion now includes
+  the safe zero-media counts, text-part count, and response signature. The
+  focused CLI case, all 67 Linq adapter tests, CLI and Operator Config
+  typechecks, and the provider-request guard pass after remediation.
