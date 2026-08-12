@@ -1,6 +1,6 @@
 # Repair Composio direct-write account identity
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -72,7 +72,7 @@ Updated: 2026-08-12
 4. [x] Strengthen exact-shape tests across email and calendar writes.
 5. [x] Add the public-safe changelog fragment, run focused verification, and
    inspect the final diff for identifiers or secrets.
-6. [ ] Push a PR candidate and complete specialist, final ReviewGPT, CI, and
+6. [x] Push a PR candidate and complete specialist, final ReviewGPT, CI, and
    merge-tree gates.
 
 ## Decisions
@@ -125,7 +125,22 @@ Updated: 2026-08-12
   left edge of a mobile element crop and remains outside this repair.
 - The required Claude Code UI double-check was attempted, but the `claude`
   executable is unavailable in this checkout. No substitute review is claimed.
+- The preliminary specialist review passed with product-experience and coverage
+  applicable, prompt and frontend implementation not applicable, no findings,
+  and no returned patch artifact.
+- ReviewGPT round 2 returned `ROUND_OUTCOME: PASS` after verifying the accepted
+  round-1 finding was resolved. Its fresh full-patch audit found no remaining
+  correctness, authorization, privacy, retry, deployment, product-experience,
+  purpose-drift, or architectural-complexity issue.
+- Required GitHub checks passed on exact pushed head `7c8cabe912dc`, including
+  Web release build/typecheck, assistant/platform/CLI package coverage, both CLI
+  host lanes, app verification, billing proof, design proof, overflow, fixture,
+  artifact, aggregate release, and Vercel ignored-build verification.
+- The parent final diff and affected-call-path review found no remaining issue.
+- `git merge-tree --write-tree HEAD origin/main` passed against the latest
+  fetched base without conflicts.
 - `pnpm docs:drift`, `git diff --check`, and the scoped identifier scan: passed.
 - The first focused test launch happened before fresh-worktree Prisma generation
   completed, so two suites failed during import with zero tests collected. The
   exact rerun after the typecheck generated Prisma passed all 52 tests.
+Completed: 2026-08-12
