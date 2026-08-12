@@ -251,9 +251,12 @@ at most one immediate exact Web replay with the identical body and request key
 inside the original overall deadline. It never replays HTTP 408 or caller
 cancellation. This bounded transport replay may recover the stored failure or
 acceptance before the assistant answers; “do not retry” still forbids another
-provider effect or any later model/user retry. A second replay failure and every
-still-indeterminate Web result throw into the assistant's existing `pending`
-result with no retry invitation.
+provider effect or any later model/user retry. Only a successfully parsed replay
+may replace the first result. If the replay also fails—including because mutable
+route or participant authority now rejects it—the original ambiguous failure
+remains authoritative and reaches the assistant's existing `pending` result.
+Caller cancellation remains authoritative. This prevents a replay-time 4xx from
+becoming false proof that an already-accepted note was not sent.
 
 The original physical-note deployment order remains: deploy the Prisma migration
 and Web route/service first, with live sending off.

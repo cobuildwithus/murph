@@ -298,3 +298,11 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   recovered acceptance after a lost body, 408, and cancellation. This connects
   the initiating conversation to the existing row-scoped Web recovery without
   a queue, scheduler, notification, or additional continuation owner.
+- Round 18 found that replay-time mutable route or participant authority could
+  replace the first ambiguous failure with a 401/403/409, which the port would map
+  to false no-send evidence. Keep the existing single replay, but for physical
+  notes let only a successfully parsed replay replace the first result. When the
+  replay also fails, preserve the original ambiguity; caller cancellation still
+  wins. Port proof covers lost-body and 5xx ambiguity followed by 401/403/409 while
+  retaining genuine first-attempt 403 classification. This is one error-choice
+  option on the existing transport, not another retry or state owner.

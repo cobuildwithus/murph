@@ -60,6 +60,7 @@ interface HostedWebControlPlaneJsonRequest {
   headers?: Headers;
   method?: "GET" | "POST";
   path: string;
+  preserveInitialFailureOnReplayFailure?: boolean;
   replayOnceOnRetryableFailure?: boolean;
   sensitiveResponseBody?: {
     maxBytes: number;
@@ -199,6 +200,7 @@ export async function fetchHostedWebControlPlaneJson(
   }
 
   const deadlineMs = Date.now() + input.timeoutMs;
+  let initialFailure: unknown;
   try {
     return await fetchHostedWebControlPlaneJsonAttempt({
       ...input,
@@ -212,12 +214,23 @@ export async function fetchHostedWebControlPlaneJson(
     ) {
       throw error;
     }
+    initialFailure = error;
   }
 
-  return await fetchHostedWebControlPlaneJsonAttempt({
-    ...input,
-    timeoutMs: Math.max(0, deadlineMs - Date.now()),
-  });
+  try {
+    return await fetchHostedWebControlPlaneJsonAttempt({
+      ...input,
+      timeoutMs: Math.max(0, deadlineMs - Date.now()),
+    });
+  } catch (error) {
+    if (input.signal?.aborted) {
+      throw input.signal.reason ?? error;
+    }
+    if (input.preserveInitialFailureOnReplayFailure === true) {
+      throw initialFailure;
+    }
+    throw error;
+  }
 }
 
 async function fetchHostedWebControlPlaneJsonAttempt(

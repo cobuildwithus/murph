@@ -202,6 +202,46 @@ describe("createHostedWebPhysicalNotePort", () => {
     expect(bodies).toEqual([JSON.stringify(REQUEST), JSON.stringify(REQUEST)]);
   });
 
+  it.each([401, 403, 409])(
+    "keeps first-attempt ambiguity when exact replay returns HTTP %i",
+    async (replayStatus) => {
+      const initialFailure = new TypeError("First response body lost.");
+      const responses = [
+        createLostBodyResponse(initialFailure),
+        new Response(null, { status: replayStatus }),
+      ];
+      const fetchImpl = vi.fn<typeof fetch>(async () => responses.shift()!);
+      const port = createHostedWebPhysicalNotePort({
+        boundUserId: "member_physical_note",
+        fetchImpl,
+        timeoutMs: 5_000,
+        transport: { mode: "proxy" },
+      });
+
+      await expect(port.send(REQUEST)).rejects.toMatchObject({
+        cause: initialFailure,
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("keeps the first 5xx when exact replay reaches revoked authority", async () => {
+    const responses = [
+      new Response(null, { status: 503 }),
+      new Response(null, { status: 403 }),
+    ];
+    const fetchImpl = vi.fn<typeof fetch>(async () => responses.shift()!);
+    const port = createHostedWebPhysicalNotePort({
+      boundUserId: "member_physical_note",
+      fetchImpl,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.send(REQUEST)).rejects.toMatchObject({ status: 503 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("preserves an HTTP 408 as uncertain after Web may have accepted the note", async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 408 }));
     const port = createHostedWebPhysicalNotePort({
@@ -283,10 +323,12 @@ describe("createHostedWebPhysicalNotePort", () => {
   });
 });
 
-function createLostBodyResponse(): Response {
+function createLostBodyResponse(
+  error: Error = new TypeError("Response body lost."),
+): Response {
   return new Response(new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.error(new TypeError("Response body lost."));
+      controller.error(error);
     },
   }), { status: 200 });
 }
