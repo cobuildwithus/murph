@@ -18,7 +18,11 @@ import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/co
 import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device-syncd/junction-resources";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "@murphai/device-syncd/local-secret-codec";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
-import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
+import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+} from "@murphai/device-syncd/hosted-runtime";
 import {
   type DeviceSyncAccount,
   type DeviceSyncJobRecord,
@@ -42,6 +46,7 @@ import {
   requireHostedRuntimeDeviceSyncStore,
 } from "../src/device-sync-service.ts";
 import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
   promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState,
@@ -349,6 +354,31 @@ function buildEmptyRuntimeSnapshot(): HostedExecutionDeviceSyncRuntimeSnapshotRe
   };
 }
 
+function buildRuntimeSnapshotPage(input: {
+  count: number;
+  nextCursor?: HostedExecutionDeviceSyncRuntimeSnapshotResponse["nextCursor"];
+  startIndex: number;
+  userId?: string;
+}): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
+  const connections = Array.from({ length: input.count }, (_, offset) => {
+    const index = input.startIndex + offset;
+    const updatedAt = new Date(Date.parse("2026-04-07T12:00:00.000Z") - index * 1_000)
+      .toISOString();
+    return buildRuntimeSnapshot({
+      connectionId: `hosted_conn_${String(index).padStart(3, "0")}`,
+      externalAccountId: `external_${index}`,
+      hostedUpdatedAt: updatedAt,
+    }).connections[0]!;
+  });
+
+  return {
+    connections,
+    generatedAt: "2026-04-07T12:01:00.000Z",
+    ...(input.nextCursor === undefined ? {} : { nextCursor: input.nextCursor }),
+    userId: input.userId ?? "member_123",
+  };
+}
+
 function buildDirtyState(input: {
   connectionId: string;
   dirtyRevision?: string;
@@ -533,6 +563,228 @@ function clearAccountCredentialForTesting(service: DeviceSyncService, accountId:
 }
 
 describe("hosted device-sync runtime", () => {
+  test("credential hydration follows stable bounded cursors sequentially", async () => {
+    const firstCursor = {
+      createdAt: new Date(Date.parse("2026-04-07T12:00:00.000Z") - 31_000).toISOString(),
+      id: "hosted_conn_031",
+    };
+    const pages = [
+      buildRuntimeSnapshotPage({
+        count: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+        nextCursor: firstCursor,
+        startIndex: 0,
+      }),
+      buildRuntimeSnapshotPage({
+        count: 2,
+        nextCursor: null,
+        startIndex: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      }),
+    ];
+    const fetchSnapshot = vi.fn(async (
+      _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+    ) => pages.shift()!);
+    const deviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot,
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+      deviceSyncPort,
+      includeCredentialMaterial: true,
+    });
+
+    assert.equal(snapshot.connections.length, 34);
+    assert.deepEqual(
+      snapshot.connections.map((entry) => entry.connection.id),
+      Array.from({ length: 34 }, (_, index) =>
+        `hosted_conn_${String(index).padStart(3, "0")}`
+      ),
+    );
+    assert.deepEqual(fetchSnapshot.mock.calls, [
+      [{
+        includeCredentialMaterial: true,
+      }],
+      [{
+        cursor: firstCursor,
+        includeCredentialMaterial: true,
+        limit: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+      }],
+    ]);
+  });
+
+  test("credential hydration fails closed at the total authority bound", async () => {
+    const pageSizes = [32, 32, 32, 4];
+    let startIndex = 0;
+    const pages = pageSizes.map((count, pageIndex) => {
+      const page = buildRuntimeSnapshotPage({
+        count,
+        nextCursor: {
+          createdAt: new Date(Date.parse("2026-04-07T12:00:00.000Z") - startIndex * 1_000)
+            .toISOString(),
+          id: `cursor_${pageIndex}`,
+        },
+        startIndex,
+      });
+      startIndex += count;
+      return page;
+    });
+    const fetchSnapshot = vi.fn(async (
+      _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+    ) => pages.shift()!);
+    const deviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot,
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort,
+        includeCredentialMaterial: true,
+      }),
+      new RegExp(
+        `${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT}-connection hydration bound`,
+        "u",
+      ),
+    );
+    assert.equal(fetchSnapshot.mock.calls.length, 4);
+    assert.deepEqual(
+      fetchSnapshot.mock.calls.map(([request]) => request?.limit),
+      [undefined, 32, 32, 4],
+    );
+  });
+
+  test("credential hydration accepts a bounded legacy first page", async () => {
+    const legacyPageWithoutCursor = buildRuntimeSnapshotPage({
+      count: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 2,
+      startIndex: 0,
+    });
+    const legacyPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => legacyPageWithoutCursor),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+      deviceSyncPort: legacyPort,
+      includeCredentialMaterial: true,
+    });
+
+    assert.equal(snapshot.connections.length, 34);
+    assert.deepEqual(legacyPort.fetchSnapshot.mock.calls, [[{
+      includeCredentialMaterial: true,
+    }]]);
+  });
+
+  test("credential hydration rejects an oversized legacy page", async () => {
+    const legacyPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => buildRuntimeSnapshotPage({
+        count: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT + 1,
+        startIndex: 0,
+      })),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: legacyPort,
+        includeCredentialMaterial: true,
+      }),
+      new RegExp(
+        `${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT}-connection hydration bound`,
+        "u",
+      ),
+    );
+  });
+
+  test("credential hydration rejects missing, repeated, and cross-member cursors", async () => {
+    const firstCursor = {
+      createdAt: "2026-04-07T12:00:00.000Z",
+      id: "hosted_conn_000",
+    };
+    const cursorPages = [
+      buildRuntimeSnapshotPage({ count: 1, nextCursor: firstCursor, startIndex: 0 }),
+      buildRuntimeSnapshotPage({ count: 1, startIndex: 1 }),
+    ];
+    const missingCursorPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => cursorPages.shift()!),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: missingCursorPort,
+        includeCredentialMaterial: true,
+      }),
+      /omitted its continuation cursor after pagination began/u,
+    );
+
+    const cursor = {
+      createdAt: "2026-04-07T12:00:00.000Z",
+      id: "hosted_conn_000",
+    };
+    const memberPages = [
+      buildRuntimeSnapshotPage({ count: 1, nextCursor: cursor, startIndex: 0 }),
+      buildRuntimeSnapshotPage({
+        count: 1,
+        nextCursor: null,
+        startIndex: 1,
+        userId: "member_other",
+      }),
+    ];
+    const memberPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => memberPages.shift()!),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: memberPort,
+        includeCredentialMaterial: true,
+      }),
+      /changed member authority/u,
+    );
+
+    const repeatedCursorPages = [
+      buildRuntimeSnapshotPage({ count: 1, nextCursor: cursor, startIndex: 0 }),
+      buildRuntimeSnapshotPage({ count: 1, nextCursor: cursor, startIndex: 1 }),
+    ];
+    const repeatedCursorPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => repeatedCursorPages.shift()!),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: repeatedCursorPort,
+        includeCredentialMaterial: true,
+      }),
+      /repeated a cursor/u,
+    );
+  });
+
   test("reconciliation sends oversized legitimate updates as sequential bounded batches", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",

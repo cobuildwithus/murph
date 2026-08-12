@@ -1510,6 +1510,14 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         total_elevation_gain: 320,
         elevation_change: -12,
         percent_recorded: 0.95,
+        heart_rate: {
+          avg_bpm: 76,
+          avg_walking_bpm: 101,
+          min_bpm: 44,
+        },
+        high: 5,
+        low: 60,
+        medium: 13,
       }],
       sleep: [{
         source: { provider: "garmin", type: "watch" },
@@ -1517,6 +1525,7 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         bedtime_start: "2026-05-20T02:00:00Z",
         bedtime_stop: "2026-05-20T10:00:00Z",
         duration: 28800,
+        latency: 600,
         time_in_bed: 30000,
         sleep_consistency: 91,
         sleep_performance: 88,
@@ -1533,27 +1542,146 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   });
 
   const latest = summarizeWearableLatest(vault);
+  const activityMinutes = summarizeWearableMetricLatest(vault, "activity-minutes", { windowDays: 1 });
+  const lowActivityMinutes = summarizeWearableMetricLatest(vault, "low-activity-minutes", { windowDays: 1 });
+  const activityAverageHeartRate = summarizeWearableMetricLatest(vault, "activity-average-heart-rate", { windowDays: 1 });
+  const activityLowestHeartRate = summarizeWearableMetricTrend(vault, "activity-lowest-heart-rate", { windowDays: 1 });
+  const walkingAverageHeartRate = summarizeWearableMetricLatest(vault, "walking-average-heart-rate", { windowDays: 1 });
+  const sleepLatency = summarizeWearableMetricLatest(vault, "sleep-latency-minutes", { windowDays: 1 });
   const leanBodyMass = summarizeWearableMetricLatest(vault, "lean-body-mass", { windowDays: 1 });
   const waistCircumference = summarizeWearableMetricLatest(vault, "waist-circumference", { windowDays: 1 });
+  const projection = buildMetricProjection(vault);
 
   assert.equal(latest?.activity?.steps.selection.value, 9400);
+  assert.equal(latest?.activity?.activityMinutes.selection.value, 78);
+  assert.equal(latest?.activity?.lowActivityMinutes.selection.value, 60);
+  assert.equal(latest?.activity?.mediumActivityMinutes.selection.value, 13);
+  assert.equal(latest?.activity?.highActivityMinutes.selection.value, 5);
+  assert.equal(latest?.activity?.averageHeartRate.selection.value, 76);
+  assert.equal(latest?.activity?.walkingAverageHeartRate.selection.value, 101);
+  assert.equal(latest?.activity?.lowestHeartRate.selection.value, 44);
   assert.equal(latest?.activity?.floorsClimbed.selection.value, 18);
   assert.equal(latest?.activity?.estimatedVo2Max.selection.value, 48.5);
   assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 320);
   assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, -12);
   assert.equal(latest?.activity?.percentRecorded.selection.value, 95);
   assert.equal(latest?.sleep?.timeInBedMinutes.selection.value, 500);
+  assert.equal(latest?.sleep?.sleepLatencyMinutes.selection.value, 10);
+  assert.equal(latest?.sleep?.averageHeartRate.selection.value, null);
+  assert.equal(latest?.sleep?.lowestHeartRate.selection.value, null);
+  assert.equal(latest?.recovery?.restingHeartRate.selection.value, null);
   assert.equal(latest?.sleep?.sleepConsistency.selection.value, 91);
   assert.equal(latest?.sleep?.sleepPerformance.selection.value, 88);
   assert.equal(latest?.bodyState?.leanBodyMassKg.selection.value, 40.1);
   assert.equal(latest?.bodyState?.temperature.selection.value, 36.7);
   assert.equal(latest?.bodyState?.waistCircumference.selection.value, 86.36);
+  assert.equal(activityMinutes?.summaryKind, "activity");
+  assert.equal(activityMinutes?.value, 78);
+  assert.equal(lowActivityMinutes?.summaryKind, "activity");
+  assert.equal(lowActivityMinutes?.value, 60);
+  assert.equal(activityAverageHeartRate?.metric, "averageHeartRate");
+  assert.equal(activityAverageHeartRate?.resolvedAlias, "activity-average-heart-rate");
+  assert.equal(activityAverageHeartRate?.summaryKind, "activity");
+  assert.equal(activityAverageHeartRate?.value, 76);
+  assert.equal(activityLowestHeartRate?.metric, "lowestHeartRate");
+  assert.equal(activityLowestHeartRate?.resolvedAlias, "activity-lowest-heart-rate");
+  assert.equal(activityLowestHeartRate?.summaryKind, "activity");
+  assert.equal(activityLowestHeartRate?.value, 44);
+  assert.equal(activityLowestHeartRate?.points[0]?.value, 44);
+  assert.equal(activityLowestHeartRate?.notes.some((note) => note.startsWith("No ")), false);
+  assert.equal(walkingAverageHeartRate?.summaryKind, "activity");
+  assert.equal(walkingAverageHeartRate?.value, 101);
+  assert.equal(sleepLatency?.summaryKind, "sleep");
+  assert.equal(sleepLatency?.value, 10);
   assert.equal(leanBodyMass?.metric, "leanBodyMassKg");
   assert.equal(leanBodyMass?.summaryKind, "bodyState");
   assert.equal(leanBodyMass?.value, 40.1);
   assert.equal(waistCircumference?.metric, "waistCircumference");
   assert.equal(waistCircumference?.summaryKind, "bodyState");
   assert.equal(waistCircumference?.value, 86.36);
+  const projectedActivitySummaryValue = (metricKey: string) =>
+    projection.metricPoints.find((point) =>
+      point.metricKey === metricKey && point.source.kind === "activity-summary"
+    )?.value;
+  assert.equal(projectedActivitySummaryValue("activity-minutes"), 78);
+  assert.equal(projectedActivitySummaryValue("low-activity-minutes"), 60);
+  assert.equal(projectedActivitySummaryValue("medium-activity-minutes"), 13);
+  assert.equal(projectedActivitySummaryValue("high-activity-minutes"), 5);
+  assert.equal(projectedActivitySummaryValue("average-heart-rate"), 76);
+  assert.equal(projectedActivitySummaryValue("walking-average-heart-rate"), 101);
+  assert.equal(projectedActivitySummaryValue("lowest-heart-rate"), 44);
+});
+
+test("Junction body composition facts remain distinct across wearable and canonical metric queries", () => {
+  const vault = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      body: [{
+        source: { provider: "withings", type: "scale" },
+        id: "body-composition-queryable",
+        date: "2026-05-20T08:00:00Z",
+        bone_mass_percentage: 4.2,
+        muscle_mass_percentage: 61.8,
+        visceral_fat_index: 7,
+        water_percentage: 54.6,
+      }],
+    },
+  });
+
+  const bodyState = summarizeWearableLatest(vault)?.bodyState;
+  const boneMass = summarizeWearableMetricLatest(vault, "bone_mass_percentage", { windowDays: 1 });
+  const muscleMass = summarizeWearableMetricLatest(vault, "muscle-mass-percentage", { windowDays: 1 });
+  const visceralFat = summarizeWearableMetricLatest(vault, "visceral_fat_index", { windowDays: 1 });
+  const bodyWater = summarizeWearableMetricLatest(vault, "water_percentage", { windowDays: 1 });
+  const compositionMetricKeys = new Set([
+    "body-water-percentage",
+    "bone-mass-percentage",
+    "muscle-mass-percentage",
+    "visceral-fat-index",
+  ]);
+  const metricPoints = buildMetricProjection(vault).metricPoints
+    .filter((point) => compositionMetricKeys.has(point.metricKey))
+    .sort((left, right) => left.metricKey.localeCompare(right.metricKey));
+
+  assert.equal(bodyState?.boneMassPercentage.selection.value, 4.2);
+  assert.equal(bodyState?.boneMassPercentage.selection.unit, "%");
+  assert.equal(bodyState?.boneMassPercentage.selection.provider, "withings");
+  assert.equal(bodyState?.muscleMassPercentage.selection.value, 61.8);
+  assert.equal(bodyState?.bodyWaterPercentage.selection.value, 54.6);
+  assert.equal(bodyState?.visceralFatIndex.selection.value, 7);
+  assert.equal(bodyState?.visceralFatIndex.selection.unit, "index");
+  assert.deepEqual(
+    [boneMass, muscleMass, visceralFat, bodyWater].map((summary) => ({
+      metric: summary?.metric,
+      provider: summary?.provider,
+      summaryKind: summary?.summaryKind,
+      unit: summary?.unit,
+      value: summary?.value,
+    })),
+    [
+      { metric: "boneMassPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 4.2 },
+      { metric: "muscleMassPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 61.8 },
+      { metric: "visceralFatIndex", provider: "withings", summaryKind: "bodyState", unit: "index", value: 7 },
+      { metric: "bodyWaterPercentage", provider: "withings", summaryKind: "bodyState", unit: "%", value: 54.6 },
+    ],
+  );
+  assert.deepEqual(
+    metricPoints.map((point) => ({
+      canonicalUnit: point.canonicalUnit,
+      metricKey: point.metricKey,
+      provider: point.provenance.provider,
+      sourceKind: point.source.kind,
+      value: point.value,
+    })),
+    [
+      { canonicalUnit: "percent", metricKey: "body-water-percentage", provider: "withings", sourceKind: "wearable-summary", value: 54.6 },
+      { canonicalUnit: "percent", metricKey: "bone-mass-percentage", provider: "withings", sourceKind: "wearable-summary", value: 4.2 },
+      { canonicalUnit: "percent", metricKey: "muscle-mass-percentage", provider: "withings", sourceKind: "wearable-summary", value: 61.8 },
+      { canonicalUnit: "index", metricKey: "visceral-fat-index", provider: "withings", sourceKind: "wearable-summary", value: 7 },
+    ],
+  );
+  assert.ok(metricPoints.every((point) => (point.provenance.dataOrigin as DeviceDataOrigin | null)?.aggregatorProvider === "junction"));
+  assert.ok(metricPoints.every((point) => (point.provenance.dataOrigin as DeviceDataOrigin | null)?.sourceProviderSlug === "withings"));
 });
 
 test("metric latest and trend surfaces keep derived sleep and aggregate-backed points", () => {

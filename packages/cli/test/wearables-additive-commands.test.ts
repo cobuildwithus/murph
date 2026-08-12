@@ -41,6 +41,23 @@ function createMetricConfidence() {
   }
 }
 
+function createResolvedMetric(metric: string, value: number, unit: string) {
+  return {
+    candidateCount: 1,
+    confidence: 'high' as const,
+    conflictingProviders: [],
+    exactDuplicateCount: 0,
+    metric,
+    occurredAt: '2026-04-05T08:00:00.000Z',
+    provider: 'withings',
+    recordedAt: '2026-04-05T08:05:00.000Z',
+    sourceKind: 'body-summary',
+    title: `Withings ${metric}`,
+    unit,
+    value,
+  }
+}
+
 function createWindowStats(overrides: Partial<{
   average: number | null
   count: number
@@ -88,7 +105,7 @@ function createMetricLatestSummary(overrides: Partial<{
   date: string | null
   delta: number | null
   max: number | null
-  metric: 'hrv' | 'restingHeartRate'
+  metric: 'averageHeartRate' | 'hrv' | 'lowestHeartRate' | 'restingHeartRate'
   min: number | null
   notes: string[]
   paths: string[]
@@ -159,6 +176,28 @@ test('wearables additive commands return the shared normalized result envelopes'
         providers: ['whoop'],
       },
       summary: null,
+      vault,
+    }),
+  )
+  const listWearableBodyState = vi.fn(
+    async (_input: { requestId: string | null; vault: string }) => ({
+      count: 1,
+      filters: {
+        date: null,
+        from: null,
+        limit: 3,
+        providers: [],
+        to: null,
+      },
+      items: [{
+        bodyWaterPercentage: createResolvedMetric('bodyWaterPercentage', 55.3, '%'),
+        boneMassPercentage: createResolvedMetric('boneMassPercentage', 4.2, '%'),
+        date: '2026-04-05',
+        muscleMassPercentage: createResolvedMetric('muscleMassPercentage', 42.7, '%'),
+        notes: [],
+        summaryConfidence: { level: 'high' as const },
+        visceralFatIndex: createResolvedMetric('visceralFatIndex', 7, 'index'),
+      }],
       vault,
     }),
   )
@@ -266,6 +305,11 @@ test('wearables additive commands return the shared normalized result envelopes'
   )
 
   Object.defineProperties(services.query, {
+    listWearableBodyState: {
+      configurable: true,
+      value: listWearableBodyState,
+      writable: true,
+    },
     showWearableDrift: {
       configurable: true,
       value: showWearableDrift,
@@ -356,6 +400,36 @@ test('wearables additive commands return the shared normalized result envelopes'
     date: '2026-04-05',
     providers: ['whoop'],
     requestId: null,
+    vault,
+  })
+
+  const bodyResult = await runInProcessJsonCli<{
+    items: Array<{
+      bodyWaterPercentage?: { value: number | null }
+      boneMassPercentage?: { value: number | null }
+      muscleMassPercentage?: { value: number | null }
+      visceralFatIndex?: { value: number | null }
+    }>
+  }>(cli, [
+    'wearables',
+    'body',
+    'list',
+    '--vault',
+    vault,
+  ])
+  assert.equal(bodyResult.exitCode, null)
+  const bodyData = requireData(bodyResult.envelope)
+  assert.equal(bodyData.items[0]?.bodyWaterPercentage?.value, 55.3)
+  assert.equal(bodyData.items[0]?.boneMassPercentage?.value, 4.2)
+  assert.equal(bodyData.items[0]?.muscleMassPercentage?.value, 42.7)
+  assert.equal(bodyData.items[0]?.visceralFatIndex?.value, 7)
+  assert.deepEqual(listWearableBodyState.mock.calls[0]?.[0], {
+    date: undefined,
+    from: undefined,
+    limit: 3,
+    providers: [],
+    requestId: null,
+    to: undefined,
     vault,
   })
 
@@ -475,6 +549,66 @@ test('wearables additive commands return the shared normalized result envelopes'
     vault,
     windowDays: 6,
   })
+})
+
+test('wearables metric latest preserves explicit activity heart-rate aliases', async () => {
+  const { cli, services } = createWearablesCliAndServices()
+  const vault = '/tmp/wearables-activity-heart-rate-vault'
+  const showWearableMetricLatest = vi.fn(
+    async (input: { metric: string; requestId: string | null; vault: string }) => ({
+      filters: {
+        date: null,
+        from: null,
+        to: null,
+        providers: [],
+        metric: input.metric,
+        windowDays: 1,
+      },
+      summary: createMetricLatestSummary({
+        max: 76,
+        metric: 'averageHeartRate',
+        min: 76,
+        requestedMetric: input.metric,
+        resolvedAlias: input.metric,
+        summaryKind: 'activity',
+        unit: 'bpm',
+        value: 76,
+        windowDays: 1,
+      }),
+      vault,
+    }),
+  )
+  Object.defineProperty(services.query, 'showWearableMetricLatest', {
+    configurable: true,
+    value: showWearableMetricLatest,
+    writable: true,
+  })
+
+  const result = await runInProcessJsonCli<{
+    summary: {
+      metric: string
+      requestedMetric: string
+      summaryKind: string
+      value: number | null
+    } | null
+  }>(cli, [
+    'wearables',
+    'metric',
+    'latest',
+    'activity-average-heart-rate',
+    '--vault',
+    vault,
+    '--window-days',
+    '1',
+  ])
+  const data = requireData(result.envelope)
+
+  assert.equal(result.exitCode, null)
+  assert.equal(data.summary?.metric, 'averageHeartRate')
+  assert.equal(data.summary?.requestedMetric, 'activity-average-heart-rate')
+  assert.equal(data.summary?.summaryKind, 'activity')
+  assert.equal(data.summary?.value, 76)
+  assert.equal(showWearableMetricLatest.mock.calls[0]?.[0].metric, 'activity-average-heart-rate')
 })
 
 test('wearables commands still reject providers that do not canonicalize to a supported value', async () => {

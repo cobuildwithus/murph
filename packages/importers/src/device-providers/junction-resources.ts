@@ -57,8 +57,10 @@ export type JunctionTimeseriesResource =
 // Every one of those six paths has explicit response and source/day bounds.
 // `blood_pressure` is the paired-shape exception: readings are sparse
 // (10s-100s/yr), so each reading lands as one `measurement` event plus one
-// compact artifact. `note` is another sparse exception: each tag lands as a
-// completed intervention, while free text is dropped. Intraday `heartrate` and
+// compact artifact. `note` is another sparse exception: normalized tags land
+// on a neutral canonical note spine while provider free text is dropped.
+// Personal Patterns owns any fail-closed action classification at read time.
+// Intraday `heartrate` and
 // `hypnogram` stay deliberately excluded from defaults: their raw sample
 // streams are unbounded (thousands of samples per day) and the vault must
 // not accumulate giant raw timeseries dumps. Sleep-grain heart rate and
@@ -238,6 +240,21 @@ export const JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS = Object.freeze([
   "sleepEfficiency",
   "sleep_efficiency",
   "efficiency",
+] as const);
+export const JUNCTION_SLEEP_LATENCY_MINUTE_PATHS = Object.freeze([
+  "sleepLatencyMinutes",
+  "sleep_latency_minutes",
+  "latencyMinutes",
+  "latency_minutes",
+] as const);
+export const JUNCTION_SLEEP_LATENCY_SECOND_PATHS = Object.freeze([
+  "sleepLatencySeconds",
+  "sleep_latency_seconds",
+  "latencySeconds",
+  "latency_seconds",
+  "sleepLatency",
+  "sleep_latency",
+  "latency",
 ] as const);
 export const JUNCTION_SLEEP_CONSISTENCY_PATHS = Object.freeze([
   "sleepConsistency",
@@ -473,6 +490,8 @@ export const JUNCTION_SLEEP_SUMMARY_NUMBER_PATHS = Object.freeze([
   ...JUNCTION_SLEEP_AWAKE_MINUTE_PATHS,
   ...JUNCTION_SLEEP_AWAKE_SECOND_PATHS,
   ...JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS,
+  ...JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
+  ...JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
   ...JUNCTION_SLEEP_HRV_PATHS,
   ...JUNCTION_SLEEP_AVERAGE_HEART_RATE_PATHS,
   ...JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,

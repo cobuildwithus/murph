@@ -5,10 +5,10 @@
     "id": "oura-tags-in-personal-patterns",
     "kind": "improvement",
     "priority": 4,
-    "title": "Use Oura tags in Personal Patterns",
-    "summary": "Murph now syncs dated Oura tags such as sauna, so repeated tags can become Personal Patterns factors.",
-    "details": "Each distinct tag becomes a completed action on its Oura date. Murph does not retain or analyze the free-text note value.",
+    "title": "Use Oura sauna tags in Personal Patterns",
+    "summary": "Murph now syncs dated Oura sauna tags so repeated sauna entries can become Personal Patterns factors.",
+    "details": "Wearable tags stay neutral notes. Personal Patterns currently treats only Oura's exact sauna tag as an action; symptoms, context, custom tags, and tags from other sources stay neutral. Existing Oura tag history receives one bounded refresh under the corrected meaning. Murph does not retain or analyze the provider's free-text note value.",
     "relevanceTags": ["oura", "wearables", "patterns", "privacy"],
-    "sourcePullRequests": [1673]
+    "sourcePullRequests": [1673, 1697]
   }
 }

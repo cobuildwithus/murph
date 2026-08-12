@@ -11,25 +11,29 @@ describe('assistant messaging presentation guidance', () => {
     })
 
     expect(prompt).toContain(
-      'never send Markdown tables, even on request',
+      'no Markdown tables',
     )
-    expect(prompt).toContain('overrides other table guidance')
-    expect(prompt).toContain('Use labeled lines')
+    expect(prompt).toContain('use labeled lines')
   })
 
-  it('marks complex visual presentation as image-welcome without losing exact text', () => {
+  it('uses a complete card alone and keeps semantic text with response media', () => {
     const prompt = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
     })
 
-    expect(prompt).toContain('dense tables/plans/schedules/matrices/diagrams')
-    expect(prompt).toContain('`murph.generate_image`')
-    expect(prompt).toContain('when available, clearer, and audience-safe')
     expect(prompt).toContain(
-      'Keep exact or safety-critical details (sets/reps, dates, dosages) in text',
+      'Complete cards replace text',
     )
     expect(prompt).toContain(
-      'No decorative images or private health data in group images',
+      'Response media comes with concise text for order, dose, timing, cues, safety, and fallback',
+    )
+    expect(prompt).toContain('`murph.generate_image`')
+    expect(prompt).toContain('only if no card fits and a safe image helps')
+    expect(prompt).toContain(
+      'Keep exact or safety-critical text',
+    )
+    expect(prompt).toContain(
+      'No decorative/private-health group images',
     )
   })
 })

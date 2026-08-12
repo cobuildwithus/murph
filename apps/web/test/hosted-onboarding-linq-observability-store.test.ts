@@ -3091,21 +3091,25 @@ describe("hosted Linq observability stores", () => {
     })).resolves.toBe(false);
   });
 
-  it("records accepted Linq transcript fallback and consumes its answered mailbox rows", async () => {
+  it("consumes one maximum-size answered mailbox set in one idempotent transaction", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
     const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+    const answeredMailboxItemIds = Array.from(
+      { length: 100 },
+      (_, index) => `mailbox_item_answered_${index}`,
+    );
     const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
       "linq-voice-memo-transcript:assistant-outbox:intent_123",
     );
-    fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
+    fixture.hostedLinqLineFindUnique.mockResolvedValue({
       phoneNumberHint: "+0000",
       phoneNumberLookupKey: "hbidx:phone:runtime-line",
     });
 
-    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+    const accepted = await recordHostedLinqRuntimeDeliveryOutcomeTx({
       acceptedAt,
-      answeredMailboxItemIds: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
+      answeredMailboxItemIds,
       attemptedAt,
       idempotencyKey: "linq-voice-memo-transcript:assistant-outbox:intent_123",
       linqChatId: "linq_chat_123",
@@ -3115,7 +3119,8 @@ describe("hosted Linq observability stores", () => {
       sourceRef: "intent_123",
       targetKind: "thread",
       userId: "member_123",
-    })).resolves.toEqual({
+    });
+    expect(accepted).toEqual({
       deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
       recorded: true,
     });
@@ -3149,7 +3154,7 @@ describe("hosted Linq observability stores", () => {
       where: {
         consumedAt: null,
         id: {
-          in: ["mailbox_item_answered_1", "mailbox_item_answered_2"],
+          in: answeredMailboxItemIds,
         },
         kind: "conversation.message",
         lane: "conversation",
@@ -3174,6 +3179,38 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
+
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt,
+      deliveredAt: null,
+      failedAt: null,
+      id: accepted.deliveryId,
+      lastReceiptAt: null,
+      messageLookupKey: "hbidx:linq-message:provider",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+      skippedAt: null,
+      status: "accepted",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      answeredMailboxItemIds,
+      attemptedAt,
+      idempotencyKey: "linq-voice-memo-transcript:assistant-outbox:intent_123",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_123",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual(accepted);
+
+    expect(fixture.transaction).toHaveBeenCalledTimes(2);
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledTimes(1);
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledTimes(1);
+    expect(fixture.hostedMailboxItemUpdateMany).toHaveBeenCalledTimes(1);
+    expect(fixture.hostedLinqProviderEventFindMany).toHaveBeenCalledTimes(1);
   });
 
   it("records group-thread runtime accepts as sent with no receipt expected", async () => {

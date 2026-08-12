@@ -421,13 +421,10 @@ export class RuntimeProcessingController {
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
     if (activeFence.processingMode !== requestedProcessingMode) {
-      if (
-        activeFence.processingMode === "inbox_media_retention"
-        || (
-          activeFence.processingMode === "system_mailbox"
-          && requestedProcessingMode === "default"
-        )
-      ) {
+      const foregroundWaitingOnSystemMailbox =
+        activeFence.processingMode === "system_mailbox"
+        && requestedProcessingMode === "default";
+      if (activeFence.processingMode === "inbox_media_retention") {
         return await this.preemptActiveBackgroundRuntimeForPriorityProcessing({
           activeFence,
           commandBudget: input.commandBudget,
@@ -436,30 +433,37 @@ export class RuntimeProcessingController {
           runtimeWakeStartedAt: input.runtimeWakeStartedAt,
         });
       }
+      if (!foregroundWaitingOnSystemMailbox) {
+        const activeRuntimeState =
+          await this.readActiveRuntimeFenceLiveness({
+            activeFence,
+            commandBudget: input.commandBudget,
+            record,
+          });
+        if (activeRuntimeState.outcome === "inactive") {
+          return await this.replaceInactiveRuntimeFence({
+            activeFence,
+            commandBudget: input.commandBudget,
+            input: input.input,
+            record,
+            runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+          });
+        }
 
-      const activeRuntimeState =
-        await this.readActiveRuntimeFenceLiveness({
-          activeFence,
-          commandBudget: input.commandBudget,
-          record,
-        });
-      if (activeRuntimeState.outcome === "inactive") {
-        return await this.replaceInactiveRuntimeFence({
-          activeFence,
-          commandBudget: input.commandBudget,
-          input: input.input,
-          record,
-          runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+        return this.createRetryLater({
+          reason: "container_busy",
+          userId: input.input.userId,
         });
       }
-
-      return this.createRetryLater({
-        reason: "container_busy",
-        userId: input.input.userId,
-      });
     }
 
-    if (activeFence.processingMode === "inbox_media_retention") {
+    const canCoalesceWithoutWake =
+      activeFence.processingMode === "inbox_media_retention"
+      || (
+        activeFence.processingMode === "system_mailbox"
+        && requestedProcessingMode === "system_mailbox"
+      );
+    if (canCoalesceWithoutWake) {
       const activeRuntimeState =
         await this.readActiveRuntimeFenceLiveness({
           activeFence,

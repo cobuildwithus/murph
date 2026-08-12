@@ -97,6 +97,9 @@ import {
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
 import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+} from "./device-sync-snapshot-pagination.ts";
+import {
   collectHostedAssistantDeliverySideEffects,
   createHostedAssistantProgressDeliveryDependencies,
   drainHostedPreparedAssistantDeliveries,
@@ -5349,7 +5352,10 @@ async function runSystemMailboxMaintenancePhase(input: {
     });
   }
   const systemMailboxWake = systemMailboxPreparation.status === "retryable_failed"
-    ? createHostedRuntimeWakeCandidate(systemMailboxPreparation.nextWakeAt, "assistant")
+    ? createHostedRuntimeWakeCandidate(
+        systemMailboxPreparation.nextWakeAt,
+        systemMailboxPreparation.nextWakeReason ?? "assistant",
+      )
     : phaseInput.foregroundCausalOnly === true
       ? null
       : await resolveHostedSystemMailboxNextWakeCandidate({
@@ -8368,7 +8374,8 @@ function resolveHostedWorkspaceDeviceTool(input: {
       if (request.action === "list_accounts") {
         const provider = normalizeAssistantRouteString(request.provider);
         const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
-        const snapshot = await deviceSyncPort.fetchSnapshot({
+        const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+          deviceSyncPort,
           includeCredentialMaterial: false,
           ...(provider ? { provider } : {}),
           signal: context?.signal ?? null,

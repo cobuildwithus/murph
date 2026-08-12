@@ -7,6 +7,8 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_SCHEMA,
   ID_PREFIXES,
+  JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+  JUNCTION_WEARABLE_TAG_NOTE_TYPE,
   eventRevisionFromLifecycle,
   isDeletedEventLifecycle,
   serializeCompanionHrvRmssdObservation,
@@ -4561,62 +4563,177 @@ test("Junction normalizer lands sparse paired blood pressure readings as measure
   assert.doesNotMatch(artifactText, /"value":350|"systolic":350|"diastolic":95/u);
 });
 
-test("Junction normalizer lands Oura note tags without retaining note text", async () => {
-  const snapshot = {
+test("Junction normalizer lands note tags on one neutral, revision-stable spine", async () => {
+  const snapshot = (entries: readonly Record<string, unknown>[]) => ({
     importedAt: "2026-04-23T12:00:00.000Z",
     timeseries: {
       note: {
         groups: {
           oura: [{
-            data: [
-              {
-                start: "2026-04-22T18:05:00+02:00",
-                end: "2026-04-22T18:10:00+02:00",
-                tags: ["Sauna", "late meal", "Sauna"],
-                unit: "text",
-                value: "SENSITIVE_VALUE_SENTINEL_A",
-              },
-              {
-                start: "2026-04-22T18:05:00+02:00",
-                end: "2026-04-22T18:10:00+02:00",
-                tags: ["Alcohol"],
-                unit: "text",
-                value: "SENSITIVE_VALUE_SENTINEL_B",
-              },
-            ],
+            data: entries,
             source: { provider: "oura", type: "ring" },
           }],
         },
       },
     },
-  };
+  });
+  const initialSnapshot = snapshot([
+    {
+      start: "2026-04-22T18:05:00+02:00",
+      end: "2026-04-22T18:10:00+02:00",
+      tags: ["Sauna", "late meal", "Sauna"],
+      unit: "text",
+      value: "SENSITIVE_VALUE_SENTINEL_A",
+    },
+    {
+      start: "2026-04-22T18:05:00+02:00",
+      end: "2026-04-22T18:10:00+02:00",
+      tags: ["Alcohol"],
+      unit: "text",
+      value: "SENSITIVE_VALUE_SENTINEL_B",
+    },
+  ]);
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     connectionId: "conn-junction-oura",
     sourceKind: "poll",
     deliveryMode: "scheduled_reconcile",
     normalizerVersion: "junction-normalizer.v1",
-    snapshot,
+    snapshot: initialSnapshot,
   });
-  const tagEvents = (payload.events ?? []).filter((event) => event.kind === "intervention_session");
+  const noteEvents = (payload.events ?? []).filter((event) => event.kind === "note");
+  const changed = normalizeJunctionSnapshot(snapshot([{
+    start: "2026-04-22T18:05:00+02:00",
+    end: "2026-04-22T18:10:00+02:00",
+    tags: ["Headache"],
+    value: "SENSITIVE_VALUE_SENTINEL_C",
+  }]));
+  const cleared = normalizeJunctionSnapshot(snapshot([{
+    start: "2026-04-22T18:05:00+02:00",
+    end: "2026-04-22T18:10:00+02:00",
+    tags: [],
+    value: "SENSITIVE_VALUE_SENTINEL_D",
+  }]));
+  const missingTags = normalizeJunctionSnapshot(snapshot([{
+    start: "2026-04-22T18:05:00+02:00",
+    end: "2026-04-22T18:10:00+02:00",
+    value: "SENSITIVE_VALUE_SENTINEL_E",
+  }]));
+  const stableInitial = normalizeJunctionSnapshot(snapshot([{
+    id: "provider-note-1",
+    start: "2026-04-22T18:05:00+02:00",
+    tags: ["Sauna"],
+    value: "SENSITIVE_VALUE_SENTINEL_F",
+  }]));
+  const stableChanged = normalizeJunctionSnapshot(snapshot([{
+    id: "provider-note-1",
+    start: "2026-04-22T19:05:00+02:00",
+    tags: ["Headache"],
+    value: "SENSITIVE_VALUE_SENTINEL_G",
+  }]));
+  const changedNote = changed.events?.find((event) => event.kind === "note");
+  const clearedNote = cleared.events?.find((event) => event.kind === "note");
+  const stableInitialNote = stableInitial.events?.find((event) => event.kind === "note");
+  const stableChangedNote = stableChanged.events?.find((event) => event.kind === "note");
 
   assert.deepEqual(payload.provenance?.timeseriesResources, ["note"]);
-  assert.deepEqual(
-    tagEvents.map((event) => event.fields?.interventionType).sort(),
-    ["alcohol", "late-meal", "sauna"],
-  );
-  assert.ok(tagEvents.every((event) => event.fields?.sessionStatus === "completed"));
-  assert.ok(tagEvents.every((event) => event.dayKey === "2026-04-22"));
-  assert.ok(tagEvents.every((event) => event.dataOrigin?.sourceProviderSlug === "oura"));
-  assert.equal(new Set(tagEvents.map((event) => event.externalRef?.resourceId)).size, 2);
-  assert.equal(new Set(tagEvents.map((event) => event.externalRef?.facet)).size, 3);
-  assert.equal(findJunctionNoteArtifacts(payload).length, 2);
+  assert.equal(noteEvents.length, 1);
+  assert.equal((payload.events ?? []).some((event) => event.kind === "intervention_session"), false);
+  assert.equal(noteEvents[0]?.fields?.noteType, JUNCTION_WEARABLE_TAG_NOTE_TYPE);
+  assert.equal(noteEvents[0]?.note, "Wearable tags");
+  assert.deepEqual(noteEvents[0]?.tags, ["alcohol", "late-meal", "sauna"]);
+  assert.equal(noteEvents[0]?.dayKey, "2026-04-22");
+  assert.equal(noteEvents[0]?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.equal(noteEvents[0]?.externalRef?.facet, JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET);
+  assert.match(noteEvents[0]?.externalRef?.resourceId ?? "", /^note-[a-f0-9]{16}$/u);
+  assert.equal(findJunctionNoteArtifacts(payload).length, 1);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
-  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /SENSITIVE_VALUE_SENTINEL/u);
-  assert.doesNotMatch(
-    JSON.stringify(payload),
-    /SENSITIVE_VALUE_SENTINEL/u,
+
+  // Source + timestamp is the bounded fallback spine when Junction omits an
+  // upstream note id. A changed or cleared tag set revises that same note.
+  assert.deepEqual(changedNote?.externalRef, noteEvents[0]?.externalRef);
+  assert.deepEqual(clearedNote?.externalRef, noteEvents[0]?.externalRef);
+  assert.deepEqual(changedNote?.tags, ["headache"]);
+  assert.deepEqual(clearedNote?.tags, []);
+  assert.equal(changed.events?.some((event) => event.kind === "intervention_session"), false);
+  assert.equal(cleared.events?.some((event) => event.kind === "intervention_session"), false);
+  assert.equal(findJunctionNoteArtifacts(changed).length, 1);
+  assert.equal(findJunctionNoteArtifacts(cleared).length, 1);
+
+  // A free-text-only row with no tag field stays out of canonical storage. An
+  // explicit provider id wins over mutable timestamps for later revisions.
+  assert.deepEqual(missingTags.events, []);
+  assert.equal(findJunctionNoteArtifacts(missingTags).length, 0);
+  assert.deepEqual(stableChangedNote?.externalRef, stableInitialNote?.externalRef);
+  assert.deepEqual(stableInitialNote?.tags, ["sauna"]);
+  assert.deepEqual(stableChangedNote?.tags, ["headache"]);
+  assert.notEqual(stableChangedNote?.occurredAt, stableInitialNote?.occurredAt);
+  assert.equal(stableChanged.events?.some((event) => event.kind === "intervention_session"), false);
+  assert.equal(
+    stableInitialNote?.externalRef?.resourceId,
+    createHash("sha256")
+      .update(JSON.stringify(["junction-oura-note", "ring", undefined, "provider-note-1"]))
+      .digest("hex")
+      .slice(0, 16),
+  );
+
+  assert.doesNotMatch(JSON.stringify(payload), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(changed), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(cleared), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(missingTags), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(stableInitial), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(JSON.stringify(stableChanged), /SENSITIVE_VALUE_SENTINEL/u);
+});
+
+test("Junction note ids remain scoped to their same-provider source instance", () => {
+  const snapshot = (firstSourceTags: readonly string[]) => ({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      note: [{
+        id: "provider-local-note-1",
+        sourceInstanceId: "source-aaaaaaaaaaaaaaaaaaaaaaaa",
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        start: "2026-04-22T18:05:00.000Z",
+        tags: firstSourceTags,
+      }, {
+        id: "provider-local-note-1",
+        sourceInstanceId: "source-bbbbbbbbbbbbbbbbbbbbbbbb",
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        start: "2026-04-22T18:05:00.000Z",
+        tags: ["sauna"],
+      }],
+    },
+  });
+  const initial = normalizeJunctionSnapshot(snapshot(["headache"]));
+  const edited = normalizeJunctionSnapshot(snapshot([]));
+  const initialNotes = initial.events?.filter((event) => event.kind === "note") ?? [];
+  const editedNotes = edited.events?.filter((event) => event.kind === "note") ?? [];
+
+  assert.equal(initialNotes.length, 2);
+  assert.equal(findJunctionNoteArtifacts(initial).length, 2);
+  assert.equal(new Set(initialNotes.map((event) => event.externalRef?.resourceId)).size, 2);
+  assert.deepEqual(
+    initialNotes.map((event) => event.dataOrigin?.sourceInstanceId).sort(),
+    ["source-aaaaaaaaaaaaaaaaaaaaaaaa", "source-bbbbbbbbbbbbbbbbbbbbbbbb"],
+  );
+  assert.deepEqual(
+    editedNotes.map((event) => event.externalRef?.resourceId).sort(),
+    initialNotes.map((event) => event.externalRef?.resourceId).sort(),
+  );
+  assert.deepEqual(
+    editedNotes.find((event) =>
+      event.dataOrigin?.sourceInstanceId === "source-aaaaaaaaaaaaaaaaaaaaaaaa"
+    )?.tags,
+    [],
+  );
+  assert.deepEqual(
+    editedNotes.find((event) =>
+      event.dataOrigin?.sourceInstanceId === "source-bbbbbbbbbbbbbbbbbbbbbbbb"
+    )?.tags,
+    ["sauna"],
   );
 });
 
@@ -5617,14 +5734,24 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
     "menstrual-cycle-deviation-irregular-menstrual-cycles-2026-04-30",
   );
 
+  const sexualActivityEvent = measurementEvents.find((event) => event.title === "Junction sexual activity");
+  assert.deepEqual(readMeasurement(sexualActivityEvent), {
+    metric: "sexual-activity",
+    value: 1,
+    unit: "recording",
+    qualifiers: { "protection-used": true },
+  });
+  assert.equal(
+    sexualActivityEvent?.externalRef?.facet,
+    "sexual-activity-protected-2026-04-13",
+  );
+
   // Predicted cycles are forecasts and must not become normalized facts.
   assert.equal(
     events.some((event) => event.occurredAt?.startsWith("2026-05-05")),
     false,
   );
-  // Sexual activity is deliberately unmapped and basal body temperature is
-  // canonical on the dedicated timeseries; both stay raw-only here.
-  assert.equal(events.length, 8);
+  assert.equal(events.length, 9);
 
   assert.match(JSON.stringify(rawCycleArtifact?.content), /period_start/u);
   assert.match(JSON.stringify(rawCycleArtifact?.content), /menstrual_flow/u);
@@ -5634,6 +5761,134 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
     "raw-cycle-source-name",
   ]);
   assertEventRawArtifactRolesExist(payload);
+});
+
+test("Junction normalizer preserves dated menstrual categorical facts without inventing certainty", () => {
+  const oversizedContraceptiveType = `type-${"x".repeat(120)}`;
+  const snapshot = {
+    importedAt: "2026-05-02T12:00:00.000Z",
+    summaries: {
+      menstrual_cycle: [{
+        id: "cycle-categorical-facts",
+        period_start: "2026-04-07",
+        cervical_mucus: [
+          { date: "2026-04-16", quality: "egg_white" },
+          { date: "2026-04-17", quality: "unknown" },
+        ],
+        intermenstrual_bleeding: [{ date: "2026-04-18" }],
+        contraceptive: [
+          { date: "2026-04-08", type: oversizedContraceptiveType },
+          { date: "2026-04-09", type: "unknown" },
+        ],
+        home_progesterone_test: [
+          { date: "2026-04-23", test_result: "positive" },
+          { date: "2026-04-24", test_result: "indeterminate" },
+        ],
+        sexual_activity: [
+          { date: "2026-04-13", protection_used: false },
+          { date: "2026-04-13" },
+          // Non-boolean values are not coerced into certainty.
+          { date: "2026-04-14", protection_used: "false" },
+        ],
+        source: { provider: "apple_health", type: "phone" },
+      }, {
+        id: "cycle-categorical-facts-predicted",
+        is_predicted: true,
+        period_start: "2026-05-05",
+        cervical_mucus: [{ date: "2026-05-10", quality: "watery" }],
+        intermenstrual_bleeding: [{ date: "2026-05-11" }],
+        contraceptive: [{ date: "2026-05-12", type: "oral" }],
+        home_progesterone_test: [{ date: "2026-05-13", test_result: "positive" }],
+        sexual_activity: [{ date: "2026-05-14", protection_used: true }],
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  };
+  const payload = normalizeJunctionSnapshot(snapshot);
+  const events = payload.events ?? [];
+  const measurementEvents = events.filter((event) => event.kind === "measurement");
+  const readMeasurement = (event: (typeof events)[number] | undefined) =>
+    (event?.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0];
+  const eventsForMetric = (metric: string) => measurementEvents.filter((event) =>
+    readMeasurement(event)?.metric === metric
+  );
+
+  const cervicalMucusEvents = eventsForMetric("cervical-mucus-quality");
+  assert.equal(cervicalMucusEvents.length, 2);
+  assert.deepEqual(readMeasurement(cervicalMucusEvents[0]), {
+    metric: "cervical-mucus-quality",
+    value: 1,
+    unit: "recording",
+    qualifiers: { quality: "egg_white" },
+  });
+  assert.deepEqual(readMeasurement(cervicalMucusEvents[1])?.qualifiers, { quality: "unknown" });
+
+  const intermenstrualBleedingEvent = eventsForMetric("intermenstrual-bleeding")[0];
+  assert.deepEqual(readMeasurement(intermenstrualBleedingEvent), {
+    metric: "intermenstrual-bleeding",
+    value: 1,
+    unit: "flag",
+  });
+  assert.equal(
+    intermenstrualBleedingEvent?.externalRef?.facet,
+    "intermenstrual-bleeding-2026-04-18",
+  );
+
+  const contraceptiveEvents = eventsForMetric("contraceptive-type");
+  assert.equal(contraceptiveEvents.length, 2);
+  const boundedContraceptiveType = oversizedContraceptiveType.slice(0, 80);
+  assert.deepEqual(readMeasurement(contraceptiveEvents[0])?.qualifiers, {
+    type: boundedContraceptiveType,
+  });
+  assert.equal(
+    contraceptiveEvents[0]?.externalRef?.facet,
+    `contraceptive-type-${boundedContraceptiveType}-2026-04-08`,
+  );
+  assert.deepEqual(readMeasurement(contraceptiveEvents[1])?.qualifiers, { type: "unknown" });
+
+  const progesteroneEvents = eventsForMetric("home-progesterone-test");
+  assert.equal(progesteroneEvents.length, 2);
+  assert.deepEqual(readMeasurement(progesteroneEvents[0]), {
+    metric: "home-progesterone-test",
+    value: 1,
+    unit: "recording",
+    qualifiers: { result: "positive" },
+  });
+  assert.deepEqual(readMeasurement(progesteroneEvents[1])?.qualifiers, {
+    result: "indeterminate",
+  });
+
+  const sexualActivityEvents = eventsForMetric("sexual-activity");
+  assert.equal(sexualActivityEvents.length, 3);
+  assert.deepEqual(readMeasurement(sexualActivityEvents[0])?.qualifiers, {
+    "protection-used": false,
+  });
+  assert.equal(
+    sexualActivityEvents[0]?.externalRef?.facet,
+    "sexual-activity-unprotected-2026-04-13",
+  );
+  assert.equal(readMeasurement(sexualActivityEvents[1])?.qualifiers, undefined);
+  assert.equal(
+    sexualActivityEvents[1]?.externalRef?.facet,
+    "sexual-activity-protection-unspecified-2026-04-13",
+  );
+  assert.equal(readMeasurement(sexualActivityEvents[2])?.qualifiers, undefined);
+
+  assert.equal(events.length, 10);
+  assert.ok(events.every((event) => event.dataOrigin?.sourceProviderSlug === "apple-health"));
+  assert.equal(events.some((event) => event.dayKey?.startsWith("2026-05")), false);
+  assertEventRawArtifactRolesExist(payload);
+
+  // Replay from a later sync window keeps the provider/date/category identity
+  // stable instead of minting replacement facts.
+  const replayPayload = normalizeJunctionSnapshot({
+    ...snapshot,
+    importedAt: "2026-06-02T12:00:00.000Z",
+  });
+  assert.deepEqual(
+    replayPayload.events?.map((event) => event.externalRef),
+    events.map((event) => event.externalRef),
+  );
 });
 
 test("Junction normalizer maps electrocardiogram summaries to per-recording events", () => {
@@ -5717,6 +5972,7 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
         height: 183,
         birth_date: "1990-05-14",
         sex: "female",
+        gender: "other",
         wheelchair_use: true,
         updated_at: "2026-04-20T09:00:00Z",
         source: { provider: "apple_health_kit", type: "phone" },
@@ -5725,20 +5981,35 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   });
   const events = payload.events ?? [];
   const height = events.find((event) => event.fields?.metric === "height");
+  const gender = events.find((event) => event.title === "Junction gender");
   const demographics = events.find((event) => event.kind === "note");
+  const genderMeasurement = (
+    gender?.fields?.measurements as Array<Record<string, unknown>> | undefined
+  )?.[0];
 
   assert.deepEqual(payload.provenance?.summaryResources, ["profile"]);
-  assert.equal(events.length, 2);
+  assert.equal(events.length, 3);
   assert.equal(height?.kind, "observation");
   assert.equal(height?.fields?.value, 183);
   assert.equal(height?.fields?.unit, "cm");
   assert.equal(height?.title, "Junction height");
   assert.equal(height?.externalRef?.resourceType, "junction-apple-health-kit-profile");
   assert.equal(height?.externalRef?.facet, "height");
+  assert.equal(gender?.kind, "measurement");
+  assert.deepEqual(genderMeasurement, {
+    metric: "gender",
+    value: 1,
+    unit: "recording",
+    qualifiers: { gender: "other" },
+  });
+  assert.equal(gender?.externalRef?.facet, "gender");
+  assert.equal(gender?.externalRef?.resourceId, height?.externalRef?.resourceId);
+  assert.equal(gender?.dataOrigin?.sourceProviderSlug, "apple-health-kit");
   assert.equal(
     demographics?.note,
     "Birth date: 1990-05-14. Biological sex: female. Wheelchair use: yes.",
   );
+  assert.equal(demographics?.note?.includes("Gender"), false);
   assert.equal(demographics?.title, "Junction profile");
   assert.equal(demographics?.externalRef?.facet, "profile-demographics");
   assert.equal(demographics?.externalRef?.resourceId, height?.externalRef?.resourceId);
@@ -5772,15 +6043,167 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   // normalized events carry the structured fields.
   const profileArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-profile");
   assertJsonOmits(JSON.stringify(profileArtifact?.content), ["1990-05-14", "183"]);
+  assert.deepEqual(profileArtifact?.content, {
+    gender: "other",
+    sourceProviderSlug: "apple-health-kit",
+    sourceType: "phone",
+    stableResourceId: height?.externalRef?.resourceId,
+    updatedAt: "2026-04-20T09:00:00.000Z",
+  });
 
-  // An "unknown" sex enum value carries no information and stays raw-only.
+  // An "unknown" sex enum value carries no biological-sex information, while
+  // Junction gender remains a separate queryable categorical fact even when
+  // the provider's enum is explicitly unknown.
   const unknownSexPayload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
-      profile: { id: "profile-2", sex: "unknown", source: { provider: "oura", type: "ring" } },
+      profile: {
+        id: "profile-2",
+        sex: "unknown",
+        gender: "unknown",
+        updated_at: "2026-04-20T09:00:00Z",
+        source: { provider: "oura", type: "ring" },
+      },
     },
   });
-  assert.equal(unknownSexPayload.events?.length ?? 0, 0);
+  const unknownGenderEvent = unknownSexPayload.events?.[0];
+  const unknownGenderMeasurement = (
+    unknownGenderEvent?.fields?.measurements as Array<Record<string, unknown>> | undefined
+  )?.[0];
+  assert.equal(unknownSexPayload.events?.length ?? 0, 1);
+  assert.equal(unknownGenderEvent?.title, "Junction gender");
+  assert.deepEqual(unknownGenderMeasurement?.qualifiers, { gender: "unknown" });
+  assertEventRawArtifactRolesExist(unknownSexPayload);
+});
+
+test("Junction profile gender is bounded and never substituted for biological sex", () => {
+  const oversizedGender = `gender-${"x".repeat(120)}`;
+  const snapshot = {
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      profile: {
+        gender: oversizedGender,
+        source_device_id: "profile-source-instance-proof",
+        updated_at: "2026-04-20T09:00:00Z",
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  };
+  const payload = normalizeJunctionSnapshot(snapshot);
+  const genderEvent = payload.events?.[0];
+  const genderMeasurement = (
+    genderEvent?.fields?.measurements as Array<Record<string, unknown>> | undefined
+  )?.[0];
+  const qualifiers = genderMeasurement?.qualifiers as Record<string, unknown> | undefined;
+
+  assert.equal(payload.events?.length, 1);
+  assert.equal(genderEvent?.kind, "measurement");
+  assert.equal(genderEvent?.externalRef?.facet, "gender");
+  assert.equal(qualifiers?.gender, oversizedGender.slice(0, 80));
+  assert.equal(typeof genderEvent?.note, "undefined");
+  assert.equal(genderEvent?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.match(genderEvent?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+  assert.equal(genderEvent?.dataOrigin?.observedAtRaw, "2026-04-20T09:00:00.000Z");
+  assert.equal(genderEvent?.legacyExternalRefs?.length, 1);
+  assert.notEqual(
+    genderEvent?.legacyExternalRefs?.[0]?.resourceId,
+    genderEvent?.externalRef?.resourceId,
+  );
+  assertEventRawArtifactRolesExist(payload);
+  const genderArtifact = payload.evidenceParts?.find(
+    (artifact) => artifact.role === "junction-summary-profile",
+  );
+  assert.deepEqual(genderArtifact?.content, {
+    gender: oversizedGender.slice(0, 80),
+    sourceProviderSlug: "oura",
+    sourceInstanceId: genderEvent?.dataOrigin?.sourceInstanceId,
+    sourceType: "ring",
+    stableResourceId: genderEvent?.externalRef?.resourceId,
+    updatedAt: "2026-04-20T09:00:00.000Z",
+  });
+
+  const replayPayload = normalizeJunctionSnapshot({
+    summaries: { profile: genderArtifact?.content },
+    importedAt: "2026-05-22T12:00:00.000Z",
+  });
+  assert.deepEqual(replayPayload.events?.[0]?.externalRef, genderEvent?.externalRef);
+  assert.equal(replayPayload.events?.[0]?.occurredAt, genderEvent?.occurredAt);
+  assert.deepEqual(replayPayload.events?.[0]?.dataOrigin, genderEvent?.dataOrigin);
+  assert.equal(replayPayload.events?.[0]?.legacyExternalRefs, undefined);
+  const replayArtifact = replayPayload.evidenceParts?.find(
+    (artifact) => artifact.role === "junction-summary-profile",
+  );
+  const secondReplayPayload = normalizeJunctionSnapshot({
+    summaries: { profile: replayArtifact?.content },
+    importedAt: "2026-06-22T12:00:00.000Z",
+  });
+  assert.deepEqual(replayArtifact?.content, genderArtifact?.content);
+  assert.deepEqual(secondReplayPayload.events?.[0]?.externalRef, genderEvent?.externalRef);
+  assert.equal(secondReplayPayload.events?.[0]?.occurredAt, genderEvent?.occurredAt);
+  assert.deepEqual(secondReplayPayload.events?.[0]?.dataOrigin, genderEvent?.dataOrigin);
+});
+
+test("Junction profile identity canonicalizes timestamp spellings without changing explicit ids", () => {
+  const normalizeProfile = (updatedAt: string, id?: string) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      profile: {
+        ...(id ? { id } : {}),
+        gender: "other",
+        updated_at: updatedAt,
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  }).events?.[0];
+  const equivalentTimestamps = [
+    "2026-04-20T09:00:00Z",
+    "2026-04-20T09:00:00.000Z",
+    "2026-04-20T04:00:00-05:00",
+  ];
+  const noIdEvents = equivalentTimestamps.map((updatedAt) => normalizeProfile(updatedAt));
+  const explicitIdEvents = equivalentTimestamps.map((updatedAt) =>
+    normalizeProfile(updatedAt, "profile-stable-id")
+  );
+
+  assert.equal(new Set(noIdEvents.map((event) => event?.externalRef?.resourceId)).size, 1);
+  assert.equal(new Set(explicitIdEvents.map((event) => event?.externalRef?.resourceId)).size, 1);
+  assert.equal(explicitIdEvents.every((event) => event?.legacyExternalRefs === undefined), true);
+  assert.deepEqual(
+    noIdEvents.map((event) => event?.dataOrigin?.observedAtRaw),
+    equivalentTimestamps.map(() => "2026-04-20T09:00:00.000Z"),
+  );
+});
+
+test("Junction no-id profile facets claim the pre-normalized timestamp identity", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      profile: {
+        birth_date: "1990-05-14",
+        gender: "other",
+        height: 181,
+        sex: "female",
+        updated_at: "2026-04-20T09:00:00Z",
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  });
+  const events = payload.events ?? [];
+
+  assert.equal(events.length, 3);
+  assert.deepEqual(
+    events.map((event) => event.externalRef?.facet).sort(),
+    ["gender", "height", "profile-demographics"],
+  );
+  assert.equal(events.every((event) => event.legacyExternalRefs?.length === 1), true);
+  assert.equal(
+    new Set(events.map((event) => event.legacyExternalRefs?.[0]?.resourceId)).size,
+    1,
+  );
+  assert.equal(events.every((event) =>
+    event.legacyExternalRefs?.[0]?.resourceId !== event.externalRef?.resourceId
+    && event.legacyExternalRefs?.[0]?.facet === event.externalRef?.facet
+  ), true);
 });
 
 test("Junction oversized menstrual deviation strings land with capped facet and qualifier", () => {
@@ -9431,6 +9854,7 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
           light: 12600,
           awake: 1800,
           time_in_bed: 30000,
+          latency: 600,
           efficiency: 0.97,
           sleep_consistency: 91,
           sleep_performance: 88,
@@ -9466,6 +9890,7 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
   assert.equal(metricValue("sleep-light-minutes"), 210);
   assert.equal(metricValue("sleep-awake-minutes"), 30);
   assert.equal(metricValue("time-in-bed-minutes"), 500);
+  assert.equal(metricValue("sleep-latency-minutes"), 10);
   assert.equal(metricValue("sleep-efficiency"), 97);
   assert.equal(metricValue("sleep-consistency"), 91);
   assert.equal(metricValue("sleep-performance"), 88);
@@ -9482,6 +9907,46 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
   assert.ok(observations
     .filter((event) => typeof event.fields?.metric === "string" && stageMetricNames.has(event.fields.metric))
     .every((event) => event.externalRef?.resourceType === "junction-oura-sleep"));
+});
+
+test("Junction sleep latency only bypasses seconds conversion for minute-named fields", () => {
+  const secondsPayload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "sleep-latency-seconds",
+        date: "2026-05-20T08:00:00+00:00",
+        sleep_latency: 900,
+        unit: "minutes",
+      }],
+    },
+  });
+  const minutesPayload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "sleep-latency-minutes",
+        date: "2026-05-20T08:00:00+00:00",
+        latency_minutes: 15,
+        unit: "seconds",
+      }],
+    },
+  });
+  const latencyObservation = (payload: ReturnType<typeof normalizeJunctionSnapshot>) =>
+    payload.events?.find((event) => event.fields?.metric === "sleep-latency-minutes");
+
+  for (const payload of [secondsPayload, minutesPayload]) {
+    const observation = latencyObservation(payload);
+    assert.equal(observation?.fields?.value, 15);
+    assert.equal(observation?.fields?.unit, "minutes");
+    assert.equal(observation?.externalRef?.facet, "sleep-latency-minutes");
+    assert.equal(observation?.externalRef?.resourceType, "junction-garmin-sleep");
+    assert.equal(observation?.dataOrigin?.aggregatorProvider, "junction");
+    assert.equal(observation?.dataOrigin?.sourceProviderSlug, "garmin");
+    assert.deepEqual(observation?.evidenceRoles, ["junction-summary-sleep"]);
+  }
 });
 
 test("Junction normalizer maps documented activity and body summary scalar fields", () => {
@@ -9506,7 +9971,10 @@ test("Junction normalizer maps documented activity and body summary scalar field
         day_strain: 10.4,
         workout_strain: 8.8,
         heart_rate: {
+          avg_bpm: 76,
+          avg_walking_bpm: 101,
           max_bpm: 148,
+          min_bpm: 44,
           resting_bpm: 52,
         },
         high: 5,
@@ -9542,6 +10010,9 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(activityMinutes?.fields?.value, 78);
   assert.equal(activityMinutes?.fields?.unit, "minutes");
   assert.equal(activityMinutes?.externalRef?.facet, "activity-minutes");
+  assert.equal(metricValue("low-activity-minutes"), 60);
+  assert.equal(metricValue("medium-activity-minutes"), 13);
+  assert.equal(metricValue("high-activity-minutes"), 5);
   assert.equal(metricValue("daily-steps"), 9400);
   assert.equal(metricValue("active-calories"), 640);
   assert.equal(metricValue("total-calories"), 2400);
@@ -9553,8 +10024,45 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("percent-recorded"), 95);
   assert.equal(metricValue("day-strain"), 10.4);
   assert.equal(metricValue("workout-strain"), 8.8);
+  assert.equal(metricValue("average-heart-rate"), 76);
+  assert.equal(metricValue("walking-average-heart-rate"), 101);
+  assert.equal(metricValue("lowest-heart-rate"), 44);
   assert.equal(metricValue("max-heart-rate"), 148);
   assert.equal(metricValue("resting-heart-rate"), 52);
+
+  const activityFidelityMetrics = [
+    "activity-minutes",
+    "low-activity-minutes",
+    "medium-activity-minutes",
+    "high-activity-minutes",
+    "average-heart-rate",
+    "walking-average-heart-rate",
+    "lowest-heart-rate",
+  ];
+  const activityFidelityObservations = activityFidelityMetrics.map((metric) =>
+    observations.find((event) => event.fields?.metric === metric)
+  );
+  assert.equal(activityFidelityObservations.every((event) => event !== undefined), true);
+  assert.deepEqual(
+    activityFidelityObservations.map((event) => event?.externalRef?.facet),
+    activityFidelityMetrics,
+  );
+  const activityFidelityResourceIds = activityFidelityObservations.map(
+    (event) => event?.externalRef?.resourceId,
+  );
+  assert.equal(
+    activityFidelityResourceIds.every((resourceId) => typeof resourceId === "string"),
+    true,
+  );
+  assert.equal(new Set(activityFidelityResourceIds).size, 1);
+  assert.ok(activityFidelityObservations.every((event) =>
+    event?.externalRef?.resourceType === "junction-garmin-activity"
+    && event?.dataOrigin?.aggregatorProvider === "junction"
+    && event?.dataOrigin?.sourceProviderSlug === "garmin"
+    && event?.evidenceRoles?.length === 1
+    && event?.evidenceRoles?.[0] === "junction-summary-activity"
+  ));
+
   assert.equal(metricValue("weight"), 80);
   assert.equal(metricValue("bmi"), 22.3);
   assert.equal(metricValue("body-fat-percentage"), 30);
@@ -9563,6 +10071,80 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("temperature"), 36.7);
   assert.match(JSON.stringify(rawBodyArtifact?.content), /"lean_body_mass_kilogram":40.1/u);
   assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
+});
+
+test("Junction body composition summaries preserve distinct facts, provenance, and replay identity", () => {
+  const snapshot = {
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      body: [{
+        source: {
+          provider: "withings",
+          type: "scale",
+        },
+        id: "body-composition-fidelity",
+        date: "2026-05-20T08:00:00+00:00",
+        unit: "kg",
+        bone_mass_percentage: 4.2,
+        muscle_mass_percentage: 61.8,
+        visceral_fat_index: 7,
+        water_percentage: 54.6,
+        height: 1.82,
+      }],
+    },
+  };
+
+  const first = normalizeJunctionSnapshot(snapshot);
+  const replay = normalizeJunctionSnapshot(snapshot);
+  const expectedMetrics = new Set([
+    "body-water-percentage",
+    "bone-mass-percentage",
+    "muscle-mass-percentage",
+    "visceral-fat-index",
+  ]);
+  const observations = (first.events ?? []).filter(
+    (event) => event.kind === "observation" && expectedMetrics.has(String(event.fields?.metric)),
+  );
+  const replayObservations = (replay.events ?? []).filter(
+    (event) => event.kind === "observation" && expectedMetrics.has(String(event.fields?.metric)),
+  );
+  const evidenceParts = (first.evidenceParts ?? []).filter(
+    (part) => part.role === "junction-summary-body",
+  );
+
+  assert.deepEqual(
+    observations
+      .map((event) => ({
+        facet: event.externalRef?.facet,
+        metric: event.fields?.metric,
+        unit: event.fields?.unit,
+        value: event.fields?.value,
+      }))
+      .sort((left, right) => String(left.metric).localeCompare(String(right.metric))),
+    [
+      { facet: "body-water-percentage", metric: "body-water-percentage", unit: "%", value: 54.6 },
+      { facet: "bone-mass-percentage", metric: "bone-mass-percentage", unit: "%", value: 4.2 },
+      { facet: "muscle-mass-percentage", metric: "muscle-mass-percentage", unit: "%", value: 61.8 },
+      { facet: "visceral-fat-index", metric: "visceral-fat-index", unit: "index", value: 7 },
+    ],
+  );
+  assert.equal(new Set(observations.map((event) => event.externalRef?.resourceId)).size, 1);
+  assert.ok(observations.every((event) => event.externalRef?.system === "junction"));
+  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-withings-body"));
+  assert.ok(observations.every((event) => event.dataOrigin?.aggregatorProvider === "junction"));
+  assert.ok(observations.every((event) => event.dataOrigin?.sourceProviderSlug === "withings"));
+  assert.ok(observations.every((event) => event.dataOrigin?.sourceType === "scale"));
+  assert.ok(observations.every((event) => event.evidenceRoles?.join(",") === "junction-summary-body"));
+  assert.deepEqual(
+    replayObservations.map((event) => event.externalRef),
+    observations.map((event) => event.externalRef),
+  );
+  assert.equal(evidenceParts.length, 1);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"bone_mass_percentage":4.2/u);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"muscle_mass_percentage":61.8/u);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"visceral_fat_index":7/u);
+  assert.match(JSON.stringify(evidenceParts[0]?.content), /"water_percentage":54.6/u);
+  assert.equal(first.events?.some((event) => event.fields?.metric === "height"), false);
 });
 
 test("Junction normalizer rejects incomplete or invalid daily activity minute buckets", () => {
@@ -9576,6 +10158,7 @@ test("Junction normalizer rejects incomplete or invalid daily activity minute bu
     { low: 20, medium: -1, high: 10 },
     { low: 20, medium: 10, high: "Infinity" },
     { low: 1440, medium: 1, high: 0 },
+    { low: 20, medium: 10, high: 1441 },
   ];
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-05-20T12:00:00.000Z",
@@ -9590,6 +10173,12 @@ test("Junction normalizer rejects incomplete or invalid daily activity minute bu
   });
 
   assert.equal(payload.events?.some((event) => event.fields?.metric === "activity-minutes"), false);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "low-activity-minutes").length, 5);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "medium-activity-minutes").length, 4);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "high-activity-minutes").length, 2);
+  assert.equal(payload.events?.some((event) =>
+    event.fields?.metric === "high-activity-minutes" && event.fields.value === 1441
+  ), false);
 });
 
 test("Junction recovery readiness score preserves source-specific semantics", () => {

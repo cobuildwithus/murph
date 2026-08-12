@@ -393,13 +393,14 @@ test("Training checks one first admission and adopts a same-source replacement",
     assert.equal(refresh.mock.calls.length, 1);
     const refreshOptions = refresh.mock.calls[0]?.[0];
     assert.equal(refreshOptions?.background, true);
-    assert.equal(typeof refreshOptions?.requestRuntimeRefreshUntil, "function");
+    const refreshCompletion = refreshOptions?.requestRuntimeRefreshUntil;
+    assert.ok(refreshCompletion);
     assert.equal(
-      refreshOptions?.requestRuntimeRefreshUntil?.(initialClient),
+      Reflect.apply(refreshCompletion, undefined, [initialClient, null]),
       false,
     );
     assert.equal(
-      refreshOptions?.requestRuntimeRefreshUntil?.(replacementClient),
+      Reflect.apply(refreshCompletion, undefined, [replacementClient, null]),
       true,
     );
 
@@ -559,9 +560,14 @@ test("Training requests one runtime-owned refresh and latches a later ordinary a
     assert.equal(refresh.mock.calls.length, 2);
     const refreshOptions = refresh.mock.calls[1]?.[0];
     assert.equal(refreshOptions?.background, true);
-    assert.equal(typeof refreshOptions?.requestRuntimeRefreshUntil, "function");
+    const refreshCompletion = refreshOptions?.requestRuntimeRefreshUntil;
+    assert.ok(refreshCompletion);
     assert.equal(
-      refreshOptions?.requestRuntimeRefreshUntil?.(initialReplacementClient),
+      Reflect.apply(
+        refreshCompletion,
+        undefined,
+        [initialReplacementClient, null],
+      ),
       false,
     );
     await act(async () => {
