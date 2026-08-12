@@ -59,6 +59,17 @@ export const JUNCTION_RESOURCE_INVENTORY = Object.freeze([
 ] as const);
 
 export type JunctionResourceName = (typeof JUNCTION_RESOURCE_INVENTORY)[number];
+
+export const JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES = Object.freeze([
+  "heart_rate_alert",
+  "sleep_apnea_alert",
+  "fall",
+  "forced_expiratory_volume_1",
+  "forced_vital_capacity",
+  "peak_expiratory_flow_rate",
+  "inhaler_usage",
+] as const satisfies readonly JunctionResourceName[]);
+
 export type JunctionResourceCategory = "summary" | "timeseries" | "dedicated_stream";
 export type JunctionResourceFrequency = "very_high" | "high" | "sparse";
 export type JunctionResourceAdmission = "default" | "known" | "opt_in" | "excluded" | "dedicated";

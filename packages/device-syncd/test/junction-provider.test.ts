@@ -570,7 +570,7 @@ test("Junction omitted timeseries config defaults to compact resources only", as
     ),
     true,
   );
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length);
 });
 
 test("Junction known dense programmatic timeseries config falls back to compact daily defaults", async () => {
@@ -667,7 +667,7 @@ test("Junction known dense programmatic timeseries config falls back to compact 
     ),
     true,
   );
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length);
 });
 
 function buildExpectedJunctionDedupeKey(
@@ -9098,7 +9098,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_id, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_name, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.user_id, undefined);
-  assert.equal(importedSnapshots.length, 2);
+  assert.equal(importedSnapshots.length, 3);
   assert.match(JSON.stringify(importedSnapshots), /"provider":"junction"/u);
   const snapshotJson = JSON.stringify(importedSnapshots);
   assert.doesNotMatch(snapshotJson, /provider-connection-oura-ring|device-oura-ring|app-oura-cloud/u);
@@ -9153,6 +9153,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.deepEqual(
     timeseriesSnapshots.map((snapshot) => [snapshot.windowStart, snapshot.windowEnd]),
     [
+      ["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z"],
       ["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z"],
     ],
   );
@@ -9717,7 +9718,7 @@ test("Junction polling skips optional unavailable resource collections", async (
   assert.deepEqual(summarySnapshot.timeseries, {});
   assert.deepEqual(timeseriesSnapshot.summaries, {});
   assert.equal(timeseriesSnapshot.timeseries?.blood_oxygen?.length, 1);
-  assert.deepEqual(timeseriesSnapshot.timeseries?.stress_level, []);
+  assert.equal(timeseriesSnapshot.timeseries?.stress_level, undefined);
   assert.deepEqual(
     warnings.map((warning) => ({
       accountId: warning.accountId,

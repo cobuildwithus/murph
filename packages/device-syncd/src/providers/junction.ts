@@ -8,6 +8,7 @@ import {
   JUNCTION_DEFAULT_TIMESERIES_HISTORY_DAYS,
   JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
   JUNCTION_KNOWN_WEBHOOK_RESOURCES,
+  JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES,
   JUNCTION_TIMESERIES_RESOURCES,
   parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
@@ -337,6 +338,14 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = new Map(
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
 );
+const JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCE_SET = new Set<string>(
+  JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES,
+);
+// The importer applies this after validation and stable-identity deduplication.
+// Keeping the remaining budget in the existing daily invocation makes replay
+// consume the same deterministic configured-resource prefix without persisting
+// another progress owner or admitting full timeseries payloads.
+const JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_DAY = 100;
 const JUNCTION_MAX_EXTENDED_HISTORY_SOURCES_PER_RESOURCE = JUNCTION_CONNECT_SOURCE_TARGETS.length;
 const JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE = 8;
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
@@ -2951,7 +2960,13 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug?: string | null,
   ): Promise<JunctionTimeseriesImportResult> {
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
+      let remainingSparseClinicalReadings = JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_DAY;
       for (const resource of resources ?? timeseriesResources) {
+        const sparseClinicalResource =
+          JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCE_SET.has(resource);
+        if (sparseClinicalResource && remainingSparseClinicalReadings === 0) {
+          continue;
+        }
         if (context.shouldYield?.()) {
           return {
             yieldedAt: window.windowStart,
@@ -2976,7 +2991,7 @@ export function createJunctionDeviceSyncProvider(
           sourceProviders,
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-          await context.importSnapshot({
+          const receipt = await context.importSnapshot({
             provider: "junction",
             accountId: buildJunctionImportAccountId(context.account.externalAccountId),
             connectionId: context.account.id,
@@ -2986,7 +3001,21 @@ export function createJunctionDeviceSyncProvider(
             connections: preparedImport.connections,
             summaries: {},
             timeseries: preparedImport.snapshots,
+            ...(sparseClinicalResource
+              ? { sparseClinicalReadingLimit: remainingSparseClinicalReadings }
+              : {}),
           });
+          if (sparseClinicalResource) {
+            const admittedReadingCount = readProviderSnapshotCanonicalEventCount(receipt);
+            if (admittedReadingCount > remainingSparseClinicalReadings) {
+              throw deviceSyncError({
+                code: "JUNCTION_SPARSE_CLINICAL_IMPORT_LIMIT_EXCEEDED",
+                message: "Junction sparse clinical import exceeded its daily admission limit.",
+                retryable: false,
+              });
+            }
+            remainingSparseClinicalReadings -= admittedReadingCount;
+          }
         }
       }
     }
