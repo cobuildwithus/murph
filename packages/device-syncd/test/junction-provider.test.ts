@@ -3026,6 +3026,9 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse({
         groups: {
           garmin: [{
@@ -3443,6 +3446,9 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse({
         groups: {
           garmin: [{
@@ -7127,6 +7133,71 @@ test("Junction reconcile keeps summaries current while compact timeseries stays 
   );
 });
 
+test("Junction date-only imports retain complete offset calendar days across UTC boundaries", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/glucose/grouped") {
+      const requestedDate = url.searchParams.get("start_date");
+      const records = [
+        { id: "day-1-early", timestamp: "2026-04-01T00:30:00-04:00", value: 5 },
+        { id: "day-1-late", timestamp: "2026-04-01T23:30:00-04:00", value: 6 },
+        { id: "day-2-early", timestamp: "2026-04-02T00:30:00-04:00", value: 7 },
+        { id: "day-2-late", timestamp: "2026-04-02T23:30:00-04:00", value: 8 },
+      ];
+      return createJsonResponse({
+        groups: {
+          dexcom: [{
+            data: records.filter((record) => record.timestamp.startsWith(requestedDate ?? "")),
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: ["glucose"],
+  });
+  const importedSnapshots: unknown[] = [];
+  const run = () => executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      now: "2026-04-03T12:00:00.000Z",
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  await run();
+  await run();
+
+  const importedDays = importedSnapshots.flatMap((snapshot) => {
+    const records = (snapshot as { timeseries?: Record<string, unknown[]> }).timeseries?.glucose;
+    return records ? [records.map((record) =>
+      (record as { timestamp?: string }).timestamp?.slice(0, 10)
+    )] : [];
+  });
+  assert.deepEqual(importedDays, [
+    ["2026-04-01", "2026-04-01"],
+    ["2026-04-02", "2026-04-02"],
+    ["2026-04-01", "2026-04-01"],
+    ["2026-04-02", "2026-04-02"],
+  ]);
+  assert.equal(Date.parse("2026-04-01T23:30:00-04:00") >= Date.parse("2026-04-02T00:00:00Z"), true);
+});
+
 test("Junction reconcile keeps same-time Oura notes with different tags", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
@@ -7143,6 +7214,7 @@ test("Junction reconcile keeps same-time Oura notes with different tags", async 
     }
     if (url.pathname === "/v2/timeseries/junction-user-1/note/grouped") {
       const first = {
+        recordId: "shared-note-record",
         start: "2026-04-02T18:05:00.000Z",
         end: "2026-04-02T18:10:00.000Z",
         tags: ["sauna"],
@@ -7192,6 +7264,69 @@ test("Junction reconcile keeps same-time Oura notes with different tags", async 
     noteRecords.map((record) => (record as { tags?: string[] }).tags).sort(),
     [["late meal"], ["sauna"]],
   );
+});
+
+test("Junction keeps same-time blood-pressure values when a fidelity-only id alias is shared", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/blood_pressure/grouped") {
+      return createJsonResponse({
+        groups: {
+          omron: [{
+            data: [
+              {
+                recordId: "shared-blood-pressure-record",
+                timestamp: "2026-04-02T18:05:00.000Z",
+                systolic: 120,
+                diastolic: 80,
+              },
+              {
+                recordId: "shared-blood-pressure-record",
+                timestamp: "2026-04-02T18:05:00.000Z",
+                systolic: 130,
+                diastolic: 85,
+              },
+            ],
+            source: { provider: "omron", type: "cuff" },
+          }],
+        },
+      });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: ["blood_pressure"],
+  });
+  const importedSnapshots: unknown[] = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      now: "2026-04-03T12:00:00.000Z",
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const readings = importedSnapshots.flatMap((snapshot) =>
+    (snapshot as { timeseries?: Record<string, unknown[]> }).timeseries?.blood_pressure ?? []
+  ) as Array<{ diastolic?: number; systolic?: number }>;
+  assert.deepEqual(readings.map((reading) => [reading.systolic, reading.diastolic]), [
+    [120, 80],
+    [130, 85],
+  ]);
 });
 
 test("Junction reconcile keeps distinct same-time fidelity records while deduplicating exact repeats", async () => {
@@ -9096,6 +9231,9 @@ test("Junction polling updates source projection and imports bounded summary/tim
 
     const timeseriesResource = new URL(url).pathname.match(/\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
     if (timeseriesResource && timeseriesResource in groupedTimeseriesPayloads) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse(groupedTimeseriesPayloads[timeseriesResource]);
     }
 

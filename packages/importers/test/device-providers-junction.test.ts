@@ -3849,6 +3849,8 @@ test("Junction sparse interval revisions keep the daily sum aligned with the tim
   assert.equal(dailyArtifact.sampleCount, 1);
   assert.equal(dailyArtifact.meanValue, 300);
   assert.equal(findJunctionIntervalReadingArtifacts(payload, "water").length, 1);
+  assert.equal(timed?.externalRef?.version, "2026-04-22T11:00:00.000Z");
+  assert.equal(timed?.externalRefUpdatePolicy, undefined);
 });
 
 test("Junction sparse intervals keep start-day ownership across local midnight", () => {
@@ -3927,11 +3929,160 @@ test("Junction dense stable-ID revisions select one newest reading per payload",
     Record<string, unknown>;
   const featureArtifact = findJunctionTimeseriesFeatureArtifacts(payload, "glucose")[0]?.content as
     Record<string, unknown>;
+  const featureEvent = payload.events?.find((event) => event.externalRef?.facet === "features");
 
   assert.equal(daily?.fields?.value, 126.1274);
   assert.equal(dailyArtifact.sampleCount, 1);
   assert.equal(dailyArtifact.meanValue, 126.1274);
   assert.equal(featureArtifact.sampleCount, 1);
+  assert.equal(featureEvent?.externalRef?.version, "2026-04-22T10:00:00.000Z");
+  assert.equal(featureEvent?.externalRefUpdatePolicy, undefined);
+});
+
+test("Junction stable-ID fidelity conflicts without an authoritative revision fail closed", () => {
+  const cases = [
+    {
+      resource: "glucose",
+      records: [
+        { id: "shared-reading", timestamp: "2026-04-22T08:00:00Z", unit: "mmol/L", value: 5 },
+        { id: "shared-reading", timestamp: "2026-04-22T08:00:00Z", unit: "mmol/L", value: 7 },
+      ],
+    },
+    {
+      resource: "water",
+      records: [
+        {
+          id: "shared-reading",
+          start: "2026-04-22T08:00:00Z",
+          end: "2026-04-22T08:01:00Z",
+          unit: "mL",
+          value: 250,
+        },
+        {
+          id: "shared-reading",
+          start: "2026-04-22T08:00:00Z",
+          end: "2026-04-22T08:02:00Z",
+          unit: "mL",
+          value: 300,
+        },
+      ],
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    for (const records of [testCase.records, [...testCase.records].reverse()]) {
+      assert.throws(
+        () => normalizeJunctionSnapshot({
+          importedAt: "2026-04-23T12:00:00.000Z",
+          timeseries: {
+            [testCase.resource]: {
+              groups: {
+                garmin: [{
+                  data: records,
+                  source: { provider: "garmin", type: "watch" },
+                }],
+              },
+            },
+          },
+        }),
+        new RegExp(
+          `Junction ${testCase.resource} stable-id records with different bodies require distinct explicit provider revisions`,
+          "u",
+        ),
+      );
+    }
+  }
+});
+
+test("Junction stable-ID fidelity conflicts at one provider revision fail closed", () => {
+  assert.throws(
+    () => normalizeJunctionSnapshot({
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: [
+                {
+                  id: "shared-reading",
+                  timestamp: "2026-04-22T08:00:00Z",
+                  updatedAt: "2026-04-22T10:00:00Z",
+                  unit: "mmol/L",
+                  value: 5,
+                },
+                {
+                  id: "shared-reading",
+                  timestamp: "2026-04-22T08:00:00Z",
+                  updatedAt: "2026-04-22T10:00:00Z",
+                  unit: "mmol/L",
+                  value: 7,
+                },
+              ],
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    }),
+    /different bodies require distinct explicit provider revisions/u,
+  );
+});
+
+test("Junction unversioned fidelity corrections cannot overwrite canonical core state", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-unversioned-fidelity-correction");
+  const inputFor = (value: number) => ({
+    provider: "junction" as const,
+    vaultRoot,
+    snapshot: {
+      accountId: "junction-account-unversioned-fidelity",
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: [
+                {
+                  id: "glucose-reading-1",
+                  timestamp: "2026-04-22T08:00:00Z",
+                  unit: "mmol/L",
+                  value,
+                },
+                {
+                  id: "glucose-reading-2",
+                  timestamp: "2026-04-22T08:05:00Z",
+                  unit: "mmol/L",
+                  value: 10,
+                },
+              ],
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      vaultRoot,
+    });
+    await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      inputFor(5),
+      { corePort: coreRuntime },
+    );
+    await assert.rejects(
+      () => importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        inputFor(7),
+        { corePort: coreRuntime },
+      ),
+      (error: unknown) =>
+        coreRuntime.isVaultError(error)
+        && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
 });
 
 test("Junction fidelity value aliases preserve temporal shape through normalization", () => {

@@ -87,6 +87,7 @@ import {
   isJunctionDenseFidelityResource,
   isJunctionSparseIntervalResource,
   type JunctionDenseFidelityResource,
+  type JunctionFidelityResource,
   type JunctionSparseIntervalResource,
   type JunctionTimeseriesFidelityPoint,
 } from "./junction-timeseries-fidelity.ts";
@@ -816,6 +817,7 @@ interface JunctionDailyTimeseriesAggregate {
   duplicateSampleCount: number;
   entry: PlainObject;
   fidelitySamples: JunctionTimeseriesFidelityPoint[];
+  fidelitySourceVersionComplete: boolean;
   firstSampleAt: string;
   lastRecordedAt?: string;
   lastSampleAt: string;
@@ -825,13 +827,14 @@ interface JunctionDailyTimeseriesAggregate {
   evidencePartRole: string;
   resourceContext: ResourceContext;
   sampleCount: number;
+  sourceVersion?: string;
   sum: number;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   timeZone?: string;
 }
 
 interface JunctionSparseIntervalReading {
-  contentVersion: string;
+  contentFingerprint: string;
   dayKey: string;
   durationSeconds: number;
   endAt: string;
@@ -841,6 +844,8 @@ interface JunctionSparseIntervalReading {
   recordedAt?: string;
   resourceContext: ResourceContext;
   startAt: string;
+  sourceVersion?: string;
+  stableIdentity: boolean;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   timeZone?: string;
   value: number;
@@ -1645,9 +1650,9 @@ function normalizeTimeseries(
 
     const descriptor = JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource);
     if (descriptor) {
-      let selectedSparseRecordKeys: ReadonlySet<string> | undefined;
+      let selectedSparseRecords: ReadonlyMap<string, JunctionSparseIntervalReading> | undefined;
       if (isJunctionSparseIntervalResource(resource)) {
-        selectedSparseRecordKeys = pushJunctionSparseIntervalReadings(
+        selectedSparseRecords = pushJunctionSparseIntervalReadings(
           payload,
           resource,
           slugify(resource, "timeseries"),
@@ -1661,7 +1666,7 @@ function normalizeTimeseries(
         slugify(resource, "timeseries"),
         context,
         descriptor,
-        selectedSparseRecordKeys,
+        selectedSparseRecords,
       );
     }
   }
@@ -1781,7 +1786,7 @@ function pushJunctionDailyTimeseriesObservations(
   resourceSlug: string,
   context: NormalizationContext,
   descriptor: JunctionDailyTimeseriesDescriptor,
-  selectedSparseRecordKeys?: ReadonlySet<string>,
+  selectedSparseRecords?: ReadonlyMap<string, JunctionSparseIntervalReading>,
 ): void {
   for (const aggregate of buildJunctionDailyTimeseriesAggregates({
     payload,
@@ -1790,7 +1795,7 @@ function pushJunctionDailyTimeseriesObservations(
     context,
     valuePaths: descriptor.valuePaths,
     normalizeValue: descriptor.normalizeValue,
-    selectedSparseRecordKeys,
+    selectedSparseRecords,
   })) {
     for (const observation of descriptor.observations) {
       pushJunctionDailyTimeseriesObservation(context, aggregate, {
@@ -1876,6 +1881,49 @@ function buildJunctionDenseFidelityStableIdentity(
     : undefined;
 }
 
+interface JunctionFidelityRecordSelection {
+  contentFingerprint: string;
+  recordKey: string;
+  sourceVersion?: string;
+}
+
+function resolveJunctionExplicitSourceVersion(
+  entry: PlainObject,
+  sourceProviderSlug: string,
+): string | undefined {
+  return resolveSafeTimestamp(
+    firstValueFromPaths(entry, ["recordedAt", "recorded_at", "updatedAt", "updated_at"]),
+    sourceProviderSlug,
+  );
+}
+
+function selectJunctionAuthoritativeRevision<T extends {
+  contentFingerprint: string;
+  sourceVersion?: string;
+}>(
+  resource: JunctionFidelityResource,
+  existing: T,
+  candidate: T,
+): T {
+  if (existing.contentFingerprint === candidate.contentFingerprint) {
+    if (!existing.sourceVersion) return candidate.sourceVersion ? candidate : existing;
+    if (!candidate.sourceVersion) return existing;
+    return candidate.sourceVersion > existing.sourceVersion ? candidate : existing;
+  }
+
+  if (
+    !existing.sourceVersion
+    || !candidate.sourceVersion
+    || existing.sourceVersion === candidate.sourceVersion
+  ) {
+    throw new RangeError(
+      `Junction ${resource} stable-id records with different bodies require distinct explicit provider revisions.`,
+    );
+  }
+
+  return candidate.sourceVersion > existing.sourceVersion ? candidate : existing;
+}
+
 function selectJunctionDenseFidelityRecordKeys(input: {
   context: NormalizationContext;
   entries: readonly JunctionResourceEntry[];
@@ -1883,8 +1931,8 @@ function selectJunctionDenseFidelityRecordKeys(input: {
   resource: JunctionDenseFidelityResource;
   resourceSlug: string;
   valuePaths: readonly string[];
-}): ReadonlyMap<string, string> {
-  const selected = new Map<string, { recordKey: string; recordedAt: string }>();
+}): ReadonlyMap<string, JunctionFidelityRecordSelection> {
+  const selected = new Map<string, JunctionFidelityRecordSelection>();
   const fallbackArtifactRole = `junction-timeseries-daily-${input.resourceSlug}`;
 
   for (const [index, { entry, originFallback }] of input.entries.entries()) {
@@ -1925,26 +1973,24 @@ function selectJunctionDenseFidelityRecordKeys(input: {
       resourceContext,
       timestamp,
     });
-    const candidate = {
+    const candidate: JunctionFidelityRecordSelection = {
+      contentFingerprint: recordKey,
       recordKey,
-      recordedAt: timestamp.recordedAt ?? sampleAt,
+      sourceVersion: resolveJunctionExplicitSourceVersion(
+        entry,
+        resourceContext.sourceProviderSlug,
+      ),
     };
     const existing = selected.get(stableIdentity);
-    if (
-      !existing
-      || existing.recordedAt.localeCompare(candidate.recordedAt) < 0
-      || (
-        existing.recordedAt === candidate.recordedAt
-        && existing.recordKey.localeCompare(candidate.recordKey) < 0
-      )
-    ) {
-      selected.set(stableIdentity, candidate);
-    }
+    selected.set(
+      stableIdentity,
+      existing
+        ? selectJunctionAuthoritativeRevision(input.resource, existing, candidate)
+        : candidate,
+    );
   }
 
-  return new Map(
-    [...selected].map(([stableIdentity, selection]) => [stableIdentity, selection.recordKey]),
-  );
+  return selected;
 }
 
 function buildJunctionTimeseriesFidelityPoint(input: {
@@ -2085,7 +2131,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   resource: string;
   resourceSlug: string;
   valuePaths: readonly string[];
-  selectedSparseRecordKeys?: ReadonlySet<string>;
+  selectedSparseRecords?: ReadonlyMap<string, JunctionSparseIntervalReading>;
 }): JunctionDailyTimeseriesAggregate[] {
   const evidencePartRole = `junction-timeseries-daily-${input.resourceSlug}`;
   const aggregates = new Map<string, JunctionDailyTimeseriesAggregate>();
@@ -2173,18 +2219,24 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const denseStableIdentity = isJunctionDenseFidelityResource(input.resource)
       ? buildJunctionDenseFidelityStableIdentity(input.resource, entry, resourceContext)
       : undefined;
+    const denseSelection = denseStableIdentity
+      ? selectedDenseRecordKeys?.get(denseStableIdentity)
+      : undefined;
     if (
       denseStableIdentity
       && fidelityRecordKey
-      && selectedDenseRecordKeys?.get(denseStableIdentity) !== fidelityRecordKey
+      && denseSelection?.recordKey !== fidelityRecordKey
     ) {
       continue;
     }
+    const sparseSelection = fidelityRecordKey
+      ? input.selectedSparseRecords?.get(fidelityRecordKey)
+      : undefined;
     if (
       isJunctionSparseIntervalResource(input.resource)
       && fidelityRecordKey
-      && input.selectedSparseRecordKeys
-      && !input.selectedSparseRecordKeys.has(fidelityRecordKey)
+      && input.selectedSparseRecords
+      && !sparseSelection
     ) {
       continue;
     }
@@ -2207,6 +2259,10 @@ function buildJunctionDailyTimeseriesAggregates(input: {
           value,
         })
       : undefined;
+    const fidelitySourceVersion = denseSelection?.sourceVersion
+      ?? (sparseSelection?.stableIdentity ? sparseSelection.sourceVersion : undefined);
+    const fidelitySourceVersionComplete = fidelityResource === undefined
+      || fidelitySourceVersion !== undefined;
     const legacyDayKeys = new Set<string>();
     if (legacyDayKey && legacyDayKey !== dayKey) {
       legacyDayKeys.add(legacyDayKey);
@@ -2218,6 +2274,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         duplicateSampleCount: 0,
         entry,
         fidelitySamples: fidelitySample ? [fidelitySample] : [],
+        fidelitySourceVersionComplete,
         firstSampleAt: sampleAt,
         lastRecordedAt: recordedAt,
         lastSampleAt: sampleAt,
@@ -2227,6 +2284,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         evidencePartRole,
         resourceContext,
         sampleCount: 1,
+        sourceVersion: fidelitySourceVersion,
         sum: value,
         timestamp,
         timeZone,
@@ -2244,6 +2302,11 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     if (fidelityResource) {
       assertJunctionTimeseriesSourceDayBound(fidelityResource, existing.sampleCount);
     }
+    existing.fidelitySourceVersionComplete = existing.fidelitySourceVersionComplete
+      && fidelitySourceVersionComplete;
+    existing.sourceVersion = existing.fidelitySourceVersionComplete
+      ? laterOptionalIsoTimestamp(existing.sourceVersion, fidelitySourceVersion)
+      : undefined;
     existing.sum += value;
     if (legacyDayKey && legacyDayKey !== dayKey) {
       existing.legacyDayKeys.add(legacyDayKey);
@@ -2524,6 +2587,8 @@ function pushJunctionTimeseriesFeatureEnvelope(
     dayKey: aggregate.dayKey,
     observedAtRaw: `${aggregate.dayKey}:${resource}:features:${policy.policyVersion}`,
   });
+  const externalRefUpdatePolicy: DeviceEventPayload["externalRefUpdatePolicy"] =
+    aggregate.sourceVersion ? undefined : "immutable";
   context.events.push(stripUndefined({
     kind: "measurement",
     occurredAt: aggregate.lastSampleAt,
@@ -2537,9 +2602,10 @@ function pushJunctionTimeseriesFeatureEnvelope(
       "junction",
       aggregate.resourceContext.externalRefResourceType,
       resourceId,
-      undefined,
+      aggregate.sourceVersion,
       "features",
     ),
+    externalRefUpdatePolicy,
     dataOrigin: buildDataOrigin(
       aggregate.entry,
       aggregate.resourceContext,
@@ -2565,7 +2631,7 @@ function pushJunctionSparseIntervalReadings(
   resourceSlug: string,
   context: NormalizationContext,
   descriptor: JunctionDailyTimeseriesDescriptor,
-): ReadonlySet<string> {
+): ReadonlyMap<string, JunctionSparseIntervalReading> {
   const policy = getJunctionSparseIntervalPolicy(resource);
   const entries = timeseriesResourceEntries(payload);
   assertJunctionTimeseriesResponseBound(resource, entries.length);
@@ -2641,7 +2707,7 @@ function pushJunctionSparseIntervalReadings(
           providerValue,
           providerUnit ?? "",
         ]);
-    const contentVersion = shortHash([
+    const contentFingerprint = shortHash([
       policy.policyVersion,
       startAt,
       endAt,
@@ -2652,7 +2718,7 @@ function pushJunctionSparseIntervalReadings(
     ]);
     const durationSeconds = Number(((Date.parse(endAt) - Date.parse(startAt)) / 1000).toFixed(3));
     const candidate: JunctionSparseIntervalReading = {
-      contentVersion,
+      contentFingerprint,
       dayKey,
       durationSeconds,
       endAt,
@@ -2671,14 +2737,21 @@ function pushJunctionSparseIntervalReadings(
       recordedAt: timestamp.recordedAt,
       resourceContext,
       startAt,
+      sourceVersion: explicitId
+        ? resolveJunctionExplicitSourceVersion(entry, resourceContext.sourceProviderSlug)
+        : undefined,
+      stableIdentity: explicitId !== undefined,
       timestamp,
       timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
       value,
     };
     const existing = readingsByIdentity.get(externalIdentityHash);
-    if (!existing || compareJunctionSparseIntervalReadings(existing, candidate) < 0) {
-      readingsByIdentity.set(externalIdentityHash, candidate);
-    }
+    readingsByIdentity.set(
+      externalIdentityHash,
+      existing && explicitId
+        ? selectJunctionAuthoritativeRevision(resource, existing, candidate)
+        : existing ?? candidate,
+    );
   }
 
   const readings = [...readingsByIdentity.values()].sort(compareJunctionSparseIntervalReadingOrder);
@@ -2695,7 +2768,7 @@ function pushJunctionSparseIntervalReadings(
     sourceDayCounts.set(sourceDayKey, sourceDayCount);
     pushJunctionSparseIntervalReading(context, resource, resourceSlug, reading);
   }
-  return new Set(readings.map((reading) => reading.fidelityRecordKey));
+  return new Map(readings.map((reading) => [reading.fidelityRecordKey, reading]));
 }
 
 function resolveJunctionSparseIntervalTimestamp(
@@ -2720,14 +2793,6 @@ function resolveJunctionSparseIntervalTimestamp(
     : timestamp;
 }
 
-function compareJunctionSparseIntervalReadings(
-  left: JunctionSparseIntervalReading,
-  right: JunctionSparseIntervalReading,
-): number {
-  return (left.recordedAt ?? left.startAt).localeCompare(right.recordedAt ?? right.startAt)
-    || left.contentVersion.localeCompare(right.contentVersion);
-}
-
 function compareJunctionSparseIntervalReadingOrder(
   left: JunctionSparseIntervalReading,
   right: JunctionSparseIntervalReading,
@@ -2746,6 +2811,8 @@ function pushJunctionSparseIntervalReading(
 ): void {
   const policy = getJunctionSparseIntervalPolicy(resource);
   const role = `junction-timeseries-reading-${resourceSlug}:${reading.dayKey}:${reading.externalIdentityHash}`;
+  const externalRefUpdatePolicy: DeviceEventPayload["externalRefUpdatePolicy"] =
+    reading.sourceVersion ? undefined : "immutable";
 
   pushEvidencePart(
     context.evidenceParts,
@@ -2790,9 +2857,10 @@ function pushJunctionSparseIntervalReading(
       "junction",
       reading.resourceContext.externalRefResourceType,
       `${resourceSlug}-${reading.externalIdentityHash}`,
-      reading.contentVersion,
+      reading.sourceVersion,
       "interval",
     ),
+    externalRefUpdatePolicy,
     dataOrigin: buildDataOrigin(
       reading.entry,
       reading.resourceContext,
@@ -5662,12 +5730,13 @@ function makeJunctionExternalRef(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   facet: string,
+  sourceVersion?: string,
 ): DeviceExternalRefPayload {
   return makeProviderExternalRef(
     "junction",
     resourceContext.externalRefResourceType,
     buildStableResourceId(resourceContext, entry, timestamp),
-    junctionCompanionExternalRefVersion(resourceContext, entry),
+    sourceVersion ?? junctionCompanionExternalRefVersion(resourceContext, entry),
     slugify(facet, "value"),
   );
 }

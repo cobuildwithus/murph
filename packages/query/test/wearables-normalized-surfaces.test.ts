@@ -618,10 +618,10 @@ test("Junction timed and derived timeseries facts survive core replay and remain
         groups: {
           dexcom: [{
             data: [
-              { timestamp: "2026-04-22T00:00:00Z", unit: "mmol/L", value: 3.5 },
-              { timestamp: "2026-04-22T00:05:00Z", unit: "mmol/L", value: 7 },
-              { timestamp: "2026-04-22T00:10:00Z", unit: "mmol/L", value: 7 },
-              { timestamp: "2026-04-22T00:15:00Z", unit: "mmol/L", value: 10.5 },
+              { id: "glucose-reading-1", timestamp: "2026-04-22T00:00:00Z", recordedAt: "2026-04-22T07:00:00Z", unit: "mmol/L", value: 3.5 },
+              { id: "glucose-reading-2", timestamp: "2026-04-22T00:05:00Z", recordedAt: "2026-04-22T07:00:00Z", unit: "mmol/L", value: 7 },
+              { id: "glucose-reading-3", timestamp: "2026-04-22T00:10:00Z", recordedAt: "2026-04-22T07:00:00Z", unit: "mmol/L", value: 7 },
+              { id: "glucose-reading-4", timestamp: "2026-04-22T00:15:00Z", recordedAt: "2026-04-22T07:00:00Z", unit: "mmol/L", value: 10.5 },
             ],
             source: { provider: "dexcom", type: "cgm" },
           }],
@@ -631,8 +631,10 @@ test("Junction timed and derived timeseries facts survive core replay and remain
         groups: {
           apple_health_kit: [{
             data: [{
+              id: "caffeine-reading-1",
               start: "2026-04-22T08:15:30-04:00",
               end: "2026-04-22T08:18:00-04:00",
+              recordedAt: "2026-04-22T07:00:00Z",
               unit: "g",
               value: 0.095,
             }],
@@ -744,6 +746,21 @@ test("Junction timed and derived timeseries facts survive core replay and remain
             }],
           },
         },
+        caffeine: {
+          groups: {
+            apple_health_kit: [{
+              data: [{
+                id: "caffeine-reading-1",
+                start: "2026-04-22T08:15:30-04:00",
+                end: "2026-04-22T08:18:00-04:00",
+                recordedAt: "2026-04-23T09:00:00Z",
+                unit: "g",
+                value: 0.12,
+              }],
+              source: { provider: "apple_health_kit", type: "phone" },
+            }],
+          },
+        },
       },
     };
     const correction = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
@@ -758,10 +775,37 @@ test("Junction timed and derived timeseries facts survive core replay and remain
       limit: null,
       metricKey: "glucose-observed-max-rise-rate",
     });
+    const correctedCaffeinePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "caffeine",
+    });
+    const correctedCaffeineInterval = correctedCaffeinePoints.find(
+      (point) => point.source.kind === "measurement",
+    );
 
     assert.equal(correction.applied, true);
     assert.deepEqual(correctedTimeInRangePoints, []);
     assert.deepEqual(correctedRiseRatePoints, []);
+    assert.equal(correctedCaffeineInterval?.value, 120);
+
+    await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      importInput,
+      { corePort: coreRuntime },
+    );
+    const staleReplayTimeInRangePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-time-in-range-percent",
+    });
+    const staleReplayCaffeinePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "caffeine",
+    });
+    const staleReplayCaffeineInterval = staleReplayCaffeinePoints.find(
+      (point) => point.source.kind === "measurement",
+    );
+
+    assert.deepEqual(staleReplayTimeInRangePoints, []);
+    assert.equal(staleReplayCaffeineInterval?.value, 120);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

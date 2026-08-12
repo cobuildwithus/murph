@@ -2635,11 +2635,13 @@ export function createJunctionDeviceSyncProvider(
         }
         const chunkRecords = await client.listTimeseries(request);
         records.push(
-          ...filterJunctionTimeseriesRecordsToWindow(
-            chunkRecords,
-            chunkWindowStart,
-            chunkWindowEnd,
-          ),
+          ...(options.dateQueryFormat === "date"
+            ? chunkRecords
+            : filterJunctionTimeseriesRecordsToWindow(
+                chunkRecords,
+                chunkWindowStart,
+                chunkWindowEnd,
+              )),
         );
       } catch (error) {
         const failure = classifyOptionalJunctionResourceFailure(
@@ -5109,10 +5111,18 @@ function junctionTimeseriesRecordValueIdentity(
     return [];
   }
 
-  // Same stable-id alias list as the importer's reading identity. Fidelity
-  // resources still include their shape/value fields so only exact repeats
-  // collapse before the importer deterministically reconciles same-id revisions.
-  const rowId = [
+  // Preserve the existing blood-pressure and note identity contract. The six
+  // fidelity resources admit the wider alias set used by their importer.
+  const legacyRowId = [
+    "id",
+    "resourceId",
+    "resource_id",
+    "externalId",
+    "external_id",
+  ]
+    .map((key) => normalizeString(entry[key]))
+    .find((value): value is string => Boolean(value));
+  const fidelityRowId = [
     "id",
     "resourceId",
     "resource_id",
@@ -5127,6 +5137,16 @@ function junctionTimeseriesRecordValueIdentity(
   ]
     .map((key) => normalizeString(entry[key]))
     .find((value): value is string => Boolean(value));
+  const rowId = fidelityPointResource || fidelityIntervalResource
+    ? fidelityRowId
+    : legacyRowId;
+  const fidelitySourceRevision = String(
+    entry.recordedAt
+      ?? entry.recorded_at
+      ?? entry.updatedAt
+      ?? entry.updated_at
+      ?? "",
+  );
 
   if (resource === "note") {
     if (rowId) return [rowId];
@@ -5179,6 +5199,7 @@ function junctionTimeseriesRecordValueIdentity(
       String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
       String(intervalValue ?? ""),
       ...timeZoneIdentity,
+      fidelitySourceRevision,
     ];
   }
 
@@ -5214,6 +5235,7 @@ function junctionTimeseriesRecordValueIdentity(
             ?? entry.score) ?? ""),
       String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
       ...timeZoneIdentity,
+      fidelitySourceRevision,
     ];
   }
 

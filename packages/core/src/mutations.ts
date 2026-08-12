@@ -1684,6 +1684,23 @@ function compareIncomingExternalRefVersion(
   return compareIsoTimestampsAscending(incomingVersion, existingVersion);
 }
 
+const JUNCTION_FIDELITY_RESOURCE_TYPE_SUFFIXES = [
+  "-blood-oxygen",
+  "-caffeine",
+  "-glucose",
+  "-mindfulness-minutes",
+  "-stress-level",
+  "-water",
+] as const;
+
+function isJunctionFidelityExternalRef(externalRef: ExternalRef): boolean {
+  return externalRef.system === "junction"
+    && (externalRef.facet === "features" || externalRef.facet === "interval")
+    && JUNCTION_FIDELITY_RESOURCE_TYPE_SUFFIXES.some((suffix) =>
+      externalRef.resourceType.endsWith(suffix)
+    );
+}
+
 // Device-sync content equality ignores per-import identity (id, lifecycle,
 // recordedAt) AND rawRefs, because device imports mint fresh raw-artifact
 // paths on every sync run.
@@ -2803,6 +2820,37 @@ async function reconcileDeviceEventEntriesByExternalRef(
         "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
         "Immutable device event externalRef already exists with different content; nothing was imported.",
       );
+    }
+
+    if (
+      indexedProviderMatch
+      && isJunctionFidelityExternalRef(indexedProviderMatch.indexedExternalRef)
+      && isJunctionFidelityExternalRef(externalRef)
+    ) {
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        indexedProviderMatch.indexedExternalRef,
+        externalRef,
+      );
+      if (sourceVersionComparison === null) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_UNORDERED",
+          "Changed Junction fidelity events require comparable explicit provider revisions; nothing was imported.",
+        );
+      }
+      if (sourceVersionComparison < 0) {
+        skippedDuplicateCount += 1;
+        if (eventSpineRevisionsAreComplete(index, latest.id)) {
+          retainedPreparedIds.add(entry.record.id);
+        }
+        records.push(latest);
+        continue;
+      }
+      if (sourceVersionComparison === 0) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          "Junction fidelity event content conflicts at the same provider revision; nothing was imported.",
+        );
+      }
     }
 
     if (
