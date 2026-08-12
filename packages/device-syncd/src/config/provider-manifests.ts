@@ -176,6 +176,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       timeseriesCursor: stringJobField({ includeInHostedHint: true }),
+      timeseriesPhase: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },

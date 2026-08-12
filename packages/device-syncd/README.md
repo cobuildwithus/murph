@@ -50,6 +50,13 @@ Current providers:
   dense-timeseries fetch window and never persist raw sample arrays or full provider
   snapshots. Opted-in `weight` uses sparse canonical measurements with compact
   per-reading evidence and the existing long summary-history backfill window.
+- Twelve additional sparse Junction timeseries are code-owned opt-ins and remain
+  off by default: BMI, carbohydrates, body fat, FEV1, FVC, heart-rate alerts,
+  inhaler usage, insulin injections, lean body mass, peak expiratory flow,
+  sleep-apnea alerts, and waist circumference. Enabled resources use the same
+  extended-history horizon as summaries, fetched in bounded 30-day windows;
+  dense/default timeseries retain their one-day windows. `fat` remains the
+  public resource name while the client requests Junction's `body_fat` path.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
@@ -190,6 +197,12 @@ against the disconnectable Junction `whoop_v2` source.
 
 The provider lifecycle metadata used here now comes from the shared `@murphai/importers/device-providers/provider-descriptors` surface, so callback paths, default scopes, webhook capabilities, sync windows, metric families, and source-priority hints stay aligned between connector code and snapshot normalization.
 The configured-provider assembly composes a lightweight hosted-runtime config schema from `packages/device-syncd/src/config/serializable-provider-configs.ts` into the full registry in `packages/device-syncd/src/config/provider-manifests.ts`. Serialization fields and secret exclusions therefore have one boot-safe owner, while descriptors, provider-owned jobs, and runtime adapters stay outside the hosted runner's static boot closure. Hosted web and runner startup can read provider config without importing the provider implementation graph.
+Junction timeseries membership, defaults, opt-in admission, history mode, fetch
+width, and storage mode are compile-time projections of
+`packages/contracts/src/junction-resources.ts`; importer and scheduler code add only
+the shape-specific canonicalization and execution they own. An explicit
+`timeseriesResources` list is exact: blocked or unknown names never expand to
+defaults.
 
 Provider request failures emit a shared, metadata-only diagnostic shape. Logs and hosted runtime apply payloads may include endpoint kind, method, auth placement, body/query field names and counts, upstream status, response shape, and a sanitized provider error code/description. They must not include provider tokens, client secrets, auth codes, raw request bodies, raw response bodies, raw provider paths, query values, or provider account identifiers. New provider transports should use the shared provider diagnostics helpers instead of adding provider-specific ad hoc logging.
 

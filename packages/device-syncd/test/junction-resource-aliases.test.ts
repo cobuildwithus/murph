@@ -145,6 +145,18 @@ test("Junction webhooks canonicalize resource aliases before category inference"
     ["daily.data.hypnogram.created", "sleep_cycle", "summary"],
     ["daily.data.calories_active.updated", "calories_active", "timeseries"],
     ["daily.data.distance.updated", "distance", "timeseries"],
+    ["daily.data.body_mass_index.created", "body_mass_index", "timeseries"],
+    ["daily.data.carbohydrates.created", "carbohydrates", "timeseries"],
+    ["daily.data.body_fat.created", "fat", "timeseries"],
+    ["daily.data.forced_expiratory_volume_1.created", "forced_expiratory_volume_1", "timeseries"],
+    ["daily.data.forced_vital_capacity.created", "forced_vital_capacity", "timeseries"],
+    ["daily.data.heart_rate_alert.created", "heart_rate_alert", "timeseries"],
+    ["daily.data.inhaler_usage.created", "inhaler_usage", "timeseries"],
+    ["daily.data.insulin_injection.created", "insulin_injection", "timeseries"],
+    ["daily.data.lean_body_mass.created", "lean_body_mass", "timeseries"],
+    ["daily.data.peak_expiratory_flow_rate.created", "peak_expiratory_flow_rate", "timeseries"],
+    ["daily.data.sleep_apnea_alert.created", "sleep_apnea_alert", "timeseries"],
+    ["daily.data.waist_circumference.created", "waist_circumference", "timeseries"],
   ] as const;
 
   for (const [eventType, resource, resourceCategory] of cases) {
@@ -168,9 +180,11 @@ test("Junction webhooks canonicalize resource aliases before category inference"
       rawBody: webhook.rawBody,
       now: "2026-04-03T00:00:00.000Z",
     });
-    const payload = parsed.jobs[0]?.payload;
+    const webhookJob = parsed.jobs[0];
+    const payload = webhookJob?.payload;
 
     assert.equal(parsed.resourceCategory, resourceCategory);
+    assert.equal(webhookJob?.kind, "resource");
     assert.ok(payload);
     assert.equal(payload.resource, resource);
     assert.equal(payload.resourceCategory, resourceCategory);

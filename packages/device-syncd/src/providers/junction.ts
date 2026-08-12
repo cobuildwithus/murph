@@ -9,8 +9,8 @@ import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   JUNCTION_KNOWN_TIMESERIES_RESOURCES,
-  JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES,
   normalizeJunctionResourceName,
+  resolveJunctionTimeseriesResourcePolicy,
   parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
@@ -160,6 +160,8 @@ export {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 };
+
+type JunctionTimeseriesBackfillPhase = "dense" | "wide";
 
 interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
@@ -323,8 +325,6 @@ const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
 // Sparse readings are cheap enough to backfill across the full summary-history
 // window. Dense timeseries retain the bounded default
 // below, and an explicit timeseriesBackfillDays override still wins.
-const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES =
-  JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES;
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   blood_pressure: {
     metadataKey: JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
@@ -343,7 +343,7 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   { metadataKey: string; version: number }
 >>);
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
-  JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
+  Object.keys(JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES),
 );
 const JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES = new Set<string>([
   "steps",
@@ -383,7 +383,13 @@ export function createJunctionDeviceSyncProvider(
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
   const extendedTimeseriesBackfillDays = config.timeseriesBackfillDays ?? summaryBackfillDays;
   const extendedBackfillTimeseriesResources = timeseriesResources.filter(
-    (resource) => JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET.has(resource),
+    (resource) => resolveJunctionExtendedTimeseriesBackfillPolicy(resource) !== null,
+  );
+  const wideChunkTimeseriesResources = timeseriesResources.filter(
+    (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) > 1,
+  );
+  const denseTimeseriesResources = timeseriesResources.filter(
+    (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) === 1,
   );
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
   const pushSourceRecoveryEnabled = config.pushSourceRecoveryEnabled === true;
@@ -1088,16 +1094,28 @@ export function createJunctionDeviceSyncProvider(
     const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(
       summaryNormalizationEvidence,
     );
-    const jobTimeseriesResources = timeseriesResources;
-    const baseTimeseriesWindowStart = job.kind === "backfill"
+    const denseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
+      : window.windowStart;
+    const wideTimeseriesWindowStart = job.kind === "backfill"
+      ? maxIsoTimestamp(
+          window.windowStart,
+          subtractDays(window.windowEnd, extendedTimeseriesBackfillDays),
+        )
       : window.windowStart;
     const timeseriesCursor = job.kind === "backfill"
       ? readBackfillTimeseriesCursor(job, window)
       : null;
-    const timeseriesWindowStart = timeseriesCursor
-      ? maxIsoTimestamp(baseTimeseriesWindowStart, timeseriesCursor)
-      : baseTimeseriesWindowStart;
+    const timeseriesPhase = job.kind === "backfill"
+      ? readBackfillTimeseriesPhase(job)
+      : null;
+    const wideTimeseriesImportStart = timeseriesCursor && timeseriesPhase === "wide"
+      ? maxIsoTimestamp(wideTimeseriesWindowStart, timeseriesCursor)
+      : wideTimeseriesWindowStart;
+    const denseTimeseriesImportStart = timeseriesCursor
+      && (timeseriesPhase === "dense" || wideChunkTimeseriesResources.length === 0)
+      ? maxIsoTimestamp(denseTimeseriesWindowStart, timeseriesCursor)
+      : denseTimeseriesWindowStart;
     if (job.kind !== "backfill" || summaryHasFetchedRecords) {
       await context.importSnapshot({
         provider: "junction",
@@ -1130,21 +1148,28 @@ export function createJunctionDeviceSyncProvider(
       window,
     );
     if (
-      jobTimeseriesResources.length > 0
+      timeseriesResources.length > 0
       && (
         job.kind === "backfill"
         || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
       )
     ) {
-      const timeseriesImport = await importTimeseriesDailySnapshots(
-        context,
-        sourceProviders,
-        timeseriesWindowStart,
-        window.windowEnd,
-        skippedOptionalResources,
-        jobTimeseriesResources,
-      );
-      if (timeseriesImport.yieldedAt) {
+      // The existing backfill job owns one projection cursor. Run the
+      // longest-history projection first and carry only its coarse phase so a
+      // yield cannot advance past either sparse or dense history. This remains
+      // one job-level continuation, not per-resource state.
+      const wideTimeseriesImport = wideChunkTimeseriesResources.length > 0
+        && timeseriesPhase !== "dense"
+        ? await importTimeseriesSparseSnapshots(
+            context,
+            sourceProviders,
+            wideTimeseriesImportStart,
+            window.windowEnd,
+            skippedOptionalResources,
+            wideChunkTimeseriesResources,
+          )
+        : { yieldedAt: null };
+      if (wideTimeseriesImport.yieldedAt) {
         return withJunctionSkippedResourceMetadata(
           context,
           withJunctionMetadataPatch(
@@ -1152,8 +1177,48 @@ export function createJunctionDeviceSyncProvider(
               context,
               job,
               windowEnd: window.windowEnd,
-              windowStart: job.kind === "backfill" ? window.windowStart : timeseriesImport.yieldedAt,
-              timeseriesCursor: job.kind === "backfill" ? timeseriesImport.yieldedAt : null,
+              windowStart: job.kind === "backfill"
+                ? window.windowStart
+                : wideTimeseriesImport.yieldedAt,
+              timeseriesCursor: job.kind === "backfill"
+                ? wideTimeseriesImport.yieldedAt
+                : null,
+              timeseriesPhase: job.kind === "backfill" ? "wide" : null,
+            }),
+            profileMetadataPatch,
+          ),
+          skippedOptionalResources,
+        );
+      }
+
+      const denseTimeseriesImport = denseTimeseriesResources.length > 0
+        ? await importTimeseriesDailySnapshots(
+            context,
+            sourceProviders,
+            denseTimeseriesImportStart,
+            window.windowEnd,
+            skippedOptionalResources,
+            denseTimeseriesResources,
+          )
+        : { yieldedAt: null };
+      if (denseTimeseriesImport.yieldedAt) {
+        return withJunctionSkippedResourceMetadata(
+          context,
+          withJunctionMetadataPatch(
+            buildYieldedJunctionJobResult({
+              context,
+              job,
+              windowEnd: window.windowEnd,
+              windowStart: job.kind === "backfill"
+                ? window.windowStart
+                : denseTimeseriesImport.yieldedAt,
+              timeseriesCursor: job.kind === "backfill"
+                ? denseTimeseriesImport.yieldedAt
+                : null,
+              timeseriesPhase: job.kind === "backfill"
+                && wideChunkTimeseriesResources.length > 0
+                ? "dense"
+                : null,
             }),
             profileMetadataPatch,
           ),
@@ -2669,8 +2734,9 @@ export function createJunctionDeviceSyncProvider(
     const end = Date.parse(windowEnd);
     let optionalFailureLogged = false;
 
+    const fetchChunkMs = resolveJunctionTimeseriesFetchChunkMs(resource);
     while (chunkStart < end) {
-      const chunkEnd = Math.min(chunkStart + TIMESERIES_CHUNK_MS, end);
+      const chunkEnd = Math.min(chunkStart + fetchChunkMs, end);
       const chunkWindowStart = new Date(chunkStart).toISOString();
       const chunkWindowEnd = new Date(chunkEnd).toISOString();
       try {
@@ -2741,7 +2807,11 @@ export function createJunctionDeviceSyncProvider(
     let providerRecordsExamined = false;
     let postFetchSourceAdmission: JunctionCurrentSourceAdmission | undefined;
 
-    const preciseWindows = buildPreciseTimeseriesWindows(windowStart, windowEnd);
+    const preciseWindows = buildPreciseTimeseriesWindows(
+      windowStart,
+      windowEnd,
+      resolveJunctionTimeseriesImportChunkMs(resources),
+    );
     for (const [index, window] of preciseWindows.entries()) {
       if (context.shouldYield?.()) {
         fetchComplete = false;
@@ -2961,6 +3031,56 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
+  async function importTimeseriesSparseSnapshots(
+    context: ProviderJobContext,
+    sourceProviders: readonly JunctionProviderConnection[],
+    windowStart: string,
+    windowEnd: string,
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+    resources: readonly string[],
+    sourceProviderSlug?: string | null,
+  ): Promise<JunctionTimeseriesImportResult> {
+    const chunkMs = resolveJunctionTimeseriesImportChunkMs(resources);
+    for (const window of buildPreciseTimeseriesWindows(windowStart, windowEnd, chunkMs)) {
+      if (context.shouldYield?.()) {
+        return { yieldedAt: window.windowStart };
+      }
+      const timeseries = await fetchTimeseriesSnapshots(
+        context,
+        window.windowStart,
+        window.windowEnd,
+        skippedOptionalResources,
+        resources,
+        sourceProviderSlug,
+        { dateQueryFormat: "datetime" },
+      );
+      if (!hasJunctionSnapshotRecords(timeseries)) {
+        continue;
+      }
+
+      const preparedImport = await prepareJunctionImportSnapshot(
+        context,
+        timeseries,
+        sourceProviders,
+      );
+      if (!hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+        continue;
+      }
+      await context.importSnapshot({
+        provider: "junction",
+        accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+        connectionId: context.account.id,
+        importedAt: window.windowEnd,
+        windowStart: window.windowStart,
+        windowEnd: window.windowEnd,
+        connections: preparedImport.connections,
+        summaries: {},
+        timeseries: preparedImport.snapshots,
+      });
+    }
+    return { yieldedAt: null };
+  }
+
   async function importTimeseriesDailySnapshots(
     context: ProviderJobContext,
     sourceProviders: readonly JunctionProviderConnection[],
@@ -3156,6 +3276,7 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
+    timeseriesPhase?: JunctionTimeseriesBackfillPhase | null;
     windowEnd: string;
     windowStart: string;
   }): ProviderJobResult {
@@ -3175,6 +3296,7 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
+    timeseriesPhase?: JunctionTimeseriesBackfillPhase | null;
     windowEnd: string;
     windowStart: string;
   }): DeviceSyncJobInput | null {
@@ -3200,6 +3322,7 @@ export function createJunctionDeviceSyncProvider(
           ...followUp.payload,
           ...(emptyBackfillAttempts > 0 ? { emptyBackfillAttempts } : {}),
           timeseriesCursor: cursor,
+          ...(input.timeseriesPhase ? { timeseriesPhase: input.timeseriesPhase } : {}),
         },
       };
     }
@@ -5151,9 +5274,8 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
   ]);
 }
 
-// Sparse readings carry provider identity or normalized values as part of
-// identity, so pre-import dedupe must not collapse distinct same-timestamp
-// rows before the importer can assign replay-stable events.
+// Sparse records carry stable row ids or normalized values as identity, so
+// pre-import dedupe preserves distinct same-timestamp rows for the importer.
 function junctionTimeseriesRecordValueIdentity(
   resource: string,
   entry: Record<string, unknown>,
@@ -5167,20 +5289,37 @@ function junctionTimeseriesRecordValueIdentity(
     return weightKilograms === undefined ? [] : [`kg:${weightKilograms}`];
   }
 
-  if (resource !== "blood_pressure" && resource !== "note") {
+  const policy = resolveJunctionTimeseriesResourcePolicy(resource);
+  const needsSemanticIdentity = resource === "blood_pressure"
+    || resource === "note"
+    || policy?.normalizationMode === "sparse_alert"
+    || policy?.normalizationMode === "sparse_intervention"
+    || policy?.normalizationMode === "sparse_observation";
+  if (!needsSemanticIdentity) {
     return [];
   }
 
-  // Same stable-id alias list as the importer's reading identity: rows
-  // distinguished only by a provider id must survive fetch-side dedupe.
-  for (const key of ["id", "resourceId", "resource_id", "externalId", "external_id"]) {
+  let providerRowId = "";
+  for (const key of [
+    "id",
+    "resourceId",
+    "resource_id",
+    "externalId",
+    "external_id",
+    "providerId",
+    "provider_id",
+  ]) {
     const rowId = normalizeString(entry[key]);
     if (rowId) {
-      return [rowId];
+      providerRowId = rowId;
+      break;
     }
   }
 
   if (resource === "note") {
+    if (providerRowId) {
+      return [providerRowId];
+    }
     return [
       ...(Array.isArray(entry.tags) ? entry.tags : [])
         .flatMap((tag) => {
@@ -5191,8 +5330,23 @@ function junctionTimeseriesRecordValueIdentity(
     ];
   }
 
-  // Field names mirror the importer's blood-pressure value paths.
-  return [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
+  if (resource === "blood_pressure") {
+    return providerRowId
+      ? [providerRowId]
+      : [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
+  }
+
+  return [
+    providerRowId,
+    String(entry.start ?? ""),
+    String(entry.end ?? ""),
+    String(entry.value ?? ""),
+    String(entry.unit ?? ""),
+    String(entry.type ?? ""),
+    String(entry.bolus_purpose ?? entry.bolusPurpose ?? ""),
+    String(entry.delivery_form ?? entry.deliveryForm ?? ""),
+    String(entry.delivery_mode ?? entry.deliveryMode ?? ""),
+  ];
 }
 
 function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {
@@ -5314,6 +5468,14 @@ function resolveJobWindow(
   };
 }
 
+function readBackfillTimeseriesPhase(
+  job: DeviceSyncJobRecord,
+): JunctionTimeseriesBackfillPhase | null {
+  return job.payload.timeseriesPhase === "wide" || job.payload.timeseriesPhase === "dense"
+    ? job.payload.timeseriesPhase
+    : null;
+}
+
 function readBackfillTimeseriesCursor(
   job: DeviceSyncJobRecord,
   ownerWindow: { windowStart: string; windowEnd: string },
@@ -5421,6 +5583,7 @@ function buildClosedDailyWindows(
 function buildPreciseTimeseriesWindows(
   windowStart: string,
   windowEnd: string,
+  chunkMs: number = TIMESERIES_CHUNK_MS,
 ): Array<{ windowStart: string; windowEnd: string }> {
   const startMs = Date.parse(windowStart);
   const endMs = Date.parse(windowEnd);
@@ -5431,7 +5594,7 @@ function buildPreciseTimeseriesWindows(
   const windows: Array<{ windowStart: string; windowEnd: string }> = [];
   let chunkStartMs = startMs;
   while (chunkStartMs < endMs) {
-    const chunkEndMs = Math.min(chunkStartMs + TIMESERIES_CHUNK_MS, endMs);
+    const chunkEndMs = Math.min(chunkStartMs + chunkMs, endMs);
     if (chunkEndMs <= chunkStartMs) {
       break;
     }
@@ -5443,6 +5606,21 @@ function buildPreciseTimeseriesWindows(
   }
 
   return windows;
+}
+
+function resolveJunctionTimeseriesFetchChunkMs(resource: string): number {
+  const fetchChunkDays = resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1;
+  return Math.max(1, fetchChunkDays) * TIMESERIES_CHUNK_MS;
+}
+
+function resolveJunctionTimeseriesImportChunkMs(resources: readonly string[]): number {
+  if (resources.length === 0) {
+    return TIMESERIES_CHUNK_MS;
+  }
+  return resources.reduce(
+    (smallest, resource) => Math.min(smallest, resolveJunctionTimeseriesFetchChunkMs(resource)),
+    Number.POSITIVE_INFINITY,
+  );
 }
 
 function floorUtcDayTimestamp(timestamp: string): string {

@@ -13874,3 +13874,195 @@ test("Junction import accountId is stable across local account row re-registrati
   assert.match(importedAccountIds[0] ?? "", /^jxn_acct_[a-f0-9]{32}$/u);
   assert.equal(new Set(importedAccountIds).size, 1);
 });
+
+test("Junction opt-in sparse resources use bounded 30-day extended-history windows while dense defaults stay daily", async () => {
+  const sparseResources = [
+    "body_mass_index",
+    "carbohydrates",
+    "fat",
+    "forced_expiratory_volume_1",
+    "forced_vital_capacity",
+    "heart_rate_alert",
+    "inhaler_usage",
+    "insulin_injection",
+    "lean_body_mass",
+    "peak_expiratory_flow_rate",
+    "sleep_apnea_alert",
+    "waist_circumference",
+  ];
+  const requests: string[] = [];
+  const availability = Object.fromEntries([
+    "activity",
+    "blood_oxygen",
+    ...sparseResources,
+  ].map((resource) => [resource === "fat" ? "body_fat" : resource, true]));
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-withings-1",
+          slug: "withings",
+          name: "Withings",
+          status: "connected",
+          resource_availability: availability,
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.includes("/v2/timeseries/junction-user-1/")) {
+      return createJsonResponse({ groups: {} });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryBackfillDays: 180,
+    timeseriesResources: ["blood_oxygen", ...sparseResources],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({ now: "2026-07-01T00:00:00.000Z" }),
+    createJob("backfill", {
+      windowStart: "2026-01-01T00:00:00.000Z",
+      windowEnd: "2026-06-30T00:00:00.000Z",
+    }),
+  );
+
+  const timeseriesRequests = requests
+    .filter((url) => url.includes("/v2/timeseries/"))
+    .map((url) => new URL(url));
+  assert.equal(timeseriesRequests.length, 86);
+
+  for (const resource of sparseResources) {
+    const apiResource = resource === "fat" ? "body_fat" : resource;
+    const resourceRequests = timeseriesRequests.filter((url) =>
+      url.pathname === `/v2/timeseries/junction-user-1/${apiResource}/grouped`
+    );
+    assert.equal(resourceRequests.length, 6, resource);
+    for (const url of resourceRequests) {
+      const start = Date.parse(requireValue(url.searchParams.get("start_date"), "sparse start_date"));
+      const end = Date.parse(requireValue(url.searchParams.get("end_date"), "sparse end_date"));
+      assert.ok(end > start, resource);
+      assert.ok(end - start <= 30 * 24 * 60 * 60_000, resource);
+    }
+  }
+
+  const denseRequests = timeseriesRequests.filter((url) =>
+    url.pathname === "/v2/timeseries/junction-user-1/blood_oxygen/grouped"
+  );
+  assert.equal(denseRequests.length, 14);
+  assert.ok(denseRequests.every((url) => {
+    const start = url.searchParams.get("start_date");
+    const end = url.searchParams.get("end_date");
+    return start !== null && start === end;
+  }));
+});
+
+test("Junction mixed sparse and dense backfills resume the longest history before advancing the shared cursor", async () => {
+  const ownerWindowStart = "2026-01-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-03-02T00:00:00.000Z";
+  const createProviderForRequests = (requests: string[]) => createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-withings-1",
+          slug: "withings",
+          name: "Withings",
+          status: "connected",
+          resource_availability: {
+            activity: true,
+            blood_oxygen: true,
+            body_fat: true,
+          },
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.includes("/v2/timeseries/junction-user-1/")) {
+      return createJsonResponse({ groups: {} });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryBackfillDays: 60,
+    timeseriesBackfillDays: 60,
+    timeseriesResources: ["blood_oxygen", "fat"],
+  });
+
+  const firstRequests: string[] = [];
+  const firstResult = await executeJunctionJob(
+    createProviderForRequests(firstRequests),
+    createJunctionJobContext({
+      now: "2026-03-03T00:00:00.000Z",
+      shouldYield: () => firstRequests.some((url) => url.includes("/body_fat/grouped")),
+    }),
+    createJob("backfill", {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+    }),
+  );
+
+  const firstTimeseriesRequests = firstRequests
+    .filter((url) => url.includes("/v2/timeseries/"))
+    .map((url) => new URL(url));
+  assert.equal(firstTimeseriesRequests.length, 1);
+  assert.equal(
+    firstTimeseriesRequests[0]?.pathname,
+    "/v2/timeseries/junction-user-1/body_fat/grouped",
+  );
+  assertJunctionWindowQuery(
+    requireValue(firstTimeseriesRequests[0]?.toString(), "first sparse window"),
+    ownerWindowStart,
+    "2026-01-31T00:00:00.000Z",
+  );
+
+  const continuation = requireValue(
+    firstResult.scheduledJobs?.find((job) => job.kind === "backfill"),
+    "Yielded mixed Junction backfill should schedule a continuation.",
+  );
+  assert.equal(continuation.payload?.timeseriesCursor, "2026-01-31T00:00:00.000Z");
+  assert.equal(continuation.payload?.timeseriesPhase, "wide");
+
+  const secondRequests: string[] = [];
+  await executeJunctionJob(
+    createProviderForRequests(secondRequests),
+    createJunctionJobContext({ now: "2026-03-03T00:05:00.000Z" }),
+    {
+      ...createJob("backfill", continuation.payload ?? {}),
+      dedupeKey: continuation.dedupeKey ?? null,
+      priority: continuation.priority ?? 50,
+    },
+  );
+
+  const secondTimeseriesRequests = secondRequests
+    .filter((url) => url.includes("/v2/timeseries/"))
+    .map((url) => new URL(url));
+  const sparseContinuationRequests = secondTimeseriesRequests.filter((url) =>
+    url.pathname === "/v2/timeseries/junction-user-1/body_fat/grouped"
+  );
+  assert.equal(sparseContinuationRequests.length, 1);
+  assertJunctionWindowQuery(
+    requireValue(sparseContinuationRequests[0]?.toString(), "continued sparse window"),
+    "2026-01-31T00:00:00.000Z",
+    ownerWindowEnd,
+  );
+  const denseRequests = secondTimeseriesRequests.filter((url) =>
+    url.pathname === "/v2/timeseries/junction-user-1/blood_oxygen/grouped"
+  );
+  assert.equal(denseRequests.length, 60);
+  assert.ok(denseRequests.every((url) => {
+    const start = url.searchParams.get("start_date");
+    const end = url.searchParams.get("end_date");
+    return start !== null && start === end;
+  }));
+});

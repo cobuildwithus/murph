@@ -1,50 +1,109 @@
-// Keep the established default order stable. Opt-ins stay explicit so adding
-// an importer path never widens existing members' collection implicitly.
-export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
-  "blood_oxygen",
-  "stress_level",
-  "hrv",
-  "respiratory_rate",
-  "vo2_max",
-  "body_temperature_delta",
-  "body_temperature",
-  "basal_body_temperature",
-  "caffeine",
-  "water",
-  "mindfulness_minutes",
-  "heart_rate_recovery_one_minute",
-  "sleep_breathing_disturbance",
-  "afib_burden",
-  "glucose",
-  "blood_pressure",
-  "note",
-] as const);
+export type JunctionTimeseriesNormalizationMode =
+  | "daily_aggregate"
+  | "hourly_or_session_feature"
+  | "note_tags"
+  | "sparse_alert"
+  | "sparse_intervention"
+  | "sparse_observation"
+  | "sparse_reading";
 
-export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
-  "steps",
-  "distance",
-  "calories_active",
-  "heartrate",
-  "weight",
-] as const);
+export type JunctionTimeseriesHistoryWindow = "dense_timeseries" | "summary_history";
 
-export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
-  ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-  ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
-] as const);
+export interface JunctionTimeseriesResourcePolicy {
+  readonly enabledByDefault: boolean;
+  readonly fetchChunkDays: number;
+  readonly historyWindow: JunctionTimeseriesHistoryWindow;
+  readonly normalizationMode: JunctionTimeseriesNormalizationMode;
+  readonly resource: string;
+}
+
+// Static, code-owned resource policy shared by config admission, fetch-window
+// selection, webhook recognition, and importer sanitization. Default entries
+// retain their established order. Opt-ins are appended so existing members and
+// hosted runtimes do not begin fetching them implicitly.
+export const JUNCTION_TIMESERIES_RESOURCE_POLICIES = Object.freeze([
+  { resource: "blood_oxygen", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "stress_level", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "hrv", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "respiratory_rate", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "vo2_max", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "body_temperature_delta", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "body_temperature", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "basal_body_temperature", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "caffeine", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "water", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "mindfulness_minutes", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "heart_rate_recovery_one_minute", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "sleep_breathing_disturbance", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "afib_burden", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "glucose", enabledByDefault: true, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "blood_pressure", enabledByDefault: true, normalizationMode: "sparse_reading", historyWindow: "summary_history", fetchChunkDays: 1 },
+  { resource: "note", enabledByDefault: true, normalizationMode: "note_tags", historyWindow: "summary_history", fetchChunkDays: 1 },
+  { resource: "steps", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "distance", enabledByDefault: false, normalizationMode: "daily_aggregate", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "calories_active", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "heartrate", enabledByDefault: false, normalizationMode: "hourly_or_session_feature", historyWindow: "dense_timeseries", fetchChunkDays: 1 },
+  { resource: "weight", enabledByDefault: false, normalizationMode: "sparse_reading", historyWindow: "summary_history", fetchChunkDays: 1 },
+  { resource: "body_mass_index", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "carbohydrates", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "fat", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "forced_expiratory_volume_1", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "forced_vital_capacity", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "heart_rate_alert", enabledByDefault: false, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "inhaler_usage", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "insulin_injection", enabledByDefault: false, normalizationMode: "sparse_intervention", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "lean_body_mass", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "peak_expiratory_flow_rate", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "sleep_apnea_alert", enabledByDefault: false, normalizationMode: "sparse_alert", historyWindow: "summary_history", fetchChunkDays: 30 },
+  { resource: "waist_circumference", enabledByDefault: false, normalizationMode: "sparse_observation", historyWindow: "summary_history", fetchChunkDays: 30 },
+] as const satisfies readonly JunctionTimeseriesResourcePolicy[]);
 
 export type JunctionTimeseriesResource =
-  (typeof JUNCTION_KNOWN_TIMESERIES_RESOURCES)[number];
+  (typeof JUNCTION_TIMESERIES_RESOURCE_POLICIES)[number]["resource"];
+
+function selectJunctionTimeseriesResources(
+  predicate: (policy: (typeof JUNCTION_TIMESERIES_RESOURCE_POLICIES)[number]) => boolean,
+): JunctionTimeseriesResource[] {
+  return JUNCTION_TIMESERIES_RESOURCE_POLICIES
+    .filter(predicate)
+    .map((policy) => policy.resource);
+}
+
+export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze(
+  selectJunctionTimeseriesResources((policy) => policy.enabledByDefault),
+);
+
+export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze(
+  selectJunctionTimeseriesResources((policy) => !policy.enabledByDefault),
+);
+
+export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze(
+  selectJunctionTimeseriesResources(() => true),
+);
 
 export const JUNCTION_ALLOWED_TIMESERIES_RESOURCES = Object.freeze([
   ...JUNCTION_KNOWN_TIMESERIES_RESOURCES,
 ]);
 
-export const JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES = Object.freeze([
-  "blood_pressure",
-  "note",
-  "weight",
-] as const satisfies readonly JunctionTimeseriesResource[]);
+export const JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES = Object.freeze(
+  selectJunctionTimeseriesResources((policy) => policy.historyWindow === "summary_history"),
+);
+
+export const JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES = Object.freeze(
+  selectJunctionTimeseriesResources((policy) => policy.fetchChunkDays > 1),
+);
+
+const JUNCTION_TIMESERIES_POLICY_BY_RESOURCE = new Map<
+  string,
+  JunctionTimeseriesResourcePolicy
+>(JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((policy) => [policy.resource, policy]));
+
+export function resolveJunctionTimeseriesResourcePolicy(
+  value: unknown,
+): JunctionTimeseriesResourcePolicy | null {
+  const resource = normalizeJunctionResourceName(value);
+  return resource ? JUNCTION_TIMESERIES_POLICY_BY_RESOURCE.get(resource) ?? null : null;
+}
 
 // Every default summary resource is sparse event/daily-grain data: profile is
 // a single current snapshot per source, menstrual_cycle is roughly 13 cycles
@@ -83,6 +142,8 @@ export function normalizeJunctionResourceName(value: unknown): string | null {
       return "stress_level";
     case "body_weight":
       return "weight";
+    case "body_fat":
+      return "fat";
     case "sleep_cycle":
     case "hypnogram":
       return "sleep_cycle";
