@@ -111,6 +111,33 @@ function readRawReceiptArtifact(payload: DeviceBatchImportPayload): WearableRawI
   return receipt;
 }
 
+interface JunctionMenstrualCycleEvidence {
+  schema: "junction.menstrual_cycle_evidence.v1";
+  cycleCount: number;
+  factCount: number;
+  omittedCycleCount: number;
+  omittedFactCount: number;
+  cycles: Array<Record<string, unknown>>;
+  facts: Array<{
+    cycleRecordHash: string;
+    date: string;
+    kind: string;
+    value?: string | number | boolean;
+  }>;
+}
+
+function readJunctionMenstrualCycleEvidence(
+  payload: Pick<DeviceBatchImportPayload, "evidenceParts">,
+): JunctionMenstrualCycleEvidence {
+  const artifact = payload.evidenceParts?.find((candidate) =>
+    candidate.role === "junction-summary-menstrual-cycle"
+  );
+  assert.ok(artifact);
+  const evidence = artifact.content as JunctionMenstrualCycleEvidence;
+  assert.equal(evidence.schema, "junction.menstrual_cycle_evidence.v1");
+  return evidence;
+}
+
 function assertJsonOmits(value: unknown, forbiddenValues: readonly string[]): void {
   const text = typeof value === "string" ? value : JSON.stringify(value);
   for (const forbidden of forbiddenValues) {
@@ -5226,10 +5253,16 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
         ],
         home_pregnancy_test: [
           { date: "2026-04-28", test_result: "positive" },
+          // A documented ovulation-only result must remain evidence-only in
+          // the pregnancy-test context.
+          { date: "2026-04-29", test_result: "estrogen_surge" },
         ],
         home_progesterone_test: [
           { date: "2026-04-24", test_result: "positive" },
           { date: "2026-04-25", test_result: "indeterminate" },
+          // A documented ovulation-only result must remain evidence-only in
+          // the progesterone-test context.
+          { date: "2026-04-26", test_result: "luteinizing_hormone_surge" },
         ],
         cervical_mucus: [
           { date: "2026-04-18", quality: "watery" },
@@ -5272,10 +5305,6 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   const measurementEvents = events.filter((event) => event.kind === "measurement");
   const readMeasurement = (event: (typeof events)[number] | undefined) =>
     (event?.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0];
-  const rawCycleArtifact = payload.evidenceParts?.find((artifact) =>
-    artifact.role === "junction-summary-menstrual-cycle"
-  );
-
   assert.deepEqual(payload.provenance?.summaryResources, ["menstrual_cycle"]);
 
   const periodLength = observationByMetric.get("period-length-days");
@@ -5342,7 +5371,11 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
     event.title === "Junction cervical mucus"
   );
   assert.equal(cervicalMucusEvents.length, 2);
-  assert.deepEqual(readMeasurement(cervicalMucusEvents[0]), {
+  const wateryCervicalMucusEvent = cervicalMucusEvents.find((event) =>
+    readMeasurement(event)?.qualifiers &&
+    (readMeasurement(event)?.qualifiers as Record<string, unknown>).quality === "watery"
+  );
+  assert.deepEqual(readMeasurement(wateryCervicalMucusEvent), {
     metric: "cervical-mucus",
     value: 1,
     unit: "observation",
@@ -5388,18 +5421,26 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
     event.title === "Junction sexual activity"
   );
   assert.equal(sexualActivityEvents.length, 2);
-  assert.deepEqual(readMeasurement(sexualActivityEvents[0]), {
+  const protectedSexualActivityEvent = sexualActivityEvents.find((event) =>
+    readMeasurement(event)?.qualifiers &&
+    (readMeasurement(event)?.qualifiers as Record<string, unknown>)["protection-used"] === true
+  );
+  const unprotectedSexualActivityEvent = sexualActivityEvents.find((event) =>
+    readMeasurement(event)?.qualifiers &&
+    (readMeasurement(event)?.qualifiers as Record<string, unknown>)["protection-used"] === false
+  );
+  assert.deepEqual(readMeasurement(protectedSexualActivityEvent), {
     metric: "sexual-activity",
     value: 1,
     unit: "event",
     qualifiers: { "protection-used": true },
   });
-  assert.deepEqual(readMeasurement(sexualActivityEvents[1])?.qualifiers, {
+  assert.deepEqual(readMeasurement(unprotectedSexualActivityEvent)?.qualifiers, {
     "protection-used": false,
   });
   assert.notEqual(
-    sexualActivityEvents[0]?.externalRef?.facet,
-    sexualActivityEvents[1]?.externalRef?.facet,
+    protectedSexualActivityEvent?.externalRef?.facet,
+    unprotectedSexualActivityEvent?.externalRef?.facet,
   );
 
   const deviationEvent = measurementEvents.find((event) => event.title === "Junction cycle deviation");
@@ -5433,10 +5474,23 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   );
   assert.equal(events.length, 9);
 
-  assert.match(JSON.stringify(rawCycleArtifact?.content), /period_start/u);
-  assert.match(JSON.stringify(rawCycleArtifact?.content), /menstrual_flow/u);
-  assert.match(JSON.stringify(rawCycleArtifact?.content), /protection_used/u);
-  assertJsonOmits(JSON.stringify(payload.evidenceParts), [
+  const cycleEvidence = readJunctionMenstrualCycleEvidence(payload);
+  const evidenceText = JSON.stringify(cycleEvidence);
+  assert.equal(cycleEvidence.cycleCount, 2);
+  assert.equal(cycleEvidence.omittedCycleCount, 0);
+  assert.ok(cycleEvidence.factCount > 0);
+  assert.match(String(cycleEvidence.cycles[0]?.recordHash), /^[a-f0-9]{16}$/u);
+  assert.ok(cycleEvidence.facts.some((fact) =>
+    fact.kind === "home_pregnancy_test" && fact.value === "estrogen_surge"
+  ));
+  assert.ok(cycleEvidence.facts.some((fact) =>
+    fact.kind === "home_progesterone_test" && fact.value === "luteinizing_hormone_surge"
+  ));
+  assert.doesNotMatch(evidenceText, /"menstrual_flow":\[/u);
+  assert.doesNotMatch(evidenceText, /"sexual_activity":\[/u);
+  assertJsonOmits(evidenceText, [
+    "cycle-1",
+    "cycle-2-predicted",
     "raw-cycle-source-app",
     "raw-cycle-source-name",
   ]);
@@ -5887,7 +5941,7 @@ test("Junction no-id profile facets claim the pre-normalized timestamp identity"
   ), true);
 });
 
-test("Junction oversized cycle labels land with capped facets and qualifiers", () => {
+test("Junction future menstrual enum values stay bounded and evidence-only", () => {
   const oversizedDeviation = "a".repeat(200);
   const oversizedQuality = "q".repeat(200);
   const oversizedContraceptiveType = "t".repeat(200);
@@ -5904,37 +5958,21 @@ test("Junction oversized cycle labels land with capped facets and qualifiers", (
       }],
     },
   });
-  const deviationEvent = payload.events?.find((event) => event.title === "Junction cycle deviation");
-  const measurement = (
-    deviationEvent?.fields?.measurements as Array<Record<string, unknown>> | undefined
-  )?.[0];
-  const qualifiers = measurement?.qualifiers as Record<string, string> | undefined;
+  assert.equal(payload.events?.length ?? 0, 0);
+  assert.equal(payload.samples?.length ?? 0, 0);
 
-  assert.ok(deviationEvent);
-  // The facet slug is hard-capped at 80 characters so attacker- or
-  // provider-controlled deviation text cannot mint unbounded external refs.
-  assert.equal(
-    deviationEvent?.externalRef?.facet,
-    `menstrual-cycle-deviation-${"a".repeat(80)}-2026-04-30`,
+  const evidence = readJunctionMenstrualCycleEvidence(payload);
+  assert.deepEqual(
+    evidence.facts.map((fact) => [fact.kind, fact.value]),
+    [
+      ["cervical_mucus", "q".repeat(80)],
+      ["contraceptive", "t".repeat(80)],
+      ["detected_deviation", "a".repeat(80)],
+    ],
   );
-  assert.equal(qualifiers?.deviation, "a".repeat(80));
-
-  for (const [title, qualifierKey, expectedFacet] of [
-    ["Junction cervical mucus", "quality", `cervical-mucus-${"q".repeat(80)}-2026-04-18`],
-    ["Junction contraceptive use", "type", `contraceptive-${"t".repeat(80)}-2026-04-19`],
-  ] as const) {
-    const event = payload.events?.find((candidate) => candidate.title === title);
-    const entry = (
-      event?.fields?.measurements as Array<Record<string, unknown>> | undefined
-    )?.[0];
-    const entryQualifiers = entry?.qualifiers as Record<string, string> | undefined;
-
-    assert.equal(event?.externalRef?.facet, expectedFacet);
-    assert.equal(entryQualifiers?.[qualifierKey]?.length, 80);
-  }
 });
 
-test("Junction menstrual cycles land explicit provider length fields when end dates are absent", () => {
+test("Junction menstrual cycles keep legacy scalar lengths evidence-only", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-23T12:00:00.000Z",
     summaries: {
@@ -5954,13 +5992,146 @@ test("Junction menstrual cycles land explicit provider length fields when end da
       }],
     },
   });
-  const observations = (payload.events ?? []).filter((event) => event.kind === "observation");
-  const byKey = new Map(observations.map((event) => [`${event.fields?.metric}:${event.dayKey}`, event]));
+  assert.equal(payload.events?.length ?? 0, 0);
 
-  assert.equal(byKey.get("period-length-days:2026-04-07")?.fields?.value, 5);
-  assert.equal(byKey.get("cycle-length-days:2026-04-07")?.fields?.value, 28);
-  assert.equal(byKey.get("period-length-days:2026-05-05")?.fields?.value, 4);
-  assert.equal(byKey.has("cycle-length-days:2026-05-05"), false);
+  const evidence = readJunctionMenstrualCycleEvidence(payload);
+  assert.equal(evidence.cycleCount, 2);
+  assert.ok(evidence.cycles.some((cycle) =>
+    cycle.periodStart === "2026-04-07" &&
+    cycle.legacyPeriodLengthDays === 5 &&
+    cycle.legacyCycleLengthDays === 28
+  ));
+  assert.ok(evidence.cycles.some((cycle) =>
+    cycle.legacyCycleStart === "2026-05-05" &&
+    cycle.legacyPeriodLengthDays === 4 &&
+    cycle.legacyCycleLengthDays === 200
+  ));
+  assertJsonOmits(evidence, ["cycle-explicit-lengths", "cycle-start-only"]);
+});
+
+test("Junction menstrual evidence admits actual cycles and known facts before bounded evidence", () => {
+  const predictedCycles = Array.from({ length: 64 }, (_, index) => ({
+    id: `predicted-${index}`,
+    is_predicted: true,
+    period_start: "2026-06-01",
+    source: { provider: "apple_health", type: "phone" },
+  }));
+  const futureQualities = Array.from({ length: 513 }, (_, index) => ({
+    date: "2026-04-18",
+    quality: `future-quality-${String(index).padStart(3, "0")}`,
+  }));
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-02T12:00:00.000Z",
+    summaries: {
+      menstrual_cycle: [
+        ...predictedCycles,
+        {
+          id: "actual-cycle",
+          period_start: "2026-04-07",
+          cervical_mucus: [...futureQualities, { date: "2026-04-18", quality: "watery" }],
+          source: { provider: "apple_health", type: "phone" },
+        },
+      ],
+    },
+  });
+  const evidence = readJunctionMenstrualCycleEvidence(payload);
+
+  assert.equal(evidence.cycleCount, 64);
+  assert.equal(evidence.omittedCycleCount, 1);
+  assert.equal(evidence.factCount, 512);
+  assert.equal(evidence.omittedFactCount, 2);
+  assert.equal(evidence.cycles[0]?.isPredicted, false);
+  assert.equal(evidence.cycles[0]?.periodStart, "2026-04-07");
+  assert.ok(evidence.facts.some((fact) => fact.kind === "cervical_mucus" && fact.value === "watery"));
+  assert.ok(payload.events?.some((event) =>
+    event.title === "Junction cervical mucus" && JSON.stringify(event.fields).includes("watery")
+  ));
+  assert.equal(payload.samples?.length ?? 0, 0);
+});
+
+test("Junction menstrual evidence and receipt hashes are stable under provider-array reordering", async () => {
+  const firstCycle = {
+    id: "private-cycle-id-one",
+    period_start: "2026-04-07",
+    period_end: "2026-04-11",
+    cycle_end: "2026-05-01",
+    menstrual_flow: [
+      { date: "2026-04-07", flow: "light" },
+      { date: "2026-04-08", flow: "heavy" },
+    ],
+    cervical_mucus: [
+      { date: "2026-04-18", quality: "watery" },
+      { date: "2026-04-19", quality: "egg_white" },
+    ],
+    source: {
+      provider: "apple_health",
+      type: "phone",
+      app_id: "private-app-id",
+      device_id: "private-device-id",
+    },
+  };
+  const secondCycle = {
+    id: "private-cycle-id-two",
+    period_start: "2026-05-05",
+    sexual_activity: [
+      { date: "2026-05-12", protection_used: true },
+      { date: "2026-05-13", protection_used: false },
+    ],
+    source: { provider: "apple_health", type: "phone" },
+  };
+  const snapshot = (reverse: boolean) => ({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      menstrual_cycle: reverse
+        ? [{
+            ...secondCycle,
+            sexual_activity: [...secondCycle.sexual_activity].reverse(),
+          }, {
+            ...firstCycle,
+            menstrual_flow: [...firstCycle.menstrual_flow].reverse(),
+            cervical_mucus: [...firstCycle.cervical_mucus].reverse(),
+          }]
+        : [firstCycle, secondCycle],
+    },
+  });
+  const ordered = normalizeJunctionSnapshot(snapshot(false));
+  const reversed = normalizeJunctionSnapshot(snapshot(true));
+  const prepare = (reverse: boolean) => prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn_junction_menstrual_order",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: snapshot(reverse),
+  });
+  const [orderedImport, reversedImport] = await Promise.all([prepare(false), prepare(true)]);
+  const orderedEvidence = readJunctionMenstrualCycleEvidence(ordered);
+
+  assert.deepEqual(orderedEvidence, readJunctionMenstrualCycleEvidence(reversed));
+  assert.deepEqual(
+    ordered.events?.map((event) => event.externalRef).sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right))
+    ),
+    reversed.events?.map((event) => event.externalRef).sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right))
+    ),
+  );
+  assert.equal(
+    readRawReceiptArtifact(orderedImport).payloadHash,
+    readRawReceiptArtifact(reversedImport).payloadHash,
+  );
+  const evidenceText = JSON.stringify(orderedEvidence);
+  assert.doesNotMatch(evidenceText, /"menstrual_flow":\[/u);
+  assert.doesNotMatch(evidenceText, /"cervical_mucus":\[/u);
+  assert.doesNotMatch(evidenceText, /"sexual_activity":\[/u);
+  assertJsonOmits(evidenceText, [
+    "private-cycle-id-one",
+    "private-cycle-id-two",
+    "private-app-id",
+    "private-device-id",
+  ]);
+  assert.equal(ordered.samples?.length ?? 0, 0);
+  assert.equal(reversed.samples?.length ?? 0, 0);
 });
 
 test("Junction ECG summaries drop negative metrics and cap qualifier lengths", () => {
