@@ -62,6 +62,12 @@ const FITBIT_COMPLETED_MIGRATION_SOURCE =
     id: "fitbit",
   };
 
+const FITBIT_MIGRATION_RETRY_CASE: ConnectSourceCardStudyCase = {
+  authenticated: true,
+  errorMessage: "The legacy Fitbit connection could not be stopped.",
+  source: FITBIT_MIGRATION_SOURCE,
+};
+
 const FITBIT_MIGRATION_CALLBACK_SOURCE: ConnectSource = {
   connectProvider: "junction",
   connectTarget: "fitbit",
@@ -370,6 +376,8 @@ export function ConnectSourceCardStudy({
           ...studyCase,
           source: DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES[index] ?? studyCase.source,
         }))
+      : studyState === "fitbit-migration-retry"
+        ? [FITBIT_MIGRATION_RETRY_CASE]
       : studyState === "fitbit-migration-completed"
         ? [{
             authenticated: true,
