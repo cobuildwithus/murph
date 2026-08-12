@@ -38,6 +38,7 @@ import {
   completeDeviceSyncJobIfOwned,
   completeDeviceSyncJobsIfOwned,
   completeDeviceSyncJobsIfOwnedInTransaction,
+  continueDeviceSyncJobIfOwnedInTransaction,
   enqueueDeviceSyncJobInTransaction,
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
@@ -70,6 +71,7 @@ import {
   markSyncStarted as markStoredSyncStarted,
   markSyncSucceeded as markStoredSyncSucceeded,
   markSyncSucceededInTransaction as markStoredSyncSucceededInTransaction,
+  patchSyncContinuationMetadataInTransaction as patchStoredSyncContinuationMetadataInTransaction,
   markWebhookReceived as markStoredWebhookReceived,
   readNextActiveReconcileAt as readNextStoredActiveReconcileAt,
 } from "./store/sync-state.ts";
@@ -580,6 +582,57 @@ export class SqliteDeviceSyncStore {
             maxAttempts: job.maxAttempts,
             dedupeKey: job.dedupeKey,
           });
+        }
+
+        return true;
+      });
+    } catch (error) {
+      if (error instanceof DeviceSyncSuccessFenceRejectedError) {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+  continueJobAndPatchSyncMetadataIfOwned(input: {
+    accountId: string;
+    availableAt: string;
+    disconnectGeneration: number | null;
+    jobId: string;
+    localConnectionRevision: number;
+    metadataPatch?: Record<string, unknown>;
+    now: string;
+    payload: Record<string, unknown>;
+    workerId: string;
+  }): boolean {
+    try {
+      return withImmediateTransaction(this.database, () => {
+        const continued = continueDeviceSyncJobIfOwnedInTransaction(this.database, {
+          availableAt: input.availableAt,
+          jobId: input.jobId,
+          now: input.now,
+          payload: input.payload,
+          workerId: input.workerId,
+        });
+
+        if (!continued) {
+          return false;
+        }
+
+        const patched = patchStoredSyncContinuationMetadataInTransaction(
+          this.database,
+          input.accountId,
+          input.now,
+          input.disconnectGeneration,
+          {
+            localConnectionRevision: input.localConnectionRevision,
+            ...(input.metadataPatch ? { metadataPatch: input.metadataPatch } : {}),
+          },
+        );
+
+        if (!patched) {
+          throw new DeviceSyncSuccessFenceRejectedError();
         }
 
         return true;

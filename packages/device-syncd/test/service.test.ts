@@ -6,9 +6,11 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
-import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
+import { initializeVault } from "@murphai/core";
+import { createImporters, prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
@@ -6290,6 +6292,248 @@ test("device sync service preserves Junction yielded backfill timeseries cursor 
       timeseriesCursor: ownerWindowStart,
     });
     assert.equal(continuation.dedupeKey, expectedDedupeKey);
+  } finally {
+    close();
+  }
+});
+
+test("Junction reconcile resumes one owned day-resource cursor until the fixed window is complete", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-reconcile-cursor");
+  let now = new Date("2026-08-12T12:00:00.000Z");
+  let yieldRequested = false;
+  let failVo2Max = true;
+  let hrvAbortPending = true;
+  let hrvFetchStartedResolve: (() => void) | null = null;
+  const hrvFetchStarted = new Promise<void>((resolve) => {
+    hrvFetchStartedResolve = resolve;
+  });
+  const requestsByCoordinate = new Map<string, number>();
+  const replayedPrefixEvents: Array<{ eventId: string; revision: number }> = [];
+  const resources = [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES];
+  const resourceAvailability = Object.fromEntries(resources.map((resource) => [resource, true]));
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_fake_test_placeholder",
+    clientUserIdSecret: "test-only-hmac-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileIntervalMs: 60_000,
+    summaryResources: ["activity"],
+    timeseriesResources: resources,
+    fetchImpl: async (input, init) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-reconcile-cursor") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-reconcile-cursor",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: resourceAvailability,
+          }],
+        });
+      }
+      if (url.pathname === "/v2/summary/activity/junction-reconcile-cursor") {
+        return createJsonResponse({ data: [] });
+      }
+
+      const match = url.pathname.match(
+        /^\/v2\/timeseries\/junction-reconcile-cursor\/([^/]+)\/grouped$/u,
+      );
+      if (!match) {
+        throw new Error(`Unexpected Junction reconcile-cursor request: ${url.pathname}`);
+      }
+
+      const resource = match[1]!;
+      const day = url.searchParams.get("start_date") ?? "missing-day";
+      const coordinate = `${day}:${resource}`;
+      requestsByCoordinate.set(coordinate, (requestsByCoordinate.get(coordinate) ?? 0) + 1);
+
+      if (day === "2026-08-10" && resource === "hrv" && hrvAbortPending) {
+        hrvAbortPending = false;
+        hrvFetchStartedResolve?.();
+        const signal = init?.signal;
+        if (!signal) {
+          throw new Error("Expected the in-flight Junction request to carry the worker signal.");
+        }
+        await new Promise<never>((_resolve, reject) => {
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+
+      if (day === "2026-08-10" && resource === "vo2_max" && failVo2Max) {
+        return createJsonResponse({ code: "upstream_unavailable" }, 503);
+      }
+
+      if (day === "2026-08-10" && resource === "body_temperature") {
+        return createJsonResponse({ code: "resource_not_available" }, 404);
+      }
+      if (
+        resource === "blood_oxygen"
+        || (day === "2026-08-10" && resource === "stress_level")
+        || (day === "2026-08-10" && resource === "respiratory_rate")
+        || (day === "2026-08-10" && resource === "basal_body_temperature")
+      ) {
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                id: `${resource}-${day}`,
+                timestamp: `${day}T08:00:00.000Z`,
+                unit: resource === "blood_oxygen" ? "%" : "count",
+                value: resource === "blood_oxygen" ? 97 : 1,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      return createJsonResponse({ groups: {} });
+    },
+  });
+  await initializeVault({ vaultRoot });
+  const canonicalImporter = createImporters();
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const result = await canonicalImporter.importDeviceProviderSnapshot(input) as {
+          events?: Array<{ id: string; lifecycle?: { revision?: number } }>;
+        };
+        const snapshot = (input as {
+          snapshot?: { timeseries?: Record<string, unknown[]> };
+        }).snapshot;
+        const importedResources = Object.keys(snapshot?.timeseries ?? {});
+        if ((snapshot?.timeseries?.stress_level?.length ?? 0) > 0) {
+          replayedPrefixEvents.push(...(result.events ?? []).map((event) => ({
+            eventId: event.id,
+            revision: event.lifecycle?.revision ?? 1,
+          })));
+        }
+        if (importedResources.some((resource) =>
+          resource === "blood_oxygen"
+          || resource === "respiratory_rate"
+          || resource === "basal_body_temperature"
+        )) {
+          yieldRequested = true;
+        }
+        return result;
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-reconcile-cursor",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: now.toISOString(),
+      nextReconcileAt: null,
+    });
+    const job = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-08-10T00:00:00.000Z",
+        windowEnd: "2026-08-12T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+      priority: 20,
+      dedupeKey: "junction-reconcile-cursor-fixed-window",
+    });
+    let workerRuns = 0;
+    const runOne = async () => {
+      yieldRequested = false;
+      workerRuns += 1;
+      const processed = await service.runWorkerOnce();
+      assert.equal(processed?.id, job.id);
+      return store.getJobById(job.id);
+    };
+
+    let persistedJob = await runOne();
+    assert.deepEqual(persistedJob?.payload, {
+      timeseriesCursor: "2026-08-10T00:00:00.000Z",
+      timeseriesResourceIndex: 1,
+      windowEnd: "2026-08-12T00:00:00.000Z",
+      windowStart: "2026-08-10T00:00:00.000Z",
+    });
+    assert.equal(persistedJob?.id, job.id);
+    assert.equal(persistedJob?.attempts, 0);
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+
+    yieldRequested = false;
+    workerRuns += 1;
+    const abortedWorker = service.runWorkerOnce();
+    await hrvFetchStarted;
+    yieldRequested = true;
+    assert.equal((await abortedWorker)?.id, job.id);
+    persistedJob = store.getJobById(job.id);
+    assert.equal(persistedJob?.status, "queued");
+    assert.equal(persistedJob?.attempts, 0);
+    assert.equal(persistedJob?.payload.timeseriesResourceIndex, 1);
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+
+    persistedJob = await runOne();
+    assert.equal(persistedJob?.payload.timeseriesResourceIndex, 4);
+
+    persistedJob = await runOne();
+    assert.equal(persistedJob?.status, "queued");
+    assert.equal(persistedJob?.payload.timeseriesResourceIndex, 4);
+    assert.equal(persistedJob?.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+    assert.equal(persistedJob?.attempts, 1);
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+    failVo2Max = false;
+
+    while (persistedJob?.status !== "succeeded") {
+      if (persistedJob?.availableAt && Date.parse(persistedJob.availableAt) > now.getTime()) {
+        now = new Date(persistedJob.availableAt);
+      }
+      persistedJob = await runOne();
+      if (persistedJob?.status === "queued") {
+        assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+      }
+      assert.ok(workerRuns <= 7, "The fixed two-day resource window must finish within its tested cursor bound.");
+    }
+
+    assert.equal(workerRuns, 7);
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, now.toISOString());
+    assert.equal(store.getAccountById(account.id)?.lastErrorCode, null);
+    assert.equal(store.getAccountById(account.id)?.metadata.junctionSkippedTimeseriesTotal, 1);
+    assert.equal(requestsByCoordinate.size, resources.length * 2);
+    for (const day of ["2026-08-10", "2026-08-11"]) {
+      for (const resource of resources) {
+        const expectedAttempts = day === "2026-08-10" && resource === "stress_level"
+          ? 2
+          : day === "2026-08-10" && resource === "hrv"
+          ? 2
+          : day === "2026-08-10" && resource === "vo2_max"
+            ? 4
+            : 1;
+        assert.equal(requestsByCoordinate.get(`${day}:${resource}`), expectedAttempts);
+      }
+    }
+    assert.ok(replayedPrefixEvents.length >= 2);
+    assert.equal(new Set(replayedPrefixEvents.map((event) => event.eventId)).size, 1);
+    assert.equal(replayedPrefixEvents.every((event) => event.revision === 1), true);
   } finally {
     close();
   }

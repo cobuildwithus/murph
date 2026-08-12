@@ -1089,6 +1089,48 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
+      if (result.jobContinuation) {
+        if (
+          activeJobs.length !== 1
+          || (result.scheduledJobs?.length ?? 0) > 0
+          || Object.prototype.hasOwnProperty.call(result, "nextReconcileAt")
+        ) {
+          throw deviceSyncError({
+            code: "DEVICE_SYNC_JOB_CONTINUATION_INVALID",
+            message: "A same-job continuation must own one row and cannot schedule parallel progress.",
+            retryable: false,
+          });
+        }
+
+        const continuation = normalizeConfiguredDeviceSyncJobInput(
+          provider.provider,
+          {
+            kind: normalizedJob.kind,
+            payload: result.jobContinuation.payload,
+            ...(result.jobContinuation.availableAt
+              ? { availableAt: result.jobContinuation.availableAt }
+              : {}),
+          },
+          "continuation",
+        );
+        const continued = this.store.continueJobAndPatchSyncMetadataIfOwned({
+          accountId: storedAccount.id,
+          availableAt: continuation.availableAt ?? currentNow(),
+          disconnectGeneration,
+          jobId: normalizedJob.id,
+          localConnectionRevision,
+          ...(result.metadataPatch ? { metadataPatch: result.metadataPatch } : {}),
+          now: currentNow(),
+          payload: continuation.payload ?? {},
+          workerId: this.workerId,
+        });
+
+        if (!continued) {
+          releaseActiveJobsIfCurrentAccountActive(currentNow());
+        }
+        return finishPass();
+      }
+
       const successOptions: {
         localConnectionRevision: number;
         metadataPatch?: Record<string, unknown>;

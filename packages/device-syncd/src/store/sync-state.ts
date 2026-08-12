@@ -95,6 +95,66 @@ export function markSyncSucceededInTransaction(
   return true;
 }
 
+export function patchSyncContinuationMetadataInTransaction(
+  database: DatabaseSync,
+  accountId: string,
+  now: string,
+  disconnectGeneration: number | null,
+  options: {
+    localConnectionRevision: number;
+    metadataPatch?: Record<string, unknown>;
+  },
+): boolean {
+  const existing = getAccountById(database, accountId);
+
+  if (
+    !existing
+    || existing.localConnectionRevision !== options.localConnectionRevision
+    || (
+      disconnectGeneration !== null
+      && (
+        existing.disconnectGeneration !== disconnectGeneration
+        || existing.status !== "active"
+      )
+    )
+  ) {
+    return false;
+  }
+
+  const metadata = mergeStoredDeviceSyncMetadataPatch(existing.metadata, options.metadataPatch);
+  const metadataJson = stringifyJson(metadata);
+  if (metadataJson === stringifyJson(existing.metadata)) {
+    return true;
+  }
+
+  const connectionResult = database.prepare(`
+    update device_connection
+    set metadata_json = ?,
+        updated_at = ?
+    where id = ?
+      and (? is null or (disconnect_generation = ? and status = 'active'))
+  `).run(
+    metadataJson,
+    now,
+    accountId,
+    disconnectGeneration ?? null,
+    disconnectGeneration ?? null,
+  ) as { changes: number };
+
+  if ((connectionResult.changes ?? 0) === 0) {
+    return false;
+  }
+
+  database.prepare(`
+    update device_observation_state
+    set local_connection_revision = ?,
+        updated_at = ?
+    where account_id = ?
+  `).run(existing.localConnectionRevision + 1, now, accountId);
+
+  return true;
+}
+
 export function markSyncSucceeded(
   database: DatabaseSync,
   accountId: string,

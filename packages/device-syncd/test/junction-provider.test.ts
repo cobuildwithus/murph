@@ -4790,6 +4790,84 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
   );
 });
 
+test("Junction schedule-time history terminality requires completed daily overlap", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [{
+        id: "provider-garmin-caffeine-overlap",
+        slug: "garmin",
+        name: "Garmin",
+        status: "connected",
+        resource_availability: { caffeine: true },
+      }] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/caffeine/grouped") {
+      return createJsonResponse({ groups: { garmin: [{
+        data: [{
+          id: "caffeine-overlap-1",
+          start: "2026-04-01T08:00:00.000Z",
+          value: 0.095,
+        }],
+        source: { provider: "garmin", type: "watch" },
+      }] } });
+    }
+    throw new Error(`Unexpected Junction completed-overlap request: ${url.pathname}`);
+  }, {
+    reconcileDays: 2,
+    summaryResources: [],
+    timeseriesResources: ["caffeine"],
+  });
+  const source = {
+    ...createConnectionSource({
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { caffeine: true },
+    }),
+    resourceCount: 1,
+  };
+  const job = createJob("resource", {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-03-01T00:00:00.000Z",
+    resource: "caffeine",
+    resourceCategory: "timeseries",
+    sourceLifecycleEpoch: 1,
+    sourceProviderSlug: "garmin",
+    windowEnd: "2026-04-02T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+  });
+  const execute = (lastSyncCompletedAt: string | null) => executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        lastSyncCompletedAt,
+        sources: [source],
+      }),
+      importSnapshot: async () => ({
+        canonicalEventCount: 1,
+        durableDeliveryAccepted: true,
+      }),
+      now: "2026-04-03T12:00:00.000Z",
+    }),
+    job,
+  );
+
+  const beforeDailyOverlap = await execute(null);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    mergeStoredDeviceSyncMetadataPatch({}, beforeDailyOverlap.metadataPatch),
+    "garmin",
+    "caffeine",
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+  ), false);
+
+  const afterDailyOverlap = await execute("2026-04-03T12:00:00.000Z");
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    mergeStoredDeviceSyncMetadataPatch({}, afterDailyOverlap.metadataPatch),
+    "garmin",
+    "caffeine",
+    JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+  ), true);
+});
+
 test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);

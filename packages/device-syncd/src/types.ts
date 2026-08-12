@@ -785,6 +785,15 @@ export interface ProviderJobResult {
   scheduledJobs?: DeviceSyncJobInput[];
   metadataPatch?: Record<string, unknown>;
   nextReconcileAt?: string | null;
+  /**
+   * Requeue the exact claimed job with replacement payload progress without
+   * publishing account-wide sync success. The current job row remains the
+   * only durable continuation owner.
+   */
+  jobContinuation?: {
+    availableAt?: string;
+    payload: Record<string, unknown>;
+  };
 }
 
 export interface ProviderJobBatchDescriptor {
