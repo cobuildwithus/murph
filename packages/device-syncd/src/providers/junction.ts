@@ -256,6 +256,9 @@ interface JunctionWindowFetchOptions {
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
 const JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY = "junctionProfileSummaryCheckedAt";
+const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION = 1;
+const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY =
+  "junctionProfileSummaryNormalizationRevision";
 
 // `profile` is deliberately excluded: it is a current-state snapshot, so
 // counting it as completion evidence would mark every backfill useful and
@@ -321,6 +324,7 @@ const JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES = new Set<string>([
 ]);
 const DEFAULT_SUMMARY_BACKFILL_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays;
 const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
+const JUNCTION_NOTE_HISTORY_BACKFILL_VERSION = 2;
 // Sparse summary-history resources are cheap enough to backfill across the
 // summary window. The contracts registry owns membership; the three legacy
 // resources retain their established per-resource coverage keys and override.
@@ -712,6 +716,7 @@ export function createJunctionDeviceSyncProvider(
         });
         return buildExtendedTimeseriesBackfillJob({
           availableAt: now,
+          ...(resource === "note" ? { historicalBackfillVersion: policy.version } : {}),
           historicalWindowStart: window.windowStart,
           resource,
           sourceProviderSlug,
@@ -1235,7 +1240,7 @@ export function createJunctionDeviceSyncProvider(
           })
       : {};
     const connectExtendedTimeseriesCoverageMetadataPatch =
-      job.kind === "backfill" && isConnectHistoricalBackfill
+      job.kind === "backfill" && isConnectHistoricalBackfill && !timeseriesCursor
         ? buildJunctionConnectExtendedTimeseriesCoverageMetadataPatch({
             context,
             skippedOptionalResources,
@@ -2413,14 +2418,15 @@ export function createJunctionDeviceSyncProvider(
       encodeJunctionHistoricalUnresolvedProviderRecords(unresolvedProviderRecords);
     const unresolvedProviderRecordsSeen = unresolvedProviderRecordCount > 0;
 
-    // A note without usable tags is an intentional importer no-op, not a
-    // canonical repair obligation. A complete note scan can therefore close
-    // its one-time source coverage even when it creates no events.
+    // A complete note scan can close its one-time source coverage even when
+    // no action-like tags exist. Neutral wearable-tag notes, including a
+    // cleared tag state, do not create a separate backfill repair obligation.
     if (input.resource === "note" && input.importResult.fetchComplete) {
       return withJunctionMetadataPatch(
         input.result,
         buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
           input.context,
+          input.job,
           input.resource,
           sourceProviderSlug,
         ),
@@ -2436,6 +2442,7 @@ export function createJunctionDeviceSyncProvider(
         input.result,
         buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
           input.context,
+          input.job,
           input.resource,
           sourceProviderSlug,
         ),
@@ -2461,6 +2468,7 @@ export function createJunctionDeviceSyncProvider(
         input.result,
         buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
           input.context,
+          input.job,
           input.resource,
           sourceProviderSlug,
         ),
@@ -2475,6 +2483,12 @@ export function createJunctionDeviceSyncProvider(
           availableAt: addMilliseconds(input.context.now, retryDelayMs),
           dedupeKey: input.job.dedupeKey,
           emptyBackfillAttempts,
+          ...(input.resource === "note"
+            ? {
+                historicalBackfillVersion:
+                  readJunctionNoteHistoryBackfillVersion(input.job.payload),
+              }
+            : {}),
           historicalProviderRecordsSeen: unresolvedProviderRecordsSeen,
           historicalRecordsSeen: recordsSeen,
           historicalUnresolvedProviderRecordIdentitiesJson:
@@ -2494,6 +2508,7 @@ export function createJunctionDeviceSyncProvider(
 
   function buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
     context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
     resource: string,
     sourceProviderSlug: string | null,
   ): Record<string, unknown> {
@@ -2506,11 +2521,20 @@ export function createJunctionDeviceSyncProvider(
       return {};
     }
 
+    const admittedVersion = resource === "note"
+      ? readJunctionNoteHistoryBackfillVersion(job.payload)
+      : policy.version;
+    if (admittedVersion > policy.version) {
+      // A rolled-back runtime cannot certify work admitted by a newer
+      // semantic generation.
+      return {};
+    }
+
     const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
       existingValue: context.account.metadata[policy.metadataKey],
       providerSlug: sourceProviderSlug,
       resource,
-      version: policy.version,
+      version: admittedVersion,
     });
     return coverage ? { [policy.metadataKey]: coverage } : {};
   }
@@ -3484,7 +3508,9 @@ export function createJunctionDeviceSyncProvider(
       metadataKey,
       requiresCompletedGlobalBackfill:
         metadataKey === JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
-      version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
+      version: resource === "note"
+        ? JUNCTION_NOTE_HISTORY_BACKFILL_VERSION
+        : JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
     };
   }
 
@@ -3606,6 +3632,8 @@ function buildJunctionProfileSummaryCheckedMetadataPatch(
 ): Record<string, unknown> {
   return {
     [JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY]: context.now,
+    [JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY]:
+      JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION,
   };
 }
 
@@ -3646,7 +3674,10 @@ function isJunctionProfileSummaryResource(resource: string): boolean {
 
 function hasCheckedJunctionProfileSummary(metadata: Record<string, unknown>): boolean {
   const checkedAt = normalizeString(metadata[JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY]);
-  return checkedAt !== undefined && Number.isFinite(Date.parse(checkedAt));
+  return checkedAt !== undefined
+    && Number.isFinite(Date.parse(checkedAt))
+    && metadata[JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY]
+      === JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION;
 }
 
 function classifyOptionalJunctionResourceFailure(
@@ -6532,12 +6563,15 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
   }
 
   if (!["blood_pressure", "weight"].includes(resource)) {
+    const coverageVersion = resource === "note"
+      ? readJunctionNoteHistoryBackfillVersion(payload)
+      : JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION;
     return sha256Text(JSON.stringify([
       "junction",
       "extended-timeseries-backfill",
       normalizeProviderSlug(payload.sourceProviderSlug),
       resource,
-      JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_VERSION,
+      coverageVersion,
     ]));
   }
 
@@ -6556,6 +6590,7 @@ function buildExtendedTimeseriesBackfillJob(input: {
   dedupeKey?: string | null;
   emptyBackfillAttempts?: number;
   historicalProviderRecordsSeen?: boolean;
+  historicalBackfillVersion?: number;
   historicalRecordsSeen?: boolean;
   historicalUnresolvedProviderRecordIdentitiesJson?: string;
   historicalUnresolvedProviderRecordCount?: number;
@@ -6570,6 +6605,9 @@ function buildExtendedTimeseriesBackfillJob(input: {
       ? { emptyBackfillAttempts: input.emptyBackfillAttempts }
       : {}),
     historicalBackfill: true,
+    ...(input.historicalBackfillVersion === undefined
+      ? {}
+      : { historicalBackfillVersion: input.historicalBackfillVersion }),
     ...(input.historicalProviderRecordsSeen
       ? { historicalProviderRecordsSeen: true }
       : {}),
@@ -6611,6 +6649,15 @@ function buildExtendedTimeseriesBackfillJob(input: {
     priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
     dedupeKey,
   };
+}
+
+function readJunctionNoteHistoryBackfillVersion(
+  payload: Record<string, unknown>,
+): number {
+  const version = payload.historicalBackfillVersion;
+  return typeof version === "number" && Number.isSafeInteger(version) && version >= 1
+    ? version
+    : 1;
 }
 
 function buildJunctionWebhookJobs(input: {

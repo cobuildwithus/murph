@@ -368,6 +368,7 @@ export class SqliteDeviceSyncStore {
       localConnectionRevision?: number | null;
       metadataPatch?: Record<string, unknown>;
       nextReconcileAt?: string | null;
+      preserveLastSyncCompletedAt?: boolean;
     } = {},
   ): boolean {
     return markStoredSyncSucceeded(this.database, accountId, now, disconnectGeneration, options);
@@ -541,6 +542,7 @@ export class SqliteDeviceSyncStore {
       localConnectionRevision?: number | null;
       metadataPatch?: Record<string, unknown>;
       nextReconcileAt?: string | null;
+      preserveLastSyncCompletedAt?: boolean;
     };
     workerId: string;
   }): boolean {

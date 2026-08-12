@@ -147,6 +147,7 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
 ): HostedRuntimeReconciliationFactsWorkspace {
   const record = requireObject(value, "Hosted runtime reconciliation facts workspace");
   assertExactKeys(record, "Hosted runtime reconciliation facts workspace", [
+    "hostedMailboxSystemHandledThroughSeq",
     "inboxMediaRetentionWakeAt",
     "nextWakeAt",
     "nextWakeReason",
@@ -154,6 +155,18 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
   ]);
 
   return {
+    ...(Object.prototype.hasOwnProperty.call(
+      record,
+      "hostedMailboxSystemHandledThroughSeq",
+    )
+      ? {
+          hostedMailboxSystemHandledThroughSeq:
+            requireNonNegativeBigIntString(
+              record.hostedMailboxSystemHandledThroughSeq,
+              "Hosted runtime reconciliation facts workspace hostedMailboxSystemHandledThroughSeq",
+            ),
+        }
+      : {}),
     inboxMediaRetentionWakeAt: readOptionalNullableIsoTimestamp(
       record.inboxMediaRetentionWakeAt,
       "Hosted runtime reconciliation facts workspace inboxMediaRetentionWakeAt",

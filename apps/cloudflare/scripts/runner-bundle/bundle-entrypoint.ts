@@ -233,13 +233,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // forbidden boot input. Exact merged local assembly measured 9,808,583B total
 // on 2026-08-11, so ratchet the total only and retain the 32KB allowance.
 //
-// Bounded Junction sparse-resource policies, canonicalizers, and activation
-// coverage extend those same deferred provider/importer chunks without adding
-// a forbidden boot input. Exact local production assembly measured 9,898,262B
-// total on 2026-08-12, so ratchet the total only and retain the 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_898_262 + 32_768;
+// Bounded Junction sparse-resource policies and current conversation mailbox
+// recovery extend existing outputs without adding a forbidden boot input.
+// Exact merged production assembly measured a 7,943,465B static closure and
+// 9,957,576B total on 2026-08-11; ratchet those two baselines while retaining
+// the established cross-platform allowances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_957_576 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_943_465;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

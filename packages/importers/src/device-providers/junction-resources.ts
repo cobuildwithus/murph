@@ -175,6 +175,21 @@ export const JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS = Object.freeze([
   "sleep_efficiency",
   "efficiency",
 ] as const);
+export const JUNCTION_SLEEP_LATENCY_MINUTE_PATHS = Object.freeze([
+  "sleepLatencyMinutes",
+  "sleep_latency_minutes",
+  "latencyMinutes",
+  "latency_minutes",
+] as const);
+export const JUNCTION_SLEEP_LATENCY_SECOND_PATHS = Object.freeze([
+  "sleepLatencySeconds",
+  "sleep_latency_seconds",
+  "latencySeconds",
+  "latency_seconds",
+  "sleepLatency",
+  "sleep_latency",
+  "latency",
+] as const);
 export const JUNCTION_SLEEP_CONSISTENCY_PATHS = Object.freeze([
   "sleepConsistency",
   "sleep_consistency",
@@ -409,6 +424,8 @@ export const JUNCTION_SLEEP_SUMMARY_NUMBER_PATHS = Object.freeze([
   ...JUNCTION_SLEEP_AWAKE_MINUTE_PATHS,
   ...JUNCTION_SLEEP_AWAKE_SECOND_PATHS,
   ...JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS,
+  ...JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
+  ...JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
   ...JUNCTION_SLEEP_HRV_PATHS,
   ...JUNCTION_SLEEP_AVERAGE_HEART_RATE_PATHS,
   ...JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,

@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
+import { HOSTED_MAILBOX_RETENTION_MS } from "@/src/lib/hosted-mailbox/store";
 import {
   readHostedRuntimeProgressHealth,
 } from "@/src/lib/hosted-runtime-progress/alert-monitor";
@@ -248,8 +249,8 @@ describe.skipIf(!runPostgresProof)(
           })).resolves.toMatchObject({
             excludedUsageBlockedConversationLaneCount: 1,
             oldestStalledAgeMs: 60 * 60_000 + 1,
-            stalledConversationLaneCount: 3,
-            stalledLaneCount: 6,
+            stalledConversationLaneCount: 2,
+            stalledLaneCount: 5,
           });
 
           const invalidMember = `${prefix}-invalid-chronology`;
@@ -305,11 +306,11 @@ describe.skipIf(!runPostgresProof)(
             prisma: tx,
           });
           expect(afterExcludedCap).toMatchObject({
-            scanTruncated: false,
-            stalledLaneCount: 5,
+            excludedInactiveLaneCount: 20_000,
+            scanTruncated: true,
+            stalledLaneCount: 0,
+            stalledRuntimeCount: 0,
           });
-          expect(afterExcludedCap.excludedInactiveLaneCount)
-            .toBeGreaterThanOrEqual(20_003);
 
           await tx.$executeRaw(Prisma.sql`
             UPDATE hosted_member
@@ -341,6 +342,131 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     }, 150_000);
+
+    it("selects the true unstamped conversation head and leaves system semantics unchanged", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const rollback = new Error("Rollback lane-aware progress PostgreSQL proof.");
+      const prefix = `progress-lane-proof-${randomUUID()}`;
+      const now = new Date("2026-08-10T16:00:00.000Z");
+      const staleAt = new Date(now.getTime() - 60 * 60_000);
+      let proofCompleted = false;
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          const mixedConversation = `${prefix}-mixed-conversation`;
+          const allStampedConversation = `${prefix}-all-stamped-conversation`;
+          const stampedSystem = `${prefix}-stamped-system`;
+          const usageDeniedConversation = `${prefix}-usage-denied-conversation`;
+          const expiredConversation = `${prefix}-retained-out-conversation`;
+          await tx.hostedMember.createMany({
+            data: [
+              mixedConversation,
+              allStampedConversation,
+              stampedSystem,
+              usageDeniedConversation,
+              expiredConversation,
+            ].map((id) => member(id, HostedBillingStatus.active)),
+          });
+
+          await seedProgressLaneItems({
+            lane: "conversation",
+            rows: [
+              { createdAt: staleAt, laneSeq: 1n },
+              {
+                aiUsageDeniedAt: new Date(now.getTime() - 30 * 60_000),
+                consumedAt: new Date(now.getTime() - 20 * 60_000),
+                createdAt: new Date(staleAt.getTime() + 1_000),
+                laneSeq: 2n,
+              },
+              {
+                consumedAt: new Date(now.getTime() - 10 * 60_000),
+                createdAt: new Date(staleAt.getTime() + 2_000),
+                laneSeq: 3n,
+              },
+            ],
+            tx,
+            userId: mixedConversation,
+          });
+          await seedProgressLaneItems({
+            lane: "conversation",
+            rows: [
+              {
+                consumedAt: new Date(now.getTime() - 20 * 60_000),
+                createdAt: staleAt,
+                laneSeq: 1n,
+              },
+              {
+                consumedAt: new Date(now.getTime() - 10 * 60_000),
+                createdAt: new Date(staleAt.getTime() + 1_000),
+                laneSeq: 2n,
+              },
+            ],
+            tx,
+            userId: allStampedConversation,
+          });
+          await seedProgressLaneItems({
+            lane: "system",
+            rows: [{
+              consumedAt: new Date(now.getTime() - 10 * 60_000),
+              createdAt: staleAt,
+              laneSeq: 1n,
+            }],
+            tx,
+            userId: stampedSystem,
+          });
+          await seedProgressLaneItems({
+            lane: "conversation",
+            rows: [{
+              aiUsageDeniedAt: new Date(now.getTime() - 50 * 60_000),
+              createdAt: staleAt,
+              laneSeq: 1n,
+            }],
+            tx,
+            userId: usageDeniedConversation,
+          });
+          await seedProgressLaneItems({
+            lane: "conversation",
+            rows: [{
+              createdAt: new Date(
+                now.getTime() - HOSTED_MAILBOX_RETENTION_MS - 1,
+              ),
+              laneSeq: 1n,
+            }],
+            tx,
+            userId: expiredConversation,
+          });
+
+          await expect(readHostedRuntimeProgressHealth({
+            now,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            excludedInactiveLaneCount: 0,
+            excludedUsageBlockedConversationLaneCount: 1,
+            oldestStalledAgeMs: 60 * 60_000,
+            pendingItemCount: 2,
+            scanTruncated: false,
+            stalledConversationLaneCount: 1,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 1,
+          });
+
+          proofCompleted = true;
+          throw rollback;
+        }, {
+          maxWait: 10_000,
+          timeout: 30_000,
+        }).catch((error: unknown) => {
+          if (error !== rollback) {
+            throw error;
+          }
+        });
+        expect(proofCompleted).toBe(true);
+      } finally {
+        await prisma.$disconnect();
+      }
+    }, 60_000);
   },
 );
 
@@ -368,35 +494,62 @@ async function seedProgressLane(input: {
   tx: Prisma.TransactionClient;
   userId: string;
 }): Promise<void> {
-  const itemId = `${input.userId}-${input.lane}-item`;
+  await seedProgressLaneItems({
+    lane: input.lane,
+    rows: [{
+      aiUsageDeniedAt: input.aiUsageDeniedAt,
+      consumedAt: input.consumedAt,
+      createdAt: input.createdAt,
+      laneSeq: 1n,
+    }],
+    tx: input.tx,
+    userId: input.userId,
+  });
+}
+
+async function seedProgressLaneItems(input: {
+  lane: "conversation" | "system";
+  rows: readonly {
+    aiUsageDeniedAt?: Date;
+    consumedAt?: Date;
+    createdAt: Date;
+    laneSeq: bigint;
+  }[];
+  tx: Prisma.TransactionClient;
+  userId: string;
+}): Promise<void> {
+  const highestLaneSeq = input.rows.reduce(
+    (highest, row) => row.laneSeq > highest ? row.laneSeq : highest,
+    0n,
+  );
   await input.tx.hostedMailboxLaneCounter.create({
     data: {
       consumedSeq: 0n,
       lane: input.lane,
-      nextSeq: 2n,
+      nextSeq: highestLaneSeq + 1n,
       userId: input.userId,
     },
   });
-  await input.tx.hostedMailboxItem.create({
-    data: {
-      ...(input.aiUsageDeniedAt === undefined
+  await input.tx.hostedMailboxItem.createMany({
+    data: input.rows.map((row) => ({
+      ...(row.aiUsageDeniedAt === undefined
         ? {}
-        : { aiUsageDeniedAt: input.aiUsageDeniedAt }),
-      ...(input.consumedAt === undefined
+        : { aiUsageDeniedAt: row.aiUsageDeniedAt }),
+      ...(row.consumedAt === undefined
         ? {}
-        : { consumedAt: input.consumedAt }),
-      createdAt: input.createdAt,
-      dedupeKey: `${input.userId}-${input.lane}-dedupe`,
-      id: itemId,
+        : { consumedAt: row.consumedAt }),
+      createdAt: row.createdAt,
+      dedupeKey: `${input.userId}-${input.lane}-dedupe-${row.laneSeq}`,
+      id: `${input.userId}-${input.lane}-item-${row.laneSeq}`,
       kind: input.lane === "conversation"
         ? "conversation.message"
         : "device-sync.wake",
       lane: input.lane,
-      laneSeq: 1n,
-      occurredAt: input.createdAt,
+      laneSeq: row.laneSeq,
+      occurredAt: row.createdAt,
       payloadSchema: "murph.runtime-progress-proof.v1",
       userId: input.userId,
-    },
+    })),
   });
 }
 
@@ -433,7 +586,7 @@ async function seedProgressTrace(input: {
       assistantInputStagedAt: input.assistantInputStagedAt,
       id: `${input.userId}-trace`,
       linqDeliveryId: deliveryId,
-      mailboxItemId: `${input.userId}-conversation-item`,
+      mailboxItemId: `${input.userId}-conversation-item-1`,
       mailboxLane: "conversation",
       mailboxLaneSeq: 1n,
       providerStartAt: input.providerStartAt,

@@ -713,6 +713,7 @@ describe("changelog registry", () => {
         })),
     ).toEqual([
       {
+
         id: "2026-08-09",
         itemIds: [
           "group-sleep-challenges-use-fresh-data",
@@ -1073,6 +1074,22 @@ describe("changelog registry", () => {
     });
     expect(item?.details).toContain("existing history");
     expect(item?.details).toContain("association rather than cause");
+  });
+
+  it("bounds wearable recovery to model-free sync work", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "wearable-sync-recovers-model-free",
+    );
+
+    expect(item).toMatchObject({
+      kind: "improvement",
+      priority: 5,
+      sourcePullRequests: [1597],
+    });
+    expect(item?.summary).toContain("scheduled assistant automations are paused");
+    expect(item?.details).toContain("Fresh messages still take priority");
+    expect(item?.details).toContain("does not start an AI response");
+    expect(item?.tryIt).toBeUndefined();
   });
 
   it("keeps historical one-time sponsorship copy and publishes monthly sponsorship only in the current edition", () => {

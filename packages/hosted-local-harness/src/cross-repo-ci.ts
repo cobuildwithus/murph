@@ -21,6 +21,10 @@ export const hostedLocalCrossRepoCiRequirements = [
     scenario: "device-connect",
   },
   {
+    reason: "Proves an authenticated member can render and retain the hosted Connect journey in Chromium.",
+    scenario: "hosted-web-browser-smoke",
+  },
+  {
     reason: "Proves the primary Linq delivery path through the real hosted stack.",
     scenario: "linq-delivery",
   },
