@@ -154,6 +154,24 @@ application authority checks.
   its existing signal, the idle caller no longer adds a duplicate wrapper, and
   transport-wrapped aborts are recognized through their preserved cause. This
   adds no queue, retry state, service, lifecycle, or authority owner.
+- The round-five full-snapshot audit at `ca9a3ccf6a1e` returned no findings and
+  accepted the foreground-preemption correction, partial-commit retry safety,
+  signed-body partitioning, two-phase apply authority, and the completed
+  retrospective. The response met the duration, exact-head, attachment, and
+  completion-marker gates; the requested model was selected in the browser,
+  while the optional persisted model confirmation remained unknown.
+- After the user-authorized current-main integration, the round-six full-
+  snapshot audit at `b8cac2430d00` found one review-induced complexity
+  collapse: current main's bounded snapshot secret-set reader and this PR's
+  apply-specific reader duplicated the same secure-box, root-cache, OAuth
+  validation, and material-map owner. Accepted. The correction keeps
+  `readHostedRuntimeConnectionSecretMaterial` as the sole set-opening
+  primitive, moves active external-identity validation to the snapshot policy
+  caller, and lets apply select the complete valid OAuth candidate id set before
+  invoking that same primitive. The duplicate material type, reader, store and
+  control-plane methods, validator pair, and test mocks are deleted. No new
+  owner, lifecycle, state, transaction, or compatibility mechanism replaces
+  them.
 
 ## Verification
 
@@ -243,3 +261,11 @@ application authority checks.
   inventory (10 passed), together with the routed architecture, logging,
   provider-request, dependency, and workspace-boundary guards. No-JS, docs-
   drift, diff, and privacy checks remain clean.
+- After the round-six consolidation, 166 focused Hosted Web authority,
+  secret-set, token-store, and root-owner tests pass. The maximum 100-connection
+  apply still uses one selected set read and performs all open/seal work before
+  serial database-only transactions. Snapshot-specific tests prove active rows
+  fail before secret opening when ciphertext is absent and fail after opening
+  when plaintext is absent, while redacted and token-ineligible rows retain
+  their bounded filtering. Hosted Web, device-syncd, assistant-runtime, and
+  Cloudflare typechecks pass.

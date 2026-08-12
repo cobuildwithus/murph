@@ -45,11 +45,6 @@ export interface HostedRuntimeConnectionSecretMaterial {
   tokenBundle: HostedStoredConnectionTokenBundle | null;
 }
 
-export interface HostedRuntimeApplyConnectionSecretMaterial {
-  externalAccountId: string | null;
-  tokenBundle: HostedStoredConnectionTokenBundle | null;
-}
-
 export interface HostedRuntimeApplyPreparedTokenWrite {
   accessTokenEncrypted: string | null;
   accessTokenExpiresAt: string | null;
@@ -177,12 +172,11 @@ export async function readHostedStoredExternalAccountId(
 }
 
 /**
- * Opens one runtime page's device secrets as two lane-aware secure-box sets.
- * Only connections whose token material can be emitted are admitted to the
- * token set; redacted, terminal, leased, and application-blocked rows never
- * have token ciphertext opened. The existing request-scoped root memo keeps
- * the two lane opens on one root-metadata read without introducing durable or
- * process-global cache state.
+ * Opens one bounded runtime authority set's device secrets as two lane-aware
+ * secure-box sets. The caller selects exactly which connections may expose
+ * token material; snapshot and apply policy remain outside this primitive.
+ * The existing request-scoped root memo keeps the two lane opens on one
+ * root-metadata read without introducing durable or process-global cache state.
  */
 export async function readHostedRuntimeConnectionSecretMaterial(input: {
   prisma?: HostedSecureBoxPrismaClient;
@@ -191,10 +185,16 @@ export async function readHostedRuntimeConnectionSecretMaterial(input: {
   tokenConnectionIds: ReadonlySet<string>;
 }): Promise<Map<string, HostedRuntimeConnectionSecretMaterial>> {
   const testCodec = normalizeHostedDeviceSyncSecretTestCodec(input.testCodec);
-  const recordsById = new Map(input.records.map((record) => [record.id, record] as const));
+  const recordsById = new Map<string, HostedConnectionRecord>();
+  for (const record of input.records) {
+    if (recordsById.has(record.id)) {
+      throw new TypeError("Hosted device-sync runtime secret preparation contained a duplicate connection.");
+    }
+    recordsById.set(record.id, record);
+  }
   for (const connectionId of input.tokenConnectionIds) {
     if (!recordsById.has(connectionId)) {
-      throw new TypeError("Hosted device-sync runtime token projection referenced an unknown connection.");
+      throw new TypeError("Hosted device-sync runtime secret preparation referenced an unknown connection.");
     }
   }
 
@@ -204,14 +204,11 @@ export async function readHostedRuntimeConnectionSecretMaterial(input: {
     value: string;
   }> = [];
   for (const record of input.records) {
-    if (record.status === "active" && !normalizeNullableString(record.externalAccountIdEncrypted)) {
-      throw new TypeError("Hosted active device-sync connection is missing its external account identity.");
-    }
     if (!input.tokenConnectionIds.has(record.id)) {
       continue;
     }
     if (normalizeHostedDeviceSyncCredentialKind(record.credentialKind) !== "oauth_tokens") {
-      throw new TypeError("Hosted device-sync runtime token projection requires OAuth credentials.");
+      throw new TypeError("Hosted device-sync runtime token preparation requires OAuth credentials.");
     }
     requireHostedRuntimeTokenVersion(record.tokenVersion);
     const accessTokenEncrypted = normalizeNullableString(record.accessTokenEncrypted);
@@ -288,7 +285,7 @@ export async function readHostedRuntimeConnectionSecretMaterial(input: {
     >();
     tokenEntries.forEach((entry, index) => {
       const plaintext = tokenPlaintexts[index];
-      if (plaintext === null) {
+      if (plaintext === null || plaintext === undefined || plaintext.length === 0) {
         throw new TypeError("Hosted device-sync secure-box decryption returned an empty plaintext.");
       }
       const values = tokensByConnectionId.get(entry.connectionId) ?? {
@@ -302,9 +299,6 @@ export async function readHostedRuntimeConnectionSecretMaterial(input: {
     const material = new Map<string, HostedRuntimeConnectionSecretMaterial>();
     input.records.forEach((record, index) => {
       const externalAccountId = externalAccountIds[index] ?? null;
-      if (record.status === "active" && !externalAccountId) {
-        throw new TypeError("Hosted active device-sync connection is missing its external account identity.");
-      }
       const tokens = tokensByConnectionId.get(record.id);
       material.set(record.id, {
         externalAccountId,
@@ -316,155 +310,6 @@ export async function readHostedRuntimeConnectionSecretMaterial(input: {
                 ?? HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
               refreshToken: tokens?.refreshToken ?? null,
               tokenVersion: requireHostedRuntimeTokenVersion(record.tokenVersion),
-            }
-          : null,
-      });
-    });
-    return material;
-  };
-
-  return testCodec ? read() : runWithHostedDomainRootUnwrapCache(read);
-}
-
-/**
- * Opens the complete bounded runtime-apply authority set before any
- * connection transaction starts. Secure-box roots are resolved as sets, and
- * the existing domain-root owner caps provider unwrap concurrency at four.
- */
-export async function readHostedRuntimeApplyConnectionSecretMaterial(input: {
-  prisma?: HostedSecureBoxPrismaClient;
-  records: readonly HostedConnectionRecord[];
-  testCodec?: HostedDeviceSyncSecretTestCodec | null;
-}): Promise<Map<string, HostedRuntimeApplyConnectionSecretMaterial>> {
-  const testCodec = normalizeHostedDeviceSyncSecretTestCodec(input.testCodec);
-  const recordsById = new Map<string, HostedConnectionRecord>();
-  const tokenEntries: Array<{
-    connectionId: string;
-    field: "accessToken" | "refreshToken";
-    tokenVersion: number;
-    value: string;
-  }> = [];
-
-  for (const record of input.records) {
-    if (recordsById.has(record.id)) {
-      throw new TypeError("Hosted device-sync runtime apply preparation contained a duplicate connection.");
-    }
-    recordsById.set(record.id, record);
-
-    if (normalizeHostedDeviceSyncCredentialKind(record.credentialKind) !== "oauth_tokens") {
-      continue;
-    }
-    const accessTokenEncrypted = normalizeNullableString(record.accessTokenEncrypted);
-    const tokenVersion = record.tokenVersion;
-    if (!accessTokenEncrypted || tokenVersion === null) {
-      continue;
-    }
-    const normalizedTokenVersion = requireHostedRuntimeApplyTokenVersion(tokenVersion);
-    tokenEntries.push({
-      connectionId: record.id,
-      field: "accessToken",
-      tokenVersion: normalizedTokenVersion,
-      value: accessTokenEncrypted,
-    });
-    const refreshTokenEncrypted = normalizeNullableString(record.refreshTokenEncrypted);
-    if (refreshTokenEncrypted) {
-      tokenEntries.push({
-        connectionId: record.id,
-        field: "refreshToken",
-        tokenVersion: normalizedTokenVersion,
-        value: refreshTokenEncrypted,
-      });
-    }
-  }
-
-  const read = async (): Promise<Map<string, HostedRuntimeApplyConnectionSecretMaterial>> => {
-    const externalAccountIds = testCodec
-      ? input.records.map((record) => {
-          const ciphertext = normalizeNullableString(record.externalAccountIdEncrypted);
-          return ciphertext ? testCodec.decrypt(ciphertext) : null;
-        })
-      : await openHostedUserSecureBoxStrings({
-          entries: input.records.map((record) => ({
-            aad: buildHostedDeviceSyncSecretAad({
-              connectionId: record.id,
-              field: "externalAccountId",
-              provider: record.provider,
-              purpose: "device-sync-external-account-id",
-              tokenVersion: null,
-            }),
-            scope: `device-sync-external-account-id:${record.id}`,
-            userId: record.userId,
-            value: record.externalAccountIdEncrypted,
-          })),
-          lane: "device-sync-external-account-id",
-          prisma: input.prisma,
-        });
-
-    const tokenPlaintexts = testCodec
-      ? tokenEntries.map((entry) => testCodec.decrypt(entry.value))
-      : await openHostedUserSecureBoxStrings({
-          entries: tokenEntries.map((entry) => {
-            const record = recordsById.get(entry.connectionId);
-            if (!record) {
-              throw new TypeError("Hosted device-sync runtime apply token preparation lost its connection.");
-            }
-            const purpose = entry.field === "accessToken"
-              ? "device-sync-access-token"
-              : "device-sync-refresh-token";
-            return {
-              aad: buildHostedDeviceSyncSecretAad({
-                connectionId: record.id,
-                field: entry.field,
-                provider: record.provider,
-                purpose,
-                tokenVersion: entry.tokenVersion,
-              }),
-              scope: `device-sync-token:${record.id}:${entry.field}`,
-              userId: record.userId,
-              value: entry.value,
-            };
-          }),
-          lane: "device-sync-token",
-          prisma: input.prisma,
-        });
-
-    const tokensByConnectionId = new Map<
-      string,
-      { accessToken: string | null; refreshToken: string | null }
-    >();
-    tokenEntries.forEach((entry, index) => {
-      const plaintext = tokenPlaintexts[index];
-      if (plaintext === null || plaintext === undefined || plaintext.length === 0) {
-        throw new TypeError("Hosted device-sync secure-box decryption returned an empty plaintext.");
-      }
-      const tokens = tokensByConnectionId.get(entry.connectionId) ?? {
-        accessToken: null,
-        refreshToken: null,
-      };
-      tokens[entry.field] = plaintext;
-      tokensByConnectionId.set(entry.connectionId, tokens);
-    });
-
-    const material = new Map<string, HostedRuntimeApplyConnectionSecretMaterial>();
-    input.records.forEach((record, index) => {
-      const tokens = tokensByConnectionId.get(record.id);
-      const tokenVersion = record.tokenVersion;
-      const accessTokenEncrypted = normalizeNullableString(record.accessTokenEncrypted);
-      material.set(record.id, {
-        externalAccountId: externalAccountIds[index] ?? null,
-        tokenBundle: normalizeHostedDeviceSyncCredentialKind(record.credentialKind) === "oauth_tokens"
-          && accessTokenEncrypted
-          && tokenVersion !== null
-          ? {
-              accessToken: requireHostedRuntimeApplyTokenPlaintext(
-                tokens?.accessToken,
-                "access token",
-              ),
-              accessTokenExpiresAt: maybeIsoTimestamp(record.accessTokenExpiresAt),
-              keyVersion: normalizeNullableString(record.keyVersion)
-                ?? HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
-              refreshToken: tokens?.refreshToken ?? null,
-              tokenVersion: requireHostedRuntimeApplyTokenVersion(tokenVersion),
             }
           : null,
       });
@@ -651,23 +496,6 @@ function requireHostedRuntimeApplySingleUser(
     throw new TypeError("Hosted device-sync runtime apply token preparation requires one user.");
   }
   return userIds[0];
-}
-
-function requireHostedRuntimeApplyTokenVersion(value: number): number {
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new TypeError("Hosted device-sync tokenVersion must be a positive integer.");
-  }
-  return value;
-}
-
-function requireHostedRuntimeApplyTokenPlaintext(
-  value: string | null | undefined,
-  label: string,
-): string {
-  if (value === null || value === undefined || value.length === 0) {
-    throw new TypeError(`Hosted device-sync runtime OAuth credential is missing its ${label}.`);
-  }
-  return value;
 }
 
 function normalizeHostedDeviceSyncSecretTestCodec(

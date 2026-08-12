@@ -22,7 +22,7 @@ vi.mock("@murphai/runtime-state", () => ({
 
 import {
   prepareHostedRuntimeApplyTokenWrites,
-  readHostedRuntimeApplyConnectionSecretMaterial,
+  readHostedRuntimeConnectionSecretMaterial,
 } from "../src/lib/device-sync/prisma-store/connection-secrets";
 import type { HostedConnectionRecord } from "../src/lib/device-sync/prisma-store/connection-records";
 
@@ -59,8 +59,9 @@ describe("device-sync runtime apply secret preparation", () => {
     const records = Array.from({ length: 100 }, (_, index) =>
       buildHostedConnectionRecord(index));
 
-    const material = await readHostedRuntimeApplyConnectionSecretMaterial({
+    const material = await readHostedRuntimeConnectionSecretMaterial({
       records,
+      tokenConnectionIds: new Set(records.map((record) => record.id)),
     });
 
     expect(material.size).toBe(100);

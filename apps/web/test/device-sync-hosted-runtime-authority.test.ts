@@ -378,24 +378,6 @@ function createAuthorityHarness(input: {
   });
 
   const findFirst = vi.fn(async () => currentRecord);
-  const readRuntimeApplyConnectionSecretMaterial = vi.fn(async (
-    records: Array<ReturnType<typeof buildHostedRecord>>,
-  ) => new Map(records.map((record) => [record.id, {
-    externalAccountId:
-      currentStoredAccount?.externalAccountId
-      ?? record.externalAccountId
-      ?? "acct_123",
-    tokenBundle: currentStoredAccount?.credential.kind === "oauth_tokens"
-      ? {
-          accessToken: currentStoredAccount.credential.tokens.accessToken,
-          accessTokenExpiresAt:
-            currentStoredAccount.credential.tokens.accessTokenExpiresAt ?? null,
-          keyVersion: currentStoredAccount.keyVersion ?? "kv_stored",
-          refreshToken: currentStoredAccount.credential.tokens.refreshToken ?? null,
-          tokenVersion: currentStoredAccount.tokenVersion ?? 1,
-        }
-      : null,
-  }] as const)));
   const upsertConnectionSource = vi.fn(async () => undefined);
   const update = vi.fn(async ({ data }: { data: Partial<ReturnType<typeof buildHostedRecord>> }) => {
     currentRecord = {
@@ -449,7 +431,10 @@ function createAuthorityHarness(input: {
         }
       : null;
     return [record.id, {
-      externalAccountId: storedAccount?.externalAccountId ?? record.externalAccountId ?? null,
+      externalAccountId:
+        storedAccount?.externalAccountId
+        ?? record.externalAccountId
+        ?? (record.externalAccountIdEncrypted ? "acct_123" : null),
       tokenBundle,
     }] as const;
   })));
@@ -490,7 +475,6 @@ function createAuthorityHarness(input: {
     persistStoredConnectionTokenBundle: vi.fn(),
     prepareRuntimeApplyTokenWrites,
     providerApplicationFindFirst,
-    readRuntimeApplyConnectionSecretMaterial,
     prisma: {
       deviceConnection: {
         findMany: vi.fn(async ({ where }: {
@@ -539,7 +523,6 @@ function createAuthorityHarness(input: {
     },
     persistStoredConnectionTokenBundle: persistPreparedRuntimeApplyTokenWrite,
     prepareRuntimeApplyTokenWrites,
-    readRuntimeApplyConnectionSecretMaterial,
     readRuntimeConnectionSecretMaterial,
     store,
     syncDurableConnectionState,
@@ -565,11 +548,17 @@ function createRuntimeApplyFanoutHarness() {
     expect(activeTransactions).toBe(0);
     return [...recordsById.values()];
   });
-  const readRuntimeApplyConnectionSecretMaterial = vi.fn(async (
-    selectedRecords: Array<ReturnType<typeof buildHostedRecord>>,
+  const readRuntimeConnectionSecretMaterial = vi.fn(async (
+    secretInput: {
+      records: Array<ReturnType<typeof buildHostedRecord>>;
+      tokenConnectionIds: ReadonlySet<string>;
+    },
   ) => {
     expect(activeTransactions).toBe(0);
-    return new Map(selectedRecords.map((record) => [record.id, {
+    expect(secretInput.tokenConnectionIds).toEqual(
+      new Set(secretInput.records.map((record) => record.id)),
+    );
+    return new Map(secretInput.records.map((record) => [record.id, {
       externalAccountId: record.externalAccountId,
       tokenBundle: {
         accessToken: `old-access:${record.id}`,
@@ -686,7 +675,7 @@ function createRuntimeApplyFanoutHarness() {
         findMany: preparationConnectionRead,
       },
     },
-    readRuntimeApplyConnectionSecretMaterial,
+    readRuntimeConnectionSecretMaterial,
     syncDurableConnectionState,
     upsertConnectionSource,
     withConnectionMutationLock,
@@ -711,7 +700,7 @@ function createRuntimeApplyFanoutHarness() {
     get preparedRootBindingReads() {
       return preparedRootBindingReads;
     },
-    readRuntimeApplyConnectionSecretMaterial,
+    readRuntimeConnectionSecretMaterial,
     records,
     syncDurableConnectionState,
     upsertConnectionSource,
@@ -989,7 +978,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
             findMany: vi.fn(async () => []),
           },
         },
-        readRuntimeApplyConnectionSecretMaterial: vi.fn(async () => new Map()),
+        readRuntimeConnectionSecretMaterial: vi.fn(async () => new Map()),
         withConnectionMutationLock,
       },
     });
@@ -1051,7 +1040,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       && update.writeUpdate === "unchanged"
     )).toBe(true);
     expect(harness.preparationConnectionRead).toHaveBeenCalledOnce();
-    expect(harness.readRuntimeApplyConnectionSecretMaterial).toHaveBeenCalledOnce();
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
     expect(harness.prepareRuntimeApplyTokenWrites).not.toHaveBeenCalled();
     expect(harness.withConnectionMutationLock).toHaveBeenCalledTimes(100);
     expect(harness.maxActiveTransactions).toBe(1);
@@ -1107,7 +1096,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       && update.writeUpdate === "applied"
     )).toBe(true);
     expect(harness.preparationConnectionRead).toHaveBeenCalledOnce();
-    expect(harness.readRuntimeApplyConnectionSecretMaterial).toHaveBeenCalledOnce();
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
     expect(harness.prepareRuntimeApplyTokenWrites).toHaveBeenCalledOnce();
     expect(harness.prepareRuntimeApplyTokenWrites.mock.calls[0]?.[0]).toHaveLength(100);
     expect(harness.withConnectionMutationLock).toHaveBeenCalledTimes(100);
@@ -1162,7 +1151,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       && update.writeUpdate === "applied"
     )).toBe(true);
     expect(harness.preparationConnectionRead).toHaveBeenCalledOnce();
-    expect(harness.readRuntimeApplyConnectionSecretMaterial).toHaveBeenCalledOnce();
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
     expect(harness.prepareRuntimeApplyTokenWrites).not.toHaveBeenCalled();
     expect(harness.withConnectionMutationLock).toHaveBeenCalledTimes(100);
     expect(harness.maxActiveTransactions).toBe(1);
@@ -1344,7 +1333,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       tokenUpdate: "missing",
       writeUpdate: "missing",
     });
-    expect(harness.readRuntimeApplyConnectionSecretMaterial).toHaveBeenCalledWith([]);
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledWith({
+      records: [],
+      tokenConnectionIds: new Set(),
+    });
     expect(harness.prepareRuntimeApplyTokenWrites).not.toHaveBeenCalled();
     expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
@@ -4046,6 +4038,65 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       trustedUserId: "user_123",
     })).rejects.toBe(secretError);
+  });
+
+  it("rejects an active credential snapshot with no external identity ciphertext before opening secrets", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        externalAccountId: null,
+        externalAccountIdEncrypted: null,
+      }),
+      storedAccount: null,
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    await expect(readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).rejects.toThrow(/missing its external account identity/u);
+
+    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
+  });
+
+  it("rejects an active credential snapshot when its external identity opens empty", async () => {
+    const harness = createAuthorityHarness({
+      record: buildHostedRecord({
+        externalAccountId: null,
+      }),
+      storedAccount: null,
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+    harness.readRuntimeConnectionSecretMaterial.mockResolvedValue(new Map([
+      ["conn_123", {
+        externalAccountId: null,
+        tokenBundle: null,
+      }],
+    ]));
+
+    await expect(readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    })).rejects.toThrow(/missing its external account identity/u);
+
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
   });
 
   it("withholds runtime OAuth material while a refresh lease covers the current token", async () => {

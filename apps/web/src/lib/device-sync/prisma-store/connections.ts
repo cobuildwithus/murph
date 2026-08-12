@@ -71,13 +71,11 @@ import {
   HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
   encryptHostedConnectionSecret,
   prepareHostedRuntimeApplyTokenWrites,
-  readHostedRuntimeApplyConnectionSecretMaterial,
   readHostedRuntimeConnectionSecretMaterial,
   readHostedStoredExternalAccountId,
   readHostedStoredTokenBundle,
   type HostedRuntimeConnectionSecretMaterial,
   type HostedDeviceSyncSecretTestCodec,
-  type HostedRuntimeApplyConnectionSecretMaterial,
   type HostedRuntimeApplyPreparedTokenWrite,
   type HostedRuntimeApplyTokenWritePreparation,
 } from "./connection-secrets";
@@ -713,16 +711,6 @@ export class PrismaHostedConnectionStore {
     prisma: HostedSecureBoxPrismaClient = this.prisma,
   ): Promise<HostedStoredDeviceSyncAccount | null> {
     return this.buildStoredConnectionAccount(record, prisma);
-  }
-
-  async readRuntimeApplyConnectionSecretMaterial(
-    records: readonly HostedConnectionRecord[],
-  ): Promise<Map<string, HostedRuntimeApplyConnectionSecretMaterial>> {
-    return readHostedRuntimeApplyConnectionSecretMaterial({
-      prisma: this.prisma,
-      records,
-      testCodec: this.testCodec,
-    });
   }
 
   async prepareRuntimeApplyTokenWrites(

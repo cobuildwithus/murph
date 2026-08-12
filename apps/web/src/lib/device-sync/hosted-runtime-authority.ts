@@ -73,11 +73,12 @@ import {
   type HostedRuntimeRedactedConnectionRecord,
   type HostedPrismaTransactionClient,
   type HostedStoredDeviceSyncAccount,
-  type HostedRuntimeApplyConnectionSecretMaterial,
+  type HostedRuntimeConnectionSecretMaterial,
   type HostedRuntimeApplyPreparedTokenWrite,
   type PrismaDeviceSyncControlPlaneStore,
 } from "./prisma-store";
 import {
+  normalizeHostedDeviceSyncCredentialKind,
   normalizeHostedDeviceSyncLifecycleStatus,
 } from "./prisma-store/connection-records";
 import { toPrismaJsonObject } from "./prisma-store/prisma-json";
@@ -97,7 +98,7 @@ interface HostedRuntimeFailureApplyResult {
 
 interface HostedRuntimePreparedApplyConnection {
   record: HostedConnectionRecord;
-  secretMaterial: HostedRuntimeApplyConnectionSecretMaterial;
+  secretMaterial: HostedRuntimeConnectionSecretMaterial;
   tokenWrite: HostedRuntimeApplyPreparedTokenWrite | null;
 }
 
@@ -234,12 +235,24 @@ export async function readHostedDeviceSyncRuntimeState(input: {
       }
     }
   }
+  const credentialRecords = parsed.includeCredentialMaterial
+    ? records as HostedConnectionRecord[]
+    : [];
+  if (parsed.includeCredentialMaterial) {
+    requireHostedRuntimeSnapshotExternalAccountCiphertexts(credentialRecords);
+  }
   const secretMaterial = parsed.includeCredentialMaterial
     ? await controlPlane.store.readRuntimeConnectionSecretMaterial({
-        records: records as HostedConnectionRecord[],
+        records: credentialRecords,
         tokenConnectionIds,
       })
     : new Map();
+  if (parsed.includeCredentialMaterial) {
+    requireHostedRuntimeSnapshotExternalAccountPlaintexts(
+      credentialRecords,
+      secretMaterial,
+    );
+  }
 
   const connections: HostedRuntimeConnectionSnapshot[] = [];
   for (const record of records) {
@@ -280,6 +293,34 @@ export async function readHostedDeviceSyncRuntimeState(input: {
       : {}),
     userId: input.trustedUserId,
   };
+}
+
+function requireHostedRuntimeSnapshotExternalAccountCiphertexts(
+  records: readonly HostedConnectionRecord[],
+): void {
+  for (const record of records) {
+    if (
+      record.status === "active"
+      && !normalizeNullableString(record.externalAccountIdEncrypted)
+    ) {
+      throw new TypeError(
+        "Hosted active device-sync connection is missing its external account identity.",
+      );
+    }
+  }
+}
+
+function requireHostedRuntimeSnapshotExternalAccountPlaintexts(
+  records: readonly HostedConnectionRecord[],
+  material: ReadonlyMap<string, HostedRuntimeConnectionSecretMaterial>,
+): void {
+  for (const record of records) {
+    if (record.status === "active" && !material.get(record.id)?.externalAccountId) {
+      throw new TypeError(
+        "Hosted active device-sync connection is missing its external account identity.",
+      );
+    }
+  }
 }
 
 export async function applyHostedDeviceSyncRuntimeResult(input: {
@@ -672,7 +713,17 @@ async function prepareHostedRuntimeApplyConnections(input: {
       },
       ...hostedConnectionRecordArgs,
     });
-    const secretMaterial = await input.store.readRuntimeApplyConnectionSecretMaterial(records);
+    const tokenConnectionIds = new Set(records.flatMap((record) =>
+      normalizeHostedDeviceSyncCredentialKind(record.credentialKind) === "oauth_tokens"
+      && normalizeNullableString(record.accessTokenEncrypted)
+      && record.tokenVersion !== null
+        ? [record.id]
+        : []
+    ));
+    const secretMaterial = await input.store.readRuntimeConnectionSecretMaterial({
+      records,
+      tokenConnectionIds,
+    });
 
     const prepared = new Map<string, HostedRuntimePreparedApplyConnection>();
     for (const record of records) {
@@ -747,7 +798,7 @@ async function prepareHostedRuntimeApplyConnections(input: {
 
 function buildHostedRuntimePreparedStoredAccount(
   record: HostedConnectionRecord,
-  material: HostedRuntimeApplyConnectionSecretMaterial,
+  material: HostedRuntimeConnectionSecretMaterial,
 ): HostedStoredDeviceSyncAccount | null {
   const mappedRecord = mapHostedConnectionRecord(record);
   mappedRecord.externalAccountId = material.externalAccountId;

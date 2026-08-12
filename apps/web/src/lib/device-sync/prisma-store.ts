@@ -21,7 +21,7 @@ import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import type {
   HostedDeviceSyncSecretTestCodec,
-  HostedRuntimeApplyConnectionSecretMaterial,
+  HostedRuntimeConnectionSecretMaterial,
   HostedRuntimeApplyPreparedTokenWrite,
   HostedRuntimeApplyTokenWritePreparation,
 } from "./prisma-store/connection-secrets";
@@ -34,7 +34,6 @@ import {
   type HostedMemberDeviceConnectionStatus,
   type HostedStoredDeviceSyncAccount,
 } from "./prisma-store/connections";
-import type { HostedRuntimeConnectionSecretMaterial } from "./prisma-store/connection-secrets";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
 import type { CompanionHrvNightReceiptInspection } from "./prisma-store/dirty-connections";
@@ -80,7 +79,7 @@ export {
   type HostedRuntimeRedactedConnectionRecord,
 } from "./prisma-store/connections";
 export type {
-  HostedRuntimeApplyConnectionSecretMaterial,
+  HostedRuntimeConnectionSecretMaterial,
   HostedRuntimeApplyPreparedTokenWrite,
   HostedRuntimeApplyTokenWritePreparation,
 } from "./prisma-store/connection-secrets";
@@ -341,12 +340,6 @@ export class PrismaDeviceSyncControlPlaneStore
     tx?: HostedPrismaTransactionClient,
   ): Promise<HostedConnectionRecord> {
     return this.connections.syncDurableConnectionState(account, tx);
-  }
-
-  async readRuntimeApplyConnectionSecretMaterial(
-    records: readonly HostedConnectionRecord[],
-  ): Promise<Map<string, HostedRuntimeApplyConnectionSecretMaterial>> {
-    return this.connections.readRuntimeApplyConnectionSecretMaterial(records);
   }
 
   async prepareRuntimeApplyTokenWrites(
