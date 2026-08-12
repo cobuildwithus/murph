@@ -2369,9 +2369,26 @@ function sanitizeProfilePayload(payload: unknown, connection?: PlainObject): Pla
   }
 
   const origin = resolveJunctionOrigin(profile, connection);
+  const gender = firstStringFromPaths(profile, JUNCTION_PROFILE_GENDER_PATHS);
+  const sourceProviderSlug = readJunctionSourceProviderSlug(profile, connection)
+    ?? origin.sourceProviderSlug;
+  const explicitId = firstStringFromPaths(profile, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
   const sanitized = stripUndefined({
-    sourceProviderSlug: readJunctionSourceProviderSlug(profile, connection) ?? origin.sourceProviderSlug,
+    gender: gender ? trimToLength(gender, 80) : undefined,
+    stableResourceId: explicitId
+      ? `profile-${shortHash([
+          sourceProviderSlug,
+          origin.sourceType,
+          origin.sourceInstanceId,
+          explicitId,
+        ])}`
+      : undefined,
+    sourceProviderSlug,
     sourceType: origin.sourceType,
+    updatedAt: resolveSafeTimestamp(
+      firstValueFromPaths(profile, ["updatedAt", "updated_at", "createdAt", "created_at"]),
+      origin.sourceProviderSlug,
+    ),
   });
 
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
@@ -5039,6 +5056,13 @@ function buildStableSummaryResourceId(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string {
+  const retainedProfileResourceId = resourceContext.resource === "profile"
+    ? firstStringFromPaths(entry, ["stableResourceId"])
+    : undefined;
+  if (retainedProfileResourceId && /^profile-[a-f0-9]{16}$/u.test(retainedProfileResourceId)) {
+    return retainedProfileResourceId;
+  }
+
   const explicitId = resourceContext.resource === "workouts"
     ? firstStringFromPaths(entry, JUNCTION_WORKOUT_STABLE_ID_PATHS)
     : resourceContext.resource === "meal"

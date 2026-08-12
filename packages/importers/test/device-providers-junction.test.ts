@@ -4711,6 +4711,13 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   // normalized events carry the structured fields.
   const profileArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-profile");
   assertJsonOmits(JSON.stringify(profileArtifact?.content), ["1990-05-14", "183"]);
+  assert.deepEqual(profileArtifact?.content, {
+    gender: "other",
+    sourceProviderSlug: "apple-health-kit",
+    sourceType: "phone",
+    stableResourceId: height?.externalRef?.resourceId,
+    updatedAt: "2026-04-20T09:00:00.000Z",
+  });
 
   // An "unknown" sex enum value carries no biological-sex information, while
   // Junction gender remains a separate queryable categorical fact even when
@@ -4764,9 +4771,19 @@ test("Junction profile gender is bounded and never substituted for biological se
   assert.equal(typeof genderEvent?.note, "undefined");
   assert.equal(genderEvent?.dataOrigin?.sourceProviderSlug, "oura");
   assertEventRawArtifactRolesExist(payload);
+  const genderArtifact = payload.evidenceParts?.find(
+    (artifact) => artifact.role === "junction-summary-profile",
+  );
+  assert.deepEqual(genderArtifact?.content, {
+    gender: oversizedGender.slice(0, 80),
+    sourceProviderSlug: "oura",
+    sourceType: "ring",
+    stableResourceId: genderEvent?.externalRef?.resourceId,
+    updatedAt: "2026-04-20T09:00:00.000Z",
+  });
 
   const replayPayload = normalizeJunctionSnapshot({
-    ...snapshot,
+    summaries: { profile: genderArtifact?.content },
     importedAt: "2026-05-22T12:00:00.000Z",
   });
   assert.deepEqual(replayPayload.events?.[0]?.externalRef, genderEvent?.externalRef);

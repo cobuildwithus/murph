@@ -517,7 +517,6 @@ test('measurement entry list returns primary, legacy, and device-observation sca
   assert.equal(normalizedPositivePregnancyTest.kind, 'measurement')
   assert.ok(normalizedPositivePregnancyTest.occurredAt)
   assert.ok(normalizedPositivePregnancyTest.fields)
-
   const junctionPositivePregnancyTest = await importEventPayload({
     cli,
     parentRoot,
@@ -733,6 +732,139 @@ test('measurement entry list returns primary, legacy, and device-observation sca
   assert.equal('measurements' in groupedEvent.data, false)
   assert.equal(events.items.some((item) => item.id === whoopBmi.eventId), false)
   assert.equal(events.items.some((item) => item.id === junctionWeight.eventId), false)
+})
+
+test('normalized Junction categorical facts survive canonical import and query', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-junction-categorical-query-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+
+  const normalized = normalizeJunctionSnapshot({
+    importedAt: '2026-07-13T12:00:00.000Z',
+    summaries: {
+      profile: {
+        id: 'profile-2026-07',
+        gender: 'other',
+        updated_at: '2026-07-09T08:30:00Z',
+        source: { provider: 'apple_health', type: 'phone' },
+      },
+      menstrual_cycle: [{
+        id: 'cycle-categorical-2026-07',
+        period_start: '2026-07-01',
+        home_progesterone_test: [{
+          date: '2026-07-12',
+          test_result: 'indeterminate',
+        }],
+        sexual_activity: [{
+          date: '2026-07-11',
+          protection_used: false,
+        }],
+        source: { provider: 'apple_health', type: 'phone' },
+      }],
+    },
+  })
+  const normalizedEvents = [
+    normalized.events?.find((event) => event.title === 'Junction gender'),
+    normalized.events?.find((event) => event.title === 'Junction home progesterone test'),
+    normalized.events?.find((event) => event.title === 'Junction sexual activity'),
+  ]
+  const importedEventIds = new Map<string, string>()
+
+  for (const [index, event] of normalizedEvents.entries()) {
+    assert.ok(event)
+    assert.equal(event.kind, 'measurement')
+    assert.ok(event.occurredAt)
+    assert.ok(event.fields)
+    const title = event.title
+    assert.ok(title)
+    const imported = await importEventPayload({
+      cli,
+      parentRoot,
+      vaultRoot,
+      fileName: `junction-categorical-${index}.json`,
+      payload: {
+        kind: event.kind,
+        occurredAt: event.occurredAt,
+        source: event.source,
+        title,
+        ...event.fields,
+        externalRef: event.externalRef,
+      },
+    })
+    importedEventIds.set(title, imported.eventId)
+  }
+
+  const genderEventId = importedEventIds.get('Junction gender')
+  const progesteroneEventId = importedEventIds.get('Junction home progesterone test')
+  const sexualActivityEventId = importedEventIds.get('Junction sexual activity')
+  assert.ok(genderEventId)
+  assert.ok(progesteroneEventId)
+  assert.ok(sexualActivityEventId)
+
+  const entries = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'gender',
+        '--metric',
+        'home-progesterone-test',
+        '--metric',
+        'sexual-activity',
+        '--from',
+        '2026-07-01',
+        '--to',
+        '2026-07-31',
+        '--limit',
+        '200',
+      ])
+    ).envelope,
+  )
+
+  assert.deepEqual(entries.filters, {
+    metric: ['gender', 'home-progesterone-test', 'sexual-activity'],
+    from: '2026-07-01',
+    to: '2026-07-31',
+    limit: 200,
+  })
+  assert.deepEqual(entries.items, [{
+    eventId: progesteroneEventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-12T00:00:00.000Z',
+    source: 'device',
+    metric: 'home-progesterone-test',
+    value: 1,
+    unit: 'recording',
+    qualifiers: { result: 'indeterminate' },
+  }, {
+    eventId: sexualActivityEventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-11T00:00:00.000Z',
+    source: 'device',
+    metric: 'sexual-activity',
+    value: 1,
+    unit: 'recording',
+    qualifiers: { 'protection-used': false },
+  }, {
+    eventId: genderEventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-09T08:30:00.000Z',
+    source: 'device',
+    metric: 'gender',
+    value: 1,
+    unit: 'recording',
+    qualifiers: { gender: 'other' },
+  }])
+  assert.equal(entries.count, 3)
+  assert.equal(entries.nextCursor, null)
 })
 
 test('measurement import-json schema exposes the structured payload escape hatch', async () => {
