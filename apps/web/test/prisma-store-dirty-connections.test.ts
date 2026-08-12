@@ -947,7 +947,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     expect(receiptRows).toEqual([]);
   });
 
-  it("prepares caller-owned payloads inside the consent transaction before the dirty-state CAS", async () => {
+  it("prepares payload classification, compression, and sealing before the caller-owned transaction", async () => {
     let insideCallerOwnedTransaction = false;
     const encryptInsideCallerOwnedTransaction: boolean[] = [];
     const operationOrder: string[] = [];
@@ -986,8 +986,10 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       };
       let payloadCreateData: Array<Record<string, unknown>> | null = null;
       const tx = {
+        $queryRaw: vi.fn(async () => [{ connectionId: existing.connectionId }]),
         deviceSyncDirtyConnection: {
           findUnique: vi.fn()
+            .mockResolvedValueOnce(existing)
             .mockResolvedValueOnce(existing)
             .mockResolvedValueOnce({
               ...existing,
@@ -1033,21 +1035,23 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         traceId: "trace_caller_owned_1",
         userId: existing.userId,
       } as const;
+      const prepared = await store.prepareDirtyConnectionUpsert(input);
       insideCallerOwnedTransaction = true;
-      const result = await store.upsertDirtyConnection({
-        ...input,
+      const result = await store.upsertDirtyConnectionWithPreparedPlanTx({
+        prepared,
         tx: tx as never,
       });
       insideCallerOwnedTransaction = false;
 
-      expect(encryptInsideCallerOwnedTransaction).toEqual([true]);
+      expect(encryptInsideCallerOwnedTransaction).toEqual([false]);
       expect(operationOrder).toEqual([
         "encrypt-payload",
         "update-dirty-marker",
         "insert-durable-payload",
       ]);
       expect(rootPrisma.$transaction).not.toHaveBeenCalled();
-      expect(rootPrisma.deviceSyncDirtyConnection.findUnique).not.toHaveBeenCalled();
+      expect(rootPrisma.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledTimes(1);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
       expect(tx.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
       const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
       expect(payloadRow.credentialIndependent).toBe(false);
@@ -1057,6 +1061,84 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       insideCallerOwnedTransaction = false;
       setHostedSecureBoxStringTestCodecForTests(null);
     }
+  });
+
+  it("rejects forged or stale prepared dirty-write capabilities before mutation", async () => {
+    const dirtyAt = new Date("2026-05-26T12:00:00.000Z");
+    const existing = {
+      connectionId: "dsc_prepared_stale_1",
+      createdAt: dirtyAt,
+      dirtyResourcesJson: {},
+      dirtyRevision: 2n,
+      eventCount: 2n,
+      firstDirtyAt: dirtyAt,
+      latestDirtyAt: dirtyAt,
+      latestEventType: "sleep.updated",
+      latestResourceCategory: "sleep",
+      latestTraceId: "trace_previous",
+      processedRevision: 2n,
+      provider: "oura",
+      resourceCategoryCountsJson: {},
+      sourceProviderCountsJson: {},
+      updatedAt: dirtyAt,
+      userId: "member_prepared_stale_1",
+      windowEnd: null,
+      windowStart: null,
+    };
+    const rootPrisma = {
+      deviceSyncDirtyConnection: {
+        findUnique: vi.fn(async () => existing),
+      },
+    };
+    const store = new PrismaHostedDirtyConnectionStore(rootPrisma as never);
+    const prepared = await store.prepareDirtyConnectionUpsert({
+      connectionId: existing.connectionId,
+      dirtyAt: "2026-05-26T12:01:00.000Z",
+      eventType: "sleep.updated",
+      provider: existing.provider,
+      resourceCategory: "sleep",
+      resources: [{
+        count: 1,
+        jobKind: "reconcile",
+        resource: "sleep",
+        resourceCategory: "sleep",
+        sourceProviderSlug: "oura",
+        windowEnd: null,
+        windowStart: null,
+      }],
+      traceId: "trace_prepared_stale_1",
+      userId: existing.userId,
+    });
+    const updateMany = vi.fn();
+    const changed = {
+      ...existing,
+      dirtyRevision: 3n,
+      updatedAt: new Date("2026-05-26T12:00:01.000Z"),
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ connectionId: existing.connectionId }]),
+      deviceSyncDirtyConnection: {
+        findUnique: vi.fn(async () => changed),
+        updateMany,
+      },
+    };
+
+    await expect(store.upsertDirtyConnectionWithPreparedPlanTx({
+      prepared,
+      tx: tx as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH",
+    });
+    expect(updateMany).not.toHaveBeenCalled();
+
+    await expect(store.upsertDirtyConnectionWithPreparedPlanTx({
+      prepared: {
+        ...prepared,
+      },
+      tx: tx as never,
+    })).rejects.toThrow(
+      "Dirty connection prepared state is not the exact request-local capability.",
+    );
   });
 
   it("recomputes store-owned dirty payload rows after a stale preseal revision contention", async () => {

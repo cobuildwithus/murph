@@ -30,7 +30,10 @@ import {
 } from "./prisma-store/connections";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
-import type { CompanionHrvNightReceiptInspection } from "./prisma-store/dirty-connections";
+import type {
+  CompanionHrvNightReceiptInspection,
+  PreparedHostedDeviceSyncDirtyConnectionUpsert,
+} from "./prisma-store/dirty-connections";
 import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import {
   PrismaHostedConnectionSourceStore,
@@ -71,6 +74,10 @@ export {
   HOSTED_AGENT_BEARER_TOKEN_PREFIX,
   generateHostedAgentBearerToken,
 } from "./prisma-store/agent-sessions";
+export {
+  HostedDeviceSyncDirtyPreparationMismatchError,
+  type PreparedHostedDeviceSyncDirtyConnectionUpsert,
+} from "./prisma-store/dirty-connections";
 export {
   hostedConnectionSourceRecordArgs,
   mapHostedConnectionSourceRecord,
@@ -369,6 +376,19 @@ export class PrismaDeviceSyncControlPlaneStore
     input: UpsertHostedDeviceSyncDirtyConnectionInput,
   ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
     return this.dirtyConnections.upsertDirtyConnection(input);
+  }
+
+  async prepareDirtyConnectionUpsert(
+    input: Omit<UpsertHostedDeviceSyncDirtyConnectionInput, "tx">,
+  ): Promise<PreparedHostedDeviceSyncDirtyConnectionUpsert> {
+    return this.dirtyConnections.prepareDirtyConnectionUpsert(input);
+  }
+
+  async upsertDirtyConnectionWithPreparedPlanTx(input: {
+    prepared: PreparedHostedDeviceSyncDirtyConnectionUpsert;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
+    return this.dirtyConnections.upsertDirtyConnectionWithPreparedPlanTx(input);
   }
 
   async inspectCompanionHrvNightReceipt(input: {

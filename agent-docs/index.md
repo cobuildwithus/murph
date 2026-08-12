@@ -31,6 +31,16 @@ permanent-versus-transient credential failure handling are jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
 `agent-docs/RELIABILITY.md`.
 
+Hosted device-sync dirty admission prepares classification, compression,
+sealing, and any clean-to-dirty mailbox wake outside database ownership, then
+revalidates consent, connection/source identity, the exact dirty snapshot, and
+every applicable exact crypto root under the final admission lock. One exact winner drift
+permits one fresh full replan. This contract and its focused real-PostgreSQL
+withdrawal proof are jointly specified by `ARCHITECTURE.md`,
+`agent-docs/RELIABILITY.md`,
+`agent-docs/operations/device-sync-ingestion-invariants.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
 Hosted cold-start ownership keeps established-member startup on the ordinary
 post-Temporal direct ensure so container boot can overlap fenced invocation
 preparation. The separate first-contact shell hint is serialized by the

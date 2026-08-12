@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Current Guardrails
 
@@ -649,11 +649,19 @@ Last verified: 2026-08-11
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;
-  no caller can supply a prepared ciphertext or classification bundle.
-  Consent-gated webhook and companion admissions instead perform that
-  preparation inside the existing member-row transaction, after the consent
-  re-read and before the dirty-marker lock or mutation. This keeps completed
-  withdrawal authoritative without adding another fence or state owner. The
+  no caller can supply a prepared ciphertext or classification bundle. A
+  consent-gated webhook or companion admission first performs a short
+  member/connection/source authority check, then prepares through the same
+  request-local, non-serializable dirty-store capability outside every database
+  lock. The final transaction reacquires the canonical member/connection locks,
+  re-reads consent and exact connection/source authority, and requires both the
+  exact dirty-marker snapshot and, when payloads exist, device-domain root
+  before inserting them.
+  A clean-to-dirty wake similarly uses an ingress-root capability prepared
+  outside the locks. Drift permits one full replan with a fresh root cache;
+  repeated drift fails retryably. Withdrawal may commit while ephemeral
+  preparation is in flight, but the final consent re-read then rejects without
+  durable dirty, receipt, signal, trace-completion, or mailbox state. The
   steady-state connection-replacement path reads no payload and uses set-based writes only.
   Nullable rows from mixed-version writers are the bounded transitional
   exception: replacement classifies at most 800 rows after taking the existing
