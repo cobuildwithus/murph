@@ -585,6 +585,43 @@ test("Junction omitted timeseries config defaults to compact resources only", as
   );
   assert.equal(importedSnapshots.length, JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length);
 
+  requests.length = 0;
+  importedSnapshots.length = 0;
+  maxInFlightTimeseriesRequests = 0;
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        lastSyncCompletedAt: "2026-03-26T12:00:00.000Z",
+      }),
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-03-27T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+  const scheduledTimeseriesResources = requests
+    .map((url) => new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1])
+    .filter((resource): resource is string => Boolean(resource));
+  const previousScheduledCollectionCount = 17 * 7;
+
+  assert.equal(scheduledTimeseriesResources.length, 24 * 7);
+  assert.equal(scheduledTimeseriesResources.length, 168);
+  assert.equal(previousScheduledCollectionCount, 119);
+  assert.equal(scheduledTimeseriesResources.length - previousScheduledCollectionCount, 49);
+  assert.equal(maxInFlightTimeseriesRequests, 1);
+  assert.equal(importedSnapshots.length, 25);
+  assert.equal(
+    importedSnapshots.filter((snapshot) =>
+      Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {}).length > 0
+    ).length,
+    24,
+  );
+
   let maximumCollectionPages = 0;
   const paginationClient = new JunctionClient({
     apiKey: "sk_us_test_123",
@@ -654,6 +691,15 @@ test("Junction omitted timeseries config defaults to compact resources only", as
     currentMaximumProviderAttemptCount
       - priorOnePageCollectionCount * maximumCollectionPages * maximumGetAttempts,
     29_400,
+  );
+  const scheduledMaximumProviderAttemptCount =
+    scheduledTimeseriesResources.length * maximumCollectionPages * maximumGetAttempts;
+  assert.equal(scheduledMaximumProviderAttemptCount, 50_400);
+  assert.equal(previousScheduledCollectionCount * maximumCollectionPages * maximumGetAttempts, 35_700);
+  assert.equal(
+    scheduledMaximumProviderAttemptCount
+      - previousScheduledCollectionCount * maximumCollectionPages * maximumGetAttempts,
+    14_700,
   );
 });
 

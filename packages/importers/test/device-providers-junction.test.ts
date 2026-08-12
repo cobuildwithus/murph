@@ -3912,7 +3912,11 @@ test("Junction sparse clinical persistence applies one deterministic post-valida
     forced_expiratory_volume_1: [...orderedTimeseries.forced_expiratory_volume_1].reverse(),
     fall: [...orderedTimeseries.fall].reverse(),
   };
-  const prepare = (timeseries: typeof orderedTimeseries, connectionId: string) =>
+  const prepare = (
+    timeseries: typeof orderedTimeseries,
+    connectionId: string,
+    sparseClinicalReadingLimit?: number,
+  ) =>
     prepareDeviceProviderSnapshotImport({
       provider: "junction",
       connectionId,
@@ -3921,11 +3925,19 @@ test("Junction sparse clinical persistence applies one deterministic post-valida
       normalizerVersion: "junction-normalizer.v1",
       snapshot: {
         importedAt: "2026-04-23T12:00:00.000Z",
+        ...(sparseClinicalReadingLimit === undefined
+          ? {}
+          : { sparseClinicalReadingLimit }),
         timeseries,
       },
     });
   const ordered = await prepare(orderedTimeseries, "conn-junction-clinical-ordered");
   const reversed = await prepare(reversedTimeseries, "conn-junction-clinical-reversed");
+  const limited = await prepare(
+    orderedTimeseries,
+    "conn-junction-clinical-limited",
+    40,
+  );
   const eventIdentities = (payload: DeviceBatchImportPayload) =>
     (payload.events ?? []).map((event) => JSON.stringify(event.externalRef)).sort();
   const evidenceRoles = (payload: DeviceBatchImportPayload) =>
@@ -3978,6 +3990,25 @@ test("Junction sparse clinical persistence applies one deterministic post-valida
 
   assert.deepEqual(eventIdentities(ordered), eventIdentities(reversed));
   assert.deepEqual(evidenceRoles(ordered), evidenceRoles(reversed));
+  assert.equal(limited.events?.length, 40);
+  assert.deepEqual(
+    limited.evidenceParts?.find((artifact) =>
+      artifact.role === "junction-timeseries-reading-sparse-clinical:bounded-overflow"
+    )?.content,
+    {
+      schema: "junction.sparse_clinical_reading_overflow.v1",
+      provider: "junction",
+      validatedReadingCount: 120,
+      retainedReadingCount: 40,
+      droppedReadingCount: 80,
+      status: "bounded_overflow",
+    },
+  );
+  assert.equal(
+    readRawReceiptArtifact(limited).payloadHash,
+    readRawReceiptArtifact(ordered).payloadHash,
+  );
+  assert.doesNotMatch(JSON.stringify(limited.ingestReceipt), /sparseClinicalReadingLimit/u);
 });
 
 test("Junction sparse clinical evidence is replay- and order-idempotent", () => {

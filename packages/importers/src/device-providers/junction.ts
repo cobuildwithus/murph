@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
   extractIsoDatePrefix,
   ID_PREFIXES,
+  JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES,
   MEAL_MICRONUTRIENT_KEYS,
   parseCompanionHrvRmssdAdmissionId,
   parseCompanionHrvRmssdObservation,
@@ -126,6 +127,7 @@ export interface JunctionSnapshotInput {
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
   companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry;
+  sparseClinicalReadingLimit?: number;
 }
 
 export type JunctionSummaryResource =
@@ -196,6 +198,8 @@ interface MetricDescriptor {
   secondsPaths?: readonly string[];
 }
 
+const JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_IMPORT = 100;
+
 const junctionSnapshotSchema = z.object({
   accountId: z.union([z.string(), z.number()]).optional(),
   importedAt: z.union([z.string(), z.number(), z.date()]).optional(),
@@ -205,6 +209,8 @@ const junctionSnapshotSchema = z.object({
   summaries: z.record(z.string(), z.unknown()).optional(),
   timeseries: z.record(z.string(), z.unknown()).optional(),
   companionHrvRmssd: z.unknown().optional(),
+  sparseClinicalReadingLimit: z.number().int().min(0)
+    .max(JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_IMPORT).optional(),
 }).catchall(z.unknown());
 
 const junctionCompanionHrvRmssdSnapshotEntrySchema = z.object({
@@ -922,7 +928,11 @@ export function normalizeJunctionSnapshot(
   };
 
   normalizeSummaries(snapshot.summaries, context);
-  normalizeTimeseries(snapshot.timeseries, context);
+  normalizeTimeseries(
+    snapshot.timeseries,
+    context,
+    snapshot.sparseClinicalReadingLimit ?? JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_IMPORT,
+  );
   normalizeCompanionHrvRmssd(companionHrvRmssd, context);
 
   return makeNormalizedDeviceBatch({
@@ -1585,10 +1595,8 @@ interface JunctionSparseClinicalReadingCandidate {
 // applies after validation and deduplication, limiting persisted output from
 // malformed direct/webhook payloads without constraining normal provider
 // history.
-const JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_IMPORT = 100;
-
 const JUNCTION_SPARSE_CLINICAL_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
-  JunctionTimeseriesResource,
+  (typeof JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES)[number],
   JunctionSparseClinicalTimeseriesDescriptor,
 ])[] = [
   ["heart_rate_alert", {
@@ -1642,6 +1650,16 @@ const JUNCTION_SPARSE_CLINICAL_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly
   }],
 ];
 
+if (
+  JUNCTION_SPARSE_CLINICAL_TIMESERIES_DESCRIPTOR_ENTRIES.length
+    !== JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES.length
+  || JUNCTION_SPARSE_CLINICAL_TIMESERIES_DESCRIPTOR_ENTRIES.some(
+    ([resource], index) => resource !== JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES[index],
+  )
+) {
+  throw new Error("Junction sparse clinical descriptors drifted from the shared resource family.");
+}
+
 const JUNCTION_SPARSE_CLINICAL_TIMESERIES_DESCRIPTORS: ReadonlyMap<
   string,
   JunctionSparseClinicalTimeseriesDescriptor
@@ -1668,6 +1686,7 @@ const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set([
 function normalizeTimeseries(
   timeseries: Record<string, unknown> | undefined,
   context: NormalizationContext,
+  sparseClinicalReadingLimit: number,
 ): void {
   const sparseClinicalInputs: JunctionSparseClinicalTimeseriesInput[] = [];
 
@@ -1699,7 +1718,11 @@ function normalizeTimeseries(
     }
   }
 
-  pushJunctionSparseClinicalReadings(sparseClinicalInputs, context);
+  pushJunctionSparseClinicalReadings(
+    sparseClinicalInputs,
+    context,
+    sparseClinicalReadingLimit,
+  );
 }
 
 function pushJunctionNoteTags(
@@ -2287,6 +2310,7 @@ function pushJunctionBloodPressureReadings(
 function pushJunctionSparseClinicalReadings(
   inputs: readonly JunctionSparseClinicalTimeseriesInput[],
   context: NormalizationContext,
+  readingLimit: number,
 ): void {
   const candidates: JunctionSparseClinicalReadingCandidate[] = [];
   const resourceInputs = new Map<string, JunctionSparseClinicalTimeseriesInput>();
@@ -2458,7 +2482,7 @@ function pushJunctionSparseClinicalReadings(
   );
   const retainedCandidates = uniqueCandidates.slice(
     0,
-    JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_IMPORT,
+    readingLimit,
   );
   const validatedReadingCounts = new Map<string, number>();
   for (const candidate of uniqueCandidates) {
@@ -2473,7 +2497,7 @@ function pushJunctionSparseClinicalReadings(
     context.events.push(candidate.event);
   }
 
-  if (uniqueCandidates.length > JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_IMPORT) {
+  if (uniqueCandidates.length > readingLimit) {
     const role = "junction-timeseries-reading-sparse-clinical:bounded-overflow";
     pushEvidencePart(
       context.evidenceParts,
@@ -2678,8 +2702,12 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
     return {};
   }
 
+  const sanitizedSnapshot = Object.fromEntries(
+    Object.entries(sanitized).filter(([key]) => key !== "sparseClinicalReadingLimit"),
+  );
+
   return stripUndefined({
-    ...sanitized,
+    ...sanitizedSnapshot,
     connections: sanitizeJunctionRawConnections(snapshot.connections),
     summaries,
     timeseries,

@@ -5182,7 +5182,7 @@ function junctionTimeseriesRecordValueIdentity(
   if (
     resource !== "blood_pressure"
     && resource !== "note"
-    && !JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES.has(resource)
+    && !JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCE_SET.has(resource)
   ) {
     return [];
   }
@@ -5236,16 +5236,6 @@ function junctionTimeseriesRecordValueIdentity(
   // Field names mirror the importer's blood-pressure value paths.
   return [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
 }
-
-const JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES: ReadonlySet<string> = new Set([
-  "heart_rate_alert",
-  "sleep_apnea_alert",
-  "fall",
-  "forced_expiratory_volume_1",
-  "forced_vital_capacity",
-  "peak_expiratory_flow_rate",
-  "inhaler_usage",
-]);
 
 function normalizeJunctionTimeseriesIdentityField(
   entry: Record<string, unknown>,
