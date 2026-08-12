@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-11
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 ## Goal
 
@@ -26,7 +26,8 @@ application authority checks.
 - Duplicate account/source hydration is removed, and the apply response is
   derived from the live or write-returned state without a second rich decrypt.
 - Deterministic maximum-cardinality tests and a focused local-PostgreSQL replay
-  prove the bounded query, KMS, transaction, and connection-pool shape.
+  prove the bounded callback-body, query, KMS, transaction, and connection-pool
+  shape.
 
 ## Constraints
 
@@ -92,6 +93,16 @@ application authority checks.
   `https://chatgpt.com/c/6a7b2545-9cd4-83ea-aa7b-f9d900b07b05`. That stale
   snapshot is non-terminal after the accepted production remediation; a fresh
   exact-head full audit owns the final verdict.
+- The fresh exact-head final at `9ef5f44d5a5d` returned one valid finding:
+  the claimed 100-by-64 source shape bypassed the production callback body
+  limit because the direct authority test never crossed the Cloudflare/Web
+  request boundary. Accepted. The fix keeps ownership in the existing
+  Cloudflare device-sync port, which already constructs the final signed
+  callback envelope: it partitions ordered runtime-apply updates by both the
+  100-update protocol cap and the shared 256 KiB serialized body cap, sends the
+  callbacks serially, aggregates ordered responses, and rejects one
+  independently oversized update before retry loops. The Web route now imports
+  the same protocol limit constant.
 
 ## Verification
 
@@ -152,3 +163,13 @@ application authority checks.
   same file 38/38. After merging current `main`, the prepared runtime build and
   isolated CLI file again pass 38/38. The reproducible verification-owner gap
   is recorded through Frog; exact-head CI owns the broad PR suite.
+- After the exact-head body-limit finding, focused proof passes:
+  Cloudflare device-sync port 3/3, including 100-by-64 serialized-body
+  partitioning, later-split failure without a misleading complete response, and
+  single-update oversize rejection; Web runtime-apply route plus authority
+  68/68, including the shared route body limit and the existing live fences; and
+  assistant-runtime hosted device sync 85/85, including a real producer-emitted
+  source-heavy 100-update batch that exceeds the callback body limit and
+  therefore requires the Cloudflare port partitioner. Affected Cloudflare, Web,
+  device-syncd, and assistant-runtime typechecks pass. Diff-check and privacy
+  scan are clean.
