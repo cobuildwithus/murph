@@ -96,8 +96,11 @@ content is a collision rather than a second effect. Accepted replays resolve
 from the durable row even after the temporary artwork capability expires; an
 existing uncertain send remains pending rather than being rewritten. After that
 replay check, Web treats every `starting` row as a member-wide unresolved-effect
-guard. Replaying that same request key always returns pending without another
-Lob create call, even if the temporary artwork URL changed. A distinct request
+guard. Replaying that same request key never calls Lob create again, even if the
+temporary artwork URL changed. Exact current-row replay performs one bounded
+metadata lookup immediately so accepted evidence can finalize the original row
+after local commit failure. Recent absent or indeterminate evidence remains
+pending; only aged proven absence uses the existing unknown transition. A distinct request
 is first persisted as an unsent `prior_note_unresolved` row. Only that distinct
 explicit request may, after the 23-hour provider window, reconcile the guarded
 row through Lob's exact-metadata lookup. Recent or indeterminate evidence keeps
@@ -135,8 +138,9 @@ oldest-first, member-wide unresolved-effect guard. The member-locked admission
 re-reads that guard instead of trusting a row selected before the lock and
 repeats the same bounded check immediately
 before ordinary reservation. Resolving one row can therefore never hide a
-second unresolved row or admit another provider effect. A recent or
-indeterminate same-key legacy replay stays pending. A different current request
+second unresolved row or admit another provider effect. A recent same-key
+legacy replay stays pending without lookup; an aged replay may use the exact
+metadata lookup, and indeterminate evidence still stays pending. A different current request
 is first recorded under its own request key as an unsent
 `prior_note_unresolved` failure, then at most one older row is reconciled.
 Proven absence narrows the current row to `unknown`. If an older legacy row is

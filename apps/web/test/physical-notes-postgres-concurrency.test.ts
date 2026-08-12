@@ -315,6 +315,105 @@ describe.skipIf(!runPostgresProof)(
       },
     );
 
+    it("recovers accepted exact replay after local finalization rolls back", async () => {
+      const sourceClient = requirePrisma(firstClient);
+      const replayClient = requirePrisma(secondClient);
+      const observer = requirePrisma(observerClient);
+      const beneficiary = requireMemberId(memberId);
+      const { createHostedPhysicalNote } = await import(
+        "@/src/lib/physical-notes/service"
+      );
+      const complimentaryId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      await observer.hostedPhysicalNote.create({
+        data: {
+          acceptedAt: new Date(),
+          complimentaryOfferCode: "physical-note-v1",
+          failureReason: null,
+          id: complimentaryId,
+          memberId: beneficiary,
+          pricingVersion: "lob-test-v1",
+          provider: "lob",
+          providerCostUsdMicros: 250_000n,
+          providerLetterId: `ltr_${complimentaryId}`,
+          requestFingerprint: `fingerprint_${complimentaryId}`,
+          requestKey: `request_${complimentaryId}`,
+          status: "accepted",
+        },
+      });
+      const request = buildRequest(20, beneficiary);
+      const sourceCreate = vi.fn(async () => ({
+        kind: "accepted" as const,
+        providerLetterId: "ltr_before_local_rollback",
+      }));
+      mocks.recordUsage.mockRejectedValueOnce(
+        new Error("simulated local usage transaction failure"),
+      );
+
+      await expect(createHostedPhysicalNote({
+        ...request,
+        prisma: sourceClient,
+        runtime: {
+          create: sourceCreate,
+          async findLetterByNoteId() {
+            return { kind: "indeterminate" };
+          },
+        },
+      })).rejects.toThrow("simulated local usage transaction failure");
+      const starting = await observer.hostedPhysicalNote.findUniqueOrThrow({
+        where: {
+          memberId_requestKey: {
+            memberId: beneficiary,
+            requestKey: request.requestKey,
+          },
+        },
+      });
+      expect(starting).toMatchObject({
+        providerLetterId: null,
+        status: "starting",
+      });
+
+      const replayCreate = vi.fn(async () => ({
+        kind: "ambiguous_failure" as const,
+      }));
+      const findAccepted = vi.fn(async () => ({
+        kind: "accepted" as const,
+        providerLetterId: "ltr_before_local_rollback",
+      }));
+      const recovered = await createHostedPhysicalNote({
+        ...request,
+        prisma: replayClient,
+        runtime: {
+          create: replayCreate,
+          findLetterByNoteId: findAccepted,
+        },
+      });
+      const stableReplay = await createHostedPhysicalNote({
+        ...request,
+        prisma: replayClient,
+        runtime: {
+          create: replayCreate,
+          findLetterByNoteId: findAccepted,
+        },
+      });
+
+      expect(recovered).toMatchObject({
+        complimentary: false,
+        physicalNoteId: starting.id,
+        status: "accepted",
+      });
+      expect(stableReplay).toEqual(recovered);
+      expect(sourceCreate).toHaveBeenCalledOnce();
+      expect(replayCreate).not.toHaveBeenCalled();
+      expect(findAccepted).toHaveBeenCalledOnce();
+      expect(mocks.recordUsage).toHaveBeenCalledTimes(2);
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: starting.id },
+      })).resolves.toMatchObject({
+        providerLetterId: "ltr_before_local_rollback",
+        status: "accepted",
+      });
+    });
+
     it("enters Lob once for concurrent replay of the same request", async () => {
       const first = requirePrisma(firstClient);
       const second = requirePrisma(secondClient);

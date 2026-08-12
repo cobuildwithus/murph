@@ -331,17 +331,20 @@ async function resolveHostedPhysicalNoteReplay(input: {
       ? null
       : toResponse(input.row, "failed");
   }
-  return toResponse(input.row, "pending");
+  return null;
 }
 
 async function resolveGuardedPhysicalNote(input: {
+  allowRecentLookup: boolean;
   memberId: string;
   prior: HostedPhysicalNote;
   prisma: PrismaClient;
   runtime: LobPhysicalNoteRuntime;
   signal?: AbortSignal;
 }): Promise<void> {
-  if (Date.now() - input.prior.createdAt.getTime() < REPLAY_WINDOW_MS) {
+  const mayResolveAbsence =
+    Date.now() - input.prior.createdAt.getTime() >= REPLAY_WINDOW_MS;
+  if (!input.allowRecentLookup && !mayResolveAbsence) {
     return;
   }
   const providerResult = await input.runtime.findLetterByNoteId({
@@ -369,6 +372,9 @@ async function resolveGuardedPhysicalNote(input: {
         providerLetterId: providerResult.providerLetterId,
       });
     }
+    return;
+  }
+  if (!mayResolveAbsence) {
     return;
   }
 
@@ -493,6 +499,9 @@ async function resolvePhysicalNoteEffectGuard(input: {
     return toResponse(input.current, "failed");
   }
   await resolveGuardedPhysicalNote({
+    allowRecentLookup:
+      input.current.id === input.prior.id
+      && input.prior.status === "starting",
     memberId: input.memberId,
     prior: input.prior,
     prisma: input.prisma,

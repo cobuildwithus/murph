@@ -34,9 +34,11 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - A Cloudflare Web-control HTTP 408 remains pending because Web may have
   consumed the POST and accepted the note before the caller timed out; it never
   becomes definite no-send guidance.
-- A current `starting` row remains pending on every same-key replay without
-  another Lob create call, even when a refreshed private-media URL changes the
-  request body.
+- A current `starting` row never re-enters Lob create on same-key replay, even
+  when a refreshed private-media URL changes the request body. Its exact replay
+  uses one bounded metadata lookup: accepted evidence finalizes the same row,
+  while recent absent or indeterminate evidence remains pending and only aged
+  proven absence becomes unknown.
 - A distinct request blocked while the original Lob call is in flight is
   narrowed atomically to accepted-prior or unknown when that original call
   terminalizes, so its exact replay cannot remain factually unresolved.
@@ -265,3 +267,13 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   interleavings, stable provider-free blocker replay, exact usage ownership,
   complimentary release, and ordinary admission after acceptance. No state,
   link, queue, lifecycle, or reconciliation owner was added.
+- Round 15 found that exact replay of a current `starting` row returned pending
+  before the existing metadata lookup, so Lob acceptance followed by a failed
+  local finalization could never converge. Let only same-key current replay use
+  the existing bounded lookup immediately. Accepted evidence finalizes the
+  original row and its original paid usage exactly once; recent absence or
+  indeterminate evidence keeps authority pending; aged proven absence uses the
+  existing unknown transition. Distinct recent requests still perform no
+  lookup, and no path re-enters Lob create. Focused tests cover accepted paid
+  recovery, recent absent and indeterminate evidence, aged absence, stable
+  replay, and changed private-media capability.
