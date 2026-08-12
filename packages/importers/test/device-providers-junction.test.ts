@@ -4770,6 +4770,13 @@ test("Junction profile gender is bounded and never substituted for biological se
   assert.equal(qualifiers?.gender, oversizedGender.slice(0, 80));
   assert.equal(typeof genderEvent?.note, "undefined");
   assert.equal(genderEvent?.dataOrigin?.sourceProviderSlug, "oura");
+  assert.match(genderEvent?.dataOrigin?.sourceInstanceId ?? "", /^source-[a-f0-9]{24}$/u);
+  assert.equal(genderEvent?.dataOrigin?.observedAtRaw, "2026-04-20T09:00:00.000Z");
+  assert.equal(genderEvent?.legacyExternalRefs?.length, 1);
+  assert.notEqual(
+    genderEvent?.legacyExternalRefs?.[0]?.resourceId,
+    genderEvent?.externalRef?.resourceId,
+  );
   assertEventRawArtifactRolesExist(payload);
   const genderArtifact = payload.evidenceParts?.find(
     (artifact) => artifact.role === "junction-summary-profile",
@@ -4777,6 +4784,7 @@ test("Junction profile gender is bounded and never substituted for biological se
   assert.deepEqual(genderArtifact?.content, {
     gender: oversizedGender.slice(0, 80),
     sourceProviderSlug: "oura",
+    sourceInstanceId: genderEvent?.dataOrigin?.sourceInstanceId,
     sourceType: "ring",
     stableResourceId: genderEvent?.externalRef?.resourceId,
     updatedAt: "2026-04-20T09:00:00.000Z",
@@ -4788,6 +4796,8 @@ test("Junction profile gender is bounded and never substituted for biological se
   });
   assert.deepEqual(replayPayload.events?.[0]?.externalRef, genderEvent?.externalRef);
   assert.equal(replayPayload.events?.[0]?.occurredAt, genderEvent?.occurredAt);
+  assert.deepEqual(replayPayload.events?.[0]?.dataOrigin, genderEvent?.dataOrigin);
+  assert.equal(replayPayload.events?.[0]?.legacyExternalRefs, undefined);
   const replayArtifact = replayPayload.evidenceParts?.find(
     (artifact) => artifact.role === "junction-summary-profile",
   );
@@ -4798,6 +4808,70 @@ test("Junction profile gender is bounded and never substituted for biological se
   assert.deepEqual(replayArtifact?.content, genderArtifact?.content);
   assert.deepEqual(secondReplayPayload.events?.[0]?.externalRef, genderEvent?.externalRef);
   assert.equal(secondReplayPayload.events?.[0]?.occurredAt, genderEvent?.occurredAt);
+  assert.deepEqual(secondReplayPayload.events?.[0]?.dataOrigin, genderEvent?.dataOrigin);
+});
+
+test("Junction profile identity canonicalizes timestamp spellings without changing explicit ids", () => {
+  const normalizeProfile = (updatedAt: string, id?: string) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      profile: {
+        ...(id ? { id } : {}),
+        gender: "other",
+        updated_at: updatedAt,
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  }).events?.[0];
+  const equivalentTimestamps = [
+    "2026-04-20T09:00:00Z",
+    "2026-04-20T09:00:00.000Z",
+    "2026-04-20T04:00:00-05:00",
+  ];
+  const noIdEvents = equivalentTimestamps.map((updatedAt) => normalizeProfile(updatedAt));
+  const explicitIdEvents = equivalentTimestamps.map((updatedAt) =>
+    normalizeProfile(updatedAt, "profile-stable-id")
+  );
+
+  assert.equal(new Set(noIdEvents.map((event) => event?.externalRef?.resourceId)).size, 1);
+  assert.equal(new Set(explicitIdEvents.map((event) => event?.externalRef?.resourceId)).size, 1);
+  assert.equal(explicitIdEvents.every((event) => event?.legacyExternalRefs === undefined), true);
+  assert.deepEqual(
+    noIdEvents.map((event) => event?.dataOrigin?.observedAtRaw),
+    equivalentTimestamps.map(() => "2026-04-20T09:00:00.000Z"),
+  );
+});
+
+test("Junction no-id profile facets claim the pre-normalized timestamp identity", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      profile: {
+        birth_date: "1990-05-14",
+        gender: "other",
+        height: 181,
+        sex: "female",
+        updated_at: "2026-04-20T09:00:00Z",
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  });
+  const events = payload.events ?? [];
+
+  assert.equal(events.length, 3);
+  assert.deepEqual(
+    events.map((event) => event.externalRef?.facet).sort(),
+    ["gender", "height", "profile-demographics"],
+  );
+  assert.equal(events.every((event) => event.legacyExternalRefs?.length === 1), true);
+  assert.equal(
+    new Set(events.map((event) => event.legacyExternalRefs?.[0]?.resourceId)).size,
+    1,
+  );
+  assert.equal(events.every((event) =>
+    event.legacyExternalRefs?.[0]?.resourceId !== event.externalRef?.resourceId
+    && event.legacyExternalRefs?.[0]?.facet === event.externalRef?.facet
+  ), true);
 });
 
 test("Junction oversized menstrual deviation strings land with capped facet and qualifier", () => {

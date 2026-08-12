@@ -3310,6 +3310,7 @@ test("Junction reconcile refreshes a legacy profile marker once", async () => {
       return createJsonResponse({
         data: [{
           gender: "other",
+          height: 181,
           updated_at: "2026-04-01T09:00:00Z",
           source: { provider: "oura", type: "ring" },
         }],
@@ -3352,6 +3353,7 @@ test("Junction reconcile refreshes a legacy profile marker once", async () => {
   };
   assert.deepEqual(firstSnapshot.summaries?.profile, [{
     gender: "other",
+    height: 181,
     sourceProviderSlug: "oura",
     sourceType: "ring",
     updated_at: "2026-04-01T09:00:00Z",

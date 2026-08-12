@@ -2386,6 +2386,7 @@ function sanitizeProfilePayload(payload: unknown, connection?: PlainObject): Pla
       updatedAt,
     ),
     sourceProviderSlug,
+    sourceInstanceId: origin.sourceInstanceId,
     sourceType: origin.sourceType,
     updatedAt,
   });
@@ -3708,12 +3709,24 @@ function pushProfileSummary(
     occurredAt: pinnedOccurredAt,
     recordedAt: baseTimestamp.observedAtRaw ? baseTimestamp.recordedAt : providerTimestamp,
     dayKey: extractIsoDatePrefix(pinnedOccurredAt) ?? baseTimestamp.dayKey,
-    observedAtRaw: baseTimestamp.observedAtRaw
-      ?? stringId(providerTimestampRaw)
-      ?? "current",
+    observedAtRaw: pinnedOccurredAt,
   });
+  const legacyExternalRefs = (facet: string) => buildJunctionProfileLegacyExternalRefs(
+    resourceContext,
+    entry,
+    timestamp,
+    providerTimestampRaw,
+    facet,
+  );
 
-  pushObservationMetrics(entry, resourceContext, context, JUNCTION_PROFILE_METRICS, timestamp);
+  pushObservationMetrics(
+    entry,
+    resourceContext,
+    context,
+    JUNCTION_PROFILE_METRICS,
+    timestamp,
+    legacyExternalRefs,
+  );
 
   if (!timestamp.occurredAt) {
     return;
@@ -3730,6 +3743,7 @@ function pushProfileSummary(
       title: "Junction gender",
       evidenceRoles: resourceContext.evidenceRoles,
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "gender"),
+      legacyExternalRefs: legacyExternalRefs("gender"),
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
       fields: {
         measurements: [{
@@ -3765,6 +3779,7 @@ function pushProfileSummary(
     note: trimToLength(segments.join(" "), 4000),
     evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "profile-demographics"),
+    legacyExternalRefs: legacyExternalRefs("profile-demographics"),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
   }));
 }
@@ -4747,6 +4762,7 @@ function pushObservationMetrics(
   context: NormalizationContext,
   metrics: readonly MetricDescriptor[],
   timestampOverride?: ReturnType<typeof resolveRecordTimestamp>,
+  legacyExternalRefs?: (facet: string) => DeviceExternalRefPayload[] | undefined,
 ): void {
   const timestamp = timestampOverride ?? resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const occurredAt = timestamp.occurredAt;
@@ -4778,6 +4794,7 @@ function pushObservationMetrics(
       // supersedes an existing generic Apple HRV event instead of duplicating
       // it under the corrected SDNN metric.
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
+      legacyExternalRefs: legacyExternalRefs?.(metric.metric),
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
       fields: {
         metric: metricKey,
@@ -5127,6 +5144,39 @@ function buildStableProfileResourceId(
         updatedAt,
       ])}`
     : undefined;
+}
+
+function buildJunctionProfileLegacyExternalRefs(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  providerTimestampRaw: unknown,
+  facet: string,
+): DeviceExternalRefPayload[] | undefined {
+  if (
+    firstStringFromPaths(entry, ["stableResourceId"])
+    || firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
+  ) {
+    return undefined;
+  }
+
+  const rawTimestamp = stringId(providerTimestampRaw);
+  if (!rawTimestamp) {
+    return undefined;
+  }
+
+  const primary = makeJunctionExternalRef(resourceContext, entry, timestamp, facet);
+  const legacyResourceId = `profile-${shortHash([
+    "profile",
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType,
+    resourceContext.origin.sourceInstanceId,
+    rawTimestamp,
+  ])}`;
+
+  return legacyResourceId === primary.resourceId
+    ? undefined
+    : [{ ...primary, resourceId: legacyResourceId }];
 }
 
 function buildStableTimeseriesResourceId(
