@@ -361,6 +361,83 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       }));
   });
 
+  it("replays the maximum current Family activation set in receipt order without fanout", async () => {
+    const activationPointers = Array.from({ length: 6 }, (_, index) => {
+      const ordinal = index + 1;
+      return {
+        dedupeKey: `member.activated:family:${ordinal}`,
+        id: `mailbox_family_${ordinal}`,
+        userId: `member_family_${ordinal}`,
+      };
+    });
+    const findMany = vi.fn().mockResolvedValue([...activationPointers].reverse());
+    const prisma = createPrisma({
+      hostedMailboxItem: { findMany },
+      hostedStripeEvent: {
+        findUnique: vi.fn().mockResolvedValue({
+          activationResultJson: {
+            activationMailboxItemIds: activationPointers.map((pointer) => pointer.id),
+            schema: "hosted.stripe.activation-result.v1",
+          },
+          claimExpiresAt: null,
+          nextAttemptAt: new Date("2026-04-23T00:00:00.000Z"),
+          status: HostedStripeEventStatus.completed,
+          type: "customer.subscription.updated",
+          updatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        }),
+      },
+    });
+    let activeWakeCalls = 0;
+    let peakWakeCalls = 0;
+    mocks.reconcileHostedStripeEventById.mockResolvedValue(null);
+    mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mockImplementation(
+      async () => {
+        activeWakeCalls += 1;
+        peakWakeCalls = Math.max(peakWakeCalls, activeWakeCalls);
+        await Promise.resolve();
+        activeWakeCalls -= 1;
+        return {
+          accepted: true,
+          configured: true,
+          errorCode: null,
+          mailboxItemIdPresent: true,
+          signalAccepted: true,
+          workflowIdPresent: true,
+        };
+      },
+    );
+
+    await expect(processRecordedHostedStripeWebhookEvent({
+      eventId: "evt_family_current",
+      prisma: prisma as never,
+      timeoutMs: 5_000,
+    })).resolves.toEqual({ accepted: true, required: true });
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith({
+      select: { dedupeKey: true, id: true, userId: true },
+      where: {
+        id: { in: activationPointers.map((pointer) => pointer.id) },
+        kind: "member.activated",
+      },
+    });
+    expect(mocks.stripeEventsRetrieve).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledTimes(activationPointers.length);
+    expect(peakWakeCalls).toBe(1);
+    for (const [index, activation] of activationPointers.entries()) {
+      expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+        .toHaveBeenNthCalledWith(index + 1, {
+          hostedExecutionEventId: activation.dedupeKey,
+          mailboxItemId: activation.id,
+          memberId: activation.userId,
+          prisma,
+          source: "stripe.webhook.activation",
+          timeoutMs: 5_000,
+        });
+    }
+  });
+
   it("preserves completed receipt convergence when account deletion removed a pointed mailbox row", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const prisma = createPrisma({

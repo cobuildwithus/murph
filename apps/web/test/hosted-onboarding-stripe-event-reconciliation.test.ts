@@ -2818,6 +2818,16 @@ describe("hosted Stripe event reconciliation", () => {
       mocks.prepareHostedStripeDirectMemberActivationCrypto,
     ).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
+    expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      activationResultJson: {
+        activationMailboxItemIds: [
+          "mailbox_family_owner",
+          "mailbox_family_child",
+        ],
+        schema: "hosted.stripe.activation-result.v1",
+      },
+      status: HostedStripeEventStatus.completed,
+    }));
   });
 
   it("prepares Family candidates when a reused subscription still resolves its direct owner", async () => {

@@ -103,8 +103,16 @@ Updated: 2026-08-12
 - ReviewGPT findings for Stripe retry pointers, split-read WHOOP false
   rejection, referral PostgreSQL fixtures, legacy trial replay, and two
   pre-limit handoff starvation paths are corrected and focused-tested.
-- The final exact-head ReviewGPT correction response remains open: a substantive
-  pass completed below the required trust-duration floor, while the trusted
-  retry reached the provider usage limit before its completion marker. Do not
-  close this plan until the same review thread returns an attested terminal
-  pass.
+- Final ReviewGPT round 1 returned an attested terminal pass on the immutable
+  first-reviewed production head after more than 30 minutes in the exact
+  existing thread. It revalidated the complete finding/disposition ledger and
+  found no qualifying production defect. Later changes are isolated tests and
+  explanatory documentation, so they require focused proof and exact-head CI,
+  not another substantive final round.
+- The preliminary coverage specialist accepted two proof gaps. Current-schema
+  Family replay now proves ordered persistence and the maximum six-pointer
+  sequential wake path in one mailbox query without a Stripe refetch. A fresh
+  182-migration PostgreSQL database executed the production preference-handoff
+  sweep and canonical access recheck, proving that two expired participant
+  leases or two retention-old Clinical Records rows cannot consume the bounded
+  page ahead of a live candidate. The disposable database was removed.
