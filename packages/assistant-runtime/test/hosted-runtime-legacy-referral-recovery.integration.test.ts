@@ -177,15 +177,43 @@ describe("runtime-owned legacy referral recovery integration", () => {
           HostedRuntimeEffectsPort["assertLinqRecentInboundEngagement"]
         >
       >(async (request) => {
-        boundaries.lifecycle.push("linq-provider-entry-authority");
-        expect(request).toMatchObject({
-          authorityCheckOnly: false,
-          homeRouteFallbackAllowed: false,
-          idempotencyKey: notificationKey,
+        const resolvedRoute = {
+          conversationThreadId: null,
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: null,
           target: frozenTarget,
-          targetKind: "explicit",
-        });
-        return { providerDispatchClaimed: true };
+          targetKind: "thread" as const,
+          threadIsDirect: true,
+        };
+        boundaries.lifecycle.push(
+          request.authorityCheckOnly
+            ? "linq-route-preflight"
+            : "linq-provider-entry-authority",
+        );
+        expect(request).toMatchObject(
+          request.authorityCheckOnly
+            ? {
+                authorityCheckOnly: true,
+                homeRouteFallbackAllowed: false,
+                idempotencyKey: notificationKey,
+                target: frozenTarget,
+                targetKind: "explicit",
+              }
+            : {
+                authorityCheckOnly: false,
+                expectedResolvedRoute: resolvedRoute,
+                homeRouteFallbackAllowed: false,
+                idempotencyKey: notificationKey,
+                target: frozenTarget,
+                targetKind: "thread",
+              },
+        );
+        return {
+          resolvedRoute,
+          ...(request.authorityCheckOnly
+            ? {}
+            : { providerDispatchClaimed: true }),
+        };
       });
       const recordLinqDeliveryOutcome = vi.fn(async () => undefined);
       const effectsPort = createHostedRuntimeEffectsPortStub({
@@ -314,7 +342,7 @@ describe("runtime-owned legacy referral recovery integration", () => {
         }),
       ]);
 
-      expect(assertLinqRecentInboundEngagement).toHaveBeenCalledTimes(1);
+      expect(assertLinqRecentInboundEngagement).toHaveBeenCalledTimes(2);
       expect(providerRequests).toEqual([
         expect.objectContaining({
           method: "POST",
@@ -331,6 +359,7 @@ describe("runtime-owned legacy referral recovery integration", () => {
       expect(boundaries.lifecycle).toEqual([
         "live-route-authority",
         "assistant-engine",
+        "linq-route-preflight",
         "linq-provider-entry-authority",
       ]);
       expect(recordLinqDeliveryOutcome).toHaveBeenCalledTimes(1);
@@ -365,7 +394,7 @@ describe("runtime-owned legacy referral recovery integration", () => {
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual([]);
       expect(assertExternalThreadRouteAuthority).toHaveBeenCalledTimes(1);
-      expect(assertLinqRecentInboundEngagement).toHaveBeenCalledTimes(1);
+      expect(assertLinqRecentInboundEngagement).toHaveBeenCalledTimes(2);
       expect(providerFetch).toHaveBeenCalledTimes(1);
     },
   );

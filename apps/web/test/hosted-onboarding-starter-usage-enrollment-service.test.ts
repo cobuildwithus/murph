@@ -1,27 +1,52 @@
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  activateHostedMemberForPositiveSourceTx: vi.fn(),
-  assertHostedLaunchRequiredConsentGranted: vi.fn(),
-  assertHostedMemberBillingStartMessagingReady: vi.fn(),
-  ensureHostedStarterUsageGrantTx: vi.fn(),
-  lockHostedUsageCreditBeneficiaryTx: vi.fn(),
-  prepareHostedCryptoDomainRootCandidates: vi.fn(),
-  readHostedStarterUsageGrantTx: vi.fn(),
-  requireHostedInviteForBillingCheckout: vi.fn(),
-  sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
-  signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  class HostedCryptoDomainRootCandidateRequiredError extends Error {
+    readonly domain: string;
+
+    constructor(input: { domain: string }) {
+      super(`Prepared hosted ${input.domain} domain root candidate is required.`);
+      this.name = "HostedCryptoDomainRootCandidateRequiredError";
+      this.domain = input.domain;
+    }
+  }
+
+  return {
+    HostedCryptoDomainRootCandidateRequiredError,
+    activateHostedMemberForPositiveSourceTx: vi.fn(),
+    assertHostedLaunchRequiredConsentGranted: vi.fn(),
+    assertHostedMemberBillingStartMessagingReady: vi.fn(),
+    ensureHostedStarterUsageGrantTx: vi.fn(),
+    lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(),
+    lockHostedUsageCreditBeneficiaryTx: vi.fn(),
+    prepareHostedCryptoDomainRootCandidates: vi.fn(),
+    prewarmPreparedHostedCryptoDomainRootForWeb: vi.fn(),
+    providerWork: vi.fn(),
+    readHostedStarterUsageGrantTx: vi.fn(),
+    requireHostedInviteForBillingCheckout: vi.fn(),
+    runWithHostedDomainRootUnwrapCache: vi.fn(),
+    sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
+    signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
+    unwrapHostedDomainRootForWeb: vi.fn(),
+  };
+});
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  HostedCryptoDomainRootCandidateRequiredError:
+    mocks.HostedCryptoDomainRootCandidateRequiredError,
+  lockAndReadActiveHostedDomainRootKeyIdTx:
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
   prepareHostedCryptoDomainRootCandidates:
     mocks.prepareHostedCryptoDomainRootCandidates,
+  prewarmPreparedHostedCryptoDomainRootForWeb:
+    mocks.prewarmPreparedHostedCryptoDomainRootForWeb,
+  unwrapHostedDomainRootForWeb: mocks.unwrapHostedDomainRootForWeb,
 }));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({
-  runWithHostedDomainRootUnwrapCache: async (callback: () => Promise<unknown>) =>
-    await callback(),
+  runWithHostedDomainRootUnwrapCache:
+    mocks.runWithHostedDomainRootUnwrapCache,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-credit-ledger", async () => {
@@ -79,6 +104,7 @@ vi.mock("@/src/lib/hosted-onboarding/starter-usage-grant", () => ({
 import {
   ensureHostedLinqInstantStartStarterUsageEnrollment,
   ensureHostedStarterUsageEnrollment,
+  runHostedLinqInstantStartDeferredActivationWakeBestEffort,
 } from "@/src/lib/hosted-onboarding/starter-usage-enrollment-service";
 
 const NOW = new Date("2026-08-09T14:00:00.000Z");
@@ -94,25 +120,174 @@ type MemberState = {
   suspendedAt: Date | null;
 };
 
-describe("Starter usage enrollment owner", () => {
-  let activationWritten: boolean;
-  let createdGrantCount: number;
-  let grantState: { effectiveAt: Date } | null;
-  let memberState: MemberState;
+const ACTIVATION_CRYPTO_DOMAINS = ["control", "ingress"] as const;
 
+type ActivationCryptoDomain = typeof ACTIVATION_CRYPTO_DOMAINS[number];
+
+type CryptoEnvelope = {
+  domain: ActivationCryptoDomain;
+  rootKeyId: string;
+  userId: string;
+};
+
+type ProviderWork = {
+  domain?: ActivationCryptoDomain;
+  kind:
+    | "kms-sign"
+    | "kms-unwrap"
+    | "messaging"
+    | "runtime-wake"
+    | "welcome-email";
+  rootKeyId?: string;
+  transactionOpen: boolean;
+};
+
+type TransactionWriteKind =
+  | "activation"
+  | "audit"
+  | "grant"
+  | "mailbox"
+  | "root";
+
+let activationWritten: boolean;
+let activeRootKeyIds: Map<ActivationCryptoDomain, string>;
+let activeTransactionWrites: TransactionWriteKind[] | null;
+let candidateGeneration: number;
+let createdGrantCount: number;
+let providerCallsInFlight: number;
+let durableTransactionWrites: TransactionWriteKind[];
+let grantState: { effectiveAt: Date } | null;
+let memberState: MemberState;
+let scopedRootKeyIds: Map<string, string> | null;
+let transactionCallsInFlight: number;
+let transactionOpen: boolean;
+let transactionPeak: number;
+
+describe("Starter usage enrollment owner", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     activationWritten = false;
+    activeRootKeyIds = new Map([
+      ["control", "control_active_1"],
+      ["ingress", "ingress_active_1"],
+    ]);
+    activeTransactionWrites = null;
+    candidateGeneration = 0;
     createdGrantCount = 0;
+    durableTransactionWrites = [];
     grantState = null;
     memberState = buildMemberState();
+    providerCallsInFlight = 0;
+    scopedRootKeyIds = null;
+    transactionCallsInFlight = 0;
+    transactionOpen = false;
+    transactionPeak = 0;
 
+    mocks.runWithHostedDomainRootUnwrapCache.mockImplementation(
+      async (callback: () => Promise<unknown>) => {
+        if (scopedRootKeyIds) {
+          return callback();
+        }
+        scopedRootKeyIds = new Map();
+        try {
+          return await callback();
+        } finally {
+          scopedRootKeyIds = null;
+        }
+      },
+    );
+    mocks.providerWork.mockImplementation(async (input: ProviderWork) => {
+      if (input.transactionOpen) {
+        throw new Error("Provider work executed inside the transaction callback.");
+      }
+    });
     mocks.requireHostedInviteForBillingCheckout.mockImplementation(
       async () => buildInvite(memberState),
     );
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
-    mocks.assertHostedMemberBillingStartMessagingReady.mockResolvedValue(undefined);
-    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
+    mocks.assertHostedMemberBillingStartMessagingReady.mockImplementation(
+      async () => runProviderWork({ kind: "messaging" }),
+    );
+    mocks.prepareHostedCryptoDomainRootCandidates.mockImplementation(
+      async (input: { userId: string }) => {
+        candidateGeneration += 1;
+        const prepared = new Map<ActivationCryptoDomain, CryptoEnvelope>();
+        for (const domain of ACTIVATION_CRYPTO_DOMAINS) {
+          if (activeRootKeyIds.has(domain)) {
+            continue;
+          }
+          const envelope = buildCryptoEnvelope({
+            domain,
+            rootKeyId: `${domain}_candidate_${candidateGeneration}`,
+            userId: input.userId,
+          });
+          await runProviderWork({
+            domain,
+            kind: "kms-sign",
+            rootKeyId: envelope.rootKeyId,
+          });
+          prepared.set(domain, envelope);
+        }
+        return prepared;
+      },
+    );
+    mocks.prewarmPreparedHostedCryptoDomainRootForWeb.mockImplementation(
+      async (input: {
+        domain: ActivationCryptoDomain;
+        prepared: ReadonlyMap<ActivationCryptoDomain, CryptoEnvelope>;
+        userId: string;
+      }) => {
+        const envelope = input.prepared.get(input.domain);
+        if (!envelope) {
+          throw new mocks.HostedCryptoDomainRootCandidateRequiredError({
+            domain: input.domain,
+          });
+        }
+        await runProviderWork({
+          domain: input.domain,
+          kind: "kms-unwrap",
+          rootKeyId: envelope.rootKeyId,
+        });
+        cacheUnwrappedRoot(envelope);
+      },
+    );
+    mocks.unwrapHostedDomainRootForWeb.mockImplementation(
+      async (input: { domain: ActivationCryptoDomain; userId: string }) => {
+        const activeCacheKey = buildActiveRootCacheKey(
+          input.userId,
+          input.domain,
+        );
+        const cachedRootKeyId = scopedRootKeyIds?.get(activeCacheKey);
+        if (cachedRootKeyId) {
+          return buildUnwrappedCryptoRoot({
+            domain: input.domain,
+            rootKeyId: cachedRootKeyId,
+            userId: input.userId,
+          });
+        }
+
+        const activeRootKeyId = activeRootKeyIds.get(input.domain);
+        if (!activeRootKeyId) {
+          throw new Error(`Active ${input.domain} root is unavailable.`);
+        }
+        await runProviderWork({
+          domain: input.domain,
+          kind: "kms-unwrap",
+          rootKeyId: activeRootKeyId,
+        });
+        const root = buildCryptoEnvelope({
+          domain: input.domain,
+          rootKeyId: activeRootKeyId,
+          userId: input.userId,
+        });
+        cacheUnwrappedRoot(root);
+        return buildUnwrappedCryptoRoot(root);
+      },
+    );
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockImplementation(
+      async (input: { domain: ActivationCryptoDomain }) =>
+        activeRootKeyIds.get(input.domain) ?? null,
+    );
     mocks.lockHostedUsageCreditBeneficiaryTx.mockResolvedValue({
       balanceUsdMicros: 0n,
       beneficiaryMemberId: memberState.id,
@@ -121,6 +296,7 @@ describe("Starter usage enrollment owner", () => {
     mocks.readHostedStarterUsageGrantTx.mockImplementation(async () => grantState);
     mocks.ensureHostedStarterUsageGrantTx.mockImplementation(async () => {
       if (!grantState) {
+        stageTransactionWrites("grant");
         grantState = { effectiveAt: NOW };
         createdGrantCount += 1;
       }
@@ -132,23 +308,75 @@ describe("Starter usage enrollment owner", () => {
         ledgerVersion: 1n,
       };
     });
-    mocks.activateHostedMemberForPositiveSourceTx.mockImplementation(async () => {
-      if (activationWritten) {
+    mocks.activateHostedMemberForPositiveSourceTx.mockImplementation(
+      async (input: {
+        memberId: string;
+        preparedCryptoDomainRoots: ReadonlyMap<
+          ActivationCryptoDomain,
+          CryptoEnvelope
+        >;
+        prisma: unknown;
+      }) => mocks.runWithHostedDomainRootUnwrapCache(async () => {
+        for (const domain of ACTIVATION_CRYPTO_DOMAINS) {
+          let rootKeyId = activeRootKeyIds.get(domain);
+          if (!rootKeyId) {
+            const candidate = input.preparedCryptoDomainRoots.get(domain);
+            if (!candidate) {
+              throw new mocks.HostedCryptoDomainRootCandidateRequiredError({
+                domain,
+              });
+            }
+            rootKeyId = candidate.rootKeyId;
+            activeRootKeyIds.set(domain, rootKeyId);
+          }
+
+          const activeCacheKey = buildActiveRootCacheKey(input.memberId, domain);
+          const concreteCacheKey = buildConcreteRootCacheKey(
+            input.memberId,
+            domain,
+            rootKeyId,
+          );
+          if (
+            scopedRootKeyIds?.get(activeCacheKey) !== rootKeyId
+            || scopedRootKeyIds.get(concreteCacheKey) !== rootKeyId
+          ) {
+            await runProviderWork({
+              domain,
+              kind: "kms-unwrap",
+              rootKeyId,
+            });
+          }
+          const root = await mocks.unwrapHostedDomainRootForWeb({
+            domain,
+            prisma: input.prisma,
+            userId: input.memberId,
+          });
+          root.rootKey.fill(0);
+        }
+
+        if (activationWritten) {
+          return {
+            activated: false,
+            hostedExecutionEventId: null,
+          };
+        }
+        stageTransactionWrites("activation", "root", "audit", "mailbox");
+        activationWritten = true;
         return {
-          activated: false,
-          hostedExecutionEventId: null,
+          activated: true,
+          hostedExecutionEventId: "execution_activation_1",
         };
-      }
-      activationWritten = true;
-      return {
-        activated: true,
-        hostedExecutionEventId: "execution_activation_1",
-      };
-    });
+      }),
+    );
     mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
-      .mockResolvedValue({ signaled: true });
+      .mockImplementation(async () => {
+        await runProviderWork({ kind: "runtime-wake" });
+        return { signaled: true };
+      });
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort
-      .mockResolvedValue(undefined);
+      .mockImplementation(async () => {
+        await runProviderWork({ kind: "welcome-email" });
+      });
   });
 
   it("enrolls once across supported channels and emits activation effects once", async () => {
@@ -181,6 +409,302 @@ describe("Starter usage enrollment owner", () => {
       .toHaveBeenCalledOnce();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
       .toHaveBeenCalledOnce();
+  });
+
+  it("prewarms exact active roots and reuses both cache identities inside the transaction", async () => {
+    const prisma = buildPrisma(() => memberState);
+
+    await expect(ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    })).resolves.toMatchObject({ status: "enrolled" });
+
+    expect(mocks.prewarmPreparedHostedCryptoDomainRootForWeb)
+      .not.toHaveBeenCalled();
+    expect(readProviderWorkByKind("kms-unwrap")).toEqual([
+      expect.objectContaining({
+        domain: "control",
+        rootKeyId: "control_active_1",
+        transactionOpen: false,
+      }),
+      expect.objectContaining({
+        domain: "ingress",
+        rootKeyId: "ingress_active_1",
+        transactionOpen: false,
+      }),
+    ]);
+    expect(readLockedCryptoDomains()).toEqual(["control", "ingress"]);
+    expectAllProviderWorkOutsideTransaction();
+  });
+
+  it("settles missing-root prewarms before BEGIN and reuses the exact candidates", async () => {
+    activeRootKeyIds.clear();
+    const ingressUnwrapStarted = createDeferred();
+    const releaseIngressUnwrap = createDeferred();
+    mocks.providerWork.mockImplementation(async (input: ProviderWork) => {
+      if (input.transactionOpen) {
+        throw new Error("Provider work executed inside the transaction callback.");
+      }
+      if (input.kind === "kms-unwrap" && input.domain === "ingress") {
+        ingressUnwrapStarted.resolve();
+        await releaseIngressUnwrap.promise;
+      }
+    });
+    const prisma = buildPrisma(() => memberState);
+
+    const enrollment = ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    });
+    await ingressUnwrapStarted.promise;
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(providerCallsInFlight).toBeGreaterThan(0);
+    releaseIngressUnwrap.resolve();
+
+    await expect(enrollment).resolves.toMatchObject({ status: "enrolled" });
+    expect(readPreparedCryptoDomains()).toEqual(["control", "ingress"]);
+    expect(activeRootKeyIds).toEqual(new Map([
+      ["control", "control_candidate_1"],
+      ["ingress", "ingress_candidate_1"],
+    ]));
+    expectAllProviderWorkOutsideTransaction();
+  });
+
+  it("drains sibling prewarms and preserves the first observed failure", async () => {
+    const controlStarted = createDeferred();
+    const releaseControl = createDeferred();
+    const ingressRejected = createDeferred();
+    const controlError = new Error("control unwrap failed later");
+    const ingressError = new Error("ingress unwrap failed first");
+    mocks.providerWork.mockImplementation(async (input: ProviderWork) => {
+      if (input.transactionOpen) {
+        throw new Error("Provider work executed inside the transaction callback.");
+      }
+      if (input.kind !== "kms-unwrap") {
+        return;
+      }
+      if (input.domain === "control") {
+        controlStarted.resolve();
+        await releaseControl.promise;
+        throw controlError;
+      }
+      ingressRejected.resolve();
+      throw ingressError;
+    });
+    const prisma = buildPrisma(() => memberState);
+    let enrollmentSettled = false;
+    const enrollment = ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    });
+    void enrollment.then(
+      () => { enrollmentSettled = true; },
+      () => { enrollmentSettled = true; },
+    );
+
+    await Promise.all([controlStarted.promise, ingressRejected.promise]);
+    await Promise.resolve();
+    expect(enrollmentSettled).toBe(false);
+    expect(providerCallsInFlight).toBe(1);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+
+    releaseControl.resolve();
+    await expect(enrollment).rejects.toBe(ingressError);
+    expect(providerCallsInFlight).toBe(0);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
+  });
+
+  it("reprepares once when a concurrent provision wins one missing-root race", async () => {
+    activeRootKeyIds.clear();
+    let injectedConcurrentControlRoot = false;
+    const prisma = buildPrisma(
+      () => memberState,
+      undefined,
+      false,
+      () => {
+        if (!injectedConcurrentControlRoot) {
+          activeRootKeyIds.set("control", "control_competitor_1");
+          injectedConcurrentControlRoot = true;
+        }
+      },
+    );
+
+    await expect(ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    })).resolves.toMatchObject({ status: "enrolled" });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureHostedStarterUsageGrantTx).toHaveBeenCalledOnce();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledOnce();
+    expect(activeRootKeyIds).toEqual(new Map([
+      ["control", "control_competitor_1"],
+      ["ingress", "ingress_candidate_2"],
+    ]));
+    expectAllProviderWorkOutsideTransaction();
+  });
+
+  it.each(["device", "runtime"] as const)(
+    "rolls back a staged %s candidate failure and commits one instant-start retry",
+    async (domain) => {
+      activeRootKeyIds.clear();
+      mocks.activateHostedMemberForPositiveSourceTx.mockImplementationOnce(
+        failActivationAfterStagedWrites(domain),
+      );
+      const admission = buildInstantStartAdmission(memberState.id);
+      const prisma = buildPrisma(() => memberState, admission);
+
+      const result = await ensureHostedLinqInstantStartStarterUsageEnrollment({
+        admissionEventId: admission.eventId,
+        inviteCode: admission.inviteCode,
+        memberId: admission.memberId,
+        now: NOW,
+        prisma: prisma as never,
+      });
+
+      expect(result).toMatchObject({
+        deferredActivationWake: {
+          hostedExecutionEventId: "execution_activation_1",
+          memberId: memberState.id,
+        },
+        status: "enrolled",
+      });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(transactionPeak).toBe(1);
+      expect(transactionCallsInFlight).toBe(0);
+      expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledTimes(2);
+      expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
+        .toHaveBeenCalledTimes(4);
+      expect(mocks.ensureHostedStarterUsageGrantTx).toHaveBeenCalledTimes(2);
+      expect(mocks.activateHostedMemberForPositiveSourceTx)
+        .toHaveBeenCalledTimes(2);
+      expect(readProviderWorkByKind("kms-sign")).toHaveLength(4);
+      expect(readProviderWorkByKind("kms-unwrap")).toHaveLength(4);
+      expect(durableTransactionWrites).toEqual([
+        "grant",
+        "activation",
+        "root",
+        "audit",
+        "mailbox",
+      ]);
+      expect(createdGrantCount).toBe(1);
+      expect(prisma.__readAdmission()).toBeNull();
+      expect(prisma.hostedInvite.updateMany).toHaveBeenCalledOnce();
+      expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+        .not.toHaveBeenCalled();
+      expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+        .not.toHaveBeenCalled();
+
+      if (!result.deferredActivationWake) {
+        throw new Error("Expected one deferred activation wake.");
+      }
+      await runHostedLinqInstantStartDeferredActivationWakeBestEffort({
+        continuation: result.deferredActivationWake,
+        prisma: prisma as never,
+      });
+      expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+        .toHaveBeenCalledOnce();
+      expect(readProviderWorkByKind("runtime-wake")).toHaveLength(1);
+      expectAllProviderWorkOutsideTransaction();
+    },
+  );
+
+  it("rolls back both staged candidate failures and preserves instant-start admission", async () => {
+    activeRootKeyIds.clear();
+    mocks.activateHostedMemberForPositiveSourceTx
+      .mockImplementationOnce(failActivationAfterStagedWrites("device"))
+      .mockImplementationOnce(failActivationAfterStagedWrites("runtime"));
+    const admission = buildInstantStartAdmission(memberState.id);
+    const prisma = buildPrisma(() => memberState, admission);
+
+    await expect(ensureHostedLinqInstantStartStarterUsageEnrollment({
+      admissionEventId: admission.eventId,
+      inviteCode: admission.inviteCode,
+      memberId: admission.memberId,
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STARTER_USAGE_CRYPTO_PREPARATION_REQUIRED",
+      details: {
+        domain: "runtime",
+        reason: "candidate-required",
+      },
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(transactionPeak).toBe(1);
+    expect(transactionCallsInFlight).toBe(0);
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledTimes(2);
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledTimes(4);
+    expect(mocks.ensureHostedStarterUsageGrantTx).toHaveBeenCalledTimes(2);
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledTimes(2);
+    expect(readProviderWorkByKind("kms-sign")).toHaveLength(4);
+    expect(readProviderWorkByKind("kms-unwrap")).toHaveLength(4);
+    expect(durableTransactionWrites).toEqual([]);
+    expect(grantState).toBeNull();
+    expect(createdGrantCount).toBe(0);
+    expect(activationWritten).toBe(false);
+    expect(prisma.__readAdmission()).toEqual(admission);
+    expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
+    expect(readProviderWorkByKind("runtime-wake")).toEqual([]);
+    expectAllProviderWorkOutsideTransaction();
+  });
+
+  it("bounds repeated exact-root churn to two preparation attempts", async () => {
+    let rootVersion = 0;
+    const prisma = buildPrisma(
+      () => memberState,
+      undefined,
+      false,
+      () => {
+        rootVersion += 1;
+        activeRootKeyIds.set("control", `control_race_${rootVersion}`);
+      },
+    );
+
+    await expect(ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    })).rejects.toMatchObject({
+      code: "HOSTED_STARTER_USAGE_CRYPTO_PREPARATION_REQUIRED",
+      details: {
+        domain: "control",
+        reason: "active-root-changed",
+      },
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureHostedStarterUsageGrantTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expectAllProviderWorkOutsideTransaction();
   });
 
   it("keeps paid billing and conflicting history outside Starter authority", async () => {
@@ -379,6 +903,7 @@ function buildPrisma(
     memberId: string;
   },
   familySponsored = false,
+  beforeTransactionBegin?: () => void,
 ) {
   let admission = admissionInput ?? null;
   const tx = {
@@ -420,7 +945,175 @@ function buildPrisma(
   };
   return {
     ...tx,
-    $transaction: vi.fn(async (callback: (prismaTx: typeof tx) => unknown) =>
-      await callback(tx)),
+    $transaction: vi.fn(async (callback: (prismaTx: typeof tx) => unknown) => {
+      beforeTransactionBegin?.();
+      if (providerCallsInFlight !== 0) {
+        throw new Error("The transaction began while provider work was still active.");
+      }
+      if (transactionOpen) {
+        throw new Error("Nested interactive transactions are not supported by this fixture.");
+      }
+
+      const snapshot = {
+        activationWritten,
+        activeRootKeyIds: new Map(activeRootKeyIds),
+        admission,
+        createdGrantCount,
+        grantState,
+      };
+      const stagedWrites: TransactionWriteKind[] = [];
+      const previousTransactionWrites = activeTransactionWrites;
+      activeTransactionWrites = stagedWrites;
+      transactionCallsInFlight += 1;
+      transactionPeak = Math.max(transactionPeak, transactionCallsInFlight);
+      transactionOpen = true;
+      try {
+        const result = await callback(tx);
+        durableTransactionWrites.push(...stagedWrites);
+        return result;
+      } catch (error) {
+        activationWritten = snapshot.activationWritten;
+        activeRootKeyIds = snapshot.activeRootKeyIds;
+        admission = snapshot.admission;
+        createdGrantCount = snapshot.createdGrantCount;
+        grantState = snapshot.grantState;
+        throw error;
+      } finally {
+        activeTransactionWrites = previousTransactionWrites;
+        transactionCallsInFlight -= 1;
+        transactionOpen = false;
+      }
+    }),
+    __readAdmission: () => admission,
   };
+}
+
+function buildInstantStartAdmission(memberId: string) {
+  return {
+    eventId: "event_admission_1",
+    inviteCode: "invite_123",
+    inviteId: "invite_id_123",
+    memberId,
+  };
+}
+
+function failActivationAfterStagedWrites(domain: "device" | "runtime") {
+  return async () => {
+    // This synthetic late failure proves the enrollment owner's full rollback
+    // envelope. Concrete root-provisioning order remains covered by the
+    // lower-level domain-root and member-activation suites.
+    stageTransactionWrites("activation", "root", "audit", "mailbox");
+    activationWritten = true;
+    throw new mocks.HostedCryptoDomainRootCandidateRequiredError({ domain });
+  };
+}
+
+function stageTransactionWrites(...writes: TransactionWriteKind[]): void {
+  if (!activeTransactionWrites || !transactionOpen) {
+    throw new Error("Starter transaction writes must be staged inside the callback.");
+  }
+  activeTransactionWrites.push(...writes);
+}
+
+function buildCryptoEnvelope(input: {
+  domain: ActivationCryptoDomain;
+  rootKeyId: string;
+  userId: string;
+}): CryptoEnvelope {
+  return input;
+}
+
+function buildUnwrappedCryptoRoot(envelope: CryptoEnvelope) {
+  return {
+    envelope,
+    rootKey: new Uint8Array(32),
+  };
+}
+
+function cacheUnwrappedRoot(envelope: CryptoEnvelope): void {
+  if (!scopedRootKeyIds) {
+    throw new Error("Hosted root prewarm requires an unwrap-cache scope.");
+  }
+  const activeCacheKey = buildActiveRootCacheKey(
+    envelope.userId,
+    envelope.domain,
+  );
+  const cachedRootKeyId = scopedRootKeyIds.get(activeCacheKey);
+  if (cachedRootKeyId && cachedRootKeyId !== envelope.rootKeyId) {
+    throw new Error("Prepared root conflicts with the cached active root.");
+  }
+  scopedRootKeyIds.set(activeCacheKey, envelope.rootKeyId);
+  scopedRootKeyIds.set(
+    buildConcreteRootCacheKey(
+      envelope.userId,
+      envelope.domain,
+      envelope.rootKeyId,
+    ),
+    envelope.rootKeyId,
+  );
+}
+
+function buildActiveRootCacheKey(
+  userId: string,
+  domain: ActivationCryptoDomain,
+): string {
+  return `${userId}|${domain}|@active`;
+}
+
+function buildConcreteRootCacheKey(
+  userId: string,
+  domain: ActivationCryptoDomain,
+  rootKeyId: string,
+): string {
+  return `${userId}|${domain}|${rootKeyId}`;
+}
+
+async function runProviderWork(
+  input: Omit<ProviderWork, "transactionOpen">,
+): Promise<void> {
+  providerCallsInFlight += 1;
+  try {
+    await mocks.providerWork({
+      ...input,
+      transactionOpen,
+    });
+  } finally {
+    providerCallsInFlight -= 1;
+  }
+}
+
+function expectAllProviderWorkOutsideTransaction(): void {
+  expect(mocks.providerWork).toHaveBeenCalled();
+  const calls = mocks.providerWork.mock.calls as Array<[ProviderWork]>;
+  for (const [call] of calls) {
+    expect(call.transactionOpen).toBe(false);
+  }
+}
+
+function readProviderWorkByKind(kind: ProviderWork["kind"]): ProviderWork[] {
+  const calls = mocks.providerWork.mock.calls as Array<[ProviderWork]>;
+  return calls.map(([call]) => call).filter((call) => call.kind === kind);
+}
+
+function readPreparedCryptoDomains(): ActivationCryptoDomain[] {
+  const calls = mocks.prewarmPreparedHostedCryptoDomainRootForWeb.mock.calls as
+    Array<[{ domain: ActivationCryptoDomain }]>;
+  return calls.map(([call]) => call.domain);
+}
+
+function readLockedCryptoDomains(): ActivationCryptoDomain[] {
+  const calls = mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mock.calls as
+    Array<[{ domain: ActivationCryptoDomain }]>;
+  return calls.map(([call]) => call.domain);
+}
+
+function createDeferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
 }

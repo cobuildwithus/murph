@@ -1457,13 +1457,22 @@ describe('assistant skill assets', () => {
       'A setup-only activation turn, plan or save confirmation, reminder or review scheduling, and the first-launch close are not movement-instruction turns merely because the saved plan contains named exercises.',
     )
     expect(compactCatalog).toContain(
+      '`murph.attach_exercise_routine_card`',
+    )
+    expect(compactCatalog).toContain(
+      'do not pad a short plan to sound more substantial.',
+    )
+    expect(compactCatalog).toContain(
+      'Use the strongest presentation supported by the current channel.',
+    )
+    expect(compactCatalog).toContain(
       'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',
     )
     expect(compactCatalog).toContain(
       'If the user clearly demonstrates relevant training fluency and every movement being taught is common or already familiar, omit exercise images unless the user asks for them.',
     )
     expect(compactCatalog).toContain(
-      'Use returned `images[]` with catalog URL, alt text, and source `exercise_catalog:<id>:<step>`.',
+      'Construct source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`.',
     )
     expect(compactCatalog).toContain('"no catalog image yet"')
     expect(catalog).toContain(

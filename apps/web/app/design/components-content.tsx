@@ -997,16 +997,17 @@ export function ComponentsContent() {
           <Section title="Environment voice processing feedback">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
               The open report keeps ownership after upload: processing,
-              updated, no-clear-facts, and delayed recovery remain visible
-              without requiring a reload. Processing stays animated, and the
-              delayed action rechecks the existing accepted job.
+              private-report refresh, updated, no-clear-facts, and delayed
+              recovery remain visible without requiring a reload. Processing
+              stays animated, and the delayed action rechecks the owned phase.
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
-                state={{
-                  baselineValues: "{}",
-                  status: "processing",
-                }}
+                state={{ status: "processing" }}
+                onCheckAgain={() => {}}
+              />
+              <EnvironmentVoiceRefreshNotice
+                state={{ status: "refreshing" }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
@@ -1445,7 +1446,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-nutrition-card"
-          title="iMessage nutrition card preview"
+          title="iMessage nutrition fallback parity"
         >
           <ImessageNutritionCardStudy />
         </Section>
@@ -1454,7 +1455,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-compact-table-card"
-          title="iMessage workout and compact table fallback states"
+          title="iMessage workout and compact-table fallback parity"
         >
           <ImessageCompactTableCardStudy />
         </Section>
@@ -1463,7 +1464,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-challenge-standings-card"
-          title="iMessage challenge standings card"
+          title="iMessage challenge-standings fallback parity"
         >
           <ImessageChallengeStandingsCardStudy />
         </Section>

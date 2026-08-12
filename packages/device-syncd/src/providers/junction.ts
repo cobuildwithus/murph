@@ -38,16 +38,17 @@ import {
   resolveDeviceSyncJunctionInlineSourceProviderSlug,
 } from "../junction-inline-authority.ts";
 import {
-  addJunctionBloodPressureHistoryBackfillCoverage,
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
-  canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage,
+  canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   encodeJunctionHistoricalBackfillStatus,
-  hasJunctionBloodPressureHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionHistoricalBackfillEvidence,
   JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
   type JunctionHistoricalBackfillEvidence,
@@ -256,6 +257,9 @@ interface JunctionWindowFetchOptions {
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
 const JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY = "junctionProfileSummaryCheckedAt";
+const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION = 1;
+const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY =
+  "junctionProfileSummaryNormalizationRevision";
 
 // `profile` is deliberately excluded: it is a current-state snapshot, so
 // counting it as completion evidence would mark every backfill useful and
@@ -321,15 +325,20 @@ const JUNCTION_KNOWN_WEBHOOK_RESOURCE_NAMES = new Set<string>([
 ]);
 const DEFAULT_SUMMARY_BACKFILL_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.backfillDays;
 const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
-// Sparse paired readings are cheap enough to backfill across the full
-// summary-history window. Dense timeseries retain the bounded default
+// Sparse readings are cheap enough to backfill across the full summary-history
+// window. Dense timeseries retain the bounded default
 // below, and an explicit timeseriesBackfillDays override still wins.
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES = Object.freeze([
   "blood_pressure",
+  "note",
 ] as const);
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   blood_pressure: {
     metadataKey: JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+    version: 1,
+  },
+  note: {
+    metadataKey: JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
     version: 1,
   },
 } as const satisfies Record<
@@ -668,7 +677,7 @@ export function createJunctionDeviceSyncProvider(
         return [];
       }
       const storedCoverage = account.metadata[policy.metadataKey];
-      if (!canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage(
+      if (!canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
         storedCoverage,
         policy.version,
       )) {
@@ -684,7 +693,7 @@ export function createJunctionDeviceSyncProvider(
           || !isJunctionResourceAdvertisedAvailable(
             source.resourceAvailabilitySummary?.[resource],
           )
-          || hasJunctionBloodPressureHistoryBackfillCoverage(
+          || hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
             storedCoverage,
             sourceProviderSlug,
             policy.version,
@@ -699,7 +708,12 @@ export function createJunctionDeviceSyncProvider(
       }
 
       return [...scheduledSources.entries()].map(([sourceProviderSlug, firstSeenAt]) => {
-        const window = buildExtendedTimeseriesBackfillWindow(firstSeenAt);
+        // Blood pressure existed before the member connected its source, so
+        // its history ends at first-seen. Notes became ingestible in a newer
+        // runtime, so existing sources need recent history ending now.
+        const window = buildExtendedTimeseriesBackfillWindow(
+          resource === "note" ? now : firstSeenAt,
+        );
         return buildExtendedTimeseriesBackfillJob({
           availableAt: now,
           historicalWindowStart: window.windowStart,
@@ -2240,6 +2254,20 @@ export function createJunctionDeviceSyncProvider(
       encodeJunctionHistoricalUnresolvedProviderRecords(unresolvedProviderRecords);
     const unresolvedProviderRecordsSeen = unresolvedProviderRecordCount > 0;
 
+    // A note without usable tags is an intentional importer no-op, not a
+    // canonical repair obligation. A complete note scan can therefore close
+    // its one-time source coverage even when it creates no events.
+    if (input.resource === "note" && input.importResult.fetchComplete) {
+      return withJunctionMetadataPatch(
+        input.result,
+        buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
+          input.context,
+          input.resource,
+          sourceProviderSlug,
+        ),
+      );
+    }
+
     if (
       input.importResult.fetchComplete
       && recordsSeen
@@ -2319,7 +2347,7 @@ export function createJunctionDeviceSyncProvider(
       return {};
     }
 
-    const coverage = addJunctionBloodPressureHistoryBackfillCoverage({
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
       existingValue: context.account.metadata[policy.metadataKey],
       providerSlug: sourceProviderSlug,
       version: policy.version,
@@ -2754,8 +2782,12 @@ export function createJunctionDeviceSyncProvider(
     let unresolvedProviderRecordIdentities: readonly string[] = [];
     let unresolvedProviderRecordCount = providerRecordCount;
     let unresolvedProviderRecordsWithoutStableIdentity = providerRecordCount > 0;
+    const requiresBloodPressureRecordResolution = resources.includes("blood_pressure");
     const fetchedProviderRecordIdentityEvidence =
-      executionWindowStart && executionWindowEnd && providerRecordCount > 0
+      requiresBloodPressureRecordResolution
+        && executionWindowStart
+        && executionWindowEnd
+        && providerRecordCount > 0
         ? identifyJunctionBloodPressureProviderRecords({
           connections: sanitizeJunctionImportConnections(sourceProviders),
           importedAt: executionWindowEnd,
@@ -2805,27 +2837,27 @@ export function createJunctionDeviceSyncProvider(
             };
           }
         }
-        if (fetchedProviderRecordIdentityEvidence) {
-          const preparedImport = await prepareJunctionImportSnapshot(
-            context,
-            dedupedTimeseries,
-            sourceProviders,
-            {},
-            options.sourceStatusRequirement,
-          );
-          if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-            const receipt = await context.importSnapshot({
-              provider: "junction",
-              accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-              connectionId: context.account.id,
-              importedAt: executionWindowEnd,
-              windowStart: executionWindowStart,
-              windowEnd: executionWindowEnd,
-              connections: preparedImport.connections,
-              summaries: {},
-              timeseries: preparedImport.snapshots,
-            });
-            canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
+        const preparedImport = await prepareJunctionImportSnapshot(
+          context,
+          dedupedTimeseries,
+          sourceProviders,
+          {},
+          options.sourceStatusRequirement,
+        );
+        if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+          const receipt = await context.importSnapshot({
+            provider: "junction",
+            accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+            connectionId: context.account.id,
+            importedAt: executionWindowEnd,
+            windowStart: executionWindowStart,
+            windowEnd: executionWindowEnd,
+            connections: preparedImport.connections,
+            summaries: {},
+            timeseries: preparedImport.snapshots,
+          });
+          canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
+          if (fetchedProviderRecordIdentityEvidence) {
             const resolutionEvidence =
               resolveJunctionBloodPressureProviderRecordResolutionEvidence({
                 canonicalEventCount,
@@ -2843,6 +2875,10 @@ export function createJunctionDeviceSyncProvider(
             unresolvedProviderRecordCount =
               unresolvedProviderRecordIdentities.length
               + (unresolvedProviderRecordsWithoutStableIdentity ? 1 : 0);
+          } else {
+            unresolvedProviderRecordCount =
+              canonicalEventCount >= providerRecordCount ? 0 : providerRecordCount;
+            unresolvedProviderRecordsWithoutStableIdentity = unresolvedProviderRecordCount > 0;
           }
         }
       } catch (error) {
@@ -3316,6 +3352,8 @@ function buildJunctionProfileSummaryCheckedMetadataPatch(
 ): Record<string, unknown> {
   return {
     [JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY]: context.now,
+    [JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY]:
+      JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION,
   };
 }
 
@@ -3356,7 +3394,10 @@ function isJunctionProfileSummaryResource(resource: string): boolean {
 
 function hasCheckedJunctionProfileSummary(metadata: Record<string, unknown>): boolean {
   const checkedAt = normalizeString(metadata[JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY]);
-  return checkedAt !== undefined && Number.isFinite(Date.parse(checkedAt));
+  return checkedAt !== undefined
+    && Number.isFinite(Date.parse(checkedAt))
+    && metadata[JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY]
+      === JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION;
 }
 
 function classifyOptionalJunctionResourceFailure(
@@ -5097,7 +5138,7 @@ function junctionTimeseriesRecordValueIdentity(
   resource: string,
   entry: Record<string, unknown>,
 ): string[] {
-  if (resource !== "blood_pressure") {
+  if (resource !== "blood_pressure" && resource !== "note") {
     return [];
   }
 
@@ -5108,6 +5149,17 @@ function junctionTimeseriesRecordValueIdentity(
     if (rowId) {
       return [rowId];
     }
+  }
+
+  if (resource === "note") {
+    return [
+      ...(Array.isArray(entry.tags) ? entry.tags : [])
+        .flatMap((tag) => {
+          const normalized = normalizeString(tag);
+          return normalized ? [normalized] : [];
+        })
+        .sort(),
+    ];
   }
 
   // Field names mirror the importer's blood-pressure value paths.
@@ -6052,6 +6104,16 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     || !JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET.has(resource)
   ) {
     return null;
+  }
+
+  if (resource === "note") {
+    return sha256Text(JSON.stringify([
+      "junction",
+      "extended-timeseries-backfill",
+      normalizeProviderSlug(payload.sourceProviderSlug),
+      resource,
+      JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES.note.version,
+    ]));
   }
 
   return sha256Text(JSON.stringify([

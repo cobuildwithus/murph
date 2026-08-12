@@ -319,6 +319,24 @@ missing; `null` means no snapshot has been supplied. Revoke and regrant clear
 the column in the same authority transaction, and regrant rotates the share id,
 so a stale producer cannot update a later grant generation.
 
+The grantor's personal runtime offers this replacement projection only after its
+source state crosses the existing successful checkpoint boundary. A pending
+mailbox prefix may wait behind an in-flight projection only when the same
+bounded response proves every fetched lane reaches its lane-wide high-water and
+every visible item is a system-lane `device-sync.wake` with the production
+`device-sync:dirty:` dedupe prefix. Those rows are level-triggered dirty hints.
+A full page whose high-water lies beyond its visible suffix is incomplete and
+remains foreground work, so connection, disconnect, manual-reconcile, and
+scheduled-reconcile commands cannot hide behind dirty hints. Mixed or
+uninspectable prefixes and failed classification fetches likewise remain
+foreground. A successful classification prefetch is reused by the foreground
+import instead of fetched a second time. An invocation that exhausts its mailbox
+budget returns the existing durable continuation before making another
+projection offer. Once graceful shutdown is observed, the retiring runtime
+neither starts nor re-enters projection or mailbox import; it returns an
+immediate `mailbox` wake so the existing replacement-runtime reconciliation owns
+the durable row.
+
 `murph.group action="read_shared"` accepts one to three unique exact selectable
 projection scopes. The signed Web handler captures the current group roster and
 exact active grants, decrypts only the captured encrypted snapshots, and returns
@@ -978,17 +996,35 @@ unstamped user entry. Until both gates pass, fail-closed legacy scrubbing is
 forbidden because it can erase recent paired conversation history
 irreversibly.
 
-Accepted Linq reply delivery carries an earlier copy of the same exact-item
-consume authority:
-the runtime reports
-`answeredMailboxItemIds`, and the signed delivery callback stamps matching
+Accepted Linq reply and reaction delivery carry an earlier copy of the same
+exact-item consume authority: the runtime keeps `answeredMailboxItemIds` on the
+existing outbox intent, and the signed delivery callback stamps matching
 same-user `conversation.message` rows with `HostedMailboxItem.consumedAt`.
+For a reaction-only terminal turn, the provider-accepted reaction receipt is
+persisted on that same intent before Web confirmation. A retryable or ambiguous
+confirmation retains the receipt and exact ids and retries only the signed Web
+callback; it must not replay the provider reaction or consume from an outcome
+that lacks a concrete accepted receipt. A restart reconciles the retained
+receipt through the same callback before the intent becomes sent. The ordinary
+exact-item checkpoint acknowledgement remains an idempotent fallback, and its
+terminal ids remain retained until a later mailbox fetch confirms the durable
+conversation floor.
 The mailbox fetch response returns both `consumedSeqByLane` and each item's
 `consumedAt`; replayed conversation items at or below the checkpoint replay
 floor, or with `consumedAt != null`, are re-staged as conversation context with
 a null reply target, never as fresh reply candidates. This keeps a workspace
 restore or restart from re-replying to an already-handled message without a
-side table or lane high-water advance past gaps. A container rollout SIGTERM
+side table or lane high-water advance past gaps. The runtime-progress monitor
+uses that same terminal distinction without redefining the contiguous floor:
+conversation candidates above the effective floor must still have
+`consumed_at IS NULL`, while system-lane candidates retain their existing
+live-row semantics. The selected head and `COUNT(*) OVER()` come from that one
+lane-aware predicate. A stamped conversation row is terminal, not usage-resume
+evidence; only staging, provider start, or accepted delivery can establish
+post-denial execution for a remaining candidate. The monitor probes at most one
+row beyond its raw 20,000-candidate cap before runtime-access and usage-denial
+exclusions and reports `scanTruncated` instead of scanning an exclusion-heavy
+population without bound. A container rollout SIGTERM
 additionally makes the runtime treat the idle window as elapsed and run its
 normal `idle_shutdown` checkpoint inside the termination grace period.
 
@@ -1138,7 +1174,7 @@ another wake, with no finite application-owned recovery bound. Enrollment
 failure returns no continuation; a previously issued shell command may leave an
 idle container to expire, but it cannot process runtime work. Both direct
 requests are latency hints, not a second durable wake authority:
-accepted Linq reply delivery stamps `consumedAt` on the exact
+accepted Linq reply or reaction delivery stamps `consumedAt` on the exact
 `HostedMailboxItem`, while Assistant Ask uses deterministic request/completion
 ids, mailbox dedupe, and idempotent continuation delivery. Do not add
 workflow-side direct-wake flags, derived-floor SQL, or lag netting merely to

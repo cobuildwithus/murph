@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-08-05
+Last verified: 2026-08-11
 
 ## Current Posture
 
@@ -121,6 +121,12 @@ default destination for every goal or the definition of activation.
   purchased capacity as `usage`, present one-time contribution in a bottom
   drawer on phones and a centered dialog on larger screens, and leave payment
   confirmation to Stripe.
+- Starting a Family plan and joining someone else's Family are distinct choices.
+  Settings must say that starting creates a plan the member owns and pays for,
+  while joining uses the other owner's invite. A never-paid owner-only draft
+  must not strand a later invite: remove an inert draft as part of successful
+  acceptance, and give a member with a live Checkout one clear Settings action
+  to expire and abandon that exact unpaid setup before trying the invite again.
 - Wearable-provider authorization uses that exception narrowly. A provider
   callback completes automatically only for the browser that can prove it
   started the connection for the signed-in member; that proof-bound return is
@@ -171,6 +177,35 @@ default destination for every goal or the definition of activation.
   only as an unmistakably unverified fallback, and leave the speaker unnamed
   when neither source is safe. Convenience text never authorizes membership,
   consent, routing, matching, delivery, or participant actions.
+
+## Channel-Native Presentation
+
+- Telegram and iMessage are product UI surfaces, not plain-text transports.
+  When an owned workflow supports a card, table, image sequence, or other
+  structured presentation, Murph should use it instead of rebuilding the same
+  answer as a long message.
+- Telegram Rich Messages support headings, paragraphs, lists, quotations,
+  bordered or striped tables, expandable details, collages, slideshows, and
+  embedded media. Murph authors semantic cards through its tools; the Telegram
+  renderer owns provider HTML or blocks. Do not ask the model to write Telegram
+  markup. See the official [Telegram Bot API Rich Messages documentation](https://core.telegram.org/bots/api#rich-messages).
+- iMessage presentation can use the Murph Messages extension's interactive
+  cards, provider-owned static card layouts, and ordered response media. The
+  current routine path uses response media rather than pretending Telegram's
+  table, details, or slideshow UI exists in Messages.
+- Share the product meaning across channels: exercise steps, nutrition facts,
+  progress, summaries, tables, and safety context should stay consistent.
+  Adapt the visible UI to each platform's current capabilities. Telegram and
+  iMessage do not need identical layouts, controls, or fallback behavior.
+- A useful presentation added to one channel is a prompt to review the other.
+  The review asks whether that platform already has a suitable component or
+  needs its own native design. It does not require automatic feature parity.
+- Agent guidance and tool availability must make current channel capabilities
+  clear. The agent should choose the strongest owned presentation available
+  for that case and use concise text when no suitable component exists.
+- Keep delivery ownership, retries, receipts, and provider-specific recovery
+  inside each channel's existing implementation. Cross-channel consistency is
+  a product and authoring rule, not a reason to add a shared delivery layer.
 
 ## First-Class Product Objects
 

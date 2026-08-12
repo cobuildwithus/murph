@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { findEventByExternalRef, importDeviceBatch } from '@murphai/core'
 import { normalizeJunctionSnapshot } from '@murphai/importers'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
@@ -517,7 +518,6 @@ test('measurement entry list returns primary, legacy, and device-observation sca
   assert.equal(normalizedPositivePregnancyTest.kind, 'measurement')
   assert.ok(normalizedPositivePregnancyTest.occurredAt)
   assert.ok(normalizedPositivePregnancyTest.fields)
-
   const junctionPositivePregnancyTest = await importEventPayload({
     cli,
     parentRoot,
@@ -733,6 +733,231 @@ test('measurement entry list returns primary, legacy, and device-observation sca
   assert.equal('measurements' in groupedEvent.data, false)
   assert.equal(events.items.some((item) => item.id === whoopBmi.eventId), false)
   assert.equal(events.items.some((item) => item.id === junctionWeight.eventId), false)
+})
+
+test('normalized Junction categorical facts survive canonical import and query', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-junction-categorical-query-')
+  cleanupPaths.push(parentRoot)
+  const cli = createMeasurementCli()
+  await initVault(cli, vaultRoot)
+
+  const normalized = normalizeJunctionSnapshot({
+    importedAt: '2026-07-13T12:00:00.000Z',
+    summaries: {
+      profile: {
+        gender: 'other',
+        height: 181,
+        source_device_id: 'profile-source-instance-proof',
+        updated_at: '2026-07-09T08:30:00Z',
+        source: { provider: 'apple_health', type: 'phone' },
+      },
+      menstrual_cycle: [{
+        id: 'cycle-categorical-2026-07',
+        period_start: '2026-07-01',
+        home_progesterone_test: [{
+          date: '2026-07-12',
+          test_result: 'indeterminate',
+        }],
+        sexual_activity: [{
+          date: '2026-07-11',
+          protection_used: false,
+        }],
+        source: { provider: 'apple_health', type: 'phone' },
+      }],
+    },
+  })
+  const normalizedEvents = [
+    normalized.events?.find((event) => event.title === 'Junction gender'),
+    normalized.events?.find((event) => event.title === 'Junction home progesterone test'),
+    normalized.events?.find((event) => event.title === 'Junction sexual activity'),
+  ]
+  const profileArtifact = normalized.evidenceParts?.find(
+    (artifact) => artifact.role === 'junction-summary-profile',
+  )
+  const firstReplay = normalizeJunctionSnapshot({
+    importedAt: '2026-08-13T12:00:00.000Z',
+    summaries: { profile: profileArtifact?.content },
+  })
+  const firstReplayArtifact = firstReplay.evidenceParts?.find(
+    (artifact) => artifact.role === 'junction-summary-profile',
+  )
+  const secondReplay = normalizeJunctionSnapshot({
+    importedAt: '2026-09-13T12:00:00.000Z',
+    summaries: { profile: firstReplayArtifact?.content },
+  })
+  const genderReplayEvents = [
+    normalizedEvents[0],
+    firstReplay.events?.find((event) => event.title === 'Junction gender'),
+    secondReplay.events?.find((event) => event.title === 'Junction gender'),
+  ]
+  assert.ok(profileArtifact)
+  assert.deepEqual(firstReplayArtifact?.content, profileArtifact.content)
+  assert.deepEqual(
+    genderReplayEvents.map((event) => event?.externalRef),
+    genderReplayEvents.map(() => genderReplayEvents[0]?.externalRef),
+  )
+  assert.deepEqual(
+    genderReplayEvents.map((event) => event?.dataOrigin),
+    genderReplayEvents.map(() => genderReplayEvents[0]?.dataOrigin),
+  )
+  assert.equal(new Set(genderReplayEvents.map((event) => event?.occurredAt)).size, 1)
+  const accountId = 'junction-profile-replay-proof'
+  const currentHeightEvent = normalized.events?.find((event) => event.title === 'Junction height')
+  const legacyHeightRef = currentHeightEvent?.legacyExternalRefs?.[0]
+  assert.ok(currentHeightEvent)
+  assert.ok(legacyHeightRef)
+  assert.notEqual(legacyHeightRef.resourceId, currentHeightEvent.externalRef?.resourceId)
+  const historicalHeightImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-06-13T12:00:00.000Z',
+    events: [{
+      ...currentHeightEvent,
+      dataOrigin: currentHeightEvent.dataOrigin
+        ? { ...currentHeightEvent.dataOrigin, observedAtRaw: '2026-07-09T08:30:00Z' }
+        : undefined,
+      evidenceRoles: undefined,
+      externalRef: legacyHeightRef,
+      fields: currentHeightEvent.fields
+        ? { ...currentHeightEvent.fields, value: 180 }
+        : undefined,
+      legacyExternalRefs: undefined,
+    }],
+  })
+  const currentImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-07-13T12:00:00.000Z',
+    events: normalized.events?.map((event) => ({ ...event })),
+    evidenceParts: normalized.evidenceParts?.map((part) => ({ ...part })),
+  })
+  const readCanonicalProfileEvent = async (event: NonNullable<typeof currentHeightEvent>) => {
+    assert.ok(event.externalRef)
+    return findEventByExternalRef({
+      vaultRoot,
+      system: event.externalRef.system,
+      resourceType: event.externalRef.resourceType,
+      resourceId: event.externalRef.resourceId,
+      facet: event.externalRef.facet,
+    })
+  }
+  const currentGenderEvent = normalizedEvents[0]
+  assert.ok(currentGenderEvent)
+  const currentCanonicalHeight = await readCanonicalProfileEvent(currentHeightEvent)
+  const currentCanonicalGender = await readCanonicalProfileEvent(currentGenderEvent)
+  assert.equal(currentCanonicalHeight?.kind === 'observation' ? currentCanonicalHeight.value : null, 181)
+  assert.equal(await findEventByExternalRef({
+    vaultRoot,
+    system: legacyHeightRef.system,
+    resourceType: legacyHeightRef.resourceType,
+    resourceId: legacyHeightRef.resourceId,
+    facet: legacyHeightRef.facet,
+  }), null)
+  const firstReplayImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-08-13T12:00:00.000Z',
+    events: firstReplay.events?.map((event) => ({ ...event })),
+    evidenceParts: firstReplay.evidenceParts?.map((part) => ({ ...part })),
+  })
+  const firstReplayCanonicalHeight = await readCanonicalProfileEvent(currentHeightEvent)
+  const firstReplayCanonicalGender = await readCanonicalProfileEvent(currentGenderEvent)
+  const secondReplayImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-09-13T12:00:00.000Z',
+    events: secondReplay.events?.map((event) => ({ ...event })),
+    evidenceParts: secondReplay.evidenceParts?.map((part) => ({ ...part })),
+  })
+  const secondReplayCanonicalHeight = await readCanonicalProfileEvent(currentHeightEvent)
+  const secondReplayCanonicalGender = await readCanonicalProfileEvent(currentGenderEvent)
+  const importedEventIds = new Map(currentImport.events.map((event) => [event.title, event.id]))
+
+  const genderEventId = importedEventIds.get('Junction gender')
+  const heightEventId = importedEventIds.get('Junction height')
+  const progesteroneEventId = importedEventIds.get('Junction home progesterone test')
+  const sexualActivityEventId = importedEventIds.get('Junction sexual activity')
+  assert.ok(genderEventId)
+  assert.ok(heightEventId)
+  assert.ok(progesteroneEventId)
+  assert.ok(sexualActivityEventId)
+  assert.equal(historicalHeightImport.events[0]?.id, heightEventId)
+  const firstReplayEvents = new Map(firstReplayImport.events.map((event) => [event.title, event]))
+  const secondReplayEvents = new Map(secondReplayImport.events.map((event) => [event.title, event]))
+  assert.equal(firstReplayEvents.get('Junction gender')?.id, genderEventId)
+  assert.equal(secondReplayEvents.get('Junction gender')?.id, genderEventId)
+  assert.deepEqual(firstReplayCanonicalHeight, currentCanonicalHeight)
+  assert.deepEqual(secondReplayCanonicalHeight, currentCanonicalHeight)
+  assert.deepEqual(firstReplayCanonicalGender, currentCanonicalGender)
+  assert.deepEqual(secondReplayCanonicalGender, currentCanonicalGender)
+
+  const entries = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'gender',
+        '--metric',
+        'home-progesterone-test',
+        '--metric',
+        'sexual-activity',
+        '--from',
+        '2026-07-01',
+        '--to',
+        '2026-07-31',
+        '--limit',
+        '200',
+      ])
+    ).envelope,
+  )
+
+  assert.deepEqual(entries.filters, {
+    metric: ['gender', 'home-progesterone-test', 'sexual-activity'],
+    from: '2026-07-01',
+    to: '2026-07-31',
+    limit: 200,
+  })
+  assert.deepEqual(entries.items, [{
+    eventId: progesteroneEventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-12T00:00:00.000Z',
+    source: 'device',
+    metric: 'home-progesterone-test',
+    value: 1,
+    unit: 'recording',
+    qualifiers: { result: 'indeterminate' },
+  }, {
+    eventId: sexualActivityEventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-11T00:00:00.000Z',
+    source: 'device',
+    metric: 'sexual-activity',
+    value: 1,
+    unit: 'recording',
+    qualifiers: { 'protection-used': false },
+  }, {
+    eventId: genderEventId,
+    recordKind: 'measurement',
+    measurementIndex: 0,
+    occurredAt: '2026-07-09T08:30:00.000Z',
+    source: 'device',
+    metric: 'gender',
+    value: 1,
+    unit: 'recording',
+    qualifiers: { gender: 'other' },
+  }])
+  assert.equal(entries.count, 3)
+  assert.equal(entries.nextCursor, null)
 })
 
 test('measurement import-json schema exposes the structured payload escape hatch', async () => {

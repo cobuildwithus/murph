@@ -138,9 +138,13 @@ export function buildWearableSourceHealth(input: {
     ...input.bodyStateDays.flatMap((day) => [
       day.weightKg,
       day.bodyFatPercentage,
+      day.bodyWaterPercentage,
+      day.boneMassPercentage,
       day.bmi,
       day.leanBodyMassKg,
+      day.muscleMassPercentage,
       day.temperature,
+      day.visceralFatIndex,
       day.waistCircumference,
     ]),
   ]);
@@ -203,9 +207,13 @@ export function buildWearableSourceHealth(input: {
     ...input.bodyStateDays.flatMap((day) => [
       day.weightKg,
       day.bodyFatPercentage,
+      day.bodyWaterPercentage,
+      day.boneMassPercentage,
       day.bmi,
       day.leanBodyMassKg,
+      day.muscleMassPercentage,
       day.temperature,
+      day.visceralFatIndex,
       day.waistCircumference,
     ]),
   ]);
