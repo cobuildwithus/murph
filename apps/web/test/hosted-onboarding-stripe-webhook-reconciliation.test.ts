@@ -212,6 +212,95 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
     });
   });
 
+  it("reads completed activation pointers from the Stripe receipt without rescanning", async () => {
+    const findMany = vi.fn().mockResolvedValue([{
+      dedupeKey:
+        "member.activated:stripe.invoice.paid:member_123:evt_123",
+      id: "mailbox_item_activation_123",
+      userId: "member_123",
+    }]);
+    const prisma = createPrisma({
+      hostedMailboxItem: { findMany },
+      hostedStripeEvent: {
+        findUnique: vi.fn().mockResolvedValue({
+          activationResultJson: {
+            activationMailboxItemIds: ["mailbox_item_activation_123"],
+            schema: "hosted.stripe.activation-result.v1",
+          },
+          claimExpiresAt: null,
+          nextAttemptAt: new Date("2026-04-23T00:00:00.000Z"),
+          status: HostedStripeEventStatus.completed,
+          type: "invoice.paid",
+          updatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        }),
+      },
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValue(null);
+
+    await expect(processRecordedHostedStripeWebhookEvent({
+      eventId: "evt_123",
+      prisma: prisma as never,
+    })).resolves.toEqual({ accepted: true, required: true });
+
+    expect(findMany).toHaveBeenCalledWith({
+      select: { dedupeKey: true, id: true, userId: true },
+      where: {
+        id: { in: ["mailbox_item_activation_123"] },
+        kind: "member.activated",
+      },
+    });
+    expect(mocks.stripeEventsRetrieve).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        hostedExecutionEventId:
+          "member.activated:stripe.invoice.paid:member_123:evt_123",
+        mailboxItemId: "mailbox_item_activation_123",
+        memberId: "member_123",
+      }));
+  });
+
+  it.each([
+    {
+      activationMailboxItemIds: ["mailbox_duplicate", "mailbox_duplicate"],
+      schema: "hosted.stripe.activation-result.v1",
+    },
+    {
+      activationMailboxItemIds: Array.from(
+        { length: 7 },
+        (_, index) => `mailbox_${index}`,
+      ),
+      schema: "hosted.stripe.activation-result.v1",
+    },
+  ])("fails closed on malformed completed activation pointers", async (
+    activationResultJson,
+  ) => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const prisma = createPrisma({
+      hostedMailboxItem: { findMany },
+      hostedStripeEvent: {
+        findUnique: vi.fn().mockResolvedValue({
+          activationResultJson,
+          claimExpiresAt: null,
+          nextAttemptAt: new Date("2026-04-23T00:00:00.000Z"),
+          status: HostedStripeEventStatus.completed,
+          type: "invoice.paid",
+          updatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        }),
+      },
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValue(null);
+
+    await expect(processRecordedHostedStripeWebhookEvent({
+      eventId: "evt_123",
+      prisma: prisma as never,
+    })).rejects.toThrow(/Stored Stripe activation result/u);
+
+    expect(findMany).not.toHaveBeenCalled();
+    expect(mocks.stripeEventsRetrieve).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .not.toHaveBeenCalled();
+  });
+
   it("rederives every completed family activation target for runtime wake retries", async () => {
     const prisma = createPrisma({
       hostedMailboxItem: {

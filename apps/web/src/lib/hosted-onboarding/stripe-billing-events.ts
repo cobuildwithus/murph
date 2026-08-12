@@ -114,6 +114,7 @@ import { cleanupHostedStandardCheckoutLoser } from "./stripe-checkout-loser-clea
 export type HostedStripeActivatedMemberOutcome = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
+  hostedExecutionMailboxItemId?: string | null;
 };
 
 export interface HostedStripeCheckoutCleanup {
@@ -860,6 +861,7 @@ async function convertHostedLegacyPulseTrialToStarterTx(input: {
     activatedMemberId: activation.activated ? input.member.id : null,
     cleanupPulseTrialStripeSubscriptionId,
     hostedExecutionEventId: activation.hostedExecutionEventId,
+    hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
     runtimeRecheckMemberIds: [input.member.id],
     welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
       ? input.member.id
@@ -1453,6 +1455,7 @@ export async function applyStripeInvoicePaid(
   return {
     activatedMemberId: activation.activated ? updatedMember.core.id : null,
     hostedExecutionEventId: activation.hostedExecutionEventId,
+    hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
     runtimeRecheckMemberIds: runtimeRecheckMemberId
       ? [runtimeRecheckMemberId]
       : [],
@@ -1542,6 +1545,8 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
     .map((activation) => ({
       activatedMemberId: activation.memberId,
       hostedExecutionEventId: activation.hostedExecutionEventId,
+      hostedExecutionMailboxItemId:
+        activation.hostedExecutionMailboxItemId ?? null,
     }));
   const firstActivation = activatedMembers[0] ?? null;
 
