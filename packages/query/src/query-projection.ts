@@ -90,7 +90,7 @@ import {
 import { resolveWearableSleepPatternReadFilters } from "./wearables/sleep-pattern.ts";
 import { createVaultReadModel } from "./read-model.ts";
 import {
-  buildPersonalPatternReportFromWearableBundle,
+  buildPersonalPatternReportFromWearableBundleAndMetricPoints,
   type PersonalPatternReport,
 } from "./personal-patterns.ts";
 
@@ -292,7 +292,16 @@ export async function buildPersonalPatternReportRuntime(
     vaultRoot,
   });
   const wearableBundle = readStoredPublicWearableSummaryBundle(location, {});
-  return buildPersonalPatternReportFromWearableBundle(vault, wearableBundle, options);
+  const metricPoints = listStoredMetricPoints(
+    location,
+    normalizeMetricPointFilters({ limit: null }),
+  );
+  return buildPersonalPatternReportFromWearableBundleAndMetricPoints(
+    vault,
+    wearableBundle,
+    metricPoints,
+    options,
+  );
 }
 
 export async function summarizeWearableActivityRuntime(

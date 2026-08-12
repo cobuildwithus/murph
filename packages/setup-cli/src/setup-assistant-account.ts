@@ -75,7 +75,7 @@ export function createSetupAssistantAccountResolver(
 
   return {
     async resolve(input) {
-      if (input.assistant.provider !== 'codex-cli') {
+      if (input.assistant.provider === null) {
         return null
       }
 

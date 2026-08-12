@@ -50,11 +50,18 @@ export const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS = Object.freeze({
 
 export const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
   "junctionBloodPressureHistoryBackfillCoverage";
+export const JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
+  "junctionNoteHistoryBackfillCoverage";
 const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX = "v";
+
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS = Object.freeze([
+  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+  JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+] as const);
 
 const JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS = Object.freeze([
   ...Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS),
-  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+  ...JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS,
 ]);
 
 export function readJunctionHistoricalBackfillProgress(
@@ -157,32 +164,36 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
     metadata: Record<string, unknown>;
     preservedLocalProgress: boolean;
   }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } => {
-    const hostedCoverage = readJunctionBloodPressureHistoryBackfillCoverage(
-      input.hostedMetadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY],
-    );
-    const localCoverage = input.localConnectionStateUnpublished
-      ? readJunctionBloodPressureHistoryBackfillCoverage(
-        input.localMetadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY],
-      )
-      : null;
-    const mergedCoverage = mergeJunctionBloodPressureHistoryBackfillCoverage(
-      hostedCoverage,
-      localCoverage,
-    );
-    const selectedCoverage = readJunctionBloodPressureHistoryBackfillCoverage(mergedCoverage);
-    const preservedLocalCoverage = localCoverage !== null
-      && selectedCoverage !== null
-      && doesJunctionBloodPressureCoverageAdvance(localCoverage, hostedCoverage)
-      && selectedCoverage.version === localCoverage.version
-      && localCoverage.providerSlugs.every(
-        (providerSlug) => selectedCoverage.providerSlugs.includes(providerSlug),
-      );
     const metadata = { ...result.metadata };
 
-    if (mergedCoverage === null) {
-      delete metadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY];
-    } else {
-      metadata[JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY] = mergedCoverage;
+    let preservedLocalCoverage = false;
+    for (const metadataKey of JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS) {
+      const hostedCoverage = readJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        input.hostedMetadata[metadataKey],
+      );
+      const localCoverage = input.localConnectionStateUnpublished
+        ? readJunctionExtendedTimeseriesHistoryBackfillCoverage(input.localMetadata[metadataKey])
+        : null;
+      const mergedCoverage = mergeJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        hostedCoverage,
+        localCoverage,
+      );
+      const selectedCoverage = readJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        mergedCoverage,
+      );
+      preservedLocalCoverage ||= localCoverage !== null
+        && selectedCoverage !== null
+        && doesJunctionExtendedTimeseriesCoverageAdvance(localCoverage, hostedCoverage)
+        && selectedCoverage.version === localCoverage.version
+        && localCoverage.providerSlugs.every(
+          (providerSlug) => selectedCoverage.providerSlugs.includes(providerSlug),
+        );
+
+      if (mergedCoverage === null) {
+        delete metadata[metadataKey];
+      } else {
+        metadata[metadataKey] = mergedCoverage;
+      }
     }
 
     return {
@@ -314,6 +325,32 @@ interface JunctionBloodPressureHistoryBackfillCoverage {
   version: number;
 }
 
+type JunctionExtendedTimeseriesHistoryBackfillCoverage =
+  JunctionBloodPressureHistoryBackfillCoverage;
+
+export function addJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
+  existingValue: unknown;
+  providerSlug: string;
+  version: number;
+}): string | null {
+  return addJunctionBloodPressureHistoryBackfillCoverage(input);
+}
+
+export function hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+  value: unknown,
+  providerSlug: string,
+  version: number,
+): boolean {
+  return hasJunctionBloodPressureHistoryBackfillCoverage(value, providerSlug, version);
+}
+
+export function canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+  value: unknown,
+  version: number,
+): boolean {
+  return canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage(value, version);
+}
+
 export function addJunctionBloodPressureHistoryBackfillCoverage(input: {
   existingValue: unknown;
   providerSlug: string;
@@ -390,6 +427,12 @@ function readJunctionBloodPressureHistoryBackfillCoverage(
   return encodeJunctionBloodPressureHistoryBackfillCoverage(coverage) === value ? coverage : null;
 }
 
+function readJunctionExtendedTimeseriesHistoryBackfillCoverage(
+  value: unknown,
+): JunctionExtendedTimeseriesHistoryBackfillCoverage | null {
+  return readJunctionBloodPressureHistoryBackfillCoverage(value);
+}
+
 function encodeJunctionBloodPressureHistoryBackfillCoverage(
   coverage: JunctionBloodPressureHistoryBackfillCoverage,
 ): string | null {
@@ -425,6 +468,13 @@ function mergeJunctionBloodPressureHistoryBackfillCoverage(
   }) ?? encodeJunctionBloodPressureHistoryBackfillCoverage(hosted);
 }
 
+function mergeJunctionExtendedTimeseriesHistoryBackfillCoverage(
+  hosted: JunctionExtendedTimeseriesHistoryBackfillCoverage | null,
+  local: JunctionExtendedTimeseriesHistoryBackfillCoverage | null,
+): string | null {
+  return mergeJunctionBloodPressureHistoryBackfillCoverage(hosted, local);
+}
+
 function doesJunctionBloodPressureCoverageAdvance(
   local: JunctionBloodPressureHistoryBackfillCoverage,
   hosted: JunctionBloodPressureHistoryBackfillCoverage | null,
@@ -435,6 +485,13 @@ function doesJunctionBloodPressureCoverageAdvance(
       local.version === hosted.version
       && local.providerSlugs.some((providerSlug) => !hosted.providerSlugs.includes(providerSlug))
     );
+}
+
+function doesJunctionExtendedTimeseriesCoverageAdvance(
+  local: JunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hosted: JunctionExtendedTimeseriesHistoryBackfillCoverage | null,
+): boolean {
+  return doesJunctionBloodPressureCoverageAdvance(local, hosted);
 }
 
 export function encodeJunctionHistoricalBackfillStatus(

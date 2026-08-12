@@ -4976,6 +4976,82 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("returns an actionable Family draft recovery reply without consuming the invite", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE",
+      httpStatus: 409,
+      message:
+        "Your Family invite was not used. You still have an unfinished Family checkout of your own.",
+    }));
+
+    const memberId = "member_family_draft_recovery";
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-03-01T12:00:00.000Z"),
+          id: memberId,
+          suspendedAt: null,
+          updatedAt: new Date("2026-03-01T12:00:00.000Z"),
+        }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [{
+            type: "text",
+            value: "family_draft_recovery",
+          }],
+        },
+        eventId: "evt_family_linq_draft_recovery",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "family-invite-draft-recovery-required",
+    });
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
+      memberId,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      idempotencyKey: "linq-message:evt_family_linq_draft_recovery",
+      message:
+        "Your Family invite was not used. You still have an unfinished Family checkout of your own. Open Family settings to resolve it, then return to this invite: https://www.withmurph.ai/settings?familyInviteReturn=%2Ffamily%2Faccept%2Fdraft_recovery#subscription",
+      replyToMessageId: "msg_123",
+      signal: undefined,
+    });
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+  });
+
   it("sends the signup link on the first inbound Linq message", async () => {
     const invite = {
       channel: "linq",

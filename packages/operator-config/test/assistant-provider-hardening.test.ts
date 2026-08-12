@@ -10,9 +10,6 @@ import {
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
 } from '../src/assistant/provider-config.ts'
-import {
-  resolveAssistantRuntimeTarget,
-} from '../src/assistant/target-runtime.ts'
 
 test('unsupported assistant config paths fail closed with a Codex runtime error', () => {
   const message = /Assistant runtime targets must use Codex App Server/u
@@ -20,15 +17,6 @@ test('unsupported assistant config paths fail closed with a Codex runtime error'
   assert.throws(
     () =>
       normalizeAssistantProviderConfig({
-        provider: 'unsupported-provider',
-        model: 'gpt-5.4',
-      }),
-    message,
-  )
-
-  assert.throws(
-    () =>
-      resolveAssistantRuntimeTarget({
         provider: 'unsupported-provider',
         model: 'gpt-5.4',
       }),
@@ -57,6 +45,30 @@ test('unsupported assistant config paths fail closed with a Codex runtime error'
     message,
   )
 
+  assert.throws(
+    () =>
+      normalizeAssistantProviderConfig(
+        JSON.parse(
+          JSON.stringify({
+            provider: 'unsupported-provider',
+            policy: {
+              approvalPolicy: null,
+              reasoningEffort: 'medium',
+              sandbox: null,
+            },
+            target: {
+              codexCommand: null,
+              codexHome: null,
+              model: 'gpt-5.4',
+              modelProvider: null,
+              oss: false,
+              profile: null,
+            },
+          }),
+        ),
+      ),
+    message,
+  )
 })
 
 test('unsupported persisted sessions fail closed during parsing', () => {
@@ -115,7 +127,6 @@ test('explicit Codex provider inputs serialize only Codex request-shaping fields
       sandbox: 'danger-full-access',
     },
     target: {
-      kind: 'codex-cli',
       codexCommand: 'codex',
       codexHome: null,
       model: 'gpt-5.6-terra',

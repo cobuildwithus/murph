@@ -54,11 +54,21 @@ describe("hosted-local dev wrangler config fidelity", () => {
     );
 
     // Container sizing, instance caps, and rollout staging are deploy-only
-    // concerns; the class names backing the durable object bindings must match.
-    const devContainers = dev.containers as Array<{ class_name: string }>;
-    const productionContainers = production.containers as Array<{ class_name: string }>;
-    expect(devContainers.map((container) => container.class_name)).toEqual(
-      productionContainers.map((container) => container.class_name),
+    // concerns; class identity and operator-access policy must match.
+    type ContainerRuntimeSurface = {
+      authorized_keys?: unknown;
+      class_name: string;
+      ssh?: unknown;
+    };
+    const devContainers = dev.containers as ContainerRuntimeSurface[];
+    const productionContainers = production.containers as ContainerRuntimeSurface[];
+    const runtimeSurface = (container: ContainerRuntimeSurface) => ({
+      authorized_keys: container.authorized_keys,
+      class_name: container.class_name,
+      ssh: container.ssh,
+    });
+    expect(devContainers.map(runtimeSurface)).toEqual(
+      productionContainers.map(runtimeSurface),
     );
   });
 

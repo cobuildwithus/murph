@@ -9,8 +9,6 @@ import {
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import {
   compactAssistantProviderConfigInput,
-  isAssistantCodexTargetConfig,
-  resolveAssistantChatProviderFromConfig,
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
@@ -103,19 +101,14 @@ export function buildResolveAssistantSessionInput(
     ...(deliveryKind !== undefined ? { deliveryKind } : {}),
     ...(bindingDeliveryTarget !== undefined ? { bindingDeliveryTarget } : {}),
     target,
-    provider: resolveAssistantChatProviderFromConfig(providerConfig),
+    provider: 'codex-cli',
     model: providerConfig.target.model,
-    modelProvider: isAssistantCodexTargetConfig(providerConfig)
-      ? providerConfig.target.modelProvider
-      : null,
+    modelProvider: providerConfig.target.modelProvider,
     sandbox: defaultSandbox,
     approvalPolicy: defaultApprovalPolicy,
-    oss: isAssistantCodexTargetConfig(providerConfig) ? providerConfig.target.oss : false,
-    profile:
-      isAssistantCodexTargetConfig(providerConfig)
-        ? providerConfig.target.profile
-        : null,
-    ...(isAssistantCodexTargetConfig(providerConfig) && providerConfig.target.codexHome
+    oss: providerConfig.target.oss,
+    profile: providerConfig.target.profile,
+    ...(providerConfig.target.codexHome
       ? { codexHome: providerConfig.target.codexHome }
       : {}),
     reasoningEffort: providerConfig.policy.reasoningEffort,

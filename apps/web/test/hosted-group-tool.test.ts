@@ -4986,8 +4986,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
     mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
-      targetOverride: null,
-      threadIsDirect: true,
+      resolvedRoute: {
+        conversationThreadId: "conversation-direct",
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "chat_direct_1",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
     });
 
     await expect(handleHostedRuntimeGroupTool({
@@ -5037,7 +5043,16 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       label: "the resolved route is not direct",
       setup: () => {
         mocks.assertHostedLinqRecentInboundEngagementForRuntime
-          .mockResolvedValue({ targetOverride: null, threadIsDirect: false });
+          .mockResolvedValue({
+            resolvedRoute: {
+              conversationThreadId: null,
+              directRecipientPhoneNumber: null,
+              fromPhoneNumber: "+15550002",
+              target: "chat_group_1",
+              targetKind: "thread",
+              threadIsDirect: false,
+            },
+          });
       },
     },
   ])("refuses a generated contact card when $label", async ({ setup }) => {
@@ -5093,8 +5108,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
   it("rejects an untrusted generated contact-card image URL before fetching it", async () => {
     mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
-      targetOverride: null,
-      threadIsDirect: true,
+      resolvedRoute: {
+        conversationThreadId: "conversation-direct",
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "chat_direct_1",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
     });
 
     await expect(handleHostedRuntimeGroupTool({
@@ -5160,7 +5181,16 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockImplementation(
       async () => {
         await new Promise((resolve) => setTimeout(resolve, 6_050));
-        return { targetOverride: null, threadIsDirect: true };
+        return {
+          resolvedRoute: {
+            conversationThreadId: "conversation-direct",
+            directRecipientPhoneNumber: "+15550001",
+            fromPhoneNumber: "+15550002",
+            target: "chat_direct_1",
+            targetKind: "thread",
+            threadIsDirect: true,
+          },
+        };
       },
     );
 
@@ -5190,8 +5220,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
     mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
-      targetOverride: null,
-      threadIsDirect: true,
+      resolvedRoute: {
+        conversationThreadId: "conversation-direct",
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "chat_direct_1",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
     });
     mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
       status: "unconfirmed",
@@ -5310,8 +5346,14 @@ describe("hosted group tool route boundary", () => {
     mocks.requireHostedCloudflareCallbackJsonRequest.mockClear();
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
     mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
-      targetOverride: null,
-      threadIsDirect: true,
+      resolvedRoute: {
+        conversationThreadId: "conversation-direct",
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        target: "chat_direct_1",
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
     });
     mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({ status: "sent" });
   });

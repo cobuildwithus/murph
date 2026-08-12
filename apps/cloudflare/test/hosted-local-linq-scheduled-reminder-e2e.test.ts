@@ -43,6 +43,26 @@ const scheduledReminderDeliveredText =
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "Still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep, I am here.";
+const scheduledNutritionCard = {
+  kind: "daily_nutrition",
+  version: 2,
+  localDate: "2026-07-28",
+  mealCount: 3,
+  totals: {
+    calories: { mealCount: 3, total: 1_490.25 },
+    carbsGrams: { mealCount: 3, total: 193.125 },
+    fatGrams: { mealCount: 3, total: 34.75 },
+    fiberGrams: { mealCount: 3, total: 26.5 },
+    proteinGrams: { mealCount: 3, total: 94.5 },
+  },
+  goals: {
+    calories: { status: "under_target", target: 2_100 },
+    carbsGrams: { status: "on_target", target: 220 },
+    fatGrams: { status: "on_target", target: 40 },
+    fiberGrams: { status: "under_target", target: 30 },
+    proteinGrams: { status: "on_target", target: 100 },
+  },
+} as const;
 const wakePreservationWindowRequestText =
   "Confirm the hosted-local wake-preservation checkpoint window.";
 const wakePreservationWindowReplyText =
@@ -52,6 +72,10 @@ const scheduledReminderLeadMs = scheduledReminderTiming.leadMs;
 const setupLeadText = scheduledReminderTiming.setupLeadText;
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
+const scheduledNutritionCardSetupRequestText =
+  `Remind me here in ${setupLeadText} to show my daily nutrition summary as a card.`;
+const scheduledNutritionCardInstructions =
+  "Show the user the hosted-local daily nutrition summary as a card.";
 const scheduledImageSetupRequestText =
   `Remind me here in ${setupLeadText} to go to sleep with a simple illustration.`;
 const scheduledReminderInstructions =
@@ -449,6 +473,115 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     } finally {
       heldOverlapReminderResponse.release();
     }
+
+    const scheduledCardSetupTimes = resolveScheduledReminderTimes();
+    const scheduledCardSetupBaselineCount =
+      requireLinqStub().countObservedSends(reminderPath);
+    requireScenario().queueAssistantResponses(
+      buildHostedAssistantAutomationSaveResponses({
+        dueAtIso: scheduledCardSetupTimes.dueAtIso,
+        instructions: scheduledNutritionCardInstructions,
+        text: setupReplyText,
+      }),
+      { matchInputContains: scheduledNutritionCardSetupRequestText },
+    );
+    const scheduledCardSetupResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(
+        userId,
+        scheduledChatId,
+        {
+          eventId: `evt_scheduled_nutrition_card_setup_${userId}`,
+          messageId: `msg_scheduled_nutrition_card_setup_${userId}`,
+          text: scheduledNutritionCardSetupRequestText,
+        },
+      ),
+    );
+    expect(scheduledCardSetupResponse.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(userId);
+    const scheduledCardSetupSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: scheduledCardSetupBaselineCount,
+      expectedPath: reminderPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(scheduledCardSetupSend))
+      .toBe(setupReplyText);
+    const scheduledCardSetupStatus = await requireScenario()
+      .waitForHostedCompletion(userId);
+    expect(scheduledCardSetupStatus.lastErrorCode ?? null).toBeNull();
+    await waitForHostedWorkspaceWakeNotLaterThan({
+      latestAllowedWakeAt: scheduledCardSetupTimes.dueAtIso,
+      userId,
+    });
+    assertScheduledReminderRunway(scheduledCardSetupTimes.dueAtIso);
+
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("attach_response_card", {
+        card: scheduledNutritionCard,
+      }),
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver scheduled nutrition card",
+        text: "Nutrition card attached.",
+      }),
+    ], {
+      matchInputContains: scheduledNutritionCardInstructions,
+    });
+    const scheduledCardMatcher = createObservedLinqIMessageAppCardMatcher();
+    const scheduledCardTotalSendBaselineCount =
+      requireLinqStub().countObservedSends(reminderPath);
+    const scheduledCardNativeSendBaselineCount =
+      requireLinqStub().countObservedSends(reminderPath, scheduledCardMatcher);
+    const capabilityPath = "/capability/check_imessage";
+    const capabilityMatcher = requireLinqStub().createIMessageCapabilityRequestMatcher({
+      address: memberPhone,
+    });
+    const scheduledCardCapabilityBaselineCount = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: capabilityPath,
+      matchRequest: capabilityMatcher,
+    });
+
+    await sleepUntil(scheduledCardSetupTimes.dueAtIso);
+    const scheduledCardWakeResult =
+      await requireScenario().waitForLatestPendingWake(userId);
+    expect(scheduledCardWakeResult.lastErrorCode ?? null).toBeNull();
+    const scheduledCardSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: scheduledCardNativeSendBaselineCount,
+      expectedPath: reminderPath,
+      matchRequest: scheduledCardMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(scheduledCardSend)).toBeNull();
+    expect(requireLinqStub().readObservedMessageAppCard(scheduledCardSend)).toMatchObject({
+      fallback_text: "Your daily nutrition. Ask Murph for this card in text",
+      interactive: true,
+      layout: {
+        caption: "Jul 28 · 3 meals",
+      },
+      type: "imessage_app",
+    });
+    await requireLinqStub().waitForMatchingRequestCount({
+      expectedCount: scheduledCardCapabilityBaselineCount + 1,
+      expectedMethod: "POST",
+      expectedPath: capabilityPath,
+      matchRequest: capabilityMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    const scheduledCardFinalStatus = await requireScenario().waitForHostedCompletion(userId, {
+      timeoutMs: scheduledReminderCompletionWaitMs,
+    });
+    expect(scheduledCardFinalStatus.lastErrorCode ?? null).toBeNull();
+    expect(requireLinqStub().countObservedSends(reminderPath, scheduledCardMatcher))
+      .toBe(scheduledCardNativeSendBaselineCount + 1);
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: capabilityPath,
+      matchRequest: capabilityMatcher,
+    })).toBe(scheduledCardCapabilityBaselineCount + 1);
+    expect(requireLinqStub().countObservedSends(reminderPath))
+      .toBe(scheduledCardTotalSendBaselineCount + 1);
   }, 720_000);
 });
 
@@ -987,6 +1120,10 @@ function createObservedLinqMessageTextMatcher(
   expectedText: string,
 ): ObservedLinqRequestMatcher {
   return (request) => requireLinqStub().readObservedMessageText(request) === expectedText;
+}
+
+function createObservedLinqIMessageAppCardMatcher(): ObservedLinqRequestMatcher {
+  return (request) => requireLinqStub().readObservedMessageAppCard(request) !== null;
 }
 
 function resolveScheduledReminderTimes(
