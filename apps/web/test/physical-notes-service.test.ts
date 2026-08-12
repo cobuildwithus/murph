@@ -664,15 +664,19 @@ describe("createHostedPhysicalNote", () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
-      [{
-        kind: "definite_failure",
-        reason: "unknown",
-        status: 422,
-      }],
+      [
+        {
+          kind: "definite_failure",
+          reason: "unknown",
+          status: 422,
+        },
+        { kind: "accepted", providerLetterId: "ltr_later" },
+      ],
       [{ kind: "accepted", providerLetterId: "ltr_legacy" }],
     );
+    const legacyRequest = buildRequest(62);
     const failed = await createHostedPhysicalNote({
-      ...buildRequest(62),
+      ...legacyRequest,
       prisma: store.prisma,
       runtime: provider.runtime,
     });
@@ -719,8 +723,14 @@ describe("createHostedPhysicalNote", () => {
       prisma: store.prisma,
       runtime: provider.runtime,
     });
+    const legacyReplay = await createHostedPhysicalNote({
+      ...legacyRequest,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
     const laterRequest = {
       ...buildRequest(67),
+      originAssistantInputId: `ain_${"2".repeat(32)}`,
       recipient: {
         addressLine1: "456 Different Street",
         city: "Chicago",
@@ -729,29 +739,12 @@ describe("createHostedPhysicalNote", () => {
         state: "IL",
       },
     };
-    const concurrentLaterRequest = {
-      ...buildRequest(68),
-      recipient: {
-        addressLine1: "789 Another Avenue",
-        city: "Boston",
-        name: "Jordan Example",
-        postalCode: "02108",
-        state: "MA",
-      },
-    };
-    mocks.lockMember.mockClear();
-    const [laterResponse, concurrentLaterResponse] = await Promise.all([
-      createHostedPhysicalNote({
-        ...laterRequest,
-        prisma: store.prisma,
-        runtime: provider.runtime,
-      }),
-      createHostedPhysicalNote({
-        ...concurrentLaterRequest,
-        prisma: store.prisma,
-        runtime: provider.runtime,
-      }),
-    ]);
+    expect(mocks.recordUsage).not.toHaveBeenCalled();
+    const laterResponse = await createHostedPhysicalNote({
+      ...laterRequest,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
     const laterReplay = await createHostedPhysicalNote({
       ...laterRequest,
       prisma: store.prisma,
@@ -759,26 +752,22 @@ describe("createHostedPhysicalNote", () => {
     });
 
     expect(replay).toEqual(response);
+    expect(legacyReplay).toMatchObject({
+      failureReason: "prior_note_accepted",
+      physicalNoteId: failed.physicalNoteId,
+      status: "accepted",
+    });
     expect(laterResponse).toMatchObject({
       complimentary: false,
-      failureReason: "prior_note_accepted",
-      status: "failed",
+      physicalNoteId: expect.stringMatching(/^hpn_[a-f0-9]{32}$/u),
+      status: "accepted",
     });
     expect(laterResponse.physicalNoteId).not.toBe(failed.physicalNoteId);
     expect(laterResponse.physicalNoteId).not.toBe(response.physicalNoteId);
-    expect(concurrentLaterResponse).toMatchObject({
-      complimentary: false,
-      failureReason: "prior_note_accepted",
-      status: "failed",
-    });
-    expect(concurrentLaterResponse.physicalNoteId).not.toBe(
-      laterResponse.physicalNoteId,
-    );
     expect(laterReplay).toEqual(laterResponse);
-    expect(mocks.lockMember).toHaveBeenCalledTimes(2);
     expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
-    expect(provider.create).not.toHaveBeenCalled();
-    expect(mocks.recordUsage).not.toHaveBeenCalled();
+    expect(provider.create).toHaveBeenCalledOnce();
+    expect(mocks.recordUsage).toHaveBeenCalledOnce();
   });
 
   it("does not reconstruct paid usage for a restored legacy acceptance", async () => {
@@ -792,6 +781,7 @@ describe("createHostedPhysicalNote", () => {
           reason: "unknown",
           status: 422,
         },
+        { kind: "accepted", providerLetterId: "ltr_later_paid" },
       ],
       [{ kind: "accepted", providerLetterId: "ltr_legacy_paid_unknown" }],
     );
@@ -825,6 +815,7 @@ describe("createHostedPhysicalNote", () => {
     });
     const laterRequest = {
       ...buildRequest(69),
+      originAssistantInputId: `ain_${"3".repeat(32)}`,
       recipient: {
         addressLine1: "456 Different Street",
         city: "Chicago",
@@ -848,8 +839,7 @@ describe("createHostedPhysicalNote", () => {
     expect(replay).toEqual(response);
     expect(laterResponse).toMatchObject({
       complimentary: false,
-      failureReason: "prior_note_accepted",
-      status: "failed",
+      status: "accepted",
     });
     expect(store.allRows()).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -865,8 +855,8 @@ describe("createHostedPhysicalNote", () => {
       }),
     ]));
     expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
-    expect(provider.create).not.toHaveBeenCalled();
-    expect(mocks.recordUsage).not.toHaveBeenCalled();
+    expect(provider.create).toHaveBeenCalledOnce();
+    expect(mocks.recordUsage).toHaveBeenCalledOnce();
   });
 
   it("keeps ambiguous provider authority pending and reserves the offer", async () => {

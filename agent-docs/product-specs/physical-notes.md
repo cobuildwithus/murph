@@ -120,10 +120,10 @@ to the bounded failure reason and persists it before responding. Lob's
 human-readable message is untrusted, may contain address details, and never
 enters durable state or assistant context. Replays return the same safe reason.
 A pre-migration failed row without one remains ambiguous because old Web also
-terminalized HTTP 408. It joins current `starting` rows and restored legacy
-acceptance markers in the same oldest-first, member-wide unresolved-effect
-guard. The member-locked admission re-reads that guard instead of trusting a
-row selected before the lock and repeats the same bounded check immediately
+terminalized HTTP 408. It joins current `starting` rows in the same
+oldest-first, member-wide unresolved-effect guard. The member-locked admission
+re-reads that guard instead of trusting a row selected before the lock and
+repeats the same bounded check immediately
 before ordinary reservation. Resolving one row can therefore never hide a
 second unresolved row or admit another provider effect. A recent or
 indeterminate same-key legacy replay stays pending. A different current request
@@ -136,16 +136,18 @@ historical charge, and the current row is durably narrowed to
 print and that the current request was not submitted, without claiming the two
 requests share a recipient; it does not invite another send or promise an
 automatic investigation or follow-up. Recovery also preserves
-`prior_note_accepted` on the accepted legacy row, so every later explicit
-request remains suppressed while ordinary accepted notes still allow a later
-paid send. Accepted-row replay is read-only because ordinary paid acceptance
-commits its usage in the same transaction, while restored legacy acceptance
-must never reconstruct erased historical billing evidence. An accepted replay
-carrying `prior_note_accepted` therefore says only that the earlier submission
-was accepted and the replay sent nothing else; it omits paid, complimentary,
-and cost claims. The current reply and every replay therefore identify the
-current row and cannot later turn the suppressed request into a new provider
-effect. The assistant tells the
+`prior_note_accepted` on the accepted legacy row for exact-row replay only; the
+terminal accepted row is not an unresolved-effect guard and cannot suppress a
+later separately authorized request. Accepted-row replay is read-only because
+ordinary paid acceptance commits its usage in the same transaction, while
+restored legacy acceptance must never reconstruct erased historical billing
+evidence. An accepted replay carrying `prior_note_accepted` therefore says only
+that the earlier submission was accepted and the replay sent nothing else; it
+omits paid, complimentary, and cost claims. The blocked current request remains
+terminal and replay-stable, while a later distinct request uses ordinary
+access, complimentary, and paid-usage admission. The current reply and every
+replay therefore identify the current row and cannot turn that suppressed
+request into a new provider effect. The assistant tells the
 person whether to check the address, regenerate the artwork, or wait for Murph
 to fix its printing setup or request. It never guesses from an unknown reason
 or retries an ambiguous outcome.

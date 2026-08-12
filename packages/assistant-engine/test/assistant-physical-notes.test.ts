@@ -637,6 +637,12 @@ describe('assistant physical notes', () => {
         expect(result.rpcResult.contentItems[0]?.text).not.toContain(
           'may recheck',
         )
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'Do not retry automatically; that applies only to this request',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'A separately authorized future request is distinct',
+        )
       }
     },
   )

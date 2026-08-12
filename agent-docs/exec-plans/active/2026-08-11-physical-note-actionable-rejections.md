@@ -56,9 +56,11 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Add one nullable column to `hosted_physical_note` so a definite rejection has
   the same answer on the original call and every replay. Null on an existing
   failed row is the legacy-ambiguity marker, not an unknown definite rejection.
-- Treat every current `starting` row, every pre-migration failed row without a
-  reason, and every restored legacy acceptance marker as one member-wide
-  unresolved-effect guard. Same-key `starting` replay stays pending and never
+- Treat every current `starting` row and every pre-migration failed row without
+  a reason as one member-wide unresolved-effect guard. A restored accepted row
+  retains its billing-neutral replay marker but is no longer unresolved and
+  cannot block a later separately authorized request. Same-key `starting`
+  replay stays pending and never
   calls Lob create. Before reconciling an older row for a distinct request,
   persist that current request as an unsent `prior_note_unresolved` failure
   under its own request key, so a concurrent replay cannot invite another send.
@@ -241,3 +243,12 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   throws into the existing pending path. Focused port and Assistant integration
   tests prove the prior bug and the corrected no-claim, no-retry result. This
   adds no state, enum, queue, compatibility path, or reconciliation mechanism.
+- Round 13 found that the restored accepted row's `prior_note_accepted` replay
+  marker was also treated as a permanent member-wide admission guard. That
+  correctly kept the blocked current request unsent, but it disabled every
+  separately authorized future note even though the provider outcome was fully
+  resolved. Keep the marker on the accepted row and the blocker for stable,
+  billing-neutral replay; delete terminal accepted rows from the unresolved
+  guard. Focused Web proof now shows the historical replay and blocker remain
+  stable while one later eligible request uses ordinary paid admission and one
+  provider create. Assistant guidance scopes no-retry to the blocked request.

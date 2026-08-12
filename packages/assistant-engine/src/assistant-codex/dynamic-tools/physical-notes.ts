@@ -235,7 +235,7 @@ export function buildPhysicalNoteFailureInstruction(
     case 'prior_note_unresolved':
       return 'An earlier physical-note submission is still unresolved, so the current physical-note request was not sent. Tell the person both facts without claiming the earlier and current requests share a recipient. No automatic investigation, retry, notification, or follow-up is running. A later explicit physical-note request may recheck the earlier outcome, but do not send while it remains unresolved. Do not retry automatically.'
     case 'prior_note_accepted':
-      return 'An earlier physical note was accepted for printing, so the current physical-note request was not sent. Tell the person both facts without claiming the earlier and current requests share a recipient. No automatic retry, notification, or follow-up is running. Do not invite or make another send attempt. Do not retry automatically.'
+      return 'An earlier physical note was accepted for printing, so the current physical-note request was not sent. Tell the person both facts without claiming the earlier and current requests share a recipient. No automatic retry, notification, or follow-up is running. Do not retry automatically; that applies only to this request. A separately authorized future request is distinct.'
     case 'unknown':
     case null:
     case undefined:

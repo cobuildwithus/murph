@@ -396,10 +396,6 @@ async function findPhysicalNoteEffectGuard(input: {
           failureReason: null,
           status: "failed",
         },
-        {
-          failureReason: "prior_note_accepted",
-          status: "accepted",
-        },
       ],
     },
   });
