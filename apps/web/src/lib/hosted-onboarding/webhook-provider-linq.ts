@@ -1687,46 +1687,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
 
     if (directMailboxPreparationFailureProvided) {
-      // A carried crypto failure may cross only exact duplicate, consent, and
-      // already-at-limit quota owners. Resolve the quota decision here, before
-      // Family or group classification can traverse collections, decrypt
-      // private routing, or mutate a route under the transaction.
-      const existingDailyState = await readHostedLinqDailyState({
-        memberId: existingMember.id,
-        occurredAt,
-        prisma: input.prisma,
-      });
-      if (
-        existingDailyState
-        && existingDailyState.inboundCount >= HOSTED_LINQ_DAILY_TEXT_LIMIT
-      ) {
-        const dailyState = await incrementHostedLinqInboundDailyState({
-          memberId: existingMember.id,
-          occurredAt,
-          prisma: input.prisma,
-        });
-        const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
-          context,
-          dailyState,
-          dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
-          event: input.event,
-          logDetails: {
-            existingMemberActive: true,
-            existingMemberMatch,
-          },
-          memberId: existingMember.id,
-          routeStages: {
-            dailyQuotaReached: "active-member-daily-quota-reached",
-            dailyQuotaReply: "active-member-daily-quota-reply",
-          },
-        });
-        if (admissionPlan) {
-          return {
-            ...admissionPlan,
-            postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
-          };
-        }
-      }
+      // Exact duplicate and withdrawn consent are the only outcomes whose
+      // authority is complete without private routing. Quota, Family, group,
+      // and home-route decisions require the prepared state, so preserve the
+      // provider retry instead of partially reclassifying this event.
       throw input.directMailboxPreparationFailure;
     }
 

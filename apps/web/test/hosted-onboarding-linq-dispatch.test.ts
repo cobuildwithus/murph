@@ -4840,11 +4840,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
       expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx)
         .not.toHaveBeenCalled();
-      expect(mocks.readHostedLinqDailyState).toHaveBeenCalledExactlyOnceWith({
-        memberId: "member_123",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-        prisma,
-      });
+      expect(mocks.readHostedLinqDailyState).not.toHaveBeenCalled();
       expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
       expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
       expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
@@ -4907,89 +4903,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }
   });
 
-  it.each([
-    {
-      expectedReason: "sent-daily-quota-reply",
-      quotaReplySentAt: null,
-      shouldSend: true,
-      suffix: "reply",
-    },
-    {
-      expectedReason: "daily-quota-reached",
-      quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
-      shouldSend: false,
-      suffix: "suppression",
-    },
-  ] as const)(
-    "settles stable daily quota $suffix when direct root preparation fails",
-    async ({ expectedReason, quotaReplySentAt, shouldSend, suffix }) => {
-      const {
-        hostedMemberRouting,
-        prisma,
-        restoreRootMock,
-      } = await createDirectRootPreparationFailureFixture();
-      mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-        inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT,
-        quotaReplySentAt,
-      }));
-      mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(
-        makeHostedLinqDailyState({
-          inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
-          quotaReplySentAt,
-        }),
-      );
-
-      try {
-        await expect(handleHostedOnboardingLinqWebhook({
-          prisma,
-          rawBody: buildHostedLinqWebhookBody({
-            data: {
-              chat: {
-                id: "chat_123",
-                is_group: false,
-              },
-            },
-            eventId: `evt_direct_quota_root_failure_${suffix}`,
-          }),
-          signature: null,
-          timestamp: null,
-        })).resolves.toMatchObject({
-          ok: true,
-          reason: expectedReason,
-        });
-
-        expect(prisma.$transaction).toHaveBeenCalled();
-        expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(1);
-        expect(mocks.readHostedLinqDailyState).toHaveBeenCalledExactlyOnceWith({
-          memberId: "member_123",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-          prisma,
-        });
-        expect(mocks.incrementHostedLinqInboundDailyState)
-          .toHaveBeenCalledExactlyOnceWith({
-            memberId: "member_123",
-            occurredAt: "2026-03-26T12:00:00.000Z",
-            prisma,
-          });
-        if (shouldSend) {
-          expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-        } else {
-          expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-        }
-        expect(mocks.claimHostedLinqQuotaReplyNotice).toHaveBeenCalledTimes(
-          shouldSend ? 1 : 0,
-        );
-        expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-        expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
-        expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
-      } finally {
-        restoreRootMock();
-      }
-    },
-  );
-
   it.each(["control", "ingress"] as const)(
-    "rethrows a %s root preparation failure before Family or group owners",
+    "rethrows an at-limit %s root preparation failure before quota, Family, or group owners",
     async (failureDomain) => {
       const {
         hostedMemberRouting,
@@ -5000,7 +4915,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         restoreRootMock,
       } = await createDirectRootPreparationFailureFixture({ failureDomain });
       mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-        inboundCount: 1,
+        inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT,
       }));
       prisma.hostedLinqDelivery.findMany.mockResolvedValueOnce([{
         groupJoinOutreach: {
@@ -5043,7 +4958,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           "phone:+15551234567",
         );
         expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(1);
-        expect(mocks.readHostedLinqDailyState).toHaveBeenCalledTimes(1);
+        expect(mocks.readHostedLinqDailyState).not.toHaveBeenCalled();
         expect(mocks.unwrapHostedDomainRootForWebByRootKeyId)
           .not.toHaveBeenCalled();
         expect(mocks.unwrapHostedDomainRootsForWebByRootKeyIds)
@@ -5055,6 +4970,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         expect(prisma.hostedLinqDelivery.findFirst).not.toHaveBeenCalled();
         expect(prisma.hostedGroupMember.findUnique).not.toHaveBeenCalled();
         expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+        expect(mocks.claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
         expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
         expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
         expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
