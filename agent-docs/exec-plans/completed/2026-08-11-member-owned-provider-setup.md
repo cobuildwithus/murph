@@ -1,6 +1,6 @@
 # Member-owned provider setup and Strava activation
 
-Status: active
+Status: completed
 Created: 2026-08-11
 
 ## Goal
@@ -79,7 +79,7 @@ Created: 2026-08-11
    section at desktop and mobile widths; complete the required UI double-check.
 5. [x] Commit and push the candidate to PR #1675 and run preliminary
    specialists plus final ReviewGPT round 1 concurrently with exact-head CI.
-6. [ ] Resolve every accepted finding through ReviewGPT-authored remediation,
+6. [x] Resolve every accepted finding through ReviewGPT-authored remediation,
    repeat focused proof and the final loop until `ROUND_OUTCOME: PASS`, then
    complete parent review, plan closure, merge-tree proof, and merge-readiness
    handoff without merging PR #1675.
@@ -107,3 +107,10 @@ Created: 2026-08-11
 - PR 1484 is merged and supplies the encrypted, revisioned, Web-owned provider
   application foundation. This PR must extend that owner instead of creating a
   parallel credential or connection system.
+- Final ReviewGPT round 3 returned `ROUND_OUTCOME: PASS` for reviewed head
+  `608740112d17bbc899e4666ac9dddb22298b02c8`; exact-head required CI passed,
+  and the current `main` merge-tree proof was clean.
+- Live disposable-provider proof remains an operator-owned launch gate. This
+  work did not merge or deploy PR 1675.
+Updated: 2026-08-12
+Completed: 2026-08-12
