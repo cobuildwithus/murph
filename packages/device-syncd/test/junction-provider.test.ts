@@ -472,6 +472,8 @@ test("Junction provider defaults fetch every default summary resource", async ()
 test("Junction omitted timeseries config defaults to compact resources only", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
+  let inFlightTimeseriesRequests = 0;
+  let maxInFlightTimeseriesRequests = 0;
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
     clientUserIdSecret: "junction-client-user-id-secret",
@@ -510,6 +512,13 @@ test("Junction omitted timeseries config defaults to compact resources only", as
 
       const timeseriesResource = new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
       if (timeseriesResource) {
+        inFlightTimeseriesRequests += 1;
+        maxInFlightTimeseriesRequests = Math.max(
+          maxInFlightTimeseriesRequests,
+          inFlightTimeseriesRequests,
+        );
+        await Promise.resolve();
+        inFlightTimeseriesRequests -= 1;
         assert.ok(
           (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
@@ -544,7 +553,7 @@ test("Junction omitted timeseries config defaults to compact resources only", as
       },
     }),
     createJob("backfill", {
-      windowStart: "2026-04-02T00:00:00.000Z",
+      windowStart: "2026-03-20T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
@@ -557,6 +566,10 @@ test("Junction omitted timeseries config defaults to compact resources only", as
     [...new Set(requestedTimeseriesResources)].sort(),
     [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
   );
+  assert.equal(JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length, 24);
+  assert.equal(requestedTimeseriesResources.length, 24 * 14);
+  assert.equal(requestedTimeseriesResources.length, 336);
+  assert.equal(maxInFlightTimeseriesRequests, 1);
   assert.equal(
     requests.every((url) =>
       !url.includes("heartrate") &&
@@ -568,6 +581,77 @@ test("Junction omitted timeseries config defaults to compact resources only", as
     true,
   );
   assert.equal(importedSnapshots.length, 1);
+
+  let maximumCollectionPages = 0;
+  const paginationClient = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      maximumCollectionPages += 1;
+      return createJsonResponse({
+        groups: {},
+        next_cursor: `page-${maximumCollectionPages + 1}`,
+      });
+    },
+  });
+  await assert.rejects(
+    () => paginationClient.listTimeseries({
+      resource: "blood_oxygen",
+      userId: "junction-user-1",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_PAGINATION_LIMIT",
+  );
+
+  let maximumGetAttempts = 0;
+  const retryClient = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      maximumGetAttempts += 1;
+      return new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+        status: 503,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": "0",
+        },
+      });
+    },
+  });
+  await assert.rejects(
+    () => retryClient.listTimeseries({
+      resource: "blood_oxygen",
+      userId: "junction-user-1",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+    (error: unknown) =>
+      error instanceof DeviceSyncError
+      && error.code === "JUNCTION_API_REQUEST_FAILED"
+      && error.retryable,
+  );
+
+  assert.equal(maximumCollectionPages, 100);
+  assert.equal(maximumGetAttempts, 3);
+  const priorOnePageCollectionCount = 17 * 14;
+  const currentMaximumProviderAttemptCount =
+    requestedTimeseriesResources.length * maximumCollectionPages * maximumGetAttempts;
+  assert.equal(
+    requestedTimeseriesResources.length - priorOnePageCollectionCount,
+    98,
+  );
+  assert.equal(priorOnePageCollectionCount, 238);
+  assert.equal(currentMaximumProviderAttemptCount, 100_800);
+  assert.equal(
+    currentMaximumProviderAttemptCount
+      - priorOnePageCollectionCount * maximumCollectionPages * maximumGetAttempts,
+    29_400,
+  );
 });
 
 test("Junction known dense programmatic timeseries config falls back to compact daily defaults", async () => {
@@ -2260,6 +2344,111 @@ test("Junction REST diagnostic matrix compares metadata, introspection, and data
     JSON.stringify(result),
     /junction-user-1|provider-garmin-1|source-device-1|device-row-1|garmin|Garmin|Fenix|97/u,
   );
+});
+
+test("Junction default diagnostic matrix reads each configured timeseries resource exactly once per scope", async () => {
+  const seenUrls: string[] = [];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+      seenUrls.push(url);
+      const parsedUrl = new URL(url);
+
+      if (parsedUrl.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [] });
+      }
+      if (parsedUrl.pathname === "/v2/user/junction-user-1/device") {
+        return createJsonResponse([]);
+      }
+      if (parsedUrl.pathname === "/v2/introspect/resources") {
+        return createJsonResponse({ data: [] });
+      }
+      if (parsedUrl.pathname === "/v2/introspect/historical_pull") {
+        return createJsonResponse({ data: [] });
+      }
+      if (parsedUrl.pathname.startsWith("/v2/timeseries/junction-user-1/")) {
+        return createJsonResponse({ groups: {} });
+      }
+      if (parsedUrl.pathname.startsWith("/v2/summary/")) {
+        return createJsonResponse({ data: [] });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const probeRest = provider.diagnostics?.probeRest;
+  assert.ok(probeRest);
+
+  const runMatrix = async (sourceProviderSlug?: string) => {
+    seenUrls.length = 0;
+    const result = await probeRest({
+      account: createAccount(),
+      endpoint: "matrix",
+      now: "2026-04-03T12:00:00.000Z",
+      sourceProviderSlug,
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    });
+    const matrix = result.result as {
+      reads?: Array<{ request?: { resource?: string; sourceFiltered?: boolean } }>;
+      request?: { resourceCount?: number };
+    };
+    const resourceReadUrls = seenUrls
+      .map((url) => new URL(url))
+      .filter((url) =>
+        url.pathname.startsWith("/v2/summary/")
+        || url.pathname.startsWith("/v2/timeseries/junction-user-1/")
+      );
+    const readUrls = seenUrls
+      .map((url) => new URL(url))
+      .filter((url) => url.pathname.startsWith("/v2/timeseries/junction-user-1/"));
+
+    return { matrix, readUrls, resourceReadUrls };
+  };
+
+  const unfiltered = await runMatrix();
+  assert.equal(unfiltered.matrix.request?.resourceCount, 33);
+  assert.equal(unfiltered.matrix.reads?.length, 33);
+  assert.equal(unfiltered.resourceReadUrls.length, 33);
+  assert.equal(unfiltered.readUrls.length, 24);
+  assert.ok(unfiltered.readUrls.every((url) => !url.searchParams.has("provider")));
+
+  const sourceFiltered = await runMatrix("garmin");
+  assert.equal(sourceFiltered.matrix.request?.resourceCount, 33);
+  assert.equal(sourceFiltered.matrix.reads?.length, 66);
+  assert.equal(sourceFiltered.resourceReadUrls.length, 66);
+  assert.equal(sourceFiltered.readUrls.length, 48);
+
+  const newlyDefaultedResources = [
+    "fall",
+    "forced_expiratory_volume_1",
+    "forced_vital_capacity",
+    "heart_rate_alert",
+    "inhaler_usage",
+    "peak_expiratory_flow_rate",
+    "sleep_apnea_alert",
+  ] as const;
+  assert.equal(newlyDefaultedResources.length, 7);
+  assert.equal(JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length - newlyDefaultedResources.length, 17);
+  for (const resource of newlyDefaultedResources) {
+    const resourcePath = `/v2/timeseries/junction-user-1/${resource}/grouped`;
+    assert.equal(
+      unfiltered.readUrls.filter((url) => url.pathname === resourcePath).length,
+      1,
+    );
+    const scopedReads = sourceFiltered.readUrls.filter((url) => url.pathname === resourcePath);
+    assert.equal(scopedReads.length, 2);
+    assert.deepEqual(
+      scopedReads.map((url) => url.searchParams.get("provider")).sort((left, right) =>
+        (left ?? "").localeCompare(right ?? "")
+      ),
+      [null, "garmin"],
+    );
+  }
 });
 
 test("Junction backfill diagnostic rejects malformed requested windows without provider calls", async () => {
