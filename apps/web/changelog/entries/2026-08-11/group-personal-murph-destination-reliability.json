@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 200,
+  "item": {
+    "id": "group-personal-murph-destination-reliability",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Group requests stay with the intended audience",
+    "summary": "When a group asks someone's personal Murph for help, the same request now determines whether the reviewed answer returns to the group or goes directly to that sender.",
+    "details": "A direct reply still requires the selected group message itself to ask for one, and a missing direct route fails without falling back to the group.",
+    "relevanceTags": ["groups", "privacy", "reliability"],
+    "sourcePullRequests": [1705]
+  }
+}
