@@ -4447,7 +4447,7 @@ async function runCodexAppServerTurnOnProcess(
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           currentResponseMedia: responseMedia,
-          currentResponseCard: responseCard,
+          currentResponseCard: responseCard ?? responseCardTextFallback,
           groupChallengeResponseCardAllowed:
             input.groupConversation === true &&
             input.dynamicTools.some((tool) =>

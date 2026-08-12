@@ -259,6 +259,7 @@ function createHostedToolContext(input: {
   beforeToolExecution?: AssistantHostedToolContext['beforeToolExecution']
   computerToolsAvailable?: boolean
   groupTool?: AssistantHostedToolContext['groupTool']
+  imageGenerationLauncher?: AssistantHostedToolContext['imageGenerationLauncher']
   sendVaultFile?: AssistantHostedToolContext['sendVaultFile']
   vaultFileSendAvailable?: boolean
 } = {}): AssistantHostedToolContext {
@@ -270,6 +271,7 @@ function createHostedToolContext(input: {
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     groupTool: input.groupTool ?? null,
+    imageGenerationLauncher: input.imageGenerationLauncher ?? null,
     persistGeneratedImageCapture: async (write) => await write(),
     sendVaultFile: input.sendVaultFile ?? vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
@@ -19825,6 +19827,20 @@ describe('steered final segments', () => {
         expectedSuccess?: boolean
         expectedText: string
         id: number
+        kind: 'generate-image'
+        prompt: string
+      }
+    | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
+        kind: 'generate-voice-memo'
+        text: string
+      }
+    | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
         kind: 'send-vault-file'
         ref: string
       }
@@ -19890,6 +19906,18 @@ describe('steered final segments', () => {
     return 'kind' in step && step.kind === 'send-vault-file'
   }
 
+  function isGenerateVoiceMemoStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'generate-voice-memo' }> {
+    return 'kind' in step && step.kind === 'generate-voice-memo'
+  }
+
+  function isGenerateImageStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'generate-image' }> {
+    return 'kind' in step && step.kind === 'generate-image'
+  }
+
   function isReactToMessageStep(
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'react-to-message' }> {
@@ -19932,6 +19960,7 @@ describe('steered final segments', () => {
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
       responseCardsAvailable?: boolean
       turnStatus?: 'completed' | 'failed'
+      voiceMemoRuntime?: CodexAppServerTurnInput['voiceMemoRuntime']
     } = {},
   ) {
     const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
@@ -20065,6 +20094,54 @@ describe('steered final segments', () => {
                   callId: `call-steered-vault-${step.id}`,
                   namespace: 'murph',
                   tool: 'send_vault_file',
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  contentItems: [{
+                    text: step.expectedText,
+                    type: 'inputText',
+                  }],
+                  success: step.expectedSuccess ?? true,
+                },
+              })
+              continue
+            }
+
+            if (isGenerateVoiceMemoStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  arguments: { text: step.text },
+                  namespace: 'murph',
+                  tool: 'generate_voice_memo',
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  contentItems: [{
+                    text: step.expectedText,
+                    type: 'inputText',
+                  }],
+                  success: step.expectedSuccess ?? true,
+                },
+              })
+              continue
+            }
+
+            if (isGenerateImageStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  arguments: { prompt: step.prompt },
+                  namespace: 'murph',
+                  tool: 'generate_image',
                   turnId: 'turn-steered-finals',
                 },
               }))
@@ -20215,12 +20292,18 @@ describe('steered final segments', () => {
         input.authorizeAcceptedMessageTarget ?? null,
       codexCommand: 'codex',
       codexHome,
-      ...(input.responseCardsAvailable === true
+      ...(input.responseCardsAvailable === true || input.voiceMemoRuntime != null ||
+          input.hostedToolContext?.vaultFileSendAvailable === true
         ? {
             dynamicTools: resolveMurphDynamicTools({
-              responseCardsAvailable: true,
+              responseCardsAvailable: input.responseCardsAvailable === true,
+              vaultFileSendAvailable:
+                input.hostedToolContext?.vaultFileSendAvailable === true,
+              voiceMemoGenerationAvailable: input.voiceMemoRuntime != null,
             }),
-            groupConversation: false,
+            ...(input.responseCardsAvailable === true
+              ? { groupConversation: false }
+              : {}),
           }
         : {}),
       hostedToolContext: input.hostedToolContext,
@@ -20229,6 +20312,7 @@ describe('steered final segments', () => {
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
+      voiceMemoRuntime: input.voiceMemoRuntime,
       prompt: 'First question',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -20566,6 +20650,79 @@ describe('steered final segments', () => {
         )
       }
     }
+    expect(result.finalMessage).not.toContain('evt_')
+    expect(result.transcriptMessage).toContain(
+      '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
+    )
+  })
+
+  it('blocks response effects before work after workout card overflow owns presentation', async () => {
+    const generateAndUpload = vi.fn(async () => ({
+      attachmentId: 'attachment_should_not_exist',
+      filename: 'voice-should-not-exist.mp3',
+    }))
+    const sendVaultFile = vi.fn(async () => ({
+      filename: 'report.pdf',
+      status: 'approved' as const,
+    }))
+    const launchImageGeneration = vi.fn(() => 'started' as const)
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
+        expectedText:
+          'workout card envelope too large; full text recovery selected',
+        id: 872,
+        kind: 'attach-response-card',
+      },
+      {
+        expectedSuccess: false,
+        expectedText:
+          'voice memo generation cannot be combined with a response card',
+        id: 873,
+        kind: 'generate-voice-memo',
+        text: 'Read the workout aloud.',
+      },
+      {
+        expectedSuccess: false,
+        expectedText: 'image generation cannot be combined with a response card',
+        id: 874,
+        kind: 'generate-image',
+        prompt: 'Render the workout.',
+      },
+      {
+        expectedSuccess: false,
+        expectedText: 'vault-file sending cannot be combined with a response card',
+        id: 875,
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
+      },
+    ], {
+      hostedToolContext: createHostedToolContext({
+        computerToolsAvailable: false,
+        imageGenerationLauncher: { launch: launchImageGeneration },
+        sendVaultFile,
+        vaultFileSendAvailable: true,
+      }),
+      responseCardsAvailable: true,
+      voiceMemoRuntime: {
+        elevenLabs: {
+          apiKeyAvailable: true,
+          modelId: 'eleven_multilingual_v2',
+          voiceId: 'voice_murph',
+        },
+        generateAndUpload,
+        kind: 'linq',
+      },
+    })
+
+    expect(generateAndUpload).not.toHaveBeenCalled()
+    expect(launchImageGeneration).not.toHaveBeenCalled()
+    expect(sendVaultFile).not.toHaveBeenCalled()
+    expect(result.finalAction).toBeNull()
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.finalMessage).toContain('Capacity exercise 1:')
+    expect(result.finalMessage).toContain('Capacity exercise 16:')
     expect(result.finalMessage).not.toContain('evt_')
     expect(result.transcriptMessage).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',

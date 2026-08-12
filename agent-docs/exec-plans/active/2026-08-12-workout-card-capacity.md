@@ -215,3 +215,21 @@ Updated: 2026-08-12
   fitting and overflowing Telegram and email projections; scheduled tests run
   both response policies across Linq, Telegram, and email and reject skip after
   runtime presentation.
+
+## ReviewGPT round 5
+
+- ReviewGPT verified both retrospectives and the complete channel matrix, then
+  found a separate review-induced effect-arbitration defect. Cardless overflow
+  owned final presentation but the dynamic-tool executor still received only
+  `responseCard`, so later voice, image, or vault-file work could start before
+  the app server rejected the incompatible result.
+- Accept the minimal correction at the existing app-server/executor boundary:
+  pass `responseCard ?? responseCardTextFallback` as the current response-card
+  presence guard. This does not make semantic fallback a deliverable card; it
+  only makes the existing pre-effect exclusivity checks see the already-owned
+  presentation before provider, detached, approval, or send work begins.
+- Add one scripted turn proving a genuine workout overflow blocks voice upload,
+  detached image launch, and vault-file send before any callback runs, while
+  retaining complete visible workout text and tracking only in the transcript.
+  Existing reverse-order tests continue to prove media rejects a later card or
+  semantic overflow.
