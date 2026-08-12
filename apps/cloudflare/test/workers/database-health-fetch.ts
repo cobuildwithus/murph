@@ -12,10 +12,10 @@ interface RecordedDatabaseHealthMessageRequest {
 const recordedDatabaseHealthMessageRequests:
   RecordedDatabaseHealthMessageRequest[] = [];
 let databaseHealthClientWaitSeconds = 8;
-let databaseHealthDiscoveryFailuresRemaining = 0;
 let databaseHealthDiscoveryRequestCount = 0;
 let databaseHealthMetricsRequestCount = 0;
 let databaseHealthNowMs = Date.now();
+let databaseHealthZeroEvidenceScrapesRemaining = 0;
 
 export function readDatabaseHealthMessageRequests():
   RecordedDatabaseHealthMessageRequest[] {
@@ -38,10 +38,10 @@ export function readDatabaseHealthPlanetScaleRequestCounts(): {
 export function resetDatabaseHealthMessageRequests(): void {
   recordedDatabaseHealthMessageRequests.length = 0;
   databaseHealthClientWaitSeconds = 8;
-  databaseHealthDiscoveryFailuresRemaining = 0;
   databaseHealthDiscoveryRequestCount = 0;
   databaseHealthMetricsRequestCount = 0;
   databaseHealthNowMs = Date.now();
+  databaseHealthZeroEvidenceScrapesRemaining = 0;
 }
 
 export function readDatabaseHealthNowMs(): number {
@@ -52,10 +52,10 @@ export function setDatabaseHealthClientWaitSeconds(value: number): void {
   databaseHealthClientWaitSeconds = value;
 }
 
-export function setDatabaseHealthDiscoveryFailuresRemaining(
+export function setDatabaseHealthZeroEvidenceScrapesRemaining(
   value: number,
 ): void {
-  databaseHealthDiscoveryFailuresRemaining = value;
+  databaseHealthZeroEvidenceScrapesRemaining = value;
 }
 
 export function setDatabaseHealthNowMs(value: number): void {
@@ -84,10 +84,6 @@ export async function handleDatabaseHealthEgress(
       === "service-token-id:service-token"
   ) {
     databaseHealthDiscoveryRequestCount += 1;
-    if (databaseHealthDiscoveryFailuresRemaining > 0) {
-      databaseHealthDiscoveryFailuresRemaining -= 1;
-      return new Response(null, { status: 503 });
-    }
     return Response.json([
       {
         labels: {
@@ -112,6 +108,10 @@ export async function handleDatabaseHealthEgress(
     && headers.get("authorization") === null
   ) {
     databaseHealthMetricsRequestCount += 1;
+    if (databaseHealthZeroEvidenceScrapesRemaining > 0) {
+      databaseHealthZeroEvidenceScrapesRemaining -= 1;
+      return new Response("", { status: 200 });
+    }
     return new Response(buildMetricsBody({
       branchId: "branch_worker_test",
       clientWaitSeconds: databaseHealthClientWaitSeconds,

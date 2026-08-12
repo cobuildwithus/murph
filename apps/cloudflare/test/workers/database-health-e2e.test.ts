@@ -19,8 +19,8 @@ import {
   readDatabaseHealthPlanetScaleRequestCounts,
   resetDatabaseHealthMessageRequests,
   setDatabaseHealthClientWaitSeconds,
-  setDatabaseHealthDiscoveryFailuresRemaining,
   setDatabaseHealthNowMs,
+  setDatabaseHealthZeroEvidenceScrapesRemaining,
 } from "./database-health-fetch.ts";
 
 const FIVE_MINUTES_MS = 5 * 60 * 1_000;
@@ -32,7 +32,7 @@ describe("database health scheduled Worker path", () => {
     const scheduledAtMs = Date.now();
     setDatabaseHealthNowMs(scheduledAtMs);
     setDatabaseHealthClientWaitSeconds(0);
-    setDatabaseHealthDiscoveryFailuresRemaining(1);
+    setDatabaseHealthZeroEvidenceScrapesRemaining(1);
 
     const namespace = readDatabaseHealthNamespace();
     const monitor = namespace.getByName("transient-retry");
@@ -57,7 +57,7 @@ describe("database health scheduled Worker path", () => {
     });
     expect(readDatabaseHealthPlanetScaleRequestCounts()).toEqual({
       discovery: 2,
-      metrics: 1,
+      metrics: 2,
     });
     expect(readDatabaseHealthMessageRequests()).toEqual([]);
   });

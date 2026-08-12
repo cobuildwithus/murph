@@ -407,11 +407,15 @@ export class DatabaseHealthMonitor {
 
   private async collectMetricObservation(): Promise<DatabaseMetricObservation> {
     try {
-      return await this.collectMetricObservationOnce();
+      const observation = await this.collectMetricObservationOnce();
+      if (hasUsableDatabaseHealthMetric(observation)) {
+        return observation;
+      }
     } catch {
-      await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
-      return await this.collectMetricObservationOnce();
+      // Retry below when the first attempt produced no usable observation.
     }
+    await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
+    return await this.collectMetricObservationOnce();
   }
 
   private async collectMetricObservationOnce(): Promise<
@@ -1440,6 +1444,13 @@ async function fetchWithTimeout(
 
 async function waitForDatabaseHealthRetry(delayMs: number): Promise<void> {
   await scheduler.wait(delayMs);
+}
+
+function hasUsableDatabaseHealthMetric(
+  observation: DatabaseMetricObservation,
+): boolean {
+  return observation.missingMetrics.length
+    < DATABASE_HEALTH_REQUIRED_METRIC_NAMES.length;
 }
 
 async function readBoundedResponseText(

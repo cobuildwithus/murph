@@ -1076,6 +1076,58 @@ describe("database health monitor", () => {
     expect(harness.retryWaits).toEqual([1_000]);
   });
 
+  it("retries a zero-evidence scrape before evaluating recovered pressure", async () => {
+    let scrapeAttempt = 0;
+    const recoveredMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+      clientWaitSeconds: 8,
+    });
+    const harness = createMonitorHarness({
+      readMetricsBody() {
+        scrapeAttempt += 1;
+        return scrapeAttempt === 1 ? "" : recoveredMetricsBody;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({
+        conditions: [{ kind: "client_wait", seconds: 8 }],
+        outcome: "alert_sent",
+        sampleStatus: "ok",
+      });
+
+    expect(harness.planetScaleRequests).toHaveLength(4);
+    expect(harness.retryWaits).toEqual([1_000]);
+    expect(harness.monitor.readAlertState().consecutiveScrapeFailures).toBe(0);
+    expect(harness.primaryLinqRequests).toHaveLength(1);
+  });
+
+  it("pages only after two scheduled runs exhaust zero-evidence retries", async () => {
+    const harness = createMonitorHarness({ metricsBody: "" });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "failed",
+    });
+    expect(harness.planetScaleRequests).toHaveLength(4);
+    expect(harness.retryWaits).toEqual([1_000]);
+
+    await expect(
+      harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
+    ).resolves.toMatchObject({
+      conditions: [{ failures: 2, kind: "monitoring_unavailable" }],
+      outcome: "alert_sent",
+      sampleStatus: "failed",
+    });
+    expect(harness.planetScaleRequests).toHaveLength(8);
+    expect(harness.retryWaits).toEqual([1_000, 1_000]);
+    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
+      failureCode: "required_metrics_missing",
+      scrapeStatus: "failed",
+    });
+  });
+
   it("summarizes a partial-then-unavailable telemetry window across retry", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,

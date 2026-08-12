@@ -219,8 +219,9 @@ absent, the sample keeps that family unknown instead of substituting zero, still
 evaluates every available signal, and records the canonical missing metric names
 without retaining labels or raw scrape data. Unsafe available signals therefore
 still open an incident immediately. A collection that fails before producing a
-parseable observation receives one bounded retry after one second; only an
-exhausted two-attempt collection counts as a failed check. Partial observations
+usable observation, including a scrape with every required family absent,
+receives one bounded retry after one second; only an exhausted two-attempt
+collection counts as a failed check. Partial observations with any usable family
 are not delayed by that retry. Two consecutive incomplete or failed collections
 open the fallback monitoring incident. An acknowledged
 telemetry-only page is one-shot for one unresolved operator-notification window.
