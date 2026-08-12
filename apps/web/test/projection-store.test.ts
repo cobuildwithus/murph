@@ -10,9 +10,27 @@ const mocks = vi.hoisted(() => ({
     void error;
     return false;
   }),
+  lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(),
+  readHostedUserSecureBoxStringRootReference: vi.fn(),
   requireHostedRuntimeActiveAccess: vi.fn(),
   requireHostedRuntimeMembersActiveAccessForUpdateTx: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  lockAndReadActiveHostedDomainRootKeyIdTx:
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
+}));
+
+vi.mock("@/src/lib/hosted-crypto/secure-box", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/secure-box")
+  >();
+  return {
+    ...actual,
+    readHostedUserSecureBoxStringRootReference:
+      mocks.readHostedUserSecureBoxStringRootReference,
+  };
+});
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   isHostedRuntimeInactiveAccessError: mocks.isHostedRuntimeInactiveAccessError,
@@ -61,8 +79,10 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mocks.isHostedRuntimeInactiveAccessError.mockImplementation(() => false);
+  mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockResolvedValue("root_current");
+  mocks.readHostedUserSecureBoxStringRootReference.mockReturnValue(null);
   mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
   mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockResolvedValue(undefined);
 });
@@ -109,7 +129,7 @@ function createPrisma(events?: string[]) {
       return callback(tx);
     }),
   });
-  return { prisma, updateMany };
+  return { prisma, tx, updateMany };
 }
 
 function buildShareRow(index: number) {
@@ -323,10 +343,22 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
     }));
   });
 
-  it("finishes snapshot encryption before opening the compare-and-set transaction", async () => {
+  it("prepares ciphertext before BEGIN and fences its destination root before compare-and-set", async () => {
     const events: string[] = [];
     createSnapshotTestCodec(events);
-    const { prisma } = createPrisma(events);
+    const { prisma, tx, updateMany } = createPrisma(events);
+    mocks.readHostedUserSecureBoxStringRootReference.mockReturnValue({
+      domain: "ingress",
+      rootKeyId: "root_prepared",
+    });
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockImplementation(async () => {
+      events.push("root-revalidation");
+      return "root_prepared";
+    });
+    updateMany.mockImplementation(async () => {
+      events.push("update");
+      return { count: 1 };
+    });
 
     await replaceHostedVaultShareProjectionSnapshot({
       prisma,
@@ -334,7 +366,47 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
       share: SHARE,
     });
 
-    expect(events).toEqual(["encrypt", "transaction"]);
+    expect(events).toEqual([
+      "encrypt",
+      "transaction",
+      "root-revalidation",
+      "update",
+    ]);
+    expect(mocks.readHostedUserSecureBoxStringRootReference).toHaveBeenCalledWith({
+      lane: "mailbox-payload",
+      value: "sealed:1",
+    });
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledWith({
+      domain: "ingress",
+      tx,
+      userId: SHARE.destinationMemberId,
+    });
+  });
+
+  it("rejects a stale prepared root before the exact-generation compare-and-set", async () => {
+    createSnapshotTestCodec();
+    const { prisma, tx, updateMany } = createPrisma();
+    mocks.readHostedUserSecureBoxStringRootReference.mockReturnValue({
+      domain: "ingress",
+      rootKeyId: "root_prepared",
+    });
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockResolvedValue("root_rotated");
+
+    await expect(replaceHostedVaultShareProjectionSnapshot({
+      prisma,
+      records: [RECORD],
+      share: SHARE,
+    })).rejects.toMatchObject({
+      code: "HOSTED_VAULT_SHARE_PROJECTION_PREPARATION_REQUIRED",
+      retryable: true,
+    });
+
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledWith({
+      domain: "ingress",
+      tx,
+      userId: SHARE.destinationMemberId,
+    });
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("returns no-active-share when the sorted member revalidation is inactive", async () => {

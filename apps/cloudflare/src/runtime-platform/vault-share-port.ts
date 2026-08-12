@@ -38,11 +38,16 @@ export function createHostedWebVaultSharePort(input: {
     },
     async deliver(request: Parameters<NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]>[0]) {
       const deadlineMs = Date.now() + input.timeoutMs;
+      const deadlineSignal = AbortSignal.timeout(input.timeoutMs);
       const observedContinuations = new Set<string>();
       let continuation: string | null = null;
       let delivered = false;
 
       while (true) {
+        const remainingTimeoutMs = deadlineMs - Date.now();
+        if (remainingTimeoutMs <= 0) {
+          throw createHostedVaultShareDeliveryTimeoutError();
+        }
         const payload = await fetchHostedWebControlPlaneJson({
           body: continuation === null
             ? request
@@ -55,7 +60,8 @@ export function createHostedWebVaultSharePort(input: {
           fetchImpl: input.fetchImpl,
           path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
           replayOnceOnRetryableFailure: true,
-          timeoutMs: Math.max(0, deadlineMs - Date.now()),
+          signal: deadlineSignal,
+          timeoutMs: remainingTimeoutMs,
           transport: input.transport,
         });
         const response = parseHostedVaultShareDeliverResponse(payload);
@@ -79,6 +85,12 @@ export function createHostedWebVaultSharePort(input: {
       }
     },
   };
+}
+
+function createHostedVaultShareDeliveryTimeoutError(): Error {
+  const error = new Error("Hosted vault-share delivery deadline exceeded.");
+  error.name = "TimeoutError";
+  return error;
 }
 
 function buildHostedVaultShareActiveKindsPath(): string {

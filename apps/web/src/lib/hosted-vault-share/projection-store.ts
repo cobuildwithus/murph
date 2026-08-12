@@ -13,12 +13,19 @@ import {
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import {
+  lockAndReadActiveHostedDomainRootKeyIdTx,
+} from "../hosted-crypto/domain-root-store";
+import {
+  readHostedUserSecureBoxStringRootReference,
+} from "../hosted-crypto/secure-box";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import {
   isHostedRuntimeInactiveAccessError,
   requireHostedRuntimeActiveAccess,
   requireHostedRuntimeMembersActiveAccessForUpdateTx,
 } from "../hosted-mailbox/runtime-access";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
 } from "./delivery-limits";
@@ -132,7 +139,8 @@ export async function readDeliverableHostedVaultShareProjectionScopes(input: {
  * the destination member's runtime-ingress root, and the row id is part of authenticated
  * data, so ciphertext cannot be replayed across a revoke/regrant generation. Crypto is
  * completed before the transaction opens; the short transaction then takes the canonical
- * sorted member locks, revalidates access, and conditionally updates the exact active row.
+ * sorted member locks, revalidates access and the prepared destination-root identity, and
+ * conditionally updates the exact active row.
  */
 export async function replaceHostedVaultShareProjectionSnapshot(input: {
   prisma?: PrismaClient;
@@ -152,6 +160,11 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
       records: input.records,
       share: input.share,
     });
+  const projectionSnapshotRootReference =
+    readHostedUserSecureBoxStringRootReference({
+      lane: "mailbox-payload",
+      value: projectionSnapshotCiphertext,
+    });
 
   return prisma.$transaction(async (tx) => {
     if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
@@ -159,6 +172,22 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
       tx,
     )) {
       return "no-active-share";
+    }
+    if (projectionSnapshotRootReference) {
+      const activeRootKeyId = await lockAndReadActiveHostedDomainRootKeyIdTx({
+        domain: projectionSnapshotRootReference.domain,
+        tx,
+        userId: input.share.destinationMemberId,
+      });
+      if (activeRootKeyId !== projectionSnapshotRootReference.rootKeyId) {
+        throw hostedOnboardingError({
+          code: "HOSTED_VAULT_SHARE_PROJECTION_PREPARATION_REQUIRED",
+          httpStatus: 503,
+          message:
+            "Hosted vault-share projection encryption authority changed. Retry the request.",
+          retryable: true,
+        });
+      }
     }
 
     const replaced = await tx.hostedVaultShare.updateMany({

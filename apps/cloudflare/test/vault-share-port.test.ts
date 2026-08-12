@@ -92,4 +92,28 @@ describe("createHostedWebVaultSharePort delivery continuation", () => {
     );
     expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledTimes(2);
   });
+
+  it("does not start a later page after the original delivery deadline", async () => {
+    const now = vi.spyOn(Date, "now")
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(1_000)
+      .mockReturnValue(2_000);
+    mocks.fetchHostedWebControlPlaneJson.mockResolvedValueOnce({
+      continuation: "share_032",
+      status: "delivered",
+    });
+
+    try {
+      await expect(createPort().deliver(DELIVER_REQUEST)).rejects.toMatchObject({
+        message: "Hosted vault-share delivery deadline exceeded.",
+        name: "TimeoutError",
+      });
+      expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledTimes(1);
+      expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith(
+        expect.objectContaining({ timeoutMs: 1_000 }),
+      );
+    } finally {
+      now.mockRestore();
+    }
+  });
 });

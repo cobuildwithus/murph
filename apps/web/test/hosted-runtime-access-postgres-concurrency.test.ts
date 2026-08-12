@@ -24,7 +24,7 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted runtime-access PostgreSQL concurrency proof",
   () => {
-    it("serializes reciprocal member sets without caller-role deadlock", async () => {
+    it("serializes reciprocal member sets from the same canonical first row", async () => {
       const suffix = randomUUID();
       const firstMemberId = `member_runtime_access_a_${suffix}`;
       const secondMemberId = `member_runtime_access_b_${suffix}`;
@@ -68,8 +68,7 @@ describe.skipIf(!runPostgresProof)(
           await tx.$queryRaw`
             SELECT id
             FROM hosted_member
-            WHERE id IN (${firstMemberId}, ${secondMemberId})
-            ORDER BY id
+            WHERE id = ${firstMemberId}
             FOR UPDATE
           `;
           memberLocksAcquired();
@@ -101,6 +100,18 @@ describe.skipIf(!runPostgresProof)(
             observer,
           }),
         ]);
+
+        // Both reciprocal calls must still be waiting on the same sorted first
+        // member. If either caller retained role order, the B-to-A call would
+        // already own the second row while waiting for the blocker on the first.
+        await expect(observer.$transaction(async (tx) => {
+          await tx.$queryRaw`
+            SELECT id
+            FROM hosted_member
+            WHERE id = ${secondMemberId}
+            FOR UPDATE NOWAIT
+          `;
+        })).resolves.toBeUndefined();
 
         releaseMemberLocks();
         await blockerPromise;

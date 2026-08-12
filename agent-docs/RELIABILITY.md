@@ -1276,10 +1276,13 @@ Last verified: 2026-08-11
   the Cloudflare call's original deadline; repeated or malformed cursors fail
   closed. Each share performs an unlocked active-access preflight, prepares its
   destination-root ciphertext before `BEGIN`, then takes container owners and
-  runtime members in canonical owner-first phases, revalidates both sides, and
-  compare-and-sets only the exact still-granted generation. Reciprocal delivery
-  can never choose caller-role lock order, and a failed later page replays only
-  that bounded page.
+  runtime members in canonical owner-first phases, revalidates both sides and
+  the exact prepared destination root under its authority lock, and
+  compare-and-sets only the exact still-granted generation. Reciprocal delivery can never choose
+  caller-role lock order, and a failed later page replays only that bounded page.
+  Rollout applies the index migration first, then the continuation-capable
+  Cloudflare reader, then the Web pager so drifted state beyond 32 rows is never
+  stranded behind an older single-callback reader.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an
   event was *received*, not that it was *applied*, so a redelivered event
