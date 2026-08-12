@@ -228,14 +228,11 @@ async function assertConnectPage(input: {
     );
   }
 
-  const horizontalOverflow = Number(
-    await input.page.evaluate(SETTLED_HORIZONTAL_OVERFLOW_EXPRESSION),
-  );
-  if (horizontalOverflow > 1) {
-    throw new Error(
-      `Hosted browser ${input.caseName} overflowed horizontally by ${horizontalOverflow}px.`,
-    );
-  }
+  await assertNoHorizontalOverflow({
+    caseName: input.caseName,
+    label: "Connect page",
+    page: input.page,
+  });
 
   await connectButton.click();
   const disclosureDialog = await requireSingleVisible({
@@ -251,6 +248,48 @@ async function assertConnectPage(input: {
     exact: true,
     name: "Continue to Whoop",
   }).waitFor({ state: "visible" });
+
+  await assertNoHorizontalOverflow({
+    caseName: input.caseName,
+    label: "Whoop disclosure",
+    page: input.page,
+  });
+
+  const disclosureBox = await disclosureDialog.boundingBox();
+  const viewport = input.page.viewportSize();
+  if (!disclosureBox || !viewport) {
+    throw new Error(
+      `Hosted browser ${input.caseName} could not measure the Whoop disclosure viewport containment.`,
+    );
+  }
+  const containmentTolerancePx = 1;
+  if (
+    disclosureBox.x < -containmentTolerancePx
+    || disclosureBox.y < -containmentTolerancePx
+    || disclosureBox.x + disclosureBox.width
+      > viewport.width + containmentTolerancePx
+    || disclosureBox.y + disclosureBox.height
+      > viewport.height + containmentTolerancePx
+  ) {
+    throw new Error(
+      `Hosted browser ${input.caseName} rendered the Whoop disclosure outside the ${viewport.width}x${viewport.height} viewport.`,
+    );
+  }
+}
+
+async function assertNoHorizontalOverflow(input: {
+  caseName: string;
+  label: string;
+  page: Page;
+}): Promise<void> {
+  const horizontalOverflow = Number(
+    await input.page.evaluate(SETTLED_HORIZONTAL_OVERFLOW_EXPRESSION),
+  );
+  if (!Number.isFinite(horizontalOverflow) || horizontalOverflow > 1) {
+    throw new Error(
+      `Hosted browser ${input.caseName} ${input.label} overflowed horizontally by ${horizontalOverflow}px.`,
+    );
+  }
 }
 
 async function requireSingleVisible(input: {
