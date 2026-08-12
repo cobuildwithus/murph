@@ -73,6 +73,7 @@ import {
 } from "../configured-provider-runtime-descriptors.ts";
 import {
   addMilliseconds,
+  normalizeIdentifier,
   normalizeString,
   sha256Text,
   subtractDays,
@@ -5147,14 +5148,32 @@ function junctionTimeseriesRecordValueIdentity(
   resource: string,
   entry: Record<string, unknown>,
 ): string[] {
-  if (resource !== "blood_pressure" && resource !== "note") {
+  if (
+    resource !== "blood_pressure"
+    && resource !== "note"
+    && !JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES.has(resource)
+  ) {
     return [];
   }
 
-  // Same stable-id alias list as the importer's reading identity: rows
-  // distinguished only by a provider id must survive fetch-side dedupe.
-  for (const key of ["id", "resourceId", "resource_id", "externalId", "external_id"]) {
-    const rowId = normalizeString(entry[key]);
+  // Keep the established blood-pressure/note aliases and string-only behavior
+  // unchanged. Sparse clinical records mirror the importer's wider generic
+  // stable-id aliases and accept the numeric IDs emitted by Junction's SDK.
+  const providerRecordIdKeys = resource === "blood_pressure" || resource === "note"
+    ? ["id", "resourceId", "resource_id", "externalId", "external_id"]
+    : [
+        "id",
+        "resourceId",
+        "resource_id",
+        "externalId",
+        "external_id",
+        "providerId",
+        "provider_id",
+      ];
+  for (const key of providerRecordIdKeys) {
+    const rowId = resource === "blood_pressure" || resource === "note"
+      ? normalizeString(entry[key])
+      : normalizeIdentifier(entry[key]);
     if (rowId) {
       return [rowId];
     }
@@ -5171,8 +5190,99 @@ function junctionTimeseriesRecordValueIdentity(
     ];
   }
 
+  if (resource !== "blood_pressure") {
+    return [
+      normalizeJunctionTimeseriesTimestampIdentity(entry, ["start", "startAt", "start_at"]),
+      normalizeJunctionTimeseriesTimestampIdentity(entry, ["end", "endAt", "end_at"]),
+      normalizeJunctionSparseClinicalValueIdentity(resource, entry),
+      normalizeJunctionTimeseriesUnitIdentity(entry),
+      resource === "heart_rate_alert"
+        ? normalizeJunctionHeartRateAlertTypeIdentity(entry)
+        : "",
+    ];
+  }
+
   // Field names mirror the importer's blood-pressure value paths.
   return [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
+}
+
+const JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES: ReadonlySet<string> = new Set([
+  "heart_rate_alert",
+  "sleep_apnea_alert",
+  "fall",
+  "forced_expiratory_volume_1",
+  "forced_vital_capacity",
+  "peak_expiratory_flow_rate",
+  "inhaler_usage",
+]);
+
+function normalizeJunctionTimeseriesIdentityField(
+  entry: Record<string, unknown>,
+  keys: readonly string[],
+): string {
+  for (const key of keys) {
+    const value = normalizeIdentifier(entry[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function normalizeJunctionTimeseriesNumericIdentityField(
+  entry: Record<string, unknown>,
+  keys: readonly string[],
+): string {
+  const value = normalizeJunctionTimeseriesIdentityField(entry, keys);
+  if (!value) {
+    return "";
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(numeric) : value;
+}
+
+function normalizeJunctionTimeseriesTimestampIdentity(
+  entry: Record<string, unknown>,
+  keys: readonly string[],
+): string {
+  const value = normalizeJunctionTimeseriesIdentityField(entry, keys);
+  return toIsoTimestampIfValid(value) ?? value;
+}
+
+function normalizeJunctionSparseClinicalValueIdentity(
+  resource: string,
+  entry: Record<string, unknown>,
+): string {
+  const value = normalizeJunctionTimeseriesNumericIdentityField(entry, ["value"]);
+  if (!value) {
+    return "";
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && ![
+    "heart_rate_alert",
+    "sleep_apnea_alert",
+    "fall",
+    "inhaler_usage",
+  ].includes(resource)
+    ? String(Number(numeric.toFixed(4)))
+    : value;
+}
+
+function normalizeJunctionTimeseriesUnitIdentity(entry: Record<string, unknown>): string {
+  return (normalizeString(entry.unit) ?? "").toLowerCase().replace(/\s+/gu, "");
+}
+
+function normalizeJunctionHeartRateAlertTypeIdentity(entry: Record<string, unknown>): string {
+  const value = normalizeJunctionTimeseriesIdentityField(
+    entry,
+    ["type", "alertType", "alert_type"],
+  );
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 80)
+    .replace(/-+$/u, "");
 }
 
 function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {

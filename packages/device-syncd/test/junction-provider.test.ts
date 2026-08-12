@@ -7364,6 +7364,146 @@ test("Junction code-owned sparse clinical defaults admit direct timeseries resou
   );
 });
 
+test("Junction fetch dedupe preserves distinct stable IDs for every sparse clinical resource", async () => {
+  const resources: readonly {
+    resource: string;
+    type?: string;
+    unit: string;
+    value: number;
+  }[] = [
+    { resource: "heart_rate_alert", unit: "count", value: 1, type: "irregular_rhythm" },
+    { resource: "sleep_apnea_alert", unit: "count", value: 1 },
+    { resource: "fall", unit: "count", value: 1 },
+    { resource: "forced_expiratory_volume_1", unit: "L", value: 3.4 },
+    { resource: "forced_vital_capacity", unit: "L", value: 4.6 },
+    { resource: "peak_expiratory_flow_rate", unit: "L/min", value: 480 },
+    { resource: "inhaler_usage", unit: "count", value: 1 },
+  ];
+
+  for (const testCase of resources) {
+    const importedSnapshots: unknown[] = [];
+    const baseRecord = {
+      timestamp: "2026-04-02T14:30:00.000Z",
+      start: "2026-04-02T14:30:00.000Z",
+      end: "2026-04-02T14:30:10.000Z",
+      unit: testCase.unit,
+      value: testCase.value,
+      ...(testCase.type ? { type: testCase.type } : {}),
+    };
+    const provider = createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: ["activity"],
+      fetchImpl: async (input) => {
+        const url = new URL(readUrl(input));
+        if (url.pathname === "/v2/user/providers/junction-user-1") {
+          return createJsonResponse({ providers: [] });
+        }
+        if (url.pathname === `/v2/timeseries/junction-user-1/${testCase.resource}/grouped`) {
+          return createJsonResponse({
+            groups: {
+              garmin: [{
+                data: [
+                  { ...baseRecord, id: 101 },
+                  { ...baseRecord, id: "101" },
+                  { ...baseRecord, providerId: "provider-row-b" },
+                  { ...baseRecord, provider_id: "provider-row-b" },
+                  { ...baseRecord, external_id: "provider-row-c" },
+                ],
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          });
+        }
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      },
+    });
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+      }),
+      createJob("resource", {
+        resource: testCase.resource,
+        resourceCategory: "timeseries",
+        windowStart: "2026-04-02T12:00:00.000Z",
+        windowEnd: "2026-04-03T12:00:00.000Z",
+      }),
+    );
+
+    const snapshot = importedSnapshots[0] as { timeseries?: Record<string, unknown[]> };
+    assert.equal(snapshot.timeseries?.[testCase.resource]?.length, 3, testCase.resource);
+  }
+});
+
+test("Junction sparse clinical fetch fallback identity keeps same-start differences", async () => {
+  const importedSnapshots: unknown[] = [];
+  const baseRecord = {
+    timestamp: "2026-04-02T14:30:00.000Z",
+    start: "2026-04-02T14:30:00.000Z",
+    end: "2026-04-02T14:30:10.000Z",
+    type: "irregular_rhythm",
+    unit: "count",
+    value: 1,
+  };
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/heart_rate_alert/grouped") {
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [
+                baseRecord,
+                { ...baseRecord },
+                { ...baseRecord, end: "2026-04-02T14:30:20.000Z" },
+                { ...baseRecord, value: 2 },
+                { ...baseRecord, unit: "events" },
+                { ...baseRecord, type: "future_provider_alert" },
+              ],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    },
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("resource", {
+      resource: "heart_rate_alert",
+      resourceCategory: "timeseries",
+      windowStart: "2026-04-02T12:00:00.000Z",
+      windowEnd: "2026-04-03T12:00:00.000Z",
+    }),
+  );
+
+  const snapshot = importedSnapshots[0] as { timeseries?: Record<string, unknown[]> };
+  assert.equal(snapshot.timeseries?.heart_rate_alert?.length, 5);
+});
+
 test("Junction compact timeseries resource jobs yield with a precise ISO follow-up window", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {

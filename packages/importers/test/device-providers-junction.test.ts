@@ -3683,6 +3683,130 @@ test("Junction normalizer lands sparse clinical and safety readings as compact m
   }
 });
 
+test("Junction heart-rate alerts require a nonempty non-exhaustive type", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn-junction-heart-alert-type",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        heart_rate_alert: [
+          {
+            id: "missing-type",
+            start: "2026-04-22T08:05:00Z",
+            end: "2026-04-22T08:05:10Z",
+            sourceProviderSlug: "watch",
+            unit: "count",
+            value: 1,
+            privateNote: "SENSITIVE_HEART_ALERT_TYPE_SENTINEL",
+          },
+          {
+            id: "blank-type",
+            start: "2026-04-22T08:10:00Z",
+            end: "2026-04-22T08:10:10Z",
+            sourceProviderSlug: "watch",
+            type: "   ",
+            unit: "count",
+            value: 1,
+            privateNote: "SENSITIVE_HEART_ALERT_TYPE_SENTINEL",
+          },
+          {
+            id: "future-type",
+            start: "2026-04-22T08:15:00Z",
+            end: "2026-04-22T08:15:10Z",
+            sourceProviderSlug: "watch",
+            type: "future_provider_alert",
+            unit: "count",
+            value: 1,
+            privateNote: "SENSITIVE_HEART_ALERT_TYPE_SENTINEL",
+          },
+        ],
+      },
+    },
+  });
+  const measurements = payload.events?.[0]?.fields?.measurements as
+    | Array<Record<string, unknown>>
+    | undefined;
+  const artifacts = findJunctionSparseClinicalReadingArtifacts(payload, "heart-rate-alert");
+
+  assert.equal(payload.events?.length, 1);
+  assert.deepEqual(measurements?.[0], {
+    metric: "heart-rate-alert",
+    value: 1,
+    unit: "count",
+    qualifiers: { "alert-type": "future-provider-alert" },
+  });
+  assert.equal(artifacts.length, 1);
+  assert.equal(
+    (artifacts[0]?.content as Record<string, unknown>).alertType,
+    "future-provider-alert",
+  );
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(
+    payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"),
+    false,
+  );
+  assert.doesNotMatch(JSON.stringify(payload), /missing-type|blank-type|future-type|SENSITIVE_HEART_ALERT/u);
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+  assertEventRawArtifactRolesExist(payload);
+});
+
+test("Junction sparse clinical stable IDs accept numbers and preserve distinct rows", async () => {
+  const entry = (id: string | number, idKey: "id" | "providerId" | "provider_id") => ({
+    [idKey]: id,
+    start: "2026-04-22T08:05:00Z",
+    end: "2026-04-22T08:05:10Z",
+    sourceProviderSlug: "watch",
+    unit: "count",
+    value: 1,
+    privateNote: "SENSITIVE_STABLE_CLINICAL_ID_SENTINEL",
+  });
+  const snapshot = async (entries: object[]) => prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn-junction-clinical-stable-id",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot: {
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: { fall: entries },
+    },
+  });
+  const numeric = entry(101, "id");
+  const numericAsString = entry("101", "id");
+  const second = entry("provider-row-b", "providerId");
+  const secondAlias = entry("provider-row-b", "provider_id");
+  const third = entry("provider-row-c", "id");
+  const firstPayload = await snapshot([numeric, numericAsString, second, secondAlias, third]);
+  const replayPayload = await snapshot([third, secondAlias, numericAsString]);
+  const roles = (payload: DeviceBatchImportPayload) =>
+    findJunctionSparseClinicalReadingArtifacts(payload, "fall")
+      .map((artifact) => artifact.role)
+      .sort();
+
+  assert.equal(firstPayload.events?.length, 3);
+  assert.equal(replayPayload.events?.length, 3);
+  assert.deepEqual(roles(firstPayload), roles(replayPayload));
+  assert.deepEqual(
+    firstPayload.events?.map((event) => event.externalRef?.resourceId).sort(),
+    replayPayload.events?.map((event) => event.externalRef?.resourceId).sort(),
+  );
+  assert.equal(firstPayload.samples?.length ?? 0, 0);
+  assert.equal(
+    firstPayload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"),
+    false,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(firstPayload.evidenceParts),
+    /provider-row-|SENSITIVE_STABLE_CLINICAL_ID/u,
+  );
+  assertNoFullJunctionTimeseriesArtifacts(firstPayload);
+  assertEventRawArtifactRolesExist(firstPayload);
+});
+
 test("Junction sparse clinical readings reject malformed units and values without raw fallback", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
@@ -3803,12 +3927,12 @@ test("Junction sparse clinical persistence stays bounded for oversized provider 
 });
 
 test("Junction sparse clinical evidence is replay- and order-idempotent", () => {
-  const reading = (end: string) => ({
+  const reading = (end: string, value = 4.2) => ({
     start: "2026-04-22T08:05:00Z",
     end,
     sourceProviderSlug: "spirometer",
     unit: "L",
-    value: 4.2,
+    value,
   });
   const snapshot = (entries: object[]) => normalizeJunctionSnapshot({
     importedAt: "2026-04-23T12:00:00.000Z",
@@ -3816,9 +3940,10 @@ test("Junction sparse clinical evidence is replay- and order-idempotent", () => 
   });
   const first = reading("2026-04-22T08:05:10Z");
   const second = reading("2026-04-22T08:05:20Z");
-  const withDuplicate = snapshot([first, { ...first }, second]);
-  const ordered = snapshot([first, second]);
-  const reversed = snapshot([second, first]);
+  const third = reading("2026-04-22T08:05:10Z", 4.8);
+  const withDuplicate = snapshot([first, { ...first }, second, third]);
+  const ordered = snapshot([first, second, third]);
+  const reversed = snapshot([third, second, first]);
   const roles = (payload: ReturnType<typeof normalizeJunctionSnapshot>) =>
     findJunctionSparseClinicalReadingArtifacts(payload, "forced-vital-capacity")
       .map((artifact) => artifact.role)
@@ -3826,11 +3951,11 @@ test("Junction sparse clinical evidence is replay- and order-idempotent", () => 
 
   assert.equal(
     (withDuplicate.events ?? []).filter((event) => event.kind === "measurement").length,
-    2,
+    3,
   );
-  assert.equal(findJunctionSparseClinicalReadingArtifacts(withDuplicate, "forced-vital-capacity").length, 2);
-  // The interval end participates in the fallback identity, so two distinct
-  // measurements with the same start/value are retained independently.
+  assert.equal(findJunctionSparseClinicalReadingArtifacts(withDuplicate, "forced-vital-capacity").length, 3);
+  // Interval end and value participate in fallback identity, so distinct
+  // measurements with the same start are retained independently.
   assert.deepEqual(roles(ordered), roles(reversed));
 });
 

@@ -2326,6 +2326,7 @@ function pushJunctionSparseClinicalReadings(
       value === undefined
       || !providerUnit
       || providerUnit !== descriptor.expectedProviderUnit
+      || (resource === "heart_rate_alert" && !alertType)
       || !startAt
       || !endAt
       || !occurredAt
