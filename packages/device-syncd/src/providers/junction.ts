@@ -5319,11 +5319,19 @@ function normalizeJunctionTimeseriesRecordTimestampIdentity(
   if (!value) return null;
 
   if (isJunctionFloatingTimestampSourceProvider(sourceProviderSlug)) {
+    if (hasExplicitNonZeroTimestampOffset(value)) {
+      return toIsoTimestampIfValid(value);
+    }
     const floatingIdentity = normalizeJunctionFloatingTimestampIdentity(value);
     return floatingIdentity;
   }
 
   return toIsoTimestampIfValid(value) ?? value;
+}
+
+function hasExplicitNonZeroTimestampOffset(value: string): boolean {
+  const match = /([+-])(\d{2}):?(\d{2})$/u.exec(value.trim());
+  return match !== null && (match[2] !== "00" || match[3] !== "00");
 }
 
 function normalizeJunctionFloatingTimestampIdentity(value: string): string | null {

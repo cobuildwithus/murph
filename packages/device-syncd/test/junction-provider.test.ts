@@ -6,6 +6,10 @@ import {
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
 } from "@murphai/importers/device-providers/junction-resources";
 import {
+  normalizeJunctionSnapshot,
+  type JunctionSnapshotInput,
+} from "@murphai/importers/device-providers/junction";
+import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
@@ -7440,6 +7444,80 @@ test("Junction reconcile applies metabolic corrections and anchors sparse interv
   );
 });
 
+test("Junction reconcile preserves both explicit Libre overlap instants", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-libre-overlap",
+          slug: "freestyle_libre",
+          name: "Libre",
+          status: "connected",
+          resource_availability: { carbohydrates: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/carbohydrates/grouped") {
+      return createJsonResponse({
+        groups: {
+          freestyle_libre: [{
+            data: [
+              {
+                start: "2026-11-01T01:30:00-05:00",
+                end: "2026-11-01T01:40:00-05:00",
+                unit: "g",
+                value: 10,
+              },
+              {
+                start: "2026-11-01T01:30:00-06:00",
+                end: "2026-11-01T01:40:00-06:00",
+                unit: "g",
+                value: 20,
+              },
+            ],
+            source: { provider: "freestyle_libre", type: "cgm" },
+          }],
+        },
+      });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: ["activity"],
+    timeseriesResources: ["carbohydrates"],
+  });
+  const importedSnapshots: unknown[] = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-11-02T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-11-01T00:00:00.000Z",
+      windowEnd: "2026-11-02T00:00:00.000Z",
+    }),
+  );
+
+  const starts = importedSnapshots.flatMap((snapshot) => {
+    const timeseries = (snapshot as { timeseries?: Record<string, unknown[]> }).timeseries;
+    return (timeseries?.carbohydrates ?? []).map((record) =>
+      (record as { start?: string }).start
+    );
+  });
+  assert.deepEqual(starts.sort(), [
+    "2026-11-01T01:30:00-05:00",
+    "2026-11-01T01:30:00-06:00",
+  ]);
+});
+
 test("Junction historical reconcile jobs preserve their summary window", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -14419,6 +14497,118 @@ test.each([
       createStoredAccount({ metadata, sources: [source] }),
       "2026-08-20T12:00:00.000Z",
     ).jobs.some((candidate) => candidate.payload?.resource === "caffeine"),
+    false,
+  );
+});
+
+test("Junction unresolved Libre overlap follows the finite malformed-history ladder", async () => {
+  let timeseriesRequestCount = 0;
+  const canonicalEventCounts: number[] = [];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: ["carbohydrates"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [{
+          id: "provider-libre-overlap",
+          slug: "freestyle_libre",
+          name: "Libre",
+          status: "connected",
+          resource_availability: { carbohydrates: true },
+        }] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/carbohydrates/grouped") {
+        timeseriesRequestCount += 1;
+        return createJsonResponse({ groups: { freestyle_libre: [{
+          data: [{
+            start: "2026-11-01T01:30:00",
+            end: "2026-11-01T01:45:00",
+            unit: "g",
+            value: 20,
+          }],
+          source: { provider: "freestyle_libre", type: "cgm" },
+        }] } });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    },
+  });
+  const source = {
+    sourceProviderSlug: "freestyle_libre",
+    displayName: null,
+    status: "connected" as const,
+    resourceCount: 1,
+    resourceAvailabilitySummary: { carbohydrates: true },
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    firstSeenAt: "2026-04-03T00:00:00.000Z",
+    lastSeenAt: "2026-11-02T12:00:00.000Z",
+    lastDataAt: null,
+  };
+  const executor = requireValue(provider.jobExecutor);
+  const initialJob = requireValue(executor.createScheduledJobs?.(
+    createStoredAccount({ sources: [source] }),
+    "2026-11-02T12:00:00.000Z",
+  ).jobs.find((candidate) => candidate.payload?.resource === "carbohydrates"));
+  let job: DeviceSyncJobRecord = {
+    ...createJob("resource", initialJob.payload ?? {}),
+    dedupeKey: initialJob.dedupeKey ?? null,
+  };
+  let metadata: Record<string, unknown> = {};
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const now = new Date(
+      Date.parse("2026-11-02T12:00:00.000Z") + attempt * 24 * 60 * 60_000,
+    ).toISOString();
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({ metadata, sources: [source] }),
+        importSnapshot: async (snapshot) => {
+          const normalized = normalizeJunctionSnapshot(
+            snapshot as JunctionSnapshotInput,
+            { defaultTimeZone: "America/Chicago" },
+          );
+          const canonicalEventCount = normalized.events?.length ?? 0;
+          canonicalEventCounts.push(canonicalEventCount);
+          return { canonicalEventCount, durableDeliveryAccepted: true };
+        },
+        now,
+      }),
+      job,
+    );
+    metadata = mergeStoredDeviceSyncMetadataPatch(metadata, result.metadataPatch);
+    const continuation = result.scheduledJobs?.find((candidate) =>
+      candidate.payload?.resource === "carbohydrates"
+    );
+    if (attempt < 29) {
+      const requiredContinuation = requireValue(continuation);
+      job = {
+        ...createJob("resource", requiredContinuation.payload ?? {}),
+        dedupeKey: requiredContinuation.dedupeKey ?? null,
+      };
+    } else {
+      assert.equal(continuation, undefined);
+    }
+  }
+
+  assert.equal(timeseriesRequestCount, 30);
+  assert.deepEqual(new Set(canonicalEventCounts), new Set([0]));
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    metadata,
+    "freestyle_libre",
+    "carbohydrates",
+    1,
+  ), true);
+  assert.equal(
+    executor.createScheduledJobs?.(
+      createStoredAccount({ metadata, sources: [source] }),
+      "2026-12-15T12:00:00.000Z",
+    ).jobs.some((candidate) => candidate.payload?.resource === "carbohydrates"),
     false,
   );
 });

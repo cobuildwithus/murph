@@ -1954,19 +1954,27 @@ function resolveJunctionSparseMetabolicInterval(input: {
     return null;
   }
 
-  const floatingTimeZone = hasFloatingTimestampSourceProvider(input.resourceContext.sourceProviderSlug)
+  const startIsFloating = isJunctionSourceLocalFloatingTimestamp(
+    startRaw,
+    input.resourceContext.sourceProviderSlug,
+  );
+  const endIsFloating = isJunctionSourceLocalFloatingTimestamp(
+    endRaw,
+    input.resourceContext.sourceProviderSlug,
+  );
+  const floatingTimeZone = startIsFloating || endIsFloating
     ? resolveJunctionFloatingTimestampTimeZone(input.entry, input.context.defaultTimeZone)
     : undefined;
-  const floatingStart = floatingTimeZone
+  const floatingStart = startIsFloating && floatingTimeZone
     ? resolveJunctionFloatingTimestamp(startRaw, floatingTimeZone)
     : null;
-  const floatingEnd = floatingTimeZone
+  const floatingEnd = endIsFloating && floatingTimeZone
     ? resolveJunctionFloatingTimestamp(endRaw, floatingTimeZone)
     : null;
-  const occurredAt = floatingTimeZone
+  const occurredAt = startIsFloating
     ? floatingStart?.timestamp
     : resolveSafeTimestamp(startRaw, input.resourceContext.sourceProviderSlug);
-  const endAt = floatingTimeZone
+  const endAt = endIsFloating
     ? floatingEnd?.timestamp
     : resolveSafeTimestamp(endRaw, input.resourceContext.sourceProviderSlug);
   if (!occurredAt || !endAt || Date.parse(endAt) < Date.parse(occurredAt)) {
@@ -5512,7 +5520,8 @@ function resolveRecordTimestamp(
   const rawObservedAt = firstStringFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS);
   const localCalendarDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
   const explicitSemantics = firstTimestampSemantics(entry);
-  const hasSourceSpecificFloatingTime = hasFloatingTimestampSourceProvider(sourceProviderSlug);
+  const hasSourceSpecificFloatingTime = rawObservedAt !== undefined
+    && isJunctionSourceLocalFloatingTimestamp(rawObservedAt, sourceProviderSlug);
   const timestampSemantics = hasSourceSpecificFloatingTime
     ? "floating"
     : explicitSemantics ?? inferTimestampSemantics(rawObservedAt);
@@ -6012,7 +6021,7 @@ function normalizeJunctionTimeseriesSampleTimestampIdentity(
   if (!value) return undefined;
 
   if (
-    hasFloatingTimestampSourceProvider(sourceProviderSlug)
+    isJunctionSourceLocalFloatingTimestamp(value, sourceProviderSlug)
     || inferTimestampSemantics(value) === "floating"
   ) {
     return parseJunctionFloatingTimestamp(value)?.identity;
@@ -6047,37 +6056,45 @@ function resolveJunctionFloatingTimestamp(
     parsed.second,
     parsed.millisecond,
   );
-  let candidateMs = targetLocalMs;
-
   try {
-    for (let iteration = 0; iteration < 4; iteration += 1) {
-      const candidateParts = formatTimeZoneDateTimeParts(candidateMs, normalizedTimeZone);
-      const candidateLocalMs = Date.UTC(
-        candidateParts.year,
-        candidateParts.month - 1,
-        candidateParts.day,
-        candidateParts.hour,
-        candidateParts.minute,
-        candidateParts.second,
+    const candidateInstants = new Set<number>();
+    for (const probeDeltaMs of [
+      -7 * 24 * 60 * 60_000,
+      -2 * 24 * 60 * 60_000,
+      0,
+      2 * 24 * 60 * 60_000,
+      7 * 24 * 60 * 60_000,
+    ]) {
+      const probeMs = targetLocalMs + probeDeltaMs;
+      const probeParts = formatTimeZoneDateTimeParts(probeMs, normalizedTimeZone);
+      const offsetMs = Date.UTC(
+        probeParts.year,
+        probeParts.month - 1,
+        probeParts.day,
+        probeParts.hour,
+        probeParts.minute,
+        probeParts.second,
         parsed.millisecond,
-      );
-      const adjustmentMs = targetLocalMs - candidateLocalMs;
-      candidateMs += adjustmentMs;
-      if (adjustmentMs === 0) break;
+      ) - probeMs;
+      const candidateMs = targetLocalMs - offsetMs;
+      const candidateParts = formatTimeZoneDateTimeParts(candidateMs, normalizedTimeZone);
+      if (
+        candidateParts.year === parsed.year
+        && candidateParts.month === parsed.month
+        && candidateParts.day === parsed.day
+        && candidateParts.hour === parsed.hour
+        && candidateParts.minute === parsed.minute
+        && candidateParts.second === parsed.second
+      ) {
+        candidateInstants.add(candidateMs);
+      }
     }
 
-    const resolvedParts = formatTimeZoneDateTimeParts(candidateMs, normalizedTimeZone);
-    if (
-      resolvedParts.year !== parsed.year
-      || resolvedParts.month !== parsed.month
-      || resolvedParts.day !== parsed.day
-      || resolvedParts.hour !== parsed.hour
-      || resolvedParts.minute !== parsed.minute
-      || resolvedParts.second !== parsed.second
-    ) {
-      // Nonexistent DST wall times never converge to the requested components.
-      return null;
-    }
+    // A gap has no candidate; a fall-back overlap has two. Neither supplies
+    // the single exact instant required for a canonical health event.
+    if (candidateInstants.size !== 1) return null;
+    const [candidateMs] = candidateInstants;
+    if (candidateMs === undefined) return null;
 
     return {
       dayKey: parsed.dayKey,
@@ -6135,7 +6152,10 @@ function parseJunctionFloatingTimestamp(value: string): JunctionFloatingTimestam
 function resolveSafeTimestamp(value: unknown, sourceProviderSlug?: string): string | undefined {
   const raw = typeof value === "string" ? value.trim() : value;
 
-  if (typeof raw === "string" && hasFloatingTimestampSourceProvider(sourceProviderSlug)) {
+  if (
+    typeof raw === "string"
+    && isJunctionSourceLocalFloatingTimestamp(raw, sourceProviderSlug)
+  ) {
     return undefined;
   }
 
@@ -6149,6 +6169,15 @@ function resolveSafeTimestamp(value: unknown, sourceProviderSlug?: string): stri
 function hasFloatingTimestampSourceProvider(sourceProviderSlug: string | undefined): boolean {
   const normalized = normalizeJunctionSourceProviderSlug(sourceProviderSlug);
   return normalized ? FLOATING_TIMESTAMP_SOURCE_PROVIDER_SLUGS.has(normalized) : false;
+}
+
+function isJunctionSourceLocalFloatingTimestamp(
+  value: string,
+  sourceProviderSlug: string | undefined,
+): boolean {
+  if (!hasFloatingTimestampSourceProvider(sourceProviderSlug)) return false;
+  const semantics = inferTimestampSemantics(value);
+  return semantics === "floating" || /(?:z|[+-]00:?00)$/iu.test(value.trim());
 }
 
 function inferTimestampSemantics(value: string | undefined): TimestampSemantics | undefined {

@@ -3943,7 +3943,7 @@ test("Junction sparse metabolic resources fail closed without retaining invalid 
   assertNoFullJunctionTimeseriesArtifacts(payload);
 });
 
-test("Junction Libre sparse metabolic timestamps use the vault zone and fail closed without one or during DST gaps", () => {
+test("Junction Libre wall times require a zone and exactly one UTC instant", () => {
   const snapshot = {
     importedAt: "2023-09-28T12:00:00.000Z",
     timeseries: {
@@ -3999,6 +3999,51 @@ test("Junction Libre sparse metabolic timestamps use the vault zone and fail clo
       },
     },
   }, { defaultTimeZone: "America/Chicago" });
+  const ambiguousDstWallTime = normalizeJunctionSnapshot({
+    importedAt: "2026-11-02T12:00:00.000Z",
+    timeseries: {
+      carbohydrates: {
+        groups: {
+          freestyle_libre: [{
+            data: [{
+              start: "2026-11-01T01:30:00",
+              end: "2026-11-01T01:45:00",
+              unit: "g",
+              value: 20,
+              private_provider_array: ["SENSITIVE_LIBRE_OVERLAP_SENTINEL"],
+            }],
+            source: { provider: "freestyle_libre", type: "cgm" },
+          }],
+        },
+      },
+    },
+  }, { defaultTimeZone: "America/Chicago" });
+  const explicitDstOverlap = normalizeJunctionSnapshot({
+    importedAt: "2026-11-02T12:00:00.000Z",
+    timeseries: {
+      carbohydrates: {
+        groups: {
+          freestyle_libre: [{
+            data: [
+              {
+                start: "2026-11-01T01:30:00-05:00",
+                end: "2026-11-01T01:40:00-05:00",
+                unit: "g",
+                value: 10,
+              },
+              {
+                start: "2026-11-01T01:30:00-06:00",
+                end: "2026-11-01T01:40:00-06:00",
+                unit: "g",
+                value: 20,
+              },
+            ],
+            source: { provider: "freestyle_libre", type: "cgm" },
+          }],
+        },
+      },
+    },
+  });
   const medication = zoned.events?.find((event) => event.kind === "medication_intake");
   const carbohydrate = zoned.events?.find(
     (event) => event.kind === "observation" && event.fields?.metric === "carbohydrate-intake",
@@ -4045,6 +4090,145 @@ test("Junction Libre sparse metabolic timestamps use the vault zone and fail clo
     /SENSITIVE_LIBRE_DST|private_provider_array|"samples"|"data"\s*:/u,
   );
   assertNoFullJunctionTimeseriesArtifacts(nonexistentDstWallTime);
+
+  assert.deepEqual(ambiguousDstWallTime.events, []);
+  assert.equal(ambiguousDstWallTime.samples?.length ?? 0, 0);
+  assert.equal(
+    findJunctionSparseMetabolicArtifacts(ambiguousDstWallTime, "carbohydrates")[0]?.role,
+    "junction-timeseries-reading-carbohydrates:no-valid-samples",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(ambiguousDstWallTime.evidenceParts ?? []),
+    /SENSITIVE_LIBRE_OVERLAP|private_provider_array|"samples"|"data"\s*:/u,
+  );
+  assertNoFullJunctionTimeseriesArtifacts(ambiguousDstWallTime);
+
+  const explicitOverlapEvents = explicitDstOverlap.events?.filter(
+    (event) => event.kind === "observation" && event.fields?.metric === "carbohydrate-intake",
+  ) ?? [];
+  assert.deepEqual(
+    explicitOverlapEvents.map((event) => event.occurredAt).sort(),
+    ["2026-11-01T06:30:00.000Z", "2026-11-01T07:30:00.000Z"],
+  );
+  assert.ok(explicitOverlapEvents.every((event) =>
+    event.dataOrigin?.timestampSemantics === "offset"
+  ));
+  assertNoFullJunctionTimeseriesArtifacts(explicitDstOverlap);
+});
+
+test("Junction Libre explicit overlap offsets preserve both instants through correction and replay", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-libre-overlap");
+  const makeSnapshot = (input: {
+    carbohydrateEnd: string;
+    carbohydrateValue: number;
+    importedAt: string;
+    insulinDose: number;
+    insulinEnd: string;
+    rowSuffix: string;
+  }) => ({
+    accountId: "junction-account-libre-overlap",
+    importedAt: input.importedAt,
+    timeseries: {
+      carbohydrates: {
+        groups: {
+          freestyle_libre: [{
+            data: [{
+              id: `carbohydrate-${input.rowSuffix}`,
+              source_device_id: `libre-${input.rowSuffix}`,
+              start: "2026-11-01T01:30:00-05:00",
+              end: input.carbohydrateEnd,
+              unit: "g",
+              value: input.carbohydrateValue,
+            }],
+            source: { provider: "freestyle_libre", type: "cgm" },
+          }],
+        },
+      },
+      insulin_injection: {
+        groups: {
+          freestyle_libre: [{
+            data: [{
+              id: `insulin-${input.rowSuffix}`,
+              source_device_id: `libre-${input.rowSuffix}`,
+              start: "2026-11-01T01:30:00-06:00",
+              end: input.insulinEnd,
+              type: "rapid_acting",
+              delivery_mode: "bolus",
+              unit: "unit",
+              value: input.insulinDose,
+            }],
+            source: { provider: "freestyle_libre", type: "cgm" },
+          }],
+        },
+      },
+    },
+  });
+  const firstSnapshot = makeSnapshot({
+    carbohydrateEnd: "2026-11-01T01:40:00-05:00",
+    carbohydrateValue: 20,
+    importedAt: "2026-11-02T12:00:00.000Z",
+    insulinDose: 2,
+    insulinEnd: "2026-11-01T01:45:00-06:00",
+    rowSuffix: "original",
+  });
+  const correctedSnapshot = makeSnapshot({
+    carbohydrateEnd: "2026-11-01T01:42:00-05:00",
+    carbohydrateValue: 25,
+    importedAt: "2026-11-02T13:00:00.000Z",
+    insulinDose: 3,
+    insulinEnd: "2026-11-01T01:47:00-06:00",
+    rowSuffix: "correction",
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-11-01T00:00:00.000Z",
+      timezone: "America/Chicago",
+    });
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot: firstSnapshot },
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot: firstSnapshot },
+      { corePort: coreRuntime },
+    );
+    const correction = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot: correctedSnapshot },
+      { corePort: coreRuntime },
+    );
+    const correctedPayload = normalizeJunctionSnapshot(correctedSnapshot);
+    const carbohydrate = correction.events.find(
+      (event) => event.kind === "observation" && event.metric === "carbohydrate-intake",
+    );
+    const insulin = correction.events.find((event) => event.kind === "medication_intake");
+    const carbohydrateArtifact = findJunctionSparseMetabolicArtifacts(
+      correctedPayload,
+      "carbohydrates",
+    )[0]?.content as Record<string, unknown> | undefined;
+    const insulinArtifact = findJunctionSparseMetabolicArtifacts(
+      correctedPayload,
+      "insulin-injection",
+    )[0]?.content as Record<string, unknown> | undefined;
+
+    assert.equal(carbohydrate?.occurredAt, "2026-11-01T06:30:00.000Z");
+    assert.equal(carbohydrate?.dayKey, "2026-11-01");
+    assert.equal(carbohydrate?.dataOrigin?.timestampSemantics, "offset");
+    assert.equal(insulin?.occurredAt, "2026-11-01T07:30:00.000Z");
+    assert.equal(insulin?.dayKey, "2026-11-01");
+    assert.equal(insulin?.dataOrigin?.timestampSemantics, "offset");
+    assert.equal(carbohydrateArtifact?.endAt, "2026-11-01T06:42:00.000Z");
+    assert.equal(insulinArtifact?.endAt, "2026-11-01T07:47:00.000Z");
+    assert.equal(replay.applied, false);
+    assert.equal(correction.applied, true);
+    assert.deepEqual(
+      correction.events.map((event) => event.id).sort(),
+      first.events.map((event) => event.id).sort(),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction metabolic facts replay and apply provider corrections under stable identities", async () => {
