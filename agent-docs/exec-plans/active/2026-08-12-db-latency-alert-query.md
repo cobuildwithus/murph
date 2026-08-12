@@ -1,6 +1,6 @@
 # Bound the hosted runtime latency monitor query
 
-Status: completed
+Status: active
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -17,8 +17,7 @@ Updated: 2026-08-12
   chronology, grouping, and truncation semantics.
 - A representative PostgreSQL proof demonstrates bounded candidate work and
   usable indexes under dominant unrelated history.
-- Focused tests, Web typecheck, lint, and privacy review pass. Preliminary
-  ReviewGPT is attempted when the existing private thread is accessible.
+- Focused tests, Web typecheck, lint, privacy review, and ReviewGPT review pass.
 
 ## Constraints
 
@@ -30,9 +29,9 @@ Updated: 2026-08-12
 
 ## Tasks
 
-1. [x] Inspect the existing exact-base ReviewGPT thread without creating a
-   duplicate. Its one-character partial response remained inaccessible through
-   the live review browser, so no patch or finding was available.
+1. [ ] Complete the existing exact-base ReviewGPT thread without creating a
+   duplicate. Its one-character partial response remains inaccessible through
+   the live review browser, so no patch or finding is currently available.
 2. [x] Replace the broad cross-owner `OR` with five independently time-indexed
    candidate branches and one exact hydration query.
 3. [x] Add PostgreSQL query-plan/cardinality proof under dominant stale history
@@ -62,4 +61,3 @@ Updated: 2026-08-12
   Web typecheck, scoped lint, Prisma generation/validation/migration deploy, the
   production migration guard, workspace and architecture guards, docs drift,
   privacy scan, and `git diff --check` passed.
-Completed: 2026-08-12
