@@ -4139,8 +4139,11 @@ describe("readHostedAiUsageGateSnapshots", () => {
     });
     const transaction = vi.fn(async (
       run: (tx: typeof prisma) => Promise<unknown>,
-      _options?: { isolationLevel?: string },
-    ) => run(prisma));
+      options?: { isolationLevel?: string },
+    ) => {
+      void options;
+      return run(prisma);
+    });
 
     const snapshots = await readHostedAiUsageGateSnapshots({
       memberIds: ["member_123"],
@@ -4198,8 +4201,11 @@ describe("readHostedAiUsageGateSnapshots", () => {
     });
     const increasedTransaction = vi.fn(async (
       run: (tx: typeof increasedPlan) => Promise<unknown>,
-      _options?: { isolationLevel?: string },
-    ) => run(increasedPlan));
+      options?: { isolationLevel?: string },
+    ) => {
+      void options;
+      return run(increasedPlan);
+    });
 
     const increasedSnapshots = await readHostedAiUsageGateSnapshots({
       memberIds: ["member_123"],
@@ -4234,8 +4240,11 @@ describe("readHostedAiUsageGateSnapshots", () => {
     });
     const decreasedTransaction = vi.fn(async (
       run: (tx: typeof decreasedPlan) => Promise<unknown>,
-      _options?: { isolationLevel?: string },
-    ) => run(decreasedPlan));
+      options?: { isolationLevel?: string },
+    ) => {
+      void options;
+      return run(decreasedPlan);
+    });
 
     const decreasedSnapshots = await readHostedAiUsageGateSnapshots({
       memberIds: ["member_123"],

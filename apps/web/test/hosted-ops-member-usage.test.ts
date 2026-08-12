@@ -303,7 +303,10 @@ describe("hosted ops member usage", () => {
       members: 1_024n,
       totalAllTimeUsageUsdMicros: 9_223_372_036_854_775_808n,
     }));
-    const groupMessages = vi.fn(async () => []);
+    const groupMessages = vi.fn(async (query: unknown) => {
+      void query;
+      return [];
+    });
     const groupUsage = vi.fn(async () => []);
     const findDeliveries = vi.fn(async () => []);
     const findMembers = createPagedMemberFindManyMock(memberCandidates);

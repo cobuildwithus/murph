@@ -173,6 +173,62 @@ test("owner snapshot maps seats, member labels, masked phone, and share links", 
   expect(invite?.acceptUrl).toBe("https://app.murph.test/family/accept/CODEDAD");
 });
 
+test(
+  "owner snapshot shares one repeatable-read database view and commits before decrypting",
+  async () => {
+    const transactionPrisma = ownerSnapshotPrisma();
+    let transactionOpen = false;
+    const prisma = {
+      $transaction: vi.fn(async (
+        callback: (tx: ReturnType<typeof ownerSnapshotPrisma>) => Promise<unknown>,
+        options: unknown,
+      ) => {
+        void options;
+        transactionOpen = true;
+        try {
+          return await callback(transactionPrisma);
+        } finally {
+          transactionOpen = false;
+        }
+      }),
+    };
+    encryptionMocks.decryptHostedWebNullableString.mockImplementation(
+      async (input: { value: string | null }) => {
+        expect(transactionOpen).toBe(false);
+        return input.value ? RAW_PHONE : null;
+      },
+    );
+
+    const snapshot = await readHostedFamilyOwnerSnapshotForMember({
+      // @ts-expect-error: focused root client delegates all database reads to its transaction
+      prisma,
+      memberId: "m_owner",
+      now: NOW,
+    });
+
+    expect(snapshot?.seats.used).toBe(3);
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      {
+        isolationLevel: "RepeatableRead",
+        maxWait: 5_000,
+      },
+    );
+    expect(transactionPrisma.hostedAccountGroup.findUnique)
+      .toHaveBeenCalledTimes(1);
+    expect(transactionPrisma.hostedAccountGroupMembership.findMany)
+      .toHaveBeenCalledTimes(1);
+    expect(transactionPrisma.hostedAccountGroupInvite.findMany)
+      .toHaveBeenCalledTimes(1);
+    expect(transactionPrisma.hostedAccountGroupPlanCapacity.findMany)
+      .toHaveBeenCalledTimes(1);
+    expect(transactionPrisma.hostedAccountGroupBillingRef.findUnique)
+      .toHaveBeenCalledTimes(1);
+    expect(transactionPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(encryptionMocks.decryptHostedWebNullableString).toHaveBeenCalled();
+  },
+);
+
 test("pending Max transition advances the Web rollback floor before Stripe capacity changes", async () => {
   const transitioningMember = {
     createdAt: FUTURE,

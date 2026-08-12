@@ -1514,10 +1514,13 @@ describe("hosted runtime latency dashboard store", () => {
   });
 
   it("caps checkpoint-publication collection writes with truncation evidence", async () => {
-    const queryRaw = vi.fn(async (_query: unknown) => [{
-      matchedCount: 250n,
-      truncated: true,
-    }]);
+    const queryRaw = vi.fn(async (query: unknown) => {
+      void query;
+      return [{
+        matchedCount: 250n,
+        truncated: true,
+      }];
+    });
 
     await expect(recordHostedIngressRuntimeMilestone({
       at: instant("2026-06-02T19:50:00.000Z"),

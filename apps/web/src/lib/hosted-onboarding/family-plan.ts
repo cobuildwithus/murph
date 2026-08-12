@@ -828,86 +828,130 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
 }): Promise<HostedFamilyOwnerSnapshot | null> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const group = await prisma.hostedAccountGroup.findUnique({
-    select: {
-      billingStatus: true,
-      displayName: true,
-      id: true,
-      ownerMemberId: true,
-      suspendedAt: true,
-    },
-    where: {
-      ownerMemberId: input.memberId,
-    },
-  });
+  const readDatabaseSnapshot = async (readPrisma: HostedOnboardingReadClient) => {
+    const group = await readPrisma.hostedAccountGroup.findUnique({
+      select: {
+        billingStatus: true,
+        displayName: true,
+        id: true,
+        ownerMemberId: true,
+        suspendedAt: true,
+      },
+      where: {
+        ownerMemberId: input.memberId,
+      },
+    });
 
-  if (!group) {
+    if (!group) {
+      return null;
+    }
+
+    const [memberships, invites, paidCapacities] = await Promise.all([
+      readPrisma.hostedAccountGroupMembership.findMany({
+        select: {
+          createdAt: true,
+          id: true,
+          joinedAt: true,
+          memberId: true,
+          pendingPlanCode: true,
+          planCode: true,
+          role: true,
+          status: true,
+        },
+        take: HOSTED_FAMILY_MAX_SEATS + 1,
+        where: {
+          groupId: group.id,
+          status: "active",
+        },
+      }),
+      readPrisma.hostedAccountGroupInvite.findMany({
+        orderBy: [
+          { expiresAt: "asc" },
+          { id: "asc" },
+        ],
+        select: hostedAccountGroupInviteSelect,
+        take: HOSTED_FAMILY_MAX_SEATS + 1,
+        where: {
+          expiresAt: {
+            gt: now,
+          },
+          groupId: group.id,
+          status: "pending",
+        },
+      }),
+      readHostedFamilyPlanCapacitiesTx({
+        groupId: group.id,
+        tx: readPrisma,
+      }),
+    ]);
+
+    if (
+      memberships.length > HOSTED_FAMILY_MAX_SEATS
+      || invites.length > HOSTED_FAMILY_MAX_SEATS
+      || memberships.length + invites.length > HOSTED_FAMILY_MAX_SEATS
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_SNAPSHOT_CAPACITY_INVALID",
+        httpStatus: 500,
+        message: "Family membership exceeds the supported seat capacity.",
+      });
+    }
+
+    // Keep pre-limit work on query-shaped indexes, then restore the prior
+    // presentation order only after cardinality is proven to be at most six.
+    memberships.sort(compareHostedFamilyOwnerSnapshotRows);
+    invites.sort(compareHostedFamilyOwnerSnapshotRows);
+
+    const acceptedInvites = await readFirstAcceptedHostedFamilyInvitesForMembers({
+      group,
+      memberIds: memberships
+        .map((membership) => membership.memberId)
+        .filter((memberId) => memberId !== group.ownerMemberId),
+      prisma: readPrisma,
+    });
+
+    return {
+      acceptedInvites,
+      group,
+      invites,
+      memberships,
+      paidCapacities,
+    };
+  };
+
+  // Invite acceptance atomically moves one row from pending invites to active
+  // memberships. Keep both cap reads and accepted-history authority on one
+  // MVCC snapshot so READ COMMITTED cannot combine opposite sides of that move.
+  const maybeTransaction = prisma as {
+    $transaction?: <T>(
+      run: (tx: Prisma.TransactionClient) => Promise<T>,
+      options?: {
+        isolationLevel?: Prisma.TransactionIsolationLevel;
+        maxWait?: number;
+      },
+    ) => Promise<T>;
+  };
+  const databaseSnapshot = typeof maybeTransaction.$transaction === "function"
+    ? await maybeTransaction.$transaction(
+        async (tx) => readDatabaseSnapshot(tx),
+        {
+          ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        },
+      )
+    : await readDatabaseSnapshot(prisma);
+
+  if (!databaseSnapshot) {
     return null;
   }
 
-  const [memberships, invites, paidCapacities] = await Promise.all([
-    prisma.hostedAccountGroupMembership.findMany({
-      select: {
-        createdAt: true,
-        id: true,
-        joinedAt: true,
-        memberId: true,
-        pendingPlanCode: true,
-        planCode: true,
-        role: true,
-        status: true,
-      },
-      take: HOSTED_FAMILY_MAX_SEATS + 1,
-      where: {
-        groupId: group.id,
-        status: "active",
-      },
-    }),
-    prisma.hostedAccountGroupInvite.findMany({
-      orderBy: [
-        { expiresAt: "asc" },
-        { id: "asc" },
-      ],
-      select: hostedAccountGroupInviteSelect,
-      take: HOSTED_FAMILY_MAX_SEATS + 1,
-      where: {
-        expiresAt: {
-          gt: now,
-        },
-        groupId: group.id,
-        status: "pending",
-      },
-    }),
-    readHostedFamilyPlanCapacitiesTx({
-      groupId: group.id,
-      tx: prisma,
-    }),
-  ]);
-
-  if (
-    memberships.length > HOSTED_FAMILY_MAX_SEATS
-    || invites.length > HOSTED_FAMILY_MAX_SEATS
-    || memberships.length + invites.length > HOSTED_FAMILY_MAX_SEATS
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_FAMILY_SNAPSHOT_CAPACITY_INVALID",
-      httpStatus: 500,
-      message: "Family membership exceeds the supported seat capacity.",
-    });
-  }
-
-  // Keep pre-limit work on query-shaped indexes, then restore the prior
-  // presentation order only after cardinality is proven to be at most six.
-  memberships.sort(compareHostedFamilyOwnerSnapshotRows);
-  invites.sort(compareHostedFamilyOwnerSnapshotRows);
-
-  const acceptedInvites = await readFirstAcceptedHostedFamilyInvitesForMembers({
+  const {
+    acceptedInvites,
     group,
-    memberIds: memberships
-      .map((membership) => membership.memberId)
-      .filter((memberId) => memberId !== group.ownerMemberId),
-    prisma,
-  });
+    invites,
+    memberships,
+    paidCapacities,
+  } = databaseSnapshot;
 
   const firstAcceptedInviteByMember = new Map<string, (typeof acceptedInvites)[number]>();
   for (const invite of acceptedInvites) {

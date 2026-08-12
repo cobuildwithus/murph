@@ -467,11 +467,15 @@ Last verified: 2026-08-12
   seats before reading private invite history. Active membership admission uses
   the existing group/status index without a pre-limit sort; live pending invite
   admission seeks by group/status/expiry/id. Both restore created order only
-  after the cap checks pass. For each current non-owner member, one indexed
-  lateral lookup selects only the earliest accepted invite; departed members
-  and later historical accepts never reach decryption. A roster that exceeds
-  the product invariant fails closed instead of turning a settings read into an
-  unbounded history scan.
+  after the cap checks pass. The ordinary root-client read evaluates roster,
+  paid capacities, and accepted-invite history in one short repeatable-read
+  database snapshot, then closes that transaction before private invite
+  projection and decryption; a caller already inside a canonical transaction
+  reuses it instead of nesting another transaction. For each current non-owner
+  member, one indexed lateral lookup selects only the earliest accepted invite;
+  departed members and later historical accepts never reach decryption. A
+  roster that exceeds the product invariant fails closed instead of turning a
+  settings read into an unbounded history scan.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a

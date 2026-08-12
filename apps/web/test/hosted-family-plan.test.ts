@@ -2809,12 +2809,32 @@ describe("hosted Family plan", () => {
     });
     tx.hostedAccountGroupMembership.findMany
       .mockResolvedValue([
-        { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_mom", planCode: "max" },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_owner",
+          memberId: "member_owner",
+          planCode: "pulse",
+        },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_mom",
+          memberId: "member_mom",
+          planCode: "max",
+        },
       ])
       .mockResolvedValueOnce([
-        { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_mom", planCode: "pulse" },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_owner",
+          memberId: "member_owner",
+          planCode: "pulse",
+        },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_mom",
+          memberId: "member_mom",
+          planCode: "pulse",
+        },
       ])
       .mockResolvedValueOnce([
         { memberId: "member_owner", planCode: "pulse" },
@@ -2911,8 +2931,18 @@ describe("hosted Family plan", () => {
     });
     tx.hostedAccountGroupMembership.findMany
       .mockResolvedValue([
-        { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_relative", planCode: "edge" },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_owner",
+          memberId: "member_owner",
+          planCode: "pulse",
+        },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_member",
+          memberId: "member_relative",
+          planCode: "edge",
+        },
       ])
       .mockResolvedValueOnce([
         { memberId: "member_owner", planCode: "pulse" },
@@ -2974,8 +3004,18 @@ describe("hosted Family plan", () => {
     });
     tx.hostedAccountGroupMembership.findMany
       .mockResolvedValue([
-        { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_mom", planCode: "edge" },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_owner",
+          memberId: "member_owner",
+          planCode: "pulse",
+        },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_mom",
+          memberId: "member_mom",
+          planCode: "edge",
+        },
       ])
       .mockResolvedValueOnce([
         { memberId: "member_owner", planCode: "pulse" },
@@ -2986,8 +3026,18 @@ describe("hosted Family plan", () => {
         { memberId: "member_mom", planCode: "pulse" },
       ])
       .mockResolvedValueOnce([
-        { memberId: "member_owner", planCode: "pulse" },
-        { memberId: "member_mom", planCode: "pulse" },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_owner",
+          memberId: "member_owner",
+          planCode: "pulse",
+        },
+        {
+          createdAt: pendingStartedAt,
+          id: "hbagm_mom",
+          memberId: "member_mom",
+          planCode: "pulse",
+        },
       ]);
     const currentCapacities = [{ billedQuantity: 2, planCode: "pulse" }];
     tx.hostedAccountGroupPlanCapacity.findMany
@@ -3064,14 +3114,21 @@ describe("hosted Family plan", () => {
       { memberId: "member_mom", planCode: "edge" },
     ];
     tx.hostedAccountGroupMembership.findMany
-      .mockResolvedValue(currentAssignments.map((assignment) => (
-        assignment.memberId === "member_mom"
-          ? { ...assignment, planCode: "pulse" }
-          : assignment
-      )))
+      .mockResolvedValue(currentAssignments.map((assignment, index) => ({
+        ...assignment,
+        createdAt: pendingStartedAt,
+        id: `hbagm_${index}`,
+        ...(assignment.memberId === "member_mom"
+          ? { planCode: "pulse" }
+          : {}),
+      })))
       .mockResolvedValueOnce(currentAssignments)
       .mockResolvedValueOnce(currentAssignments)
-      .mockResolvedValueOnce(currentAssignments);
+      .mockResolvedValueOnce(currentAssignments.map((assignment, index) => ({
+        ...assignment,
+        createdAt: pendingStartedAt,
+        id: `hbagm_snapshot_${index}`,
+      })));
     const currentCapacities = [
       { billedQuantity: 5, planCode: "pulse" },
       { billedQuantity: 1, planCode: "edge" },
