@@ -95,6 +95,11 @@ export interface FindEventsByRawRefsInput {
   resourceType?: string;
 }
 
+export interface EventRawRefMatch {
+  attachment: EventRecord;
+  latest: EventRecord;
+}
+
 export interface UpsertEventResult {
   eventId: string;
   ledgerFile: string;
@@ -394,7 +399,7 @@ function rawRefMatches(record: EventRecord, rawRef: string, input: FindEventsByR
 
 export async function findEventsByRawRefs(
   input: FindEventsByRawRefsInput,
-): Promise<EventRecord[][]> {
+): Promise<EventRawRefMatch[][]> {
   if (input.rawRefs.length > 100) {
     throw new TypeError("Event raw-reference lookup is limited to 100 references.");
   }
@@ -406,7 +411,9 @@ export async function findEventsByRawRefs(
     extension: ".jsonl",
   });
   const refIndexesByRawRef = new Map<string, number[]>();
-  const candidateIdsByRefIndex = input.rawRefs.map(() => new Set<string>());
+  const attachmentsByRefIndex = input.rawRefs.map(
+    () => new Map<string, MatchedEventRecord>(),
+  );
   input.rawRefs.forEach((rawRef, index) => {
     const indexes = refIndexesByRawRef.get(rawRef) ?? [];
     indexes.push(index);
@@ -420,14 +427,21 @@ export async function findEventsByRawRefs(
       for (const rawRef of collectEventRawReferencePaths(record)) {
         for (const refIndex of refIndexesByRawRef.get(rawRef) ?? []) {
           if (rawRefMatches(record, rawRef, input)) {
-            candidateIdsByRefIndex[refIndex]?.add(record.id);
+            const attachments = attachmentsByRefIndex[refIndex];
+            const entry = { relativePath, record };
+            const prior = attachments?.get(record.id);
+            if (attachments && (!prior || compareEventSpineEntries(entry, prior) < 0)) {
+              attachments.set(record.id, entry);
+            }
           }
         }
       }
     }
   }
 
-  const candidateIds = new Set(candidateIdsByRefIndex.flatMap((ids) => [...ids]));
+  const candidateIds = new Set(
+    attachmentsByRefIndex.flatMap((attachments) => [...attachments.keys()]),
+  );
   if (candidateIds.size === 0) {
     return input.rawRefs.map(() => []);
   }
@@ -448,14 +462,16 @@ export async function findEventsByRawRefs(
     }
   }
 
-  return input.rawRefs.map((rawRef, refIndex) =>
-    [...(candidateIdsByRefIndex[refIndex] ?? [])]
-      .map((candidateId) => latestByCandidateId.get(candidateId)?.record)
-      .filter((record): record is EventRecord =>
-        record !== undefined
-        && !isDeletedEventSpineRecord(record)
-        && rawRefMatches(record, rawRef, input))
-      .sort((left, right) => left.id.localeCompare(right.id)));
+  return input.rawRefs.map((_rawRef, refIndex) =>
+    [...(attachmentsByRefIndex[refIndex] ?? new Map<string, MatchedEventRecord>())]
+      .map(([candidateId, attachment]) => {
+        const latest = latestByCandidateId.get(candidateId);
+        return latest
+          ? { attachment: attachment.record, latest: latest.record }
+          : undefined;
+      })
+      .filter((match): match is EventRawRefMatch => match !== undefined)
+      .sort((left, right) => left.latest.id.localeCompare(right.latest.id)));
 }
 
 function flattenMatchedEventRecords(

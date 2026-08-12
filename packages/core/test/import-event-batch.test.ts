@@ -7,6 +7,7 @@ import { test } from "vitest";
 import type { AuditRecord, EventRecord } from "@murphai/contracts";
 
 import {
+  deleteEvent,
   findEventByExternalRef,
   findEventsByRawRefs,
   importEventBatch,
@@ -90,7 +91,7 @@ function buildClinicalMeasurementPayload(version: string, value = 72) {
   };
 }
 
-test("findEventsByRawRefs returns latest live events in stable creation order", async () => {
+test("findEventsByRawRefs returns immutable attachments and latest lifecycle state", async () => {
   const vaultRoot = await makeVault("event-raw-ref-batch");
   const rawRef = "raw/workouts/2026/03/batch/source.csv";
   await importEventBatch({
@@ -102,7 +103,7 @@ test("findEventsByRawRefs returns latest live events in stable creation order", 
     apply: true,
   });
 
-  const [records, missing] = await findEventsByRawRefs({
+  const firstLookup = await findEventsByRawRefs({
     vaultRoot,
     rawRefs: [rawRef, "raw/workouts/missing.csv"],
     system: "whoop",
@@ -110,10 +111,34 @@ test("findEventsByRawRefs returns latest live events in stable creation order", 
   });
 
   assert.deepEqual(
-    records?.map((record) => record.externalRef?.resourceId),
+    firstLookup[0]?.map((match) => match.latest.externalRef?.resourceId),
     ["sleep-2026-03-01", "sleep-2026-03-02"],
   );
-  assert.deepEqual(missing, []);
+  assert.deepEqual(firstLookup[1], []);
+
+  const firstEventId = firstLookup[0]![0]!.latest.id;
+  await upsertEvent({
+    vaultRoot,
+    payload: {
+      ...buildObservationPayload(1, "efficiency", 90),
+      id: firstEventId,
+      occurredAt: "2026-03-05T06:50:00.000Z",
+      title: "Edited title",
+      rawRefs: [],
+    },
+  });
+  await deleteEvent({ vaultRoot, eventId: firstEventId });
+
+  const [matches] = await findEventsByRawRefs({
+    vaultRoot,
+    rawRefs: [rawRef],
+    system: "whoop",
+    resourceType: "sleep",
+  });
+  assert.equal(matches?.[0]?.attachment.title, "Sleep efficiency 2026-03-01");
+  assert.equal(matches?.[0]?.latest.title, "Edited title");
+  assert.equal(matches?.[0]?.latest.lifecycle?.state, "deleted");
+  assert.equal(matches?.[0]?.latest.rawRefs, undefined);
 });
 
 function buildClinicalTestPayload(version: string) {

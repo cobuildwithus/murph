@@ -49,6 +49,7 @@ export interface WorkoutCsvPlannerInput {
 
 export interface PlannedWorkoutCsvSession {
   sourceSessionKey: string;
+  sourceEndTimeKey?: string;
   sourceWorkoutId: string;
   occurredAt: string;
   title: string;
@@ -94,6 +95,7 @@ interface WorkoutCsvSessionExercise {
 
 interface MutableWorkoutCsvSession {
   sourceSessionKey: string;
+  sourceEndTimeKey?: string;
   sourceWorkoutId: string;
   title: string;
   occurredAt: string;
@@ -481,6 +483,13 @@ function stableWorkoutSessionKey(rawTimestamp: string): string {
     .slice(0, 40);
 }
 
+function stableWorkoutEndTimeKey(rawDate: string | undefined, rawEndTime: string): string {
+  return createHash("sha256")
+    .update([rawDate, rawEndTime].filter(Boolean).join(" ").trim())
+    .digest("hex")
+    .slice(0, 40);
+}
+
 function stableWorkoutSourceId(source: WorkoutCsvSource, sourceSessionKey: string): string {
   const digest = createHash("sha256")
     .update(`${source}\0${sourceSessionKey}`)
@@ -769,6 +778,20 @@ function buildSessions(input: {
       };
       sessions.set(sourceWorkoutId, session);
     }
+    const rawEndTime = valueAt(row, endTimeIndex);
+    const sourceEndTimeKey = rawEndTime
+      ? stableWorkoutEndTimeKey(rawDate, rawEndTime)
+      : undefined;
+    if (
+      session.sourceEndTimeKey
+      && sourceEndTimeKey
+      && session.sourceEndTimeKey !== sourceEndTimeKey
+    ) {
+      skippedRowCount += 1;
+      incrementReason(input.skipReasons, "conflicting workout end times");
+      continue;
+    }
+    session.sourceEndTimeKey = session.sourceEndTimeKey ?? sourceEndTimeKey;
     const rawDuration = valueAt(row, durationIndex);
     const durationMinutes = parseDurationMinutes(rawDuration);
     if (session.durationMinutes === undefined && rawDuration !== undefined) {
@@ -779,7 +802,6 @@ function buildSessions(input: {
         invalidDurationSessionIds.delete(sourceWorkoutId);
       }
     }
-    const rawEndTime = valueAt(row, endTimeIndex);
     session.endedAt = session.endedAt ?? (rawEndTime
       ? normalizeWorkoutTimestamp(rawDate, rawEndTime, input.timeZone)
       : undefined);
@@ -865,6 +887,7 @@ function buildSessions(input: {
       });
     return {
       sourceSessionKey: session.sourceSessionKey,
+      ...(session.sourceEndTimeKey ? { sourceEndTimeKey: session.sourceEndTimeKey } : {}),
       sourceWorkoutId: session.sourceWorkoutId,
       occurredAt: session.occurredAt,
       title: session.title,

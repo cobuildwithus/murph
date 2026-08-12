@@ -345,6 +345,7 @@ export type {
   AddMeasurementInput,
   AddMeasurementResult,
   EventDraftByKind,
+  EventRawRefMatch,
   FindCaptureByLookupResult,
   FindEventByExternalRefInput,
   FindEventsByRawRefsInput,

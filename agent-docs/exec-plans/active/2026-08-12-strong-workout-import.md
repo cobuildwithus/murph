@@ -153,6 +153,18 @@ Updated: 2026-08-12
   snapshots and resolves their attached events in one core lookup. Refreshed
   exports skip overlapping sessions, create only new sessions, and fail closed
   on changed, partial, conflicting, ambiguous, or over-limit evidence.
+- Final ReviewGPT round 5 found that raw-reference lookup returned only the
+  latest live revision, so a member-deleted workout could be recreated by a
+  later expanded snapshot and later title/time edits could break source-session
+  identity. The core lookup now returns the immutable attachment revision plus
+  the latest revision, including tombstones. Reconciliation maps with the
+  attachment, preserves the latest live payload, and treats a tombstone as an
+  authoritative skipped session rather than a request to recreate it.
+- Final ReviewGPT round 5 also found that canonical end timestamps were excluded
+  from refreshed-snapshot comparison and that raw-only storage bypassed the
+  ambiguous-provider gate. The planner now compares a privacy-safe hash of the
+  raw provider end input, and raw-only storage requires the same explicit or
+  unambiguous Strong/Hevy recognition as structured import.
 
 ## Verification
 

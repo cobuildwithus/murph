@@ -77,6 +77,7 @@ export type {
 export type {
   DeleteEventInput,
   DeleteEventResult,
+  EventRawRefMatch,
   FindEventByExternalRefInput,
   FindEventsByRawRefsInput,
   UpsertEventDraftInput,

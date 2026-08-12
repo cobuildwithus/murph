@@ -1254,7 +1254,143 @@ describe("workout-import", () => {
         workoutImportModule.importWorkoutCsv({ vault: tempDir, file: csvPath }),
         /supported structured workout export/u,
       );
+      await assert.rejects(
+        workoutImportModule.importWorkoutCsv({
+          vault: tempDir,
+          file: csvPath,
+          storeRawOnly: true,
+        }),
+        /supported structured workout export/u,
+      );
       assert.deepEqual(await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"), []);
+    });
+  });
+
+  test("preserves edits and tombstones while expanding a prior workout snapshot", async () => {
+    await withTempDir(async (tempDir) => {
+      await initializeVault({
+        vaultRoot: tempDir,
+        title: "Workout Snapshot Lifecycle Test Vault",
+        timezone: "UTC",
+      });
+      const text = [
+        "Workout Name,Date,Start Time,End Time,Duration,Exercise Name,Set Order,Weight,Weight Unit,Reps",
+        "Upper,2026-04-08,10:00:00,10:45:00,45,Press,1,40,kg,8",
+        "Lower,2026-04-09,11:00:00,11:30:00,30,Row,1,50,kg,10",
+      ].join("\n");
+      const csvPath = path.join(tempDir, "lifecycle.csv");
+      await writeFile(csvPath, text, "utf8");
+      const generatedIds = [
+        "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+      ];
+      const workoutImportModule = (await importWithMocks(
+        "../src/usecases/workout-import.ts",
+        {
+          "../src/runtime-import.js": () => ({
+            loadRuntimeModule: vi.fn(async (specifier: string) => {
+              if (specifier === "@murphai/core") return coreRuntime;
+              if (specifier === "@murphai/importers") return importersRuntime;
+              if (specifier === "@murphai/runtime-state") {
+                return { generateUlid: () => generatedIds.shift()! };
+              }
+              throw new Error(`Unexpected runtime module: ${specifier}`);
+            }),
+          }),
+        },
+      )) as typeof import("../src/usecases/workout-import.ts");
+
+      const imported = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: csvPath,
+        source: "strong",
+      });
+      assert.equal(imported.createdCount, 2);
+      const plan = importersRuntime.planWorkoutCsvImport({
+        text,
+        timeZone: "UTC",
+        source: "strong",
+      });
+      const records = await Promise.all(plan.sessions.map((session) =>
+        coreRuntime.findEventByExternalRef({
+          vaultRoot: tempDir,
+          system: "strong",
+          resourceType: "workout-session",
+          resourceId: session.sourceWorkoutId,
+        })));
+      const edited = records[0];
+      const removed = records[1];
+      assert.ok(edited);
+      assert.ok(removed);
+      const {
+        schemaVersion: _schemaVersion,
+        id: _id,
+        dayKey: _dayKey,
+        lifecycle: _lifecycle,
+        ...editablePayload
+      } = edited;
+      await coreRuntime.upsertEvent({
+        vaultRoot: tempDir,
+        payload: {
+          ...editablePayload,
+          id: edited.id,
+          title: "Member-edited title",
+          occurredAt: "2026-04-08T12:00:00.000Z",
+        },
+      });
+      await coreRuntime.deleteEvent({ vaultRoot: tempDir, eventId: removed.id });
+
+      const expandedText = [
+        text,
+        "New Session,2026-04-10,09:00:00,09:30:00,30,Squat,1,60,kg,5",
+      ].join("\n");
+      const changedEndPath = path.join(tempDir, "changed-end.csv");
+      await writeFile(
+        changedEndPath,
+        expandedText.replace("10:45:00", "10:50:00"),
+        "utf8",
+      );
+      const rawFilesBeforeConflict = await coreRuntime.walkVaultFiles(tempDir, "raw/workouts");
+      await assert.rejects(
+        workoutImportModule.importWorkoutCsv({
+          vault: tempDir,
+          file: changedEndPath,
+          source: "strong",
+        }),
+        /source session changed/u,
+      );
+      assert.deepEqual(
+        await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"),
+        rawFilesBeforeConflict,
+      );
+
+      const expandedPath = path.join(tempDir, "expanded.csv");
+      await writeFile(expandedPath, expandedText, "utf8");
+      const expanded = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: expandedPath,
+        source: "strong",
+      });
+      assert.equal(expanded.createdCount, 1);
+      assert.equal(expanded.supersededCount, 0);
+      assert.equal(expanded.skippedExistingCount, 2);
+      assert.equal(expanded.receivedCount, 3);
+      const retainedEdit = await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: plan.sessions[0]!.sourceWorkoutId,
+      });
+      assert.equal(retainedEdit?.id, edited.id);
+      assert.equal(retainedEdit?.title, "Member-edited title");
+      assert.equal(retainedEdit?.occurredAt, "2026-04-08T12:00:00.000Z");
+      assert.equal(await coreRuntime.findEventByExternalRef({
+        vaultRoot: tempDir,
+        system: "strong",
+        resourceType: "workout-session",
+        resourceId: plan.sessions[1]!.sourceWorkoutId,
+      }), null);
     });
   });
 

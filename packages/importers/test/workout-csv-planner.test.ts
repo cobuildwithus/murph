@@ -117,6 +117,8 @@ describe("planWorkoutCsvImport", () => {
     assert.equal(plan.requiresDistanceUnit, false);
     assert.equal(plan.sessions[0]?.occurredAt, "2026-04-08T15:00:00.000Z");
     assert.equal(plan.sessions[0]?.workout.endedAt, "2026-04-08T15:45:00.000Z");
+    assert.match(plan.sessions[0]?.sourceEndTimeKey ?? "", /^[a-f0-9]{40}$/u);
+    assert.equal(plan.sessions[0]?.sourceEndTimeKey?.includes("10:45"), false);
     assert.equal(plan.sessions[0]?.note, "Session note");
     assert.equal(plan.sessions[0]?.distanceKm, 1.25);
     assert.deepEqual(plan.sessions[0]?.workout.exercises[0], {
@@ -128,6 +130,15 @@ describe("planWorkoutCsvImport", () => {
       mode: "weight_reps",
       unitOverride: "kg",
     });
+
+    const otherTimeZone = planWorkoutCsvImport({ text, timeZone: "UTC", source: "hevy" });
+    const changedEnd = planWorkoutCsvImport({
+      text: text.replaceAll("2026-04-08T10:45:00", "2026-04-08T10:50:00"),
+      timeZone: "America/Chicago",
+      source: "hevy",
+    });
+    assert.equal(otherTimeZone.sessions[0]?.sourceEndTimeKey, plan.sessions[0]?.sourceEndTimeKey);
+    assert.notEqual(changedEnd.sessions[0]?.sourceEndTimeKey, plan.sessions[0]?.sourceEndTimeKey);
   });
 
   test("rejects an explicit source that conflicts with provider-specific headers", () => {
@@ -274,6 +285,22 @@ describe("planWorkoutCsvImport", () => {
     assert.equal(plan.sessions[0]?.workout.sessionNote, "Session context");
     assert.equal(plan.sessions[0]?.workout.exercises[0]?.note, "Controlled");
     assert.equal(plan.sessions[0]?.workout.exercises[0]?.groupId, "A");
+  });
+
+  test("fails closed when rows for one workout disagree on the provider end time", () => {
+    const plan = planWorkoutCsvImport({
+      text: [
+        "Workout Name,Date,Start Time,End Time,Exercise Name,Set Order,Reps",
+        "Morning,2026-03-12,07:00:00,08:00:00,Press,1,8",
+        "Morning,2026-03-12,07:00:00,08:05:00,Press,2,6",
+      ].join("\n"),
+      timeZone: "UTC",
+      source: "strong",
+    });
+
+    assert.equal(plan.importable, false);
+    assert.equal(plan.skippedRowCount, 1);
+    assert.deepEqual(plan.skipReasons, [{ reason: "conflicting workout end times", count: 1 }]);
   });
 
   test("preserves unit-bearing legacy distance headers and session projection", () => {
