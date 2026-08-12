@@ -166,11 +166,6 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
-interface JunctionTimeseriesSnapshotFetchResult {
-  firstRetryableError: unknown | null;
-  snapshots: Record<string, unknown[]>;
-}
-
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
   canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
@@ -2630,53 +2625,20 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug?: string | null,
     options: JunctionWindowFetchOptions = {},
   ): Promise<Record<string, unknown[]>> {
-    const result = await fetchTimeseriesSnapshotsPreservingResourceFailures(
-      context,
-      windowStart,
-      windowEnd,
-      skippedOptionalResources,
-      resources,
-      sourceProviderSlug,
-      options,
-    );
-    if (result.firstRetryableError !== null) {
-      throw result.firstRetryableError;
-    }
-    return result.snapshots;
-  }
-
-  async function fetchTimeseriesSnapshotsPreservingResourceFailures(
-    context: ProviderJobContext,
-    windowStart: string,
-    windowEnd: string,
-    skippedOptionalResources: JunctionSkippedOptionalResource[],
-    resources: readonly string[] = timeseriesResources,
-    sourceProviderSlug?: string | null,
-    options: JunctionWindowFetchOptions = {},
-  ): Promise<JunctionTimeseriesSnapshotFetchResult> {
     const snapshots: Record<string, unknown[]> = {};
-    let firstRetryableError: unknown | null = null;
-
     for (const resource of resources) {
-      try {
-        snapshots[resource] = await fetchTimeseriesResourceInChunks(
-          context,
-          resource,
-          windowStart,
-          windowEnd,
-          skippedOptionalResources,
-          sourceProviderSlug,
-          options,
-        );
-      } catch (error) {
-        if (!isRetryableDeviceSyncFailure(error)) {
-          throw error;
-        }
-        firstRetryableError ??= error;
-      }
+      snapshots[resource] = await fetchTimeseriesResourceInChunks(
+        context,
+        resource,
+        windowStart,
+        windowEnd,
+        skippedOptionalResources,
+        sourceProviderSlug,
+        options,
+      );
     }
 
-    return { firstRetryableError, snapshots };
+    return snapshots;
   }
 
   async function fetchTimeseriesResourceInChunks(
@@ -2989,48 +2951,43 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug?: string | null,
   ): Promise<JunctionTimeseriesImportResult> {
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
-      if (context.shouldYield?.()) {
-        return {
-          yieldedAt: window.windowStart,
-        };
-      }
-      const fetchResult = await fetchTimeseriesSnapshotsPreservingResourceFailures(
-        context,
-        window.windowStart,
-        window.windowEnd,
-        skippedOptionalResources,
-        resources,
-        sourceProviderSlug,
-        { dateQueryFormat: "date" },
-      );
-      const timeseries = fetchResult.snapshots;
-      if (!hasJunctionSnapshotRecords(timeseries)) {
-        if (fetchResult.firstRetryableError !== null) {
-          throw fetchResult.firstRetryableError;
+      for (const resource of resources ?? timeseriesResources) {
+        if (context.shouldYield?.()) {
+          return {
+            yieldedAt: window.windowStart,
+          };
         }
-        continue;
-      }
+        const timeseries = await fetchTimeseriesSnapshots(
+          context,
+          window.windowStart,
+          window.windowEnd,
+          skippedOptionalResources,
+          [resource],
+          sourceProviderSlug,
+          { dateQueryFormat: "date" },
+        );
+        if (!hasJunctionSnapshotRecords(timeseries)) {
+          continue;
+        }
 
-      const preparedImport = await prepareJunctionImportSnapshot(
-        context,
-        timeseries,
-        sourceProviders,
-      );
-      if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-        await context.importSnapshot({
-          provider: "junction",
-          accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-          connectionId: context.account.id,
-          importedAt: window.windowEnd,
-          windowStart: window.windowStart,
-          windowEnd: window.windowEnd,
-          connections: preparedImport.connections,
-          summaries: {},
-          timeseries: preparedImport.snapshots,
-        });
-      }
-      if (fetchResult.firstRetryableError !== null) {
-        throw fetchResult.firstRetryableError;
+        const preparedImport = await prepareJunctionImportSnapshot(
+          context,
+          timeseries,
+          sourceProviders,
+        );
+        if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+          await context.importSnapshot({
+            provider: "junction",
+            accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+            connectionId: context.account.id,
+            importedAt: window.windowEnd,
+            windowStart: window.windowStart,
+            windowEnd: window.windowEnd,
+            connections: preparedImport.connections,
+            summaries: {},
+            timeseries: preparedImport.snapshots,
+          });
+        }
       }
     }
     return {
@@ -6173,13 +6130,15 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     return null;
   }
 
-  if (resource === "note") {
+  const policy = [...JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES]
+    .find(([candidate]) => candidate === resource)?.[1];
+  if (policy?.historyAnchor === "schedule_time") {
     return sha256Text(JSON.stringify([
       "junction",
       "extended-timeseries-backfill",
       normalizeProviderSlug(payload.sourceProviderSlug),
       resource,
-      JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES.get(resource)?.version ?? 1,
+      policy.version,
     ]));
   }
 
