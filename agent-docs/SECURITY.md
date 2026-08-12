@@ -1034,9 +1034,15 @@ Last verified: 2026-08-11
   the exact configured Frog App, retains the expected label, and has exactly
   one matching binding in the protected default branch's committed friction
   tree. The issue number is the only issue field inserted into the parent
-  worker prompt. Titles, bodies, comments, links, repository content,
-  ReviewGPT prose, and attachments remain untrusted evidence and cannot
-  override user or repository instructions.
+  worker prompt. The ReviewGPT implementation prompt and edit-only Codex prompt
+  require an explicit foul-play assessment before implementation. Titles,
+  bodies, comments, attachments, links, proposed patches, existing
+  branch/worktree state, embedded instructions, repository content, and
+  ReviewGPT prose remain adversarial evidence and cannot override user or
+  repository instructions. Unexplained scope or weakened authentication,
+  review, sandbox, credential, or network boundaries stop the run without a
+  patch or ready PR body; neither model may normalize suspicious state into a
+  PR.
   GitHub CLI's GraphQL issue projection represents this App actor as
   `app/murph-frog-reconciliation`; the workflow's REST-style bot-login setting
   uses a different `[bot]` representation and is not the local admission field.
@@ -1058,10 +1064,13 @@ Last verified: 2026-08-11
   parent retains a validated local body or creates a fixed authority-free
   recovery body, replaces the remote presentation, and reruns exact-head review.
   Only a fresh branch can authorize the implementation ReviewGPT request;
-  resume omits that command entirely. A clean committed deterministic branch
-  ahead of `origin/main` may resume when its remote branch and PR do not yet
-  exist, preserving the parent-created commit and validated local body for the
-  first push and ordinary review path. An interrupted dirty diff can resume only
+  resume omits that command entirely. A clean local-only committed deterministic
+  branch ahead of `origin/main` may resume before its first push. When remote-
+  tracking evidence exists but no PR does, resume additionally requires the
+  retained validated parent-local PR body to bind its immutable first-reviewed
+  head to the exact local head. That exact provenance preserves a legitimate
+  push-before-PR interruption without trusting a deterministic branch seeded by
+  another repository writer. An interrupted dirty diff can resume only
   when the one open parent-owned PR, remote branch, and local committed head
   match exactly; mutable body text is not needed to preserve the worktree. It
   returns to an edit-only child and every parent gate reruns.
@@ -1080,11 +1089,18 @@ Last verified: 2026-08-11
 - The child may edit only the issue worktree and a private ignored PR draft. It
   cannot run Git, GitHub, ReviewGPT, browser automation, or network clients and
   cannot author readiness, response, model-verification, or GitHub-state
-  evidence. The parent does not execute child-authored package scripts or tests
+  evidence. Before editing or writing that draft it must assess issue evidence,
+  proposed patches, and existing worktree state for foul play and exit
+  unsuccessfully on unexplained scope or weakened authority/sandbox boundaries.
+  The parent does not execute child-authored package scripts or tests
   in its credentialed context: it runs fixed Git structural checks, commits and
   pushes with hooks disabled, and relies on exact-head CI for independent
-  executable proof. The initial PR mutation includes the immutable
-  first-reviewed head. Preliminary and final parent ReviewGPT use Murph's
+  executable proof. The retained local body includes the immutable first-
+  reviewed head before the first push. Immediately before pushing, the parent
+  refreshes `origin/main` and revalidates exact open App author, label, and one
+  protected-main binding authority; if no parent-owned PR exists after that
+  push, it repeats the refresh and exact authority check immediately before
+  creating a draft. Preliminary and final parent ReviewGPT use Murph's
   canonical packager and canonical review state from a detached exact-head
   checkout only when every executable and instructional review control,
   including the complete prompt-preset directory, matches trusted `main`.

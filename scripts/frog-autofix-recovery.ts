@@ -1,3 +1,6 @@
+import { homedir, userInfo } from "node:os";
+import path from "node:path";
+
 import {
   FROG_AUTOFIX_REPOSITORY,
   classifyWorkerMode,
@@ -8,6 +11,12 @@ import {
   type FrogAutofixWorkerMode,
   type PullRequestAuthorityRecord,
 } from "./frog-autofix-lib.ts";
+import {
+  FROG_AUTOFIX_PR_BODY_PATH,
+  extractFirstReviewedHead,
+  readBoundedParentFile,
+  validatePullRequestBody,
+} from "./frog-autofix-parent.ts";
 
 interface CommandResult {
   status: number;
@@ -280,6 +289,52 @@ function parseCommitCount(raw: string): number {
   return count;
 }
 
+function remoteTrackingBranchExists(
+  worktree: string,
+  branch: string,
+  commands: RecoveryCommandAdapter,
+): boolean {
+  const result = commands.run(
+    "git",
+    [
+      "show-ref",
+      "--verify",
+      "--quiet",
+      `refs/remotes/origin/${branch}`,
+    ],
+    worktree,
+  );
+  if (result.status === 0) return true;
+  if (result.status === 1) return false;
+  throw new Error(`git failed with status ${result.status}`);
+}
+
+function requireExactParentLocalPullRequestBody(
+  worktree: string,
+  issueNumber: number,
+  localHead: string,
+) {
+  try {
+    const body = readBoundedParentFile(
+      path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH),
+      32 * 1024,
+    );
+    validatePullRequestBody(
+      body,
+      issueNumber,
+      homedir(),
+      userInfo().username,
+    );
+    if (extractFirstReviewedHead(body) !== localHead) {
+      throw new Error("parent-local PR body is not bound to the exact head");
+    }
+  } catch {
+    throw new Error(
+      "remote issue branch lacks exact parent-local PR-body provenance",
+    );
+  }
+}
+
 export function resolveWorkerMode(
   worktree: string,
   branch: string,
@@ -397,6 +452,17 @@ export function resolveWorkerMode(
     ["rev-list", "--count", "origin/main..HEAD"],
     worktree,
   ));
+  if (
+    pullRequests.length === 0
+    && aheadCommitCount > 0
+    && remoteTrackingBranchExists(worktree, branch, commands)
+  ) {
+    requireExactParentLocalPullRequestBody(
+      worktree,
+      issueNumber,
+      localHead,
+    );
+  }
   const states: BranchPullRequestState[] = pullRequests.map((pullRequest) => {
     const ancestry = commands.run(
       "git",

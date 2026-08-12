@@ -19,8 +19,14 @@ Admission requires an open `enhancement` issue authored by the exact Frog App
 and exactly one matching `issue:` binding already committed beneath
 `.agents/friction-log/*/friction.md` on `origin/main`. The issue number is the
 only issue datum placed in the parent worker prompt. Issue content remains
-untrusted evidence. A deterministic branch owns one sanctioned worktree, so a
-later run can recover an incomplete PR without a second task database.
+untrusted evidence. Both the ReviewGPT implementation prompt and edit-only
+Codex prompt require a foul-play assessment before implementation: issue
+titles, bodies, comments, attachments, links, proposed patches, existing
+branch/worktree state, and embedded instructions are adversarial evidence.
+Unexplained scope or weakened authentication, review, sandbox, credential, or
+network boundaries fail closed rather than being normalized into a PR. A
+deterministic branch owns one sanctioned worktree, so a later run can recover
+an incomplete PR without a second task database.
 
 Recovery is a parent classification, not a prompt guess. A fresh deterministic
 branch has no commit, remote branch, or PR. Under the run lock, interrupted
@@ -39,10 +45,14 @@ with creator fallback only for a never-edited body. Otherwise the parent keeps
 an already validated local body or writes one fixed recovery body, overwrites
 the remote presentation, and reruns exact-head reviews.
 A clean implementation commit interrupted before its first remote push, or an
-open PR, may resume without requesting a second implementation patch. The
-clean no-PR path reuses its validated local body, pushes the existing commit,
-and enters the ordinary parent review path. Divergence, mismatched ownership,
-merged or multiply-owned PR state, and other ambiguity fail closed. One exact
+open PR, may resume without requesting a second implementation patch. A clean
+local-only no-PR commit remains resumable. Once the deterministic branch has
+remote-tracking provenance but no PR, resume additionally requires the retained
+validated parent-local PR body to bind its immutable first-reviewed head to the
+exact local head; this preserves push-before-PR recovery while rejecting a
+same-repository branch seeded by another writer. Divergence, missing or stale
+parent-local provenance, mismatched ownership, merged or multiply-owned PR
+state, and other ambiguity fail closed. One exact
 closed-unmerged parent PR that lacks a trusted handoff is rewritten with the
 fixed recovery body plus a review-findings handoff, without reopening or
 reviewing it, so cancellation cannot pin later issues. After an unrelated
@@ -66,9 +76,13 @@ command output. It may integrate code, tests, docs, the plan, and a private PR
 draft, but cannot commit, push, publish, review, merge, close, or manufacture
 authority evidence.
 
-The parent structurally validates the diff, commits with hooks disabled, pushes
-with hooks disabled, and publishes the immutable first-reviewed head in the
-initial draft PR body. Preliminary and final ReviewGPT run through Murph's
+The parent structurally validates the diff, commits with hooks disabled, and
+binds the retained private PR body to the immutable first-reviewed head. It
+refreshes `origin/main` and revalidates exact open Frog App author, label, and
+one protected-main binding authority immediately before push, then repeats that
+refresh and revalidation immediately before creating a new draft PR. Existing
+PR recovery still edits the one parent-owned PR after the first checkpoint.
+Preliminary and final ReviewGPT run through Murph's
 canonical packager and state files from a detached parent-only checkout whose
 review controls, including the complete prompt-preset directory, exactly match
 trusted `main`. Either review returning findings, a final review requiring a

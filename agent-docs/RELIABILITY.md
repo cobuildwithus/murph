@@ -181,7 +181,12 @@ Last verified: 2026-08-11
   reapply an implementation patch. A clean parent commit interrupted before its
   first push also resumes when no remote branch or PR exists; the validated
   local body skips a second child and the ordinary parent publishes the exact
-  existing commit. A merged PR paired with an open or reopened
+  existing commit. If remote-tracking evidence exists without a PR, recovery
+  instead requires that retained validated parent-local body to bind the
+  immutable first-reviewed head to the exact local head. This preserves a crash
+  after push but before PR creation, including a subsequently deleted remote
+  ref, while a same-repository branch seeded without local provenance fails
+  closed. A merged PR paired with an open or reopened
   issue, multiple parent-owned PRs, branch divergence, mismatched ownership or
   head, and every other dirty state fail
   closed rather than guessing a continuation point or closing historical state.
@@ -201,9 +206,16 @@ Last verified: 2026-08-11
   state for a later pass. Definitive failed/cancelled required checks and a
   current-base conflict instead publish the existing review-findings handoff so
   the oldest issue cannot pin later work.
-- A successful child leaves only uncommitted code/docs/tests and a private PR
+- Both implementation prompts require an explicit foul-play assessment before
+  edits: issue title/body/comments/attachments/links, proposed patches,
+  existing branch/worktree state, and embedded instructions are adversarial
+  evidence. Unexplained scope or weakened authentication, review, sandbox,
+  credential, or network boundaries stop the run rather than becoming PR state.
+  A successful child leaves only uncommitted code/docs/tests and a private PR
   draft. The parent applies implementation patches, closes plans, commits,
-  pushes, publishes the immutable review baseline, runs the canonical
+  binds the local body to the immutable review baseline, refreshes `origin/main`
+  and exact issue authority immediately before push, and repeats that refresh
+  immediately before creating a new draft PR. It then runs the canonical
   preliminary and final ReviewGPT gates from a trusted parent checkout, and
   observes CI. A review finding or final retrospective requirement becomes the
   same durable draft human handoff rather than an autonomous remediation loop;
