@@ -13913,8 +13913,11 @@ test("Junction sparse-history continuation fetches one bounded 30-day window", a
       candidate.kind === "resource" && candidate.payload?.resource === "vo2_max"
     ),
   );
-  const historicalWindowStart = requireValue(job.payload?.historicalWindowStart);
-  const historicalWindowEnd = requireValue(job.payload?.windowEnd);
+  const historicalWindowStart = job.payload?.historicalWindowStart;
+  const historicalWindowEnd = job.payload?.windowEnd;
+  if (typeof historicalWindowStart !== "string" || typeof historicalWindowEnd !== "string") {
+    throw new TypeError("Expected a string sparse-history window.");
+  }
   assert.equal(
     (Date.parse(historicalWindowEnd) - Date.parse(historicalWindowStart))
       / (24 * 60 * 60_000),
