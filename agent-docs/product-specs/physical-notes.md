@@ -95,12 +95,18 @@ remain in the separate request fingerprint, so reusing one approval with changed
 content is a collision rather than a second effect. Accepted replays resolve
 from the durable row even after the temporary artwork capability expires; an
 existing uncertain send remains pending rather than being rewritten. After that
-replay check, Web treats every `starting` row as a member-wide unresolved-effect
-guard. Replaying that same request key never calls Lob create again, even if the
-temporary artwork URL changed. Exact current-row replay performs one bounded
-metadata lookup immediately so accepted evidence can finalize the original row
-after local commit failure. Recent absent or indeterminate evidence remains
-pending; only aged proven absence uses the existing unknown transition. A distinct request
+replay check, exact same-key recovery is row-scoped: it reconciles that row
+independently of whichever older unresolved row controls new-effect admission.
+This supports multiple unresolved rows durably admitted by earlier Web versions
+without allowing another provider effect. Web otherwise treats every `starting`
+row as a member-wide unresolved-effect guard. Replaying that same request key
+never calls Lob create again, even if the temporary artwork URL changed. Exact
+current-row replay performs one bounded metadata lookup immediately so accepted
+evidence can finalize the original row after local commit failure. Recent absent
+or indeterminate evidence remains pending; only aged proven absence uses the
+existing unknown transition. Every other unresolved row keeps its independent
+admission authority, so new effects remain blocked until all such rows are
+terminal. A distinct request
 is first persisted as an unsent `prior_note_unresolved` row. Only that distinct
 explicit request may, after the 23-hour provider window, reconcile the guarded
 row through Lob's exact-metadata lookup. Recent or indeterminate evidence keeps

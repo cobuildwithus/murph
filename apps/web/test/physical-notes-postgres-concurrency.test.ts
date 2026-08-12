@@ -1,6 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
+import {
+  normalizeHostedPhysicalNoteRecipient,
+  stableHostedPhysicalNoteRecipientJson,
+} from "@murphai/hosted-execution/physical-notes";
 import {
   afterAll,
   beforeAll,
@@ -414,6 +418,114 @@ describe.skipIf(!runPostgresProof)(
       });
     });
 
+    it("recovers a newer accepted exact replay behind an older unresolved row", async () => {
+      const replayClient = requirePrisma(secondClient);
+      const observer = requirePrisma(observerClient);
+      const beneficiary = requireMemberId(memberId);
+      const { createHostedPhysicalNote } = await import(
+        "@/src/lib/physical-notes/service"
+      );
+      const olderRequest = buildRequest(21, beneficiary);
+      const replayRequest = buildRequest(22, beneficiary);
+      const olderId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const replayId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      await observer.hostedPhysicalNote.createMany({
+        data: [
+          {
+            complimentaryOfferCode: "physical-note-v1",
+            createdAt: new Date(Date.now() - 1_000),
+            id: olderId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: buildRequestFingerprint(olderRequest),
+            requestKey: olderRequest.requestKey,
+            status: "starting",
+          },
+          {
+            complimentaryOfferCode: null,
+            id: replayId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: buildRequestFingerprint(replayRequest),
+            requestKey: replayRequest.requestKey,
+            status: "starting",
+          },
+        ],
+      });
+      const createProviderLetter = vi.fn(async () => ({
+        kind: "accepted" as const,
+        providerLetterId: "ltr_must_not_create",
+      }));
+      const findProviderLetter = vi.fn(async (input: { noteId: string }) => {
+        if (input.noteId !== replayId) {
+          throw new Error("Exact replay looked up the wrong physical note.");
+        }
+        return {
+          kind: "accepted" as const,
+          providerLetterId: "ltr_newer_accepted",
+        };
+      });
+
+      const recovered = await createHostedPhysicalNote({
+        ...replayRequest,
+        prisma: replayClient,
+        runtime: {
+          create: createProviderLetter,
+          findLetterByNoteId: findProviderLetter,
+        },
+      });
+      const stableReplay = await createHostedPhysicalNote({
+        ...replayRequest,
+        prisma: replayClient,
+        runtime: {
+          create: createProviderLetter,
+          findLetterByNoteId: findProviderLetter,
+        },
+      });
+      const blocked = await createHostedPhysicalNote({
+        ...buildRequest(23, beneficiary),
+        prisma: replayClient,
+        runtime: {
+          create: createProviderLetter,
+          findLetterByNoteId: findProviderLetter,
+        },
+      });
+
+      expect(recovered).toMatchObject({
+        complimentary: false,
+        physicalNoteId: replayId,
+        status: "accepted",
+      });
+      expect(stableReplay).toEqual(recovered);
+      expect(blocked).toMatchObject({
+        failureReason: "prior_note_unresolved",
+        status: "failed",
+      });
+      expect(createProviderLetter).not.toHaveBeenCalled();
+      expect(findProviderLetter).toHaveBeenCalledOnce();
+      expect(findProviderLetter).toHaveBeenCalledWith({
+        noteId: replayId,
+        signal: undefined,
+      });
+      expect(mocks.recordUsage).toHaveBeenCalledOnce();
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: olderId },
+      })).resolves.toMatchObject({
+        providerLetterId: null,
+        status: "starting",
+      });
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: replayId },
+      })).resolves.toMatchObject({
+        providerLetterId: "ltr_newer_accepted",
+        status: "accepted",
+      });
+    });
+
     it("enters Lob once for concurrent replay of the same request", async () => {
       const first = requirePrisma(firstClient);
       const second = requirePrisma(secondClient);
@@ -646,6 +758,21 @@ function buildRequest(sequence: number, memberId: string) {
     },
     requestKey: `physical-note-concurrent-${sequence}`,
   };
+}
+
+function buildRequestFingerprint(
+  request: ReturnType<typeof buildRequest>,
+): string {
+  return createHash("sha256")
+    .update("murph.hosted-physical-note.request.v1\0")
+    .update(request.artwork.sha256)
+    .update("\0")
+    .update(request.originAssistantInputId)
+    .update("\0")
+    .update(stableHostedPhysicalNoteRecipientJson(
+      normalizeHostedPhysicalNoteRecipient(request.recipient),
+    ))
+    .digest("hex");
 }
 
 function requirePrisma(value: PrismaClient | null): PrismaClient {

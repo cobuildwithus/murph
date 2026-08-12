@@ -277,3 +277,15 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   lookup, and no path re-enters Lob create. Focused tests cover accepted paid
   recovery, recent absent and indeterminate evidence, aged absence, stable
   replay, and changed private-media capability.
+- Round 16 found that this exact-row recovery still depended on the replayed row
+  also being the member's oldest unresolved guard. Earlier Web versions could
+  durably admit more than one `starting` row, so that cardinality remains
+  supported during rollout. Exact same-key recovery is therefore row-scoped:
+  reconcile its own row independently of the oldest guard that owns new-effect
+  admission. Acceptance finalizes that row and its paid usage exactly once;
+  every other unresolved row remains untouched and continues blocking new Lob
+  creates. A real-PostgreSQL restart case seeds older A plus newer paid B,
+  recovers accepted B with one B lookup and zero creates, preserves A, and
+  proves a later new request remains blocked. This separates recovery authority
+  from admission ordering inside the existing row, member lock, lookup, and
+  usage owners, without another state machine or continuation mechanism.
