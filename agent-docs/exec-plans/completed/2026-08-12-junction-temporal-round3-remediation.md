@@ -1,6 +1,6 @@
 # Junction temporal round-three remediation
 
-Status: active
+Status: completed
 Created: 2026-08-12
 
 ## Outcome
@@ -36,8 +36,8 @@ boundaries, integrate the latest summary-only test correction, and return PR
 - [x] Remove account-wide temporal starvation and prove bounded reconcile ordering.
 - [x] Correct floating timestamp filtering and prove both timezone directions.
 - [x] Enforce or truthfully document the temporal output cap.
-- [ ] Merge the latest summary head and resolve current CI deltas.
-- [ ] Run focused verification, archive this plan, commit, push, and update PR #1703.
+- [x] Merge the latest summary head and resolve current CI deltas.
+- [x] Run focused verification, archive this plan, commit, push, and update PR #1703.
 
 ## Verification
 
@@ -50,3 +50,5 @@ boundaries, integrate the latest summary-only test correction, and return PR
   overlap and process-timezone independence.
 - Affected package typechecks, focused CI reproductions, runner bundle budget
   policy and assembly, diff/privacy scans, exact-head ancestry, and merge-tree.
+Updated: 2026-08-12
+Completed: 2026-08-12
