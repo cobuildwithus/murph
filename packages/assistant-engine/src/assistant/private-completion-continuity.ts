@@ -49,13 +49,30 @@ export async function reconcileAssistantPrivateCompletionContinuityForSession(
     }
 
     const intents = await listAssistantOutboxIntentsLocal(input.vault)
-    for (const intent of intents) {
-      if (
-        !assistantPrivateCompletionCanJoinSession({ intent, session })
-        || intent.privateCompletionContinuity?.status === 'applied'
-      ) {
-        continue
-      }
+    const initialSession = session
+    const candidates = intents
+      .flatMap((intent) => {
+        if (
+          !assistantPrivateCompletionCanJoinSession({
+            intent,
+            session: initialSession,
+          })
+          || intent.privateCompletionContinuity?.status === 'applied'
+        ) {
+          return []
+        }
+        return [{
+          intent,
+          transcriptCreatedAt:
+            resolveAssistantPrivateCompletionTranscriptCreatedAt(intent),
+        }]
+      })
+      .sort((left, right) =>
+        left.transcriptCreatedAt.localeCompare(right.transcriptCreatedAt)
+        || left.intent.createdAt.localeCompare(right.intent.createdAt)
+        || left.intent.intentId.localeCompare(right.intent.intentId)
+      )
+    for (const { intent } of candidates) {
       session = await reconcileAssistantPrivateCompletionIntent({
         intent,
         paths,
@@ -297,6 +314,20 @@ function laterNullableIsoTimestamp(
   right: string,
 ): string {
   return left ? laterIsoTimestamp(left, right) : right
+}
+
+function resolveAssistantPrivateCompletionTranscriptCreatedAt(
+  intent: AssistantOutboxIntent,
+): string {
+  if (intent.privateCompletionContinuity?.status === 'prepared') {
+    return intent.privateCompletionContinuity.transcriptCreatedAt
+  }
+  if (!intent.delivery) {
+    throw new Error(
+      'Assistant private completion continuity requires a canonical delivery.',
+    )
+  }
+  return intent.delivery.sentAt
 }
 
 function laterIsoTimestamp(left: string, right: string): string {

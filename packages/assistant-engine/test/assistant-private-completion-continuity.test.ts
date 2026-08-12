@@ -74,6 +74,7 @@ if (!ordinaryTarget || !detachedTarget) {
 }
 
 afterEach(async () => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   await Promise.all(cleanupPaths.splice(0).map((target) =>
     rm(target, { force: true, recursive: true })
@@ -660,6 +661,148 @@ describe('private completion continuity', () => {
       pending.intentId,
     )).resolves.toBeNull()
   })
+
+  it('recovers multiple unbound completions in canonical delivery order', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-11T18:00:00.000Z'))
+    const fixture = await createContinuityFixture(
+      'private-continuity-delivery-order-',
+    )
+    const earlierIntent = await createPrivateCompletionIntent({
+      completionId: 'aask_done_private_continuity_order_earlier',
+      continuitySessionId: null,
+      createdAt: '2026-08-11T18:00:00.000Z',
+      deliverySession: fixture.detachedSession,
+      message: 'Delivered after the other completion.',
+      turnId: 'turn_private_continuity_order_earlier',
+      vault: fixture.vaultRoot,
+    })
+    const laterIntent = await createPrivateCompletionIntent({
+      completionId: 'aask_done_private_continuity_order_later',
+      continuitySessionId: null,
+      createdAt: '2026-08-11T18:00:01.000Z',
+      deliverySession: fixture.detachedSession,
+      message: 'Delivered before the other completion.',
+      turnId: 'turn_private_continuity_order_later',
+      vault: fixture.vaultRoot,
+    })
+
+    vi.setSystemTime(new Date('2026-08-11T18:01:00.000Z'))
+    const retryable = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinq: async () => {
+          throw Object.assign(new Error('Temporary synthetic provider failure.'), {
+            code: 'LINQ_API_REQUEST_FAILED',
+            retryable: true,
+          })
+        },
+      },
+      force: true,
+      intentId: earlierIntent.intentId,
+      vault: fixture.vaultRoot,
+    })
+    expect(retryable.intent.status).toBe('retryable')
+
+    vi.setSystemTime(new Date('2026-08-11T18:02:00.000Z'))
+    const deliveredFirst = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinq: async () => ({
+          idempotencyKey: laterIntent.deliveryIdempotencyKey,
+          providerMessageId: 'provider_private_continuity_order_first',
+          providerThreadId: locator.threadId,
+          target: locator.bindingDeliveryTarget,
+          targetKind: 'thread',
+        }),
+      },
+      force: true,
+      intentId: laterIntent.intentId,
+      vault: fixture.vaultRoot,
+    })
+    expect(deliveredFirst.intent.status).toBe('sent')
+
+    vi.setSystemTime(new Date('2026-08-11T18:03:00.000Z'))
+    const deliveredSecond = await dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinq: async () => ({
+          idempotencyKey: earlierIntent.deliveryIdempotencyKey,
+          providerMessageId: 'provider_private_continuity_order_second',
+          providerThreadId: locator.threadId,
+          target: locator.bindingDeliveryTarget,
+          targetKind: 'thread',
+        }),
+      },
+      force: true,
+      intentId: earlierIntent.intentId,
+      vault: fixture.vaultRoot,
+    })
+    expect(deliveredSecond.intent.status).toBe('sent')
+
+    vi.setSystemTime(new Date('2026-08-11T18:04:00.000Z'))
+    const attended = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: ordinaryTarget,
+      defaults: null,
+      message: {
+        ...locator,
+        executionContext: {
+          hosted: {
+            defaultTarget: ordinaryTarget,
+            memberId: 'member_private_continuity_order',
+            userEnvKeys: [],
+          },
+        },
+        prompt: 'Continue after both private replies.',
+        vault: fixture.vaultRoot,
+      },
+    })
+
+    expect(attended.session).toMatchObject({
+      codexResume: null,
+      resumeState: null,
+      turnCount: 2,
+    })
+    expect(attended.session.sessionId).not.toBe(fixture.detachedSession.sessionId)
+    const transcript = await listAssistantTranscriptEntries(
+      fixture.vaultRoot,
+      attended.session.sessionId,
+    )
+    expect(transcript).toEqual([
+      expect.objectContaining({
+        createdAt: '2026-08-11T18:02:00.000Z',
+        sourceOutboxIntentId: laterIntent.intentId,
+        text: laterIntent.message,
+      }),
+      expect.objectContaining({
+        createdAt: '2026-08-11T18:03:00.000Z',
+        sourceOutboxIntentId: earlierIntent.intentId,
+        text: earlierIntent.message,
+      }),
+    ])
+    await expect(readAssistantOutboxIntent(
+      fixture.vaultRoot,
+      laterIntent.intentId,
+    )).resolves.toMatchObject({
+      privateCompletionContinuity: { status: 'applied' },
+    })
+    await expect(readAssistantOutboxIntent(
+      fixture.vaultRoot,
+      earlierIntent.intentId,
+    )).resolves.toMatchObject({
+      privateCompletionContinuity: { status: 'applied' },
+    })
+
+    await reconcileAssistantPrivateCompletionContinuityForSession({
+      sessionId: attended.session.sessionId,
+      vault: fixture.vaultRoot,
+    })
+    await expect(listAssistantTranscriptEntries(
+      fixture.vaultRoot,
+      attended.session.sessionId,
+    )).resolves.toEqual(transcript)
+    await expect(getAssistantSession(
+      fixture.vaultRoot,
+      attended.session.sessionId,
+    )).resolves.toMatchObject({ turnCount: 2 })
+  })
 })
 
 async function createContinuityFixture(
@@ -710,13 +853,17 @@ async function createBoundContinuityFixture(
 }
 
 async function createPrivateCompletionIntent(input: {
+  completionId?: string
   continuitySessionId: string | null
+  createdAt?: string
   deliverySession: AssistantSession
+  message?: string
   route?: ContinuityLocator
+  turnId?: string
   vault: string
 }): Promise<AssistantOutboxIntent> {
   const route = input.route ?? locator
-  const completionId = 'aask_done_private_continuity_test'
+  const completionId = input.completionId ?? 'aask_done_private_continuity_test'
   const deliveryKey =
     createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(completionId)
   return await createAssistantOutboxIntent({
@@ -727,16 +874,17 @@ async function createPrivateCompletionIntent(input: {
       target: route.bindingDeliveryTarget,
     },
     channel: route.channel,
+    createdAt: input.createdAt,
     deliveryIdempotencyKey: deliveryKey,
     deliveryTransportIdempotent: true,
     identityId: route.identityId,
-    message: 'Exact private completion.',
+    message: input.message ?? 'Exact private completion.',
     privateCompletionContinuitySessionId: input.continuitySessionId,
     reviewedAssistantAskCompletionExpiresAt: '2099-08-11T18:05:00.000Z',
     sessionId: input.deliverySession.sessionId,
     threadId: route.threadId,
     threadIsDirect: route.threadIsDirect,
-    turnId: 'turn_private_continuity_test',
+    turnId: input.turnId ?? 'turn_private_continuity_test',
     vault: input.vault,
   })
 }
