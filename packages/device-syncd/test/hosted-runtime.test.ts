@@ -5,18 +5,18 @@ import * as hostedRuntime from "../src/hosted-runtime.ts";
 import { JUNCTION_CONNECT_SOURCE_TARGETS } from "../src/config/junction-connect-sources.ts";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
-  addJunctionBloodPressureHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
   canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
-  canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
-  hasJunctionBloodPressureHistoryBackfillCoverage,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_SOURCE_SLUGS,
   readJunctionHistoricalBackfillEvidence,
 } from "../src/junction-historical-backfill-progress.ts";
-import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
+import {
+  DEVICE_SYNC_METADATA_MAX_STRING_LENGTH,
+  mergeStoredDeviceSyncMetadataPatch,
+} from "../src/metadata.ts";
 import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
   isDeviceSyncCredentialIndependentImportJob as classifyCredentialIndependentImportJob,
@@ -343,15 +343,13 @@ describe("Junction extended-timeseries history coverage", () => {
           version: 1,
         });
         expect(patch).not.toBeNull();
-        metadata = { ...metadata, ...patch };
+        metadata = mergeStoredDeviceSyncMetadataPatch(metadata, patch);
       }
     }
 
-    expect(Object.keys(metadata).sort()).toEqual([
+    expect(Object.keys(metadata)).toEqual([
       JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY,
-      "junctionBloodPressureHistoryBackfillCoverage",
-      "junctionNoteHistoryBackfillCoverage",
-    ].sort());
+    ]);
     expect(String(metadata[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY]).length)
       .toBeLessThan(DEVICE_SYNC_METADATA_MAX_STRING_LENGTH);
     expect(String(metadata[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY]).length)
@@ -381,7 +379,7 @@ describe("Junction extended-timeseries history coverage", () => {
           version: 1,
         });
         expect(patch).not.toBeNull();
-        Object.assign(target, patch);
+        Object.assign(target, mergeStoredDeviceSyncMetadataPatch(target, patch));
       }
     }
 
@@ -424,24 +422,52 @@ describe("Junction extended-timeseries history coverage", () => {
       "m2|opaque-future",
     );
   });
+
+  it("reopens old matrix coverage when the coverage-policy version advances", () => {
+    const versionOne = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingMetadata: {},
+      providerSlug: "garmin",
+      resource: "caffeine",
+      version: 1,
+    });
+    expect(versionOne).not.toBeNull();
+    const storedVersionOne = mergeStoredDeviceSyncMetadataPatch({}, versionOne);
+
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      storedVersionOne,
+      "garmin",
+      "caffeine",
+      2,
+    )).toBe(false);
+    const versionTwo = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingMetadata: storedVersionOne,
+      providerSlug: "garmin",
+      resource: "caffeine",
+      version: 2,
+    });
+    expect(versionTwo?.[JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_METADATA_KEY])
+      .toMatch(/^m2\|/u);
+  });
 });
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
-  it("keeps newer blood-pressure source-coverage semantics immutable to older runtimes", () => {
-    const coverage = addJunctionBloodPressureHistoryBackfillCoverage({
-      existingValue: "v2|withings",
-      providerSlug: "omron",
-      version: 1,
-    });
+  it("keeps newer legacy input read-only and blocks only its resource", () => {
+    const metadata = { junctionBloodPressureHistoryBackfillCoverage: "v2|withings" };
 
-    expect(coverage).toBe("v2|withings");
-    expect(hasJunctionBloodPressureHistoryBackfillCoverage(coverage, "omron", 1)).toBe(false);
-    expect(hasJunctionBloodPressureHistoryBackfillCoverage("v1|omron", "omron", 2)).toBe(false);
-    expect(canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage(coverage, 1)).toBe(false);
-    expect(canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage("v1|omron", 2)).toBe(true);
-    expect(addJunctionBloodPressureHistoryBackfillCoverage({
-      existingValue: coverage,
-      providerSlug: "__proto__",
+    expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      metadata,
+      "blood_pressure",
+      1,
+    )).toBe(false);
+    expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      metadata,
+      "caffeine",
+      1,
+    )).toBe(true);
+    expect(addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      existingMetadata: metadata,
+      providerSlug: "omron",
+      resource: "blood_pressure",
       version: 1,
     })).toBeNull();
   });
@@ -458,9 +484,9 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 
     expect(result.metadata).toMatchObject({
       hostedOnly: true,
-      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
-      junctionNoteHistoryBackfillCoverage: "v1|oura",
     });
+    expect(result.metadata).not.toHaveProperty("junctionBloodPressureHistoryBackfillCoverage");
+    expect(result.metadata).not.toHaveProperty("junctionNoteHistoryBackfillCoverage");
     expect(result.preservedLocalProgress).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       result.metadata,
@@ -491,7 +517,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     });
   });
 
-  it("unions hosted and unpublished local source coverage", () => {
+  it("unions hosted and unpublished legacy inputs into the matrix", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
         junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
@@ -502,7 +528,19 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       },
     });
 
-    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toBe("v1|omron,withings");
+    expect(result.metadata).not.toHaveProperty("junctionBloodPressureHistoryBackfillCoverage");
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "omron",
+      "blood_pressure",
+      1,
+    )).toBe(true);
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "withings",
+      "blood_pressure",
+      1,
+    )).toBe(true);
     expect(result.preservedLocalProgress).toBe(true);
   });
 
@@ -961,7 +999,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 });
 
 describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
-  it("preserves blood-pressure source coverage during guarded replacement", () => {
+  it("migrates blood-pressure source coverage during guarded replacement", () => {
     const merged = mergeGuardedJunctionHistoricalBackfillMetadata({
       existingMetadata: {
         junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
@@ -973,8 +1011,8 @@ describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
     });
     expect(merged).toMatchObject({
       callbackOutcome: "complete",
-      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
     });
+    expect(merged).not.toHaveProperty("junctionBloodPressureHistoryBackfillCoverage");
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       merged,
       "omron",
