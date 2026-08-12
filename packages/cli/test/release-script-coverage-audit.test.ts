@@ -1256,6 +1256,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain(
       'review_gpt_all_browser_lanes=(eragon phlebas hercules mountain)',
     )
+    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('REVIEW_GPT_FULL_REVIEW_REASON')
@@ -1942,7 +1943,7 @@ printf '%s|%s|%s|%s\n' \
         },
       })
       expect(localResult.status, localResult.stderr).toBe(0)
-      expect(localResult.stdout.trim()).toBe('main|1|/tmp/custom-brave|unthrottled')
+      expect(localResult.stdout.trim()).toBe('eragon|1|/tmp/custom-brave|unthrottled')
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
       const defaultResult = spawnSync('bash', ['-c', configHarness], {
@@ -1956,7 +1957,28 @@ printf '%s|%s|%s|%s\n' \
         },
       })
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
-      expect(defaultResult.stdout.trim()).toBe(
+      const [defaultLane, defaultLaneCount, defaultBrowser, defaultBackgroundMode] =
+        defaultResult.stdout.trim().split('|')
+      expect(['eragon', 'phlebas', 'hercules', 'mountain']).toContain(defaultLane)
+      expect(defaultLaneCount).toBe('4')
+      expect(defaultBrowser).toBe(
+        '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      )
+      expect(defaultBackgroundMode).toBe('balanced')
+
+      const mainResult = spawnSync('bash', ['-c', configHarness], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: {
+          ...withoutNodeV8Coverage(),
+          HOME: harnessRoot,
+          REPO_ROOT: repoRoot,
+          REVIEW_GPT_BROWSER_LANE: 'main',
+          XDG_CONFIG_HOME: localConfigRoot,
+        },
+      })
+      expect(mainResult.status, mainResult.stderr).toBe(0)
+      expect(mainResult.stdout.trim()).toBe(
         'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced',
       )
 
