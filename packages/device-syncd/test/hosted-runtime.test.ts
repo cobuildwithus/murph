@@ -313,7 +313,16 @@ describe("Junction extended-timeseries history coverage", () => {
     );
     expect(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_V1_RESOURCES).toEqual(
       [
-        ...JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
+        "vo2_max",
+        "body_temperature_delta",
+        "body_temperature",
+        "basal_body_temperature",
+        "caffeine",
+        "heart_rate_recovery_one_minute",
+        "sleep_breathing_disturbance",
+        "afib_burden",
+        "blood_pressure",
+        "note",
         "insulin_injection",
         "carbohydrates",
         "workout_duration",
