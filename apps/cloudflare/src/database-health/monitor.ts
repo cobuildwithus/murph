@@ -8,6 +8,7 @@ import {
   requireCompleteDatabaseMetricSnapshot,
   type DatabaseHealthCondition,
   type DatabaseHealthRequiredMetricName,
+  type DatabaseMetricObservation,
   type DatabaseMetricObservationSnapshot,
   type DatabaseMetricSnapshot,
 } from "./metrics.js";
@@ -25,6 +26,7 @@ const DATABASE_HEALTH_ALERT_INTERVAL_MS = 60 * 60 * 1_000;
 const DATABASE_HEALTH_RUN_LEASE_MS = 2 * 60 * 1_000;
 const DATABASE_HEALTH_SAMPLE_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const DATABASE_HEALTH_FETCH_TIMEOUT_MS = 10_000;
+const DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS = 1_000;
 const PLANETSCALE_DISCOVERY_BODY_LIMIT_BYTES = 256 * 1_024;
 const PLANETSCALE_METRICS_BODY_LIMIT_BYTES = 2 * 1_024 * 1_024;
 const LINQ_HEALTH_BODY_LIMIT_BYTES = 256 * 1_024;
@@ -229,6 +231,8 @@ type DatabaseHealthFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+type DatabaseHealthWait = (delayMs: number) => Promise<void>;
+
 type DatabaseHealthFailureCode =
   | "metrics_parse_failed"
   | "metrics_scrape_failed"
@@ -246,6 +250,8 @@ export class DatabaseHealthMonitor {
     environment: DatabaseHealthMonitorEnvironment,
     private readonly fetchImplementation: DatabaseHealthFetch = fetch,
     private readonly nowImplementation: () => number = Date.now,
+    private readonly waitImplementation: DatabaseHealthWait =
+      waitForDatabaseHealthRetry,
   ) {
     this.config = readDatabaseHealthMonitorConfig(environment);
     const sql = storage.sql;
@@ -309,14 +315,7 @@ export class DatabaseHealthMonitor {
 
   private async collectSample(): Promise<DatabaseHealthCollectedSample> {
     try {
-      const metricsBody = await fetchPlanetScaleMetrics({
-        config: this.config,
-        fetchImplementation: this.fetchImplementation,
-      });
-      const observation = parsePlanetScaleDatabaseMetricObservation(
-        metricsBody,
-        this.config.branchId,
-      );
+      const observation = await this.collectMetricObservation();
       if (observation.missingMetrics.length > 0) {
         const directConnectionErrorDelta =
           observation.snapshot.directConnectionErrorCounters === null
@@ -386,6 +385,7 @@ export class DatabaseHealthMonitor {
           ? [{ failures, kind: "monitoring_unavailable", missingMetrics }]
           : [];
       console.warn("Database health metrics collection failed.", {
+        attempts: 2,
         failureCode,
         failures,
         missingMetrics,
@@ -403,6 +403,28 @@ export class DatabaseHealthMonitor {
         status: "failed",
       };
     }
+  }
+
+  private async collectMetricObservation(): Promise<DatabaseMetricObservation> {
+    try {
+      return await this.collectMetricObservationOnce();
+    } catch {
+      await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
+      return await this.collectMetricObservationOnce();
+    }
+  }
+
+  private async collectMetricObservationOnce(): Promise<
+    DatabaseMetricObservation
+  > {
+    const metricsBody = await fetchPlanetScaleMetrics({
+      config: this.config,
+      fetchImplementation: this.fetchImplementation,
+    });
+    return parsePlanetScaleDatabaseMetricObservation(
+      metricsBody,
+      this.config.branchId,
+    );
   }
 
   private persistSampleAndAlertAdmission(input: {
@@ -1414,6 +1436,10 @@ async function fetchWithTimeout(
     redirect: "manual",
     signal: AbortSignal.timeout(DATABASE_HEALTH_FETCH_TIMEOUT_MS),
   });
+}
+
+async function waitForDatabaseHealthRetry(delayMs: number): Promise<void> {
+  await scheduler.wait(delayMs);
 }
 
 async function readBoundedResponseText(

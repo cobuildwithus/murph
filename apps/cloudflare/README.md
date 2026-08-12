@@ -218,8 +218,11 @@ Each metric family is normalized independently. When a documented family is
 absent, the sample keeps that family unknown instead of substituting zero, still
 evaluates every available signal, and records the canonical missing metric names
 without retaining labels or raw scrape data. Unsafe available signals therefore
-still open an incident immediately. Two consecutive incomplete or failed
-collections open the fallback monitoring incident. An acknowledged
+still open an incident immediately. A collection that fails before producing a
+parseable observation receives one bounded retry after one second; only an
+exhausted two-attempt collection counts as a failed check. Partial observations
+are not delayed by that retry. Two consecutive incomplete or failed collections
+open the fallback monitoring incident. An acknowledged
 telemetry-only page is one-shot for one unresolved operator-notification window.
 Crossing the two-failure threshold records one bounded alert obligation in the
 existing incident row. The first two-check window counts incomplete versus

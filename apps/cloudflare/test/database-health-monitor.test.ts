@@ -986,6 +986,8 @@ describe("database health monitor", () => {
       serviceDiscoveryResponses: [
         () => new Response(null, { status: 503 }),
         () => new Response(null, { status: 503 }),
+        () => new Response(null, { status: 503 }),
+        () => new Response(null, { status: 503 }),
       ],
     });
 
@@ -1022,6 +1024,52 @@ describe("database health monitor", () => {
     });
   });
 
+  it("retries transient telemetry failure before counting a failed check", async () => {
+    const harness = createMonitorHarness({
+      serviceDiscoveryResponses: [
+        () => new Response(null, { status: 503 }),
+        createServiceDiscoveryResponse,
+      ],
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "ok",
+    });
+
+    expect(harness.planetScaleRequests).toHaveLength(3);
+    expect(harness.monitor.readRecentSamples()).toEqual([
+      expect.objectContaining({
+        failureCode: null,
+        scrapeStatus: "ok",
+      }),
+    ]);
+    expect(harness.primaryLinqRequests).toEqual([]);
+  });
+
+  it("pages concrete pressure returned by the retry without delay", async () => {
+    const harness = createMonitorHarness({
+      metricsBody: buildMetricsBody({
+        branchId: BRANCH_ID,
+        clientWaitSeconds: 8,
+      }),
+      serviceDiscoveryResponses: [
+        () => new Response(null, { status: 503 }),
+        createServiceDiscoveryResponse,
+      ],
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({
+        conditions: [{ kind: "client_wait", seconds: 8 }],
+        outcome: "alert_sent",
+        sampleStatus: "ok",
+      });
+
+    expect(harness.primaryLinqRequests).toHaveLength(1);
+  });
+
   it("summarizes a partial-then-unavailable telemetry window across retry", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
@@ -1038,6 +1086,7 @@ describe("database health monitor", () => {
       metricsBody: partialMetricsBody,
       serviceDiscoveryResponses: [
         createServiceDiscoveryResponse,
+        () => new Response(null, { status: 503 }),
         () => new Response(null, { status: 503 }),
       ],
     });
@@ -1120,6 +1169,7 @@ describe("database health monitor", () => {
     const harness = createMonitorHarness({
       metricsBody: partialMetricsBody,
       serviceDiscoveryResponses: [
+        () => new Response(null, { status: 503 }),
         () => new Response(null, { status: 503 }),
         createServiceDiscoveryResponse,
       ],
@@ -2966,21 +3016,23 @@ describe("database health monitor", () => {
   });
 
   it("rejects an unsafe discovered target before scrape egress", async () => {
+    const createUnsafeDiscoveryResponse = () =>
+      Response.json([
+        {
+          labels: {
+            __metrics_path__: "/metrics",
+            __scheme__: "https",
+            planetscale_branch_name: BRANCH_NAME,
+            planetscale_database_name: DATABASE_NAME,
+            planetscale_organization_name: ORGANIZATION,
+          },
+          targets: ["metrics.planetscale.test/redirect"],
+        },
+      ]);
     const harness = createMonitorHarness({
       serviceDiscoveryResponses: [
-        () =>
-          Response.json([
-            {
-              labels: {
-                __metrics_path__: "/metrics",
-                __scheme__: "https",
-                planetscale_branch_name: BRANCH_NAME,
-                planetscale_database_name: DATABASE_NAME,
-                planetscale_organization_name: ORGANIZATION,
-              },
-              targets: ["metrics.planetscale.test/redirect"],
-            },
-          ]),
+        createUnsafeDiscoveryResponse,
+        createUnsafeDiscoveryResponse,
       ],
     });
 
@@ -2990,7 +3042,12 @@ describe("database health monitor", () => {
         sampleStatus: "failed",
       });
 
-    expect(harness.planetScaleRequests).toHaveLength(1);
+    expect(harness.planetScaleRequests).toHaveLength(2);
+    expect(
+      harness.planetScaleRequests.every(
+        (request) => new URL(request.url).hostname === "api.planetscale.com",
+      ),
+    ).toBe(true);
     expect(harness.primaryLinqRequests).toEqual([]);
   });
 
@@ -3160,6 +3217,7 @@ function createMonitorHarness(input: {
       environment,
       fetchImplementation,
       () => nowMs,
+      async () => {},
     );
   let monitor = createMonitor();
 
