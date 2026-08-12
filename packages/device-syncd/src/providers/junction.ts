@@ -7398,17 +7398,23 @@ async function projectJunctionSources(
     options.preserveHistoricalReconnectProviderSlugs === undefined
       ? null
       : new Set(options.preserveHistoricalReconnectProviderSlugs);
+  const existingSources = context.listConnectionSources
+    ? await context.listConnectionSources()
+    : [];
+  const admissionSources: readonly JunctionImportAdmissionSource[] =
+    context.listConnectionSources
+      ? existingSources
+      : context.account.sources ?? [];
+  const existingByInstanceKey = new Map(
+    existingSources.map((existingSource) => [
+      existingSource.sourceInstanceKey,
+      existingSource,
+    ] as const),
+  );
   for (const source of projectJunctionSourcesByProviderSlug(
     context.account.id,
     providers,
   )) {
-    const existingSources = context.listConnectionSources
-      ? await context.listConnectionSources()
-      : [];
-    const admissionSources: readonly JunctionImportAdmissionSource[] =
-      context.listConnectionSources
-        ? existingSources
-        : context.account.sources ?? [];
     const listedOnly = context.connectionSourceAdmissionMode === "listed_only";
     if (
       (
@@ -7425,12 +7431,6 @@ async function projectJunctionSources(
     ) {
       continue;
     }
-    const existingByInstanceKey = new Map(
-      existingSources.map((existingSource) => [
-        existingSource.sourceInstanceKey,
-        existingSource,
-      ] as const),
-    );
     const existing = existingByInstanceKey.get(source.sourceInstanceKey) ?? existingSources.find(
       (candidate) =>
         normalizeProviderSlug(candidate.sourceProviderSlug) === source.sourceProviderSlug,

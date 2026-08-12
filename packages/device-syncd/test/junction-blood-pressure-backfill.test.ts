@@ -1100,6 +1100,43 @@ test("an in-flight pre-reconnect import cannot publish terminal coverage", async
   assert.deepEqual(result, {});
 });
 
+test("source projection reads hosted authority once for all listed providers", async () => {
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: { blood_pressure: true },
+      slug: "withings",
+    }],
+    requests: [],
+  });
+  const scheduled = createScheduledBloodPressureJob(provider);
+  let sourceStateReads = 0;
+  const sources = [
+    createSourceSummary("omron"),
+    createSourceSummary("withings"),
+  ];
+  const result = await requireValue(provider.jobExecutor).executeJob(createJobContext({
+    account: createAccount({ sources }),
+    connectionSourceAdmissionMode: "listed_only",
+    listConnectionSources: async () => {
+      sourceStateReads += 1;
+      return sources;
+    },
+  }), toJobRecord({
+    ...scheduled,
+    payload: {
+      ...scheduled.payload,
+      historicalWindowStart: "2026-05-12T00:00:00.000Z",
+      windowEnd: "2026-05-13T00:00:00.000Z",
+      windowStart: "2026-05-12T00:00:00.000Z",
+    },
+  }, 5));
+
+  // One projection snapshot covers both providers; the other four reads fence
+  // current admission, snapshot sanitization, canonical import, and completion.
+  assert.equal(sourceStateReads, 5);
+  assert.equal(findBloodPressureJob(result.scheduledJobs ?? []).payload?.sourceProviderSlug, "omron");
+});
+
 test("empty Oura note history reaches terminal source coverage", async () => {
   const provider = createProvider({
     additionalProviders: [{
