@@ -396,6 +396,47 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     expect(result.preservedLocalProgress).toBe(true);
   });
 
+  it("retains unpublished matrix coverage when hosted metadata fills the envelope", () => {
+    const sharedMetadata = Object.fromEntries(
+      Array.from({ length: 15 }, (_, index) => [`sharedFact${index}`, `value-${index}`]),
+    );
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: sharedMetadata,
+      providerSlug: "omron",
+      resource: "caffeine",
+      version: 1,
+    });
+    expect(coverage).not.toBeNull();
+    if (!coverage) {
+      throw new TypeError("Expected representable Junction coverage.");
+    }
+
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        ...sharedMetadata,
+        concurrentHostedFact: "published",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        ...sharedMetadata,
+        [coverage.metadataKey]: coverage.value,
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(Object.keys(result.metadata)).toHaveLength(16);
+    expect(result.metadata.concurrentHostedFact).toBeUndefined();
+    expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      result.metadata,
+      "omron",
+      "caffeine",
+      1,
+    )).toBe(true);
+    for (const [key, value] of Object.entries(sharedMetadata)) {
+      expect(result.metadata[key]).toBe(value);
+    }
+  });
+
   it("keeps published source coverage when a bounded union cannot fit", () => {
     const hostedCoverage = `v1|${Array.from(
       { length: 12 },

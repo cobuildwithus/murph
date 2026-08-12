@@ -818,7 +818,7 @@ function mergeJunctionExtendedTimeseriesHistoryCoverageMetadata(input: {
   localMetadata: Record<string, unknown>;
   selectedMetadata: Record<string, unknown>;
 }): { metadata: Record<string, unknown>; preservedLocalCoverage: boolean } {
-  const metadata = { ...input.selectedMetadata };
+  let metadata = { ...input.selectedMetadata };
   const hostedCoverage = readJunctionExtendedTimeseriesHistoryCoverageFacts(
     input.hostedMetadata,
   );
@@ -839,7 +839,9 @@ function mergeJunctionExtendedTimeseriesHistoryCoverageMetadata(input: {
     : null;
 
   if (metadataKey && encoded) {
-    metadata[metadataKey] = encoded;
+    metadata = mergeStoredDeviceSyncMetadataPatch(metadata, {
+      [metadataKey]: encoded,
+    });
     for (const legacyMetadataKey of JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS) {
       if (
         legacyMetadataKey !== metadataKey
