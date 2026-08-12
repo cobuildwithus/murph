@@ -116,6 +116,10 @@ const ACTIVITY_RECORD = {
 
 const SOURCE_REVISION_PATTERN = /^[A-Za-z0-9_-]{32}$/u;
 
+function utcDateKey(nowMs: number): string {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
 type WorkoutMetricRow = Pick<
   MetricSeriesPoint,
   | "date"
@@ -577,7 +581,7 @@ describe("selectProjectableDailyMetricDays", () => {
       date,
       sleepEndAt: "2026-07-04T07:51:00.000Z",
       sleepStartAt: "2026-07-03T22:00:00.000Z",
-    }], nowMs);
+    }], utcDateKey(nowMs));
     const sleepDurations = selectProjectableDailyMetricDays([{
       date,
       grain: "day",
@@ -585,7 +589,7 @@ describe("selectProjectableDailyMetricDays", () => {
       statistic: "value",
       unit: "minutes",
       value: 477,
-    }], sleepDurationSpec, nowMs);
+    }], sleepDurationSpec, nowMs, utcDateKey(nowMs));
 
     expect(Date.parse("2026-07-04T07:51:00.000Z") - Date.parse("2026-07-03T22:00:00.000Z"))
       .toBe(591 * 60_000);
@@ -636,6 +640,7 @@ describe("selectProjectableDailyMetricDays", () => {
       })),
       sleepDurationSpec,
       boundaryNowMs,
+      utcDateKey(boundaryNowMs),
     );
 
     expect(selected.map((record) => record.recordKey)).toEqual([
@@ -1557,7 +1562,12 @@ describe("selectProjectableDailyMetricDays", () => {
       value: 88,
     };
 
-    const selected = selectProjectableDailyMetricDays([point], spec, nowMs);
+    const selected = selectProjectableDailyMetricDays(
+      [point],
+      spec,
+      nowMs,
+      utcDateKey(nowMs),
+    );
     expect(selected[0]?.data).toMatchObject({
       projectedAt: "2026-07-04T00:00:00.000Z",
       sources: [
@@ -1588,7 +1598,7 @@ describe("selectProjectableDailyMetricDays", () => {
           value: 92,
         },
       ],
-    }], spec, nowMs)).toEqual([]);
+    }], spec, nowMs, utcDateKey(nowMs))).toEqual([]);
   });
 
   it("maps recent selected daily metric rows to generic scalar records", () => {
@@ -1617,7 +1627,7 @@ describe("selectProjectableDailyMetricDays", () => {
         unit: "count",
         value: 1_000_001,
       },
-    ], stepsSpec, nowMs);
+    ], stepsSpec, nowMs, utcDateKey(nowMs));
 
     expect(selected).toEqual([
       {
@@ -1642,6 +1652,7 @@ describe("selectProjectableDailyMetricDays", () => {
   it.each([
     {
       label: "UTC+14 Monday",
+      currentDate: "2026-07-27",
       nowMs: Date.parse("2026-07-26T10:15:00.000Z"),
       expectedDates: [
         "2026-07-27",
@@ -1655,6 +1666,7 @@ describe("selectProjectableDailyMetricDays", () => {
     },
     {
       label: "UTC-12 Monday",
+      currentDate: "2026-07-27",
       nowMs: Date.parse("2026-07-28T11:45:00.000Z"),
       expectedDates: [
         "2026-07-27",
@@ -1663,9 +1675,25 @@ describe("selectProjectableDailyMetricDays", () => {
         "2026-07-24",
         "2026-07-23",
         "2026-07-22",
+        "2026-07-21",
       ],
     },
-  ])("never crosses the seven-date UTC disclosure bound on $label", ({
+    {
+      label: "Chicago before UTC midnight",
+      currentDate: "2026-07-27",
+      nowMs: Date.parse("2026-07-28T04:30:00.000Z"),
+      expectedDates: [
+        "2026-07-27",
+        "2026-07-26",
+        "2026-07-25",
+        "2026-07-24",
+        "2026-07-23",
+        "2026-07-22",
+        "2026-07-21",
+      ],
+    },
+  ])("keeps the member-local seven-date disclosure window on $label", ({
+    currentDate,
     expectedDates,
     nowMs: boundaryNowMs,
   }) => {
@@ -1691,9 +1719,69 @@ describe("selectProjectableDailyMetricDays", () => {
       })),
       stepsSpec,
       boundaryNowMs,
+      currentDate,
     );
 
     expect(selected.map((record) => record.recordKey)).toEqual(expectedDates);
+  });
+
+  it("excludes sparse dates outside the member-local window", () => {
+    const selected = selectProjectableDailyMetricDays(
+      ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-22", "2026-07-20"]
+        .map((date, index) => ({
+          date,
+          grain: "day" as const,
+          metricKey: "steps",
+          statistic: "value" as const,
+          unit: "count",
+          value: 1_000 + index,
+        })),
+      stepsSpec,
+      Date.parse("2026-07-26T10:15:00.000Z"),
+      "2026-07-27",
+    );
+
+    expect(selected.map((record) => record.recordKey)).toEqual([
+      "2026-07-27",
+      "2026-07-25",
+      "2026-07-23",
+      "2026-07-22",
+    ]);
+  });
+
+  it("keeps seven civil dates across daylight-saving changes", () => {
+    const selected = selectProjectableDailyMetricDays(
+      [
+        "2026-03-08",
+        "2026-03-07",
+        "2026-03-06",
+        "2026-03-05",
+        "2026-03-04",
+        "2026-03-03",
+        "2026-03-02",
+        "2026-03-01",
+      ].map((date, index) => ({
+        date,
+        grain: "day" as const,
+        metricKey: "steps",
+        statistic: "value" as const,
+        unit: "count",
+        value: 1_000 + index,
+      })),
+      stepsSpec,
+      Date.parse("2026-03-08T18:00:00.000Z"),
+      "2026-03-08",
+    );
+
+    expect(selected.map((record) => record.recordKey)).toEqual([
+      "2026-03-08",
+      "2026-03-07",
+      "2026-03-06",
+      "2026-03-05",
+      "2026-03-04",
+      "2026-03-03",
+      "2026-03-02",
+    ]);
   });
 
   it("shares selected day-grain activity-minutes rows through the scalar activity spec", () => {
@@ -1729,8 +1817,13 @@ describe("selectProjectableDailyMetricDays", () => {
       statistic: "value",
       unit: "minutes",
       value: 45,
-    }], activitySpec, nowMs)).toEqual([]);
-    const selected = selectProjectableDailyMetricDays(series.rows, activitySpec, nowMs);
+    }], activitySpec, nowMs, utcDateKey(nowMs))).toEqual([]);
+    const selected = selectProjectableDailyMetricDays(
+      series.rows,
+      activitySpec,
+      nowMs,
+      utcDateKey(nowMs),
+    );
     expect(selected).toEqual([{
       ...ACTIVITY_RECORD,
       sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
@@ -1836,7 +1929,7 @@ describe("selectProjectableMealNutritionDays", () => {
         mealCount: 2,
         proteinTotal: 87.5,
       }),
-    ], proteinSpec, nowMs)).toEqual([{
+    ], proteinSpec, utcDateKey(nowMs))).toEqual([{
       data: {
         date: "2026-07-03",
         metricKey: "protein-grams",
@@ -1856,7 +1949,7 @@ describe("selectProjectableMealNutritionDays", () => {
         proteinMealCount: 1,
         proteinTotal: 42,
       }),
-    ], proteinSpec, nowMs)).toEqual([]);
+    ], proteinSpec, utcDateKey(nowMs))).toEqual([]);
   });
 
   it("retains a complete true-zero protein day", () => {
@@ -1866,7 +1959,7 @@ describe("selectProjectableMealNutritionDays", () => {
         mealCount: 2,
         proteinTotal: 0,
       }),
-    ], proteinSpec, nowMs)).toEqual([{
+    ], proteinSpec, utcDateKey(nowMs))).toEqual([{
       data: {
         date: "2026-07-03",
         metricKey: "protein-grams",
@@ -1882,13 +1975,13 @@ describe("selectProjectableMealNutritionDays", () => {
     expect(selectProjectableMealNutritionDays([
       mealNutritionDay({ date: "2026-07-03", proteinTotal: 2_001 }),
       mealNutritionDay({ date: "2026-07-02", proteinTotal: -1 }),
-    ], proteinSpec, nowMs)).toEqual([]);
+    ], proteinSpec, utcDateKey(nowMs))).toEqual([]);
   });
 
   it("skips protein days older than the seven-date cutoff", () => {
     expect(selectProjectableMealNutritionDays([
       mealNutritionDay({ date: "2026-06-25", proteinTotal: 55 }),
-    ], proteinSpec, nowMs)).toEqual([]);
+    ], proteinSpec, utcDateKey(nowMs))).toEqual([]);
   });
 
   it("keeps at most the seven newest complete protein days", () => {
@@ -1904,7 +1997,7 @@ describe("selectProjectableMealNutritionDays", () => {
     ].map((date, index) => mealNutritionDay({
       date,
       proteinTotal: 40 + index,
-    })), proteinSpec, nowMs);
+    })), proteinSpec, utcDateKey(nowMs));
 
     expect(selected).toHaveLength(7);
     expect(selected.map((record) => record.recordKey)).toEqual([
@@ -1921,7 +2014,7 @@ describe("selectProjectableMealNutritionDays", () => {
   it("returns no records for a metric-series-sourced projection spec", () => {
     expect(selectProjectableMealNutritionDays([
       mealNutritionDay({ date: "2026-07-03", proteinTotal: 55 }),
-    ], requireDailyMetricSpec("steps-days.v0"), nowMs)).toEqual([]);
+    ], requireDailyMetricSpec("steps-days.v0"), utcDateKey(nowMs))).toEqual([]);
   });
 
   const NUTRIENT_CASES = [
@@ -1954,7 +2047,7 @@ describe("selectProjectableMealNutritionDays", () => {
       const spec = requireDailyMetricSpec(nutrient.projectionKind);
       expect(selectProjectableMealNutritionDays([
         dayForNutrient("2026-07-03", nutrient.value),
-      ], spec, nowMs)).toEqual([{
+      ], spec, utcDateKey(nowMs))).toEqual([{
         data: {
           date: "2026-07-03",
           metricKey: nutrient.metricKey,
@@ -1968,17 +2061,17 @@ describe("selectProjectableMealNutritionDays", () => {
       // Complete true-zero day is data.
       expect(selectProjectableMealNutritionDays([
         dayForNutrient("2026-07-03", 0),
-      ], spec, nowMs)[0]?.data).toMatchObject({ value: 0 });
+      ], spec, utcDateKey(nowMs))[0]?.data).toMatchObject({ value: 0 });
 
       // Incomplete day (a meal lacks the nutrient) is omitted.
       expect(selectProjectableMealNutritionDays([
         dayForNutrient("2026-07-03", nutrient.value, { mealCount: 2, metricMealCount: 1 }),
-      ], spec, nowMs)).toEqual([]);
+      ], spec, utcDateKey(nowMs))).toEqual([]);
 
       // Out-of-bounds total is skipped, never clamped.
       expect(selectProjectableMealNutritionDays([
         dayForNutrient("2026-07-03", nutrient.overMax),
-      ], spec, nowMs)).toEqual([]);
+      ], spec, utcDateKey(nowMs))).toEqual([]);
     });
   }
 
@@ -2147,12 +2240,12 @@ describe("selectProjectableWorkoutDays", () => {
 
   it("maps selected workout session summaries without raw workout details", () => {
     const selected = selectProjectableWorkoutDays({
+      currentDate: utcDateKey(nowMs),
       ...workoutRows({
         date: ACTIVITY_DAY.date,
         workoutCount: 2,
         workoutMinutes: 85,
       }),
-      nowMs,
     });
 
     expect(selected).toEqual([
@@ -2179,6 +2272,7 @@ describe("selectProjectableWorkoutDays", () => {
 
   it("drops split-provider workout tuples instead of joining count and minutes by date", () => {
     const selected = selectProjectableWorkoutDays({
+      currentDate: utcDateKey(nowMs),
       ...workoutRows({
         countRecordIds: ["evt_garmin_count"],
         date: ACTIVITY_DAY.date,
@@ -2186,7 +2280,6 @@ describe("selectProjectableWorkoutDays", () => {
         workoutCount: 1,
         workoutMinutes: 85,
       }),
-      nowMs,
     });
 
     expect(selected).toEqual([]);
@@ -3280,7 +3373,7 @@ describe("selectProjectableActivityMinutesDays", () => {
 
   it("maps structured activity sessions to activity-specific daily minute records", () => {
     const selected = selectProjectableActivityMinutesDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows: [
         activitySessionRow({
           activityKind: "running",
@@ -3330,7 +3423,7 @@ describe("selectProjectableActivityMinutesDays", () => {
 
   it("does not count durationless sessions as activity-minute records", () => {
     const selected = selectProjectableActivityMinutesDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows: [
         activitySessionRow({
           activityKind: "running",
@@ -3346,7 +3439,7 @@ describe("selectProjectableActivityMinutesDays", () => {
 
   it("drops exact duplicate activity sessions before scoring a day", () => {
     const selected = selectProjectableActivityMinutesDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows: [
         activitySessionRow({
           activityKind: "running",
@@ -3376,7 +3469,7 @@ describe("selectProjectableActivityMinutesDays", () => {
 
   it("deduplicates matching activity aliases before scoring a day", () => {
     const selected = selectProjectableActivityMinutesDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows: [
         activitySessionRow({
           activityKind: "running",
@@ -3406,7 +3499,7 @@ describe("selectProjectableActivityMinutesDays", () => {
 
   it("deduplicates overlapping provider copies with rounded duration drift", () => {
     const selected = selectProjectableActivityMinutesDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows: [
         activitySessionRow({
           activityKind: "running",
@@ -3692,7 +3785,7 @@ describe("selectProjectableActivityDistanceDays", () => {
     ];
 
     const selected = selectProjectableActivityDistanceDays({
-      nowMs: boundaryNowMs,
+      currentDate: utcDateKey(boundaryNowMs),
       rows: dates.map((date, index) => activitySessionRow({
         activityKind: "running",
         date,
@@ -3715,9 +3808,63 @@ describe("selectProjectableActivityDistanceDays", () => {
     ]);
   });
 
+  it.each([
+    {
+      expectedDates: ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-21"],
+      label: "UTC+14 excludes a sparse eighth local date",
+      nowMs: Date.parse("2026-07-26T10:15:00.000Z"),
+      timeZone: "Pacific/Kiritimati",
+    },
+    {
+      expectedDates: ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-21"],
+      label: "UTC-12 retains the oldest valid local date",
+      nowMs: Date.parse("2026-07-28T11:45:00.000Z"),
+      timeZone: "Etc/GMT+12",
+    },
+    {
+      expectedDates: ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-21"],
+      label: "Chicago retains its local date before UTC midnight",
+      nowMs: Date.parse("2026-07-28T04:30:00.000Z"),
+      timeZone: "America/Chicago",
+    },
+  ])("uses the validated vault timezone when $label", async ({
+    expectedDates,
+    nowMs: boundaryNowMs,
+    timeZone,
+  }) => {
+    const dates = ["2026-07-27", "2026-07-25", "2026-07-23", "2026-07-21", "2026-07-20"];
+    const vaultRoot = await createActivitySessionVault(
+      dates.map((date, index) => ({
+        activityType: "running",
+        dayKey: date,
+        distanceKm: 5,
+        durationMinutes: 30,
+        id: `evt_local_window_${index}`,
+        kind: "activity_session",
+        occurredAt: `${date}T07:00:00.000Z`,
+        recordedAt: `${date}T08:00:00.000Z`,
+        schemaVersion: "murph.event.v1",
+        startAt: `${date}T07:00:00.000Z`,
+      })),
+      timeZone,
+    );
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(boundaryNowMs);
+
+    try {
+      const selected = await readProjectableActivityDistanceDays(
+        vaultRoot,
+        runningDistanceSpec,
+      );
+      expect(selected.map((record) => record.recordKey)).toEqual(expectedDates);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it("maps activity-session distance to activity-specific daily distance records", () => {
     const selected = selectProjectableActivityDistanceDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows: [
         activitySessionRow({
           activityKind: "running",
@@ -3770,7 +3917,7 @@ describe("selectProjectableActivityDistanceDays", () => {
 
   it("does not infer distance when matching sessions have no canonical distance", () => {
     const selected = selectProjectableActivityDistanceDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows: [
         activitySessionRow({
           activityKind: "running",
@@ -3787,7 +3934,7 @@ describe("selectProjectableActivityDistanceDays", () => {
 
   it("preserves distance when duplicate matching session rows disagree on distance", () => {
     const selected = selectProjectableActivityDistanceDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows: [
         activitySessionRow({
           activityKind: "running",
@@ -3842,12 +3989,12 @@ describe("selectProjectableActivityDistanceDays", () => {
     ];
 
     expect(selectProjectableActivityDistanceDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows,
       spec: runningDistanceSpec,
     })).toEqual([]);
     expect(selectProjectableActivitySessionCountDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows,
       spec: requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
     })).toEqual([{
@@ -3919,7 +4066,7 @@ describe("selectProjectableActivitySessionCountDays", () => {
     ];
 
     const selected = selectProjectableActivitySessionCountDays({
-      nowMs: boundaryNowMs,
+      currentDate: utcDateKey(boundaryNowMs),
       rows: dates.map((date, index) => activitySessionRow({
         activityKind: "running",
         date,
@@ -3943,7 +4090,7 @@ describe("selectProjectableActivitySessionCountDays", () => {
 
   it("maps activity sessions to activity-specific daily count records", () => {
     const selected = selectProjectableActivitySessionCountDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows: [
         activitySessionRow({
           activityKind: "running",
@@ -3992,7 +4139,7 @@ describe("selectProjectableActivitySessionCountDays", () => {
 
   it("deduplicates count rows when one copy omits duration", () => {
     const selected = selectProjectableActivitySessionCountDays({
-      nowMs,
+      currentDate: utcDateKey(nowMs),
       rows: [
         activitySessionRow({
           activityKind: "running",
@@ -4123,7 +4270,7 @@ describe("selectProjectableHeartRateZoneDays", () => {
         statistic: "value",
         value: 24,
       },
-    ], nowMs);
+    ], utcDateKey(nowMs));
 
     expect(selected).toEqual([
       {
@@ -4249,7 +4396,7 @@ describe("selectProjectableSleepNights", () => {
       },
     ];
 
-    const selected = selectProjectableSleepNights(summaries, nowMs);
+    const selected = selectProjectableSleepNights(summaries, utcDateKey(nowMs));
 
     // recordKey is the night date and occurredAt is the night date at UTC midnight, so the
     // dedupe key, vault path, and plaintext mailbox metadata all reduce to the night itself
@@ -4278,7 +4425,7 @@ describe("selectProjectableSleepNights", () => {
         sleepEndAt: `${date}T06:00:00.000Z`,
         sleepStartAt: `${date}T00:00:00.000Z`,
       })),
-      boundaryNowMs,
+      utcDateKey(boundaryNowMs),
     );
 
     expect(selected.map((record) => record.recordKey)).toEqual(dates.slice(0, 7));
@@ -4288,7 +4435,7 @@ describe("selectProjectableSleepNights", () => {
     // Cross-package drift guard: the deliver parser pins occurredAt to the night-date
     // midnight and bounds the sleep window, so a projector that drifts from that contract
     // would make web reject every offer. Pipe real projector output through the real parser.
-    const selected = selectProjectableSleepNights([NIGHT], nowMs);
+    const selected = selectProjectableSleepNights([NIGHT], utcDateKey(nowMs));
 
     expect(selected).toHaveLength(1);
     expect(
@@ -4311,7 +4458,7 @@ describe("selectProjectableSleepNights", () => {
       sleepStartAt: `${date}T22:00:00.000Z`,
     }));
 
-    const selected = selectProjectableSleepNights(summaries, nowMs);
+    const selected = selectProjectableSleepNights(summaries, utcDateKey(nowMs));
 
     expect(selected.map((record) => record.recordKey)).toEqual([justInsideDate]);
   });

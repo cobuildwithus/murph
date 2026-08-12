@@ -102,15 +102,15 @@ Last verified: 2026-08-11
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
-- A committed hosted-group projection grant immediately appends the existing
-  durable `runtime.maintenance-requested` control row and signals its mailbox
-  pointer in parallel with bounded join-confirmation recovery. Caller
-  cancellation cannot suppress the post-commit append, and the scheduled
-  mailbox-handoff sweep includes unconsumed maintenance rows, so a failed first
-  signal remains recoverable without unrelated member activity. Either
-  best-effort handoff can stall without starving the other. The durable null
-  snapshot remains an explicit `pending` shared-read state until the member
-  runtime materializes it.
+- A hosted-group projection grant that needs its first private projection and
+  one generation-stable `runtime.maintenance-requested` control row commit in
+  the same Web transaction. An append failure therefore rolls back the grant
+  instead of admitting unrecoverable work. After commit, Web signals that exact
+  mailbox pointer in parallel with bounded join-confirmation recovery, and the
+  scheduled mailbox-handoff sweep includes an unconsumed row when the immediate
+  signal fails or the process stops. Either best-effort signal can stall without
+  starving the other. The durable null snapshot remains an explicit `pending`
+  shared-read state until the member runtime materializes it.
 - Direct hosted Codex process projection includes the selected core provider
   and only that provider's signed egress credential. Changing providers
   therefore changes the warm-process launch identity; the replacement process

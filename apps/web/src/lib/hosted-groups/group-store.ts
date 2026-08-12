@@ -1,10 +1,14 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { resolveDeviceConnectSourceById } from "@murphai/device-syncd/connect-config";
+import { buildHostedExecutionRuntimeControlWake } from "@murphai/hosted-execution";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
+  type HostedMailboxLane,
   type HostedRuntimeGroupSharedReadResult,
   type HostedRuntimeGroupSharedRecord,
 } from "@murphai/hosted-execution/runtime-control";
@@ -34,6 +38,7 @@ import {
   hostedHealthDataConsentNotRevokedWhere,
 } from "../legal/consent";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
+import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import {
   createHostedEmailLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
@@ -152,6 +157,14 @@ export interface HostedGroupJoinAcceptanceResult {
 export interface HostedGroupJoinAcceptanceTxResult
   extends HostedGroupJoinAcceptanceResult {
   joinConfirmationSignal?: HostedGroupJoinConfirmationSignal;
+  projectionMaintenanceSignal?: HostedGroupProjectionMaintenanceSignal;
+}
+
+export interface HostedGroupProjectionMaintenanceSignal {
+  lane: HostedMailboxLane;
+  laneSeq: string;
+  mailboxItemId: string;
+  memberId: string;
 }
 
 export interface HostedGroupJoinOfferBindingTxResult {
@@ -2118,11 +2131,15 @@ async function acceptHostedGroupJoinTx(input: {
   const revokedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
   const grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[] = [];
   const revokedVaultShareProjectionScopes: HostedVaultShareProjectionScope[] = [];
-  await grantHostedGroupMembershipProfileNameTx(input.tx, {
+  const projectionGrantIds: string[] = [];
+  const profileNameGrant = await grantHostedGroupMembershipProfileNameTx(input.tx, {
     groupRuntimeMemberId: group.runtimeMemberId,
     memberId: input.memberId,
     now: input.now,
   });
+  if (profileNameGrant.requiresProjection) {
+    projectionGrantIds.push(profileNameGrant.id);
+  }
   grantedVaultShareProjectionKinds.push("profile-name.v0");
   grantedVaultShareProjectionScopes.push(hostedVaultShareProjectionKindToScope("profile-name.v0"));
   if (requestedProjectionScopes.length > 0) {
@@ -2151,13 +2168,16 @@ async function acceptHostedGroupJoinTx(input: {
           grantorMemberId: input.memberId,
           projectionScope,
         });
-        await grantHostedVaultShareTx({
+        const grant = await grantHostedVaultShareTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
           now: input.now,
           projectionScope,
           tx: input.tx,
         });
+        if (grant.requiresProjection) {
+          projectionGrantIds.push(grant.id);
+        }
         grantedVaultShareProjectionKinds.push(projectionScope.projectionKind);
         grantedVaultShareProjectionScopes.push(projectionScope);
       } else if (!input.additiveOnly) {
@@ -2218,6 +2238,13 @@ async function acceptHostedGroupJoinTx(input: {
   const joinConfirmationSignal = joinConfirmationResult?.kind === "appended"
     ? joinConfirmationResult.signal
     : null;
+  const projectionMaintenanceSignal = projectionGrantIds.length > 0
+    ? await appendHostedGroupProjectionMaintenanceTx({
+        grantIds: projectionGrantIds,
+        memberId: input.memberId,
+        tx: input.tx,
+      })
+    : null;
 
   return {
     alreadyMember,
@@ -2226,6 +2253,7 @@ async function acceptHostedGroupJoinTx(input: {
     groupId: group.id,
     ...(joinConfirmationSignal ? { joinConfirmationSignal } : {}),
     membershipId,
+    ...(projectionMaintenanceSignal ? { projectionMaintenanceSignal } : {}),
     revokedVaultShareProjectionKinds,
     revokedVaultShareProjectionScopes,
   };
@@ -2524,8 +2552,8 @@ function fixedProjectionKindsToScopes(
 async function grantHostedGroupMembershipProfileNameTx(
   tx: Prisma.TransactionClient,
   input: { groupRuntimeMemberId: string; memberId: string; now: Date },
-): Promise<void> {
-  await grantHostedGroupMembershipProjectionTx(tx, {
+): ReturnType<typeof grantHostedVaultShareTx> {
+  return grantHostedGroupMembershipProjectionTx(tx, {
     ...input,
     projectionScope: hostedVaultShareProjectionKindToScope("profile-name.v0"),
   });
@@ -2539,19 +2567,47 @@ async function grantHostedGroupMembershipProjectionTx(
     now: Date;
     projectionScope: HostedVaultShareProjectionScope;
   },
-): Promise<void> {
+): ReturnType<typeof grantHostedVaultShareTx> {
   await assertHostedGroupVaultShareGrantLimitTx(tx, {
     destinationMemberId: input.groupRuntimeMemberId,
     grantorMemberId: input.memberId,
     projectionScope: input.projectionScope,
   });
-  await grantHostedVaultShareTx({
+  return grantHostedVaultShareTx({
     destinationMemberId: input.groupRuntimeMemberId,
     grantorMemberId: input.memberId,
     now: input.now,
     projectionScope: input.projectionScope,
     tx,
   });
+}
+
+async function appendHostedGroupProjectionMaintenanceTx(input: {
+  grantIds: readonly string[];
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupProjectionMaintenanceSignal> {
+  const grantIds = [...new Set(input.grantIds)].sort();
+  const deterministicOccurredAt = "1970-01-01T00:00:00.000Z";
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify({ grantIds, memberId: input.memberId, version: 1 }))
+    .digest("hex")
+    .slice(0, 32);
+  const appended = await appendHostedMailboxEnvelopeTx({
+    envelope: buildHostedExecutionRuntimeControlWake({
+      eventId: `runtime-control:group-share-projection:${fingerprint}`,
+      kind: "runtime.maintenance-requested",
+      occurredAt: deterministicOccurredAt,
+      userId: input.memberId,
+    }),
+    tx: input.tx,
+  });
+  return {
+    lane: appended.item.lane,
+    laneSeq: appended.item.laneSeq,
+    mailboxItemId: appended.item.id,
+    memberId: appended.item.userId,
+  };
 }
 
 async function readHostedGroupSummaryById(

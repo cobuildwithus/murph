@@ -463,23 +463,27 @@ mutate a local share store. V2 archive restore excludes
 materialization excludes the corresponding vault-relative subtrees. No
 foreground cleanup pass or revoke wake is part of the boundary.
 
-After a join or permission transaction creates a new projection grant, Web
-starts the existing durable `runtime.maintenance-requested` mailbox handoff
-immediately. The append ignores caller cancellation after the grant commits and
-runs alongside join-confirmation recovery rather than after it, so either
-best-effort path can stall without starving the other. The shared scheduled
-mailbox-handoff sweep also selects unconsumed maintenance rows, making a failed
-first Temporal signal recoverable without unrelated member activity. This adds
-no projection owner; the durable null snapshot remains visible as `pending`
-until the member runtime materializes it.
+When a join or permission acceptance admits a grant generation whose snapshot
+is still null, Web appends one generation-stable
+`runtime.maintenance-requested` mailbox row in the same transaction as the
+grant. An append failure rolls back the grant. After commit, Web signals that
+exact mailbox pointer alongside join-confirmation recovery, so either
+best-effort signal can stall without starving the other. The shared scheduled
+mailbox-handoff sweep also selects the unconsumed maintenance row, making a
+failed first Temporal signal or a process stop after commit recoverable without
+unrelated member activity. This adds no projection owner; the durable null
+snapshot remains visible as `pending` until the member runtime materializes it.
 
-Recent daily and sleep projection owners emit at most seven records and reject
-any record date older than six UTC calendar days, so sparse data cannot reach
-outside the seven-date disclosure bound. Deploy the
-Cloudflare runtime bundle with that producer bound and the additive `pending`
-parser/model status before Web begins emitting `pending` or the exact seven-day
-consent copy. Older Web remains compatible with the newer consumer because it
-emits only the prior status subset during that window.
+Recent daily and sleep projection owners derive the member's current civil date
+from the validated vault timezone, admit only that date and the prior six civil
+dates, and emit at most seven records. Sparse data therefore cannot reach an
+eighth member-local date, including around UTC midnight or daylight-saving
+changes. A missing or invalid vault timezone fails these civil-date scopes
+closed. `workouts.v0` retains its separate global calendar-close semantics.
+Deploy the Cloudflare runtime bundle with that producer bound and the additive
+`pending` parser/model status before Web begins emitting `pending` or the exact
+seven-day consent copy. Older Web remains compatible with the newer consumer
+because it emits only the prior status subset during that window.
 
 This protocol is a consumer-first hard cut:
 

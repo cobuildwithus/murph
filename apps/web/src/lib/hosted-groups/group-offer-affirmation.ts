@@ -9,7 +9,7 @@ import {
   readHostedPostCommitRemainingMs,
   waitForHostedPostCommitOperation,
 } from "../hosted-onboarding/bounded-post-commit";
-import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
+import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
@@ -158,13 +158,20 @@ export async function acceptHostedGroupOfferAffirmation(input: {
 
   const runPostCommitTail = async (): Promise<void> => {
     const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
-    const projectionWake = result.grantedVaultShareProjectionKinds.length > 0
+    const projectionMaintenanceSignal = result.projectionMaintenanceSignal;
+    const projectionWake = projectionMaintenanceSignal
       ? runHostedGroupOfferAffirmationPostCommitBestEffort({
           deadlineMs: postCommitDeadlineMs,
           operation: (abortSignal) =>
-            signalHostedRuntimeMaintenanceRuntime({
+            signalHostedMailboxAppendRuntime({
               abortSignal,
-              userId: input.memberId,
+              expectedUserId: projectionMaintenanceSignal.memberId,
+              knownCheckpoint: {
+                lane: projectionMaintenanceSignal.lane,
+                laneSeq: projectionMaintenanceSignal.laneSeq,
+                userId: projectionMaintenanceSignal.memberId,
+              },
+              mailboxItemId: projectionMaintenanceSignal.mailboxItemId,
             }),
         })
       : null;

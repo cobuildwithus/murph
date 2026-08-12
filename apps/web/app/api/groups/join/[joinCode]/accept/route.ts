@@ -19,7 +19,7 @@ import {
   requireHostedInviteForAuthentication,
 } from "@/src/lib/hosted-onboarding/invite-service";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
-import { signalHostedRuntimeMaintenanceRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
+import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
@@ -84,15 +84,25 @@ export const POST = withJsonError(async (
       tx,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  const { joinConfirmationSignal, ...responseResult } = result;
+  const {
+    joinConfirmationSignal,
+    projectionMaintenanceSignal,
+    ...responseResult
+  } = result;
 
   const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
-  const projectionWake = result.grantedVaultShareProjectionKinds.length > 0
+  const projectionWake = projectionMaintenanceSignal
     ? runHostedGroupJoinPostCommitBestEffort({
         deadlineMs: postCommitDeadlineMs,
-        operation: (abortSignal) => signalHostedRuntimeMaintenanceRuntime({
+        operation: (abortSignal) => signalHostedMailboxAppendRuntime({
           abortSignal,
-          userId: auth.member.id,
+          expectedUserId: projectionMaintenanceSignal.memberId,
+          knownCheckpoint: {
+            lane: projectionMaintenanceSignal.lane,
+            laneSeq: projectionMaintenanceSignal.laneSeq,
+            userId: projectionMaintenanceSignal.memberId,
+          },
+          mailboxItemId: projectionMaintenanceSignal.mailboxItemId,
         }),
       })
     : null;

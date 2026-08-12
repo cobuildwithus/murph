@@ -15,8 +15,9 @@ Updated: 2026-08-11
 
 ## Success criteria
 
-- Affirmative reaction acceptance durably requests the existing payload-free
-  member-runtime wake as soon as the sleep grants commit.
+- Affirmative acceptance atomically admits the exact grant generation and its
+  durable projection-maintenance mailbox row, then signals that row as soon as
+  the transaction commits.
 - Group shared reads expose `pending`, `missing`, and `available` as distinct
   data states while preserving `not_granted` authority semantics.
 - Assistant guidance treats pending data as preparation, never as proof that
@@ -29,7 +30,8 @@ Updated: 2026-08-11
 
 ## Scope
 
-- Existing hosted group reaction/grant and payload-free runtime-wake path.
+- Existing hosted group reaction/grant, runtime-maintenance mailbox, and
+  scheduled handoff-recovery paths.
 - Existing Web-owned vault-share snapshot/read contract.
 - Existing hosted-execution parser/types and assistant group-shared guidance.
 - Focused tests and matching durable consent/group-sharing documentation.
@@ -38,8 +40,8 @@ Updated: 2026-08-11
 
 - Keep Web authoritative for grants and the member runtime authoritative for
   private-vault projection.
-- Reuse the existing payload-free runtime wake; add no queue, scheduler, or broad state
-  owner.
+- Reuse the existing runtime-maintenance mailbox and scheduled handoff sweep;
+  add no queue, scheduler, or broad state owner.
 - Pending must disclose no health values, provider identity, or private-data
   existence.
 - Preserve active user-critical group replies and consent revocation behavior.
@@ -65,9 +67,9 @@ Updated: 2026-08-11
   an unmaterialized null snapshot and a completed encrypted empty snapshot into
   the same missing state. Its accepted UX additions keep pending participants
   unranked, prevent repeat-consent pressure, and make selector-based seven-day
-  activity disclosures explicit. Its proposed operator-maintenance mailbox was
-  rejected because the current architecture already designates the payload-free
-  runtime wake for committed user actions.
+  activity disclosures explicit. Its initial maintenance-mailbox suggestion was
+  deferred until exact code-path review proved that the prior payload-free wake
+  had no durable recovery record.
 - Focused Web verification passed: 4 files and 225 tests. Focused hosted wire
   parser verification passed: 1 file and 66 tests. Focused Assistant Engine
   verification passed: 2 files and 104 tests.
@@ -121,10 +123,9 @@ Updated: 2026-08-11
   found the same two defects: seven-day consent copy did not match the
   eight-record producer, and a one-shot payload-free wake could leave pending
   without a recovery owner. Both findings were accepted. The producer now caps
-  recent sleep and daily projections at seven records with a six-UTC-day age
-  cutoff, native selector consent names the same window, approval appends the
-  existing durable maintenance control row without caller-cancellation
-  suppression, and the scheduled mailbox handoff sweep includes unconsumed
+  recent sleep and daily projections at seven records, native selector consent
+  names the same window, approval appends the existing durable maintenance
+  control row, and the scheduled mailbox handoff sweep includes unconsumed
   maintenance rows.
 - Remediation proof passed: 235 focused Web tests, 101 projection-owner tests,
   an additional 88-test durable-signal/recovery subset, the 154-test group-tool
@@ -132,3 +133,23 @@ Updated: 2026-08-11
   typechecks. New boundary cases prove eight eligible sleep-timing,
   sleep-duration, selector-distance, and selector-session-count dates produce
   no more than the seven dates disclosed by consent.
+- Final ReviewGPT round 2 accepted the first remediation's intent but found two
+  remaining boundary failures. First, a UTC-midnight cutoff could admit an
+  eighth sparse member-local date east of UTC or omit a valid date west of UTC.
+  Projection reads now derive the inclusive seven-date civil window from the
+  validated vault timezone, fail closed without that domain, and preserve the
+  separate `workouts.v0` global close rule. UTC+14, UTC-12, Chicago, sparse, and
+  daylight-saving cases cover that contract.
+- Second, the grant could still commit before the maintenance append. A grant
+  generation whose snapshot is null and its generation-stable maintenance row
+  now commit in the same transaction. An append failure rejects the acceptance;
+  retrying the same generation reuses the event identity, a regrant changes it,
+  and the post-commit path signals the exact checkpoint without another
+  workspace ensure or mailbox append.
+- Round-2 remediation proof passed: 107 Assistant Runtime projection tests, 169
+  focused Web grant/admission/signal/recovery tests, and both package
+  typechecks. The final ReviewGPT rerun remains required on the remediated head.
+- `origin/main` advanced after the one permitted base update. Current-base
+  merge-tree proof now conflicts in the durable-doc index. Repository policy
+  forbids a second update; this is a `moving-base race`, so the PR and worktree
+  must remain active for handoff rather than being merged or retired here.

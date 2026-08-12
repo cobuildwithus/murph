@@ -14,13 +14,18 @@ import { parseHostedVaultShareRowProjectionScope } from "./row-projection-scope"
 
 export type HostedVaultShareGrantClient = PrismaClient | Prisma.TransactionClient;
 
+export interface HostedVaultShareGrantResult {
+  id: string;
+  requiresProjection: boolean;
+}
+
 export async function grantHostedVaultShareTx(input: {
   tx: Prisma.TransactionClient;
   grantorMemberId: string;
   destinationMemberId: string;
   projectionScope: HostedVaultShareProjectionScope;
   now: Date;
-}): Promise<void> {
+}): Promise<HostedVaultShareGrantResult> {
   const projectionScope = assertSupportedProjectionScope(input.projectionScope);
   const projectionKind = projectionScope.projectionKind;
   const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
@@ -41,12 +46,12 @@ export async function grantHostedVaultShareTx(input: {
         projectionScopeKey,
       },
     },
-    select: { id: true, status: true },
+    select: { id: true, projectionSnapshotCiphertext: true, status: true },
   });
 
   if (!existing) {
     try {
-      await input.tx.hostedVaultShare.create({
+      const created = await input.tx.hostedVaultShare.create({
         data: {
           id: generateHostedVaultShareId(),
           destinationMemberId: input.destinationMemberId,
@@ -59,8 +64,9 @@ export async function grantHostedVaultShareTx(input: {
           revokedAt: null,
           status: "granted",
         },
+        select: { id: true },
       });
-      return;
+      return { id: created.id, requiresProjection: true };
     } catch (error) {
       if (!isPrismaUniqueConstraintError(error)) {
         throw error;
@@ -73,7 +79,7 @@ export async function grantHostedVaultShareTx(input: {
             projectionScopeKey,
           },
         },
-        select: { id: true, status: true },
+        select: { id: true, projectionSnapshotCiphertext: true, status: true },
       });
       if (!existing) {
         throw error;
@@ -82,9 +88,13 @@ export async function grantHostedVaultShareTx(input: {
   }
 
   if (existing.status === "granted") {
-    return;
+    return {
+      id: existing.id,
+      requiresProjection: existing.projectionSnapshotCiphertext === null,
+    };
   }
 
+  const reactivatedId = generateHostedVaultShareId();
   await input.tx.hostedVaultShare.update({
     where: {
       grantorMemberId_projectionScopeKey_destinationMemberId: {
@@ -94,7 +104,7 @@ export async function grantHostedVaultShareTx(input: {
       },
     },
     data: {
-      id: generateHostedVaultShareId(),
+      id: reactivatedId,
       grantedAt: input.now,
       projectionKind,
       projectionSnapshotCiphertext: null,
@@ -104,6 +114,7 @@ export async function grantHostedVaultShareTx(input: {
       status: "granted",
     },
   });
+  return { id: reactivatedId, requiresProjection: true };
 }
 
 export async function revokeHostedVaultSharesTx(input: {
