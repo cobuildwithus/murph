@@ -123,8 +123,10 @@ const wearableSourceHealthSummarySchema = z.object({
 const wearableActivitySummarySchema = z.object({
   activityScore: wearableResolvedMetricSchema.optional(),
   activeCalories: wearableResolvedMetricSchema.optional(),
+  activityMinutes: wearableResolvedMetricSchema.optional(),
   activityTypes: z.array(z.string().min(1)).optional(),
   altitudeChangeMeters: wearableResolvedMetricSchema.optional(),
+  averageHeartRate: wearableResolvedMetricSchema.optional(),
   date: localDateSchema,
   dayStrain: wearableResolvedMetricSchema.optional(),
   distanceKm: wearableResolvedMetricSchema.optional(),
@@ -137,7 +139,11 @@ const wearableActivitySummarySchema = z.object({
     minHeartRate: z.number().nonnegative().optional(),
     zone: z.number().int().nonnegative().optional(),
   })).optional(),
+  highActivityMinutes: wearableResolvedMetricSchema.optional(),
+  lowActivityMinutes: wearableResolvedMetricSchema.optional(),
+  lowestHeartRate: wearableResolvedMetricSchema.optional(),
   maxHeartRate: wearableResolvedMetricSchema.optional(),
+  mediumActivityMinutes: wearableResolvedMetricSchema.optional(),
   notes: z.array(z.string()).optional(),
   percentRecorded: wearableResolvedMetricSchema.optional(),
   sessionCount: wearableResolvedMetricSchema.optional(),
@@ -146,6 +152,7 @@ const wearableActivitySummarySchema = z.object({
   summaryConfidence: wearableSummaryConfidenceSchema,
   totalCalories: wearableResolvedMetricSchema.optional(),
   totalElevationGainMeters: wearableResolvedMetricSchema.optional(),
+  walkingAverageHeartRate: wearableResolvedMetricSchema.optional(),
   workoutStrain: wearableResolvedMetricSchema.optional(),
 })
 
@@ -166,6 +173,7 @@ const wearableSleepSummarySchema = z.object({
   sleepConsistency: wearableResolvedMetricSchema.optional(),
   sleepEfficiency: wearableResolvedMetricSchema.optional(),
   sleepEndAt: nullableTimestampSchema.optional(),
+  sleepLatencyMinutes: wearableResolvedMetricSchema.optional(),
   sleepPerformance: wearableResolvedMetricSchema.optional(),
   sleepScore: wearableResolvedMetricSchema.optional(),
   sleepStartAt: nullableTimestampSchema.optional(),
@@ -747,7 +755,7 @@ export function registerWearablesCommands(
       },
     ],
     hint:
-      'Use metric aliases such as `hrv`, `resting-heart-rate`, `sleep-score`, or `skin-temp`; the shared wearable metric catalog resolves them to canonical keys.',
+      'Use aliases such as `hrv`, `sleep-score`, `activity-average-heart-rate`, or `activity-lowest-heart-rate`; the shared wearable metric catalog resolves them to canonical keys.',
     output: wearablesMetricLatestResultSchema,
     async run({ args, options }) {
       const showWearableMetricLatest = requireAdditiveWearablesQueryMethod<

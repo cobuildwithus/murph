@@ -105,7 +105,7 @@ function createMetricLatestSummary(overrides: Partial<{
   date: string | null
   delta: number | null
   max: number | null
-  metric: 'hrv' | 'restingHeartRate'
+  metric: 'averageHeartRate' | 'hrv' | 'lowestHeartRate' | 'restingHeartRate'
   min: number | null
   notes: string[]
   paths: string[]
@@ -549,6 +549,66 @@ test('wearables additive commands return the shared normalized result envelopes'
     vault,
     windowDays: 6,
   })
+})
+
+test('wearables metric latest preserves explicit activity heart-rate aliases', async () => {
+  const { cli, services } = createWearablesCliAndServices()
+  const vault = '/tmp/wearables-activity-heart-rate-vault'
+  const showWearableMetricLatest = vi.fn(
+    async (input: { metric: string; requestId: string | null; vault: string }) => ({
+      filters: {
+        date: null,
+        from: null,
+        to: null,
+        providers: [],
+        metric: input.metric,
+        windowDays: 1,
+      },
+      summary: createMetricLatestSummary({
+        max: 76,
+        metric: 'averageHeartRate',
+        min: 76,
+        requestedMetric: input.metric,
+        resolvedAlias: input.metric,
+        summaryKind: 'activity',
+        unit: 'bpm',
+        value: 76,
+        windowDays: 1,
+      }),
+      vault,
+    }),
+  )
+  Object.defineProperty(services.query, 'showWearableMetricLatest', {
+    configurable: true,
+    value: showWearableMetricLatest,
+    writable: true,
+  })
+
+  const result = await runInProcessJsonCli<{
+    summary: {
+      metric: string
+      requestedMetric: string
+      summaryKind: string
+      value: number | null
+    } | null
+  }>(cli, [
+    'wearables',
+    'metric',
+    'latest',
+    'activity-average-heart-rate',
+    '--vault',
+    vault,
+    '--window-days',
+    '1',
+  ])
+  const data = requireData(result.envelope)
+
+  assert.equal(result.exitCode, null)
+  assert.equal(data.summary?.metric, 'averageHeartRate')
+  assert.equal(data.summary?.requestedMetric, 'activity-average-heart-rate')
+  assert.equal(data.summary?.summaryKind, 'activity')
+  assert.equal(data.summary?.value, 76)
+  assert.equal(showWearableMetricLatest.mock.calls[0]?.[0].metric, 'activity-average-heart-rate')
 })
 
 test('wearables commands still reject providers that do not canonicalize to a supported value', async () => {
