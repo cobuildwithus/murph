@@ -3791,10 +3791,29 @@ test("Junction sparse metabolic identity follows every documented compound-key c
           }],
         },
       },
+      insulin_injection: {
+        groups: {
+          apple_health_kit: [{
+            data: [{
+              id: "provider-row-insulin",
+              source_device_id: "phone-original",
+              start: "2026-04-22T12:00:00Z",
+              end: "2026-04-22T12:01:00Z",
+              type: "rapid_acting",
+              unit: "unit",
+              value: 2,
+            }],
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
     },
   });
   const carbohydrateEvents = (payload.events ?? []).filter(
     (event) => event.kind === "observation" && event.fields?.metric === "carbohydrate-intake",
+  );
+  const insulinEvents = (payload.events ?? []).filter(
+    (event) => event.kind === "medication_intake",
   );
 
   assert.deepEqual(
@@ -3819,6 +3838,12 @@ test("Junction sparse metabolic identity follows every documented compound-key c
       ["apple-health-kit", "watch", "2026-04-22T12:00:00.000Z"],
       ["cronometer", "phone", "2026-04-22T12:00:00.000Z"],
     ],
+  );
+  assert.equal(insulinEvents.length, 1);
+  assert.equal(insulinEvents[0]?.occurredAt, "2026-04-22T12:00:00.000Z");
+  assert.notEqual(
+    insulinEvents[0]?.externalRef?.resourceId,
+    carbohydrateEvents.find((event) => event.fields?.value === 20)?.externalRef?.resourceId,
   );
 });
 
