@@ -81,6 +81,7 @@ import {
 } from "../configured-provider-runtime-descriptors.ts";
 import {
   addMilliseconds,
+  computeRetryDelayMs,
   normalizeString,
   sha256Text,
   subtractDays,
@@ -175,6 +176,7 @@ interface JunctionTimeseriesImportResult {
 }
 
 interface JunctionDailyTimeseriesImportResult extends JunctionTimeseriesImportResult {
+  retryableFailure?: DeviceSyncError;
   workoutStreamCursor: string | null;
 }
 
@@ -1232,6 +1234,9 @@ export function createJunctionDeviceSyncProvider(
                 && wideChunkTimeseriesResources.length > 0
                 ? "dense"
                 : null,
+              ...(denseTimeseriesImport.retryableFailure
+                ? { retryableFailure: denseTimeseriesImport.retryableFailure }
+                : {}),
               workoutStreamCursor: denseTimeseriesImport.workoutStreamCursor,
             }),
             profileMetadataPatch,
@@ -2188,6 +2193,9 @@ export function createJunctionDeviceSyncProvider(
               ? buildYieldedJunctionJobResult({
                   context,
                   job,
+                  ...(dailyImport.retryableFailure
+                    ? { retryableFailure: dailyImport.retryableFailure }
+                    : {}),
                   windowEnd: window.windowEnd,
                   windowStart: dailyImport.yieldedAt,
                   workoutStreamCursor: dailyImport.workoutStreamCursor,
@@ -3309,17 +3317,21 @@ export function createJunctionDeviceSyncProvider(
     const completedIdentities = new Set(
       [...input.completedIdentities].filter((identity) => candidateIdentities.has(identity)),
     );
-    const carryTerminalProgressOrThrow = (
-      error: unknown,
-    ): JunctionDailyTimeseriesImportResult => {
+    const carryTerminalProgressOrThrow = (error: unknown): JunctionDailyTimeseriesImportResult => {
       if (
         completedIdentities.size > 0
-        && (
-          isRetryableDeviceSyncFailure(error)
-          || isJunctionJobSignalAbort(error, input.context.signal)
-        )
+        && isJunctionJobSignalAbort(error, input.context.signal)
       ) {
         return {
+          workoutStreamCursor: encodeJunctionWorkoutStreamCompletedIdentities(
+            completedIdentities,
+          ),
+          yieldedAt: input.windowStart,
+        };
+      }
+      if (completedIdentities.size > 0 && isRetryableDeviceSyncFailure(error)) {
+        return {
+          retryableFailure: error,
           workoutStreamCursor: encodeJunctionWorkoutStreamCompletedIdentities(
             completedIdentities,
           ),
@@ -3545,6 +3557,7 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordIdentitiesJson?: string;
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
+    retryableFailure?: DeviceSyncError;
     timeseriesCursor?: string | null;
     timeseriesPhase?: JunctionTimeseriesBackfillPhase | null;
     workoutStreamCursor?: string | null;
@@ -3552,8 +3565,39 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string;
   }): ProviderJobResult {
     const followUp = buildYieldedJunctionFollowUpJob(input);
+    if (input.retryableFailure) {
+      const remainingAttempts = input.job.maxAttempts - input.job.attempts;
+      if (!followUp || remainingAttempts <= 0) {
+        throw input.retryableFailure;
+      }
+      return {
+        scheduledJobs: [{
+          ...followUp,
+          availableAt: addMilliseconds(
+            input.context.now,
+            computeRetryDelayMs(input.job.attempts),
+          ),
+          maxAttempts: remainingAttempts,
+        }],
+        nextReconcileAt: input.job.kind === "resource"
+          ? clampWebhookJobNextReconcileAt(input.context)
+          : addMilliseconds(input.context.now, reconcileIntervalMs),
+      };
+    }
     return {
-      ...(followUp ? { scheduledJobs: [followUp] } : {}),
+      ...(followUp
+        ? {
+            scheduledJobs: [{
+              ...followUp,
+              ...(input.workoutStreamCursor
+                ? {
+                    maxAttempts:
+                      input.job.maxAttempts - Math.max(input.job.attempts - 1, 0),
+                  }
+                : {}),
+            }],
+          }
+        : {}),
       nextReconcileAt: input.job.kind === "resource"
         ? clampWebhookJobNextReconcileAt(input.context)
         : addMilliseconds(input.context.now, reconcileIntervalMs),
@@ -4023,7 +4067,7 @@ function classifyOptionalJunctionResourceFailure(
   };
 }
 
-function isRetryableDeviceSyncFailure(error: unknown): boolean {
+function isRetryableDeviceSyncFailure(error: unknown): error is DeviceSyncError {
   return isDeviceSyncError(error) && error.retryable;
 }
 
