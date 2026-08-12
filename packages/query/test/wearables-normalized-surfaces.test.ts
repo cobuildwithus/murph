@@ -15,6 +15,7 @@ import { searchVaultRuntime } from "../src/query-projection.ts";
 import { searchVault } from "../src/search.ts";
 import {
   explainWearableDrift,
+  listWearableBodyStateDays,
   summarizeWearableLatest,
   summarizeWearableMetricLatest,
   summarizeWearableMetricTrend,
@@ -57,6 +58,7 @@ function makeObservation(input: {
   occurredAt: string;
   recordedAt: string;
   provider?: string;
+  observationGrain?: string;
   resourceType?: string;
   path?: string;
 }): CanonicalEntity {
@@ -73,6 +75,7 @@ function makeObservation(input: {
       dayKey: input.dayKey,
       recordedAt: input.recordedAt,
       metric: input.metric,
+      ...(input.observationGrain ? { observationGrain: input.observationGrain } : {}),
       value: input.value,
       unit: input.unit,
       externalRef: {
@@ -1217,49 +1220,51 @@ test("Junction body composition facts remain distinct across wearable and canoni
   assert.ok(metricPoints.every((point) => (point.provenance.dataOrigin as DeviceDataOrigin | null)?.sourceProviderSlug === "withings"));
 });
 
-test("sparse body observations remain sample-grain while wearable metric reads use canonical points", () => {
-  const vault = makeVault([
-    makeEntity({
-      attributes: {
-        dataOrigin: {
-          version: 1,
-          aggregatorProvider: "junction",
-          sourceProviderSlug: "withings",
-          sourceType: "scale",
-        },
-        dayKey: "2026-05-20",
-        externalRef: {
-          resourceId: "bmi-reading-1",
-          resourceType: "junction-body-mass-index-withings",
-          system: "junction",
-        },
-        metric: "bmi",
-        observationGrain: "sample",
-        recordedAt: "2026-05-20T08:06:00.000Z",
-        unit: "kg_m2",
-        value: 23.7,
-      },
-      date: "2026-05-20",
-      entityId: "event_junction_bmi_reading_1",
-      family: "event",
-      kind: "observation",
-      occurredAt: "2026-05-20T08:05:00.000Z",
-      recordClass: "ledger",
-      title: "Junction BMI reading",
-    }),
-  ]);
+test("sparse body observations participate in body lists and metric summaries through canonical selection", () => {
+  const dataOrigin = {
+    version: 1,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "withings",
+    sourceType: "scale",
+  } as const satisfies DeviceDataOrigin;
+  const sparseBodyReadings = [
+    ["weight", 72.4, "kg"],
+    ["body-fat-percentage", 18.4, "%"],
+    ["bmi", 23.7, "kg_m2"],
+    ["lean-body-mass", 59.1, "kg"],
+    ["waist-circumference", 83.9, "cm"],
+  ] as const;
+  const vault = makeVault(sparseBodyReadings.map(([metric, value, unit], index) => makeObservation({
+    dataOrigin,
+    dayKey: "2026-05-20",
+    entityId: `event_junction_sparse_body_${index}`,
+    metric,
+    observationGrain: "sample",
+    occurredAt: `2026-05-20T08:${String(index).padStart(2, "0")}:00.000Z`,
+    provider: "junction",
+    recordedAt: `2026-05-20T08:${String(index + 5).padStart(2, "0")}:00.000Z`,
+    resourceType: `junction-${metric}-withings`,
+    unit,
+    value,
+  })));
 
+  const bodyDays = listWearableBodyStateDays(vault);
   const latest = summarizeWearableMetricLatest(vault, "body-mass-index", { windowDays: 1 });
   const trend = summarizeWearableMetricTrend(vault, "bmi", { windowDays: 1 });
 
-  assert.equal(summarizeWearableLatest(vault), null);
+  assert.equal(bodyDays.length, 1);
+  assert.equal(bodyDays[0]?.weightKg.selection.value, 72.4);
+  assert.equal(bodyDays[0]?.bodyFatPercentage.selection.value, 18.4);
+  assert.equal(bodyDays[0]?.bmi.selection.value, 23.7);
+  assert.equal(bodyDays[0]?.leanBodyMassKg.selection.value, 59.1);
+  assert.equal(bodyDays[0]?.waistCircumference.selection.value, 83.9);
+  assert.equal(summarizeWearableLatest(vault)?.bodyState?.bmi.selection.value, 23.7);
   assert.equal(latest?.metric, "bmi");
   assert.equal(latest?.summaryKind, "bodyState");
   assert.equal(latest?.provider, "withings");
   assert.equal(latest?.unit, "kg/m^2");
   assert.equal(latest?.value, 23.7);
   assert.equal(latest?.date, "2026-05-20");
-  assert.equal(latest?.notes.some((note) => note.includes("canonical metric-point history")), true);
   assert.deepEqual(trend?.points.map((point) => ({
     date: point.date,
     provider: point.provider,
@@ -1271,6 +1276,116 @@ test("sparse body observations remain sample-grain while wearable metric reads u
     unit: "kg/m^2",
     value: 23.7,
   }]);
+});
+
+test("mixed curated and sparse body history orders latest and trend by canonical day", () => {
+  const withingsOrigin = {
+    version: 1,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "withings",
+    sourceType: "scale",
+  } as const satisfies DeviceDataOrigin;
+  const vault = makeVault([
+    makeObservation({
+      dayKey: "2026-05-19",
+      entityId: "event_curated_weight_older",
+      metric: "weight",
+      observationGrain: "summary",
+      occurredAt: "2026-05-19T08:00:00.000Z",
+      provider: "oura",
+      recordedAt: "2026-05-19T08:05:00.000Z",
+      resourceType: "body-summary",
+      unit: "kg",
+      value: 73.1,
+    }),
+    makeObservation({
+      dataOrigin: withingsOrigin,
+      dayKey: "2026-05-20",
+      entityId: "event_sparse_weight_newer",
+      metric: "weight",
+      observationGrain: "sample",
+      occurredAt: "2026-05-20T08:00:00.000Z",
+      provider: "junction",
+      recordedAt: "2026-05-20T08:05:00.000Z",
+      resourceType: "junction-weight-withings",
+      unit: "kg",
+      value: 72.4,
+    }),
+    makeObservation({
+      dataOrigin: withingsOrigin,
+      dayKey: "2026-05-19",
+      entityId: "event_sparse_body_fat_older",
+      metric: "body-fat-percentage",
+      observationGrain: "sample",
+      occurredAt: "2026-05-19T08:10:00.000Z",
+      provider: "junction",
+      recordedAt: "2026-05-19T08:15:00.000Z",
+      resourceType: "junction-fat-withings",
+      unit: "%",
+      value: 18.4,
+    }),
+    makeObservation({
+      dayKey: "2026-05-20",
+      entityId: "event_curated_body_fat_newer",
+      metric: "body-fat-percentage",
+      observationGrain: "summary",
+      occurredAt: "2026-05-20T08:10:00.000Z",
+      provider: "oura",
+      recordedAt: "2026-05-20T08:15:00.000Z",
+      resourceType: "body-summary",
+      unit: "%",
+      value: 18.2,
+    }),
+  ]);
+
+  const bodyDays = listWearableBodyStateDays(vault);
+  const weightLatest = summarizeWearableMetricLatest(vault, "weight", { windowDays: 2 });
+  const weightTrend = summarizeWearableMetricTrend(vault, "weight", { windowDays: 2 });
+  const bodyFatLatest = summarizeWearableMetricLatest(vault, "body-fat-percentage", { windowDays: 2 });
+  const bodyFatTrend = summarizeWearableMetricTrend(vault, "body-fat-percentage", { windowDays: 2 });
+
+  assert.deepEqual(bodyDays.map((day) => day.date), ["2026-05-20", "2026-05-19"]);
+  assert.equal(weightLatest?.value, 72.4);
+  assert.equal(weightLatest?.provider, "withings");
+  assert.deepEqual(weightTrend?.points.map((point) => point.value), [72.4, 73.1]);
+  assert.equal(bodyFatLatest?.value, 18.2);
+  assert.equal(bodyFatLatest?.provider, "oura");
+  assert.deepEqual(bodyFatTrend?.points.map((point) => point.value), [18.2, 18.4]);
+});
+
+test("equal-time sparse and curated body candidates resolve identically across storage order and providers", () => {
+  const garminSample = makeObservation({
+    dayKey: "2026-05-20",
+    entityId: "event_garmin_bmi_sample",
+    metric: "bmi",
+    observationGrain: "sample",
+    occurredAt: "2026-05-20T08:00:00.000Z",
+    provider: "garmin",
+    recordedAt: "2026-05-20T08:05:00.000Z",
+    resourceType: "body-reading",
+    unit: "kg_m2",
+    value: 23.7,
+  });
+  const ouraSummary = makeObservation({
+    dayKey: "2026-05-20",
+    entityId: "event_oura_bmi_summary",
+    metric: "bmi",
+    observationGrain: "summary",
+    occurredAt: "2026-05-20T08:00:00.000Z",
+    provider: "oura",
+    recordedAt: "2026-05-20T08:05:00.000Z",
+    resourceType: "body-summary",
+    unit: "kg_m2",
+    value: 24.4,
+  });
+
+  for (const entities of [[garminSample, ouraSummary], [ouraSummary, garminSample]]) {
+    const bmi = listWearableBodyStateDays(makeVault(entities))[0]?.bmi;
+    assert.equal(bmi?.selection.provider, "garmin");
+    assert.equal(bmi?.selection.value, 23.7);
+    assert.equal(bmi?.confidence.candidateCount, 2);
+    assert.deepEqual(bmi?.confidence.conflictingProviders, ["oura"]);
+  }
 });
 
 test("metric latest and trend surfaces keep derived sleep and aggregate-backed points", () => {

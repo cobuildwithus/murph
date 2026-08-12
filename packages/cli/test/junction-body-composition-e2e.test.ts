@@ -329,6 +329,11 @@ test('Junction body data composes from provider jobs through canonical vault rea
     })
     assert.equal(body.count, 1)
     const bodyItem = requireRecord(body.items[0])
+    assert.equal(requireRecord(bodyItem.weightKg).value, 72.4)
+    assert.equal(requireRecord(bodyItem.bodyFatPercentage).value, 18.4)
+    assert.equal(requireRecord(bodyItem.bmi).value, 23.7)
+    assert.equal(requireRecord(bodyItem.leanBodyMassKg).value, 59.1)
+    assert.equal(requireRecord(bodyItem.waistCircumference).value, 83.9)
     assert.equal(requireRecord(bodyItem.bodyWaterPercentage).value, 51.8)
     assert.equal(requireRecord(bodyItem.boneMassPercentage).value, 4.2)
     assert.equal(requireRecord(bodyItem.muscleMassPercentage).value, 63.4)
@@ -378,6 +383,11 @@ test('Junction body data composes from provider jobs through canonical vault rea
       items: Array<Record<string, { value?: number | null }>>
     }>(cli, ['wearables', 'body', 'list', '--vault', vaultRoot])
     const bodyCliItem = requireData(bodyCli.envelope).items[0]
+    assert.equal(bodyCliItem?.weightKg?.value, 72.4)
+    assert.equal(bodyCliItem?.bodyFatPercentage?.value, 18.4)
+    assert.equal(bodyCliItem?.bmi?.value, 23.7)
+    assert.equal(bodyCliItem?.leanBodyMassKg?.value, 59.1)
+    assert.equal(bodyCliItem?.waistCircumference?.value, 83.9)
     assert.equal(bodyCliItem?.bodyWaterPercentage?.value, 51.8)
     assert.equal(bodyCliItem?.boneMassPercentage?.value, 4.2)
     assert.equal(bodyCliItem?.muscleMassPercentage?.value, 63.4)
