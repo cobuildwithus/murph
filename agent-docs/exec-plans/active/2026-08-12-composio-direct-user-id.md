@@ -68,7 +68,7 @@ Updated: 2026-08-12
    shape with the current Composio contract.
 3. [x] Require and send member user identity for direct fixed writes.
 4. [x] Strengthen exact-shape tests across email and calendar writes.
-5. [ ] Add the public-safe changelog fragment, run focused verification, and
+5. [x] Add the public-safe changelog fragment, run focused verification, and
    inspect the final diff for identifiers or secrets.
 6. [ ] Push a PR candidate and complete specialist, final ReviewGPT, CI, and
    merge-tree gates.
@@ -103,6 +103,11 @@ Updated: 2026-08-12
   passed, 52 tests.
 - `pnpm --dir apps/web typecheck`: passed.
 - `pnpm logs:guard`: passed.
+- Focused changelog-fragment tests: passed, 7 tests.
+- A production-shaped synthetic direct scenario passed through the real Web
+  service boundary and proved that the provider request binds both the
+  authenticated member and selected account.
+- `pnpm docs:drift`, `git diff --check`, and the scoped identifier scan: passed.
 - The first focused test launch happened before fresh-worktree Prisma generation
   completed, so two suites failed during import with zero tests collected. The
   exact rerun after the typecheck generated Prisma passed all 52 tests.
