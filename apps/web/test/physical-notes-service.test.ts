@@ -80,6 +80,7 @@ type PhysicalNoteWhere = Partial<Pick<
   | "requestKey"
   | "status"
 >> & {
+  OR?: readonly PhysicalNoteWhere[];
   createdAt?: { lte: Date };
 };
 
@@ -762,7 +763,7 @@ describe("createHostedPhysicalNote", () => {
     expect(store.allRows()).toEqual(expect.arrayContaining([
       expect.objectContaining({
         complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
-        failureReason: null,
+        failureReason: "prior_note_accepted",
         id: failed.physicalNoteId,
         providerLetterId: "ltr_legacy",
         status: "accepted",
@@ -780,7 +781,63 @@ describe("createHostedPhysicalNote", () => {
       prisma: store.prisma,
       runtime: provider.runtime,
     });
+    const laterRequest = {
+      ...buildRequest(67),
+      recipient: {
+        addressLine1: "456 Different Street",
+        city: "Chicago",
+        name: "Taylor Example",
+        postalCode: "60601",
+        state: "IL",
+      },
+    };
+    const concurrentLaterRequest = {
+      ...buildRequest(68),
+      recipient: {
+        addressLine1: "789 Another Avenue",
+        city: "Boston",
+        name: "Jordan Example",
+        postalCode: "02108",
+        state: "MA",
+      },
+    };
+    mocks.lockMember.mockClear();
+    const [laterResponse, concurrentLaterResponse] = await Promise.all([
+      createHostedPhysicalNote({
+        ...laterRequest,
+        prisma: store.prisma,
+        runtime: provider.runtime,
+      }),
+      createHostedPhysicalNote({
+        ...concurrentLaterRequest,
+        prisma: store.prisma,
+        runtime: provider.runtime,
+      }),
+    ]);
+    const laterReplay = await createHostedPhysicalNote({
+      ...laterRequest,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
     expect(replay).toEqual(response);
+    expect(laterResponse).toMatchObject({
+      complimentary: false,
+      failureReason: "prior_note_accepted",
+      status: "failed",
+    });
+    expect(laterResponse.physicalNoteId).not.toBe(failed.physicalNoteId);
+    expect(laterResponse.physicalNoteId).not.toBe(response.physicalNoteId);
+    expect(concurrentLaterResponse).toMatchObject({
+      complimentary: false,
+      failureReason: "prior_note_accepted",
+      status: "failed",
+    });
+    expect(concurrentLaterResponse.physicalNoteId).not.toBe(
+      laterResponse.physicalNoteId,
+    );
+    expect(laterReplay).toEqual(laterResponse);
+    expect(mocks.lockMember).toHaveBeenCalledTimes(2);
     expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
     expect(provider.create).not.toHaveBeenCalled();
     expect(mocks.recordUsage).not.toHaveBeenCalled();
@@ -828,6 +885,21 @@ describe("createHostedPhysicalNote", () => {
       prisma: store.prisma,
       runtime: provider.runtime,
     });
+    const laterRequest = {
+      ...buildRequest(69),
+      recipient: {
+        addressLine1: "456 Different Street",
+        city: "Chicago",
+        name: "Taylor Example",
+        postalCode: "60601",
+        state: "IL",
+      },
+    };
+    const laterResponse = await createHostedPhysicalNote({
+      ...laterRequest,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
 
     expect(response).toMatchObject({
       complimentary: false,
@@ -835,6 +907,11 @@ describe("createHostedPhysicalNote", () => {
       status: "accepted",
     });
     expect(replay).toEqual(response);
+    expect(laterResponse).toMatchObject({
+      complimentary: false,
+      failureReason: "prior_note_accepted",
+      status: "failed",
+    });
     expect(store.allRows()).toEqual(expect.arrayContaining([
       expect.objectContaining({
         complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
@@ -1413,7 +1490,9 @@ function matchesWhere(
   where: PhysicalNoteWhere,
 ): boolean {
   return (
-    (where.complimentaryOfferCode === undefined
+    (where.OR === undefined
+      || where.OR.some((candidate) => matchesWhere(row, candidate)))
+    && (where.complimentaryOfferCode === undefined
       || row.complimentaryOfferCode === where.complimentaryOfferCode)
     && (where.createdAt === undefined
       || row.createdAt <= where.createdAt.lte)

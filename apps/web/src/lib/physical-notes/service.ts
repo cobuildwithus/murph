@@ -117,7 +117,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     apiKey: config.apiKey,
     fromAddressId: config.fromAddressId,
   });
-  const legacy = await findLegacyFailedPhysicalNote({
+  const legacy = await findLegacyPhysicalNoteGuard({
     memberId: input.memberId,
     prisma,
   });
@@ -390,16 +390,24 @@ async function resolveLegacyFailedPhysicalNote(input: {
   });
 }
 
-async function findLegacyFailedPhysicalNote(input: {
+async function findLegacyPhysicalNoteGuard(input: {
   memberId: string;
   prisma: PrismaClient;
 }): Promise<HostedPhysicalNote | null> {
   return await input.prisma.hostedPhysicalNote.findFirst({
     orderBy: { createdAt: "asc" },
     where: {
-      failureReason: null,
       memberId: input.memberId,
-      status: "failed",
+      OR: [
+        {
+          failureReason: null,
+          status: "failed",
+        },
+        {
+          failureReason: "prior_note_accepted",
+          status: "accepted",
+        },
+      ],
     },
   });
 }
@@ -422,6 +430,7 @@ async function recordLegacyBlockedPhysicalNoteRequest(input: {
       return null;
     }
     const blockerReason = legacy.status === "accepted"
+      && legacy.failureReason === "prior_note_accepted"
       ? "prior_note_accepted"
       : legacy.status === "failed" && legacy.failureReason === null
         ? "prior_note_unresolved"
@@ -535,7 +544,7 @@ async function finalizeLegacyPhysicalNoteAcceptance(input: {
         ...(currentComplimentary
           ? {}
           : { complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE }),
-        failureReason: null,
+        failureReason: "prior_note_accepted",
         providerLetterId: input.providerLetterId,
         status: "accepted",
       },
@@ -553,6 +562,7 @@ async function finalizeLegacyPhysicalNoteAcceptance(input: {
     if (
       note.memberId !== input.memberId
       || note.status !== "accepted"
+      || note.failureReason !== "prior_note_accepted"
       || note.providerLetterId !== input.providerLetterId
       || note.acceptedAt === null
     ) {

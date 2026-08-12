@@ -395,8 +395,8 @@ describe('assistant physical notes', () => {
     ['artwork', 'regenerate the image'],
     ['service_unavailable', "on Murph's side, not the recipient address"],
     ['request_invalid', 'correct the printing request'],
-    ['prior_note_unresolved', 'earlier physical-note submission for this person is still unresolved'],
-    ['prior_note_accepted', 'earlier physical note for this person was accepted'],
+    ['prior_note_unresolved', 'earlier physical-note submission is still unresolved'],
+    ['prior_note_accepted', 'earlier physical note was accepted'],
     ['unknown', 'could not complete the physical-note request'],
   ] as const)(
     'returns actionable recovery for %s physical-note failures',
@@ -468,6 +468,28 @@ describe('assistant physical notes', () => {
         )
         expect(result.rpcResult.contentItems[0]?.text).not.toContain(
           'new explicit send request',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'for this person',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'while Murph investigates',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'without claiming the earlier and current requests share a recipient',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'No automatic',
+        )
+      }
+      if (failureReason === 'prior_note_unresolved') {
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'A later explicit physical-note request may recheck the earlier outcome',
+        )
+      }
+      if (failureReason === 'prior_note_accepted') {
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'may recheck',
         )
       }
     },

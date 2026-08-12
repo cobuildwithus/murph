@@ -173,7 +173,8 @@ describe("physical-note durable replay", () => {
     });
     expect(create).not.toHaveBeenCalled();
     expect(hostedPhysicalNote.findUnique).toHaveBeenCalledOnce();
-    expect(hostedPhysicalNote.updateMany).toHaveBeenCalledOnce();
+    expect(prismaLike.$transaction).not.toHaveBeenCalled();
+    expect(hostedPhysicalNote.updateMany).not.toHaveBeenCalled();
     expect(mocks.readUsageGate).not.toHaveBeenCalled();
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });

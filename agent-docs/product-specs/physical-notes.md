@@ -124,8 +124,12 @@ unsent `prior_note_unresolved` failure, then at most one older row is
 reconciled. Proven absence narrows the current row to `unknown`. If that
 older row is proven accepted, the current row is durably narrowed to
 `prior_note_accepted`, so the reply says both that the earlier note is headed to
-print and that the current request was not submitted; it does not invite
-another send. Accepted-row replay is read-only because ordinary paid acceptance
+print and that the current request was not submitted, without claiming the two
+requests share a recipient; it does not invite another send or promise an
+automatic investigation or follow-up. Recovery also preserves
+`prior_note_accepted` on the accepted legacy row, so every later explicit
+request remains suppressed while ordinary accepted notes still allow a later
+paid send. Accepted-row replay is read-only because ordinary paid acceptance
 commits its usage in the same transaction, while restored legacy acceptance
 must never reconstruct erased historical billing evidence. The current reply
 and every replay therefore identify the current row and cannot later turn the

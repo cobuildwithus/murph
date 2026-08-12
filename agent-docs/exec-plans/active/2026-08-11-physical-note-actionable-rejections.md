@@ -175,3 +175,12 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   both facts without inviting retry. Prove ordinary paid and legacy accepted
   replay add no usage, and prove the distinct request replays the same typed
   no-send disposition with zero provider creates.
+- Round 9 found that restoring a legacy row to an ordinary accepted shape
+  erased the member-scoped admission discriminator, so a third explicit request
+  could mail and charge again. Preserve `prior_note_accepted` on the restored
+  row and include only that accepted marker alongside failed/null ambiguity in
+  the existing indexed admission guard. It also found that recovery copy
+  incorrectly implied both requests shared a recipient and promised an
+  investigation with no owner. State only the earlier outcome and current
+  no-send fact, name the absence of automatic follow-up, and let only a later
+  explicit request recheck unresolved evidence.
