@@ -95,7 +95,7 @@ export function buildJunctionTemporalFeatures(input: {
   }
   if (
     input.samples.length < 2
-    || new Set(input.samples.map((sample) => sample.recordedAt)).size < 2
+    || distinctSampleInstantCount(input.samples) < 2
   ) {
     return { observations: [], status: "insufficient_samples" };
   }
@@ -109,6 +109,19 @@ export function buildJunctionTemporalFeatures(input: {
   }
 
   return result;
+}
+
+function distinctSampleInstantCount(
+  samples: readonly JunctionTemporalFeatureSample[],
+): number {
+  const instants = new Set<number>();
+  for (const sample of samples) {
+    const instant = Date.parse(sample.recordedAt);
+    if (Number.isFinite(instant)) {
+      instants.add(instant);
+    }
+  }
+  return instants.size;
 }
 
 function buildCompleteTemporalFeatureResult(
@@ -184,14 +197,17 @@ function buildBloodOxygenTemporalFeatures(
 function buildStressTemporalFeatures(
   samples: readonly JunctionTemporalFeatureSample[],
 ): Extract<JunctionTemporalFeatureResult, { status: "complete" }> {
-  const dailyMean = round4(
-    samples.reduce((sum, sample) => sum + sample.value, 0) / samples.length,
-  );
+  const unroundedDailyMean =
+    samples.reduce((sum, sample) => sum + sample.value, 0) / samples.length;
+  const dailyMean = round4(unroundedDailyMean);
   const aboveSummary = summarizeBelowThresholds(
     samples.map((sample) => ({ ...sample, value: -sample.value })),
-    [-dailyMean],
+    [-unroundedDailyMean],
   );
-  const aboveDailyMeanRunCount = thresholdRunCount(aboveSummary, -dailyMean);
+  const aboveDailyMeanRunCount = thresholdRunCount(
+    aboveSummary,
+    -unroundedDailyMean,
+  );
   const meanAbsoluteSuccessiveDifferenceValue = meanAbsoluteSuccessiveDifference(samples);
   const morningMean = meanForLocalMinuteWindow(
     samples,

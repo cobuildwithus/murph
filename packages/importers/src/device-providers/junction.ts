@@ -790,6 +790,7 @@ interface JunctionDailyTimeseriesAggregate {
   sampleCount: number;
   sum: number;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  temporalFeatureInputSuppressed?: boolean;
   temporalFeatureResult?: JunctionTemporalFeatureResult;
   temporalFeatureSamples?: JunctionTemporalFeatureSample[];
   timeZone?: string;
@@ -1769,7 +1770,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     ? input.resource
     : undefined;
   let temporalFeatureInputCount = 0;
-  let temporalFeatureInputSuppressed = false;
+  let temporalFeatureImportSuppressed = false;
 
   for (const [index, { entry, originFallback }] of timeseriesResourceEntries(input.payload).entries()) {
     const resourceContext = buildResourceContext({
@@ -1788,7 +1789,14 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     }
 
     const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths));
-    const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
+    const resolvedTimestamp = resolveRecordTimestamp(
+      entry,
+      input.context,
+      resourceContext.sourceProviderSlug,
+    );
+    const timestamp = temporalFeatureResource
+      ? resolveJunctionTemporalFeatureTimestamp(entry, resolvedTimestamp)
+      : resolvedTimestamp;
     const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp);
     const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt, input.context.defaultTimeZone);
     const legacyDayKey = resolveLegacyJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
@@ -1855,33 +1863,35 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       }
     }
 
-    if (temporalFeatureResource && !temporalFeatureInputSuppressed) {
+    if (temporalFeatureResource && !temporalFeatureImportSuppressed) {
       temporalFeatureInputCount += 1;
-      const temporalFeatureSamples = aggregate.temporalFeatureSamples ?? [];
-      if (
-        temporalFeatureInputCount > JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT
-        || temporalFeatureSamples.length >= JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY
-      ) {
-        temporalFeatureInputSuppressed = true;
+      if (temporalFeatureInputCount > JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT) {
+        temporalFeatureImportSuppressed = true;
         for (const current of aggregates.values()) {
           delete current.temporalFeatureSamples;
         }
-      } else {
-        temporalFeatureSamples.push(stripUndefined({
-          recordedAt: resolveJunctionTemporalFeatureRecordedAt(
-            timestamp,
-            dayKey,
-            sampleAt,
-          ),
-          value,
-          localMinuteOfDay: resolveJunctionTemporalFeatureLocalMinuteOfDay(
-            entry,
-            timestamp,
-            sampleAt,
-            input.context.defaultTimeZone,
-          ),
-        }));
-        aggregate.temporalFeatureSamples = temporalFeatureSamples;
+      } else if (!aggregate.temporalFeatureInputSuppressed) {
+        const temporalFeatureSamples = aggregate.temporalFeatureSamples ?? [];
+        if (temporalFeatureSamples.length >= JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY) {
+          aggregate.temporalFeatureInputSuppressed = true;
+          delete aggregate.temporalFeatureSamples;
+        } else {
+          temporalFeatureSamples.push(stripUndefined({
+            recordedAt: resolveJunctionTemporalFeatureRecordedAt(
+              timestamp,
+              dayKey,
+              sampleAt,
+            ),
+            value,
+            localMinuteOfDay: resolveJunctionTemporalFeatureLocalMinuteOfDay(
+              entry,
+              timestamp,
+              sampleAt,
+              input.context.defaultTimeZone,
+            ),
+          }));
+          aggregate.temporalFeatureSamples = temporalFeatureSamples;
+        }
       }
     }
   }
@@ -1889,9 +1899,10 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   const sortedAggregates = [...aggregates.values()].sort(compareJunctionDailyTimeseriesAggregates);
   if (temporalFeatureResource) {
     for (const aggregate of sortedAggregates) {
-      const result: JunctionTemporalFeatureResult = temporalFeatureInputSuppressed
-        ? { observations: [], status: "suppressed_input_cap" }
-        : buildJunctionTemporalFeatures({
+      const result: JunctionTemporalFeatureResult =
+        temporalFeatureImportSuppressed || aggregate.temporalFeatureInputSuppressed
+          ? { observations: [], status: "suppressed_input_cap" }
+          : buildJunctionTemporalFeatures({
             resource: temporalFeatureResource,
             samples: aggregate.temporalFeatureSamples ?? [],
           });
@@ -5682,6 +5693,38 @@ function firstTimestampSemantics(entry: PlainObject): TimestampSemantics | undef
     : undefined;
 }
 
+function resolveJunctionTemporalFeatureTimestamp(
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): ReturnType<typeof resolveRecordTimestamp> {
+  if (!isImplicitJunctionCanonicalUtcTimestamp(entry, timestamp)) {
+    return timestamp;
+  }
+
+  // Junction's canonical +00:00 timestamps are UTC (except providers already
+  // admitted as floating above). Drop the raw UTC calendar day inferred by the
+  // generic offset parser so provider offset or vault timezone owns local day.
+  const correctedTimestamp: ReturnType<typeof resolveRecordTimestamp> = {
+    ...timestamp,
+    timestampSemantics: "utc",
+  };
+  delete correctedTimestamp.dayKey;
+  const explicitDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
+  if (explicitDayKey) {
+    correctedTimestamp.dayKey = explicitDayKey;
+  }
+  return correctedTimestamp;
+}
+
+function isImplicitJunctionCanonicalUtcTimestamp(
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): boolean {
+  return firstTimestampSemantics(entry) === undefined
+    && timestamp.timestampSemantics !== "floating"
+    && /\+00:?00$/u.test(timestamp.observedAtRaw?.trim() ?? "");
+}
+
 function resolveJunctionTimeseriesAggregateDayKey(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
@@ -5740,6 +5783,16 @@ function resolveLegacyJunctionTimeseriesAggregateDayKey(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   sampleAt: string | undefined,
 ): string | undefined {
+  // Before canonical +00:00 timestamps were recognized as UTC, the importer
+  // treated their raw calendar date as authoritative. Keep that old day as a
+  // replay alias when the corrected source-local day crosses midnight.
+  if (
+    timestamp.timestampSemantics === "utc"
+    && isImplicitJunctionCanonicalUtcTimestamp(entry, timestamp)
+  ) {
+    return extractIsoDatePrefix(timestamp.observedAtRaw) ?? undefined;
+  }
+
   const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
   if (
     offsetSeconds !== null
