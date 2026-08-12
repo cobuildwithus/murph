@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
+import { rm } from "node:fs/promises";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
-import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
+import {
+  importDeviceProviderSnapshot,
+  prepareDeviceProviderSnapshotImport,
+} from "@murphai/importers";
 import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
@@ -51,7 +55,7 @@ import {
   JunctionClient,
   parseJunctionHistoricalPullSnapshot,
 } from "../src/providers/junction-client.ts";
-import { createJsonResponse, readUrl, requireValue } from "./helpers.ts";
+import { createJsonResponse, makeTempDirectory, readUrl, requireValue } from "./helpers.ts";
 
 import type {
   DeviceConnectionSourceRecord,
@@ -14230,221 +14234,344 @@ test("Junction opt-in sparse resources use bounded 30-day extended-history windo
   }));
 });
 
-test("Junction existing connections receive one bounded retryable fat activation catch-up after terminal global coverage", async () => {
+test("Junction direct-Link sparse activation remains the sole delayed-history coverage owner", async () => {
+  const connectedAt = "2026-04-03T00:00:00.000Z";
   const now = "2026-07-01T12:00:00.000Z";
-  const requests: URL[] = [];
-  let fatRecordAvailable = false;
-  const provider = createJunctionProvider(async (input) => {
-    const url = new URL(readUrl(input));
+  const vaultRoot = await makeTempDirectory("murph-junction-fat-activation");
 
-    if (url.pathname === "/v2/user/providers/junction-user-1") {
-      return createJsonResponse({
-        providers: [{
-          id: "provider-garmin-1",
-          slug: "garmin",
-          name: "Garmin",
-          status: "connected",
-          resource_availability: { body_fat: true },
-        }],
-      });
-    }
-    if (url.pathname === "/v2/timeseries/junction-user-1/body_fat/grouped") {
-      requests.push(url);
-      const windowStart = Date.parse(requireValue(
-        url.searchParams.get("start_date"),
-        "fat activation start_date",
-      ));
-      const windowEnd = Date.parse(requireValue(
-        url.searchParams.get("end_date"),
-        "fat activation end_date",
-      ));
-      const observedAt = Date.parse("2026-06-15T08:00:00.000Z");
-      const includeRecord = fatRecordAvailable
-        && observedAt >= windowStart
-        && observedAt < windowEnd;
-      return createJsonResponse({
-        groups: {
-          garmin: [{
-            data: includeRecord
-              ? [{
-                  id: "fat-activation-row-1",
-                  timestamp: "2026-06-15T08:00:00.000Z",
-                  unit: "%",
-                  value: 18.5,
-                }]
-              : [],
-            source: { provider: "garmin", type: "scale" },
+  try {
+    const coreRuntime = await import("@murphai/core");
+    await coreRuntime.initializeVault({
+      createdAt: connectedAt,
+      timezone: "UTC",
+      vaultRoot,
+    });
+
+    const requests: URL[] = [];
+    let fatRecordAvailable = false;
+    const provider = createJunctionProvider(async (input) => {
+      const url = new URL(readUrl(input));
+
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+              body_fat: true,
+            },
           }],
-        },
-      });
-    }
+        });
+      }
+      if (url.pathname === "/v2/summary/activity/junction-user-1") {
+        return createJsonResponse({
+          data: [{
+            connectionId: "provider-garmin-1",
+            date: "2026-04-02",
+            id: "activity-connect-row-1",
+            observedAt: "2026-04-02T12:00:00.000Z",
+            steps: 1_234,
+          }],
+        });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/body_fat/grouped") {
+        requests.push(url);
+        const windowStart = Date.parse(requireValue(
+          url.searchParams.get("start_date"),
+          "fat activation start_date",
+        ));
+        const windowEnd = Date.parse(requireValue(
+          url.searchParams.get("end_date"),
+          "fat activation end_date",
+        ));
+        const observedAt = Date.parse("2026-01-15T08:00:00.000Z");
+        const includeRecord = fatRecordAvailable
+          && observedAt >= windowStart
+          && observedAt < windowEnd;
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: includeRecord
+                ? [{
+                    id: "fat-activation-row-1",
+                    timestamp: "2026-01-15T08:00:00.000Z",
+                    unit: "%",
+                    value: 18.5,
+                  }]
+                : [],
+              source: { provider: "garmin", type: "scale" },
+            }],
+          },
+        });
+      }
 
-    throw new Error(`Unexpected request: ${url.toString()}`);
-  }, {
-    providerFilter: ["garmin"],
-    summaryBackfillDays: 180,
-    timeseriesResources: ["fat"],
-  });
-  const source = createConnectionSource({
-    resourceAvailabilitySummary: { body_fat: true },
-  });
-  const sourceSummary = {
-    displayName: source.displayName,
-    firstSeenAt: source.firstSeenAt,
-    lastDataAt: source.lastDataAt,
-    lastErrorCode: source.lastErrorCode,
-    lastErrorMessage: source.lastErrorMessage,
-    lastSeenAt: source.lastSeenAt,
-    resourceAvailabilitySummary: source.resourceAvailabilitySummary,
-    resourceCount: Object.keys(source.resourceAvailabilitySummary).length,
-    sourceProviderSlug: source.sourceProviderSlug,
-    status: source.status,
-  };
-  const terminalMetadata = {
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
-    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-    junctionHistoricalBackfillWindowStart: "2025-10-05T00:00:00.000Z",
-  };
-  const schedulerAccount = createStoredAccount({
-    metadata: terminalMetadata,
-    nextReconcileAt: now,
-    sources: [sourceSummary],
-  });
-  const executor = requireValue(provider.jobExecutor);
-
-  const nonTerminalJobs = executor.createScheduledJobs?.(
-    createStoredAccount({
-      metadata: {
-        ...terminalMetadata,
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    }, {
+      providerFilter: ["garmin"],
+      summaryBackfillDays: 180,
+      timeseriesResources: ["fat"],
+    });
+    const source = createConnectionSource({
+      resourceAvailabilitySummary: {
+        activity: true,
+        body_fat: true,
       },
-      nextReconcileAt: now,
-      sources: [sourceSummary],
-    }),
-    now,
-  ).jobs ?? [];
-  assert.equal(nonTerminalJobs.some((job) =>
-    job.kind === "resource" && job.payload?.resource === "fat"
-  ), false);
-
-  const scheduled = requireValue(executor.createScheduledJobs?.(schedulerAccount, now));
-  const activationJobs = scheduled.jobs.filter((job) =>
-    job.kind === "resource"
-    && job.payload?.resource === "fat"
-    && job.payload?.sourceProviderSlug === "garmin"
-  );
-  assert.equal(activationJobs.length, 1);
-  assert.deepEqual(activationJobs[0]?.payload, {
-    historicalBackfill: true,
-    historicalWindowStart: "2026-01-02T00:00:00.000Z",
-    resource: "fat",
-    resourceCategory: "timeseries",
-    sourceProviderSlug: "garmin",
-    windowEnd: "2026-07-01T00:00:00.000Z",
-    windowStart: "2026-01-02T00:00:00.000Z",
-  });
-
-  const toJobRecord = (input: DeviceSyncJobInput): DeviceSyncJobRecord => ({
-    ...createJob(input.kind, input.payload ?? {}),
-    availableAt: input.availableAt ?? now,
-    dedupeKey: input.dedupeKey ?? null,
-    priority: input.priority ?? 50,
-  });
-  let currentJob = toJobRecord(requireValue(activationJobs[0]));
-  let result = await executeJunctionJob(
-    provider,
-    createJunctionJobContext({
-      account: createAccount({ metadata: terminalMetadata, sources: [sourceSummary] }),
-      importSnapshot: async () => ({
-        canonicalEventCount: 1,
+    });
+    const sourceSummary = {
+      displayName: source.displayName,
+      firstSeenAt: source.firstSeenAt,
+      lastDataAt: source.lastDataAt,
+      lastErrorCode: source.lastErrorCode,
+      lastErrorMessage: source.lastErrorMessage,
+      lastSeenAt: source.lastSeenAt,
+      resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+      resourceCount: Object.keys(source.resourceAvailabilitySummary).length,
+      sourceProviderSlug: source.sourceProviderSlug,
+      status: source.status,
+    };
+    const toJobRecord = (
+      input: DeviceSyncJobInput,
+      fallbackAvailableAt = now,
+    ): DeviceSyncJobRecord => ({
+      ...createJob(input.kind, input.payload ?? {}),
+      availableAt: input.availableAt ?? fallbackAvailableAt,
+      dedupeKey: input.dedupeKey ?? null,
+      priority: input.priority ?? 50,
+    });
+    let importedSnapshotCount = 0;
+    const importSnapshot: ProviderJobContext["importSnapshot"] = async (snapshot) => {
+      const imported = await importDeviceProviderSnapshot<
+        Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+      >({
+        provider: "junction",
+        snapshot,
+        vaultRoot,
+      }, { corePort: coreRuntime });
+      importedSnapshotCount += 1;
+      return {
+        canonicalEventCount: imported.events.length,
         durableDeliveryAccepted: true,
+      };
+    };
+
+    const connection = await requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-fat-activation",
+      seededExternalAccountId: "junction-user-1",
+      sourceProviderSlug: "garmin",
+      query: new URLSearchParams({
+        murph_state: "state-fat-activation",
+        state: "success",
+      }),
+      now: connectedAt,
+      grantedScopes: [],
+    });
+    const connectBackfill = requireValue(
+      connection.initialJobs?.find((job) => job.kind === "backfill"),
+      "Direct Link should enqueue the global connect backfill.",
+    );
+    assert.equal(connection.setupPhase, "link_returned");
+    assert.equal(connectBackfill.payload?.timeseriesCursor, undefined);
+    assert.equal(sourceSummary.status, "connected");
+    assert.equal(sourceSummary.sourceProviderSlug, "garmin");
+    assert.equal(sourceSummary.resourceAvailabilitySummary.body_fat, true);
+
+    const connectResult = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          connectedAt,
+          sources: [sourceSummary],
+        }),
+        connectionSourceAdmissionMode: "listed_only",
+        importSnapshot,
+        now: connectedAt,
+      }),
+      toJobRecord(connectBackfill, connectedAt),
+    );
+    assert.equal(
+      connectResult.metadataPatch?.junctionHistoricalBackfillStatus,
+      "coverage_v3_complete",
+    );
+    assert.equal(
+      connectResult.metadataPatch?.junctionExtendedTimeseriesHistoryBackfillCoverage,
+      undefined,
+    );
+    assert.equal(connectResult.scheduledJobs?.some((job) => job.kind === "backfill") ?? false, false);
+    assert.equal(importedSnapshotCount, 1);
+    assert.equal(requests.length, 6);
+    assert.equal(new Set(requests.map((url) => [
+      url.searchParams.get("start_date"),
+      url.searchParams.get("end_date"),
+    ].join("|"))).size, 6);
+    requests.length = 0;
+
+    const terminalMetadata = requireValue(
+      connectResult.metadataPatch,
+      "The global connect backfill should return terminal coverage metadata.",
+    );
+    const executor = requireValue(provider.jobExecutor);
+    const nonTerminalJobs = executor.createScheduledJobs?.(
+      createStoredAccount({
+        metadata: {
+          ...terminalMetadata,
+          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        },
+        nextReconcileAt: now,
+        sources: [sourceSummary],
       }),
       now,
-    }),
-    currentJob,
-  );
+    ).jobs ?? [];
+    assert.equal(nonTerminalJobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "fat"
+    ), false);
 
-  for (let chunk = 1; chunk < 6; chunk += 1) {
-    currentJob = toJobRecord(requireValue(
-      result.scheduledJobs?.find((job) => job.kind === "resource"),
-      `Expected empty fat continuation ${chunk}.`,
+    const scheduled = requireValue(executor.createScheduledJobs?.(
+      createStoredAccount({
+        metadata: terminalMetadata,
+        nextReconcileAt: now,
+        sources: [sourceSummary],
+      }),
+      now,
     ));
-    assert.equal(currentJob.availableAt, now);
-    result = await executeJunctionJob(
+    const activationJobs = scheduled.jobs.filter((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "fat"
+      && job.payload?.sourceProviderSlug === "garmin"
+    );
+    assert.equal(activationJobs.length, 1);
+    assert.deepEqual(activationJobs[0]?.payload, {
+      historicalBackfill: true,
+      historicalWindowStart: "2026-01-02T00:00:00.000Z",
+      resource: "fat",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowEnd: "2026-07-01T00:00:00.000Z",
+      windowStart: "2026-01-02T00:00:00.000Z",
+    });
+
+    let currentJob = toJobRecord(requireValue(activationJobs[0]));
+    let result = await executeJunctionJob(
       provider,
       createJunctionJobContext({
         account: createAccount({ metadata: terminalMetadata, sources: [sourceSummary] }),
-        importSnapshot: async () => ({
-          canonicalEventCount: 1,
-          durableDeliveryAccepted: true,
-        }),
+        connectionSourceAdmissionMode: "listed_only",
+        importSnapshot,
         now,
       }),
       currentJob,
     );
-  }
-
-  const retryJob = toJobRecord(requireValue(
-    result.scheduledJobs?.find((job) => job.kind === "resource"),
-    "Expected one delayed fat activation retry after the empty 180-day pass.",
-  ));
-  assert.equal(retryJob.payload.historicalWindowStart, "2026-01-02T00:00:00.000Z");
-  assert.equal(retryJob.payload.windowStart, "2026-01-02T00:00:00.000Z");
-  assert.equal(retryJob.payload.emptyBackfillAttempts, 1);
-  assert.notEqual(retryJob.availableAt, now);
-  assert.equal(retryJob.dedupeKey, activationJobs[0]?.dedupeKey);
-
-  fatRecordAvailable = true;
-  currentJob = retryJob;
-  for (let chunk = 0; chunk < 6; chunk += 1) {
-    result = await executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        account: createAccount({ metadata: terminalMetadata, sources: [sourceSummary] }),
-        importSnapshot: async () => ({
-          canonicalEventCount: 1,
-          durableDeliveryAccepted: true,
-        }),
-        now: chunk === 0 ? retryJob.availableAt : now,
-      }),
-      currentJob,
+    assert.equal(
+      result.metadataPatch?.junctionExtendedTimeseriesHistoryBackfillCoverage,
+      undefined,
     );
-    if (chunk < 5) {
+
+    for (let chunk = 1; chunk < 6; chunk += 1) {
       currentJob = toJobRecord(requireValue(
         result.scheduledJobs?.find((job) => job.kind === "resource"),
-        `Expected populated fat continuation ${chunk + 1}.`,
+        `Expected empty fat continuation ${chunk}.`,
       ));
+      assert.equal(currentJob.availableAt, now);
+      result = await executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          account: createAccount({ metadata: terminalMetadata, sources: [sourceSummary] }),
+          connectionSourceAdmissionMode: "listed_only",
+          importSnapshot,
+          now,
+        }),
+        currentJob,
+      );
+      assert.equal(
+        result.metadataPatch?.junctionExtendedTimeseriesHistoryBackfillCoverage,
+        undefined,
+      );
     }
+    assert.equal(importedSnapshotCount, 1);
+
+    const retryJob = toJobRecord(requireValue(
+      result.scheduledJobs?.find((job) => job.kind === "resource"),
+      "Expected one delayed fat activation retry after the empty 180-day pass.",
+    ));
+    assert.equal(retryJob.payload.historicalWindowStart, "2026-01-02T00:00:00.000Z");
+    assert.equal(retryJob.payload.windowStart, "2026-01-02T00:00:00.000Z");
+    assert.equal(retryJob.payload.emptyBackfillAttempts, 1);
+    assert.notEqual(retryJob.availableAt, now);
+    assert.equal(retryJob.dedupeKey, activationJobs[0]?.dedupeKey);
+
+    fatRecordAvailable = true;
+    currentJob = retryJob;
+    for (let chunk = 0; chunk < 6; chunk += 1) {
+      result = await executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          account: createAccount({ metadata: terminalMetadata, sources: [sourceSummary] }),
+          connectionSourceAdmissionMode: "listed_only",
+          importSnapshot,
+          now: chunk === 0 ? retryJob.availableAt : now,
+        }),
+        currentJob,
+      );
+      if (chunk < 5) {
+        assert.equal(
+          result.metadataPatch?.junctionExtendedTimeseriesHistoryBackfillCoverage,
+          undefined,
+        );
+        currentJob = toJobRecord(requireValue(
+          result.scheduledJobs?.find((job) => job.kind === "resource"),
+          `Expected populated fat continuation ${chunk + 1}.`,
+        ));
+      }
+    }
+
+    assert.equal(importedSnapshotCount, 2);
+    assert.equal(
+      result.metadataPatch?.junctionExtendedTimeseriesHistoryBackfillCoverage,
+      "v1|garmin:4",
+    );
+    assert.equal(result.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+    const windows = requests.map((url) => ({
+      end: requireValue(url.searchParams.get("end_date"), "fat activation end_date"),
+      start: requireValue(url.searchParams.get("start_date"), "fat activation start_date"),
+    }));
+    assert.equal(windows.length, 12);
+    assert.equal(new Set(windows.map(({ end, start }) => `${start}|${end}`)).size, 6);
+    assert.ok(windows.every(({ end, start }) =>
+      Date.parse(end) > Date.parse(start)
+      && Date.parse(end) - Date.parse(start) <= 30 * 24 * 60 * 60_000
+    ));
+    assert.equal(requests.every((url) =>
+      url.pathname === "/v2/timeseries/junction-user-1/body_fat/grouped"
+    ), true);
+
+    const queryRuntime = await import("@murphai/query");
+    await queryRuntime.rebuildQueryProjection(vaultRoot);
+    const points = await queryRuntime.listMetricPoints(vaultRoot, {
+      limit: null,
+      metricKey: "fat",
+    });
+    assert.equal(points.length, 1);
+    assert.equal(points[0]?.metricKey, "body-fat-percentage");
+    assert.equal(points[0]?.value, 18.5);
+
+    const completedAccount = createStoredAccount({
+      metadata: {
+        ...terminalMetadata,
+        ...result.metadataPatch,
+      },
+      nextReconcileAt: now,
+      sources: [sourceSummary],
+    });
+    const afterCompletion = requireValue(executor.createScheduledJobs?.(completedAccount, now));
+    assert.equal(afterCompletion.jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "fat"
+    ), false);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
   }
-
-  assert.equal(result.metadataPatch?.junctionExtendedTimeseriesHistoryBackfillCoverage, "v1|garmin:4");
-  assert.equal(result.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
-  const windows = requests.map((url) => ({
-    end: requireValue(url.searchParams.get("end_date"), "fat activation end_date"),
-    start: requireValue(url.searchParams.get("start_date"), "fat activation start_date"),
-  }));
-  assert.equal(windows.length, 12);
-  assert.equal(new Set(windows.map(({ end, start }) => `${start}|${end}`)).size, 6);
-  assert.ok(windows.every(({ end, start }) =>
-    Date.parse(end) > Date.parse(start)
-    && Date.parse(end) - Date.parse(start) <= 30 * 24 * 60 * 60_000
-  ));
-  assert.equal(requests.every((url) =>
-    url.pathname === "/v2/timeseries/junction-user-1/body_fat/grouped"
-  ), true);
-
-  const completedAccount = createStoredAccount({
-    metadata: {
-      ...terminalMetadata,
-      ...result.metadataPatch,
-    },
-    nextReconcileAt: now,
-    sources: [sourceSummary],
-  });
-  const afterCompletion = requireValue(executor.createScheduledJobs?.(completedAccount, now));
-  assert.equal(afterCompletion.jobs.some((job) =>
-    job.kind === "resource" && job.payload?.resource === "fat"
-  ), false);
 });
 
 test("Junction activity opt-ins keep fall on bounded sparse history while dense aggregates and features stay daily", async () => {
