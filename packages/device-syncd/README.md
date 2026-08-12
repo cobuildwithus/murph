@@ -45,6 +45,12 @@ Current providers:
   job, schedules at most eight resource/source pairs per reconcile pass, and
   retains only the existing compact daily facts. It never persists full
   provider timeseries arrays or emits canonical sample rows.
+- Only the closed date-by-date Junction fetch path may authorize blood-oxygen
+  and stress temporal features. Precise resource windows and webhook-driven
+  imports keep the ordinary compact daily facts but never publish day-scoped
+  temporal features from partial windows. Each authorized date fetch replaces
+  the fixed feature-facet set through canonical upserts and retractions, so an
+  insufficient or capped retry removes older derived facts.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use

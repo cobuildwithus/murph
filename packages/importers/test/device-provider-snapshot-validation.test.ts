@@ -43,6 +43,33 @@ describe("prepareDeviceProviderSnapshotImport", () => {
     }
   });
 
+  it("rejects malformed complete source-day authority", async () => {
+    const snapshot = {
+      accountId: "whoop-user",
+      importedAt: "2026-04-08T00:00:00.000Z",
+      recoveries: [],
+      sleeps: [],
+      workouts: [],
+    };
+
+    await expect(prepareDeviceProviderSnapshotImport({
+      completeSourceDay: {
+        dayKey: "2026-02-30",
+        revisionAt: "2026-04-08T00:00:00.000Z",
+      },
+      provider: "whoop",
+      snapshot,
+    })).rejects.toBeInstanceOf(TypeError);
+    await expect(prepareDeviceProviderSnapshotImport({
+      completeSourceDay: {
+        dayKey: "2026-04-08",
+        revisionAt: "2026-04-08T00:00:00",
+      },
+      provider: "whoop",
+      snapshot,
+    })).rejects.toBeInstanceOf(TypeError);
+  });
+
   it("rejects malformed Oura collection fields instead of silently dropping them", async () => {
     await expect(
       prepareDeviceProviderSnapshotImport({

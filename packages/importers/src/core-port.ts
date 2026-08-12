@@ -66,6 +66,11 @@ export interface DeviceExternalRefPayload {
   facet?: string;
 }
 
+export interface DeviceEventRetractionPayload {
+  externalRef: DeviceExternalRefPayload & { version: string };
+  reason: string;
+}
+
 export type DeviceDataOrigin = ContractDeviceDataOrigin;
 
 export interface DeviceEventLinkPayload {
@@ -142,6 +147,11 @@ export interface CanonicalWritePort {
   addMeal(payload: MealImportPayload): unknown;
   importSamples(payload: SampleImportPayload): unknown;
   importDeviceBatch(payload: DeviceBatchImportPayload): unknown;
+  importEventBatch(payload: {
+    apply: true;
+    decisions: readonly ({ action: "retract" } & DeviceEventRetractionPayload)[];
+    vaultRoot: string;
+  }): unknown;
 }
 
 export type CanonicalWriteMethod = keyof CanonicalWritePort;

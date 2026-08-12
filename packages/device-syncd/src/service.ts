@@ -978,12 +978,13 @@ class DeviceSyncServiceController {
           ? { shouldYield: this.shouldYieldJobExecution }
           : {}),
         throwIfAborted: assertJobExecutionNotYielded,
-        importSnapshot: async (snapshot: unknown) => {
+        importSnapshot: async (snapshot: unknown, options) => {
           ensureExecutionActive();
           const importResult = await this.importer.importDeviceProviderSnapshot({
             provider: provider.provider,
             snapshot,
             vaultRoot: this.vaultRoot,
+            ...options,
           });
           const receipt: ProviderSnapshotImportReceipt = {
             canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),

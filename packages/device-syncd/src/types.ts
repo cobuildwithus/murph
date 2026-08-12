@@ -15,6 +15,7 @@ import type {
   DeviceProviderDescriptor,
   NamedDeviceProviderRegistry,
 } from "@murphai/importers/device-providers/provider-descriptors";
+import type { CompleteDeviceProviderSourceDay } from "@murphai/importers";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
 export type { DeviceSyncAccountSetupPhase } from "./client.ts";
@@ -763,7 +764,10 @@ export interface ProviderJobContext {
   throwIfAborted?(): void;
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.
-  importSnapshot(snapshot: unknown): Promise<unknown>;
+  importSnapshot(
+    snapshot: unknown,
+    options?: { completeSourceDay?: CompleteDeviceProviderSourceDay },
+  ): Promise<unknown>;
   upsertConnectionSource?(
     input: Omit<UpsertDeviceConnectionSourceInput, "connectionId">,
   ): DeviceConnectionSourceRecord | Promise<DeviceConnectionSourceRecord>;
@@ -1001,6 +1005,7 @@ export interface DeviceSyncServiceSummary {
 
 export interface DeviceSyncImporterPort {
   importDeviceProviderSnapshot(input: {
+    completeSourceDay?: CompleteDeviceProviderSourceDay;
     provider: string;
     snapshot: unknown;
     vaultRoot?: string;

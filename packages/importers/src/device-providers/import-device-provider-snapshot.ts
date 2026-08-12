@@ -1,7 +1,12 @@
+import { isStrictIsoDate, isWritableIsoDateTime } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 
 import { assertCanonicalWritePort } from "../core-port.ts";
-import type { DeviceBatchImportPayload, DeviceEvidencePartPayload } from "../core-port.ts";
+import type {
+  DeviceBatchImportPayload,
+  DeviceEventRetractionPayload,
+  DeviceEvidencePartPayload,
+} from "../core-port.ts";
 import {
   optionalTrimmedStringSchema,
   parseInputObject,
@@ -14,6 +19,7 @@ import { buildWearableRawIngestReceipt } from "./raw-ingest-receipt.ts";
 import { createDeviceProviderRegistry } from "./registry.ts";
 
 import type { DeviceProviderRegistry } from "./registry.ts";
+import type { CompleteDeviceProviderSourceDay } from "./types.ts";
 
 export interface DeviceProviderImporterExecutionOptions {
   corePort?: unknown;
@@ -22,6 +28,7 @@ export interface DeviceProviderImporterExecutionOptions {
 }
 
 export interface DeviceProviderSnapshotImportInput {
+  completeSourceDay?: CompleteDeviceProviderSourceDay;
   provider: string;
   snapshot: unknown;
   vaultRoot?: string;
@@ -43,12 +50,20 @@ export interface DeviceProviderSnapshotImportInput {
   normalizerVersion?: string;
 }
 
+export interface PreparedDeviceProviderSnapshotImport extends DeviceBatchImportPayload {
+  eventRetractions?: DeviceEventRetractionPayload[];
+}
+
 const rawIngestSourceKindSchema = z.enum(["poll", "webhook", "sdk", "xml", "manual"]);
 const rawIngestDeliveryModeSchema = z.enum(["full_payload", "notification_only", "scheduled_reconcile"]);
 const rawIngestEventTypeSchema = z.enum(["create", "update", "delete", "deauthorize"]);
 
 const deviceProviderSnapshotImportSchema = z
   .object({
+    completeSourceDay: z.object({
+      dayKey: z.string().refine(isStrictIsoDate),
+      revisionAt: z.string().refine(isWritableIsoDateTime),
+    }).strict().optional(),
     provider: requiredTrimmedStringSchema("provider"),
     snapshot: z.unknown(),
     vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
@@ -83,7 +98,7 @@ export async function prepareDeviceProviderSnapshotImport(
   }: Pick<DeviceProviderImporterExecutionOptions, "providerRegistry"> & {
     defaultTimeZone?: string;
   } = {},
-): Promise<DeviceBatchImportPayload> {
+): Promise<PreparedDeviceProviderSnapshotImport> {
   const request = parseInputObject(
     input,
     "device provider snapshot import input",
@@ -99,7 +114,10 @@ export async function prepareDeviceProviderSnapshotImport(
   const snapshot = adapter.parseSnapshot
     ? adapter.parseSnapshot(request.snapshot)
     : request.snapshot;
-  const normalized = await adapter.normalizeSnapshot(snapshot, { defaultTimeZone });
+  const normalized = await adapter.normalizeSnapshot(snapshot, {
+    completeSourceDay: request.completeSourceDay,
+    defaultTimeZone,
+  });
   const sanitizedSnapshot = adapter.sanitizeRawSnapshot
     ? adapter.sanitizeRawSnapshot(snapshot)
     : request.snapshot;
@@ -112,6 +130,7 @@ export async function prepareDeviceProviderSnapshotImport(
     source: normalized.source,
     dataOrigin: normalized.dataOrigin,
     events: normalized.events,
+    eventRetractions: normalized.eventRetractions,
     samples: normalized.samples,
     evidenceParts: normalized.evidenceParts,
     provenance: normalized.provenance,
@@ -181,7 +200,9 @@ async function resolveSnapshotImportDefaultTimeZone(
   return vault.metadata.timezone;
 }
 
-function attachSingleEvidenceRole(payload: DeviceBatchImportPayload): DeviceBatchImportPayload {
+function attachSingleEvidenceRole(
+  payload: PreparedDeviceProviderSnapshotImport,
+): PreparedDeviceProviderSnapshotImport {
   if ((payload.evidenceParts ?? []).length !== 1) {
     return payload;
   }
@@ -200,9 +221,9 @@ function attachSingleEvidenceRole(payload: DeviceBatchImportPayload): DeviceBatc
 }
 
 function ensureProviderEvidencePart(
-  payload: DeviceBatchImportPayload,
+  payload: PreparedDeviceProviderSnapshotImport,
   rawSnapshot: unknown,
-): DeviceBatchImportPayload {
+): PreparedDeviceProviderSnapshotImport {
   if ((payload.evidenceParts ?? []).length > 0 || !hasRetainableEvidencePartContent(rawSnapshot)) {
     return payload;
   }
@@ -296,5 +317,27 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
     defaultTimeZone: resolvedDefaultTimeZone,
     providerRegistry,
   });
-  return (await writer.importDeviceBatch(payload)) as TResult;
+  const { eventRetractions = [], ...deviceBatchPayload } = payload;
+  const retractionWriter = eventRetractions.length > 0
+    ? assertCanonicalWritePort(corePort, ["importEventBatch"])
+    : undefined;
+  if (retractionWriter && !payload.vaultRoot) {
+    throw new TypeError("Device event retractions require vaultRoot.");
+  }
+
+  // The device batch remains the canonical upsert owner. Retractions follow it
+  // so an interrupted attempt is safe to replay and converges without another
+  // lifecycle store or reconciler.
+  const result = await writer.importDeviceBatch(deviceBatchPayload);
+  if (retractionWriter && payload.vaultRoot) {
+    await retractionWriter.importEventBatch({
+      apply: true,
+      decisions: eventRetractions.map((retraction) => ({
+        action: "retract",
+        ...retraction,
+      })),
+      vaultRoot: payload.vaultRoot,
+    });
+  }
+  return result as TResult;
 }

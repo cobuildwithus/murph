@@ -86,6 +86,7 @@ import {
 import {
   buildJunctionTemporalFeatures,
   isJunctionTemporalFeatureResource,
+  JUNCTION_TEMPORAL_FEATURE_METRICS,
   JUNCTION_TEMPORAL_FEATURE_MAX_OBSERVATIONS_PER_DAY,
   JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY,
   JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT,
@@ -97,6 +98,7 @@ import {
 import type {
   DeviceDataOrigin,
   DeviceEventPayload,
+  DeviceEventRetractionPayload,
   DeviceExternalRefPayload,
   DeviceEvidencePartPayload,
   DeviceSamplePayload,
@@ -181,9 +183,11 @@ interface NormalizationContext {
   windowEnd?: string;
   connectionsByKey: ReadonlyMap<string, PlainObject>;
   evidenceParts: DeviceEvidencePartPayload[];
+  eventRetractions: DeviceEventRetractionPayload[];
   events: DeviceEventPayload[];
   samples: DeviceSamplePayload[];
   temporalFeatureObservationCountsByDay: Map<string, number>;
+  temporalFeatureSourceDay?: NonNullable<DeviceProviderNormalizationContext["completeSourceDay"]>;
 }
 
 interface JunctionResourceEntry {
@@ -904,6 +908,7 @@ export function normalizeJunctionSnapshot(
   const windowStart = normalizeTimestamp(snapshot.windowStart);
   const windowEnd = normalizeTimestamp(snapshot.windowEnd);
   const evidenceParts: DeviceEvidencePartPayload[] = [];
+  const eventRetractions: DeviceEventRetractionPayload[] = [];
   const events: DeviceEventPayload[] = [];
   const samples: DeviceSamplePayload[] = [];
   const companionHrvRmssd = snapshot.companionHrvRmssd === undefined
@@ -920,9 +925,11 @@ export function normalizeJunctionSnapshot(
     windowEnd,
     connectionsByKey: buildConnectionsByKey(connections),
     evidenceParts,
+    eventRetractions,
     events,
     samples,
     temporalFeatureObservationCountsByDay: new Map(),
+    temporalFeatureSourceDay: providerContext.completeSourceDay,
   };
 
   normalizeSummaries(snapshot.summaries, context);
@@ -934,6 +941,7 @@ export function normalizeJunctionSnapshot(
     accountId: stringId(snapshot.accountId),
     importedAt,
     events,
+    eventRetractions: eventRetractions.length > 0 ? eventRetractions : undefined,
     samples: samples.length > 0 ? samples : undefined,
     evidenceParts,
     provenance: stripUndefined({
@@ -1032,6 +1040,7 @@ export function identifyJunctionBloodPressureProviderRecords(
     windowEnd: normalizeTimestamp(snapshot.windowEnd),
     connectionsByKey: buildConnectionsByKey(connections),
     evidenceParts: [],
+    eventRetractions: [],
     events: [],
     samples: [],
     temporalFeatureObservationCountsByDay: new Map(),
@@ -1770,6 +1779,8 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   const temporalFeatureResource = isJunctionTemporalFeatureResource(input.resource)
     ? input.resource
     : undefined;
+  const ownsTemporalFeatures = temporalFeatureResource !== undefined
+    && input.context.temporalFeatureSourceDay !== undefined;
   let temporalFeatureInputCount = 0;
   let temporalFeatureImportSuppressed = false;
 
@@ -1864,14 +1875,20 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       }
     }
 
-    if (temporalFeatureResource && !temporalFeatureImportSuppressed) {
+    if (
+      ownsTemporalFeatures
+      && !temporalFeatureImportSuppressed
+    ) {
       temporalFeatureInputCount += 1;
       if (temporalFeatureInputCount > JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT) {
         temporalFeatureImportSuppressed = true;
         for (const current of aggregates.values()) {
           delete current.temporalFeatureSamples;
         }
-      } else if (!aggregate.temporalFeatureInputSuppressed) {
+      } else if (
+        dayKey === input.context.temporalFeatureSourceDay?.dayKey
+        && !aggregate.temporalFeatureInputSuppressed
+      ) {
         const temporalFeatureSamples = aggregate.temporalFeatureSamples ?? [];
         if (temporalFeatureSamples.length >= JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY) {
           aggregate.temporalFeatureInputSuppressed = true;
@@ -1898,8 +1915,11 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   }
 
   const sortedAggregates = [...aggregates.values()].sort(compareJunctionDailyTimeseriesAggregates);
-  if (temporalFeatureResource) {
+  if (temporalFeatureResource && ownsTemporalFeatures) {
     for (const aggregate of sortedAggregates) {
+      if (aggregate.dayKey !== input.context.temporalFeatureSourceDay?.dayKey) {
+        continue;
+      }
       const result: JunctionTemporalFeatureResult =
         temporalFeatureImportSuppressed || aggregate.temporalFeatureInputSuppressed
           ? { observations: [], status: "suppressed_input_cap" }
@@ -1926,6 +1946,11 @@ function buildJunctionDailyTimeseriesAggregates(input: {
           existingObservationCount + result.observations.length,
         );
       }
+      reconcileJunctionTemporalFeatureFacets(
+        input.context,
+        aggregate,
+        temporalFeatureResource,
+      );
       delete aggregate.temporalFeatureSamples;
     }
   }
@@ -2172,12 +2197,12 @@ function pushJunctionDailyTimeseriesObservation(
     source: "device",
     title: resolveJunctionHrvTitle(metric, observation.title),
     evidenceRoles: [aggregate.evidencePartRole],
-    externalRef: makeJunctionExternalRef(
+    externalRef: withJunctionTemporalFeatureRevision(makeJunctionExternalRef(
       aggregate.resourceContext,
       aggregate.entry,
       timestamp,
       observation.metric,
-    ),
+    ), context, observation.qualifiers),
     legacyExternalRefs: legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
     dataOrigin: observation.confidence
       ? { ...dataOrigin, originConfidence: observation.confidence }
@@ -2190,6 +2215,56 @@ function pushJunctionDailyTimeseriesObservation(
       unit: observation.unit,
     },
   }));
+}
+
+function withJunctionTemporalFeatureRevision(
+  externalRef: DeviceExternalRefPayload,
+  context: NormalizationContext,
+  qualifiers: JunctionTemporalFeatureObservationQualifiers | undefined,
+): DeviceExternalRefPayload {
+  return qualifiers && context.temporalFeatureSourceDay
+    ? { ...externalRef, version: context.temporalFeatureSourceDay.revisionAt }
+    : externalRef;
+}
+
+function reconcileJunctionTemporalFeatureFacets(
+  context: NormalizationContext,
+  aggregate: JunctionDailyTimeseriesAggregate,
+  resource: keyof typeof JUNCTION_TEMPORAL_FEATURE_METRICS,
+): void {
+  const sourceDay = context.temporalFeatureSourceDay;
+  if (!sourceDay || aggregate.dayKey !== sourceDay.dayKey) {
+    aggregate.temporalFeatureResult = undefined;
+    return;
+  }
+  const emittedMetrics = new Set(
+    aggregate.temporalFeatureResult?.status === "complete"
+      ? aggregate.temporalFeatureResult.observations.map((observation) => observation.metric)
+      : [],
+  );
+  const timestamp = withTimestampOverride(aggregate.timestamp, {
+    occurredAt: aggregate.lastSampleAt,
+    recordedAt: aggregate.lastRecordedAt,
+    dayKey: aggregate.dayKey,
+    observedAtRaw: `${aggregate.dayKey}:${aggregate.resourceContext.resource}:daily`,
+  });
+  for (const metric of JUNCTION_TEMPORAL_FEATURE_METRICS[resource]) {
+    if (emittedMetrics.has(metric)) {
+      continue;
+    }
+    context.eventRetractions.push({
+      externalRef: {
+        ...makeJunctionExternalRef(
+          aggregate.resourceContext,
+          aggregate.entry,
+          timestamp,
+          metric,
+        ),
+        version: sourceDay.revisionAt,
+      },
+      reason: "Complete Junction source-day replacement omitted this temporal feature.",
+    });
+  }
 }
 
 function legacyJunctionDailyTimeseriesAggregateExternalRefs(
@@ -5761,6 +5836,25 @@ function resolveJunctionTimeseriesAggregateDayKey(
     ? resolveVaultLocalDayKey(sampleAt, defaultTimeZone)
     : undefined;
   return timestamp.dayKey ?? vaultDayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+}
+
+/** Resolve the same source-local date used by Junction daily aggregation. */
+export function resolveJunctionTimeseriesSourceDayKey(
+  entry: Record<string, unknown>,
+  defaultTimeZone?: string,
+): string | undefined {
+  const sourceProviderSlug = readJunctionSourceProviderSlug(entry, undefined);
+  const timestamp = resolveJunctionTemporalFeatureTimestamp(
+    entry,
+    resolveRecordTimestamp(entry, {}, sourceProviderSlug),
+  );
+  const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp);
+  return resolveJunctionTimeseriesAggregateDayKey(
+    entry,
+    timestamp,
+    sampleAt,
+    defaultTimeZone,
+  );
 }
 
 function resolveJunctionDailyAggregateSampleAt(

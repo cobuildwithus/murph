@@ -7128,6 +7128,80 @@ test("Junction reconcile keeps summaries current while compact timeseries stays 
   );
 });
 
+test("Junction closed daily timeseries imports carry the exclusive temporal source-day proof", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      assert.equal(url.searchParams.get("start_date"), "2026-04-22");
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [
+              {
+                start: "2026-04-22T12:00:00.000Z",
+                timezone_offset: -18_000,
+                value: 20,
+              },
+              {
+                start: "2026-04-23T00:05:00.000Z",
+                timezone_offset: -18_000,
+                value: 30,
+              },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    timeseriesResources: ["stress_level"],
+  });
+  const importedSnapshots: unknown[] = [];
+  const importOptions: unknown[] = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-24T12:00:00.000Z",
+      importSnapshot: async (snapshot, options) => {
+        importedSnapshots.push(snapshot);
+        importOptions.push(options);
+        return { imported: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+    }),
+  );
+
+  const dailySnapshotIndex = importedSnapshots.findIndex((snapshot) =>
+    Boolean((snapshot as { timeseries?: Record<string, unknown> }).timeseries?.stress_level)
+  );
+  assert.deepEqual(
+    (importOptions[dailySnapshotIndex] as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      dayKey: "2026-04-22",
+      revisionAt: "2026-04-24T12:00:00.000Z",
+    },
+  );
+  const dailySnapshot = importedSnapshots[dailySnapshotIndex] as {
+    timeseries?: { stress_level?: Array<{ start?: string }> };
+  };
+  assert.equal(dailySnapshot.timeseries?.stress_level?.length, 2);
+  assert.equal(
+    dailySnapshot.timeseries?.stress_level?.[1]?.start,
+    "2026-04-23T00:05:00.000Z",
+  );
+});
+
 test("Junction reconcile keeps same-time Oura notes with different tags", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
@@ -7316,14 +7390,16 @@ test("Junction code-owned compact defaults admit direct timeseries resource jobs
     },
   });
   const importedSnapshots: unknown[] = [];
+  const importOptions: unknown[] = [];
 
   await executeJunctionJob(
     provider,
     {
       account: createAccount(),
       now: "2026-04-03T12:00:00.000Z",
-      importSnapshot: async (snapshot) => {
+      importSnapshot: async (snapshot, options) => {
         importedSnapshots.push(snapshot);
+        importOptions.push(options);
         return { imported: true };
       },
       logger: {},
@@ -7349,6 +7425,7 @@ test("Junction code-owned compact defaults admit direct timeseries resource jobs
     timeseries?: Record<string, unknown[]>;
   };
   assert.deepEqual(snapshot.summaries, {});
+  assert.equal(importOptions[0], undefined);
   assert.equal(snapshot.timeseries?.blood_oxygen?.length, 1);
   const timeseriesRequest = requireValue(
     requests.find((url) => url.includes("/v2/timeseries/")),

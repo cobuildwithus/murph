@@ -17,6 +17,7 @@ import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
+  resolveJunctionTimeseriesSourceDayKey,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
@@ -2686,12 +2687,21 @@ export function createJunctionDeviceSyncProvider(
           request.dateQueryFormat = options.dateQueryFormat;
         }
         const chunkRecords = await client.listTimeseries(request);
+        // Date-only Junction requests are bounded by provider calendar dates.
+        // Reuse the importer's source-day semantics so offset evening rows are
+        // retained without admitting duplicate rows returned for another day.
+        const retainedChunkRecords = options.dateQueryFormat === "date"
+          ? filterJunctionTimeseriesRecordsToSourceDay(
+              chunkRecords,
+              chunkWindowStart.slice(0, 10),
+            )
+          : filterJunctionTimeseriesRecordsToWindow(
+              chunkRecords,
+              chunkWindowStart,
+              chunkWindowEnd,
+            );
         records.push(
-          ...filterJunctionTimeseriesRecordsToWindow(
-            chunkRecords,
-            chunkWindowStart,
-            chunkWindowEnd,
-          ),
+          ...retainedChunkRecords,
         );
       } catch (error) {
         const failure = classifyOptionalJunctionResourceFailure(
@@ -3007,6 +3017,11 @@ export function createJunctionDeviceSyncProvider(
           connections: preparedImport.connections,
           summaries: {},
           timeseries: preparedImport.snapshots,
+        }, {
+          completeSourceDay: {
+            dayKey: window.windowStart.slice(0, 10),
+            revisionAt: context.now,
+          },
         });
       }
     }
@@ -5133,6 +5148,20 @@ function filterJunctionTimeseriesRecordsToWindow(
       return true;
     }
     return recordedMs >= startMs && recordedMs < endMs;
+  });
+}
+
+function filterJunctionTimeseriesRecordsToSourceDay(
+  records: readonly unknown[],
+  sourceDayKey: string,
+): unknown[] {
+  return records.filter((record) => {
+    const entry = readPlainObject(record);
+    if (!entry) {
+      return true;
+    }
+    const recordSourceDayKey = resolveJunctionTimeseriesSourceDayKey(entry);
+    return recordSourceDayKey === undefined || recordSourceDayKey === sourceDayKey;
   });
 }
 

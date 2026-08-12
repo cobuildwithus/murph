@@ -1299,6 +1299,7 @@ test("hosted listed-only recovery publishes connected before pressure egress res
 
 test("device sync service reports canonical counts separately from durable delivery acceptance", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-import-receipt");
+  const importerInputs: unknown[] = [];
   const importReceipts: unknown[] = [];
   let importAttempt = 0;
   const { service, close } = createServiceFixture({
@@ -1309,7 +1310,8 @@ test("device sync service reports canonical counts separately from durable deliv
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     importer: {
-      async importDeviceProviderSnapshot() {
+      async importDeviceProviderSnapshot(input) {
+        importerInputs.push(input);
         importAttempt += 1;
         return importAttempt === 1
           ? { events: [{ kind: "activity" }, { kind: "sleep" }] }
@@ -1318,7 +1320,15 @@ test("device sync service reports canonical counts separately from durable deliv
     },
     providers: [createFakeProvider({
       async executeJob(context) {
-        importReceipts.push(await context.importSnapshot({ provider: "demo" }));
+        importReceipts.push(await context.importSnapshot(
+          { provider: "demo" },
+          {
+            completeSourceDay: {
+              dayKey: "2026-03-16",
+              revisionAt: "2026-03-17T12:00:00.000Z",
+            },
+          },
+        ));
         return {};
       },
     })],
@@ -1345,6 +1355,26 @@ test("device sync service reports canonical counts separately from durable deliv
         canonicalEventCount: 0,
         canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
+      },
+    ]);
+    assert.deepEqual(importerInputs, [
+      {
+        completeSourceDay: {
+          dayKey: "2026-03-16",
+          revisionAt: "2026-03-17T12:00:00.000Z",
+        },
+        provider: "demo",
+        snapshot: { provider: "demo" },
+        vaultRoot,
+      },
+      {
+        completeSourceDay: {
+          dayKey: "2026-03-16",
+          revisionAt: "2026-03-17T12:00:00.000Z",
+        },
+        provider: "demo",
+        snapshot: { provider: "demo" },
+        vaultRoot,
       },
     ]);
   } finally {

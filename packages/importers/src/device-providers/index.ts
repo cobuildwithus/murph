@@ -32,6 +32,7 @@ export {
   junctionProviderAdapter,
   normalizeJunctionResourceName,
   normalizeJunctionSnapshot,
+  resolveJunctionTimeseriesSourceDayKey,
   type JunctionSnapshotInput,
   type JunctionBloodPressureProviderRecordIdentityEvidence,
   type JunctionSummaryNormalizationEvidence,
@@ -66,6 +67,7 @@ export {
   type WhoopSnapshotInput,
 } from "./whoop.ts";
 export type {
+  CompleteDeviceProviderSourceDay,
   DeviceProviderAdapter,
   DeviceProviderSnapshotImportPayload,
   NormalizedDeviceBatch,
