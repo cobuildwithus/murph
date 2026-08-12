@@ -628,7 +628,7 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
       },
     });
 
-    expect(result).toEqual({ outcome: "delivered" });
+    expect(result).toEqual({ outcome: "preempted" });
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver.mock.calls[0]?.[0]).toMatchObject({
       projectionKind: "profile-name.v0",

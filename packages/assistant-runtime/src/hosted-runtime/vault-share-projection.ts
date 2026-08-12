@@ -169,7 +169,8 @@ export interface HostedVaultShareProjectionOfferResult {
     | "error"
     | "no-active-share"
     | "no-port"
-    | "no-projectable-records";
+    | "no-projectable-records"
+    | "preempted";
 }
 
 export type HostedVaultShareProjectionScopeResolution =
@@ -292,7 +293,7 @@ export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
   const outcomes: HostedVaultShareOfferOutcome[] = [];
   for (const [index, snapshot] of input.capture.snapshots.entries()) {
     if (index > 0 && input.shouldStop?.()) {
-      break;
+      return { outcome: "preempted" };
     }
     try {
       const request = {

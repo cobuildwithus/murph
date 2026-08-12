@@ -354,8 +354,12 @@ a foreground conversation may enter the provider without waiting for
 publication, but that invocation starts no second projection and retains runner
 ownership until the forwarded Web request is terminal. Abort and shutdown
 finalization join the same end-to-end request before a successor invocation or
-durable continuation may retry. No projection work outlives that owner, and a
-failed scope terminates the remaining captured delivery chain. Web performs
+durable continuation may retry. Foreground preemption is local to that active
+delivery owner. If it skips later captured scopes, the offer reports preempted;
+the next opportunity starts with a fresh stop state and cannot acknowledge the
+dirty or recording obligation until its complete scope set succeeds. No
+projection work outlives that owner, and a failed scope terminates the remaining
+captured delivery chain. Web performs
 encryption before taking a short `hosted_workspace` row lock, then replaces the
 exact active share generation only when the locked version still matches. The
 workspace lock serializes the final replacement with checkpoint CAS: an older

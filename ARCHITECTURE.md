@@ -59,7 +59,10 @@ vault path. Scope resolution receives the invocation's abort signal, so a
 foreground wake cancels and drains that read. An already-started immutable
 delivery instead remains owned and
 finishes its current scope. The wake prevents admission of every later captured
-scope, leaving the existing dirty or recording obligation to retry them. Web
+scope, and that offer reports preempted instead of treating its successful
+prefix as complete. The stop bit belongs only to the active delivery owner, so
+a later opportunity begins fresh and can retry every scope before the existing
+dirty or recording obligation is acknowledged. Web
 owns a finite effect deadline for that current scope, stops admitting destination
 replacements on deadline or request cancellation, and bounds the final database
 transaction by the remaining deadline. Runtime creates that one absolute

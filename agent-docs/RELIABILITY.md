@@ -646,8 +646,11 @@ Last verified: 2026-08-12
   starts, foreground conversation work may proceed without waiting for
   publication. The first foreground preemption marks the remaining captured
   scopes deferred: the current scope reaches a terminal boundary, no later scope
-  starts, and the existing dirty or recording owner retries the undispatched
-  scopes. The invocation starts no second projection and does not release its
+  starts, and the partial offer reports preempted rather than aggregating its
+  successful prefix as complete. That stop bit belongs only to the active
+  delivery promise; after it settles, a later opportunity starts unpreempted and
+  the existing dirty or recording owner retries every undispatched scope before
+  acknowledgement. The invocation starts no second projection and does not release its
   runner ownership until the real proxy-to-Web response is terminal. Web owns a
   finite effect deadline for each delivery, stops admitting destination
   replacements on deadline or request cancellation, and gives the final

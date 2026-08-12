@@ -7,8 +7,9 @@ Last verified: 2026-08-12
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
-Personal-to-group projection convergence, including its single forwarded
-deadline and authoritative Web-response ownership boundary, is specified by
+Personal-to-group projection convergence, including attempt-local foreground
+preemption, its single forwarded deadline, and authoritative Web-response
+ownership, is specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 

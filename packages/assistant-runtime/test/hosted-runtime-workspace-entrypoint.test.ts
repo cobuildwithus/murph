@@ -24863,10 +24863,12 @@ describe("hosted workspace runtime entrypoint", () => {
     let activeScopeReads = 0;
     let activeProjectionDeliveries = 0;
     let assistantPhaseCalls = 0;
+    let checkpointEffectCalls = 0;
     let checkpointCount = 0;
     let conversationAssistantPhaseEvent: string | null = null;
     let peakActiveProjectionDeliveries = 0;
     let projectionDeliveryCalls = 0;
+    const projectionKinds: string[] = [];
     let processedConversationInputs = 0;
     let pendingInputId: string | null = null;
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
@@ -24925,16 +24927,15 @@ describe("hosted workspace runtime entrypoint", () => {
             vaultSharePort: {
               async listActiveProjectionScopes() {
                 activeScopeReads += 1;
-                return activeScopeReads === 1
-                  ? [
-                      { projectionKind: "sleep-times.v0" },
-                      { projectionKind: "profile-name.v0" },
-                      { projectionKind: "time-zone.v0" },
-                    ]
-                  : [];
+                return [
+                  { projectionKind: "sleep-times.v0" },
+                  { projectionKind: "profile-name.v0" },
+                  { projectionKind: "time-zone.v0" },
+                ];
               },
-              async deliver() {
+              async deliver(request) {
                 projectionDeliveryCalls += 1;
+                projectionKinds.push(request.projectionKind);
                 activeProjectionDeliveries += 1;
                 peakActiveProjectionDeliveries = Math.max(
                   peakActiveProjectionDeliveries,
@@ -25009,7 +25010,34 @@ describe("hosted workspace runtime entrypoint", () => {
             } else if (processedConversationInputs === 2) {
               secondConversationAssistantStarted.resolve();
             }
+            const afterDurableCheckpoint = Object.assign(
+              async () => {
+                checkpointEffectCalls += 1;
+                events.push("device-sync.dirty-ack");
+                assert.deepEqual(projectionKinds.slice(-3), [
+                  "sleep-times.v0",
+                  "profile-name.v0",
+                  "time-zone.v0",
+                ]);
+                assert.equal(activeProjectionDeliveries, 0);
+              },
+              {
+                vaultShareProjectionFailureWake: {
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "device-sync.reconcile" as const,
+                  requiresFollowUpCheckpoint: true,
+                },
+              },
+            );
             return {
+              ...(processedConversationInputs === 2
+                ? {
+                  afterCheckpoint: async () => ({
+                    afterDurableCheckpoint,
+                    checkpointReason: "assistant_runtime_commit" as const,
+                  }),
+                }
+                : {}),
               checkpointReason: "assistant_runtime_commit" as const,
               nextWakeAt: null,
               progressed: true,
@@ -25134,7 +25162,20 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await withRealTimeout(resultPromise, 15_000, () => events.join(","));
       assert.ok(events.includes("vault-share.deliver:done"), events.join(","));
       assert.equal(activeProjectionDeliveries, 0);
-      assert.equal(projectionDeliveryCalls, 1);
+      assert.ok(activeScopeReads >= 2);
+      assert.equal(projectionDeliveryCalls, 4);
+      assert.deepEqual(projectionKinds, [
+        "sleep-times.v0",
+        "sleep-times.v0",
+        "profile-name.v0",
+        "time-zone.v0",
+      ]);
+      assert.equal(checkpointEffectCalls, 1);
+      assert.ok(
+        events.lastIndexOf("vault-share.deliver:done")
+          < requireEventIndex(events, "device-sync.dirty-ack"),
+        events.join(","),
+      );
       assert.ok(["idle", "scheduled"].includes(result.status));
       assert.ok(checkpointRequests.length >= 1);
     } finally {

@@ -164,6 +164,17 @@ Updated: 2026-08-12
   both hops unchanged, and focused proof covers actual Web 503, propagated
   second-hop loss, proxy-local 500, unchanged deadline forwarding, and expired
   Web admission.
-- Remaining proof: ReviewGPT round 7 PASS, required GitHub Actions, and
-  current-base merge-tree
-  verification.
+- ReviewGPT round 7 found that foreground preemption was stored on the whole
+  invocation and that a skipped suffix was aggregated as a successful prefix.
+  A later same-invocation opportunity could therefore inherit the stale stop
+  bit, publish only its first scope, and consume the dirty obligation. The
+  correction moves the stop bit into the active promise owner and returns an
+  explicit preempted outcome when any captured suffix is skipped. Production-
+  shaped proof keeps the active scope set stable across attempts, reaches the
+  provider while the first scope is pending, proves peak one delivery, retries
+  all three scopes with a fresh owner, and executes the tagged durable effect
+  only after that complete retry.
+- ReviewGPT reached its seven-round hard cap with this accepted finding. The
+  known bug is corrected; round 8 requires an explicit continuation decision
+  after focused verification, required GitHub Actions, parent final review, and
+  the cap retrospective are complete.

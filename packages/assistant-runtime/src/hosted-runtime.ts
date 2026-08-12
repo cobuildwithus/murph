@@ -1199,26 +1199,42 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     ...runtime,
     platform: guardedPlatform,
   };
-  let pendingOwnedVaultShareProjection:
-    Promise<Awaited<ReturnType<typeof offerCapturedHostedVaultShareProjectionBestEffort>>>
-    | null = null;
-  let vaultShareProjectionForegroundPreempted = false;
+  type OwnedVaultShareProjection = {
+    preemptForForeground(): void;
+    promise: Promise<
+      Awaited<ReturnType<typeof offerCapturedHostedVaultShareProjectionBestEffort>>
+    >;
+  };
+  let pendingOwnedVaultShareProjection: OwnedVaultShareProjection | null = null;
   const startOwnedVaultShareProjection = (
-    offerInput: Parameters<typeof offerCapturedHostedVaultShareProjectionBestEffort>[0],
-  ): NonNullable<typeof pendingOwnedVaultShareProjection> => {
+    offerInput: Omit<
+      Parameters<typeof offerCapturedHostedVaultShareProjectionBestEffort>[0],
+      "shouldStop"
+    >,
+  ): OwnedVaultShareProjection["promise"] => {
     if (pendingOwnedVaultShareProjection) {
       throw new Error("Hosted vault-share projection already has an invocation owner.");
     }
-    const projection = offerCapturedHostedVaultShareProjectionBestEffort(offerInput);
-    pendingOwnedVaultShareProjection = projection;
+    let foregroundPreempted = false;
+    const projection = offerCapturedHostedVaultShareProjectionBestEffort({
+      ...offerInput,
+      shouldStop: () => foregroundPreempted,
+    });
+    const owner: OwnedVaultShareProjection = {
+      preemptForForeground() {
+        foregroundPreempted = true;
+      },
+      promise: projection,
+    };
+    pendingOwnedVaultShareProjection = owner;
     void projection.then(
       () => {
-        if (pendingOwnedVaultShareProjection === projection) {
+        if (pendingOwnedVaultShareProjection === owner) {
           pendingOwnedVaultShareProjection = null;
         }
       },
       () => {
-        if (pendingOwnedVaultShareProjection === projection) {
+        if (pendingOwnedVaultShareProjection === owner) {
           pendingOwnedVaultShareProjection = null;
         }
       },
@@ -1226,12 +1242,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     return projection;
   };
   const drainOwnedVaultShareProjection = async (): Promise<void> => {
-    const projection = pendingOwnedVaultShareProjection;
-    if (!projection) {
+    const owner = pendingOwnedVaultShareProjection;
+    if (!owner) {
       return;
     }
-    await projection.catch(() => undefined);
-    if (pendingOwnedVaultShareProjection === projection) {
+    await owner.promise.catch(() => undefined);
+    if (pendingOwnedVaultShareProjection === owner) {
       pendingOwnedVaultShareProjection = null;
     }
   };
@@ -2413,7 +2429,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 new Error("Hosted vault-share projection yielded to foreground work."),
               );
             } else {
-              vaultShareProjectionForegroundPreempted = true;
+              pendingOwnedVaultShareProjection?.preemptForForeground();
             }
             if (workSignal.aborted) {
               throw readHostedRuntimeAbortReason(workSignal);
@@ -2466,7 +2482,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const offerResult = await waitForOwnedProjectionStage(
           () => startOwnedVaultShareProjection({
             capture: capture.capture,
-            shouldStop: () => vaultShareProjectionForegroundPreempted,
             vaultSharePort,
           }),
           "retain",
@@ -2477,6 +2492,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         logHostedVaultShareProjectionOfferOutcome(offerResult.value);
         if (offerResult.value.outcome === "error") {
           return "retry";
+        }
+        if (offerResult.value.outcome === "preempted") {
+          return "preempted";
         }
         return consumeForegroundWake() ? "preempted" : "completed";
       };
@@ -3857,7 +3875,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   new Error("Hosted vault-share projection yielded to foreground work."),
                 );
               } else {
-                vaultShareProjectionForegroundPreempted = true;
+                pendingOwnedVaultShareProjection?.preemptForForeground();
               }
               if (runtimeAbortController.signal.aborted) {
                 throw readHostedRuntimeAbortReason(runtimeAbortController.signal);
@@ -3952,7 +3970,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const offerStage = await waitForOwnedProjectionStage(
         () => startOwnedVaultShareProjection({
           capture: capture.capture,
-          shouldStop: () => vaultShareProjectionForegroundPreempted,
           vaultSharePort,
         }),
         "retain",
