@@ -52,10 +52,17 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   `unknown`, proven acceptance restores the same row without an unsupported
   historical charge, and indeterminate evidence stays pending for the same
   request. Before reconciling an older row for a distinct request, persist that
-  current request as an unsent `unknown` failure under its own request key.
-  Always answer with the current row so reply loss and replay cannot turn a
-  suppressed request into a provider effect. Do not add an enum, queue, another
-  state owner, or a reconciliation lifecycle.
+  current request as an unsent `prior_note_unresolved` failure under its own
+  request key, so a concurrent replay cannot invite another send. Proven
+  absence narrows that current reason to `unknown`.
+  If the older row is proven accepted, narrow the current row to the existing
+  bounded reason vocabulary's `prior_note_accepted` state and tell the member
+  both that the older note was accepted and the current request was not sent.
+  Accepted replay is read-only; ordinary paid acceptance already commits usage
+  atomically, while restored legacy acceptance has no billing provenance to
+  reconstruct. Always answer with the current row so reply loss and replay
+  cannot turn a suppressed request into a provider effect. Do not add another
+  enum, queue, state owner, or reconciliation lifecycle.
 - Cover the member-scoped legacy lookup with an index on member, status, reason,
   and creation time so physical-note history does not create a table-scan hot
   path. The request performs one bounded row lookup and at most one serial
@@ -159,3 +166,12 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   current request key and physical-note id survive replay with zero provider
   create and usage calls. This is the seven-round cap; do not start round 8
   without an explicit continuation decision.
+- After explicit continuation, round 8 found that accepted-row replay could
+  still reconstruct erased legacy billing evidence and that a distinct blocked
+  request hid the older acceptance while inviting another send. Make accepted
+  replay read-only because ordinary usage commits atomically with acceptance.
+  When legacy acceptance blocks a distinct request, persist
+  `prior_note_accepted` on the current row and instruct the assistant to report
+  both facts without inviting retry. Prove ordinary paid and legacy accepted
+  replay add no usage, and prove the distinct request replays the same typed
+  no-send disposition with zero provider creates.

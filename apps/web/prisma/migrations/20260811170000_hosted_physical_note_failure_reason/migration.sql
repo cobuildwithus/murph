@@ -3,6 +3,8 @@ CREATE TYPE "HostedPhysicalNoteFailureReason" AS ENUM (
   'artwork',
   'service_unavailable',
   'request_invalid',
+  'prior_note_unresolved',
+  'prior_note_accepted',
   'unknown'
 );
 

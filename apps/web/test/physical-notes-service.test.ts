@@ -211,6 +211,11 @@ describe("createHostedPhysicalNote", () => {
       prisma: store.prisma,
       runtime: provider.runtime,
     });
+    const paidReplay = await createHostedPhysicalNote({
+      ...buildRequest(2),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
 
     expect(paidResponse).toEqual({
       complimentary: false,
@@ -218,6 +223,7 @@ describe("createHostedPhysicalNote", () => {
       physicalNoteId: expect.stringMatching(/^hpn_[a-f0-9]{32}$/u),
       status: "accepted",
     });
+    expect(paidReplay).toEqual(paidResponse);
     expect(mocks.readUsageGate).toHaveBeenCalledOnce();
     const paidRow = store.allRows().find(
       (row) => row.id === paidResponse.physicalNoteId,
@@ -240,6 +246,8 @@ describe("createHostedPhysicalNote", () => {
         }),
       ],
     });
+    expect(mocks.recordUsage).toHaveBeenCalledOnce();
+    expect(provider.create).toHaveBeenCalledTimes(2);
     expect(paidRow).toMatchObject({
       complimentaryOfferCode: null,
       providerLetterId: "ltr_paid",
@@ -653,7 +661,7 @@ describe("createHostedPhysicalNote", () => {
       runtime: provider.runtime,
     });
     expect(recentBlocked).toMatchObject({
-      failureReason: "unknown",
+      failureReason: "prior_note_unresolved",
       status: "failed",
     });
     expect(recentBlocked.physicalNoteId).not.toBe(failed.physicalNoteId);
@@ -677,7 +685,7 @@ describe("createHostedPhysicalNote", () => {
       runtime: provider.runtime,
     });
     expect(indeterminate).toMatchObject({
-      failureReason: "unknown",
+      failureReason: "prior_note_unresolved",
       status: "failed",
     });
     expect(indeterminate.physicalNoteId).not.toBe(failed.physicalNoteId);
@@ -690,13 +698,13 @@ describe("createHostedPhysicalNote", () => {
         status: "failed",
       }),
       expect.objectContaining({
-        failureReason: "unknown",
+        failureReason: "prior_note_unresolved",
         id: indeterminate.physicalNoteId,
         requestKey: blockedRequest.requestKey,
         status: "failed",
       }),
       expect.objectContaining({
-        failureReason: "unknown",
+        failureReason: "prior_note_unresolved",
         id: recentBlocked.physicalNoteId,
         requestKey: recentBlockedRequest.requestKey,
         status: "failed",
@@ -745,7 +753,7 @@ describe("createHostedPhysicalNote", () => {
 
     expect(response).toMatchObject({
       complimentary: false,
-      failureReason: "unknown",
+      failureReason: "prior_note_accepted",
       status: "failed",
     });
     expect(response.physicalNoteId).not.toBe(failed.physicalNoteId);
@@ -761,7 +769,7 @@ describe("createHostedPhysicalNote", () => {
       }),
       expect.objectContaining({
         complimentaryOfferCode: null,
-        failureReason: "unknown",
+        failureReason: "prior_note_accepted",
         id: response.physicalNoteId,
         requestKey: blockedRequest.requestKey,
         status: "failed",
@@ -815,12 +823,18 @@ describe("createHostedPhysicalNote", () => {
       prisma: store.prisma,
       runtime: provider.runtime,
     });
+    const replay = await createHostedPhysicalNote({
+      ...legacyRequest,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
 
     expect(response).toMatchObject({
       complimentary: false,
       physicalNoteId: failed.physicalNoteId,
       status: "accepted",
     });
+    expect(replay).toEqual(response);
     expect(store.allRows()).toEqual(expect.arrayContaining([
       expect.objectContaining({
         complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,

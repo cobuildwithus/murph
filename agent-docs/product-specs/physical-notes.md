@@ -86,9 +86,9 @@ Web owns the sole durable `HostedPhysicalNote` row. It stores only operational
 facts: beneficiary, request identity and fingerprint, provider id, status,
 complimentary offer code, configured provider cost, pricing version, one
 provider-neutral failure reason, and timestamps. The failure reason is limited
-to recipient address, artwork, service availability, invalid Murph request, or
-unknown. It never stores the postal address, image URL, artwork, prompt, note
-text, or Lob's freeform error message.
+to recipient address, artwork, service availability, invalid Murph request,
+prior-note unresolved or accepted state, or unknown. It never stores the postal
+address, image URL, artwork, prompt, note text, or Lob's freeform error message.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
@@ -120,9 +120,16 @@ existing exact-metadata lookup. Proven absence persists `unknown`; proven
 acceptance restores the same row without another send or an unsupported legacy
 charge; a recent or indeterminate replay of that same request stays pending. A
 different current request is first recorded under its own request key as an
-unsent `unknown` failure, then at most one older row is reconciled. The current
-reply and every replay therefore identify the current row and cannot later turn
-the suppressed request into a new provider effect. The assistant tells the
+unsent `prior_note_unresolved` failure, then at most one older row is
+reconciled. Proven absence narrows the current row to `unknown`. If that
+older row is proven accepted, the current row is durably narrowed to
+`prior_note_accepted`, so the reply says both that the earlier note is headed to
+print and that the current request was not submitted; it does not invite
+another send. Accepted-row replay is read-only because ordinary paid acceptance
+commits its usage in the same transaction, while restored legacy acceptance
+must never reconstruct erased historical billing evidence. The current reply
+and every replay therefore identify the current row and cannot later turn the
+suppressed request into a new provider effect. The assistant tells the
 person whether to check the address, regenerate the artwork, or wait for Murph
 to fix its printing setup or request. It never guesses from an unknown reason
 or retries an ambiguous outcome.

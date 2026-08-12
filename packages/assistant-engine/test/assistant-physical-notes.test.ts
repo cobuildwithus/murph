@@ -395,6 +395,8 @@ describe('assistant physical notes', () => {
     ['artwork', 'regenerate the image'],
     ['service_unavailable', "on Murph's side, not the recipient address"],
     ['request_invalid', 'correct the printing request'],
+    ['prior_note_unresolved', 'earlier physical-note submission for this person is still unresolved'],
+    ['prior_note_accepted', 'earlier physical note for this person was accepted'],
     ['unknown', 'could not complete the physical-note request'],
   ] as const)(
     'returns actionable recovery for %s physical-note failures',
@@ -455,6 +457,17 @@ describe('assistant physical notes', () => {
         )
         expect(result.rpcResult.contentItems[0]?.text).toContain(
           'new explicit send request later',
+        )
+      }
+      if (
+        failureReason === 'prior_note_unresolved'
+        || failureReason === 'prior_note_accepted'
+      ) {
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'current physical-note request was not sent',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'new explicit send request',
         )
       }
     },

@@ -122,6 +122,14 @@ describe("hosted physical-note contracts", () => {
       ...baseResponse,
       failureReason: "recipient_address",
     })).toMatchObject({ failureReason: "recipient_address" });
+    expect(hostedPhysicalNoteSendResponseSchema.parse({
+      ...baseResponse,
+      failureReason: "prior_note_unresolved",
+    })).toMatchObject({ failureReason: "prior_note_unresolved" });
+    expect(hostedPhysicalNoteSendResponseSchema.parse({
+      ...baseResponse,
+      failureReason: "prior_note_accepted",
+    })).toMatchObject({ failureReason: "prior_note_accepted" });
     expect(hostedPhysicalNoteSendResponseSchema.parse(baseResponse))
       .toEqual(baseResponse);
     expect(() => hostedPhysicalNoteSendResponseSchema.parse({

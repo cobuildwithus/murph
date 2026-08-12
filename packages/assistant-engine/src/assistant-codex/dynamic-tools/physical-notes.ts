@@ -232,6 +232,10 @@ export function buildPhysicalNoteFailureInstruction(
       return 'Murph\'s printing service or account setup was unavailable. Nothing was sent. Explain that the problem is on Murph\'s side, not the recipient address. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
     case 'request_invalid':
       return 'The printer rejected Murph\'s print request. Nothing was sent. Explain that Murph needs to correct the printing request. Do not ask the person to change a confirmed address. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
+    case 'prior_note_unresolved':
+      return 'An earlier physical-note submission for this person is still unresolved, so the current physical-note request was not sent. Tell the person both facts. Do not claim that no note was sent overall, and do not invite or make another send attempt while Murph investigates. Do not retry automatically.'
+    case 'prior_note_accepted':
+      return 'An earlier physical note for this person was accepted for printing, so the current physical-note request was not sent. Tell the person both facts and do not invite or make another send attempt. Do not retry automatically.'
     case 'unknown':
     case null:
     case undefined:

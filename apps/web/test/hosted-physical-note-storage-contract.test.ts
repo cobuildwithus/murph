@@ -66,6 +66,8 @@ describe("HostedPhysicalNote storage contract", () => {
     expect(migration).toContain("'artwork'");
     expect(migration).toContain("'service_unavailable'");
     expect(migration).toContain("'request_invalid'");
+    expect(migration).toContain("'prior_note_unresolved'");
+    expect(migration).toContain("'prior_note_accepted'");
     expect(migration).toContain("'unknown'");
     expect(migration).toContain(
       'CREATE INDEX CONCURRENTLY "hosted_physical_note_member_id_status_failure_reason_created_at_idx"',

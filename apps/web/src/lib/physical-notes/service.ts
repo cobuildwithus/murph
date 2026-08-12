@@ -125,6 +125,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     const current = legacy.requestKey === input.requestKey
       ? legacy
       : await recordLegacyBlockedPhysicalNoteRequest({
+          legacyId: legacy.id,
           memberId: input.memberId,
           pricingVersion: config.pricingVersion,
           prisma,
@@ -132,31 +133,32 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
           requestFingerprint,
           requestKey: input.requestKey,
         });
-    await resolveLegacyFailedPhysicalNote({
-      legacy,
-      memberId: input.memberId,
-      prisma,
-      runtime,
-      signal: input.signal,
-    });
-    const reconciledCurrent = await prisma.hostedPhysicalNote.findUniqueOrThrow({
-      where: { id: current.id },
-    });
-    if (current.id === legacy.id) {
-      if (reconciledCurrent.status === "accepted") {
-        return toResponse(reconciledCurrent, "accepted");
+    if (current) {
+      if (current.failureReason === "prior_note_accepted") {
+        return toResponse(current, "failed");
       }
-      return reconciledCurrent.failureReason === null
-        ? toResponse(reconciledCurrent, "pending")
-        : toResponse(reconciledCurrent, "failed");
+      await resolveLegacyFailedPhysicalNote({
+        legacy,
+        memberId: input.memberId,
+        prisma,
+        runtime,
+        signal: input.signal,
+      });
+      const reconciledCurrent = await prisma.hostedPhysicalNote.findUniqueOrThrow({
+        where: { id: current.id },
+      });
+      if (current.id === legacy.id) {
+        if (reconciledCurrent.status === "accepted") {
+          return toResponse(reconciledCurrent, "accepted");
+        }
+        return reconciledCurrent.failureReason === null
+          ? toResponse(reconciledCurrent, "pending")
+          : toResponse(reconciledCurrent, "failed");
+      }
+      return reconciledCurrent.status === "failed"
+        ? toResponse(reconciledCurrent, "failed")
+        : toResponse(reconciledCurrent, "pending");
     }
-    const replay = await resolveHostedPhysicalNoteReplay({
-      memberId: input.memberId,
-      prisma,
-      requestFingerprint,
-      row: reconciledCurrent,
-    });
-    return replay ?? toResponse(reconciledCurrent, "pending");
   }
   await resolveStaleComplimentaryPhysicalNote({
     memberId: input.memberId,
@@ -337,14 +339,11 @@ async function resolveHostedPhysicalNoteReplay(input: {
     throw new Error("Hosted physical-note request key collision.");
   }
   if (input.row.status === "accepted") {
-    const accepted = await finalizeHostedPhysicalNoteAcceptance({
-      acceptedAt: input.row.acceptedAt ?? new Date(),
-      memberId: input.memberId,
-      noteId: input.row.id,
-      prisma: input.prisma,
-      providerLetterId: requireProviderLetterId(input.row),
-    });
-    return toResponse(accepted, "accepted");
+    requireProviderLetterId(input.row);
+    if (input.row.acceptedAt === null) {
+      throw new Error("Accepted physical note is missing its acceptance time.");
+    }
+    return toResponse(input.row, "accepted");
   }
   if (input.row.status === "failed") {
     return input.row.failureReason === null
@@ -406,15 +405,28 @@ async function findLegacyFailedPhysicalNote(input: {
 }
 
 async function recordLegacyBlockedPhysicalNoteRequest(input: {
+  legacyId: string;
   memberId: string;
   pricingVersion: string;
   prisma: PrismaClient;
   providerCostUsdMicros: bigint;
   requestFingerprint: string;
   requestKey: string;
-}): Promise<HostedPhysicalNote> {
+}): Promise<HostedPhysicalNote | null> {
   return await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
+    const legacy = await tx.hostedPhysicalNote.findUnique({
+      where: { id: input.legacyId },
+    });
+    if (!legacy || legacy.memberId !== input.memberId) {
+      return null;
+    }
+    const blockerReason = legacy.status === "accepted"
+      ? "prior_note_accepted"
+      : legacy.status === "failed" && legacy.failureReason === null
+        ? "prior_note_unresolved"
+        : null;
+    if (!blockerReason) return null;
     const existing = await tx.hostedPhysicalNote.findUnique({
       where: {
         memberId_requestKey: {
@@ -436,7 +448,7 @@ async function recordLegacyBlockedPhysicalNoteRequest(input: {
     return await tx.hostedPhysicalNote.create({
       data: {
         complimentaryOfferCode: null,
-        failureReason: "unknown",
+        failureReason: blockerReason,
         id: createPhysicalNoteId(),
         memberId: input.memberId,
         pricingVersion: input.pricingVersion,
@@ -546,6 +558,15 @@ async function finalizeLegacyPhysicalNoteAcceptance(input: {
     ) {
       throw new Error("Legacy physical-note acceptance invariant failed.");
     }
+    await tx.hostedPhysicalNote.updateMany({
+      data: { failureReason: "prior_note_accepted" },
+      where: {
+        failureReason: "prior_note_unresolved",
+        memberId: input.memberId,
+        providerLetterId: null,
+        status: "failed",
+      },
+    });
     // The old failure transition erased whether this reservation was free or
     // paid. Do not create a charge from missing historical billing evidence.
     return note;
@@ -657,6 +678,15 @@ async function markLegacyPhysicalNoteAbsent(input: {
       where: {
         failureReason: null,
         id: input.noteId,
+        memberId: input.memberId,
+        providerLetterId: null,
+        status: "failed",
+      },
+    });
+    await tx.hostedPhysicalNote.updateMany({
+      data: { failureReason: "unknown" },
+      where: {
+        failureReason: "prior_note_unresolved",
         memberId: input.memberId,
         providerLetterId: null,
         status: "failed",

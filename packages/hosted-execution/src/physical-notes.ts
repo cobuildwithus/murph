@@ -27,6 +27,8 @@ export const hostedPhysicalNoteFailureReasonSchema = z.enum([
   "artwork",
   "service_unavailable",
   "request_invalid",
+  "prior_note_unresolved",
+  "prior_note_accepted",
   "unknown",
 ]);
 
