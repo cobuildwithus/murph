@@ -66,6 +66,7 @@ interface MutableProviderState {
 
 interface MutableHistoricalPullState {
   notPulled?: boolean;
+  providerSlug?: string;
   resource: string;
   status?: string;
 }
@@ -420,7 +421,7 @@ function createProvider(input: {
           ? {
               data: [{
                 provider: {
-                  omron: {
+                  [state.providerSlug ?? "omron"]: {
                     not_pulled: state.notPulled ? [state.resource] : [],
                     pulled: state.status
                       ? { [state.resource]: { days_with_data: 0, status: state.status } }
@@ -1252,6 +1253,93 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
     "v1|omron:16",
   );
   assert.equal(requests.length, 2);
+});
+
+test("sparse history completion resolves supported source aliases", async () => {
+  const cases = [
+    {
+      expectedCoverage: undefined,
+      expectedScheduledJobs: 1,
+      expectedTimeseriesRequests: 0,
+      historicalPullState: { resource: "caffeine", status: "in_progress" },
+      label: "in_progress",
+    },
+    {
+      expectedCoverage: "v1|apple_health:16",
+      expectedScheduledJobs: 0,
+      expectedTimeseriesRequests: 0,
+      historicalPullState: { notPulled: true, resource: "caffeine" },
+      label: "not_pulled",
+    },
+    {
+      expectedCoverage: undefined,
+      expectedScheduledJobs: 0,
+      expectedTimeseriesRequests: 0,
+      historicalPullState: { resource: "caffeine", status: "failure" },
+      label: "failure",
+    },
+    {
+      expectedCoverage: "v1|apple_health:16",
+      expectedScheduledJobs: 0,
+      expectedTimeseriesRequests: 2,
+      historicalPullState: { resource: "caffeine", status: "success" },
+      label: "success",
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const requests: TimeseriesRequest[] = [];
+    const provider = createProvider({
+      additionalProviders: [{
+        resourceAvailability: { caffeine: true },
+        slug: "apple_health",
+      }],
+      historicalPullState: {
+        ...testCase.historicalPullState,
+        providerSlug: "apple-healthkit",
+      },
+      providerState: {
+        resourceAvailability: { activity: true },
+        status: "connected",
+      },
+      requests,
+      summaryBackfillDays: 2,
+      timeseriesResources: ["caffeine"],
+    });
+    const createScheduledJobs = requireValue(
+      requireValue(provider.jobExecutor).createScheduledJobs,
+    );
+    const sources = [createSourceSummary(
+      "apple_health",
+      "2026-01-01T12:00:00.000Z",
+      "connected",
+      { caffeine: true },
+    )];
+    const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+    const completed = await executeImmediateResourceContinuations({
+      context: createJobContext(),
+      job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+      provider,
+      resource: "caffeine",
+    });
+
+    assert.equal(
+      completed.result.metadataPatch
+        ?.junctionSparseDailyTimeseriesHistoryBackfillCoverage,
+      testCase.expectedCoverage,
+      testCase.label,
+    );
+    assert.equal(
+      completed.result.scheduledJobs?.length ?? 0,
+      testCase.expectedScheduledJobs,
+      testCase.label,
+    );
+    assert.equal(
+      requests.length,
+      testCase.expectedTimeseriesRequests,
+      testCase.label,
+    );
+  }
 });
 
 test("successful upstream pull with no sparse rows completes after one scan", async () => {

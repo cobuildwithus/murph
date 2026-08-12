@@ -110,9 +110,10 @@ keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. Sparse aggregates fetch one complete provider calendar date at a
 time; a provider-bearing date with no canonical observation retries only that
 date on the existing bounded ladder. Historical-pull status is re-read before
-coverage: success permits terminal empty history, explicit `not_pulled` is no
-obligation, nonterminal state waits, explicit failure remains uncovered, and
-unavailable status requires canonical history evidence. Delayed work derives
+coverage, with supported connect-route aliases canonicalized on both sides:
+success permits terminal empty history, explicit `not_pulled` is no obligation,
+nonterminal state waits, explicit failure remains uncovered, and unavailable
+status requires canonical history evidence. Delayed work derives
 the live reconcile boundary after every completed segment and continues until
 no middle gap remains. An explicit timeseries backfill override still governs
 every timeseries resource.

@@ -5652,13 +5652,16 @@ function resolveJunctionHistoricalPullReadiness(input: {
   snapshot: JunctionHistoricalPullSnapshot | null;
   sourceProviderSlug: string | null;
 }): JunctionHistoricalPullReadiness {
-  const sourceProviderSlug = normalizeProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug =
+    canonicalizeJunctionHistoricalProviderSlug(input.sourceProviderSlug)
+    ?? normalizeProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug || !input.snapshot?.matchedUser) {
     return "unavailable";
   }
-  const source = input.snapshot.sources.find((entry) =>
-    normalizeProviderSlug(entry.sourceProviderSlug) === sourceProviderSlug
-  );
+  const source = input.snapshot.sources.find((entry) => (
+    canonicalizeJunctionHistoricalProviderSlug(entry.sourceProviderSlug)
+    ?? normalizeProviderSlug(entry.sourceProviderSlug)
+  ) === sourceProviderSlug);
   if (!source) {
     return "unavailable";
   }

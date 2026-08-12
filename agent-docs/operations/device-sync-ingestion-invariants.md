@@ -200,10 +200,12 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    together. A provider-bearing date that produces no canonical observation
    retries only that date on the existing bounded ladder before it becomes
    terminal. Historical-pull status is re-read at the first date and before
-   coverage: `success` permits terminal empty history, explicit `not_pulled`
-   remains no obligation, nonterminal state waits, and explicit failure remains
-   uncovered. Unavailable, malformed, or unmatched introspection can close only
-   after a canonical historical observation. Before coverage closes, the
+   coverage. Source matching canonicalizes supported connect-route aliases on
+   both the persisted and introspection sides before applying the status table:
+   `success` permits terminal empty history, explicit `not_pulled` remains no
+   obligation, nonterminal state waits, and explicit failure remains uncovered.
+   Unavailable, malformed, or unmatched introspection can close only after a
+   canonical historical observation. Before coverage closes, the
    migration recomputes the live reconcile-window boundary and appends the
    uncovered segment; delayed continuations repeat that same derivation, so
    stable dedupe cannot freeze a middle gap.
