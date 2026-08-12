@@ -496,6 +496,75 @@ describe('hosted domain dynamic tools', () => {
     )
   })
 
+  it('keeps DST target identity stable from create-only save to patch', async () => {
+    const failedSave = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      slug: 'medication-reminder',
+      title: 'Medication reminder',
+    }, referenceWindow('2026-03-08T04:59:00.000Z'))
+    const recoveryPatch = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      lookup: 'medication-reminder',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+    })
+    if (
+      failedSave?.kind !== 'invalid-automation-arguments' ||
+      recoveryPatch?.kind !== 'automation'
+    ) {
+      throw new TypeError('Expected a failed save and explicit-date patch.')
+    }
+    expect(recoveryPatch.localAtRecovery?.targetKey).toBe(
+      failedSave.localAtTargetKey,
+    )
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: {
+          request: async (request) => ({
+            action: 'patch',
+            automationId: 'automation-medication-reminder',
+            created: false,
+            effectiveTimeZone: 'America/New_York',
+            lookupId: 'medication-reminder',
+            nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+            routeBinding: 'current_conversation',
+            schedule: request.action === 'patch' && request.schedule
+              ? request.schedule
+              : { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
+            status: 'active',
+            timingVerified: true,
+            updatedAt: '2026-03-08T05:01:00.000Z',
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: recoveryPatch,
+    })
+    expect(result.automationTargetKeys).toContain(
+      failedSave.localAtTargetKey,
+    )
+  })
+
   it('contains local one-shot slug derivation failures for a recoverable retry', async () => {
     const localizedRequest = readToolRequest('automation', {
       action: 'save',
@@ -917,7 +986,6 @@ describe('hosted domain dynamic tools', () => {
       timingVerified: true,
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
-
     const mismatchedTool = {
       request: vi.fn(async () => ({
         action: 'patch' as const,
@@ -1014,6 +1082,8 @@ describe('hosted domain dynamic tools', () => {
       timingVerified: true,
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
+    expect(result.automationTargetKeys).toHaveLength(2)
+    expect(new Set(result.automationTargetKeys)).toHaveLength(2)
   })
 
   it('returns safe recovery instructions for local-time and write-conflict failures', async () => {
@@ -1104,6 +1174,7 @@ describe('hosted domain dynamic tools', () => {
       request: patchRequest,
     })
     expect(conflictResult.rpcResult).toMatchObject({ success: false })
+    expect(conflictResult.automationTargetKeys).toBeUndefined()
     expect(conflictResult.rpcResult.contentItems[0]?.text).toContain(
       'inspect it again and decide from the current stored schedule',
     )

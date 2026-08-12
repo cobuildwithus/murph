@@ -440,7 +440,7 @@ function readAutomationLocalAtAttempt(
       })
   return {
     explicitLocalDate: schedule.localAt.date ?? null,
-    targetKey: buildAutomationLocalAtTargetKey(args.action, targetIdentity),
+    targetKey: buildAutomationLocalAtTargetKey(targetIdentity),
     targetLabel: args.action === 'patch'
       ? args.lookup
       : args.slug
@@ -449,12 +449,9 @@ function readAutomationLocalAtAttempt(
   }
 }
 
-function buildAutomationLocalAtTargetKey(
-  action: 'patch' | 'save',
-  targetIdentity: string,
-): string {
+function buildAutomationLocalAtTargetKey(targetIdentity: string): string {
   return createHash('sha256')
-    .update(JSON.stringify([action, targetIdentity]))
+    .update(JSON.stringify(targetIdentity))
     .digest('hex')
 }
 
@@ -738,8 +735,21 @@ export async function executeAutomationDynamicTool(input: {
       return {
         ...result,
         automationTargetKeys: [
-          buildAutomationLocalAtTargetKey('save', response.lookupId),
+          buildAutomationLocalAtTargetKey(response.lookupId),
         ],
+      }
+    }
+    if (
+      response.action === 'inspect' &&
+      input.request.request.action === 'inspect'
+    ) {
+      return {
+        ...result,
+        automationTargetKeys: [...new Set([
+          buildAutomationLocalAtTargetKey(input.request.request.lookup),
+          buildAutomationLocalAtTargetKey(response.automationId),
+          buildAutomationLocalAtTargetKey(response.lookupId),
+        ])],
       }
     }
     if (
@@ -750,11 +760,10 @@ export async function executeAutomationDynamicTool(input: {
         ...result,
         automationTargetKeys: [...new Set([
           buildAutomationLocalAtTargetKey(
-            'patch',
             input.request.request.lookup,
           ),
-          buildAutomationLocalAtTargetKey('patch', response.automationId),
-          buildAutomationLocalAtTargetKey('patch', response.lookupId),
+          buildAutomationLocalAtTargetKey(response.automationId),
+          buildAutomationLocalAtTargetKey(response.lookupId),
         ])],
       }
     }

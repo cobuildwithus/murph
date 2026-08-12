@@ -2864,6 +2864,264 @@ text(JSON.stringify(result));
     }
   })
 
+  it.each([
+    {
+      date: '2026-03-08',
+      failedTime: '02:30',
+      fold: null,
+      newSlug: 'morning-meds',
+      patchLookup: 'medication-reminder',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      resolvedAt: '2026-03-08T07:30:00.000Z',
+      resolvedTime: '03:30',
+      secondPending: false,
+    },
+    {
+      date: '2026-03-08',
+      failedTime: '02:30',
+      fold: null,
+      newSlug: null,
+      patchLookup: 'automation-medication-reminder',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      resolvedAt: '2026-03-08T07:30:00.000Z',
+      resolvedTime: '03:30',
+      secondPending: false,
+    },
+    {
+      date: '2026-11-01',
+      failedTime: '01:30',
+      fold: 'later' as const,
+      newSlug: null,
+      patchLookup: 'medication-reminder',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      resolvedAt: '2026-11-01T06:30:00.000Z',
+      resolvedTime: '01:30',
+      secondPending: false,
+    },
+    {
+      date: '2026-11-01',
+      failedTime: '01:30',
+      fold: 'earlier' as const,
+      newSlug: 'evening-meds',
+      patchLookup: 'automation-medication-reminder',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      resolvedAt: '2026-11-01T05:30:00.000Z',
+      resolvedTime: '01:30',
+      secondPending: true,
+    },
+  ])('settles $date save recovery through create conflict and versioned patch', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    date,
+    failedTime,
+    fold,
+    newSlug,
+    patchLookup,
+    referenceAt,
+    resolvedAt,
+    resolvedTime,
+    secondPending,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const slug = 'medication-reminder'
+    const automationId = 'automation-medication-reminder'
+    const updatedAt = '2026-03-07T20:00:00.000Z'
+    const failedSave = {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      slug,
+      title: 'Medication reminder',
+    }
+    const recoveryLocalAt = {
+      date,
+      ...(fold ? { fold } : {}),
+      time: resolvedTime,
+      timeZone: 'America/New_York',
+    }
+    const retrySave = {
+      ...failedSave,
+      schedule: { kind: 'at', localAt: recoveryLocalAt },
+    }
+    const inspect = { action: 'inspect', lookup: slug }
+    const patch = {
+      action: 'patch',
+      expectedUpdatedAt: updatedAt,
+      lookup: patchLookup,
+      ...(newSlug ? { slug: newSlug } : {}),
+      schedule: { kind: 'at', localAt: recoveryLocalAt },
+    }
+    const secondFailure = {
+      action: 'save',
+      instructions: 'Send the call reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      slug: 'call-reminder',
+      title: 'Call reminder',
+    }
+    const responseCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Medication reminder',
+      subtitle: `${date} at ${resolvedTime}`,
+      rowHeader: 'Status',
+      columns: ['Schedule'],
+      rows: [{ label: 'Active', values: [resolvedTime] }],
+      footer: null,
+      tracking: null,
+    } satisfies AssistantResponseCard
+    const calls = [
+      failedSave,
+      ...(secondPending ? [secondFailure] : []),
+      retrySave,
+      inspect,
+      patch,
+    ]
+    for (const request of calls) {
+      scenario.stub.queue({
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(request)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      })
+    }
+    scenario.stub.queue({
+      functionCall: {
+        arguments: { card: responseCard },
+        name: 'attach_response_card',
+        namespace: 'murph',
+      },
+    })
+    if (secondPending) {
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {},
+            name: 'finish_without_reply',
+            namespace: 'murph',
+          },
+        },
+        { text: '' },
+      )
+    } else {
+      scenario.stub.queue({ text: 'CARD_ATTACHED' })
+    }
+
+    const ownerRequests: AssistantHostedAutomationToolRequest[] = []
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      allowFinishWithoutReply: true,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: referenceAt,
+        latestAt: referenceAt,
+      },
+      dynamicTools: [
+        MURPH_AUTOMATION_TOOL,
+        MURPH_ATTACH_RESPONSE_CARD_TOOL,
+        MURPH_FINISH_WITHOUT_REPLY_TOOL,
+      ],
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            ownerRequests.push(request)
+            if (request.action === 'save') {
+              throw Object.assign(new Error('automation already exists'), {
+                code: 'VAULT_AUTOMATION_CONFLICT' as const,
+              })
+            }
+            if (request.action === 'inspect') {
+              return {
+                action: 'inspect',
+                automationId,
+                effectiveTimeZone: 'America/New_York',
+                lookupId: slug,
+                nextOccurrenceAt: '2026-03-07T21:00:00.000Z',
+                routeBinding: 'preserved',
+                schedule: {
+                  at: '2026-03-07T21:00:00.000Z',
+                  kind: 'at',
+                },
+                status: 'active',
+                timingVerified: true,
+                updatedAt,
+              }
+            }
+            if (request.action !== 'patch') {
+              throw new Error('Expected a versioned patch request.')
+            }
+            return {
+              action: 'patch',
+              automationId,
+              created: false,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: newSlug ?? slug,
+              nextOccurrenceAt: resolvedAt,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule ?? { at: resolvedAt, kind: 'at' },
+              status: 'active',
+              timingVerified: true,
+              updatedAt: '2026-03-08T05:01:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Set or update my medication reminder for tomorrow.',
+    })
+
+    expect(ownerRequests.map((request) => request.action)).toEqual([
+      'save',
+      'inspect',
+      'patch',
+    ])
+    expect(ownerRequests[2]).toMatchObject({
+      action: 'patch',
+      expectedUpdatedAt: updatedAt,
+      lookup: patchLookup,
+      ...(newSlug ? { slug: newSlug } : {}),
+      schedule: { at: resolvedAt, kind: 'at' },
+    })
+    const medicationQuestion =
+      `For reminder "Medication reminder (${slug})", the trusted date is ${date}.`
+    expect(result.finalMessage).not.toContain(medicationQuestion)
+    expect(result.transcriptMessage).not.toContain(medicationQuestion)
+    if (secondPending) {
+      const callQuestion =
+        `For reminder "Call reminder (call-reminder)", the trusted date is ${date}.`
+      expect(result.finalAction).toBeNull()
+      expect(result.responseCard).toBeNull()
+      expect(result.finalMessage).toContain(callQuestion)
+      expect(result.transcriptMessage).toContain(callQuestion)
+    } else {
+      expect(result.responseCard).toEqual(responseCard)
+      expect(result.finalMessage).not.toContain('the trusted date is')
+      expect(result.transcriptMessage).not.toContain('the trusted date is')
+    }
+  })
+
   it('suppresses a response card until the trusted DST clarification is delivered', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
