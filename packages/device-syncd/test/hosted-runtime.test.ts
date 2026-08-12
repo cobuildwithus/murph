@@ -1139,6 +1139,38 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toThrowError(/runtime apply response updates must include no more than 100 entries/u);
   });
 
+  it("caps each runtime apply update at 64 source projections", () => {
+    const source = (index: number) => ({
+      lastSeenAt: "2026-04-07T02:00:00.000Z",
+      observedLastSeenAt: null,
+      sourceInstanceKey: `source_${index}`,
+      sourceProviderSlug: `provider_${index}`,
+      status: "connected",
+    });
+    const boundedSources = Array.from(
+      {
+        length:
+          hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT,
+      },
+      (_, index) => source(index),
+    );
+
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [{ connectionId: "conn_123", sources: boundedSources }],
+      userId: "user_123",
+    }).updates[0]?.sources).toHaveLength(64);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [{
+          connectionId: "conn_123",
+          sources: [...boundedSources, source(boundedSources.length)],
+        }],
+        userId: "user_123",
+      })
+    ).toThrowError(/updates\[0\]\.sources must include no more than 64 entries/u);
+  });
+
   it("parses staged dirty ack overlays on dirty-pending requests", () => {
     expect(
       parseHostedExecutionDeviceSyncDirtyPendingRequest(

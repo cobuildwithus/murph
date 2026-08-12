@@ -19,7 +19,12 @@ import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
-import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
+import type {
+  HostedDeviceSyncSecretTestCodec,
+  HostedRuntimeConnectionSecretMaterial,
+  HostedRuntimeApplyPreparedTokenWrite,
+  HostedRuntimeApplyTokenWritePreparation,
+} from "./prisma-store/connection-secrets";
 import type { DeviceProviderApplicationBinding } from "./provider-applications/types";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
@@ -29,7 +34,6 @@ import {
   type HostedMemberDeviceConnectionStatus,
   type HostedStoredDeviceSyncAccount,
 } from "./prisma-store/connections";
-import type { HostedRuntimeConnectionSecretMaterial } from "./prisma-store/connection-secrets";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
 import type { CompanionHrvNightReceiptInspection } from "./prisma-store/dirty-connections";
@@ -74,6 +78,11 @@ export {
   type HostedRuntimeConnectionRecord,
   type HostedRuntimeRedactedConnectionRecord,
 } from "./prisma-store/connections";
+export type {
+  HostedRuntimeConnectionSecretMaterial,
+  HostedRuntimeApplyPreparedTokenWrite,
+  HostedRuntimeApplyTokenWritePreparation,
+} from "./prisma-store/connection-secrets";
 export {
   HOSTED_AGENT_BEARER_TOKEN_PREFIX,
   generateHostedAgentBearerToken,
@@ -326,8 +335,25 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionRecordForUser(userId, connectionId, tx);
   }
 
-  async syncDurableConnectionState(account: PublicDeviceSyncAccount, tx?: HostedPrismaTransactionClient): Promise<void> {
+  async syncDurableConnectionState(
+    account: PublicDeviceSyncAccount,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedConnectionRecord> {
     return this.connections.syncDurableConnectionState(account, tx);
+  }
+
+  async prepareRuntimeApplyTokenWrites(
+    entries: readonly HostedRuntimeApplyTokenWritePreparation[],
+  ): Promise<Map<string, HostedRuntimeApplyPreparedTokenWrite>> {
+    return this.connections.prepareRuntimeApplyTokenWrites(entries);
+  }
+
+  async persistPreparedRuntimeApplyTokenWrite(input: {
+    prepared: HostedRuntimeApplyPreparedTokenWrite;
+    record: HostedConnectionRecord;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionRecord> {
+    return this.connections.persistPreparedRuntimeApplyTokenWrite(input);
   }
 
   async persistStoredConnectionTokenBundle(input: {

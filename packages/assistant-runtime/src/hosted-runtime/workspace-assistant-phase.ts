@@ -4333,12 +4333,6 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<HostedDeviceSyncWakeMetrics> {
-  const cancellation = createHostedBackgroundMaintenanceCancellation({
-    signal: input.phaseInput.signal ?? null,
-    shouldYield: input.phaseInput.shouldYieldBackgroundMaintenance ?? null,
-    timeoutMs: input.phaseInput.runtime.commitTimeoutMs,
-  });
-
   try {
     const {
       runHostedDeviceSyncWakeLane,
@@ -4351,7 +4345,7 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
       ...(input.phaseInput.shouldYieldBackgroundMaintenance
         ? { shouldYieldDeviceSync: input.phaseInput.shouldYieldBackgroundMaintenance }
         : {}),
-      signal: cancellation.signal,
+      signal: input.phaseInput.signal ?? null,
       skipDirtyPendingFetch: input.phaseInput.suppressDirtyPendingFetch ?? false,
       stagedDirtyAcks: input.phaseInput.stagedDirtyAcks ?? null,
       timeoutMs: input.phaseInput.runtime.commitTimeoutMs,
@@ -4376,8 +4370,6 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
       parserProcessed: 0,
       postCheckpointRecord: null,
     };
-  } finally {
-    cancellation.dispose();
   }
 }
 
