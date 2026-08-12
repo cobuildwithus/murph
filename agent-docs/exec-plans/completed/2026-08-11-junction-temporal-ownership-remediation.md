@@ -1,6 +1,6 @@
 # Fence Junction temporal features to complete source days
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -80,14 +80,18 @@ Updated: 2026-08-11
   real core/query tests prove order, retry, offset, partial-facet, input-cap,
   and output-cap convergence without retained samples.
 - The generated event schema and durable ownership docs are current.
+- The corrected history-ownership foundation is integrated; daily imports
+  retain successful peer resources before surfacing a retryable failure.
 
 ## Verification
 
 - Junction importer/validation/boundary tests: 175 passed.
-- Device-sync Junction provider/service tests: 327 passed.
+- Device-sync Junction provider/service tests: 331 passed.
 - Real core/query temporal replacement tests: 2 passed.
-- Contracts schema/catalog tests: 25 passed after generation.
+- Contracts schema/catalog tests: 30 passed after generation.
 - Contracts, core, importers, device-syncd, query, and vault-usecases
   typechecks passed.
-- Docs drift and gardening passed; final diff/privacy and current-base
-  merge-tree proof remain before closure.
+- Workspace-boundary verification, docs drift, and docs gardening passed.
+- Final diff/privacy checks and the corrected-foundation ancestry plus
+  merge-tree proof passed.
+Completed: 2026-08-11
