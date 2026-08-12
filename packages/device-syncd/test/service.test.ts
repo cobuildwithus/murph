@@ -1757,7 +1757,7 @@ test("Junction empty sparse history exhausts real delayed scans once and records
   }
 });
 
-test("Junction moving sparse-history rescans repair a post-anchor gap while daily sync is blocked", async () => {
+test("Junction stale fifth sparse-history scan schedules one current replacement after restart", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-moving-history-repair");
   const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
   let now = new Date("2040-08-01T12:00:00.000Z");
@@ -1985,8 +1985,22 @@ test("Junction moving sparse-history rescans repair a post-anchor gap while dail
     assert.equal(queuedTerminalScan.dedupeKey, stableDedupeKey);
     assert.equal(queuedTerminalScan.payload.emptyBackfillAttempts, 4);
     assert.equal(queuedTerminalScan.payload.historicalNoProgressRescan, true);
-    const queuedTerminalScanId = queuedTerminalScan.id;
-    const queuedTerminalScanAvailableAt = queuedTerminalScan.availableAt;
+    advanceToNextJob();
+    assert.equal((await runtime.service.runWorkerOnce())?.id, queuedTerminalScan.id);
+    assert.equal(historicalRequestCount, 25);
+    const persistedTerminalContinuation = activeHistoryJobs()[0];
+    assert.ok(persistedTerminalContinuation);
+    assert.notEqual(persistedTerminalContinuation.id, queuedTerminalScan.id);
+    assert.equal(persistedTerminalContinuation.dedupeKey, stableDedupeKey);
+    assert.equal(persistedTerminalContinuation.payload.emptyBackfillAttempts, 4);
+    assert.equal(persistedTerminalContinuation.payload.historicalNoProgressRescan, true);
+    assert.notEqual(
+      persistedTerminalContinuation.payload.windowStart,
+      persistedTerminalContinuation.payload.historicalWindowStart,
+    );
+    assert.equal(persistedTerminalContinuation.payload.windowEnd, "2040-08-02T00:00:00.000Z");
+    const persistedTerminalContinuationId = persistedTerminalContinuation.id;
+    const persistedTerminalContinuationAvailableAt = persistedTerminalContinuation.availableAt;
     const dailyCaffeineRequestCountBeforeBlockedRestart = dailyCaffeineRequestCount;
     assert.ok(dailyCaffeineRequestCountBeforeBlockedRestart > 0);
 
@@ -1996,11 +2010,21 @@ test("Junction moving sparse-history rescans repair a post-anchor gap while dail
     dailyBlockerFails = true;
     runtime = createRuntime();
     closed = false;
-    const reloadedTerminalScan = runtime.store.getJobById(queuedTerminalScanId);
-    assert.ok(reloadedTerminalScan);
-    assert.equal(reloadedTerminalScan.availableAt, queuedTerminalScanAvailableAt);
-    assert.equal(reloadedTerminalScan.dedupeKey, stableDedupeKey);
-    assert.equal(reloadedTerminalScan.payload.historicalNoProgressRescan, true);
+    const reloadedTerminalContinuation = runtime.store.getJobById(
+      persistedTerminalContinuationId,
+    );
+    assert.ok(reloadedTerminalContinuation);
+    assert.equal(
+      reloadedTerminalContinuation.availableAt,
+      persistedTerminalContinuationAvailableAt,
+    );
+    assert.equal(reloadedTerminalContinuation.dedupeKey, stableDedupeKey);
+    assert.equal(reloadedTerminalContinuation.payload.historicalNoProgressRescan, true);
+    assert.notEqual(
+      reloadedTerminalContinuation.payload.windowStart,
+      reloadedTerminalContinuation.payload.historicalWindowStart,
+    );
+    assert.equal(reloadedTerminalContinuation.payload.windowEnd, "2040-08-02T00:00:00.000Z");
 
     runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
     await runtime.service.runSchedulerOnce();
@@ -2016,14 +2040,65 @@ test("Junction moving sparse-history rescans repair a post-anchor gap while dail
 
     assert.equal(historicalRequestCount, 30);
     assert.equal(dailyCaffeineRequestCount, dailyCaffeineRequestCountBeforeBlockedRestart);
-    assert.ok(
-      historicalWindows.slice(24).some((window) =>
-        Date.parse(window.start) <= Date.parse(postAnchorFactAt)
-        && Date.parse(window.end) > Date.parse(postAnchorFactAt)
-      ),
+    assert.equal(historicalWindows.slice(24, 30).some((window) =>
+      Date.parse(window.start) <= Date.parse(postAnchorFactAt)
+      && Date.parse(window.end) > Date.parse(postAnchorFactAt)
+    ), false);
+    assert.equal(importedPostAnchorFactCount, 0);
+    let persisted = runtime.store.getAccountById(account.id);
+    assert.ok(persisted);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      persisted.metadata,
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), false, "the stale fifth scan must not publish terminal coverage");
+    assert.equal(activeHistoryJobs().length, 0);
+
+    const historicalRowCountBeforeReplacement = readJobsForAccountForTesting(
+      runtime.store,
+      account.id,
+    ).filter((row) => {
+      const job = runtime.store.getJobById(row.id);
+      return job?.kind === "resource"
+        && job.payload.historicalBackfill === true
+        && job.payload.resource === "caffeine";
+    }).length;
+    runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await runtime.service.runSchedulerOnce();
+    const currentReplacement = activeHistoryJobs();
+    assert.equal(currentReplacement.length, 1);
+    assert.equal(currentReplacement[0]?.dedupeKey, stableDedupeKey);
+    assert.equal(currentReplacement[0]?.payload.windowEnd, "2040-08-12T00:00:00.000Z");
+    assert.equal(currentReplacement[0]?.payload.historicalNoProgressRescan, undefined);
+    assert.equal(
+      readJobsForAccountForTesting(runtime.store, account.id).filter((row) => {
+        const job = runtime.store.getJobById(row.id);
+        return job?.kind === "resource"
+          && job.payload.historicalBackfill === true
+          && job.payload.resource === "caffeine";
+      }).length,
+      historicalRowCountBeforeReplacement + 1,
+      "the scheduler must offer exactly one current replacement root",
     );
+
+    workerRuns = 0;
+    while (activeHistoryJobs().length > 0) {
+      const processed = await runtime.service.runWorkerOnce();
+      workerRuns += 1;
+      assert.ok(workerRuns < 20);
+      if (!processed) {
+        advanceToNextJob();
+      }
+    }
+    assert.equal(historicalRequestCount, 36, "one current replacement must use six chunks");
+    assert.equal(historicalWindows.slice(30).length, 6);
+    assert.ok(historicalWindows.slice(30).some((window) =>
+      Date.parse(window.start) <= Date.parse(postAnchorFactAt)
+      && Date.parse(window.end) > Date.parse(postAnchorFactAt)
+    ));
     assert.equal(importedPostAnchorFactCount, 1);
-    const persisted = runtime.store.getAccountById(account.id);
+    persisted = runtime.store.getAccountById(account.id);
     assert.ok(persisted);
     assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       persisted.metadata,
@@ -2032,6 +2107,29 @@ test("Junction moving sparse-history rescans repair a post-anchor gap while dail
       JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
     ), true);
     assert.equal(activeHistoryJobs().length, 0);
+
+    const historicalRowsAfterCompletion = readJobsForAccountForTesting(
+      runtime.store,
+      account.id,
+    ).filter((row) => {
+      const job = runtime.store.getJobById(row.id);
+      return job?.kind === "resource"
+        && job.payload.historicalBackfill === true
+        && job.payload.resource === "caffeine";
+    }).length;
+    runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await runtime.service.runSchedulerOnce();
+    assert.equal(activeHistoryJobs().length, 0);
+    assert.equal(
+      readJobsForAccountForTesting(runtime.store, account.id).filter((row) => {
+        const job = runtime.store.getJobById(row.id);
+        return job?.kind === "resource"
+          && job.payload.historicalBackfill === true
+          && job.payload.resource === "caffeine";
+      }).length,
+      historicalRowsAfterCompletion,
+      "terminal coverage must prevent a fresh history chain",
+    );
 
     dailyBlockerFails = false;
     now = new Date("2040-08-20T12:00:00.000Z");
@@ -6833,8 +6931,13 @@ test("device sync service preserves Junction yielded backfill timeseries cursor 
 test("Junction reconcile checkpoints each completed day-resource before an in-flight cutoff", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-reconcile-cursor");
   let now = new Date("2026-08-12T12:00:00.000Z");
-  let yieldDeadline = Number.POSITIVE_INFINITY;
+  let yieldRequested = false;
   let failVo2Max = true;
+  let hrvAbortPending = true;
+  let hrvFetchStartedResolve: (() => void) | null = null;
+  const hrvFetchStarted = new Promise<void>((resolve) => {
+    hrvFetchStartedResolve = resolve;
+  });
   let retryableCoordinate: string | null = null;
   const requestsByCoordinate = new Map<string, number>();
   const terminalResponsesByCoordinate = new Map<string, number>();
@@ -6880,6 +6983,22 @@ test("Junction reconcile checkpoints each completed day-resource before an in-fl
       const coordinate = `${day}:${resource}`;
       requestsByCoordinate.set(coordinate, (requestsByCoordinate.get(coordinate) ?? 0) + 1);
 
+      if (day === "2026-08-10" && resource === "hrv" && hrvAbortPending) {
+        hrvAbortPending = false;
+        hrvFetchStartedResolve?.();
+        const signal = init?.signal;
+        if (!signal) {
+          throw new Error("Expected the in-flight Junction request to carry the worker signal.");
+        }
+        await new Promise<never>((_resolve, reject) => {
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+
       if (day === "2026-08-10" && resource === "vo2_max" && failVo2Max) {
         retryableCoordinate = coordinate;
         return new Response(JSON.stringify({ code: "upstream_unavailable" }), {
@@ -6890,23 +7009,6 @@ test("Junction reconcile checkpoints each completed day-resource before an in-fl
           status: 503,
         });
       }
-
-      await new Promise<void>((resolve, reject) => {
-        const signal = init?.signal;
-        const timer = setTimeout(() => {
-          signal?.removeEventListener("abort", onAbort);
-          resolve();
-        }, 70);
-        const onAbort = () => {
-          clearTimeout(timer);
-          reject(signal?.reason ?? new Error("Junction request aborted."));
-        };
-        if (signal?.aborted) {
-          onAbort();
-          return;
-        }
-        signal?.addEventListener("abort", onAbort, { once: true });
-      });
 
       if (day === "2026-08-10" && resource === "body_temperature") {
         terminalResponsesByCoordinate.set(
@@ -6926,15 +7028,18 @@ test("Junction reconcile checkpoints each completed day-resource before an in-fl
         coordinate,
         (terminalResponsesByCoordinate.get(coordinate) ?? 0) + 1,
       );
-      if (day === "2026-08-10" && resource === "stress_level") {
+      if (
+        (day === "2026-08-10" && resource === "stress_level")
+        || resource === "blood_oxygen"
+      ) {
         return createJsonResponse({
           groups: {
             garmin: [{
               data: [{
-                id: "stress-level-2026-08-10",
-                timestamp: "2026-08-10T08:00:00.000Z",
-                unit: "count",
-                value: 1,
+                id: `${resource}-${day}`,
+                timestamp: `${day}T08:00:00.000Z`,
+                unit: resource === "blood_oxygen" ? "%" : "count",
+                value: resource === "blood_oxygen" ? 97 : 1,
               }],
               source: { provider: "garmin", type: "watch" },
             }],
@@ -6953,7 +7058,7 @@ test("Junction reconcile checkpoints each completed day-resource before an in-fl
       vaultRoot,
       publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
-      shouldYieldJobExecution: () => Date.now() >= yieldDeadline,
+      shouldYieldJobExecution: () => yieldRequested,
     },
     importer: {
       async importDeviceProviderSnapshot(input) {
@@ -6967,6 +7072,9 @@ test("Junction reconcile checkpoints each completed day-resource before an in-fl
             eventId: event.id,
             revision: event.lifecycle?.revision ?? 1,
           })));
+        }
+        if ((snapshot.timeseries?.blood_oxygen?.length ?? 0) > 0) {
+          yieldRequested = true;
         }
         return result;
       },
@@ -7002,14 +7110,9 @@ test("Junction reconcile checkpoints each completed day-resource before an in-fl
       dedupeKey: "junction-reconcile-cursor-fixed-window",
     });
     let workerRuns = 0;
-    let cursorAtLastWorkerStart = 0;
     let retainedFailureAttempts = 0;
     const runOne = async () => {
-      const before = store.getJobById(job.id);
-      cursorAtLastWorkerStart = typeof before?.payload.timeseriesResourceIndex === "number"
-        ? before.payload.timeseriesResourceIndex
-        : 0;
-      yieldDeadline = Date.now() + 90;
+      yieldRequested = false;
       workerRuns += 1;
       const processed = await service.runWorkerOnce();
       assert.equal(processed?.id, job.id);
@@ -7018,7 +7121,27 @@ test("Junction reconcile checkpoints each completed day-resource before an in-fl
       return persisted;
     };
 
-    let persistedJob = await runOne();
+    let persistedJob: DeviceSyncJobRecord | null = await runOne();
+    assert.deepEqual(persistedJob?.payload, {
+      timeseriesCursor: "2026-08-10T00:00:00.000Z",
+      timeseriesResourceIndex: 1,
+      windowEnd: "2026-08-12T00:00:00.000Z",
+      windowStart: "2026-08-10T00:00:00.000Z",
+    });
+    assert.equal(persistedJob?.attempts, 0);
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+
+    yieldRequested = false;
+    const abortedWorker = service.runWorkerOnce();
+    await hrvFetchStarted;
+    yieldRequested = true;
+    assert.equal((await abortedWorker)?.id, job.id);
+    persistedJob = store.getJobById(job.id);
+    assert.equal(persistedJob?.status, "queued");
+    assert.equal(persistedJob?.attempts, 0);
+    assert.equal(persistedJob?.payload.timeseriesResourceIndex, resources.indexOf("hrv"));
+    assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
+
     while (persistedJob?.status !== "succeeded") {
       assert.equal(store.getAccountById(account.id)?.lastSyncCompletedAt, null);
       if (persistedJob?.lastErrorCode === "JUNCTION_API_REQUEST_FAILED") {
@@ -7028,7 +7151,6 @@ test("Junction reconcile checkpoints each completed day-resource before an in-fl
           retryableCoordinate,
           "A retryable 5xx must retain the exact in-flight resource coordinate.",
         );
-        assert.ok(Number(persistedJob.payload.timeseriesResourceIndex) >= cursorAtLastWorkerStart);
         assert.equal(persistedJob.attempts, 1);
         retainedFailureAttempts = persistedJob.attempts;
         failVo2Max = false;
@@ -7043,8 +7165,8 @@ test("Junction reconcile checkpoints each completed day-resource before an in-fl
       }
       persistedJob = await runOne();
       assert.ok(
-        workerRuns <= resources.length * 2 + 12,
-        "The fixed two-day resource window must finish within the coordinate count plus bounded retry and cutoff scheduling allowance.",
+        workerRuns <= 5,
+        "The fixed two-day resource window must finish within its explicit abort and retry bound.",
       );
     }
 

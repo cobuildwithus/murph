@@ -2545,19 +2545,17 @@ export function createJunctionDeviceSyncProvider(
 
     if (
       policy.historyAnchor === "schedule_time"
-      && job.payload.historicalNoProgressRescan !== true
       && !doesJunctionScheduleTimeHistoryWindowReachDailyCoverage({
         currentClosedDayTarget: floorUtcDayTimestamp(context.now),
         fixedWindowEnd: normalizeString(job.payload.windowEnd),
       })
     ) {
-      // Incomplete or unavailable work deliberately keeps its prior window.
-      // If that window no longer reaches the current closed-day target, it
-      // cannot certify the intervening gap. Finish this row without the bit;
-      // the scheduler can offer one current replacement. A fetch-complete
-      // no-progress rescan instead selects its current target before its first
-      // chunk, so its bit certifies the same interval as every other terminal
-      // path rather than bypassing freshness for the original fixed window.
+      // Every schedule-time terminal path certifies through the current
+      // closed-day target. A complete no-progress scan selects a current
+      // target before its first chunk, but a long interruption can make that
+      // fixed target stale before its final chunk commits. Finish any stale
+      // row without the bit so the existing scheduler can offer one current
+      // replacement to own the intervening gap.
       return {};
     }
 
