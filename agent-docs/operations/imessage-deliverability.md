@@ -254,6 +254,13 @@ Design messaging flows to earn genuine replies early, then keep letting current 
   blinded chat identifier. Webhooks are the fast path; bounded inventory
   reconciliation repairs missed or silence-driven changes without calling Linq
   from a routing transaction.
+- Chat-health reconciliation must finish its provider pagination before opening
+  database transactions, reject inventories above 5,000 records, and project
+  at most 250 records per short transaction. Each chunk prepares blinded keys
+  and encrypted line material first, then acquires its complete chat/line lock
+  set in canonical order under a tight local lock timeout before the set-based
+  projection. Chunks commit independently so a later failure can replay prior
+  chunks idempotently without holding one connection across the full inventory.
 - Existing routes remain sticky on `AT_RISK`; new assignments avoid those
   lines. Scheduled turns may receive only a closed cautious/recovery posture,
   while the existing Web egress authority rechecks hard blocks immediately

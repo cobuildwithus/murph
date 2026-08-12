@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
   createHostedLinqChatLookupKey,
+  createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT,
   listHostedLinqChatHealthInventory,
   parseHostedLinqChatHealthInventoryRecord,
   syncHostedLinqChatHealthInventory,
@@ -24,6 +26,9 @@ import {
   parseHostedLinqProviderHealthEvent,
 } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
+  HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE,
+  prepareHostedLinqChatHealthInventoryProjection,
+  projectHostedLinqChatHealthInventoryChunk,
   projectHostedLinqChatHealthTx,
   projectHostedLinqLineProviderStateTx,
 } from "@/src/lib/hosted-onboarding/linq-provider-health-store";
@@ -288,49 +293,363 @@ describe("Linq provider health inventory synchronization", () => {
     expect(query.values).not.toContain("FUTURE_SERVICE");
   });
 
-  it("associates inventoried chat health with its resolved sending line", async () => {
+  it("associates inventoried chat health with its resolved sending line in one bounded chunk", async () => {
     const observedAt = new Date("2026-07-29T16:09:00.000Z");
-    const createMany = vi.fn().mockResolvedValue({ count: 1 });
-    const prisma = {
-      hostedLinqChatHealth: {
-        createMany,
-        findMany: vi.fn().mockResolvedValue([]),
-        updateMany: vi.fn(),
-      },
-    } as never;
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
+    const projection = createChatHealthProjectionPrisma(queryRaw);
     inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
       chats: [buildChatInventoryRecord("chat-1")],
       next_cursor: null,
     }));
-    inventoryMocks.upsertHostedLinqLineForPhoneTx.mockResolvedValueOnce({
-      phoneNumberLookupKey: "line-key",
-    });
 
     await expect(syncHostedLinqChatHealthInventory({
       observedAt,
-      prisma,
+      prisma: projection.prisma,
     })).resolves.toEqual({
       skippedCount: 0,
       syncedCount: 1,
     });
 
-    expect(inventoryMocks.upsertHostedLinqLineForPhoneTx).toHaveBeenCalledWith({
+    expect(inventoryMocks.upsertHostedLinqLineForPhoneTx).not.toHaveBeenCalled();
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(projection.executeRaw).toHaveBeenCalledTimes(1);
+    expect(projection.transaction).toHaveBeenCalledTimes(1);
+    const lockQuery = projection.executeRaw.mock.calls[0]?.[0] as {
+      values: unknown[];
+    };
+    expect(lockQuery.values).not.toContain("+12025550123");
+    expect(lockQuery.values).toContain("2000ms");
+    const query = queryRaw.mock.calls[0]?.[0] as {
+      strings: string[];
+      values: unknown[];
+    };
+    expect(query.values).toEqual(expect.arrayContaining([
+      createHostedLinqChatLookupKey("chat-1"),
+      createHostedPhoneLookupKey("+12025550123"),
+      "HEALTHY",
+      new Date("2026-07-29T16:02:00.000Z"),
       observedAt,
-      phoneNumber: "+12025550123",
-      prisma,
-      source: "provider",
+      "iMessage",
+    ]));
+    expect(query.values).not.toContain("+12025550123");
+    const sql = query.strings.join("");
+    expect(sql).toContain("provider_first_seen_at = COALESCE");
+    expect(sql).toContain(
+      "chat.provider_observed_at <=",
+    );
+    expect(sql).toContain(
+      "hosted_linq_chat_health.provider_observed_at",
+    );
+  });
+
+  it("performs zero database work for an empty provider inventory", async () => {
+    const queryRaw = vi.fn();
+    const projection = createChatHealthProjectionPrisma(queryRaw);
+    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+      chats: [],
+      next_cursor: null,
+    }));
+
+    await expect(syncHostedLinqChatHealthInventory({
+      prisma: projection.prisma,
+    })).resolves.toEqual({ skippedCount: 0, syncedCount: 0 });
+
+    expect(queryRaw).not.toHaveBeenCalled();
+    expect(projection.transaction).not.toHaveBeenCalled();
+    expect(inventoryMocks.upsertHostedLinqLineForPhoneTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE, 1],
+    [HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE + 1, 2],
+  ])(
+    "projects %i chats with exactly %i bounded projection transaction(s)",
+    async (chatCount, expectedQueryCount) => {
+      const queryRaw = vi.fn();
+      const projection = createChatHealthProjectionPrisma(queryRaw);
+      const chunkCounts = Array.from(
+        { length: expectedQueryCount },
+        (_, index) => Math.min(
+          HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE,
+          chatCount - index * HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE,
+        ),
+      );
+      for (const chunkCount of chunkCounts) {
+        queryRaw.mockResolvedValueOnce([{ syncedCount: BigInt(chunkCount) }]);
+      }
+      mockChatInventoryPages(chatCount);
+
+      await expect(syncHostedLinqChatHealthInventory({
+        prisma: projection.prisma,
+      })).resolves.toEqual({ skippedCount: 0, syncedCount: chatCount });
+
+      expect(queryRaw).toHaveBeenCalledTimes(expectedQueryCount);
+      expect(projection.executeRaw).toHaveBeenCalledTimes(expectedQueryCount);
+      expect(projection.transaction).toHaveBeenCalledTimes(expectedQueryCount);
+      expect(inventoryMocks.upsertHostedLinqLineForPhoneTx).not.toHaveBeenCalled();
+    },
+  );
+
+  it("finishes provider pagination before opening the first database statement", async () => {
+    const callOrder: string[] = [];
+    inventoryMocks.fetchLinqApi
+      .mockImplementationOnce(async () => {
+        callOrder.push("provider-page-1");
+        return jsonResponse({
+          chats: Array.from({ length: 100 }, (_, index) =>
+            buildChatInventoryRecord(`chat-${index}`)),
+          next_cursor: "page-2",
+        });
+      })
+      .mockImplementationOnce(async () => {
+        callOrder.push("provider-page-2");
+        return jsonResponse({
+          chats: [buildChatInventoryRecord("chat-100")],
+          next_cursor: null,
+        });
+      });
+    const queryRaw = vi.fn(async () => {
+      callOrder.push("database");
+      return [{ syncedCount: 101n }];
     });
-    expect(createMany).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    const projection = createChatHealthProjectionPrisma(queryRaw, {
+      onLock: () => callOrder.push("database-lock"),
+    });
+
+    await expect(syncHostedLinqChatHealthInventory({
+      prisma: projection.prisma,
+    })).resolves.toEqual({ skippedCount: 0, syncedCount: 101 });
+
+    expect(callOrder).toEqual([
+      "provider-page-1",
+      "provider-page-2",
+      "database-lock",
+      "database",
+    ]);
+  });
+
+  it("leaves a failed later chunk retryable without wrapping committed chunks", async () => {
+    const retryableFailure = new Error("retry the inventory owner");
+    const queryRaw = vi.fn()
+      .mockResolvedValueOnce([{
+        syncedCount: BigInt(HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE),
+      }])
+      .mockRejectedValueOnce(retryableFailure);
+    const projection = createChatHealthProjectionPrisma(queryRaw);
+    mockChatInventoryPages(HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE + 1);
+
+    await expect(syncHostedLinqChatHealthInventory({
+      prisma: projection.prisma,
+    })).rejects.toBe(retryableFailure);
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+
+    inventoryMocks.fetchLinqApi.mockReset();
+    mockChatInventoryPages(HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE + 1);
+    queryRaw
+      .mockResolvedValueOnce([{
+        syncedCount: BigInt(HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE),
+      }])
+      .mockResolvedValueOnce([{ syncedCount: 1n }]);
+
+    await expect(syncHostedLinqChatHealthInventory({
+      prisma: projection.prisma,
+    })).resolves.toEqual({
+      skippedCount: 0,
+      syncedCount: HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE + 1,
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps the maximum inventory at twenty bounded projection transactions", async () => {
+    const queryRaw = vi.fn();
+    const projection = createChatHealthProjectionPrisma(queryRaw);
+    for (
+      let offset = 0;
+      offset < HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT;
+      offset += HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE
+    ) {
+      queryRaw.mockResolvedValueOnce([{
+        syncedCount: BigInt(HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE),
+      }]);
+    }
+    mockChatInventoryPages(HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT);
+
+    await expect(syncHostedLinqChatHealthInventory({
+      prisma: projection.prisma,
+    })).resolves.toEqual({
+      skippedCount: 0,
+      syncedCount: HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT,
+    });
+
+    expect(queryRaw).toHaveBeenCalledTimes(
+      HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT
+        / HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE,
+    );
+    expect(projection.executeRaw).toHaveBeenCalledTimes(
+      HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT
+        / HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE,
+    );
+    expect(projection.transaction).toHaveBeenCalledTimes(
+      HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT
+        / HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE,
+    );
+    expect(inventoryMocks.fetchLinqApi).toHaveBeenCalledTimes(
+      HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT / 100,
+    );
+  });
+
+  it("rejects one chat over the hard inventory cap before database work", async () => {
+    const queryRaw = vi.fn();
+    const projection = createChatHealthProjectionPrisma(queryRaw);
+    mockChatInventoryPages(HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT + 1);
+
+    await expect(syncHostedLinqChatHealthInventory({
+      maxChats: HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT + 1_000,
+      prisma: projection.prisma,
+    })).rejects.toMatchObject({
+      code: "LINQ_CHAT_HEALTH_INVENTORY_LIMIT_EXCEEDED",
+      retryable: false,
+    });
+
+    expect(queryRaw).not.toHaveBeenCalled();
+    expect(projection.transaction).not.toHaveBeenCalled();
+  });
+
+  it("preserves malformed-record skip counts while projecting valid chats", async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
+    const projection = createChatHealthProjectionPrisma(queryRaw);
+    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+      chats: [
+        buildChatInventoryRecord("chat-valid"),
+        { id: "chat-invalid", health_status: { status: "HEALTHY" } },
+      ],
+      next_cursor: null,
+    }));
+
+    await expect(syncHostedLinqChatHealthInventory({
+      prisma: projection.prisma,
+    })).resolves.toEqual({ skippedCount: 1, syncedCount: 1 });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("deduplicates chat writes while retaining every duplicate line observation", async () => {
+    const newestAt = new Date("2026-07-29T16:12:00.000Z");
+    const prepared = prepareHostedLinqChatHealthInventoryProjection([
+      {
+        chatId: "chat-duplicate",
         isGroup: false,
-        phoneNumberLookupKey: "line-key",
-        providerObservedAt: observedAt,
+        linePhoneNumber: "+12025550123",
+        providerStatus: "CRITICAL",
+        providerUpdatedAt: newestAt,
+        service: "first-equal",
+      },
+      {
+        chatId: "chat-duplicate",
+        isGroup: true,
+        linePhoneNumber: "+12025550124",
+        providerStatus: "OPTED_OUT",
+        providerUpdatedAt: new Date("2026-07-29T16:11:00.000Z"),
+        service: "stale",
+      },
+      {
+        chatId: "chat-duplicate",
+        isGroup: null,
+        linePhoneNumber: null,
         providerStatus: "HEALTHY",
-        providerUpdatedAt: new Date("2026-07-29T16:02:00.000Z"),
+        providerUpdatedAt: newestAt,
+        service: "later-equal",
+      },
+    ]);
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
+    const projection = createChatHealthProjectionPrisma(queryRaw);
+
+    expect(prepared).toHaveLength(3);
+    await expect(projectHostedLinqChatHealthInventoryChunk({
+      chats: prepared,
+      observedAt: new Date("2026-07-29T16:13:00.000Z"),
+      prisma: projection.prisma,
+    })).resolves.toBe(1);
+
+    const query = queryRaw.mock.calls[0]?.[0] as {
+      strings: string[];
+      values: unknown[];
+    };
+    expect(query.values).toEqual(expect.arrayContaining([
+      createHostedPhoneLookupKey("+12025550123"),
+      createHostedPhoneLookupKey("+12025550124"),
+      "first-equal",
+      "stale",
+      "later-equal",
+    ]));
+    const sql = query.strings.join("");
+    expect(sql).toContain("SELECT DISTINCT ON (input.current_lookup_key)");
+    expect(sql).toMatch(
+      /input\.provider_updated_at DESC,\s*input\.input_ordinal DESC/u,
+    );
+  });
+
+  it("carries current and legacy chat and line keys into the set projection", async () => {
+    const restoreV1 = configureContactPrivacyKeyringForTest("v1");
+    const legacyChatLookupKey = createHostedLinqChatLookupKey("chat-legacy-batch");
+    const legacyLineLookupKey = createHostedPhoneLookupKey("+12025550123");
+    restoreV1();
+    const restoreV2 = configureContactPrivacyKeyringForTest("v2");
+    const currentChatLookupKey = createHostedLinqChatLookupKey("chat-legacy-batch");
+    const currentLineLookupKey = createHostedPhoneLookupKey("+12025550123");
+    const queryRaw = vi.fn().mockResolvedValue([{ syncedCount: 1n }]);
+    const projection = createChatHealthProjectionPrisma(queryRaw);
+
+    if (
+      !legacyChatLookupKey
+      || !legacyLineLookupKey
+      || !currentChatLookupKey
+      || !currentLineLookupKey
+    ) {
+      restoreV2();
+      throw new Error("Expected versioned Linq chat and line lookup keys.");
+    }
+
+    try {
+      const prepared = prepareHostedLinqChatHealthInventoryProjection([{
+        chatId: "chat-legacy-batch",
+        isGroup: false,
+        linePhoneNumber: "+12025550123",
+        providerStatus: "HEALTHY",
+        providerUpdatedAt: new Date("2026-07-29T16:13:00.000Z"),
         service: "iMessage",
-      }),
-      skipDuplicates: true,
-    });
+      }]);
+
+      expect(prepared[0]?.lookupKeyReadCandidates).toEqual(expect.arrayContaining([
+        legacyChatLookupKey,
+        currentChatLookupKey,
+      ]));
+      expect(prepared[0]?.line?.lookupKeyReadCandidates).toEqual(expect.arrayContaining([
+        legacyLineLookupKey,
+        currentLineLookupKey,
+      ]));
+
+      await projectHostedLinqChatHealthInventoryChunk({
+        chats: prepared,
+        observedAt: new Date("2026-07-29T16:14:00.000Z"),
+        prisma: projection.prisma,
+      });
+
+      const query = queryRaw.mock.calls[0]?.[0] as {
+        strings: string[];
+        values: unknown[];
+      };
+      expect(query.values).toEqual(expect.arrayContaining([
+        legacyChatLookupKey,
+        currentChatLookupKey,
+        legacyLineLookupKey,
+        currentLineLookupKey,
+      ]));
+      expect(query.strings.join("")).toContain(
+        "linq_chat_lookup_key = resolved.current_lookup_key",
+      );
+    } finally {
+      restoreV2();
+    }
   });
 });
 
@@ -759,6 +1078,43 @@ function buildProviderEvent(input: {
     event_id: "event-health",
     event_type: input.eventType,
   };
+}
+
+function createChatHealthProjectionPrisma(
+  queryRaw: ReturnType<typeof vi.fn>,
+  input: { onLock?: () => void } = {},
+) {
+  const executeRaw = vi.fn(async (query: unknown) => {
+    void query;
+    input.onLock?.();
+    return 0;
+  });
+  const transaction = vi.fn(async (
+    callback: (tx: {
+      $executeRaw: typeof executeRaw;
+      $queryRaw: typeof queryRaw;
+    }) => Promise<unknown>,
+  ) => callback({ $executeRaw: executeRaw, $queryRaw: queryRaw }));
+  return {
+    executeRaw,
+    prisma: { $transaction: transaction } as never,
+    transaction,
+  };
+}
+
+function mockChatInventoryPages(chatCount: number): void {
+  const pageSize = 100;
+  for (let offset = 0; offset < chatCount; offset += pageSize) {
+    const pageLength = Math.min(pageSize, chatCount - offset);
+    const nextCursor = offset + pageLength < chatCount
+      ? `page-${offset + pageLength}`
+      : null;
+    inventoryMocks.fetchLinqApi.mockResolvedValueOnce(jsonResponse({
+      chats: Array.from({ length: pageLength }, (_, index) =>
+        buildChatInventoryRecord(`chat-${offset + index}`)),
+      next_cursor: nextCursor,
+    }));
+  }
 }
 
 function buildChatInventoryRecord(id: string) {
