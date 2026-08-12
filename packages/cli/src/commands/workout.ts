@@ -965,6 +965,10 @@ export function registerWorkoutCommands(
         .boolean()
         .optional()
         .describe('Store the raw CSV + manifest without creating workout events.'),
+      correctUnits: z
+        .boolean()
+        .optional()
+        .describe('Explicitly supersede an exact prior import after correcting its unit choice.'),
     }),
     output: workoutImportCsvResultSchema,
     async run({ args, options }) {
@@ -976,6 +980,7 @@ export function registerWorkoutCommands(
         weightUnit: options.weightUnit,
         distanceUnit: options.distanceUnit,
         storeRawOnly: options.storeRawOnly === true,
+        correctUnits: options.correctUnits === true,
       })
     },
   })

@@ -113,6 +113,27 @@ again to refresh later readings. When the file arrives, inspect its real format
 and use the narrowest existing measurement or health-record ingestion path; do
 not infer blood pressure, weight, or glucose rows from an unsupported summary.
 
+## Workout CSV import contract
+
+For both Strong and Hevy workout exports, inspect the original CSV before any
+write. If inspection returns `requiresWeightUnit: true` or
+`requiresDistanceUnit: true`, ask one concise question covering every missing
+unit. Explain that the weight answer applies to every unitless load field in the
+export, including bodyweight, assistance, and added weight. Never infer units
+from locale, exercise names, or value size. Rerun inspection with the confirmed
+`--weight-unit lb|kg` and/or `--distance-unit m|km|mi` options.
+
+Do not run the structured write while any unit requirement or unsafe skipped
+row remains. Claim completion only from the durable import result and its
+aggregate counts. `lookupIds` and `ledgerFiles` are intentionally capped, so use
+the count and truncation fields instead of requesting or repeating every
+imported id. A pure replay reports skipped existing workouts and stores no
+duplicate raw copy. These are historical snapshots, not continuous syncs.
+If the member says a previously confirmed unit was wrong, rerun the exact
+original CSV with the corrected unit option and `--correct-units`. Use that
+flag only after explicit confirmation; it supersedes the same imported workout
+identities and requires the exact prior raw evidence.
+
 ## Strong
 
 Strong is a workout-tracking app. Its official export is a
@@ -138,17 +159,6 @@ Run the write only when inspection says the file is importable:
 vault-cli workout import csv <file> --vault "$VAULT" --source strong --format json
 ```
 
-If inspection returns `requiresWeightUnit: true` or
-`requiresDistanceUnit: true`, ask one concise question for the missing unit or
-units. Never infer them from locale, exercise names, or value size. Rerun
-inspection and the import with the confirmed `--weight-unit lb|kg` and/or
-`--distance-unit m|km|mi` options. Do not run the structured write while any
-unit requirement or unsafe skipped row remains.
-
-Claim completion only from the durable import result and its aggregate counts.
-`lookupIds` and `ledgerFiles` are intentionally capped, so use the count and
-truncation fields instead of requesting or repeating every imported id. A pure
-replay reports skipped existing workouts and does not store another raw copy.
 This imports historical workouts; it does not keep Strong continuously synced.
 
 https://help.strongapp.io/article/235-export-workout-data
@@ -174,8 +184,8 @@ vault-cli workout import inspect <file> --vault "$VAULT" --source hevy --format 
 vault-cli workout import csv <file> --vault "$VAULT" --source hevy --format json
 ```
 
-Run the write only when inspection says the file is importable. A Hevy
-measurements export is not a workout CSV; do not send it through the workout
+Follow the shared workout CSV import contract above. A Hevy measurements export
+is not a workout CSV; do not send it through the workout
 importer. Inspect its actual format and use the canonical measurement ingestion
 path that fits it.
 

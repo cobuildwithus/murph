@@ -6851,6 +6851,10 @@
                                 "storeRawOnly": {
                                   "description": "Store the raw CSV + manifest without creating workout events.",
                                   "type": "boolean"
+                                },
+                                "correctUnits": {
+                                  "description": "Explicitly supersede an exact prior import after correcting its unit choice.",
+                                  "type": "boolean"
                                 }
                               }
                             }

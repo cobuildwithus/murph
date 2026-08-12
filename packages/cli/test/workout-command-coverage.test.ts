@@ -763,6 +763,73 @@ test('Strong CSV import requires weight provenance, commits once, and returns bo
     await readdir(path.join(vaultRoot, 'raw', 'workouts'), { recursive: true }),
     rawFilesBeforeConflict,
   )
+
+  const unconfirmedUnitChange = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'csv',
+    csvPath,
+    '--vault',
+    vaultRoot,
+    '--weight-unit',
+    'kg',
+    '--distance-unit',
+    'km',
+  ])
+  assert.equal(unconfirmedUnitChange.envelope.ok, false)
+  if (unconfirmedUnitChange.envelope.ok) {
+    throw new Error('Expected an unconfirmed unit change to fail closed.')
+  }
+  assert.equal(unconfirmedUnitChange.envelope.error.code, 'conflict')
+
+  const corrected = requireData(
+    (
+      await runWorkoutCli<{
+        createdCount: number
+        rawStored: boolean
+        supersededCount: number
+      }>(cli, [
+        'workout',
+        'import',
+        'csv',
+        csvPath,
+        '--vault',
+        vaultRoot,
+        '--weight-unit',
+        'kg',
+        '--distance-unit',
+        'km',
+        '--correct-units',
+      ])
+    ).envelope,
+  )
+  assert.equal(corrected.createdCount, 0)
+  assert.equal(corrected.supersededCount, 12)
+  assert.equal(corrected.rawStored, false)
+
+  const correctedReplay = requireData(
+    (
+      await runWorkoutCli<{
+        importedCount: number
+        rawStored: boolean
+        skippedExistingCount: number
+      }>(cli, [
+        'workout',
+        'import',
+        'csv',
+        csvPath,
+        '--vault',
+        vaultRoot,
+        '--weight-unit',
+        'kg',
+        '--distance-unit',
+        'km',
+      ])
+    ).envelope,
+  )
+  assert.equal(correctedReplay.importedCount, 0)
+  assert.equal(correctedReplay.skippedExistingCount, 12)
+  assert.equal(correctedReplay.rawStored, false)
 })
 
 test('workout format save rejects missing name or text when --input is absent', async () => {

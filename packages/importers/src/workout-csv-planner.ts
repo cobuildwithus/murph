@@ -48,7 +48,6 @@ export interface WorkoutCsvPlannerInput {
 
 export interface PlannedWorkoutCsvSession {
   sourceWorkoutId: string;
-  legacySourceWorkoutId: string;
   occurredAt: string;
   title: string;
   durationMinutes?: number;
@@ -93,7 +92,6 @@ interface WorkoutCsvSessionExercise {
 
 interface MutableWorkoutCsvSession {
   sourceWorkoutId: string;
-  legacySourceWorkoutId: string;
   title: string;
   occurredAt: string;
   endedAt?: string;
@@ -148,6 +146,18 @@ function detectSource(headers: readonly string[]): string | null {
   }
 
   return null;
+}
+
+function detectUnambiguousSource(headers: readonly string[]): "strong" | "hevy" | null {
+  const normalizedHeaders = new Set(headers.map(normalizeHeaderName));
+  if (
+    normalizedHeaders.has("exerciseimage")
+    || normalizedHeaders.has("primarymuscles")
+    || normalizedHeaders.has("secondarymuscles")
+  ) {
+    return "hevy";
+  }
+  return hasCurrentStrongHeaders(headers) ? "strong" : null;
 }
 
 function findHeaderIndex(headers: readonly string[], aliases: readonly string[]): number | undefined {
@@ -426,10 +436,11 @@ function normalizeWorkoutTimestamp(
 ): string | undefined {
   const date = normalizeOptionalText(dateValue);
   const time = normalizeOptionalText(timeValue);
-  if (!date) {
-    return undefined;
+  if (time && /^\d{4}-\d{2}-\d{2}(?:[T\s]|$)/u.test(time)) {
+    return normalizeFlexibleTimestamp(time, timeZone);
   }
-  return normalizeFlexibleTimestamp(time ? `${date} ${time}` : date, timeZone);
+  const timestamp = [date, time].filter(Boolean).join(" ");
+  return timestamp ? normalizeFlexibleTimestamp(timestamp, timeZone) : undefined;
 }
 
 function inferDistanceUnitFromHeader(header: string | undefined): WorkoutCsvDistanceUnit | undefined {
@@ -453,6 +464,17 @@ function normalizeWeightUnit(value: string | undefined): WorkoutCsvWeightUnit | 
   return undefined;
 }
 
+function inferWeightUnitFromHeader(header: string | undefined): WorkoutCsvWeightUnit | undefined {
+  const normalized = normalizeHeaderName(header ?? "");
+  if (normalized.endsWith("kg") || normalized.includes("kilogram")) return "kg";
+  if (normalized.endsWith("lb") || normalized.endsWith("lbs") || normalized.includes("pound")) return "lb";
+  return undefined;
+}
+
+function toKilograms(value: number, unit: WorkoutCsvWeightUnit): number {
+  return unit === "lb" ? value * 0.45359237 : value;
+}
+
 function normalizeSetType(value: string | undefined, detectedSource: string | null): WorkoutSetType {
   const normalized = normalizeOptionalText(value)?.toLowerCase();
   if (detectedSource === "strong") {
@@ -473,10 +495,6 @@ function stableWorkoutSourceId(source: string, rawTimestamp: string): string {
     .digest("hex")
     .slice(0, 40);
   return `${source}-workout-${digest}`;
-}
-
-function legacyWorkoutSourceId(occurredAt: string, title: string): string {
-  return `${occurredAt}::${title}`.slice(0, 200);
 }
 
 function resolveExerciseMode(exercise: WorkoutCsvSessionExercise): WorkoutSession["exercises"][number]["mode"] {
@@ -550,21 +568,30 @@ function buildSessions(input: {
   requiresDistanceUnit: boolean;
 } {
   const { headers } = input;
-  const workoutNameIndex = findHeaderIndex(headers, ["workout name", "workout", "routine name", "routine", "name"]);
+  const workoutNameIndex = findHeaderIndex(headers, ["workout name", "workout", "routine name", "routine", "name", "title"]);
   const dateIndex = findHeaderIndex(headers, ["date", "workout date", "session date", "day"]);
   const startTimeIndex = findHeaderIndex(headers, ["start time", "start", "started at", "started"]);
   const endTimeIndex = findHeaderIndex(headers, ["end time", "end", "ended at", "ended"]);
   const durationIndex = findHeaderIndex(headers, ["duration minutes", "duration min", "duration"]);
   const workoutNoteIndex = input.detectedSource === "strong"
     ? findHeaderIndex(headers, ["workout notes"])
-    : findHeaderIndex(headers, ["workout notes", "workout note", "session note", "note", "notes"]);
-  const exerciseNameIndex = findHeaderIndex(headers, ["exercise name", "exercise", "movement"]);
+    : findHeaderIndex(headers, ["workout notes", "workout note", "session note", "description", "note", "notes"]);
+  const exerciseNameIndex = findHeaderIndex(headers, ["exercise name", "exercise title", "exercise", "movement"]);
   const exerciseNoteIndex = input.detectedSource === "strong"
     ? findHeaderIndex(headers, ["notes"])
     : findHeaderIndex(headers, ["exercise notes", "exercise note", "movement note"]);
-  const setOrderIndex = findHeaderIndex(headers, ["set order", "set number", "set"]);
+  const setOrderIndex = findHeaderIndex(headers, ["set order", "set number", "set index", "set"]);
   const repsIndex = findHeaderIndex(headers, ["reps", "rep"]);
-  const weightIndex = findHeaderIndex(headers, ["weight", "load"]);
+  const weightIndex = findHeaderIndex(headers, [
+    "weight",
+    "weight kg",
+    "weight lb",
+    "weight lbs",
+    "load",
+    "load kg",
+    "load lb",
+    "load lbs",
+  ]);
   const weightUnitIndex = findHeaderIndex(headers, ["weight unit", "load unit"]);
   const distanceIndex = findHeaderIndex(headers, [
     "distance",
@@ -578,13 +605,25 @@ function buildSessions(input: {
   const secondsIndex = findHeaderIndex(headers, ["seconds", "duration seconds"]);
   const rpeIndex = findHeaderIndex(headers, ["rpe"]);
   const setTypeIndex = findHeaderIndex(headers, ["set type", "type"]);
-  const groupIndex = findHeaderIndex(headers, ["group", "group id", "superset", "circuit"]);
+  const groupIndex = findHeaderIndex(headers, ["group", "group id", "superset", "superset id", "circuit"]);
   const bodyweightIndex = findHeaderIndex(headers, ["bodyweight kg", "body weight kg", "bodyweight", "body weight"]);
   const assistanceIndex = findHeaderIndex(headers, ["assistance kg", "assisted weight kg", "assistance", "assisted weight"]);
   const addedWeightIndex = findHeaderIndex(headers, ["added weight kg", "extra weight kg", "added weight", "extra weight"]);
   const warmupIndex = findHeaderIndex(headers, ["warmup", "warm up"]);
   const dropsetIndex = findHeaderIndex(headers, ["dropset", "drop set"]);
   const failureIndex = findHeaderIndex(headers, ["failure"]);
+  const bodyweightHeaderUnit = bodyweightIndex === undefined
+    ? undefined
+    : inferWeightUnitFromHeader(headers[bodyweightIndex]);
+  const assistanceHeaderUnit = assistanceIndex === undefined
+    ? undefined
+    : inferWeightUnitFromHeader(headers[assistanceIndex]);
+  const addedWeightHeaderUnit = addedWeightIndex === undefined
+    ? undefined
+    : inferWeightUnitFromHeader(headers[addedWeightIndex]);
+  const weightHeaderUnit = weightIndex === undefined
+    ? undefined
+    : inferWeightUnitFromHeader(headers[weightIndex]);
 
   const sessions = new Map<string, MutableWorkoutCsvSession>();
   const titleByOccurredAt = new Map<string, string>();
@@ -636,25 +675,33 @@ function buildSessions(input: {
     const bodyweightText = valueAt(row, bodyweightIndex);
     const assistanceText = valueAt(row, assistanceIndex);
     const addedWeightText = valueAt(row, addedWeightIndex);
-    const bodyweightKg = parseNonnegativeNumber(bodyweightText);
-    const assistanceKg = parseNonnegativeNumber(assistanceText);
-    const addedWeightKg = parseNonnegativeNumber(addedWeightText);
+    const parsedBodyweight = parseWeightValue(bodyweightText);
+    const parsedAssistance = parseWeightValue(assistanceText);
+    const parsedAddedWeight = parseWeightValue(addedWeightText);
     if (
       (repsText !== undefined && reps === undefined)
       || (weightText !== undefined && weight === undefined)
       || (distanceText !== undefined && distance === undefined)
       || (secondsText !== undefined && parseNonnegativeNumber(secondsText) !== 0 && durationSeconds === undefined)
       || (rpeText !== undefined && (rpe === undefined || rpe > 10))
-      || (bodyweightText !== undefined && bodyweightKg === undefined)
-      || (assistanceText !== undefined && assistanceKg === undefined)
-      || (addedWeightText !== undefined && addedWeightKg === undefined)
+      || (bodyweightText !== undefined && parsedBodyweight.weight === undefined)
+      || (assistanceText !== undefined && parsedAssistance.weight === undefined)
+      || (addedWeightText !== undefined && parsedAddedWeight.weight === undefined)
     ) {
       skippedRowCount += 1;
       incrementReason(input.skipReasons, "invalid numeric set value");
       continue;
     }
 
-    const declaredWeightUnit = parsedWeight.unit ?? normalizeWeightUnit(valueAt(row, weightUnitIndex));
+    const weightUnitCell = normalizeWeightUnit(valueAt(row, weightUnitIndex));
+    const declaredWeightUnits = [parsedWeight.unit, weightUnitCell, weightHeaderUnit]
+      .filter((unit): unit is WorkoutCsvWeightUnit => unit !== undefined);
+    if (new Set(declaredWeightUnits).size > 1) {
+      skippedRowCount += 1;
+      incrementReason(input.skipReasons, "weight units conflict within CSV metadata");
+      continue;
+    }
+    const declaredWeightUnit = parsedWeight.unit ?? weightUnitCell ?? weightHeaderUnit;
     if (input.weightUnit && declaredWeightUnit && input.weightUnit !== declaredWeightUnit) {
       skippedRowCount += 1;
       incrementReason(input.skipReasons, "explicit weight unit conflicts with CSV metadata");
@@ -664,6 +711,34 @@ function buildSessions(input: {
     if (typeof weight === "number" && weight > 0 && !resolvedWeightUnit) {
       hasUnitlessPositiveWeight = true;
     }
+    const auxiliaryLoads = [
+      { parsed: parsedBodyweight, headerUnit: bodyweightHeaderUnit },
+      { parsed: parsedAssistance, headerUnit: assistanceHeaderUnit },
+      { parsed: parsedAddedWeight, headerUnit: addedWeightHeaderUnit },
+    ];
+    if (auxiliaryLoads.some(({ parsed, headerUnit }) =>
+      parsed.unit && headerUnit && parsed.unit !== headerUnit)) {
+      skippedRowCount += 1;
+      incrementReason(input.skipReasons, "weight units conflict within CSV metadata");
+      continue;
+    }
+    if (auxiliaryLoads.some(({ parsed, headerUnit }) =>
+      input.weightUnit && (parsed.unit ?? headerUnit) && input.weightUnit !== (parsed.unit ?? headerUnit))) {
+      skippedRowCount += 1;
+      incrementReason(input.skipReasons, "explicit weight unit conflicts with CSV metadata");
+      continue;
+    }
+    if (auxiliaryLoads.some(({ parsed, headerUnit }) =>
+      typeof parsed.weight === "number"
+      && parsed.weight > 0
+      && !(parsed.unit ?? headerUnit ?? input.weightUnit))) {
+      hasUnitlessPositiveWeight = true;
+    }
+    const [bodyweightKg, assistanceKg, addedWeightKg] = auxiliaryLoads.map(({ parsed, headerUnit }) => {
+      if (parsed.weight === undefined) return undefined;
+      const unit = parsed.unit ?? headerUnit ?? input.weightUnit;
+      return parsed.weight === 0 ? 0 : unit ? toKilograms(parsed.weight, unit) : undefined;
+    });
     const declaredDistanceUnit = parsedDistance.unit ?? headerDistanceUnit;
     if (input.distanceUnit && declaredDistanceUnit && input.distanceUnit !== declaredDistanceUnit) {
       skippedRowCount += 1;
@@ -687,12 +762,10 @@ function buildSessions(input: {
     titleByOccurredAt.set(occurredAt, title);
 
     const sourceWorkoutId = stableWorkoutSourceId(input.source, rawTimestamp);
-    const legacySourceWorkoutId = legacyWorkoutSourceId(occurredAt, title);
     let session = sessions.get(sourceWorkoutId);
     if (!session) {
       session = {
         sourceWorkoutId,
-        legacySourceWorkoutId,
         title,
         occurredAt,
         exercises: [],
@@ -713,9 +786,9 @@ function buildSessions(input: {
     session.endedAt = session.endedAt ?? (rawEndTime
       ? normalizeWorkoutTimestamp(rawDate, rawEndTime, input.timeZone)
       : undefined);
-    session.distanceKm = session.distanceKm ?? (distanceMeters !== undefined
-      ? distanceMeters / 1000
-      : undefined);
+    if (distanceMeters !== undefined) {
+      session.distanceKm = (session.distanceKm ?? 0) + distanceMeters / 1000;
+    }
     session.note = session.note ?? valueAt(row, workoutNoteIndex);
 
     let exercise = session.exercises.at(-1);
@@ -795,7 +868,6 @@ function buildSessions(input: {
       });
     return {
       sourceWorkoutId: session.sourceWorkoutId,
-      legacySourceWorkoutId: session.legacySourceWorkoutId,
       occurredAt: session.occurredAt,
       title: session.title,
       ...(session.durationMinutes ? { durationMinutes: session.durationMinutes } : {}),
@@ -855,8 +927,19 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
     throw new TypeError("Workout CSV headers must be unique.");
   }
 
-  const detectedSource = detectSource(headers);
-  const source = normalizeSource(input.source ?? detectedSource ?? undefined);
+  const inferredSource = detectSource(headers);
+  const explicitSource = input.source === undefined ? undefined : normalizeSource(input.source);
+  const explicitDialect = explicitSource === "strong" || explicitSource === "hevy"
+    ? explicitSource
+    : undefined;
+  const unambiguousSource = detectUnambiguousSource(headers);
+  if (explicitDialect && unambiguousSource && explicitDialect !== unambiguousSource) {
+    throw new TypeError(
+      `Workout CSV source ${explicitDialect} conflicts with unambiguous ${unambiguousSource} headers.`,
+    );
+  }
+  const detectedSource = explicitDialect ?? inferredSource;
+  const source = explicitSource ?? normalizeSource(detectedSource ?? undefined);
   const normalized = normalizeRows(headers, parsedRows.slice(1), detectedSource);
   if (normalized.rows.length + normalized.skippedRowCount > MAX_DATA_ROWS) {
     throw new TypeError(`Workout CSV exceeds the ${MAX_DATA_ROWS}-row limit.`);

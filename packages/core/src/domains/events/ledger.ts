@@ -88,9 +88,11 @@ export interface FindEventByExternalRefInput {
   facet?: string;
 }
 
-export interface FindEventsByExternalRefsInput {
+export interface FindEventsByRawRefsInput {
   vaultRoot: string;
-  externalRefs: readonly Omit<FindEventByExternalRefInput, "vaultRoot">[];
+  rawRefs: readonly string[];
+  system?: string;
+  resourceType?: string;
 }
 
 export interface UpsertEventResult {
@@ -320,34 +322,13 @@ function externalRefMatches(record: EventRecord, input: FindEventByExternalRefIn
     (input.facet === undefined || externalRef.facet === input.facet);
 }
 
-function externalRefLookupKey(input: Pick<
-  FindEventByExternalRefInput,
-  "system" | "resourceType" | "resourceId"
->): string {
-  return JSON.stringify([input.system, input.resourceType, input.resourceId]);
-}
-
-export async function findEventsByExternalRefs(
-  input: FindEventsByExternalRefsInput,
-): Promise<Array<EventRecord | null>> {
-  if (input.externalRefs.length > 10_000) {
-    throw new TypeError("Event external-reference lookup is limited to 10,000 references.");
-  }
-  if (input.externalRefs.length === 0) {
-    return [];
-  }
-
+export async function findEventByExternalRef(
+  input: FindEventByExternalRefInput,
+): Promise<EventRecord | null> {
   const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
     extension: ".jsonl",
   });
-  const refIndexesByKey = new Map<string, number[]>();
-  const candidateIdsByRefIndex = input.externalRefs.map(() => new Set<string>());
-  input.externalRefs.forEach((externalRef, index) => {
-    const key = externalRefLookupKey(externalRef);
-    const indexes = refIndexesByKey.get(key) ?? [];
-    indexes.push(index);
-    refIndexesByKey.set(key, indexes);
-  });
+  const candidateIds = new Set<string>();
 
   for (const relativePath of relativePaths) {
     const records = await readJsonlRecords({
@@ -357,22 +338,15 @@ export async function findEventsByExternalRefs(
 
     for (const rawRecord of records) {
       const record = validateStoredEventRecord(rawRecord as JsonObject);
-      const externalRef = record.externalRef;
-      if (!externalRef) {
-        continue;
-      }
-      for (const refIndex of refIndexesByKey.get(externalRefLookupKey(externalRef)) ?? []) {
-        const requestedRef = input.externalRefs[refIndex];
-        if (requestedRef && externalRefMatches(record, { vaultRoot: input.vaultRoot, ...requestedRef })) {
-          candidateIdsByRefIndex[refIndex]?.add(record.id);
-        }
+
+      if (externalRefMatches(record, input)) {
+        candidateIds.add(record.id);
       }
     }
   }
 
-  const candidateIds = new Set(candidateIdsByRefIndex.flatMap((ids) => [...ids]));
   if (candidateIds.size === 0) {
-    return input.externalRefs.map(() => null);
+    return null;
   }
 
   const latestByCandidateId = new Map<string, MatchedEventRecord>();
@@ -396,34 +370,92 @@ export async function findEventsByExternalRefs(
     }
   }
 
-  return input.externalRefs.map((externalRef, refIndex) => {
-    const matchingLatestEntries = [...(candidateIdsByRefIndex[refIndex] ?? [])]
-      .map((candidateId) => latestByCandidateId.get(candidateId))
-      .filter((entry): entry is MatchedEventRecord =>
-        entry !== undefined
-        && externalRefMatches(entry.record, { vaultRoot: input.vaultRoot, ...externalRef }));
-    const liveMatchingLatestEntries = matchingLatestEntries.filter((entry) =>
-      !isDeletedEventSpineRecord(entry.record));
-    const latest = selectLatestEventSpineEntry(
-      liveMatchingLatestEntries.length > 0 ? liveMatchingLatestEntries : matchingLatestEntries,
-    );
-    return !latest || isDeletedEventSpineRecord(latest.record) ? null : latest.record;
-  });
+  const matchingLatestEntries = [...latestByCandidateId.values()].filter((entry) =>
+    externalRefMatches(entry.record, input)
+  );
+  const liveMatchingLatestEntries = matchingLatestEntries.filter((entry) =>
+    !isDeletedEventSpineRecord(entry.record)
+  );
+  const latest = selectLatestEventSpineEntry(
+    liveMatchingLatestEntries.length > 0 ? liveMatchingLatestEntries : matchingLatestEntries,
+  );
+  if (!latest || isDeletedEventSpineRecord(latest.record)) {
+    return null;
+  }
+
+  return latest.record;
 }
 
-export async function findEventByExternalRef(
-  input: FindEventByExternalRefInput,
-): Promise<EventRecord | null> {
-  return (await findEventsByExternalRefs({
-    vaultRoot: input.vaultRoot,
-    externalRefs: [{
-      system: input.system,
-      resourceType: input.resourceType,
-      resourceId: input.resourceId,
-      ...(input.version ? { version: input.version } : {}),
-      ...(input.facet ? { facet: input.facet } : {}),
-    }],
-  }))[0] ?? null;
+function rawRefMatches(record: EventRecord, rawRef: string, input: FindEventsByRawRefsInput): boolean {
+  return collectEventRawReferencePaths(record).includes(rawRef)
+    && (input.system === undefined || record.externalRef?.system === input.system)
+    && (input.resourceType === undefined || record.externalRef?.resourceType === input.resourceType);
+}
+
+export async function findEventsByRawRefs(
+  input: FindEventsByRawRefsInput,
+): Promise<EventRecord[][]> {
+  if (input.rawRefs.length > 100) {
+    throw new TypeError("Event raw-reference lookup is limited to 100 references.");
+  }
+  if (input.rawRefs.length === 0) {
+    return [];
+  }
+
+  const relativePaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const refIndexesByRawRef = new Map<string, number[]>();
+  const candidateIdsByRefIndex = input.rawRefs.map(() => new Set<string>());
+  input.rawRefs.forEach((rawRef, index) => {
+    const indexes = refIndexesByRawRef.get(rawRef) ?? [];
+    indexes.push(index);
+    refIndexesByRawRef.set(rawRef, indexes);
+  });
+
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    for (const rawRecord of records) {
+      const record = validateStoredEventRecord(rawRecord as JsonObject);
+      for (const rawRef of collectEventRawReferencePaths(record)) {
+        for (const refIndex of refIndexesByRawRef.get(rawRef) ?? []) {
+          if (rawRefMatches(record, rawRef, input)) {
+            candidateIdsByRefIndex[refIndex]?.add(record.id);
+          }
+        }
+      }
+    }
+  }
+
+  const candidateIds = new Set(candidateIdsByRefIndex.flatMap((ids) => [...ids]));
+  if (candidateIds.size === 0) {
+    return input.rawRefs.map(() => []);
+  }
+
+  const latestByCandidateId = new Map<string, MatchedEventRecord>();
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    for (const rawRecord of records) {
+      const record = validateStoredEventRecord(rawRecord as JsonObject);
+      if (!candidateIds.has(record.id)) {
+        continue;
+      }
+      const entry = { relativePath, record };
+      const latest = latestByCandidateId.get(record.id);
+      if (!latest || compareEventSpineEntries(latest, entry) < 0) {
+        latestByCandidateId.set(record.id, entry);
+      }
+    }
+  }
+
+  return input.rawRefs.map((rawRef, refIndex) =>
+    [...(candidateIdsByRefIndex[refIndex] ?? [])]
+      .map((candidateId) => latestByCandidateId.get(candidateId)?.record)
+      .filter((record): record is EventRecord =>
+        record !== undefined
+        && !isDeletedEventSpineRecord(record)
+        && rawRefMatches(record, rawRef, input))
+      .sort((left, right) => left.id.localeCompare(right.id)));
 }
 
 function flattenMatchedEventRecords(

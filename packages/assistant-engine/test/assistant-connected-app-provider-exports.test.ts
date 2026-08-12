@@ -158,13 +158,22 @@ describe('assistant manual provider export guidance', () => {
       'vault-cli workout import csv <file> --vault "$VAULT" --source strong --format json',
     )
     expect(normalizedReference).toContain(
-      'Never infer them from locale, exercise names, or value size',
+      'Never infer units from locale, exercise names, or value size',
     )
     expect(normalizedReference).toContain(
       '`--distance-unit m|km|mi`',
     )
     expect(normalizedReference).toContain(
       '`lookupIds` and `ledgerFiles` are intentionally capped',
+    )
+    expect(normalizedReference).toContain(
+      'the weight answer applies to every unitless load field',
+    )
+    expect(normalizedReference).toContain(
+      'For both Strong and Hevy workout exports, inspect the original CSV before any write',
+    )
+    expect(normalizedReference).toContain(
+      'the corrected unit option and `--correct-units`',
     )
 
     expect(reference).toContain('`Export Workouts`')
@@ -174,6 +183,9 @@ describe('assistant manual provider export guidance', () => {
     )
     expect(normalizedReference).toContain(
       'A Hevy measurements export is not a workout CSV',
+    )
+    expect(normalizedReference).toContain(
+      'Follow the shared workout CSV import contract above',
     )
 
     expect(reference).toContain('Lab Results of Record')

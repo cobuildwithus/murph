@@ -8,7 +8,7 @@ import type { AuditRecord, EventRecord } from "@murphai/contracts";
 
 import {
   findEventByExternalRef,
-  findEventsByExternalRefs,
+  findEventsByRawRefs,
   importEventBatch,
   initializeVault,
   listHistoryEvents,
@@ -90,44 +90,30 @@ function buildClinicalMeasurementPayload(version: string, value = 72) {
   };
 }
 
-test("findEventsByExternalRefs resolves a bounded lookup set in caller order", async () => {
-  const vaultRoot = await makeVault("event-external-ref-batch");
+test("findEventsByRawRefs returns latest live events in stable creation order", async () => {
+  const vaultRoot = await makeVault("event-raw-ref-batch");
+  const rawRef = "raw/workouts/2026/03/batch/source.csv";
   await importEventBatch({
     vaultRoot,
     payloads: [
-      buildObservationPayload(1, "efficiency", 90),
-      buildObservationPayload(2, "efficiency", 91),
+      { ...buildObservationPayload(1, "efficiency", 90), rawRefs: [rawRef] },
+      { ...buildObservationPayload(2, "efficiency", 91), rawRefs: [rawRef] },
     ],
     apply: true,
   });
 
-  const records = await findEventsByExternalRefs({
+  const [records, missing] = await findEventsByRawRefs({
     vaultRoot,
-    externalRefs: [
-      {
-        system: "whoop",
-        resourceType: "sleep",
-        resourceId: "sleep-2026-03-02",
-        facet: "efficiency",
-      },
-      {
-        system: "whoop",
-        resourceType: "sleep",
-        resourceId: "missing",
-        facet: "efficiency",
-      },
-      {
-        system: "whoop",
-        resourceType: "sleep",
-        resourceId: "sleep-2026-03-01",
-        facet: "efficiency",
-      },
-    ],
+    rawRefs: [rawRef, "raw/workouts/missing.csv"],
+    system: "whoop",
+    resourceType: "sleep",
   });
 
-  assert.equal(records[0]?.externalRef?.resourceId, "sleep-2026-03-02");
-  assert.equal(records[1], null);
-  assert.equal(records[2]?.externalRef?.resourceId, "sleep-2026-03-01");
+  assert.deepEqual(
+    records?.map((record) => record.externalRef?.resourceId),
+    ["sleep-2026-03-01", "sleep-2026-03-02"],
+  );
+  assert.deepEqual(missing, []);
 });
 
 function buildClinicalTestPayload(version: string) {

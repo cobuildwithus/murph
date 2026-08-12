@@ -23,7 +23,10 @@ Updated: 2026-08-12
 - Re-importing an unchanged export creates no new workout revisions or raw
   batch, and changed same-revision content fails closed.
 - Missing weight or distance unit provenance is an explicit, actionable
-  pre-write choice.
+  pre-write choice, including bodyweight, assistance, and added-weight loads;
+  a confirmed prior unit mistake has an exact-evidence correction path.
+- Explicit Strong or Hevy selection controls provider-specific note, set-type,
+  and set-order semantics, including marker-free Hevy exports.
 - File/session/row limits and bounded success output keep model context and
   local resource use predictable for multi-year exports.
 - Synthetic focused tests, the real-file redacted inspection, typechecks,
@@ -57,12 +60,15 @@ Updated: 2026-08-12
    Mitigation: parse and dry-run the complete event decision batch before raw
    persistence, then apply the canonical batch once.
 3. Risk: replay duplicates history or floods model context with event ids.
-   Mitigation: stable privacy-safe external identities, equal-version semantic
-   reconciliation, bounded lookup of the shipped legacy identity, exact-hash
-   raw-evidence reuse, replay no-op handling, and capped identifier/path arrays.
+   Mitigation: stable privacy-safe identities for new imports, exact-hash prior
+   raw-evidence discovery, bounded lookup of the live events attached to that
+   evidence, authoritative identity reuse, replay no-op handling, and capped
+   identifier/path arrays.
 4. Risk: Strong's unitless `Weight` and `Distance` columns are interpreted
    incorrectly. Mitigation: require explicit `--weight-unit` and
-   `--distance-unit` values when positive values are present.
+   `--distance-unit` values when positive values are present in any load or
+   distance field, normalize explicit units, and require exact prior evidence
+   plus `--correct-units` before superseding a mistaken unit choice.
 
 ## Tasks
 
@@ -87,10 +93,14 @@ Updated: 2026-08-12
 - Use a dated importer-mapping revision rather than treating a revisionless CSV
   as permanently fixed. Bump it only when a corrected mapping must supersede
   prior canonical output.
-- New imports keep the privacy-safe timestamp hash. Before preview, resolve the
-  shipped legacy timestamp-and-title identity in one bounded core lookup; when
-  found, update that event in place and reuse its raw export only after exact
-  byte-length and SHA-256 verification.
+- New imports keep the privacy-safe timestamp hash. Before identity selection,
+  find an exact prior workout manifest and verify its source artifact by byte
+  length and SHA-256, then resolve the live events attached to that raw ref in
+  one bounded core lookup. Keep those authoritative external references; never
+  reconstruct a legacy identity from the current vault timezone.
+- An explicit recognized Strong or Hevy source selects the parser dialect.
+  Header inference applies only without that option, and an unambiguous
+  provider-marker conflict blocks before any write.
 
 ## Review findings
 
@@ -103,6 +113,26 @@ Updated: 2026-08-12
   and that a fixed epoch mapping revision prevented future parser corrections.
   The planner now accumulates first non-empty metadata across the session,
   restores the distance surfaces, and uses the explicit mapping revision above.
+- Final ReviewGPT round 2 proved that reconstructing the legacy key with current
+  vault-timezone rules still duplicated imports made under a different host
+  timezone. The second remediation makes exact raw evidence and its attached
+  live events authoritative, covers daylight-saving and repeated timezone
+  changes, and fails closed on a partial or ambiguous attachment set.
+- Final ReviewGPT round 2 also proved that a marker-free Hevy export explicitly
+  labeled `hevy` still took Strong parsing branches. Explicit recognized source
+  selection now controls note, set-type, and set-order semantics; the mapping
+  revision was bumped so a prior incomplete Hevy mapping supersedes in place.
+- The preliminary specialist pass found that unitless bodyweight, assistance,
+  and added-weight columns could silently persist as kilograms. Those fields
+  now share the explicit weight-unit gate, honor unit-bearing values and header
+  suffixes, reject conflicts, and normalize pounds to canonical kilograms. It
+  also requested a safe correction journey, which is now an explicit exact-raw
+  `--correct-units` supersession instead of a destructive re-import.
+- The preliminary specialist pass also found missing shared assistant guidance,
+  direct ambiguous-comma coverage, and overstated scenario-manifest claims.
+  Strong and Hevy now share one inspect-first workflow, the ambiguous repair is
+  exercised fail-closed, and the scenario docs identify focused tests as the
+  executable proof owner.
 
 ## Verification
 
@@ -113,11 +143,11 @@ Updated: 2026-08-12
   export without row contents entering output; import blocks only on the
   explicit weight and distance unit choices; synthetic end-to-end import and
   replay are atomic and bounded; all required gates pass.
-- Focused remediation proof: importer planner 17 tests, core event-batch 33
-  tests, vault workout/loader 16 tests, CLI workout behavior 23 tests, CLI
-  command coverage 8 tests, assistant guidance 3 tests, changelog 57 tests,
-  scenario integrity 206 scenarios / 12 sample inputs / 29 golden directories,
-  affected typechecks, and affected package builds pass. The supplied export
-  still plans 7,521 rows into 915 sessions with 23 deterministic repairs, 23
-  ignored rest-timer rows, zero skipped rows, and explicit unit gates; no import
-  was performed.
+- Latest focused remediation proof: importer planner 23 tests, core event-batch
+  33 tests, vault workout import 12 tests, CLI workout command coverage 8 tests,
+  assistant guidance 3 tests, changelog 57 tests, scenario integrity (206
+  scenarios / 12 sample inputs / 29 golden directories), all affected package
+  typechecks, and affected package builds pass. The supplied export still plans
+  7,521 rows into 915 sessions with 23 deterministic repairs, 23 ignored
+  rest-timer rows, zero skipped rows, and explicit weight and distance unit
+  gates; no import was performed. PR CI and final ReviewGPT remain pending.

@@ -6,5 +6,5 @@
     "fixtures/sample-imports/workouts/strong.csv"
   ],
   "goldenOutput": "fixtures/golden-outputs/workout-import-csv",
-  "purpose": "Covers non-mutating Strong and Hevy CSV planning with explicit unit provenance before any workout write."
+  "purpose": "Registers the non-mutating Strong fixture and inspect command for scenario-integrity coverage; executable Strong and Hevy planning proof lives in focused importer tests."
 }

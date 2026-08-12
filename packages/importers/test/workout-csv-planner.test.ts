@@ -50,6 +50,71 @@ describe("planWorkoutCsvImport", () => {
     assert.equal(plan.sessions[0]?.workout.exercises[1]?.sets[0]?.reps, 0);
   });
 
+  test("uses an explicit Hevy source for marker-free headers", () => {
+    const text = [
+      "Workout Name,Date,Start Time,Duration,Exercise Name,Set Order,Weight,Weight Unit,Reps,Exercise Notes,Set Type",
+      "Upper,2026-04-08,10:00:00,45,Press,2,45,kg,8,Controlled,warmup",
+      "Upper,2026-04-08,10:00:00,45,Press,1,50,kg,6,Controlled,dropset",
+    ].join("\n");
+    const hevy = planWorkoutCsvImport({ text, timeZone: "UTC", source: "hevy" });
+
+    assert.equal(hevy.detectedSource, "hevy");
+    assert.equal(hevy.sessions[0]?.workout.exercises[0]?.note, "Controlled");
+    assert.deepEqual(
+      hevy.sessions[0]?.workout.exercises[0]?.sets.map((set) => [set.order, set.type]),
+      [[2, "warmup"], [1, "dropset"]],
+    );
+
+    const strong = planWorkoutCsvImport({ text, timeZone: "UTC", source: "strong" });
+    assert.equal(strong.detectedSource, "strong");
+    assert.equal(strong.sessions[0]?.workout.exercises[0]?.note, undefined);
+    assert.deepEqual(
+      strong.sessions[0]?.workout.exercises[0]?.sets.map((set) => [set.order, set.type]),
+      [[1, "normal"], [2, "normal"]],
+    );
+  });
+
+  test("maps the common snake-case Hevy workout export", () => {
+    const text = [
+      "title,start_time,end_time,description,exercise_title,superset_id,exercise_notes,set_index,set_type,weight_kg,reps,distance_km,duration_seconds,rpe",
+      "Morning,2026-04-08T10:00:00,2026-04-08T10:45:00,Session note,Squat,,Controlled,1,warmup,40,8,0,0,6",
+      "Morning,2026-04-08T10:00:00,2026-04-08T10:45:00,Session note,Run,,Easy,2,normal,0,0,1.25,420,7",
+    ].join("\n");
+
+    const plan = planWorkoutCsvImport({ text, timeZone: "America/Chicago", source: "hevy" });
+
+    assert.equal(plan.importable, true);
+    assert.equal(plan.requiresWeightUnit, false);
+    assert.equal(plan.requiresDistanceUnit, false);
+    assert.equal(plan.sessions[0]?.occurredAt, "2026-04-08T15:00:00.000Z");
+    assert.equal(plan.sessions[0]?.workout.endedAt, "2026-04-08T15:45:00.000Z");
+    assert.equal(plan.sessions[0]?.note, "Session note");
+    assert.equal(plan.sessions[0]?.distanceKm, 1.25);
+    assert.deepEqual(plan.sessions[0]?.workout.exercises[0], {
+      name: "Squat",
+      order: 1,
+      groupId: undefined,
+      note: "Controlled",
+      sets: [{ order: 1, type: "warmup", reps: 8, weight: 40, weightUnit: "kg", rpe: 6 }],
+      mode: "weight_reps",
+      unitOverride: "kg",
+    });
+  });
+
+  test("rejects an explicit source that conflicts with provider-specific headers", () => {
+    assert.throws(
+      () => planWorkoutCsvImport({
+        text: [
+          "Workout Name,Date,Start Time,Exercise Name,Set Order,Reps,Exercise Image",
+          "Upper,2026-04-08,10:00:00,Press,1,8,https://example.invalid/press.png",
+        ].join("\n"),
+        timeZone: "UTC",
+        source: "strong",
+      }),
+      /source strong conflicts with unambiguous hevy headers/u,
+    );
+  });
+
   test("requires an explicit unit for Strong's unitless positive weights", () => {
     const plan = planWorkoutCsvImport({
       text: [
@@ -80,6 +145,24 @@ describe("planWorkoutCsvImport", () => {
     assert.equal(plan.sessions[0]?.title, "Upper, Phase 2");
     assert.equal(plan.sessions[1]?.workout.exercises[0]?.name, "Press, Paused");
     assert.match(plan.warnings.join(" "), /repaired deterministically/u);
+  });
+
+  test("rejects a Strong comma repair with multiple plausible text fields", () => {
+    const plan = planWorkoutCsvImport({
+      text: [
+        STRONG_HEADER,
+        "2026-02-10 18:00:00,Upper,45m,50m,Press,1,0,8,0,0,, ,",
+      ].join("\n"),
+      timeZone: "UTC",
+    });
+
+    assert.equal(plan.repairedRowCount, 0);
+    assert.equal(plan.skippedRowCount, 1);
+    assert.equal(plan.importable, false);
+    assert.equal(plan.sessions.length, 0);
+    assert.deepEqual(plan.skipReasons, [
+      { reason: "column count does not match the header", count: 1 },
+    ]);
   });
 
   test("keeps quoted workout-title commas on the ordinary CSV path", () => {
@@ -131,6 +214,7 @@ describe("planWorkoutCsvImport", () => {
     const text = [
       STRONG_HEADER,
       "2026-01-15 06:30:00,Conditioning,20m,Run,1,0,0,1.5,600,,,",
+      "2026-01-15 06:30:00,Conditioning,20m,Run,2,0,0,0.5,300,,,",
     ].join("\n");
     const inspected = planWorkoutCsvImport({ text, timeZone: "UTC" });
 
@@ -140,8 +224,9 @@ describe("planWorkoutCsvImport", () => {
 
     const planned = planWorkoutCsvImport({ text, timeZone: "UTC", distanceUnit: "km" });
     assert.equal(planned.importable, true);
-    assert.equal(planned.sessions[0]?.distanceKm, 1.5);
+    assert.equal(planned.sessions[0]?.distanceKm, 2);
     assert.equal(planned.sessions[0]?.workout.exercises[0]?.sets[0]?.distanceMeters, 1500);
+    assert.equal(planned.sessions[0]?.workout.exercises[0]?.sets[1]?.distanceMeters, 500);
   });
 
   test("backfills later session and exercise metadata", () => {
@@ -203,7 +288,7 @@ describe("planWorkoutCsvImport", () => {
       text: [
         "Workout Name,Date,Start Time,End Time,Duration,Exercise Name,Set Order,Weight,Reps,Set Type,Distance,Seconds,Exercise Note,Workout Note,Bodyweight,Assistance,Added Weight,Exercise Image",
         "Morning,2026-03-12,07:00:00,08:00:00,60,Press,1,45 lbs,8,warmup,1.5 km,01:30,Exercise note,Session note,,,,asset",
-        "Morning,2026-03-12,07:00:00,08:00:00,60,Pull Up,1,,5,,,,,Session note,80,10,,asset",
+        "Morning,2026-03-12,07:00:00,08:00:00,60,Pull Up,1,,5,,,,,Session note,176.3698 lbs,22.0462 lbs,,asset",
       ].join("\n"),
       timeZone: "America/Los_Angeles",
     });
@@ -218,6 +303,66 @@ describe("planWorkoutCsvImport", () => {
     assert.equal(plan.sessions[0]?.workout.exercises[0]?.sets[0]?.distanceMeters, 1500);
     assert.equal(plan.sessions[0]?.workout.exercises[0]?.sets[0]?.durationSeconds, 90);
     assert.equal(plan.sessions[0]?.workout.exercises[1]?.mode, "assisted_bodyweight");
+    assert.ok(Math.abs((plan.sessions[0]?.workout.exercises[1]?.sets[0]?.bodyweightKg ?? 0) - 80) < 0.001);
+    assert.ok(Math.abs((plan.sessions[0]?.workout.exercises[1]?.sets[0]?.assistanceKg ?? 0) - 10) < 0.001);
+  });
+
+  test("requires one unit for generic auxiliary loads and converts them to kilograms", () => {
+    const text = [
+      "Workout Name,Date,Start Time,Exercise Name,Set Order,Reps,Bodyweight,Assistance,Added Weight,Exercise Image",
+      "Morning,2026-03-12,07:00:00,Pull Up,1,5,176.3698,22.0462,11.0231,asset",
+    ].join("\n");
+    const inspection = planWorkoutCsvImport({ text, timeZone: "UTC", source: "hevy" });
+    assert.equal(inspection.importable, false);
+    assert.equal(inspection.requiresWeightUnit, true);
+
+    const pounds = planWorkoutCsvImport({
+      text,
+      timeZone: "UTC",
+      source: "hevy",
+      weightUnit: "lb",
+    });
+    const poundsSet = pounds.sessions[0]?.workout.exercises[0]?.sets[0];
+    assert.ok(Math.abs((poundsSet?.bodyweightKg ?? 0) - 80) < 0.001);
+    assert.ok(Math.abs((poundsSet?.assistanceKg ?? 0) - 10) < 0.001);
+    assert.ok(Math.abs((poundsSet?.addedWeightKg ?? 0) - 5) < 0.001);
+
+    const kilograms = planWorkoutCsvImport({
+      text: text.replace("176.3698,22.0462,11.0231", "80,10,5"),
+      timeZone: "UTC",
+      source: "hevy",
+      weightUnit: "kg",
+    });
+    const kilogramsSet = kilograms.sessions[0]?.workout.exercises[0]?.sets[0];
+    assert.equal(kilogramsSet?.bodyweightKg, 80);
+    assert.equal(kilogramsSet?.assistanceKg, 10);
+    assert.equal(kilogramsSet?.addedWeightKg, 5);
+  });
+
+  test("keeps kilogram auxiliary headers authoritative and rejects unit conflicts", () => {
+    const kilograms = planWorkoutCsvImport({
+      text: [
+        "Workout Name,Date,Start Time,Exercise Name,Set Order,Reps,Bodyweight Kg,Assistance Kg,Added Weight Kg,Exercise Image",
+        "Morning,2026-03-12,07:00:00,Pull Up,1,5,80,10,5,asset",
+      ].join("\n"),
+      timeZone: "UTC",
+      source: "hevy",
+    });
+    assert.equal(kilograms.requiresWeightUnit, false);
+    assert.equal(kilograms.sessions[0]?.workout.exercises[0]?.sets[0]?.bodyweightKg, 80);
+
+    const conflict = planWorkoutCsvImport({
+      text: [
+        "Workout Name,Date,Start Time,Exercise Name,Set Order,Reps,Bodyweight Kg,Exercise Image",
+        "Morning,2026-03-12,07:00:00,Pull Up,1,5,176 lbs,asset",
+      ].join("\n"),
+      timeZone: "UTC",
+      source: "hevy",
+    });
+    assert.equal(conflict.importable, false);
+    assert.deepEqual(conflict.skipReasons, [
+      { reason: "weight units conflict within CSV metadata", count: 1 },
+    ]);
   });
 
   test("blocks an explicit option that conflicts with unit metadata in the CSV", () => {
@@ -270,7 +415,7 @@ describe("planWorkoutCsvImport", () => {
     assert.match(plan.warnings.join(" "), /rest-timer metadata/u);
   });
 
-  test("keeps source identities private while retaining the shipped reconciliation key", () => {
+  test("keeps source identities private and preserves repeated exercise blocks", () => {
     const plan = planWorkoutCsvImport({
       text: [
         STRONG_HEADER,
@@ -285,10 +430,6 @@ describe("planWorkoutCsvImport", () => {
     assert.match(sourceWorkoutId, /^strong-workout-[a-f0-9]{40}$/u);
     assert.equal(sourceWorkoutId.includes("Full Body"), false);
     assert.equal(sourceWorkoutId.includes("2026-05-01"), false);
-    assert.equal(
-      plan.sessions[0]?.legacySourceWorkoutId,
-      "2026-05-01T08:00:00.000Z::Full Body",
-    );
     assert.deepEqual(
       plan.sessions[0]?.workout.exercises.map((exercise) => exercise.name),
       ["Press", "Row", "Press"],
