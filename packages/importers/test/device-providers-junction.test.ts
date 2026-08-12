@@ -3873,57 +3873,111 @@ test("Junction sparse clinical readings reject malformed units and values withou
   );
 });
 
-test("Junction sparse clinical persistence stays bounded for oversized provider arrays", async () => {
-  const records = Array.from({ length: 150 }, (_, index) => ({
-    id: `fall-row-${index}`,
-    start: "2026-04-22T08:05:00Z",
-    end: "2026-04-22T08:05:10Z",
-    unit: "count",
-    value: 1,
+test("Junction sparse clinical persistence applies one deterministic post-validation import budget", async () => {
+  const reading = (
+    resource: "fall" | "forced_expiratory_volume_1",
+    index: number,
+  ) => {
+    const occurredAt = new Date(Date.UTC(2026, 3, 22, 6, index)).toISOString();
+    const endAt = new Date(Date.parse(occurredAt) + 10_000).toISOString();
+    return {
+      id: `SENSITIVE_STABLE_${resource.toUpperCase()}_${index}`,
+      start: occurredAt,
+      end: endAt,
+      sourceProviderSlug: resource === "fall" ? "apple-health-kit" : "spirometer",
+      unit: resource === "fall" ? "count" : "L",
+      value: resource === "fall" ? 1 : 3 + index / 100,
+      privateNote: "SENSITIVE_OVERSIZED_CLINICAL_ARRAY_SENTINEL",
+    };
+  };
+  const fallReadings = Array.from({ length: 60 }, (_, index) => reading("fall", index));
+  const fevReadings = Array.from(
+    { length: 60 },
+    (_, index) => reading("forced_expiratory_volume_1", index + 60),
+  );
+  const malformedPrefix = Array.from({ length: 110 }, (_, index) => ({
+    id: `SENSITIVE_MALFORMED_CLINICAL_ID_${index}`,
+    start: "not-a-timestamp",
+    sourceProviderSlug: "spirometer",
+    unit: "L",
+    value: 3.5,
     privateNote: "SENSITIVE_OVERSIZED_CLINICAL_ARRAY_SENTINEL",
   }));
-  const payload = await prepareDeviceProviderSnapshotImport({
-    provider: "junction",
-    connectionId: "conn-junction-clinical-oversized",
-    sourceKind: "webhook",
-    deliveryMode: "full_payload",
-    normalizerVersion: "junction-normalizer.v1",
-    snapshot: {
-      importedAt: "2026-04-23T12:00:00.000Z",
-      timeseries: {
-        fall: {
-          groups: {
-            "apple-health-kit": [{
-              data: records,
-              source: { provider: "apple_health_kit", type: "watch" },
-            }],
-          },
-        },
+  const duplicatePrefix = Array.from({ length: 12 }, () => ({ ...fallReadings[0] }));
+  const orderedTimeseries = {
+    fall: [...duplicatePrefix, ...fallReadings],
+    forced_expiratory_volume_1: [...malformedPrefix, ...fevReadings],
+  };
+  const reversedTimeseries = {
+    forced_expiratory_volume_1: [...orderedTimeseries.forced_expiratory_volume_1].reverse(),
+    fall: [...orderedTimeseries.fall].reverse(),
+  };
+  const prepare = (timeseries: typeof orderedTimeseries, connectionId: string) =>
+    prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      connectionId,
+      sourceKind: "webhook",
+      deliveryMode: "full_payload",
+      normalizerVersion: "junction-normalizer.v1",
+      snapshot: {
+        importedAt: "2026-04-23T12:00:00.000Z",
+        timeseries,
       },
-    },
-  });
-  const artifacts = findJunctionSparseClinicalReadingArtifacts(payload, "fall");
-  const overflow = artifacts.find((artifact) => artifact.role.endsWith(":bounded-overflow"));
+    });
+  const ordered = await prepare(orderedTimeseries, "conn-junction-clinical-ordered");
+  const reversed = await prepare(reversedTimeseries, "conn-junction-clinical-reversed");
+  const eventIdentities = (payload: DeviceBatchImportPayload) =>
+    (payload.events ?? []).map((event) => JSON.stringify(event.externalRef)).sort();
+  const evidenceRoles = (payload: DeviceBatchImportPayload) =>
+    (payload.evidenceParts ?? []).map((part) => part.role).sort();
 
-  assert.equal(payload.events?.length, 100);
-  assert.equal(payload.samples?.length ?? 0, 0);
-  assert.equal(artifacts.length, 101);
-  assert.deepEqual(overflow?.content, {
-    schema: "junction.sparse_clinical_reading_overflow.v1",
-    provider: "junction",
-    resource: "fall",
-    inputRecordCount: 150,
-    persistedReadingCount: 100,
-    status: "bounded_overflow",
-  });
-  assert.ok(artifacts.every((artifact) => JSON.stringify(artifact.content).length < 1024));
-  assert.equal(
-    payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"),
-    false,
-  );
-  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /"groups"|"data"|fall-row-|SENSITIVE_OVERSIZED/u);
-  assertNoFullJunctionTimeseriesArtifacts(payload);
-  assertEventRawArtifactRolesExist(payload);
+  for (const payload of [ordered, reversed]) {
+    const overflow = payload.evidenceParts?.find((artifact) =>
+      artifact.role === "junction-timeseries-reading-sparse-clinical:bounded-overflow"
+    );
+    assert.equal(payload.events?.length, 100);
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.equal(
+      payload.evidenceParts?.filter((artifact) => artifact.role.endsWith(":bounded-overflow")).length,
+      1,
+    );
+    assert.deepEqual(overflow?.content, {
+      schema: "junction.sparse_clinical_reading_overflow.v1",
+      provider: "junction",
+      validatedReadingCount: 120,
+      retainedReadingCount: 100,
+      droppedReadingCount: 20,
+      status: "bounded_overflow",
+    });
+    assert.equal(
+      payload.events?.at(-1)?.occurredAt,
+      new Date(Date.UTC(2026, 3, 22, 6, 99)).toISOString(),
+    );
+    assert.ok((payload.evidenceParts ?? []).every((artifact) =>
+      JSON.stringify(artifact.content).length < 1024
+    ));
+    assert.ok((payload.evidenceParts ?? []).every((artifact) =>
+      !Array.isArray(artifact.content)
+    ));
+    assert.equal(
+      payload.evidenceParts?.some((artifact) => artifact.role === "provider-snapshot"),
+      false,
+    );
+    assert.doesNotMatch(
+      JSON.stringify({
+        events: payload.events,
+        evidenceParts: payload.evidenceParts,
+        ingestReceipt: payload.ingestReceipt,
+        samples: payload.samples,
+      }),
+      /"groups"|"data"|SENSITIVE_(?:STABLE|MALFORMED|OVERSIZED)|"medication"/u,
+    );
+    assertNoFullJunctionTimeseriesArtifacts(payload);
+    assertEventRawArtifactRolesExist(payload);
+  }
+
+  assert.deepEqual(eventIdentities(ordered), eventIdentities(reversed));
+  assert.deepEqual(evidenceRoles(ordered), evidenceRoles(reversed));
 });
 
 test("Junction sparse clinical evidence is replay- and order-idempotent", () => {
@@ -3959,7 +4013,7 @@ test("Junction sparse clinical evidence is replay- and order-idempotent", () => 
   assert.deepEqual(roles(ordered), roles(reversed));
 });
 
-test("Junction sparse clinical readings pass the canonical device import contract", async () => {
+test("Junction sparse clinical corrections retain canonical identity and replay through core", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-sparse-clinical-import");
   try {
     await coreRuntime.initializeVault({
@@ -3967,32 +4021,101 @@ test("Junction sparse clinical readings pass the canonical device import contrac
       createdAt: "2026-04-22T00:00:00.000Z",
       timezone: "UTC",
     });
-    const snapshot = {
-      importedAt: "2026-04-22T12:00:00.000Z",
+    const stableProviderId = "SENSITIVE_FEV1_PROVIDER_RECORD_ID";
+    const snapshot = (
+      importedAt: string,
+      value: number,
+      providerIdentity: { id: string } | { provider_id: string },
+    ) => ({
+      importedAt,
       timeseries: {
         forced_expiratory_volume_1: [{
-          id: "fev1-row-1",
+          ...providerIdentity,
           start: "2026-04-22T08:05:00Z",
           end: "2026-04-22T08:05:10Z",
+          updatedAt: importedAt,
           sourceProviderSlug: "spirometer",
           unit: "L",
-          value: 3.42,
+          value,
+          privateNote: "SENSITIVE_FEV1_PRIVATE_NOTE",
         }],
       },
-    };
-
-    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      { provider: "junction", vaultRoot, snapshot },
+    });
+    const firstSnapshot = snapshot(
+      "2026-04-22T12:00:00.000Z",
+      3.42,
+      { id: stableProviderId },
+    );
+    const correctedSnapshot = snapshot(
+      "2026-04-22T13:00:00.000Z",
+      3.87,
+      { provider_id: stableProviderId },
+    );
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot: firstSnapshot },
       { corePort: coreRuntime },
     );
-    const reading = result.events.find((event) => event.kind === "measurement");
+    const corrected = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot: correctedSnapshot },
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot: correctedSnapshot },
+      { corePort: coreRuntime },
+    );
+    assert.equal(first.applied, true);
+    assert.equal(corrected.applied, true);
+    assert.equal(replay.applied, false);
+    const firstReading = first.events.find((event) => event.kind === "measurement");
+    const correctedReading = corrected.events.find((event) => event.kind === "measurement");
+    const eventRows = (await Promise.all(
+      [...new Set([...first.eventShardPaths, ...corrected.eventShardPaths])].map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ),
+    )).flat().filter((record) => record.id === firstReading?.id);
+    const storedFirst = await coreRuntime.readIntegrationIngestById(vaultRoot, first.ingestId);
+    const storedCorrection = await coreRuntime.readIntegrationIngestById(
+      vaultRoot,
+      corrected.ingestId,
+    );
+    assert.ok(storedFirst);
+    assert.ok(storedCorrection);
+    const firstEvidence = storedFirst.record.parts.find((part) =>
+      part.role.startsWith("junction-timeseries-reading-forced-expiratory-volume-1:")
+    );
+    const correctedEvidence = storedCorrection.record.parts.find((part) =>
+      part.role.startsWith("junction-timeseries-reading-forced-expiratory-volume-1:")
+    );
+    const retainedText = JSON.stringify({
+      firstIngest: storedFirst.record,
+      correctedIngest: storedCorrection.record,
+      eventRows,
+      firstEvents: first.events,
+      correctedEvents: corrected.events,
+      replayEvents: replay.events,
+    });
 
-    assert.equal(reading?.kind, "measurement");
-    assert.deepEqual(reading?.measurements, [
-      { metric: "forced-expiratory-volume-1", value: 3.42, unit: "L" },
+    assert.equal(firstReading?.id, correctedReading?.id);
+    assert.equal(eventRevisionFromLifecycle(correctedReading?.lifecycle), 2);
+    assert.deepEqual(correctedReading?.measurements, [
+      { metric: "forced-expiratory-volume-1", value: 3.87, unit: "L" },
     ]);
-    assert.ok(result.evidencePartCount >= 1);
-    assert.notEqual(result.ingestShardPath, "");
+    assert.equal(eventRows.length, 2);
+    assert.deepEqual(eventRows.map((record) => eventRevisionFromLifecycle(record.lifecycle)), [1, 2]);
+    assert.match(firstEvidence?.content ?? "", /"value":3\.42/u);
+    assert.match(correctedEvidence?.content ?? "", /"value":3\.87/u);
+    assert.equal(corrected.persistedEvidencePartCount, 1);
+    assert.equal(replay.persistedEvidencePartCount, 0);
+    assert.equal(first.samples.length, 0);
+    assert.equal(corrected.samples.length, 0);
+    assert.equal(replay.samples.length, 0);
+    assert.equal(first.sampleShardPaths.length, 0);
+    assert.equal(corrected.sampleShardPaths.length, 0);
+    assert.equal(replay.sampleShardPaths.length, 0);
+    assert.doesNotMatch(
+      retainedText,
+      /SENSITIVE_FEV1_PROVIDER_RECORD_ID|SENSITIVE_FEV1_PRIVATE_NOTE|provider-snapshot|"groups"|"data"|"medication"/u,
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
