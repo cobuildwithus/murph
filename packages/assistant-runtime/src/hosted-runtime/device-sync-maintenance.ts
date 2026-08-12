@@ -1,6 +1,11 @@
 import {
   createConfiguredDeviceSyncProvidersFromConfigs,
 } from "@murphai/device-syncd/config";
+import {
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+  normalizeJunctionProviderSlug,
+} from "@murphai/device-syncd/connect-config";
 import type {
   SerializableConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
@@ -9,6 +14,11 @@ import {
   resolveDeviceSyncStoreNextWakeAt,
   type DeviceSyncService,
 } from "@murphai/device-syncd/service";
+import {
+  countAvailableDeviceSyncSourceResources,
+  isDeviceSyncSourceHistoricalBackfillComplete,
+  isGoogleHealthFitbitMigrationSuccessorReady,
+} from "@murphai/device-syncd/public-account";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import {
   sanitizeHostedRuntimeErrorText,
@@ -47,6 +57,7 @@ import {
 import {
   closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService,
+  requireHostedRuntimeDeviceSyncStore,
 } from "../device-sync-service.ts";
 import {
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
@@ -66,6 +77,11 @@ const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 2048;
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES = 25;
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES = 512 * 1024 * 1024;
+const HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_MAX_ATTEMPTS_PER_PASS = 4;
+const HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_RETRY_DELAY_MS = 30_000;
+type HostedDeviceSyncMaintenanceStore = ReturnType<
+  typeof requireHostedRuntimeDeviceSyncStore
+>;
 export async function runHostedDeviceSyncPass(
   wake: HostedRuntimeEvent,
   vaultRoot: string,
@@ -260,6 +276,13 @@ export async function runHostedDeviceSyncPass(
         service,
         state: syncState,
       });
+      await completeHostedDeviceSyncFitbitMigrations({
+        deviceSyncPort,
+        platform: options.runtimeLogPlatform ?? null,
+        service,
+        signal: options.signal ?? null,
+        state: syncState,
+      });
     }
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
@@ -328,6 +351,119 @@ export async function runHostedDeviceSyncPass(
   } finally {
     closeHostedRuntimeDeviceSyncService(service);
   }
+}
+
+async function completeHostedDeviceSyncFitbitMigrations(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  service: DeviceSyncService;
+  signal: AbortSignal | null;
+  state: HostedDeviceSyncRuntimeSyncState;
+}): Promise<void> {
+  const completeFitbitMigration = input.deviceSyncPort?.completeFitbitMigration;
+  if (!completeFitbitMigration) {
+    return;
+  }
+
+  const store = requireHostedRuntimeDeviceSyncStore(input.service);
+  const candidates: Array<{ hostedConnectionId: string; localAccountId: string }> = [];
+  for (const [localAccountId, hostedConnectionId] of input.state.localToHostedAccountIds) {
+    const sources = store.listConnectionSources({ connectionId: localAccountId });
+    const hasLegacy = sources.some((source) =>
+      normalizeJunctionProviderSlug(source.sourceProviderSlug)
+        === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      && source.status !== "disconnected"
+    );
+    const successor = sources.find((source) =>
+      normalizeJunctionProviderSlug(source.sourceProviderSlug)
+        === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    );
+    const successorReady = successor
+      ? isGoogleHealthFitbitMigrationSuccessorReady({
+          firstSeenAt: successor.firstSeenAt,
+          historicalBackfillComplete:
+            isDeviceSyncSourceHistoricalBackfillComplete(successor),
+          lastDataAt: successor.lastDataAt,
+          resourceCount: countAvailableDeviceSyncSourceResources(
+            successor.resourceAvailabilitySummary,
+          ),
+          status: successor.status,
+        })
+      : false;
+    if (hasLegacy && successorReady) {
+      candidates.push({ hostedConnectionId, localAccountId });
+    }
+  }
+
+  const retryBucket = Math.floor(
+    Date.now() / HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_RETRY_DELAY_MS,
+  );
+  const rotationStart = candidates.length > 0 ? retryBucket % candidates.length : 0;
+  const rotatedCandidates = [
+    ...candidates.slice(rotationStart),
+    ...candidates.slice(0, rotationStart),
+  ];
+  const attempts = rotatedCandidates.slice(
+    0,
+    HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_MAX_ATTEMPTS_PER_PASS,
+  );
+  const deferred = rotatedCandidates[HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_MAX_ATTEMPTS_PER_PASS];
+  if (deferred) {
+    scheduleHostedDeviceSyncFitbitMigrationRetry(store, deferred.localAccountId);
+  }
+
+  for (const candidate of attempts) {
+    try {
+      const outcome = await completeFitbitMigration.call(input.deviceSyncPort, {
+        connectionId: candidate.hostedConnectionId,
+        signal: input.signal,
+      });
+      if (outcome.status === "pending") {
+        scheduleHostedDeviceSyncFitbitMigrationRetry(store, candidate.localAccountId);
+      }
+    } catch (error) {
+      if (input.signal?.aborted) {
+        throw input.signal.reason ?? error;
+      }
+      scheduleHostedDeviceSyncFitbitMigrationRetry(store, candidate.localAccountId);
+      if (input.platform) {
+        await writeHostedRuntimeLogBestEffort({
+          entry: {
+            component: "device-sync",
+            eventCode: "device-sync.fitbit_migration_cutover_failed",
+            level: "warn",
+            phase: "invoke",
+            redactedJson: {
+              errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(error))
+                ?? "Fitbit migration cutover failed",
+              provider: "junction",
+              sourceProvider: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+            },
+          },
+          platform: input.platform,
+        });
+      }
+    }
+  }
+}
+
+function scheduleHostedDeviceSyncFitbitMigrationRetry(
+  store: HostedDeviceSyncMaintenanceStore,
+  localAccountId: string,
+): void {
+  const account = store.getAccountById(localAccountId);
+  if (account?.status !== "active") {
+    return;
+  }
+  const retryAt = new Date(
+    Date.now() + HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_RETRY_DELAY_MS,
+  ).toISOString();
+  store.patchAccount(account.id, {
+    nextReconcileAt: earliestHostedMaintenanceWakeAt(
+      account.nextReconcileAt ?? null,
+      retryAt,
+    ),
+  });
 }
 
 function writeHostedDeviceSyncImportCompletedRuntimeLogs(input: {

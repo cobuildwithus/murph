@@ -4840,6 +4840,43 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
+  it("routes automatic Fitbit cutover through the signed web-control port", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(
+        "/api/internal/device-sync/fitbit-migration/cutover",
+      );
+      await expect(request.json()).resolves.toEqual({ connectionId: "conn_fitbit" });
+      return new Response(JSON.stringify({
+        connectionId: "conn_fitbit",
+        status: "complete",
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.deviceSyncPort!.completeFitbitMigration!({
+      connectionId: "conn_fitbit",
+    })).resolves.toEqual({
+      connectionId: "conn_fitbit",
+      status: "complete",
+    });
+
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "Fitbit cutover request");
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
   it("write-fences exact external thread route authority through direct web-control", async () => {
     const authority = {
       channel: "telegram" as const,

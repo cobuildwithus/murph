@@ -1,8 +1,8 @@
 # Migrate Fitbit Connections to Google Health
 
-Status: blocked on external review and browser proof
+Status: in progress; final ReviewGPT and current-base gates remain
 Created: 2026-08-11
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 ## Goal
 
@@ -68,6 +68,11 @@ Updated: 2026-08-11
 5. Risk: deployment configuration lags code across web and hosted runtime.
    Mitigation: document the safe deployment order and verify the final binding
    names and an end-to-end test authorization before cohort rollout.
+6. Risk: the browser closes before successor verification finishes, leaving the
+   member indefinitely on the legacy source.
+   Mitigation: make the hosted runtime the bounded retry owner, have Web recheck
+   durable readiness under the existing connection lock, and keep the browser
+   limited to presentation and an explicit manual retry.
 
 ## Tasks
 
@@ -79,13 +84,15 @@ Updated: 2026-08-11
    exact-head required functional CI.
 4. Completed: pushed the base-reconciled candidate and inspected the only manual
    merge resolution, which combined compatible compatibility-matrix text.
-5. Blocked: the required exact-head ReviewGPT file-backed gates cannot attach
-   their packages because ChatGPT reports a full file library. A GitHub-connector
-   fallback accepted the exact-head prompt but remained in model thinking after
-   an extended wait and did not return review findings.
-6. Blocked: exact-head desktop/mobile design screenshots cannot be captured
-   because no in-app browser runtime is available. Existing hosted images remain
-   labeled as prior baselines and are not represented as current proof.
+5. Completed: captured and published desktop/mobile design proof for the real
+   Connect study through the repository's Playwright fallback when the in-app
+   browser runtime was unavailable.
+6. Completed: obtained the preliminary ReviewGPT specialist outcome, accepted
+   its browser-lifecycle finding, and moved automatic verified cutover into the
+   hosted runtime and signed Web control plane with bounded retries.
+7. In progress: push the corrected exact head, run final ReviewGPT concurrently
+   with required CI, and inspect current-base mergeability without spending a
+   second base-update attempt.
 
 ## Decisions
 
@@ -106,24 +113,24 @@ Updated: 2026-08-11
   passed after the base update.
 - `apps/web`: 197 focused settings, Connect, and hosted-authority tests passed.
 - `packages/importers`: 149 focused Junction importer tests passed.
+- Corrected lifecycle remediation: 102 device-sync contract tests, 246 Web
+  connect/control-plane tests, 82 hosted-runtime maintenance tests, 362
+  Cloudflare transport/policy tests, and all affected package typechecks pass.
 - Affected device-sync, importer, and Web typechecks passed before the base-only
   update; exact-head release build/typecheck and app verification passed in CI.
 - Exact-head package coverage, host matrices, fixture coverage, sandbox,
   artifact, billing, and overflow checks passed.
-- The frontend design-proof check remains failed only because current hosted
-  desktop/mobile screenshots are unavailable; its architecture and changelog
-  declarations pass.
-- The protected ReviewGPT gate remains uncompleted due to the external upload
-  quota. The connector fallback has not returned an outcome and does not replace
-  the protected gate.
+- The frontend design-proof test passes, and the pull request includes rendered
+  desktop/mobile proof for authorization, verification, cutover, retry, and the
+  provider disclosure.
+- Preliminary ReviewGPT returned one accepted finding. The corrected head must
+  still complete the independent final full-patch ReviewGPT round.
 
-## Blocked handoff
+## Remaining handoff
 
 - Keep the pull request draft.
-- Free space in the ChatGPT file library, then rerun the protected preliminary
-  and final ReviewGPT gates against the unchanged PR-authored patch.
-- Make an in-app browser runtime available, capture the real Connect design study
-  at desktop and mobile widths, update the pull-request proof, and rerun the
-  frontend design-proof check.
-- Resolve any accepted ReviewGPT finding before archiving this plan or moving to
-  the merge boundary.
+- Run final ReviewGPT round 1 against the corrected exact head while required CI
+  executes; resolve every accepted finding before archiving this plan.
+- Recheck the current base with `git merge-tree`. The one permitted base update
+  is already consumed, so retain the draft PR and report a moving-base conflict
+  if the reviewed patch no longer merges cleanly.

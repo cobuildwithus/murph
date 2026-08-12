@@ -24,6 +24,9 @@ export const DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE =
 export const DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY =
   "historicalBackfillCompletedAt";
 
+export const DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE =
+  "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED";
+
 const DEVICE_SYNC_SOURCE_RESOURCE_AVAILABILITY_METADATA_KEYS = new Set([
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   "sourceInstanceKeyFallback",
@@ -83,6 +86,48 @@ export function isDeviceSyncSourceResourceAvailabilityMetadataKey(
   key: string,
 ): boolean {
   return DEVICE_SYNC_SOURCE_RESOURCE_AVAILABILITY_METADATA_KEYS.has(key);
+}
+
+export function countAvailableDeviceSyncSourceResources(
+  summary: Record<string, unknown> | null | undefined,
+): number {
+  return Object.entries(summary ?? {}).filter(([key, value]) =>
+    isAvailableDeviceSyncSourceResource(key, value)
+  ).length;
+}
+
+export function isAvailableDeviceSyncSourceResource(
+  key: string,
+  value: unknown,
+): boolean {
+  return !isDeviceSyncSourceResourceAvailabilityMetadataKey(key)
+    && value !== false
+    && value !== null
+    && value !== undefined;
+}
+
+export function isGoogleHealthFitbitMigrationSuccessorReady(input: {
+  firstSeenAt?: string | null;
+  historicalBackfillComplete: boolean;
+  lastDataAt?: string | null;
+  resourceCount: number;
+  status: string;
+}): boolean {
+  if (
+    input.status !== "connected"
+    || !input.historicalBackfillComplete
+    || input.resourceCount <= 0
+    || !input.firstSeenAt
+    || !input.lastDataAt
+  ) {
+    return false;
+  }
+
+  const firstSeenAtMs = Date.parse(input.firstSeenAt);
+  const lastDataAtMs = Date.parse(input.lastDataAt);
+  return Number.isFinite(firstSeenAtMs)
+    && Number.isFinite(lastDataAtMs)
+    && lastDataAtMs > firstSeenAtMs;
 }
 
 // Garmin historical exports can only restart after the provider-side connection is

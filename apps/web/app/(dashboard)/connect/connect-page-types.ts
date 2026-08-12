@@ -27,6 +27,7 @@ export type ConnectSource = {
     | "authorization_required"
     | "verifying_successor"
     | "cutover_ready";
+  migrationRetryRequired?: boolean;
   name: string;
   recoveryKind?: "connection_reset";
   requiresReconnect?: boolean;

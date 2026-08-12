@@ -1,5 +1,7 @@
 import {
   buildJunctionProviderSourceInstanceKey,
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   normalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
@@ -21,8 +23,12 @@ import {
   shapeHostedDeviceSyncJobHintPayload,
 } from "@murphai/device-syncd/hosted-hints";
 import {
+  countAvailableDeviceSyncSourceResources,
   DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
+  isDeviceSyncSourceHistoricalBackfillComplete,
+  isGoogleHealthFitbitMigrationSuccessorReady,
   isEstablishedDeviceSyncConnection,
   isDeviceSyncConnectionSetupPending,
   isDeviceSyncDisconnectInProgress,
@@ -84,6 +90,8 @@ import {
 
 const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
 const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
+const GOOGLE_HEALTH_FITBIT_MIGRATION_NOT_READY_ERROR_CODE =
+  "GOOGLE_HEALTH_FITBIT_MIGRATION_NOT_READY";
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
@@ -91,6 +99,7 @@ const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
 
 export async function disconnectHostedDeviceSyncConnectionSource(input: {
   connectionId: string;
+  requireGoogleHealthFitbitMigrationReady?: boolean;
   registry: DeviceSyncRegistry;
   sourceProviderSlug: string;
   store: PrismaDeviceSyncControlPlaneStore;
@@ -115,9 +124,20 @@ export async function disconnectHostedDeviceSyncConnectionSource(input: {
       throw connectionSourceNotFoundError();
     }
 
+    const sources = input.requireGoogleHealthFitbitMigrationReady
+      ? await input.store.listConnectionSources(input.connectionId, tx)
+      : undefined;
+    if (
+      sources
+      && !isHostedGoogleHealthFitbitMigrationCutoverReady(sources)
+    ) {
+      throw googleHealthFitbitMigrationNotReadyError();
+    }
+
     const source = await findHostedConnectionSource({
       connectionId: input.connectionId,
       sourceProviderSlug,
+      sources,
       store: input.store,
       tx,
     });
@@ -300,6 +320,75 @@ export async function disconnectHostedDeviceSyncConnectionSource(input: {
   }
 
   return { sourceProviderSlug, status: "disconnected" };
+}
+
+export async function completeHostedGoogleHealthFitbitMigration(input: {
+  connectionId: string;
+  registry: DeviceSyncRegistry;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<{ connectionId: string; status: "complete" | "pending" }> {
+  try {
+    await disconnectHostedDeviceSyncConnectionSource({
+      ...input,
+      requireGoogleHealthFitbitMigrationReady: true,
+      sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+    });
+    return { connectionId: input.connectionId, status: "complete" };
+  } catch (error) {
+    if (
+      isDeviceSyncError(error)
+      && (
+        error.code === GOOGLE_HEALTH_FITBIT_MIGRATION_NOT_READY_ERROR_CODE
+        || error.code === "CONNECTION_CHANGED_DURING_DISCONNECT"
+      )
+    ) {
+      return { connectionId: input.connectionId, status: "pending" };
+    }
+    await markHostedGoogleHealthFitbitMigrationCutoverFailed(input);
+    throw error;
+  }
+}
+
+async function markHostedGoogleHealthFitbitMigrationCutoverFailed(input: {
+  connectionId: string;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<void> {
+  await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const connection = await input.store.getConnectionForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    if (!connection || connection.provider !== "junction" || connection.status !== "active") {
+      return;
+    }
+    const source = await findHostedConnectionSource({
+      connectionId: input.connectionId,
+      sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+      store: input.store,
+      tx,
+    });
+    if (
+      !source
+      || source.status === "disconnected"
+      || isHostedSourceDisconnectFenced(source)
+      || source.lastErrorCode === HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+      || source.lastErrorCode === HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE
+    ) {
+      return;
+    }
+    await writeHostedConnectionSourceLifecycle({
+      errorCode: DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
+      errorMessage: null,
+      now: nextHostedSourceLifecycleAt(source.lastSeenAt),
+      source,
+      status: source.status,
+      store: input.store,
+      tx,
+    });
+  });
 }
 
 /**
@@ -1437,6 +1526,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
 async function findHostedConnectionSource(input: {
   connectionId: string;
   sourceProviderSlug: string;
+  sources?: readonly HostedDeviceConnectionSource[];
   store: PrismaDeviceSyncControlPlaneStore;
   tx: HostedPrismaTransactionClient;
 }): Promise<HostedDeviceConnectionSource | null> {
@@ -1448,8 +1538,38 @@ async function findHostedConnectionSource(input: {
     return null;
   }
 
-  return (await input.store.listConnectionSources(input.connectionId, input.tx))
+  return (input.sources ?? await input.store.listConnectionSources(input.connectionId, input.tx))
     .find((source) => source.sourceInstanceKey === sourceInstanceKey) ?? null;
+}
+
+function isHostedGoogleHealthFitbitMigrationCutoverReady(
+  sources: readonly HostedDeviceConnectionSource[],
+): boolean {
+  const legacy = sources.find((source) =>
+    normalizeJunctionProviderSlug(source.sourceProviderSlug)
+      === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+  );
+  const successor = sources.find((source) =>
+    normalizeJunctionProviderSlug(source.sourceProviderSlug)
+      === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+  );
+
+  return Boolean(
+    legacy
+    && legacy.status !== "disconnected"
+    && !isHostedSourceDisconnectFenced(legacy)
+    && successor
+    && isGoogleHealthFitbitMigrationSuccessorReady({
+      firstSeenAt: successor.firstSeenAt,
+      historicalBackfillComplete:
+        isDeviceSyncSourceHistoricalBackfillComplete(successor),
+      lastDataAt: successor.lastDataAt,
+      resourceCount: countAvailableDeviceSyncSourceResources(
+        successor.resourceAvailabilitySummary,
+      ),
+      status: successor.status,
+    }),
+  );
 }
 
 async function readCurrentSourceDisconnectTarget(input: {
@@ -1537,6 +1657,15 @@ function connectionSourceNotFoundError(): never {
     message: "Hosted device-sync source was not found for this connection.",
     retryable: false,
     httpStatus: 404,
+  });
+}
+
+function googleHealthFitbitMigrationNotReadyError(): never {
+  throw deviceSyncError({
+    code: GOOGLE_HEALTH_FITBIT_MIGRATION_NOT_READY_ERROR_CODE,
+    message: "Google Health verification is not ready for Fitbit cutover.",
+    retryable: false,
+    httpStatus: 409,
   });
 }
 

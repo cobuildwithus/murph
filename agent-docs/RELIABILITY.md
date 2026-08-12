@@ -624,6 +624,13 @@ Last verified: 2026-08-11
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
   and authority failures, other HTTP responses, malformed data, and unclassified
   errors remain terminal; the runtime must not create a second artifact retry queue.
+- Automatic Google Health Fitbit cutover runs only after the hosted pass has
+  published successor history/resource/freshness evidence. Web rechecks those
+  durable rows before the targeted provider revoke. Provider failure restores
+  legacy Fitbit and writes only the retry presentation marker; provider or
+  transport failure advances the existing local reconcile wake by 30 seconds.
+  The flow must not create a migration queue or depend on a browser poll
+  remaining mounted.
 - Store-owned device-sync dirty writes use a private prepare-then-commit
   boundary: the dirty store derives the credential-independence authority bit,
   compresses, and secure-box seals each payload before opening its transaction;

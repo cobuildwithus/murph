@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  countAvailableDeviceSyncSourceResources,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
   isDeviceSyncConnectionSetupConfirmed,
@@ -10,6 +11,7 @@ import {
   isDeviceSyncSourceHistoricalBackfillComplete,
   isDeviceSyncSourceResourceAvailabilityMetadataKey,
   isEstablishedDeviceSyncConnection,
+  isGoogleHealthFitbitMigrationSuccessorReady,
   isJunctionHistoricalResetProviderSlug,
   redactPublicDeviceSyncMetadata,
   requiresHistoricalResetDeviceSyncSource,
@@ -148,4 +150,44 @@ test("source history readiness requires a valid completion marker no older than 
     true,
   );
   assert.equal(isDeviceSyncSourceResourceAvailabilityMetadataKey("sleep"), false);
+});
+
+test("Google Health Fitbit cutover requires verified history, resources, and a fresh update", () => {
+  const ready = {
+    firstSeenAt: "2026-08-11T10:00:00.000Z",
+    historicalBackfillComplete: true,
+    lastDataAt: "2026-08-11T10:00:01.000Z",
+    resourceCount: 2,
+    status: "connected",
+  };
+
+  assert.equal(isGoogleHealthFitbitMigrationSuccessorReady(ready), true);
+  assert.equal(isGoogleHealthFitbitMigrationSuccessorReady({
+    ...ready,
+    historicalBackfillComplete: false,
+  }), false);
+  assert.equal(isGoogleHealthFitbitMigrationSuccessorReady({
+    ...ready,
+    lastDataAt: ready.firstSeenAt,
+  }), false);
+  assert.equal(isGoogleHealthFitbitMigrationSuccessorReady({
+    ...ready,
+    resourceCount: 0,
+  }), false);
+  assert.equal(isGoogleHealthFitbitMigrationSuccessorReady({
+    ...ready,
+    status: "error",
+  }), false);
+});
+
+test("available source resource counts exclude lifecycle metadata and unavailable values", () => {
+  assert.equal(countAvailableDeviceSyncSourceResources({
+    [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]:
+      "2026-08-11T12:00:00.000Z",
+    heartrate: null,
+    sleep: true,
+    steps: false,
+    workouts: { available: true },
+  }), 2);
+  assert.equal(countAvailableDeviceSyncSourceResources(null), 0);
 });

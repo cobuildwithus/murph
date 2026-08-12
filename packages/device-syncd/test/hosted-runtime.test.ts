@@ -11,12 +11,15 @@ import {
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
 import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
+  HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
   isDeviceSyncCredentialIndependentImportJob as classifyCredentialIndependentImportJob,
   isHostedRuntimeIdShapedDiagnosticToken,
   mergeGuardedJunctionHistoricalBackfillMetadata,
   mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
+  parseHostedExecutionDeviceSyncFitbitMigrationCutoverRequest,
+  parseHostedExecutionDeviceSyncFitbitMigrationCutoverResponse,
   parseHostedExecutionDeviceSyncDirtyAckRequest,
   parseHostedExecutionDeviceSyncWakeHint,
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
@@ -1126,6 +1129,23 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       generatedAt: "2026-04-07T00:00:00.000Z",
       userId: "user_123",
     });
+  });
+
+  it("parses the bounded Fitbit migration cutover contract", () => {
+    expect(HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH).toBe(
+      "/api/internal/device-sync/fitbit-migration/cutover",
+    );
+    expect(parseHostedExecutionDeviceSyncFitbitMigrationCutoverRequest({
+      connectionId: "dsc_fitbit",
+    })).toEqual({ connectionId: "dsc_fitbit" });
+    expect(parseHostedExecutionDeviceSyncFitbitMigrationCutoverResponse({
+      connectionId: "dsc_fitbit",
+      status: "complete",
+    })).toEqual({ connectionId: "dsc_fitbit", status: "complete" });
+    expect(() => parseHostedExecutionDeviceSyncFitbitMigrationCutoverResponse({
+      connectionId: "dsc_fitbit",
+      status: "switching",
+    })).toThrowError(/status must be complete or pending/u);
   });
 
   it("rejects non-object and invalid hosted runtime snapshot requests", () => {

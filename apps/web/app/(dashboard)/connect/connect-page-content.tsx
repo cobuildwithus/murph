@@ -11,7 +11,9 @@ import {
   resolveDeviceConnectSourceIdForJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 import {
+  DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  isGoogleHealthFitbitMigrationSuccessorReady,
 } from "@murphai/device-syncd/public-account";
 
 import { PageHeader } from "@/src/components/ui/page-header";
@@ -73,6 +75,7 @@ type ConnectSourceConnectionState = {
   disconnectScope?: ConnectSourceDisconnectScope;
   disconnectSourceProviderSlug?: string;
   migrationState?: ConnectSourceMigrationState;
+  migrationRetryRequired?: boolean;
   recoveryKind?: ConnectSourceRecoveryKind;
   requiresReconnect: boolean;
   sourceId: string;
@@ -345,6 +348,7 @@ export default async function ConnectPage({
   >();
   const disconnectSourceProviderSlugBySourceId = new Map<string, string>();
   const migrationStateBySourceId = new Map<string, ConnectSourceMigrationState>();
+  const migrationRetrySourceIds = new Set<string>();
   let historicalResetIncompleteSourceIds = new Set<string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
   const [
@@ -385,6 +389,9 @@ export default async function ConnectPage({
         if (connection.migrationState) {
           migrationStateBySourceId.set(sourceId, connection.migrationState);
           connectedSourceIds.delete(sourceId);
+        }
+        if (connection.migrationRetryRequired) {
+          migrationRetrySourceIds.add(sourceId);
         }
         if (connection.connectionId) {
           disconnectConnectionIdBySourceId.set(
@@ -440,6 +447,7 @@ export default async function ConnectPage({
       disconnectSourceProviderSlugBySourceId,
       historicalResetIncompleteSourceIds,
       migrationStateBySourceId,
+      migrationRetrySourceIds,
       reconnectProviderBySourceId,
       reconnectSourceIds,
       reconnectTargetBySourceId,
@@ -637,6 +645,7 @@ export function resolveConfiguredConnectSources(
     disconnectSourceProviderSlugBySourceId?: ReadonlyMap<string, string>;
     historicalResetIncompleteSourceIds?: ReadonlySet<string>;
     migrationStateBySourceId?: ReadonlyMap<string, ConnectSourceMigrationState>;
+    migrationRetrySourceIds?: ReadonlySet<string>;
     reconnectProviderBySourceId?: ReadonlyMap<string, string>;
     reconnectSourceIds?: ReadonlySet<string>;
     reconnectTargetBySourceId?: ReadonlyMap<string, string>;
@@ -700,6 +709,9 @@ export function resolveConfiguredConnectSources(
           : {}),
         ...(historicalResetIncomplete ? { historicalResetIncomplete } : {}),
         ...(migrationState ? { migrationState } : {}),
+        ...(options.migrationRetrySourceIds?.has(source.id)
+          ? { migrationRetryRequired: true }
+          : {}),
         ...(recoveryKind ? { recoveryKind } : {}),
         ...(requiresReconnect ? { requiresReconnect } : {}),
         ...(requiresJunctionDisclosure ? { requiresJunctionDisclosure } : {}),
@@ -1013,10 +1025,15 @@ function resolveFitbitMigrationConnectionState(input: {
       normalizeDeviceSyncConnectTargetKey(source.sourceProviderSlug) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG &&
       isLiveJunctionUpstreamSource(source),
   );
-  const successorReady = successor?.status === "connected" &&
-    successor.historicalBackfillComplete === true &&
-    successor.resourceCount > 0 &&
-    compareIsoTimestamps(successor.lastDataAt ?? undefined, successor.firstSeenAt) > 0;
+  const successorReady = successor
+    ? isGoogleHealthFitbitMigrationSuccessorReady({
+        firstSeenAt: successor.firstSeenAt,
+        historicalBackfillComplete: successor.historicalBackfillComplete === true,
+        lastDataAt: successor.lastDataAt,
+        resourceCount: successor.resourceCount,
+        status: successor.status,
+      })
+    : false;
   const successorNeedsAuthorization =
     !successor ||
     successor.status === "error" ||
@@ -1031,6 +1048,10 @@ function resolveFitbitMigrationConnectionState(input: {
       ? legacy.connectTarget ?? null
       : null,
     ...(successorReady ? { disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } : {}),
+    ...(successorReady &&
+      legacy.lastErrorCode === DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE
+      ? { migrationRetryRequired: true }
+      : {}),
     migrationState: successorReady
       ? "cutover_ready"
       : successorNeedsAuthorization
@@ -1040,18 +1061,6 @@ function resolveFitbitMigrationConnectionState(input: {
     sourceId: "fitbit",
     state: input.sourceState,
   };
-}
-
-function compareIsoTimestamps(left: string | undefined, right: string | undefined): number {
-  if (!left || !right) {
-    return 0;
-  }
-  const leftTimestamp = Date.parse(left);
-  const rightTimestamp = Date.parse(right);
-  if (!Number.isFinite(leftTimestamp) || !Number.isFinite(rightTimestamp)) {
-    return 0;
-  }
-  return leftTimestamp - rightTimestamp;
 }
 
 function countLiveJunctionUpstreamSources(

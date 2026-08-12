@@ -57,6 +57,7 @@ import type {
 } from "./connect-page-types";
 
 interface HostedDeviceSyncDisconnectResponse {
+  status?: "complete" | "pending";
   warning?: { historicalResetIncomplete?: boolean; message: string };
 }
 
@@ -149,7 +150,6 @@ export function ConnectSourcesGrid({
     useState(false);
   const initialConnectIntentAuthOpenedRef = useRef(false);
   const initialConnectIntentAttemptedRef = useRef(false);
-  const automaticFitbitCutoverAttemptsRef = useRef(new Set<string>());
   const fitbitMigrationRefreshAttemptsRef = useRef(0);
   const router = useRouter();
   const { openAuthDialog } = useAuth();
@@ -487,7 +487,10 @@ export function ConnectSourcesGrid({
 
     try {
       const sourceProviderSlug = source.disconnectSourceProviderSlug?.trim();
-      const disconnectUrl = sourceProviderSlug
+      const migrationCutover = source.migrationState === "cutover_ready";
+      const disconnectUrl = migrationCutover
+        ? `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/fitbit-migration/cutover`
+        : sourceProviderSlug
         ? `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/sources/${encodeURIComponent(sourceProviderSlug)}/disconnect`
         : `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/disconnect`;
       const result =
@@ -495,6 +498,15 @@ export function ConnectSourcesGrid({
           method: "POST",
           url: disconnectUrl,
         });
+      if (migrationCutover && result.status === "pending") {
+        setNotice({
+          kind: "warning",
+          title: "Fitbit is still switching",
+          message: "The legacy Fitbit connection is still syncing. Murph will retry the switch automatically.",
+        });
+        router.refresh();
+        return;
+      }
       setDisconnectSource(null);
       if (source.migrationState === "cutover_ready") {
         setCompletedMigrationSourceIds(
@@ -528,32 +540,7 @@ export function ConnectSourcesGrid({
     } finally {
       setPendingDisconnectSourceId(null);
     }
-  }, [pendingDisconnectSourceId, pendingSourceId]);
-
-  useEffect(() => {
-    if (!authenticated) {
-      return;
-    }
-
-    const source = displaySources.find(
-      (candidate) =>
-        candidate.id === "fitbit" &&
-        candidate.migrationState === "cutover_ready",
-    );
-    const connectionId = source?.disconnectConnectionId?.trim();
-    const sourceProviderSlug = source?.disconnectSourceProviderSlug?.trim();
-    if (!source || !connectionId || !sourceProviderSlug) {
-      return;
-    }
-
-    const attemptKey = `${connectionId}:${sourceProviderSlug}`;
-    if (automaticFitbitCutoverAttemptsRef.current.has(attemptKey)) {
-      return;
-    }
-
-    automaticFitbitCutoverAttemptsRef.current.add(attemptKey);
-    void disconnectConnection(source);
-  }, [authenticated, disconnectConnection, displaySources]);
+  }, [pendingDisconnectSourceId, pendingSourceId, router]);
 
   return (
     <section className="flex min-w-0 flex-col gap-4">
@@ -625,7 +612,9 @@ export function ConnectSourcesGrid({
               errorMessage={
                 visibleActionError?.sourceId === source.id
                   ? visibleActionError.message
-                  : null
+                  : source.migrationRetryRequired
+                    ? "Murph could not stop the legacy Fitbit connection. It is still syncing; retry when you are ready."
+                    : null
               }
               pending={pendingSourceId === source.id}
               pendingDisconnect={pendingDisconnectSourceId === source.id}

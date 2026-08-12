@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   initInboxRuntime: vi.fn(),
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
+  requireHostedRuntimeDeviceSyncStore: vi.fn(),
   reconcileHostedDeviceSyncControlPlaneState: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   selectHostedAssistantInputIds: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock("@murphai/device-syncd/registry", () => ({
 vi.mock("../src/device-sync-service.ts", () => ({
   closeHostedRuntimeDeviceSyncService: mocks.closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService: mocks.createHostedRuntimeDeviceSyncService,
+  requireHostedRuntimeDeviceSyncStore: mocks.requireHostedRuntimeDeviceSyncStore,
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -1704,6 +1706,241 @@ describe("runHostedDeviceSyncPass", () => {
         ],
       }),
     );
+  });
+
+  it("asks Web to complete Fitbit cutover after publishing runtime source state", async () => {
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 0),
+      getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const completeFitbitMigration = vi.fn(async () => ({
+      connectionId: "hosted_fitbit",
+      status: "complete" as const,
+    }));
+    const port = {
+      ...createMaintenanceDeviceSyncPortStub(),
+      completeFitbitMigration,
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      listConnectionSources: vi.fn(() => [
+        { sourceProviderSlug: "fitbit", status: "connected" },
+        {
+          firstSeenAt: "2026-08-11T10:00:00.000Z",
+          lastDataAt: "2026-08-11T10:05:00.000Z",
+          resourceAvailabilitySummary: {
+            historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
+            sleep: true,
+          },
+          sourceProviderSlug: "google_health",
+          status: "connected",
+        },
+      ]),
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map([["hosted_fitbit", "local_fitbit"]]),
+      localToHostedAccountIds: new Map([["local_fitbit", "hosted_fitbit"]]),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: { connections: [] },
+    });
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_fitbit_cutover",
+        kind: "runtime.timer",
+        occurredAt: "2026-08-11T10:05:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      FIXED_MAINTENANCE_VAULT_ROOT,
+      DEVICE_SYNC_CONFIG,
+      port,
+      45_000,
+    );
+
+    expect(completeFitbitMigration).toHaveBeenCalledWith({
+      connectionId: "hosted_fitbit",
+      signal: null,
+    });
+    expect(
+      mocks.reconcileHostedDeviceSyncControlPlaneState.mock.invocationCallOrder[0],
+    ).toBeLessThan(completeFitbitMigration.mock.invocationCallOrder[0]!);
+  });
+
+  it("schedules durable retry when automatic Fitbit cutover fails", async () => {
+    const account = {
+      id: "local_fitbit",
+      nextReconcileAt: null as string | null,
+      status: "active",
+    };
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 0),
+      getNextWakeAt: () => account.nextReconcileAt,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const completeFitbitMigration = vi.fn(async () => {
+      throw new Error("provider unavailable");
+    });
+    const patchAccount = vi.fn((_: string, patch: { nextReconcileAt: string | null }) => {
+      account.nextReconcileAt = patch.nextReconcileAt;
+      return account;
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      getAccountById: vi.fn(() => account),
+      listConnectionSources: vi.fn(() => [
+        { sourceProviderSlug: "fitbit", status: "connected" },
+        {
+          firstSeenAt: "2026-08-11T10:00:00.000Z",
+          lastDataAt: "2026-08-11T10:05:00.000Z",
+          resourceAvailabilitySummary: {
+            historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
+            sleep: true,
+          },
+          sourceProviderSlug: "google_health",
+          status: "connected",
+        },
+      ]),
+      patchAccount,
+    });
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map([["hosted_fitbit", "local_fitbit"]]),
+      localToHostedAccountIds: new Map([["local_fitbit", "hosted_fitbit"]]),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: { connections: [] },
+    });
+
+    const result = await withHostedMaintenanceNow(
+      "2026-08-11T10:05:00.000Z",
+      () => runHostedDeviceSyncPass(
+        {
+          eventId: "evt_fitbit_cutover_retry",
+          kind: "runtime.timer",
+          occurredAt: "2026-08-11T10:05:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        FIXED_MAINTENANCE_VAULT_ROOT,
+        DEVICE_SYNC_CONFIG,
+        {
+          ...createMaintenanceDeviceSyncPortStub(),
+          completeFitbitMigration,
+        },
+        45_000,
+      ),
+    );
+
+    expect(patchAccount).toHaveBeenCalledWith("local_fitbit", {
+      nextReconcileAt: "2026-08-11T10:05:30.000Z",
+    });
+    expect(result.nextWakeAt).toBe("2026-08-11T10:05:30.000Z");
+  });
+
+  it("bounds automatic Fitbit cutovers and schedules the deferred cohort", async () => {
+    const accounts = new Map(
+      Array.from({ length: 5 }, (_, index) => {
+        const id = `local_fitbit_${index + 1}`;
+        return [
+          id,
+          {
+            id,
+            nextReconcileAt: null as string | null,
+            status: "active",
+          },
+        ];
+      }),
+    );
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 0),
+      getNextWakeAt: () =>
+        [...accounts.values()].find((account) => account.nextReconcileAt)
+          ?.nextReconcileAt ?? null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const completeFitbitMigration = vi.fn(async () => ({
+      connectionId: "hosted_fitbit",
+      status: "complete" as const,
+    }));
+    const patchAccount = vi.fn(
+      (id: string, patch: { nextReconcileAt: string | null }) => {
+        const account = accounts.get(id);
+        if (!account) {
+          throw new Error("Expected deferred Fitbit account.");
+        }
+        account.nextReconcileAt = patch.nextReconcileAt;
+        return account;
+      },
+    );
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      getAccountById: vi.fn((id: string) => accounts.get(id) ?? null),
+      listConnectionSources: vi.fn(() => [
+        { sourceProviderSlug: "fitbit", status: "connected" },
+        {
+          firstSeenAt: "2026-08-11T10:00:00.000Z",
+          lastDataAt: "2026-08-11T10:05:00.000Z",
+          resourceAvailabilitySummary: {
+            historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
+            sleep: true,
+          },
+          sourceProviderSlug: "google_health",
+          status: "connected",
+        },
+      ]),
+      patchAccount,
+    });
+    const idPairs = Array.from({ length: 5 }, (_, index) => [
+      `local_fitbit_${index + 1}`,
+      `hosted_fitbit_${index + 1}`,
+    ] as const);
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
+      hostedToLocalAccountIds: new Map(
+        idPairs.map(([localId, hostedId]) => [hostedId, localId]),
+      ),
+      localToHostedAccountIds: new Map(idPairs),
+      observedTokenVersions: new Map(),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: { connections: [] },
+    });
+
+    const result = await withHostedMaintenanceNow(
+      "2026-08-11T10:05:00.000Z",
+      () => runHostedDeviceSyncPass(
+        {
+          eventId: "evt_fitbit_cutover_bounded",
+          kind: "runtime.timer",
+          occurredAt: "2026-08-11T10:05:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        FIXED_MAINTENANCE_VAULT_ROOT,
+        DEVICE_SYNC_CONFIG,
+        {
+          ...createMaintenanceDeviceSyncPortStub(),
+          completeFitbitMigration,
+        },
+        45_000,
+      ),
+    );
+
+    expect(completeFitbitMigration).toHaveBeenCalledTimes(4);
+    expect(patchAccount).toHaveBeenCalledTimes(1);
+    expect(result.nextWakeAt).toBe("2026-08-11T10:05:30.000Z");
   });
 
   it("builds a member-only provider runtime from one credential-bearing snapshot", async () => {

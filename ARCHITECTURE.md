@@ -1162,7 +1162,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   one bounded wake on a clean-to-dirty transition, and the runner drains and
   acknowledges dirty-pending rows through signed callbacks. Hosted provider
   registration reuses the shared `device-syncd` provider-manifest assembly path
-  rather than maintaining an app-local provider list.
+  rather than maintaining an app-local provider list. Google Health-backed
+  Fitbit migration is likewise runtime-driven but Web-authoritative: the pass
+  publishes successor verification, then requests one exact-connection cutover;
+  Web rechecks its durable source rows and owns the fenced targeted provider
+  revoke. Failure keeps legacy Fitbit active, records the retry presentation
+  marker, and advances the existing local reconcile wake without creating a
+  migration queue or browser-owned lifecycle.
 - Group sponsorship remains an extension of the existing Web-owned
   usage-credit purchase, not a second billing or entitlement system. A group
   purchase may own one encrypted participant-authored sponsorship moment.

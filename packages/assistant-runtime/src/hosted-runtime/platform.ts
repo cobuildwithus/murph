@@ -106,6 +106,7 @@ import type {
 } from "@murphai/hosted-execution/labs";
 import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
+  HostedExecutionDeviceSyncFitbitMigrationCutoverResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
   HostedExecutionDeviceSyncDirtyAckResponse,
   HostedExecutionDeviceSyncDirtyPendingRequest,
@@ -435,6 +436,10 @@ export interface HostedRuntimeDeviceSyncPort {
     connectTarget: string;
     messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
+  completeFitbitMigration?(input: {
+    connectionId: string;
+    signal?: AbortSignal | null;
+  }): Promise<HostedExecutionDeviceSyncFitbitMigrationCutoverResponse>;
   reconcileAccount?(input: {
     connectionId: string;
     signal?: AbortSignal | null;

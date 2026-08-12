@@ -309,9 +309,12 @@ function buildHostedConnectionSource(
   connectionId: string,
   sourceProviderSlug: string,
   overrides: Partial<{
+    firstSeenAt: string;
+    lastDataAt: string | null;
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
     lastSeenAt: string;
+    resourceAvailabilitySummary: Record<string, unknown>;
     status: "connected" | "disconnected" | "error" | "unavailable";
   }> = {},
 ) {
@@ -2033,6 +2036,212 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertConnectionSource).toHaveBeenCalledTimes(3);
     expect(mocks.createSignal).toHaveBeenCalledTimes(2);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes a verified Google Health migration without a browser session", async () => {
+    const connection = buildHostedConnection({
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_fitbit_migration",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    const storedConnection = buildProviderConfigStoredConnection(connection);
+    let sources = [
+      buildHostedConnectionSource(connection.id, "fitbit"),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-08-11T10:00:00.000Z",
+        lastDataAt: "2026-08-11T10:05:00.000Z",
+        resourceAvailabilitySummary: {
+          historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
+          sleep: true,
+          steps: true,
+        },
+      }),
+    ];
+    const revokeSourceAccess = vi.fn(async () => undefined);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.listConnectionSources.mockImplementation(async () => sources);
+    mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      const existing = sources.find((source) => source.sourceInstanceKey === input.sourceInstanceKey);
+      if (!existing) {
+        throw new Error("Test source was not found.");
+      }
+      const updated = {
+        ...existing,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        status: input.status ?? existing.status,
+      };
+      sources = sources.map((source) => source.id === existing.id ? updated : source);
+      return updated;
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/internal/device-sync/fitbit-migration/cutover"),
+    );
+
+    await expect(controlPlane.completeGoogleHealthFitbitMigration(
+      "user-123",
+      connection.id,
+    )).resolves.toEqual({
+      connectionId: connection.id,
+      status: "complete",
+    });
+
+    expect(revokeSourceAccess).toHaveBeenCalledOnce();
+    expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "fitbit");
+    expect(sources.find((source) => source.sourceProviderSlug === "fitbit")).toMatchObject({
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      status: "disconnected",
+    });
+    expect(sources.find((source) => source.sourceProviderSlug === "google_health")).toMatchObject({
+      status: "connected",
+    });
+  });
+
+  it("keeps legacy Fitbit active when durable Google Health verification is incomplete", async () => {
+    const connection = buildHostedConnection({
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_fitbit_pending",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    const sources = [
+      buildHostedConnectionSource(connection.id, "fitbit"),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-08-11T10:00:00.000Z",
+        lastDataAt: "2026-08-11T10:05:00.000Z",
+        resourceAvailabilitySummary: { sleep: true },
+      }),
+    ];
+    const revokeSourceAccess = vi.fn(async () => undefined);
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockResolvedValue(sources);
+    mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/internal/device-sync/fitbit-migration/cutover"),
+    );
+
+    await expect(controlPlane.completeGoogleHealthFitbitMigration(
+      "user-123",
+      connection.id,
+    )).resolves.toEqual({
+      connectionId: connection.id,
+      status: "pending",
+    });
+
+    expect(revokeSourceAccess).not.toHaveBeenCalled();
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(sources[0]).toMatchObject({
+      lastErrorCode: null,
+      status: "connected",
+    });
+  });
+
+  it("leaves an in-progress Fitbit cutover claim with its current owner", async () => {
+    const connection = buildHostedConnection({
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_fitbit_concurrent",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    const sources = [
+      buildHostedConnectionSource(connection.id, "fitbit", {
+        lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
+      }),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-08-11T10:00:00.000Z",
+        lastDataAt: "2026-08-11T10:05:00.000Z",
+        resourceAvailabilitySummary: {
+          historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
+          sleep: true,
+        },
+      }),
+    ];
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.listConnectionSources.mockResolvedValue(sources);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/internal/device-sync/fitbit-migration/cutover"),
+    );
+
+    await expect(controlPlane.completeGoogleHealthFitbitMigration(
+      "user-123",
+      connection.id,
+    )).resolves.toEqual({
+      connectionId: connection.id,
+      status: "pending",
+    });
+
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(sources[0]).toMatchObject({
+      lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
+      status: "connected",
+    });
+  });
+
+  it("records durable retry state while preserving legacy Fitbit after cutover failure", async () => {
+    const connection = buildHostedConnection({
+      externalAccountId: "junction-user-established",
+      id: "dsc_junction_fitbit_retry",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    const storedConnection = buildProviderConfigStoredConnection(connection);
+    let sources = [
+      buildHostedConnectionSource(connection.id, "fitbit"),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-08-11T10:00:00.000Z",
+        lastDataAt: "2026-08-11T10:05:00.000Z",
+        resourceAvailabilitySummary: {
+          historicalBackfillCompletedAt: "2026-08-11T10:04:00.000Z",
+          sleep: true,
+        },
+      }),
+    ];
+    const revokeSourceAccess = vi.fn(async () => {
+      throw new Error("provider unavailable");
+    });
+    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(storedConnection);
+    mocks.listConnectionSources.mockImplementation(async () => sources);
+    mocks.registryGet.mockReturnValue({ connectionHandler: { revokeSourceAccess } });
+    mocks.upsertConnectionSource.mockImplementation(async (input) => {
+      const existing = sources.find((source) => source.sourceInstanceKey === input.sourceInstanceKey);
+      if (!existing) {
+        throw new Error("Test source was not found.");
+      }
+      const updated = {
+        ...existing,
+        lastErrorCode: input.lastErrorCode ?? null,
+        lastErrorMessage: input.lastErrorMessage ?? null,
+        lastSeenAt: input.lastSeenAt ?? existing.lastSeenAt,
+        status: input.status ?? existing.status,
+      };
+      sources = sources.map((source) => source.id === existing.id ? updated : source);
+      return updated;
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/internal/device-sync/fitbit-migration/cutover"),
+    );
+
+    await expect(controlPlane.completeGoogleHealthFitbitMigration(
+      "user-123",
+      connection.id,
+    )).rejects.toMatchObject({
+      code: "CONNECTION_SOURCE_DISCONNECT_FAILED",
+      retryable: true,
+    });
+
+    expect(sources.find((source) => source.sourceProviderSlug === "fitbit")).toMatchObject({
+      lastErrorCode: "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED",
+      lastErrorMessage: null,
+      status: "connected",
+    });
+    expect(sources.find((source) => source.sourceProviderSlug === "google_health")).toMatchObject({
+      status: "connected",
+    });
   });
 
   it("restores the selected Junction source when provider revoke fails", async () => {

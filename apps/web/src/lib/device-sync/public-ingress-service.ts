@@ -49,6 +49,7 @@ import {
   buildHostedCompanionHrvRmssdDirtyResource,
   captureHostedDeviceSyncConnectionSourceReconnect,
   cleanupRejectedHostedDeviceSyncConnectionSource,
+  completeHostedGoogleHealthFitbitMigration,
   disconnectHostedDeviceSyncConnection,
   disconnectHostedDeviceSyncConnectionSource,
   handleHostedDeviceSyncConnectionEstablished,
@@ -711,6 +712,19 @@ export class HostedDeviceSyncPublicIngressService {
       connectionId: connection.id,
       registry,
       sourceProviderSlug,
+      store: this.context.store,
+      userId,
+    });
+  }
+
+  async completeGoogleHealthFitbitMigration(
+    userId: string,
+    connectionId: string,
+  ): Promise<{ connectionId: string; status: "complete" | "pending" }> {
+    const registry = await this.resolveRegistryForConnection(userId, connectionId);
+    return completeHostedGoogleHealthFitbitMigration({
+      connectionId,
+      registry,
       store: this.context.store,
       userId,
     });

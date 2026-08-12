@@ -18,6 +18,7 @@ import {
 } from "@murphai/hosted-execution/assistant-personalization";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
@@ -62,6 +63,7 @@ import {
 
 export {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
@@ -88,6 +90,7 @@ export type HostedRunnerWebControlOperation =
   | "clinical_records_read_run"
   | "clinical_records_record_outcome"
   | "device_sync_connect_link"
+  | "device_sync_fitbit_migration_cutover"
   | "device_sync_dirty_ack"
   | "device_sync_pending_dirty_state"
   | "device_sync_reconcile"
@@ -136,6 +139,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH, "clinical_records_read_run"],
   [HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH, "clinical_records_record_outcome"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH, "device_sync_runtime_apply"],
+  [HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH, "device_sync_fitbit_migration_cutover"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH, "device_sync_dirty_ack"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH, "device_sync_pending_dirty_state"],
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH, "device_sync_runtime_snapshot"],

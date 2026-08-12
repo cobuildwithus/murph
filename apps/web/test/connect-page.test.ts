@@ -2191,6 +2191,52 @@ test("ConnectPage exposes only the targeted automatic legacy cutover after Googl
   });
 });
 
+test("ConnectPage projects durable Fitbit cutover failure as an explicit retry", async () => {
+  const { resolveConnectSourceConnectionStates } = await import(
+    "../app/(dashboard)/connect/connect-page-content"
+  );
+
+  const [state] = resolveConnectSourceConnectionStates(
+    [{ id: "fitbit" }],
+    [{
+      connectionId: "dsc_junction_fitbit",
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          lastErrorCode: "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED",
+          providerLabel: "Fitbit",
+          resourceCount: 4,
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        },
+        {
+          firstSeenAt: "2026-08-11T10:00:00.000Z",
+          historicalBackfillComplete: true,
+          lastDataAt: "2026-08-11T10:05:00.000Z",
+          lastSeenAt: "2026-08-11T10:06:00.000Z",
+          providerLabel: "Fitbit",
+          resourceCount: 3,
+          sourceProviderSlug: "google_health",
+          status: "connected",
+        },
+      ],
+    }],
+  );
+
+  assert.deepEqual(state, {
+    connectionId: "dsc_junction_fitbit",
+    connectProvider: null,
+    connectTarget: null,
+    disconnectSourceProviderSlug: "fitbit",
+    migrationRetryRequired: true,
+    migrationState: "cutover_ready",
+    requiresReconnect: false,
+    sourceId: "fitbit",
+    state: "active",
+  });
+});
+
 test("ConnectPage keeps provider-disconnected Fitbit migrations staged until automatic cutover", async () => {
   const { resolveConnectSourceConnectionStates } = await import(
     "../app/(dashboard)/connect/connect-page-content"
@@ -4651,14 +4697,14 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid automatically finishes Fitbit migration with a targeted legacy disconnect", async () => {
+test("ConnectSourcesGrid leaves automatic Fitbit cutover to the durable runtime owner", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
       void _init;
       return Response.json({
-        sourceProviderSlug: "fitbit",
-        status: "disconnected",
+        connectionId: "dsc_junction_fitbit",
+        status: "complete",
       });
     },
   );
@@ -4687,24 +4733,12 @@ test("ConnectSourcesGrid automatically finishes Fitbit migration with a targeted
     }),
   );
 
-  await vi.waitFor(() => {
-    assert.match(
-      rendered.container.textContent ?? "",
-      /Fitbit migration complete/u,
-    );
-    assert.match(
-      rendered.container.textContent ?? "",
-      /Fitbit now uses Google Health\. Your history is still saved\./u,
-    );
-  });
-  assert.equal(
-    fetch.mock.calls[0]?.[0],
-    "/api/settings/device-sync/connections/dsc_junction_fitbit/sources/fitbit/disconnect",
+  assert.match(rendered.container.textContent ?? "", /Switching\.\.\./u);
+  assert.match(
+    rendered.container.textContent ?? "",
+    /switching from the legacy Fitbit connection automatically/u,
   );
-  assert.match(rendered.container.textContent ?? "", /Fitbit connected/u);
-  assert.ok(
-    rendered.container.querySelector("button[aria-label='Disconnect Fitbit']"),
-  );
+  assert.equal(fetch.mock.calls.length, 0);
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
     /Finish migration/u,
@@ -4713,26 +4747,15 @@ test("ConnectSourcesGrid automatically finishes Fitbit migration with a targeted
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid preserves legacy Fitbit and offers a direct retry when automatic cutover fails", async () => {
-  let attempt = 0;
+test("ConnectSourcesGrid offers a direct retry after durable automatic cutover failure", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
       void _init;
-      attempt += 1;
-      return attempt === 1
-        ? Response.json({
-            error: {
-              code: "DEVICE_SYNC_SOURCE_DISCONNECT_FAILED",
-              message: "The legacy Fitbit connection could not be stopped.",
-            },
-          }, {
-            status: 502,
-          })
-        : Response.json({
-            sourceProviderSlug: "fitbit",
-            status: "disconnected",
-          });
+      return Response.json({
+        sourceProviderSlug: "fitbit",
+        status: "disconnected",
+      });
     },
   );
   vi.stubGlobal("fetch", fetch);
@@ -4754,21 +4777,17 @@ test("ConnectSourcesGrid preserves legacy Fitbit and offers a direct retry when 
           width: 44,
         },
         migrationState: "cutover_ready",
+        migrationRetryRequired: true,
         name: "Fitbit",
       }],
     }),
   );
 
-  await vi.waitFor(() => {
-    assert.match(
-      rendered.container.textContent ?? "",
-      /legacy Fitbit connection could not be stopped/u,
-    );
-  });
-  assert.equal(
-    fetch.mock.calls[0]?.[0],
-    "/api/settings/device-sync/connections/dsc_junction_fitbit/sources/fitbit/disconnect",
+  assert.match(
+    rendered.container.textContent ?? "",
+    /could not stop the legacy Fitbit connection/u,
   );
+  assert.equal(fetch.mock.calls.length, 0);
   assert.match(
     rendered.container.textContent ?? "",
     /Fitbit keeps syncing until you retry/u,
@@ -4789,7 +4808,63 @@ test("ConnectSourcesGrid preserves legacy Fitbit and offers a direct retry when 
     assert.match(rendered.container.textContent ?? "", /Fitbit migration complete/u);
     assert.match(rendered.container.textContent ?? "", /Fitbit connected/u);
   });
-  assert.equal(fetch.mock.calls.length, 2);
+  assert.equal(fetch.mock.calls.length, 1);
+  assert.equal(
+    fetch.mock.calls[0]?.[0],
+    "/api/settings/device-sync/connections/dsc_junction_fitbit/fitbit-migration/cutover",
+  );
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid keeps Fitbit active when the guarded retry is still pending", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+    connectionId: "dsc_junction_fitbit",
+    status: "pending",
+  })));
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [{
+        description: "Fitbit data through Google authorization.",
+        disconnectConnectionId: "dsc_junction_fitbit",
+        disconnectSourceProviderSlug: "fitbit",
+        id: "fitbit",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/fitbit.svg",
+          width: 44,
+        },
+        migrationState: "cutover_ready",
+        migrationRetryRequired: true,
+        name: "Fitbit",
+      }],
+    }),
+  );
+  const retryButton = rendered.container.querySelector(
+    "button[aria-label='Retry Fitbit migration']",
+  );
+  assert.ok(retryButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    retryButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /still switching/u);
+    assert.match(rendered.container.textContent ?? "", /still syncing/u);
+  });
+  assert.doesNotMatch(
+    rendered.container.textContent ?? "",
+    /Fitbit migration complete/u,
+  );
+  assert.equal(mocks.routerRefresh.mock.calls.length, 1);
 
   await rendered.cleanup();
 });

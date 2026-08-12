@@ -42,6 +42,8 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
+export const HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH =
+  "/api/internal/device-sync/fitbit-migration/cutover";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
@@ -245,6 +247,15 @@ export interface HostedExecutionDeviceSyncReconcileResponse {
   connectionId: string;
   occurredAt: string;
   status: "queued";
+}
+
+export interface HostedExecutionDeviceSyncFitbitMigrationCutoverRequest {
+  connectionId: string;
+}
+
+export interface HostedExecutionDeviceSyncFitbitMigrationCutoverResponse {
+  connectionId: string;
+  status: "complete" | "pending";
 }
 
 export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
@@ -727,6 +738,46 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
 
 export function buildHostedExecutionDeviceSyncConnectLinkPath(connectTarget: string): string {
   return `/api/internal/device-sync/connect-targets/${encodeURIComponent(connectTarget)}/connect-link`;
+}
+
+export function parseHostedExecutionDeviceSyncFitbitMigrationCutoverRequest(
+  value: unknown,
+): HostedExecutionDeviceSyncFitbitMigrationCutoverRequest {
+  const record = requireObject(value, "Hosted Fitbit migration cutover request");
+  assertSupportedFields(
+    record,
+    "Hosted Fitbit migration cutover request",
+    ["connectionId"],
+  );
+  return {
+    connectionId: requireString(
+      record.connectionId,
+      "Hosted Fitbit migration cutover request connectionId",
+    ),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncFitbitMigrationCutoverResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncFitbitMigrationCutoverResponse {
+  const record = requireObject(value, "Hosted Fitbit migration cutover response");
+  assertSupportedFields(
+    record,
+    "Hosted Fitbit migration cutover response",
+    ["connectionId", "status"],
+  );
+  if (record.status !== "complete" && record.status !== "pending") {
+    throw new TypeError(
+      "Hosted Fitbit migration cutover response status must be complete or pending.",
+    );
+  }
+  return {
+    connectionId: requireString(
+      record.connectionId,
+      "Hosted Fitbit migration cutover response connectionId",
+    ),
+    status: record.status,
+  };
 }
 
 export function parseHostedExecutionDeviceSyncConnectLinkResponse(

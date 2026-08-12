@@ -6,7 +6,7 @@ import {
   withImmediateTransaction,
 } from "@murphai/runtime-state/node";
 
-import { isDeviceSyncSourceResourceAvailabilityMetadataKey } from "./public-account.ts";
+import { countAvailableDeviceSyncSourceResources } from "./public-account.ts";
 
 import {
   decodeDeviceSyncSummaryRow,
@@ -245,7 +245,7 @@ export class SqliteDeviceSyncStore {
       lastErrorMessage: source.lastErrorMessage,
       lastDataAt: source.lastDataAt,
       lastSeenAt: source.lastSeenAt,
-      resourceCount: countConnectionSourceResources(source.resourceAvailabilitySummary),
+      resourceCount: countAvailableDeviceSyncSourceResources(source.resourceAvailabilitySummary),
       resourceAvailabilitySummary: source.resourceAvailabilitySummary,
       sourceProviderSlug: source.sourceProviderSlug,
       status: source.status,
@@ -686,15 +686,4 @@ function normalizeAccountListInput(
     ...(input.provider ? { provider: input.provider } : {}),
     ...(input.sourceProviderSlug ? { sourceProviderSlug: input.sourceProviderSlug } : {}),
   };
-}
-
-function countConnectionSourceResources(
-  summary: StoredDeviceConnectionSource["resourceAvailabilitySummary"],
-): number {
-  return Object.entries(summary).filter(([key, value]) =>
-    !isDeviceSyncSourceResourceAvailabilityMetadataKey(key)
-    && value !== false
-    && value !== null
-    && value !== undefined
-  ).length;
 }
