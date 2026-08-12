@@ -751,7 +751,7 @@ export function registerWearablesCommands(
       },
     ],
     hint:
-      'Use metric aliases such as `hrv`, `resting-heart-rate`, `sleep-score`, or `skin-temp`; the shared wearable metric catalog resolves them to canonical keys.',
+      'Use aliases such as `hrv`, `sleep-score`, `activity-average-heart-rate`, or `activity-lowest-heart-rate`; the shared wearable metric catalog resolves them to canonical keys.',
     output: wearablesMetricLatestResultSchema,
     async run({ args, options }) {
       const showWearableMetricLatest = requireAdditiveWearablesQueryMethod<

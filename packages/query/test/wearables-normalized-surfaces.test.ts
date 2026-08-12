@@ -965,6 +965,8 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   const latest = summarizeWearableLatest(vault);
   const activityMinutes = summarizeWearableMetricLatest(vault, "activity-minutes", { windowDays: 1 });
   const lowActivityMinutes = summarizeWearableMetricLatest(vault, "low-activity-minutes", { windowDays: 1 });
+  const activityAverageHeartRate = summarizeWearableMetricLatest(vault, "activity-average-heart-rate", { windowDays: 1 });
+  const activityLowestHeartRate = summarizeWearableMetricTrend(vault, "activity-lowest-heart-rate", { windowDays: 1 });
   const walkingAverageHeartRate = summarizeWearableMetricLatest(vault, "walking-average-heart-rate", { windowDays: 1 });
   const sleepLatency = summarizeWearableMetricLatest(vault, "sleep-latency-minutes", { windowDays: 1 });
   const leanBodyMass = summarizeWearableMetricLatest(vault, "lean-body-mass", { windowDays: 1 });
@@ -998,6 +1000,16 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   assert.equal(activityMinutes?.value, 78);
   assert.equal(lowActivityMinutes?.summaryKind, "activity");
   assert.equal(lowActivityMinutes?.value, 60);
+  assert.equal(activityAverageHeartRate?.metric, "averageHeartRate");
+  assert.equal(activityAverageHeartRate?.resolvedAlias, "activity-average-heart-rate");
+  assert.equal(activityAverageHeartRate?.summaryKind, "activity");
+  assert.equal(activityAverageHeartRate?.value, 76);
+  assert.equal(activityLowestHeartRate?.metric, "lowestHeartRate");
+  assert.equal(activityLowestHeartRate?.resolvedAlias, "activity-lowest-heart-rate");
+  assert.equal(activityLowestHeartRate?.summaryKind, "activity");
+  assert.equal(activityLowestHeartRate?.value, 44);
+  assert.equal(activityLowestHeartRate?.points[0]?.value, 44);
+  assert.equal(activityLowestHeartRate?.notes.some((note) => note.startsWith("No ")), false);
   assert.equal(walkingAverageHeartRate?.summaryKind, "activity");
   assert.equal(walkingAverageHeartRate?.value, 101);
   assert.equal(sleepLatency?.summaryKind, "sleep");

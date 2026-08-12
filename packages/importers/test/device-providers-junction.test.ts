@@ -8446,6 +8446,7 @@ test("Junction normalizer rejects incomplete or invalid daily activity minute bu
     { low: 20, medium: -1, high: 10 },
     { low: 20, medium: 10, high: "Infinity" },
     { low: 1440, medium: 1, high: 0 },
+    { low: 20, medium: 10, high: 1441 },
   ];
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-05-20T12:00:00.000Z",
@@ -8460,9 +8461,12 @@ test("Junction normalizer rejects incomplete or invalid daily activity minute bu
   });
 
   assert.equal(payload.events?.some((event) => event.fields?.metric === "activity-minutes"), false);
-  assert.equal(payload.events?.filter((event) => event.fields?.metric === "low-activity-minutes").length, 4);
-  assert.equal(payload.events?.filter((event) => event.fields?.metric === "medium-activity-minutes").length, 3);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "low-activity-minutes").length, 5);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "medium-activity-minutes").length, 4);
   assert.equal(payload.events?.filter((event) => event.fields?.metric === "high-activity-minutes").length, 2);
+  assert.equal(payload.events?.some((event) =>
+    event.fields?.metric === "high-activity-minutes" && event.fields.value === 1441
+  ), false);
 });
 
 test("Junction recovery readiness score preserves source-specific semantics", () => {

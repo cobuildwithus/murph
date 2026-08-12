@@ -1312,12 +1312,18 @@ const DEFAULT_WEARABLE_DRIFT_SIGNALS: ReadonlyArray<{
   { metric: "waistCircumference", summaryKind: "bodyState" },
 ];
 const WEARABLE_METRIC_ALIAS_FALLBACKS: Readonly<Record<string, WearableMetricKey>> = {
+  "activity-average-heart-rate": "averageHeartRate",
+  "activity-lowest-heart-rate": "lowestHeartRate",
   "skin-temp": "temperatureDeviation",
   "skin-temperature": "temperatureDeviation",
   "session-count": "sessionCount",
   "session-minutes": "sessionMinutes",
   "workout-minutes": "sessionMinutes",
 };
+const ACTIVITY_OWNED_WEARABLE_METRIC_ALIASES = new Set([
+  "activity-average-heart-rate",
+  "activity-lowest-heart-rate",
+]);
 
 function resolveWearableMetricWindowDays(windowDays: number | undefined): number {
   return Number.isInteger(windowDays) && (windowDays ?? 0) > 0
@@ -1377,6 +1383,10 @@ function resolveWearableRequestedSummaryKind(
 ): WearableMetricSummaryKind {
   if (summaryKind) {
     return summaryKind;
+  }
+
+  if (ACTIVITY_OWNED_WEARABLE_METRIC_ALIASES.has(normalizedMetricRequest)) {
+    return "activity";
   }
 
   if (
