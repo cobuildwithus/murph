@@ -50,11 +50,10 @@ export async function requireHostedRuntimeActiveAccessForUpdateTx(
 }
 
 /**
- * Locks every member that can authorize the requested runtimes in one stable order before
- * role-specific access revalidation. Container owners retain the established owner-before-
- * runtime phase; owners and runtimes are sorted within their phases. Reciprocal A-to-B and
- * B-to-A callers therefore take the same sequence without inverting existing single-runtime
- * callers.
+ * Locks every requested runtime and discovered owner in one global member-id order before
+ * role-specific access revalidation. A role-partitioned owner-first order can invert when
+ * reciprocal requests target group runtimes owned by one another's grantors. One total
+ * order avoids that cycle before sorted container-row locking.
  */
 export async function requireHostedRuntimeMembersActiveAccessForUpdateTx(
   userIds: readonly string[],
@@ -75,19 +74,13 @@ export async function requireHostedRuntimeMembersActiveAccessForUpdateTx(
     );
   }
 
-  const sortedOwnerMemberIds = [
-    ...new Set([...ownerMemberIdsByUserId.values()].filter(
+  const sortedMemberIds = [...new Set([
+    ...sortedUserIds,
+    ...[...ownerMemberIdsByUserId.values()].filter(
       (memberId): memberId is string => memberId !== null,
-    )),
-  ].sort();
-  const ownerMemberIdSet = new Set(sortedOwnerMemberIds);
-  const sortedRuntimeMemberIds = sortedUserIds.filter(
-    (memberId) => !ownerMemberIdSet.has(memberId),
-  );
-  for (const memberId of [
-    ...sortedOwnerMemberIds,
-    ...sortedRuntimeMemberIds,
-  ]) {
+    ),
+  ])].sort();
+  for (const memberId of sortedMemberIds) {
     await lockHostedRuntimeMemberForUpdateTx({
       memberId,
       prisma: options.prisma,

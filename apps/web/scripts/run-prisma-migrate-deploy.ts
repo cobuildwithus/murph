@@ -142,6 +142,14 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     new Set(["ADD CONSTRAINT CHECK", "DROP INDEX"]),
   ],
   [
+    "20260812053100_drop_hosted_vault_share_grantor_scope_prefix_index",
+    // The replacement partial index is created in the preceding migration
+    // with the same predicate and key prefix plus destination_member_id.
+    // Removing the redundant prefix index changes neither old nor new query
+    // semantics and remains non-blocking during the deploy window.
+    new Set(["DROP INDEX"]),
+  ],
+  [
     "20260807204000_non_expiring_starter_usage",
     // The replacement ledger checks are supersets of the existing checks:
     // every old writer remains valid, while the new Starter grant becomes an

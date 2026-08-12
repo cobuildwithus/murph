@@ -1276,8 +1276,9 @@ Last verified: 2026-08-11
   within the Cloudflare call's original deadline, while each selected row still
   carries the exact generation used by encryption and finalization; repeated or
   malformed cursors fail closed. Each share performs an unlocked active-access preflight, prepares its
-  destination-root ciphertext before `BEGIN`, then takes container owners and
-  runtime members in canonical owner-first phases, revalidates both sides and
+  destination-root ciphertext before `BEGIN`, then takes every discovered
+  owner and requested runtime in one globally sorted member-lock order,
+  revalidates both sides and
   the exact prepared destination root under its authority lock, and
   compare-and-sets only the exact still-granted generation. Reciprocal delivery can never choose
   caller-role lock order, and a failed later page replays only that bounded page.

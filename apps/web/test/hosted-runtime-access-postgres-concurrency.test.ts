@@ -24,10 +24,12 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted runtime-access PostgreSQL concurrency proof",
   () => {
-    it("serializes reciprocal member sets from the same canonical first row", async () => {
+    it("serializes reciprocal cross-owned runtimes from one global first member row", async () => {
       const suffix = randomUUID();
       const firstMemberId = `member_runtime_access_a_${suffix}`;
       const secondMemberId = `member_runtime_access_b_${suffix}`;
+      const firstGroupRuntimeId = `member_runtime_access_ga_${suffix}`;
+      const secondGroupRuntimeId = `member_runtime_access_gb_${suffix}`;
       const firstApplicationName = `runtime_access_first_${suffix.slice(0, 8)}`;
       const secondApplicationName = `runtime_access_second_${suffix.slice(0, 8)}`;
       const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -59,10 +61,36 @@ describe.skipIf(!runPostgresProof)(
 
       try {
         await blocker.hostedMember.createMany({
-          data: [firstMemberId, secondMemberId].map((id) => ({
-            billingStatus: HostedBillingStatus.active,
-            id,
-          })),
+          data: [
+            {
+              billingStatus: HostedBillingStatus.active,
+              id: firstMemberId,
+            },
+            {
+              billingStatus: HostedBillingStatus.active,
+              id: secondMemberId,
+            },
+            {
+              billingStatus: HostedBillingStatus.not_started,
+              id: firstGroupRuntimeId,
+            },
+            {
+              billingStatus: HostedBillingStatus.not_started,
+              id: secondGroupRuntimeId,
+            },
+          ],
+        });
+        await blocker.hostedThreadContainer.createMany({
+          data: [
+            {
+              memberId: firstGroupRuntimeId,
+              ownerMemberId: firstMemberId,
+            },
+            {
+              memberId: secondGroupRuntimeId,
+              ownerMemberId: secondMemberId,
+            },
+          ],
         });
         const blockerPromise = blocker.$transaction(async (tx) => {
           await tx.$queryRaw`
@@ -79,13 +107,13 @@ describe.skipIf(!runPostgresProof)(
 
         const firstAccess = first.$transaction((tx) =>
           requireHostedRuntimeMembersActiveAccessForUpdateTx(
-            [firstMemberId, secondMemberId],
+            [firstMemberId, secondGroupRuntimeId],
             { prisma: tx },
           ),
         );
         const secondAccess = second.$transaction((tx) =>
           requireHostedRuntimeMembersActiveAccessForUpdateTx(
-            [secondMemberId, firstMemberId],
+            [secondMemberId, firstGroupRuntimeId],
             { prisma: tx },
           ),
         );
@@ -101,9 +129,9 @@ describe.skipIf(!runPostgresProof)(
           }),
         ]);
 
-        // Both reciprocal calls must still be waiting on the same sorted first
-        // member. If either caller retained role order, the B-to-A call would
-        // already own the second row while waiting for the blocker on the first.
+        // Both reciprocal calls must still be waiting on the same globally
+        // sorted first member. A request-relative owner-first order would let
+        // the A-to-GB call own B while the B-to-GA call waits on A.
         await expect(observer.$transaction(async (tx) => {
           await tx.$queryRaw`
             SELECT id
@@ -122,8 +150,24 @@ describe.skipIf(!runPostgresProof)(
       } finally {
         releaseMemberLocks();
         await Promise.allSettled(inFlight);
+        await observer.hostedThreadContainer.deleteMany({
+          where: {
+            memberId: {
+              in: [firstGroupRuntimeId, secondGroupRuntimeId],
+            },
+          },
+        });
         await observer.hostedMember.deleteMany({
-          where: { id: { in: [firstMemberId, secondMemberId] } },
+          where: {
+            id: {
+              in: [
+                firstMemberId,
+                secondMemberId,
+                firstGroupRuntimeId,
+                secondGroupRuntimeId,
+              ],
+            },
+          },
         });
         await Promise.all([
           blocker.$disconnect(),

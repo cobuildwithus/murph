@@ -7,6 +7,12 @@ Last verified: 2026-08-12
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Bounded Linq chat-health projection and vault-share delivery, including stable
+destination paging, globally ordered runtime/owner member locks, prepared-root
+fencing, and split concurrent index deployment, are jointly specified by
+`agent-docs/RELIABILITY.md`, `agent-docs/operations/imessage-deliverability.md`,
+and `agent-docs/references/testing-ci-map.md`.
+
 The lower-level hosted browser assertion first-invalid boundary, single-use
 nonce persisted horizon, mixed-version cleanup safety, and opt-in PostgreSQL
 concurrency proof are jointly specified by `ARCHITECTURE.md`,

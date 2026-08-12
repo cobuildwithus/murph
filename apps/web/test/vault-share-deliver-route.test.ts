@@ -447,6 +447,43 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(2);
   });
 
+  it("attempts one maximum page sequentially and returns its continuation", async () => {
+    const shares = Array.from({ length: 32 }, (_, index) => ({
+      ...ACTIVE_SHARE,
+      destinationMemberId: `member_destination_${String(index).padStart(2, "0")}`,
+      id: `share_${String(index).padStart(2, "0")}`,
+    }));
+    let activeReplacements = 0;
+    let peakReplacements = 0;
+    mocks.findActiveHostedVaultShares.mockResolvedValue({
+      continuation: "member_destination_31",
+      shares,
+    });
+    mocks.replaceHostedVaultShareProjectionSnapshot.mockImplementation(
+      async () => {
+        activeReplacements += 1;
+        peakReplacements = Math.max(peakReplacements, activeReplacements);
+        await Promise.resolve();
+        activeReplacements -= 1;
+        return "replaced";
+      },
+    );
+
+    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      continuation: "member_destination_31",
+      status: "delivered",
+    });
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledTimes(1);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(32);
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot.mock.calls.map(
+      ([input]) => input.share.destinationMemberId,
+    )).toEqual(shares.map((share) => share.destinationMemberId));
+    expect(peakReplacements).toBe(1);
+  });
+
 	it("replaces an all-stale offer with an empty snapshot", async () => {
 		const response = await deliverRoute.POST(
 			buildRequest({

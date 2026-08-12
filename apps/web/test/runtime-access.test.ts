@@ -128,6 +128,7 @@ function createMemberLockManager() {
 
 function buildReciprocalRuntimeAccessTx(input: {
   awaitPeerAtFirstMemberLock: () => Promise<void>;
+  containerOwnerByMemberId?: ReadonlyMap<string, string>;
   lockManager: ReturnType<typeof createMemberLockManager>;
   transactionId: string;
 }): {
@@ -140,7 +141,10 @@ function buildReciprocalRuntimeAccessTx(input: {
     $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = Array.from(strings).join("?");
       if (sql.includes("FROM hosted_thread_container")) {
-        return [];
+        const ownerMemberId = input.containerOwnerByMemberId?.get(
+          String(values[0]),
+        );
+        return ownerMemberId ? [{ ownerMemberId }] : [];
       }
       if (sql.includes("FROM hosted_member")) {
         const memberId = String(values[0]);
@@ -187,8 +191,8 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
 
     expect(lockOrder).toEqual([
       "container-read",
-      "owner-lock",
       "runtime-lock",
+      "owner-lock",
       "container-lock",
     ]);
     expect(tx.hostedMember.findUnique).toHaveBeenCalled();
@@ -229,16 +233,22 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
     expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
   });
 
-  it("completes reciprocal concurrent access checks in the same member lock order", async () => {
+  it("completes reciprocal cross-owned runtime checks in one global member lock order", async () => {
     const awaitPeerAtFirstMemberLock = createBarrier(2);
     const lockManager = createMemberLockManager();
     const first = buildReciprocalRuntimeAccessTx({
       awaitPeerAtFirstMemberLock,
+      containerOwnerByMemberId: new Map([
+        ["member_group_b", "member_b"],
+      ]),
       lockManager,
       transactionId: "transaction-a-to-b",
     });
     const second = buildReciprocalRuntimeAccessTx({
       awaitPeerAtFirstMemberLock,
+      containerOwnerByMemberId: new Map([
+        ["member_group_a", "member_a"],
+      ]),
       lockManager,
       transactionId: "transaction-b-to-a",
     });
@@ -261,16 +271,24 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
       run(
         "transaction-a-to-b",
         first.tx,
-        ["member_a", "member_b", "member_a"],
+        ["member_a", "member_group_b"],
       ),
       run(
         "transaction-b-to-a",
         second.tx,
-        ["member_b", "member_a", "member_b"],
+        ["member_b", "member_group_a"],
       ),
     ]);
 
-    expect(first.memberLockOrder).toEqual(["member_a", "member_b"]);
-    expect(second.memberLockOrder).toEqual(["member_a", "member_b"]);
+    expect(first.memberLockOrder).toEqual([
+      "member_a",
+      "member_b",
+      "member_group_b",
+    ]);
+    expect(second.memberLockOrder).toEqual([
+      "member_a",
+      "member_b",
+      "member_group_a",
+    ]);
   }, 1_000);
 });
