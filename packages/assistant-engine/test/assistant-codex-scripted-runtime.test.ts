@@ -2155,16 +2155,72 @@ text(JSON.stringify(result));
 
   it.each([
     {
+      expectedAt: '2026-03-08T07:30:00.000Z',
       failedLookup: 'medication-reminder',
+      failedTime: '02:30',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      responseLookup: 'medication-reminder',
+      retryLocalAt: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
       retryLookup: 'automation-medication-reminder',
     },
     {
+      expectedAt: '2026-03-08T07:30:00.000Z',
       failedLookup: 'automation-medication-reminder',
+      failedTime: '02:30',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      responseLookup: 'medication-reminder',
+      retryLocalAt: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
       retryLookup: 'medication-reminder',
     },
-  ])('clears a patch clarification across canonical lookup aliases', {
+    {
+      expectedAt: '2026-03-08T07:30:00.000Z',
+      failedLookup: 'medication-reminder',
+      failedTime: '02:30',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      requestedSlug: 'morning-meds',
+      responseLookup: 'morning-meds',
+      retryLocalAt: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
+      retryLookup: 'medication-reminder',
+    },
+    {
+      expectedAt: '2026-11-01T06:30:00.000Z',
+      failedLookup: 'medication-reminder',
+      failedTime: '01:30',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      requestedSlug: 'evening-meds',
+      responseLookup: 'evening-meds',
+      retryLocalAt: {
+        date: '2026-11-01',
+        fold: 'later' as const,
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+      retryLookup: 'medication-reminder',
+    },
+  ])('clears a patch clarification across canonical and renamed aliases', {
     timeout: TURN_TIMEOUT_MS,
-  }, async ({ failedLookup, retryLookup }) => {
+  }, async ({
+    expectedAt,
+    failedLookup,
+    failedTime,
+    referenceAt,
+    requestedSlug,
+    responseLookup,
+    retryLocalAt,
+    retryLookup,
+  }) => {
     const scenario = await prepareScriptedTurnScenario()
     const responseCard = {
       kind: 'compact_table',
@@ -2181,11 +2237,12 @@ text(JSON.stringify(result));
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
       lookup: failedLookup,
+      ...(requestedSlug ? { slug: requestedSlug } : {}),
       schedule: {
         kind: 'at',
         localAt: {
           relativeDay: 'tomorrow',
-          time: '02:30',
+          time: failedTime,
           timeZone: 'America/New_York',
         },
       },
@@ -2194,13 +2251,10 @@ text(JSON.stringify(result));
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
       lookup: retryLookup,
+      ...(requestedSlug ? { slug: requestedSlug } : {}),
       schedule: {
         kind: 'at',
-        localAt: {
-          date: '2026-03-08',
-          time: '03:30',
-          timeZone: 'America/New_York',
-        },
+        localAt: retryLocalAt,
       },
     }
     scenario.stub.queue(
@@ -2243,11 +2297,11 @@ text(JSON.stringify(result));
         automationId: 'automation-medication-reminder',
         created: false,
         effectiveTimeZone: 'America/New_York',
-        lookupId: 'medication-reminder',
-        nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+        lookupId: responseLookup,
+        nextOccurrenceAt: expectedAt,
         routeBinding: 'current_conversation' as const,
         schedule: request.schedule ?? {
-          at: '2026-03-08T07:30:00.000Z',
+          at: expectedAt,
           kind: 'at' as const,
         },
         status: 'active' as const,
@@ -2258,8 +2312,8 @@ text(JSON.stringify(result));
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
       automationRelativeDateReferenceWindow: {
-        earliestAt: '2026-03-08T04:59:00.000Z',
-        latestAt: '2026-03-08T04:59:00.000Z',
+        earliestAt: referenceAt,
+        latestAt: referenceAt,
       },
       dynamicTools: [
         MURPH_AUTOMATION_TOOL,
@@ -2276,21 +2330,20 @@ text(JSON.stringify(result));
         },
         vaultFileSendAvailable: false,
       },
-      prompt: 'Move my medication reminder to tomorrow at 2:30 AM.',
+      prompt: `Move my medication reminder to tomorrow at ${failedTime}.`,
     })
 
-    const staleClarification =
-      'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?'
     expect(automationRequest).toHaveBeenCalledTimes(1)
     expect(automationRequest).toHaveBeenCalledWith({
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
       lookup: retryLookup,
-      schedule: { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
+      ...(requestedSlug ? { slug: requestedSlug } : {}),
+      schedule: { at: expectedAt, kind: 'at' },
     }, expect.anything())
     expect(result.responseCard).toEqual(responseCard)
-    expect(result.finalMessage).not.toContain(staleClarification)
-    expect(result.transcriptMessage).not.toContain(staleClarification)
+    expect(result.finalMessage).not.toContain('The trusted reminder date is')
+    expect(result.transcriptMessage).not.toContain('The trusted reminder date is')
   })
 
   it('contains local one-shot slug failures and accepts a corrected retry', {

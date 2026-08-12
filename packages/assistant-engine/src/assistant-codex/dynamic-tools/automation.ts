@@ -732,10 +732,17 @@ export async function executeAutomationDynamicTool(input: {
         ],
       }
     }
-    if (response.action === 'patch') {
+    if (
+      response.action === 'patch' &&
+      input.request.request.action === 'patch'
+    ) {
       return {
         ...result,
         automationTargetKeys: [...new Set([
+          buildAutomationLocalAtTargetKey(
+            'patch',
+            input.request.request.lookup,
+          ),
           buildAutomationLocalAtTargetKey('patch', response.automationId),
           buildAutomationLocalAtTargetKey('patch', response.lookupId),
         ])],

@@ -424,6 +424,75 @@ describe('hosted domain dynamic tools', () => {
     )
   })
 
+  it('certifies the successful pre-rename patch lookup as a recovery alias', async () => {
+    const failedPatch = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      lookup: 'medication-reminder',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      slug: 'morning-meds',
+    }, referenceWindow('2026-03-08T04:59:00.000Z'))
+    const recovery = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      lookup: 'medication-reminder',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      slug: 'morning-meds',
+    })
+    if (
+      failedPatch?.kind !== 'invalid-automation-arguments' ||
+      recovery?.kind !== 'automation'
+    ) {
+      throw new TypeError('Expected a failed patch and explicit-date recovery.')
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: {
+          request: async (request) => ({
+            action: 'patch',
+            automationId: 'automation-medication-reminder',
+            created: false,
+            effectiveTimeZone: 'America/New_York',
+            lookupId: 'morning-meds',
+            nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+            routeBinding: 'current_conversation',
+            schedule: request.action === 'patch' && request.schedule
+              ? request.schedule
+              : { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
+            status: 'active',
+            timingVerified: true,
+            updatedAt: '2026-03-08T05:01:00.000Z',
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: recovery,
+    })
+
+    expect(result.rpcResult.success).toBe(true)
+    expect(result.automationTargetKeys).toContain(
+      failedPatch.localAtTargetKey,
+    )
+  })
+
   it('contains local one-shot slug derivation failures for a recoverable retry', async () => {
     const localizedRequest = readToolRequest('automation', {
       action: 'save',
