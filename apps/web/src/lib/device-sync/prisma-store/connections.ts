@@ -70,11 +70,14 @@ export { sanitizeHostedDeviceSyncConnectionMetadata } from "./connection-records
 import {
   HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
   encryptHostedConnectionSecret,
+  prepareHostedRuntimeApplyTokenWrites,
   readHostedRuntimeConnectionSecretMaterial,
   readHostedStoredExternalAccountId,
   readHostedStoredTokenBundle,
   type HostedRuntimeConnectionSecretMaterial,
   type HostedDeviceSyncSecretTestCodec,
+  type HostedRuntimeApplyPreparedTokenWrite,
+  type HostedRuntimeApplyTokenWritePreparation,
 } from "./connection-secrets";
 import {
   isHostedDirtyPayloadClassificationPendingError,
@@ -567,10 +570,10 @@ export class PrismaHostedConnectionStore {
   async syncDurableConnectionState(
     account: PublicDeviceSyncAccount,
     tx?: HostedPrismaTransactionClient,
-  ): Promise<void> {
+  ): Promise<HostedConnectionRecord> {
     const prisma = tx ?? this.prisma;
 
-    await prisma.deviceConnection.update({
+    return prisma.deviceConnection.update({
       where: {
         id: account.id,
       },
@@ -591,6 +594,7 @@ export class PrismaHostedConnectionStore {
         setupExpiresAt: maybeDate(account.setupExpiresAt ?? null),
         setupPhase: normalizeHostedDeviceSyncSetupPhase(account.setupPhase ?? null),
       },
+      ...hostedConnectionRecordArgs,
     });
   }
 
@@ -709,6 +713,16 @@ export class PrismaHostedConnectionStore {
     return this.buildStoredConnectionAccount(record, prisma);
   }
 
+  async prepareRuntimeApplyTokenWrites(
+    entries: readonly HostedRuntimeApplyTokenWritePreparation[],
+  ): Promise<Map<string, HostedRuntimeApplyPreparedTokenWrite>> {
+    return prepareHostedRuntimeApplyTokenWrites({
+      entries,
+      prisma: this.prisma,
+      testCodec: this.testCodec,
+    });
+  }
+
   async readRuntimeConnectionSecretMaterial(input: {
     records: readonly HostedConnectionRecord[];
     tokenConnectionIds: ReadonlySet<string>;
@@ -804,6 +818,60 @@ export class PrismaHostedConnectionStore {
     });
 
     return result.count > 0;
+  }
+
+  async persistPreparedRuntimeApplyTokenWrite(input: {
+    prepared: HostedRuntimeApplyPreparedTokenWrite;
+    record: HostedConnectionRecord;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionRecord> {
+    const refreshLeaseOwner = normalizeNullableString(input.record.refreshLeaseOwner);
+    const obsoleteRefreshLease = Boolean(
+      refreshLeaseOwner
+      && input.record.refreshLeaseTokenVersion !== null
+      && input.record.refreshLeaseTokenVersion !== input.record.tokenVersion,
+    );
+
+    if (refreshLeaseOwner && !obsoleteRefreshLease) {
+      throw deviceSyncError({
+        code: "TOKEN_REFRESH_IN_PROGRESS",
+        message: "A hosted device-sync token refresh is already in progress for this connection.",
+        retryable: true,
+        httpStatus: 409,
+      });
+    }
+
+    const hasTokenBundle = input.prepared.tokenVersion !== null;
+    if (hasTokenBundle && !input.prepared.accessTokenEncrypted) {
+      throw new TypeError("Hosted device-sync runtime apply token preparation is missing its access token.");
+    }
+
+    return input.tx.deviceConnection.update({
+      where: {
+        id: input.record.id,
+      },
+      data: {
+        accessTokenEncrypted: input.prepared.accessTokenEncrypted,
+        accessTokenExpiresAt: maybeDate(input.prepared.accessTokenExpiresAt),
+        credentialKind: hasTokenBundle
+          ? "oauth_tokens"
+          : normalizeHostedDeviceSyncCredentialKind(input.record.credentialKind),
+        ...(hasTokenBundle ? { credentialMetadataJson: toPrismaJsonObject({}) } : {}),
+        externalAccountIdEncrypted: input.prepared.externalAccountIdEncrypted,
+        keyVersion: input.prepared.keyVersion,
+        providerConfigKey: hasTokenBundle ? null : input.record.providerConfigKey,
+        ...(obsoleteRefreshLease
+          ? {
+              refreshLeaseExpiresAt: null,
+              refreshLeaseOwner: null,
+              refreshLeaseTokenVersion: null,
+            }
+          : {}),
+        refreshTokenEncrypted: input.prepared.refreshTokenEncrypted,
+        tokenVersion: input.prepared.tokenVersion,
+      },
+      ...hostedConnectionRecordArgs,
+    });
   }
 
   async persistStoredConnectionTokenBundle(input: {
