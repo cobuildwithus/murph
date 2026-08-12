@@ -1217,6 +1217,7 @@ const noteEventFieldsShape = {
   ...experimentLinkShape,
   note: boundedString(1, 4000),
   noteType: boundedString(1, 120).optional(),
+  reportedGender: z.enum(["female", "male", "other"]).optional(),
   authoredAt: isoDateTimeString().optional(),
   signedAt: isoDateTimeString().optional(),
   author: boundedString(1, 160).optional(),

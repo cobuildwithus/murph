@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 200,
+  "item": {
+    "id": "more-complete-wearable-summaries",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More complete connected-health summaries",
+    "summary": "Murph can now use sleep latency, separate activity-intensity minutes, activity-specific heart-rate fields, and bounded profile and cycle facts from connected health sources.",
+    "details": "Activity intensity keeps the source's minute values, and activity heart-rate averages remain distinct from sleep averages. Newer profile and cycle corrections replace changed facts and remove omitted facts, while invalid dates, predictions, unfamiliar values, and legacy length fields remain bounded supporting evidence.",
+    "relevanceTags": ["wearables", "sleep", "activity", "heart-rate", "cycle"],
+    "sourcePullRequests": [1702]
+  }
+}
