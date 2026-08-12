@@ -839,9 +839,6 @@ function mergeJunctionExtendedTimeseriesHistoryCoverageMetadata(input: {
     : null;
 
   if (metadataKey && encoded) {
-    metadata = mergeStoredDeviceSyncMetadataPatch(metadata, {
-      [metadataKey]: encoded,
-    });
     for (const legacyMetadataKey of JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS) {
       if (
         legacyMetadataKey !== metadataKey
@@ -855,6 +852,9 @@ function mergeJunctionExtendedTimeseriesHistoryCoverageMetadata(input: {
         delete metadata[legacyMetadataKey];
       }
     }
+    metadata = mergeStoredDeviceSyncMetadataPatch(metadata, {
+      [metadataKey]: encoded,
+    });
   }
 
   const localCoverageAdvanced = input.localConnectionStateUnpublished

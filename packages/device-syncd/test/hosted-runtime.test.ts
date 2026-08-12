@@ -437,6 +437,96 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     }
   });
 
+  it("compacts split coverage slots before merging a full hosted envelope", () => {
+    const sharedMetadata = Object.fromEntries(
+      Array.from({ length: 15 }, (_, index) => [`sharedFact${index}`, `value-${index}`]),
+    );
+    const bloodPressureMatrix = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: {},
+      providerSlug: "omron",
+      resource: "blood_pressure",
+      version: 1,
+    });
+    const noteMatrix = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: {},
+      providerSlug: "oura",
+      resource: "note",
+      version: 2,
+    });
+    expect(bloodPressureMatrix).not.toBeNull();
+    expect(noteMatrix).not.toBeNull();
+    if (!bloodPressureMatrix || !noteMatrix) {
+      throw new TypeError("Expected representable Junction coverage.");
+    }
+
+    const cases = [
+      {
+        hostedCoverage: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
+        localCoverage: { junctionBloodPressureHistoryBackfillCoverage: "v1|omron" },
+      },
+      {
+        hostedCoverage: { junctionBloodPressureHistoryBackfillCoverage: "v1|omron" },
+        localCoverage: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
+      },
+      {
+        hostedCoverage: { junctionNoteHistoryBackfillCoverage: noteMatrix.value },
+        localCoverage: { junctionBloodPressureHistoryBackfillCoverage: "v1|omron" },
+      },
+      {
+        hostedCoverage: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
+        localCoverage: {
+          junctionBloodPressureHistoryBackfillCoverage: bloodPressureMatrix.value,
+        },
+      },
+      {
+        hostedCoverage: { junctionNoteHistoryBackfillCoverage: noteMatrix.value },
+        localCoverage: {
+          junctionBloodPressureHistoryBackfillCoverage: bloodPressureMatrix.value,
+        },
+      },
+      {
+        hostedCoverage: {
+          junctionBloodPressureHistoryBackfillCoverage: bloodPressureMatrix.value,
+        },
+        localCoverage: { junctionNoteHistoryBackfillCoverage: noteMatrix.value },
+      },
+    ];
+
+    for (const { hostedCoverage, localCoverage } of cases) {
+      for (const hostedCoverageFirst of [true, false]) {
+        for (const localCoverageFirst of [true, false]) {
+          const result = mergeHostedDeviceSyncConnectionMetadata({
+            hostedMetadata: hostedCoverageFirst
+              ? { ...hostedCoverage, ...sharedMetadata }
+              : { ...sharedMetadata, ...hostedCoverage },
+            localConnectionStateUnpublished: true,
+            localMetadata: localCoverageFirst
+              ? { ...localCoverage, ...sharedMetadata }
+              : { ...sharedMetadata, ...localCoverage },
+          });
+
+          expect(result.preservedLocalProgress).toBe(true);
+          expect(Object.keys(result.metadata)).toHaveLength(16);
+          expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            result.metadata,
+            "omron",
+            "blood_pressure",
+            1,
+          )).toBe(true);
+          expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+            result.metadata,
+            "oura",
+            "note",
+            2,
+          )).toBe(true);
+          for (const [key, value] of Object.entries(sharedMetadata)) {
+            expect(result.metadata[key]).toBe(value);
+          }
+        }
+      }
+    }
+  });
+
   it("keeps published source coverage when a bounded union cannot fit", () => {
     const hostedCoverage = `v1|${Array.from(
       { length: 12 },
