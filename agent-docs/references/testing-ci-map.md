@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Current Repo Checks
 
@@ -563,7 +563,13 @@ supported provider credential.
   prove strict per-family metric normalization, explicit unknowns for missing
   required series, continued evaluation of available signals, positive
   direct-port counter deltas with reset/new-series suppression across complete
-  and partial samples, SQLite sample persistence and 30-day pruning, concrete
+  and partial samples, one bounded confirmation for a safe direct-counter-only
+  omission, multi-family confirmation rejection, cross-scrape evidence
+  composition, immediate unsafe-signal paging before that confirmation, unsafe
+  confirmation-signal paging, failed-confirmation retention, positive
+  recovered-counter deltas, persistent-gap telemetry paging, and the scheduled
+  Durable Object boundary for that retry,
+  SQLite sample persistence and 30-day pruning, concrete
   connection thresholds, two-failure collection hysteresis, one acknowledged
   page per unresolved telemetry-notification window, recovered threshold
   coalescing before acknowledgment, truthful partial-then-unavailable,
