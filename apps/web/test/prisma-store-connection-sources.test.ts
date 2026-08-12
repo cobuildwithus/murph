@@ -107,23 +107,40 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
     take?: number;
     where: {
       connectionId: string;
-      sourceProviderSlug?: {
-        in: string[];
-      };
-      status?: {
-        not?: string;
-      };
+      sourceProviderSlug?: string | { in: string[] };
+      status?: string | { not?: string };
+      OR?: Array<{
+        lastErrorCode?: null;
+        NOT?: { lastErrorCode: { in: string[] } };
+      }>;
     };
   }) => {
     const sorted = [...records.values()]
       .filter((record) => record.connectionId === input.where.connectionId)
       .filter((record) =>
-        input.where.sourceProviderSlug?.in
-          ? input.where.sourceProviderSlug.in.includes(record.sourceProviderSlug)
-          : true
+        typeof input.where.sourceProviderSlug === "string"
+          ? record.sourceProviderSlug === input.where.sourceProviderSlug
+          : input.where.sourceProviderSlug?.in
+            ? input.where.sourceProviderSlug.in.includes(record.sourceProviderSlug)
+            : true
       )
       .filter((record) =>
-        input.where.status?.not ? record.status !== input.where.status.not : true
+        typeof input.where.status === "string"
+          ? record.status === input.where.status
+          : input.where.status?.not
+            ? record.status !== input.where.status.not
+            : true
+      )
+      .filter((record) =>
+        input.where.OR
+          ? input.where.OR.some((clause) =>
+              clause.lastErrorCode === null
+                ? record.lastErrorCode === null
+                : clause.NOT
+                  ? !clause.NOT.lastErrorCode.in.includes(record.lastErrorCode ?? "")
+                  : false
+            )
+          : true
       )
       .sort((left, right) =>
         right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
@@ -399,6 +416,84 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       ],
       where: {
         connectionId: "dsc_parent",
+      },
+    }));
+  });
+
+  it("bounds source admission to one exact, minimally projected connected candidate", async () => {
+    const { findMany, store } = createSourceStore([
+      createSourceRecord({
+        id: "dcs_other",
+        sourceInstanceKey: "src_other",
+        sourceProviderSlug: "garmin",
+      }),
+      createSourceRecord({
+        id: "dcs_target",
+        sourceInstanceKey: "src_target",
+        sourceProviderSlug: "oura",
+      }),
+    ]);
+
+    await expect(store.listConnectionSourceAdmissionCandidates({
+      connectionId: "dsc_parent",
+      sourceProviderSlug: "oura",
+    })).resolves.toEqual([
+      expect.objectContaining({
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }),
+    ]);
+    expect(findMany).toHaveBeenCalledOnce();
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: {
+        lastErrorCode: true,
+        sourceProviderSlug: true,
+        status: true,
+      },
+      take: 1,
+      where: expect.objectContaining({
+        connectionId: "dsc_parent",
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }),
+    }));
+  });
+
+  it("returns one exact blocked source when no admitted candidate exists", async () => {
+    const { findMany, store } = createSourceStore([
+      createSourceRecord({
+        id: "dcs_target",
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        sourceInstanceKey: "src_target",
+        sourceProviderSlug: "oura",
+      }),
+      createSourceRecord({
+        id: "dcs_unrelated",
+        sourceInstanceKey: "src_unrelated",
+        sourceProviderSlug: "garmin",
+      }),
+    ]);
+
+    await expect(store.listConnectionSourceAdmissionCandidates({
+      connectionId: "dsc_parent",
+      sourceProviderSlug: "oura",
+    })).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "SOURCE_USER_DISCONNECTED",
+        sourceProviderSlug: "oura",
+      }),
+    ]);
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      select: {
+        lastErrorCode: true,
+        sourceProviderSlug: true,
+        status: true,
+      },
+      take: 1,
+      where: {
+        connectionId: "dsc_parent",
+        sourceProviderSlug: "oura",
       },
     }));
   });

@@ -4,15 +4,20 @@ const sealState = vi.hoisted(() => ({
   active: 0,
   calls: 0,
   failAtCall: null as number | null,
+  insideTransaction: false,
   maxActive: 0,
+  prepareInsideTransaction: [] as boolean[],
+  revalidateInsideTransaction: [] as boolean[],
+  sealInsideTransaction: [] as boolean[],
 }));
 
-vi.mock("@/src/lib/device-sync/prisma-store/dirty-payloads", () => ({
-  sealHostedDeviceSyncDirtyPayloadJson: vi.fn(async () => {
+vi.mock("@/src/lib/device-sync/prisma-store/dirty-payloads", () => {
+  const seal = vi.fn(async () => {
     sealState.active += 1;
     sealState.calls += 1;
     const callNumber = sealState.calls;
     sealState.maxActive = Math.max(sealState.maxActive, sealState.active);
+    sealState.sealInsideTransaction.push(sealState.insideTransaction);
 
     if (sealState.failAtCall === callNumber) {
       sealState.active -= 1;
@@ -23,15 +28,35 @@ vi.mock("@/src/lib/device-sync/prisma-store/dirty-payloads", () => ({
 
     sealState.active -= 1;
     return `sealed-payload-${callNumber}`;
-  }),
-}));
+  });
+
+  return {
+    prepareHostedDeviceSyncDirtyPayloadCrypto: vi.fn(async (input: { userId: string }) => {
+      sealState.prepareInsideTransaction.push(sealState.insideTransaction);
+      return {
+        domain: "device-sync-payload",
+        rootKeyId: "prepared-root-test",
+        userId: input.userId,
+      };
+    }),
+    revalidatePreparedHostedDeviceSyncDirtyPayloadCryptoTx: vi.fn(async () => {
+      sealState.revalidateInsideTransaction.push(sealState.insideTransaction);
+    }),
+    sealHostedDeviceSyncDirtyPayloadJson: seal,
+    sealHostedDeviceSyncDirtyPayloadJsonFromPreparedCrypto: seal,
+  };
+});
 
 describe("PrismaHostedDirtyConnectionStore dirty payload preseal concurrency", () => {
   function resetSealState(): void {
     sealState.active = 0;
     sealState.calls = 0;
     sealState.failAtCall = null;
+    sealState.insideTransaction = false;
     sealState.maxActive = 0;
+    sealState.prepareInsideTransaction = [];
+    sealState.revalidateInsideTransaction = [];
+    sealState.sealInsideTransaction = [];
   }
 
   async function importStore() {
@@ -154,5 +179,44 @@ describe("PrismaHostedDirtyConnectionStore dirty payload preseal concurrency", (
     expect(sealState.active).toBe(0);
     expect(sealState.calls).toBe(16);
     expect(readPayloadCreateData()).toBeNull();
+  });
+
+  it("prepares the provider-owned maximum webhook batch before the caller transaction", async () => {
+    resetSealState();
+
+    const { PrismaHostedDirtyConnectionStore } = await importStore();
+    const { prisma, readPayloadCreateData } = createPrismaStub();
+    const store = new PrismaHostedDirtyConnectionStore(prisma as never);
+    const input = {
+      connectionId: "dsc_prepared_bound_1",
+      dirtyAt: "2026-05-26T12:00:00.000Z",
+      eventType: "provider.connection.updated",
+      provider: "junction",
+      resourceCategory: null,
+      resources: createDirtyResources(2),
+      traceId: "trace_prepared_bound_1",
+      userId: "member_prepared_bound_1",
+    } as const;
+
+    const prepared = await store.prepareDirtyConnectionUpsert(input);
+    sealState.insideTransaction = true;
+    try {
+      await store.upsertDirtyConnectionWithPreparedPlanTx({
+        prepared,
+        tx: prisma as never,
+      });
+    } finally {
+      sealState.insideTransaction = false;
+    }
+
+    expect(sealState.prepareInsideTransaction).toEqual([false]);
+    expect(sealState.sealInsideTransaction).toEqual([false, false]);
+    expect(sealState.maxActive).toBe(2);
+    expect(sealState.revalidateInsideTransaction).toEqual([true]);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledTimes(3);
+    expect(prisma.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
+    expect(readPayloadCreateData()).toHaveLength(2);
   });
 });

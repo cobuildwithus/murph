@@ -43,6 +43,7 @@ import type {
 import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import {
   PrismaHostedConnectionSourceStore,
+  type HostedConnectionSourceAdmissionCandidate,
   type HostedDeviceConnectionSource,
   type ListHostedBoundedConnectionSourcesForConnectionsInput,
   type MarkHostedDeviceConnectionSourceDataReceivedInput,
@@ -92,12 +93,14 @@ export {
 } from "./prisma-store/agent-sessions";
 export {
   HostedDeviceSyncDirtyPreparationMismatchError,
+  hasHostedDeviceSyncDirtyResourcePayload,
   type PreparedHostedDeviceSyncDirtyConnectionUpsert,
 } from "./prisma-store/dirty-connections";
 export {
   hostedConnectionSourceRecordArgs,
   mapHostedConnectionSourceRecord,
   type HostedConnectionSourceRecord,
+  type HostedConnectionSourceAdmissionCandidate,
   type HostedDeviceConnectionSource,
   type ListHostedBoundedConnectionSourcesForConnectionsInput,
   type MarkHostedDeviceConnectionSourceDataReceivedInput,
@@ -470,6 +473,14 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.dirtyConnections.hasPendingDirtyConnection(connectionId, tx);
   }
 
+  async shouldRequestWakeForDirtyConnectionUpsert(input: {
+    connectionId: string;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    return this.dirtyConnections.shouldRequestWakeForDirtyConnectionUpsert(input);
+  }
+
   async hasPendingDirtyConnectionForUser(
     userId: string,
     tx?: HostedPrismaTransactionClient,
@@ -547,6 +558,14 @@ export class PrismaDeviceSyncControlPlaneStore
       (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
       && (!input.status || source.status === input.status)
     );
+  }
+
+  async listConnectionSourceAdmissionCandidates(input: {
+    connectionId: string;
+    sourceProviderSlug: string;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<HostedConnectionSourceAdmissionCandidate[]> {
+    return this.sources.listConnectionSourceAdmissionCandidates(input);
   }
 
   async listConnectionSourcesForConnections(

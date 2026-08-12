@@ -111,6 +111,12 @@ export interface PreparedHostedDeviceSyncDirtyConnectionUpsert {
   readonly userId: string;
 }
 
+export function hasHostedDeviceSyncDirtyResourcePayload(
+  resource: HostedDeviceSyncDirtyResource,
+): boolean {
+  return hasDirtyResourceInputPayload(resource.payload);
+}
+
 export class HostedDeviceSyncDirtyPreparationMismatchError extends Error {
   readonly code = "HOSTED_DEVICE_SYNC_DIRTY_PREPARATION_MISMATCH";
 
@@ -915,6 +921,28 @@ export class PrismaHostedDirtyConnectionStore {
     `);
 
     return rows.some((row) => row.pending === true);
+  }
+
+  async shouldRequestWakeForDirtyConnectionUpsert(input: {
+    connectionId: string;
+    tx: HostedPrismaTransactionClient;
+    userId: string;
+  }): Promise<boolean> {
+    const existing = await input.tx.deviceSyncDirtyConnection.findUnique({
+      select: {
+        dirtyRevision: true,
+        processedRevision: true,
+        userId: true,
+      },
+      where: {
+        connectionId: input.connectionId,
+      },
+    });
+    if (existing && existing.userId !== input.userId) {
+      throw new TypeError("Dirty connection wake inspection owner did not match the connection.");
+    }
+
+    return !existing || existing.processedRevision >= existing.dirtyRevision;
   }
 
   async hasPendingDirtyConnectionForUser(
@@ -2029,7 +2057,7 @@ function buildDirtyResourceBatch(
     const normalized = withDirtyResourceWindowPayload(normalizeDirtyResource(resource));
     mergeDirtyResourceInto(allResources, normalized);
 
-    if (hasDirtyResourceInputPayload(resource.payload)) {
+    if (hasHostedDeviceSyncDirtyResourcePayload(resource)) {
       payloadResources.push(normalized);
     } else {
       mergeDirtyResourceInto(compactResources, normalized);
