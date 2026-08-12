@@ -1,6 +1,6 @@
 # Adopt Composio's provider-owned API client
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -73,7 +73,7 @@ Updated: 2026-08-12
 3. [x] Add Composio to the provider-request guard and strengthen compile/runtime
    boundary coverage.
 4. [x] Run focused verification, dependency checks, and inspect the final diff.
-5. [ ] Push the exact candidate, complete specialist/final review and CI, then
+5. [x] Push the exact candidate, complete specialist/final review and CI, then
    close the plan with the final scoped commit.
 
 ## Decisions
@@ -106,3 +106,39 @@ Updated: 2026-08-12
     bodies remain unchanged.
   - Existing bounded-response, diagnostic-redaction, no-retry, and account
     lifecycle tests remain green.
+
+## Outcomes
+
+- Installed exact `@composio/client@0.1.0-alpha.76`, the current
+  Stainless-generated Apache-2.0 REST client. Its package and lockfile snapshot
+  have no dependencies or transitive additions.
+- Replaced the handwritten Composio transport with generated resource methods
+  and provider-owned request/response types. The documented bodyless revoke
+  endpoint uses the same client's low-level POST because this release does not
+  expose a generated revoke resource.
+- Refined `Composio.ToolExecuteParams` so direct Murph writes require
+  `arguments`, `user_id`, and `version`, while preserving the provider's
+  remaining fields and compile-time drift detection.
+- Preserved zero SDK retries, the 30-second timeout, success/error body caps,
+  structured-only diagnostics, connected-account ownership filters, and the
+  deployed repeated-query-key wire shape.
+- Focused proof passed: 54 connected-app Web tests, 21 provider-boundary guard
+  tests, Web typecheck, provider/dependency guards, frozen install, ignored
+  build checks, docs drift, diff checks, and privacy scan. The full Web,
+  package, and built-boundary matrix passed. A host-load-only Cloudflare test
+  timeout passed in isolation, and the complete Cloudflare rerun passed all 141
+  Node files / 2,401 tests and five Workers files / 10 tests.
+- The dependency audit remains red only on existing workspace advisories; an
+  explicit audit-path check found no Composio path.
+- The preliminary specialist pass accepted one coverage finding: bodyless
+  revoke success was modeled as JSON HTTP 200. The inspected test-only patch
+  changed that response to bodyless HTTP 204 and asserted exactly three
+  list/revoke/delete requests; the corrected 13-test focused suite and broader
+  54-test suite pass.
+- Final ReviewGPT round 4 returned `ROUND_OUTCOME: PASS` with no findings after
+  verifying the accepted correction and the full sensitive provider boundary.
+  Required GitHub checks passed on corrected implementation head
+  `145eddd00e6eb0d31417aa4fefc127f44d137a09`.
+- `git merge-tree --write-tree HEAD origin/main` completed without conflicts
+  before plan closure.
+Completed: 2026-08-12
