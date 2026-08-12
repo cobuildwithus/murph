@@ -357,7 +357,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           kind: "member" as const,
           mailboxRootKeyId,
           memberId,
-          routeEncrypted: routingRecord.telegramUserIdEncrypted,
           senderResolution: "found" as const,
           telegramThreadId,
           telegramUserId,

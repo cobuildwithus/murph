@@ -90,7 +90,6 @@ interface HostedDirectTelegramMemberRoutingPreparation {
   kind: "member";
   mailboxRootKeyId: string | null;
   memberId: string | null;
-  routeEncrypted: string | null;
   senderResolution: "ambiguous" | "found" | "missing";
   telegramThreadId: string;
   telegramUserId: string;
@@ -636,17 +635,32 @@ async function revalidatePreparedDirectTelegramRouteTx(input: {
     },
   });
   const routeEncrypted = routing?.telegramUserIdEncrypted ?? null;
-  if (routeEncrypted !== input.preparation.routeEncrypted) {
+  let rootReference: ReturnType<
+    typeof readHostedUserSecureBoxStringRootReference
+  >;
+  try {
+    rootReference = readHostedUserSecureBoxStringRootReference({
+      lane: "hosted-member-private-field",
+      value: routeEncrypted,
+    });
+  } catch {
     throw hostedDirectTelegramPreparationRequired("sender_route");
   }
-
-  const rootReference = readHostedUserSecureBoxStringRootReference({
-    lane: "hosted-member-private-field",
-    value: routeEncrypted,
-  });
+  // Direct routing upserts reseal the same authenticated sender with a fresh
+  // nonce. The locked sender lookup above owns semantic identity; this check
+  // only binds the current seal to a root that preflight actually prepared.
   if (
-    (rootReference?.rootKeyId ?? null)
-      !== input.preparation.existingControlRootKeyId
+    (
+      !rootReference
+      && input.preparation.existingControlRootKeyId !== null
+    )
+    || (
+      rootReference
+      && rootReference.rootKeyId
+        !== input.preparation.existingControlRootKeyId
+      && rootReference.rootKeyId
+        !== input.preparation.activeControlRootKeyId
+    )
   ) {
     throw hostedDirectTelegramPreparationRequired("sender_route");
   }

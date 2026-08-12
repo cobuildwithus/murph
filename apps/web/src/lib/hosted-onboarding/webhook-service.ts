@@ -1971,7 +1971,6 @@ interface HostedDirectTelegramMemberRoutingCryptoPreparation {
   kind: "member";
   mailboxRootKeyId: string | null;
   memberId: string | null;
-  routeEncrypted: string | null;
   senderResolution: "ambiguous" | "found" | "missing";
   telegramThreadId: string;
   telegramUserId: string;
@@ -2315,7 +2314,6 @@ async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
     kind: "member",
     mailboxRootKeyId: null,
     memberId: memberLookup.status === "found" ? memberLookup.core.id : null,
-    routeEncrypted: null,
     senderResolution: memberLookup.status,
     telegramThreadId: input.threadId,
     telegramUserId: input.senderTelegramUserId,
@@ -2443,7 +2441,6 @@ async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
       activeControlRootKeyId,
       existingControlRootKeyId: existingControlRoot?.rootKeyId ?? null,
       mailboxRootKeyId: mailboxRootResult.value,
-      routeEncrypted,
     },
   };
 }

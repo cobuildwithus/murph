@@ -16,6 +16,9 @@ import {
   getHostedDomainRootUnwrapCache,
 } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import {
+  setHostedSecureBoxStringTestCodecForTests,
+} from "@/src/lib/hosted-crypto/secure-box";
+import {
   lockAndReadActiveHostedDomainRootKeyIdTx,
 } from "@/src/lib/hosted-crypto/domain-root-store";
 import {
@@ -127,7 +130,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         kind: "member" as const,
         mailboxRootKeyId: ingressRootKeyId,
         memberId,
-        routeEncrypted: routingRecord.telegramUserIdEncrypted,
         senderResolution: "found" as const,
         telegramThreadId,
         telegramUserId,
@@ -213,6 +215,141 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: memberId },
         });
         await disconnectClients([observer, activation, inbound]);
+      }
+    });
+
+    it("admits three direct events prepared from one randomized same-root route", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_telegram_burst_${fixtureId}`;
+      const controlRootKeyId = `control_${fixtureId}`;
+      const ingressRootKeyId = `ingress_${fixtureId}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const inboundClients = Array.from(
+        { length: 3 },
+        () => createPrismaClient({ databaseUrl, poolMax: 1 }),
+      );
+      let memberCreated = false;
+      setHostedSecureBoxStringTestCodecForTests(null);
+
+      try {
+        await observer.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: memberId,
+          },
+        });
+        memberCreated = true;
+        await Promise.all([
+          insertActiveRootEnvelope({
+            domain: "control",
+            prisma: observer,
+            rootKeyId: controlRootKeyId,
+            userId: memberId,
+          }),
+          insertActiveRootEnvelope({
+            domain: "ingress",
+            prisma: observer,
+            rootKeyId: ingressRootKeyId,
+            userId: memberId,
+          }),
+        ]);
+        await runHostedOnboardingWebhookTransaction(
+          observer,
+          (transaction) => upsertHostedMemberTelegramRoutingBindingTx({
+            memberId,
+            prisma: transaction,
+            telegramThreadId,
+            telegramUserId,
+          }),
+          async () => {
+            seedPreparedRoot({
+              domain: "control",
+              rootKeyId: controlRootKeyId,
+              userId: memberId,
+            });
+          },
+        );
+        const initialRouting = await observer.hostedMemberRouting.findUnique({
+          select: {
+            telegramUserIdEncrypted: true,
+          },
+          where: { memberId },
+        });
+        if (!initialRouting?.telegramUserIdEncrypted) {
+          throw new Error("Expected an encrypted Telegram burst fixture.");
+        }
+
+        const preparedDirectTelegramRouting = {
+          activeControlRootKeyId: controlRootKeyId,
+          existingControlRootKeyId: controlRootKeyId,
+          initialSenderResolution: "found" as const,
+          kind: "member" as const,
+          mailboxRootKeyId: ingressRootKeyId,
+          memberId,
+          senderResolution: "found" as const,
+          telegramThreadId,
+          telegramUserId,
+        };
+        const updates = [720_101, 720_102, 720_103].map(
+          buildDirectTelegramUpdate,
+        );
+
+        await expect(Promise.all(updates.map((update, index) =>
+          runPreparedTelegramPlanTransaction({
+            controlRootKeyId,
+            ingressRootKeyId,
+            memberId,
+            preparedDirectTelegramRouting,
+            prisma: requireValue(
+              inboundClients[index],
+              "Telegram burst inbound client",
+            ),
+            update,
+          })
+        ))).resolves.toEqual([
+          expect.objectContaining({
+            response: expect.objectContaining({
+              ok: true,
+              reason: "wake-appended-active-member",
+            }),
+          }),
+          expect.objectContaining({
+            response: expect.objectContaining({
+              ok: true,
+              reason: "wake-appended-active-member",
+            }),
+          }),
+          expect.objectContaining({
+            response: expect.objectContaining({
+              ok: true,
+              reason: "wake-appended-active-member",
+            }),
+          }),
+        ]);
+
+        const finalRouting = await observer.hostedMemberRouting.findUnique({
+          select: {
+            telegramUserIdEncrypted: true,
+          },
+          where: { memberId },
+        });
+        expect(finalRouting?.telegramUserIdEncrypted).not.toBe(
+          initialRouting.telegramUserIdEncrypted,
+        );
+        await expect(observer.hostedMailboxItem.count({
+          where: {
+            kind: "conversation.message",
+            userId: memberId,
+          },
+        })).resolves.toBe(3);
+      } finally {
+        installDefaultHostedSecureBoxStringTestCodec();
+        if (memberCreated) {
+          await observer.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+        }
+        await disconnectClients([observer, ...inboundClients]);
       }
     });
   },
@@ -341,6 +478,48 @@ function buildDirectTelegramUpdate(updateId: number) {
     },
     update_id: updateId,
   }));
+}
+
+function requireValue<T>(value: T | undefined, label: string): T {
+  if (value === undefined) {
+    throw new Error(`Expected ${label}.`);
+  }
+  return value;
+}
+
+function installDefaultHostedSecureBoxStringTestCodec(): void {
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt(input) {
+      const decoded = JSON.parse(
+        Buffer.from(
+          input.value.replace(/^hsb-test:/u, ""),
+          "base64url",
+        ).toString("utf8"),
+      ) as {
+        lane?: string;
+        scope?: string;
+        userId?: string;
+        value?: string;
+      };
+      if (
+        decoded.lane !== input.lane
+        || decoded.scope !== input.scope
+        || decoded.userId !== input.userId
+        || typeof decoded.value !== "string"
+      ) {
+        throw new Error("Hosted secure-box test codec metadata mismatch.");
+      }
+      return decoded.value;
+    },
+    encrypt(input) {
+      return `hsb-test:${Buffer.from(JSON.stringify({
+        lane: input.lane,
+        scope: input.scope,
+        userId: input.userId,
+        value: input.value,
+      }), "utf8").toString("base64url")}`;
+    },
+  });
 }
 
 async function settleWithin(
