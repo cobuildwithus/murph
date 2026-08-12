@@ -2824,6 +2824,7 @@ export function createJunctionDeviceSyncProvider(
         const chunkRecords = await client.listTimeseries(request);
         records.push(
           ...filterJunctionTimeseriesRecordsToWindow(
+            resource,
             chunkRecords,
             chunkWindowStart,
             chunkWindowEnd,
@@ -5346,6 +5347,7 @@ function dedupeJunctionTimeseriesSnapshotRecords(
 }
 
 function filterJunctionTimeseriesRecordsToWindow(
+  resource: string,
   records: readonly unknown[],
   windowStart: string,
   windowEnd: string,
@@ -5356,12 +5358,14 @@ function filterJunctionTimeseriesRecordsToWindow(
     return [...records];
   }
 
+  const preferIntervalStart =
+    resolveJunctionTimeseriesResourcePolicy(resource)?.normalizationMode === "daily_aggregate";
   return records.filter((record) => {
     const entry = readPlainObject(record);
     if (!entry) {
       return true;
     }
-    const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry);
+    const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry, preferIntervalStart);
     if (!timestamp) {
       return true;
     }
@@ -5550,7 +5554,13 @@ function junctionTimeseriesRecordValueIdentity(
   ];
 }
 
-function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {
+function resolveJunctionTimeseriesRecordTimestamp(
+  record: Record<string, unknown>,
+  preferIntervalStart = false,
+): string | null {
+  const intervalKeys = preferIntervalStart
+    ? ["start", "startAt", "start_at", "end", "endAt", "end_at"]
+    : ["end", "endAt", "end_at", "start", "startAt", "start_at"];
   for (const key of [
     "observedAt",
     "observed_at",
@@ -5559,12 +5569,7 @@ function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown
     "time",
     "date",
     "day",
-    "end",
-    "endAt",
-    "end_at",
-    "start",
-    "startAt",
-    "start_at",
+    ...intervalKeys,
   ]) {
     const normalized = normalizeString(record[key]);
     if (!normalized) {

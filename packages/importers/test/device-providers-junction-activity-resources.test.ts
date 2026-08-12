@@ -78,6 +78,7 @@ function validActivitySnapshot(): Record<string, unknown> {
       stand_hour: source([
         { end: `${DAY}T11:00:00.000Z`, start: `${DAY}T10:00:00.000Z`, unit: "count", value: 1 },
         { end: `${DAY}T18:00:00.000Z`, start: `${DAY}T17:00:00.000Z`, unit: "count", value: 1 },
+        { end: "2026-02-02T00:00:00.000Z", start: `${DAY}T23:00:00.000Z`, unit: "count", value: 1 },
       ]),
       uv_exposure: source([
         { end: END, id: "uv-1", start: START, timestamp: `${DAY}T12:01:00.000Z`, unit: "index", value: 4 },
@@ -130,7 +131,7 @@ test("Junction activity-resource slice emits bounded daily, hourly, and sparse f
     ["floors-climbed", { unit: "count", value: 8 }],
     ["handwashing-count", { unit: "count", value: 1 }],
     ["stand-duration-minutes", { unit: "minutes", value: 75 }],
-    ["stand-hours", { unit: "count", value: 2 }],
+    ["stand-hours", { unit: "count", value: 3 }],
     ["uv-exposure-index", { unit: "index", value: 5 }],
     ["wheelchair-push-count", { unit: "count", value: 300 }],
     ["workout-distance-km", { unit: "km", value: 2 }],

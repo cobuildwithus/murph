@@ -14516,7 +14516,7 @@ test("Junction mixed sparse and dense backfills resume the longest history befor
 });
 
 test("Junction opt-in dense webhooks wait for a closed UTC day before importing", async () => {
-  for (const resource of ["calories_basal", "handwashing"] as const) {
+  for (const resource of ["calories_basal", "handwashing", "stand_hour"] as const) {
     const requests: URL[] = [];
     const importedSnapshots: unknown[] = [];
     const provider = createJunctionProvider(async (input) => {
@@ -14538,11 +14538,18 @@ test("Junction opt-in dense webhooks wait for a closed UTC day before importing"
           groups: {
             garmin: [{
               data: requestedDay === "2026-04-02"
-                ? [{
-                    timestamp: "2026-04-02T12:00:00.000Z",
-                    unit: resource === "calories_basal" ? "kcal" : "count",
-                    value: 1,
-                  }]
+                ? resource === "stand_hour"
+                  ? [{
+                      end: "2026-04-03T00:00:00.000Z",
+                      start: "2026-04-02T23:00:00.000Z",
+                      unit: "count",
+                      value: 1,
+                    }]
+                  : [{
+                      timestamp: "2026-04-02T12:00:00.000Z",
+                      unit: resource === "calories_basal" ? "kcal" : "count",
+                      value: 1,
+                    }]
                 : [],
               source: { provider: "garmin", type: "watch" },
             }],

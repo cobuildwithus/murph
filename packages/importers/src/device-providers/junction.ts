@@ -360,7 +360,7 @@ const JUNCTION_GENERIC_SUMMARY_ID_PATHS = [
   "providerId",
   "provider_id",
 ] as const;
-const JUNCTION_RECORD_TIMESTAMP_PATHS = [
+const JUNCTION_RECORD_POINT_TIMESTAMP_PATHS = [
   "observedAtRaw",
   "observed_at_raw",
   "observedAt",
@@ -369,6 +369,8 @@ const JUNCTION_RECORD_TIMESTAMP_PATHS = [
   "time",
   "date",
   "day",
+] as const;
+const JUNCTION_RECORD_INTERVAL_END_TIMESTAMP_PATHS = [
   "end",
   "endAt",
   "end_at",
@@ -376,6 +378,8 @@ const JUNCTION_RECORD_TIMESTAMP_PATHS = [
   "time_end",
   "bedtimeStop",
   "bedtime_stop",
+] as const;
+const JUNCTION_RECORD_INTERVAL_START_TIMESTAMP_PATHS = [
   "start",
   "startAt",
   "start_at",
@@ -383,6 +387,16 @@ const JUNCTION_RECORD_TIMESTAMP_PATHS = [
   "time_start",
   "bedtimeStart",
   "bedtime_start",
+] as const;
+const JUNCTION_RECORD_TIMESTAMP_PATHS = [
+  ...JUNCTION_RECORD_POINT_TIMESTAMP_PATHS,
+  ...JUNCTION_RECORD_INTERVAL_END_TIMESTAMP_PATHS,
+  ...JUNCTION_RECORD_INTERVAL_START_TIMESTAMP_PATHS,
+] as const;
+const JUNCTION_DAILY_AGGREGATE_TIMESTAMP_PATHS = [
+  ...JUNCTION_RECORD_POINT_TIMESTAMP_PATHS,
+  ...JUNCTION_RECORD_INTERVAL_START_TIMESTAMP_PATHS,
+  ...JUNCTION_RECORD_INTERVAL_END_TIMESTAMP_PATHS,
 ] as const;
 const JUNCTION_MEAL_PROVIDER_ID_PATHS = [
   "mealId",
@@ -2478,7 +2492,12 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     }
 
     const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths), entry);
-    const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
+    const timestamp = resolveRecordTimestamp(
+      entry,
+      input.context,
+      resourceContext.sourceProviderSlug,
+      JUNCTION_DAILY_AGGREGATE_TIMESTAMP_PATHS,
+    );
     const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp);
     const dayKey = input.requireExplicitTimestamp
       ? extractIsoDatePrefix(sampleAt) ?? undefined
@@ -6235,6 +6254,7 @@ function resolveRecordTimestamp(
   entry: PlainObject,
   context: Pick<NormalizationContext, "importedAt" | "windowEnd" | "windowStart">,
   sourceProviderSlug: string | undefined,
+  timestampPaths: readonly string[] = JUNCTION_RECORD_TIMESTAMP_PATHS,
 ): {
   occurredAt?: string;
   recordedAt?: string;
@@ -6242,7 +6262,7 @@ function resolveRecordTimestamp(
   observedAtRaw?: string;
   timestampSemantics?: TimestampSemantics;
 } {
-  const rawObservedAt = firstStringFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS);
+  const rawObservedAt = firstStringFromPaths(entry, timestampPaths);
   const localCalendarDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
   const explicitSemantics = firstTimestampSemantics(entry);
   const hasSourceSpecificFloatingTime = hasFloatingTimestampSourceProvider(sourceProviderSlug);
