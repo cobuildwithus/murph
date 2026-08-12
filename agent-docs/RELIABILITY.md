@@ -456,6 +456,12 @@ Last verified: 2026-08-11
   route also requires proof: a new browser on an old instance receives 404, and
   an old browser on a new instance receives 400, so mixed-version traffic fails
   safely during convergence.
+- The Family owner snapshot admits at most the six supported active and pending
+  seats before reading private invite history. For each current non-owner
+  member it selects only the earliest accepted invite through one indexed
+  lateral lookup; departed members and later historical accepts never reach
+  decryption. A roster that exceeds the product invariant fails closed instead
+  of turning a settings read into an unbounded history scan.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a

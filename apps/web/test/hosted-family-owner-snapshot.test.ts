@@ -57,6 +57,12 @@ const GROUP = {
 
 function ownerSnapshotPrisma() {
   return {
+    $queryRaw: vi.fn().mockResolvedValue([
+      {
+        acceptedByMemberId: "m_mom",
+        targetLabel: "Mom",
+      },
+    ]),
     hostedAccountGroup: {
       findUnique: vi.fn().mockResolvedValue(GROUP),
     },
@@ -206,6 +212,7 @@ test("pending Max transition advances the Web rollback floor before Stripe capac
 
 test("owner snapshot exposes a Telegram link only for a Telegram-bound invite", async () => {
   const prisma = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
     hostedAccountGroup: { findUnique: vi.fn().mockResolvedValue(GROUP) },
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
@@ -262,6 +269,14 @@ test("active member identity falls back to the invited email when there is no la
     field === "hosted-account-group-invite.target-email" ? "dad@example.com" : null,
   );
   const prisma = {
+    $queryRaw: vi.fn().mockResolvedValue([
+      {
+        acceptedByMemberId: "m_dad",
+        planCode: "pulse",
+        targetEmailEncrypted: "enc:dad",
+        targetLabel: null,
+      },
+    ]),
     hostedAccountGroup: { findUnique: vi.fn().mockResolvedValue(GROUP) },
     hostedAccountGroupBillingRef: {
       findUnique: vi.fn().mockResolvedValue({ billedSeatCount: 4 }),
@@ -313,6 +328,65 @@ test("active member identity falls back to the invited email when there is no la
 
   const dad = snapshot?.members.find((member) => member.memberId === "m_dad");
   expect(dad?.label).toBe("dad@example.com");
+});
+
+test("owner snapshot bounds current seats and accepted-invite history before decrypting", async () => {
+  const prisma = ownerSnapshotPrisma();
+
+  await readHostedFamilyOwnerSnapshotForMember({
+    // @ts-expect-error: focused prisma double exposes only the methods under test
+    prisma,
+    memberId: "m_owner",
+    now: NOW,
+  });
+
+  expect(prisma.hostedAccountGroupMembership.findMany).toHaveBeenCalledWith(
+    expect.objectContaining({ take: 7 }),
+  );
+  expect(prisma.hostedAccountGroupInvite.findMany).toHaveBeenCalledWith(
+    expect.objectContaining({ take: 7 }),
+  );
+  expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+  const acceptedInviteQuery = prisma.$queryRaw.mock.calls[0]?.[0] as {
+    strings?: readonly string[];
+    values?: readonly unknown[];
+  } | undefined;
+  const sql = acceptedInviteQuery?.strings?.join("?") ?? "";
+  expect(sql).toContain("WITH current_member(member_id)");
+  expect(sql).toContain("CROSS JOIN LATERAL");
+  expect(sql).toContain("invite.accepted_by_member_id = current_member.member_id");
+  expect(sql).toContain("LIMIT 1");
+  expect(acceptedInviteQuery?.values).toEqual(expect.arrayContaining([
+    "m_mom",
+    GROUP.id,
+  ]));
+});
+
+test("owner snapshot fails closed before history reads when seat state exceeds six", async () => {
+  const prisma = ownerSnapshotPrisma();
+  prisma.hostedAccountGroupMembership.findMany.mockResolvedValueOnce(
+    Array.from({ length: 7 }, (_, index) => ({
+      joinedAt: NOW,
+      memberId: `m_${index}`,
+      pendingPlanCode: null,
+      planCode: "pulse",
+      role: index === 0 ? "owner" : "member",
+      status: "active",
+    })),
+  );
+  prisma.hostedAccountGroupInvite.findMany.mockResolvedValueOnce([]);
+
+  await expect(readHostedFamilyOwnerSnapshotForMember({
+    // @ts-expect-error: focused prisma double exposes only the methods under test
+    prisma,
+    memberId: "m_owner",
+    now: NOW,
+  })).rejects.toMatchObject({
+    code: "HOSTED_FAMILY_SNAPSHOT_CAPACITY_INVALID",
+  });
+
+  expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  expect(encryptionMocks.decryptHostedWebNullableString).not.toHaveBeenCalled();
 });
 
 test("owner snapshot is null when the member owns no family group", async () => {

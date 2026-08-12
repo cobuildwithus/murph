@@ -837,7 +837,7 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
     return null;
   }
 
-  const [memberships, invites, acceptedInvites, paidCapacities] = await Promise.all([
+  const [memberships, invites, paidCapacities] = await Promise.all([
     prisma.hostedAccountGroupMembership.findMany({
       orderBy: {
         createdAt: "asc",
@@ -850,6 +850,7 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
         role: true,
         status: true,
       },
+      take: HOSTED_FAMILY_MAX_SEATS + 1,
       where: {
         groupId: group.id,
         status: "active",
@@ -860,6 +861,7 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
         createdAt: "asc",
       },
       select: hostedAccountGroupInviteSelect,
+      take: HOSTED_FAMILY_MAX_SEATS + 1,
       where: {
         expiresAt: {
           gt: now,
@@ -868,24 +870,31 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
         status: "pending",
       },
     }),
-    prisma.hostedAccountGroupInvite.findMany({
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: hostedAccountGroupInviteSelect,
-      where: {
-        acceptedByMemberId: {
-          not: null,
-        },
-        groupId: group.id,
-        status: "accepted",
-      },
-    }),
     readHostedFamilyPlanCapacitiesTx({
       groupId: group.id,
       tx: prisma,
     }),
   ]);
+
+  if (
+    memberships.length > HOSTED_FAMILY_MAX_SEATS
+    || invites.length > HOSTED_FAMILY_MAX_SEATS
+    || memberships.length + invites.length > HOSTED_FAMILY_MAX_SEATS
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_SNAPSHOT_CAPACITY_INVALID",
+      httpStatus: 500,
+      message: "Family membership exceeds the supported seat capacity.",
+    });
+  }
+
+  const acceptedInvites = await readFirstAcceptedHostedFamilyInvitesForMembers({
+    group,
+    memberIds: memberships
+      .map((membership) => membership.memberId)
+      .filter((memberId) => memberId !== group.ownerMemberId),
+    prisma,
+  });
 
   const firstAcceptedInviteByMember = new Map<string, (typeof acceptedInvites)[number]>();
   for (const invite of acceptedInvites) {
@@ -1002,6 +1011,60 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
     },
     suspendedAt: group.suspendedAt,
   };
+}
+
+async function readFirstAcceptedHostedFamilyInvitesForMembers(input: {
+  group: HostedAccountGroupAccessSnapshot;
+  memberIds: string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedAccountGroupInviteSnapshot[]> {
+  if (input.memberIds.length === 0) {
+    return [];
+  }
+
+  const invites = await input.prisma.$queryRaw<Array<
+    Omit<HostedAccountGroupInviteSnapshot, "group">
+  >>(Prisma.sql`
+    WITH current_member(member_id) AS (
+      SELECT unnest(ARRAY[${Prisma.join(input.memberIds)}]::text[])
+    )
+    SELECT
+      accepted_invite.accepted_at AS "acceptedAt",
+      accepted_invite.accepted_by_member_id AS "acceptedByMemberId",
+      accepted_invite.channel,
+      accepted_invite.created_at AS "createdAt",
+      accepted_invite.expires_at AS "expiresAt",
+      accepted_invite.group_id AS "groupId",
+      accepted_invite.id,
+      accepted_invite.invite_code AS "inviteCode",
+      accepted_invite.invited_by_member_id AS "invitedByMemberId",
+      accepted_invite.plan_code AS "planCode",
+      accepted_invite.status,
+      accepted_invite.target_email_encrypted AS "targetEmailEncrypted",
+      accepted_invite.target_email_lookup_key AS "targetEmailLookupKey",
+      accepted_invite.target_label AS "targetLabel",
+      accepted_invite.target_phone_lookup_key AS "targetPhoneLookupKey",
+      accepted_invite.target_phone_number_encrypted AS "targetPhoneNumberEncrypted",
+      accepted_invite.target_telegram_username_encrypted AS "targetTelegramUsernameEncrypted",
+      accepted_invite.target_telegram_username_lookup_key AS "targetTelegramUsernameLookupKey",
+      accepted_invite.updated_at AS "updatedAt"
+    FROM current_member
+    CROSS JOIN LATERAL (
+      SELECT invite.*
+      FROM hosted_account_group_invite AS invite
+      WHERE invite.group_id = ${input.group.id}
+        AND invite.accepted_by_member_id = current_member.member_id
+        AND invite.status = 'accepted'
+      ORDER BY invite.created_at ASC, invite.id ASC
+      LIMIT 1
+    ) AS accepted_invite
+    ORDER BY current_member.member_id ASC
+  `);
+
+  return invites.map((invite) => ({
+    ...invite,
+    group: input.group,
+  }));
 }
 
 /**
