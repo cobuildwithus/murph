@@ -518,7 +518,6 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
     (
       await runWorkoutCli<{
         estimatedWorkouts: number
-        headers: string[]
         importable: boolean
         rowCount: number
         source: string
@@ -539,8 +538,47 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
   assert.equal(inspected.estimatedWorkouts, 1)
   assert.equal(inspected.rowCount, 2)
   assert.equal(inspected.source, 'strong')
-  assert.equal(inspected.headers.includes('Workout Name'), true)
+  assert.equal('headers' in inspected, false)
   assert.deepEqual(inspected.warnings, [])
+
+  const privateSentinels = [
+    'PRIVATE_WORKOUT_TITLE',
+    'PRIVATE_WORKOUT_TIMESTAMP',
+    'PRIVATE_EXERCISE_NAME',
+    'PRIVATE_WORKOUT_NOTE',
+  ]
+  const headerlessPath = path.join(vaultRoot, 'headerless.csv')
+  await writeFile(headerlessPath, privateSentinels.join(','), 'utf8')
+  const headerless = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'inspect',
+    headerlessPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong',
+  ])
+  const headerlessOutput = JSON.stringify(headerless.envelope)
+  for (const sentinel of privateSentinels) {
+    assert.equal(headerlessOutput.includes(sentinel), false)
+  }
+
+  const largeHeaderPath = path.join(vaultRoot, 'large-header.csv')
+  await writeFile(largeHeaderPath, 'x'.repeat(9 * 1024 * 1024), 'utf8')
+  const largeHeader = await runWorkoutCli(cli, [
+    'workout',
+    'import',
+    'inspect',
+    largeHeaderPath,
+    '--vault',
+    vaultRoot,
+    '--source',
+    'strong',
+  ])
+  const largeHeaderOutput = JSON.stringify(largeHeader.envelope)
+  assert.equal(largeHeaderOutput.length < 4096, true)
+  assert.equal(largeHeaderOutput.includes('x'.repeat(100)), false)
 
   const unsupportedSource = await runWorkoutCli(cli, [
     'workout',

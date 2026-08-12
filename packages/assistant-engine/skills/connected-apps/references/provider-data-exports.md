@@ -122,6 +122,8 @@ unit. Explain that the weight answer applies to every unitless load field in the
 export, including bodyweight, assistance, and added weight. Never infer units
 from locale, exercise names, or value size. Rerun inspection with the confirmed
 `--weight-unit lb|kg` and/or `--distance-unit m|km|mi` options.
+Inspection returns only fixed aggregate fields; it never returns source headers
+or row content. Do not open or quote the CSV to diagnose an unsupported export.
 
 If inspection returns `detectedSource: null` for headers shared by Strong and
 Hevy, ask which app produced the export and rerun with the matching
@@ -133,6 +135,9 @@ aggregate counts. `lookupIds` and `ledgerFiles` are intentionally capped, so use
 the count and truncation fields instead of requesting or repeating every
 imported id. A pure replay reports skipped existing workouts and stores no
 duplicate raw copy. These are historical snapshots, not continuous syncs.
+Treat each refreshed export as a complete snapshot. If Murph reports that a
+prior source session is missing or changed, stop and ask for a new complete
+export instead of importing the apparent replacement as another workout.
 If the member says a previously confirmed unit was wrong, rerun the exact
 original CSV with the corrected unit option and `--correct-units`. Use that
 flag only after explicit confirmation; it supersedes the same imported workout

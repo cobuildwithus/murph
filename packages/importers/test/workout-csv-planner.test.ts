@@ -141,6 +141,27 @@ describe("planWorkoutCsvImport", () => {
     assert.notEqual(changedEnd.sessions[0]?.sourceEndTimeKey, plan.sessions[0]?.sourceEndTimeKey);
   });
 
+  test("canonicalizes equivalent source timestamp spellings without using the vault timezone", () => {
+    for (const source of ["strong", "hevy"] as const) {
+      const build = (startTime: string, timeZone: string) => planWorkoutCsvImport({
+        text: [
+          "Workout Name,Date,Start Time,Exercise Name,Set Order,Reps",
+          `Upper,2026-03-08,${startTime},Press,1,8`,
+        ].join("\n"),
+        timeZone,
+        source,
+      }).sessions[0]!;
+
+      const minute = build("01:30", "America/Chicago");
+      const seconds = build("01:30:00", "Europe/London");
+      const changed = build("01:31", "America/Chicago");
+      assert.equal(minute.sourceSessionKey, seconds.sourceSessionKey);
+      assert.equal(minute.sourceWorkoutId, seconds.sourceWorkoutId);
+      assert.notEqual(minute.occurredAt, seconds.occurredAt);
+      assert.notEqual(minute.sourceSessionKey, changed.sourceSessionKey);
+    }
+  });
+
   test("rejects an explicit source that conflicts with provider-specific headers", () => {
     assert.throws(
       () => planWorkoutCsvImport({

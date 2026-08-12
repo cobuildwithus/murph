@@ -1275,8 +1275,8 @@ describe("workout-import", () => {
       });
       const text = [
         "Workout Name,Date,Start Time,End Time,Duration,Exercise Name,Set Order,Weight,Weight Unit,Reps",
-        "Upper,2026-04-08,10:00:00,10:45:00,45,Press,1,40,kg,8",
-        "Lower,2026-04-09,11:00:00,11:30:00,30,Row,1,50,kg,10",
+        "Upper,2026-04-08,10:00,10:45,45,Press,1,40,kg,8",
+        "Lower,2026-04-09,11:00,11:30,30,Row,1,50,kg,10",
       ].join("\n");
       const csvPath = path.join(tempDir, "lifecycle.csv");
       await writeFile(csvPath, text, "utf8");
@@ -1284,6 +1284,8 @@ describe("workout-import", () => {
         "01ARZ3NDEKTSV4RRFFQ69G5FAV",
         "01ARZ3NDEKTSV4RRFFQ69G5FAW",
         "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+        "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
       ];
       const workoutImportModule = (await importWithMocks(
         "../src/usecases/workout-import.ts",
@@ -1340,15 +1342,38 @@ describe("workout-import", () => {
         },
       });
       await coreRuntime.deleteEvent({ vaultRoot: tempDir, eventId: removed.id });
+      await coreRuntime.updateVaultSummary({
+        vaultRoot: tempDir,
+        timezone: "America/Los_Angeles",
+      });
 
       const expandedText = [
-        text,
+        text.replace(",10:00,", ",10:00:00,"),
         "New Session,2026-04-10,09:00:00,09:30:00,30,Squat,1,60,kg,5",
       ].join("\n");
+      const changedStartPath = path.join(tempDir, "changed-start.csv");
+      await writeFile(
+        changedStartPath,
+        expandedText.replace(",10:00:00,", ",10:05:00,"),
+        "utf8",
+      );
+      const rawFilesBeforeStartConflict = await coreRuntime.walkVaultFiles(tempDir, "raw/workouts");
+      await assert.rejects(
+        workoutImportModule.importWorkoutCsv({
+          vault: tempDir,
+          file: changedStartPath,
+          source: "strong",
+        }),
+        /source session is missing or changed/u,
+      );
+      assert.deepEqual(
+        await coreRuntime.walkVaultFiles(tempDir, "raw/workouts"),
+        rawFilesBeforeStartConflict,
+      );
       const changedEndPath = path.join(tempDir, "changed-end.csv");
       await writeFile(
         changedEndPath,
-        expandedText.replace("10:45:00", "10:50:00"),
+        expandedText.replace(",10:45,", ",10:50,"),
         "utf8",
       );
       const rawFilesBeforeConflict = await coreRuntime.walkVaultFiles(tempDir, "raw/workouts");
@@ -1391,6 +1416,14 @@ describe("workout-import", () => {
         resourceType: "workout-session",
         resourceId: plan.sessions[1]!.sourceWorkoutId,
       }), null);
+      const expandedReplay = await workoutImportModule.importWorkoutCsv({
+        vault: tempDir,
+        file: expandedPath,
+        source: "strong",
+      });
+      assert.equal(expandedReplay.importedCount, 0);
+      assert.equal(expandedReplay.skippedExistingCount, 3);
+      assert.equal(expandedReplay.rawStored, false);
     });
   });
 
@@ -1969,7 +2002,7 @@ describe("workout-import", () => {
         assert.deepEqual(duplicateRecords, plan.sessions.map(() => null));
 
         const expandedText = [
-          fixture.text.trimEnd(),
+          fixture.text.trimEnd().replaceAll("10:00:00", "10:00"),
           fixture.source === "strong"
             ? "2026-05-01 09:00:00,New Session,30m,Press,1,50,8,0,0,,,"
             : "New Session,2026-05-01,09:00:00,30,Press,1,50,kg,8,,,normal,0,0,0",

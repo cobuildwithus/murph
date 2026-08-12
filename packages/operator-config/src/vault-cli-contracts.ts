@@ -423,7 +423,6 @@ export const workoutImportInspectResultSchema = z.object({
   timeZone: timeZoneSchema,
   weightUnit: z.enum(['lb', 'kg']).nullable(),
   distanceUnit: z.enum(['m', 'km', 'mi']).nullable(),
-  headers: z.array(z.string()).max(100),
   rowCount: z.number().int().nonnegative(),
   repairedRowCount: z.number().int().nonnegative(),
   ignoredRowCount: z.number().int().nonnegative(),

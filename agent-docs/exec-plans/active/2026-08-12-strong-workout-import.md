@@ -165,6 +165,18 @@ Updated: 2026-08-12
   ambiguous-provider gate. The planner now compares a privacy-safe hash of the
   raw provider end input, and raw-only storage requires the same explicit or
   unambiguous Strong/Hevy recognition as structured import.
+- Final ReviewGPT round 6 found that source identity still hashed timestamp
+  spelling, so an accepted `10:00` to `10:00:00` formatting change could create
+  duplicate workouts, while a genuine missing or changed prior start time was
+  silently treated as new. Source-session keys now hash a canonical source
+  wall-clock/offset representation independent of the vault timezone, and each
+  admitted prior complete snapshot must be a subset of the refreshed snapshot
+  before any new session is allowed.
+- Final ReviewGPT round 6 also found that inspection returned raw header cells,
+  allowing a headerless row or near-limit cell to enter assistant context.
+  Public inspection output and its typed CLI contract no longer contain source
+  headers. CLI proof uses sentinel row values and a near-limit single-cell file
+  to keep output private and constant-sized.
 
 ## Verification
 

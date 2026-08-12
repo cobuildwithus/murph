@@ -761,9 +761,20 @@ async function resolvePriorSnapshotRecords(input: {
         'Prior workout raw evidence cannot be parsed safely for identity reconciliation; nothing was imported.',
       )
     }
+    const attachedSources = new Set(matches.flatMap(({ latest }) =>
+      latest.kind === 'activity_session' ? [latest.workout.sourceApp] : []))
     const hasCurrentOverlap = priorPlan.sessions.some((session) =>
       currentIndexesByKey.has(session.sourceSessionKey))
-    if (!hasCurrentOverlap) continue
+    const isCurrentProviderHistory = candidate.source === input.plan.source
+      || (attachedSources.size === 1 && attachedSources.has(input.plan.source))
+    if (!hasCurrentOverlap && !isCurrentProviderHistory) continue
+    if (priorPlan.sessions.some((session) =>
+      !currentIndexesByKey.has(session.sourceSessionKey))) {
+      throw new VaultCliError(
+        'conflict',
+        'A prior workout source session is missing or changed in the refreshed export; nothing was imported.',
+      )
+    }
     let comparisonPlan: WorkoutCsvImportPlan
     try {
       comparisonPlan = input.importers.planWorkoutCsvImport({
@@ -1264,7 +1275,6 @@ export async function inspectWorkoutCsvImport(input: {
     timeZone: plan.timeZone,
     weightUnit: plan.weightUnit,
     distanceUnit: plan.distanceUnit,
-    headers: plan.headers,
     rowCount: plan.rowCount,
     repairedRowCount: plan.repairedRowCount,
     ignoredRowCount: plan.ignoredRowCount,

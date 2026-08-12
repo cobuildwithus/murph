@@ -190,6 +190,12 @@ describe('assistant manual provider export guidance', () => {
     expect(normalizedReference).toContain(
       'stop instead of overwriting member changes',
     )
+    expect(normalizedReference).toContain(
+      'it never returns source headers or row content',
+    )
+    expect(normalizedReference).toContain(
+      'Treat each refreshed export as a complete snapshot',
+    )
 
     expect(reference).toContain('`Export Workouts`')
     expect(reference).toContain('`Export Measurements`')

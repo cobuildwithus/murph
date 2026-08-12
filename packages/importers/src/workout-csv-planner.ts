@@ -477,15 +477,22 @@ function normalizeSetType(value: string | undefined, detectedSource: WorkoutCsvS
 }
 
 function stableWorkoutSessionKey(rawTimestamp: string): string {
+  const canonicalSourceTimestamp = normalizeFlexibleTimestamp(rawTimestamp, "UTC");
+  if (!canonicalSourceTimestamp) {
+    throw new TypeError("Workout source timestamp cannot be normalized safely.");
+  }
   return createHash("sha256")
-    .update(rawTimestamp.trim())
+    .update(canonicalSourceTimestamp)
     .digest("hex")
     .slice(0, 40);
 }
 
 function stableWorkoutEndTimeKey(rawDate: string | undefined, rawEndTime: string): string {
+  const sourceDate = /^\d{4}-\d{2}-\d{2}/u.exec(rawDate ?? "")?.[0] ?? rawDate;
+  const canonicalSourceTimestamp = normalizeWorkoutTimestamp(sourceDate, rawEndTime, "UTC")
+    ?? [sourceDate, rawEndTime].filter(Boolean).join(" ").trim();
   return createHash("sha256")
-    .update([rawDate, rawEndTime].filter(Boolean).join(" ").trim())
+    .update(canonicalSourceTimestamp)
     .digest("hex")
     .slice(0, 40);
 }
