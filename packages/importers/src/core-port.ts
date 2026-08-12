@@ -123,6 +123,15 @@ export interface DeviceEvidencePartPayload {
   metadata?: Record<string, unknown>;
 }
 
+export interface DeviceAuthoritativeEventSetPayload {
+  system: string;
+  resourceType: string;
+  resourceId: string;
+  version: string;
+  facetPrefixes: string[];
+  currentFacets: string[];
+}
+
 export interface DeviceBatchImportPayload {
   vaultRoot?: string;
   provider: string;
@@ -133,6 +142,7 @@ export interface DeviceBatchImportPayload {
   events?: DeviceEventPayload[];
   samples?: DeviceSamplePayload[];
   evidenceParts?: DeviceEvidencePartPayload[];
+  authoritativeEventSets?: DeviceAuthoritativeEventSetPayload[];
   ingestReceipt?: Record<string, unknown>;
   provenance?: Record<string, unknown>;
 }

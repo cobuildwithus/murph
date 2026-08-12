@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -138,6 +138,20 @@ function readJunctionMenstrualCycleEvidence(
   return evidence;
 }
 
+async function readHostedSmokeActivityRow(source: "garmin" | "oura"): Promise<Record<string, unknown>> {
+  const fixture = JSON.parse(await readFile(
+    new URL("../../vault-usecases/fixtures/junction-wearables-hosted-smoke.sanitized.json", import.meta.url),
+    "utf8",
+  )) as {
+    rawArtifacts: Array<{ relativePath: string; content: Array<Record<string, unknown>> }>;
+  };
+  const artifact = fixture.rawArtifacts.find((candidate) =>
+    candidate.relativePath === `hosted-smoke/${source}/01-junction-summary-activity.json`
+  );
+  assert.ok(artifact?.content[0]);
+  return artifact.content[0];
+}
+
 function assertJsonOmits(value: unknown, forbiddenValues: readonly string[]): void {
   const text = typeof value === "string" ? value : JSON.stringify(value);
   for (const forbidden of forbiddenValues) {
@@ -190,6 +204,32 @@ function storedObservationValue(record: StoredJsonlRecord | undefined): unknown 
   }
 
   return record.value;
+}
+
+function storedMeasurements(
+  record: StoredJsonlRecord,
+): Array<{ metric?: string; qualifiers?: Record<string, unknown> }> {
+  if (!Array.isArray(record.measurements)) {
+    return [];
+  }
+
+  return record.measurements.flatMap((measurement) => {
+    if (!measurement || typeof measurement !== "object" || Array.isArray(measurement)) {
+      return [];
+    }
+
+    return [{
+      metric: "metric" in measurement && typeof measurement.metric === "string"
+        ? measurement.metric
+        : undefined,
+      qualifiers: "qualifiers" in measurement
+        && measurement.qualifiers !== null
+        && typeof measurement.qualifiers === "object"
+        && !Array.isArray(measurement.qualifiers)
+        ? measurement.qualifiers
+        : undefined,
+    }];
+  });
 }
 
 function junctionFallbackSummaryResourceId(
@@ -2251,9 +2291,9 @@ test("Junction summary completeness facts roundtrip and replay without samples",
           activity: [{
             id: "activity-summary-completeness",
             date: "2026-05-20T00:00:00Z",
-            low: 3600,
-            medium: 780,
-            high: 300,
+            low: 84,
+            medium: 15,
+            high: 29,
             heart_rate: {
               avg_bpm: 72,
               avg_walking_bpm: 83,
@@ -2302,10 +2342,10 @@ test("Junction summary completeness facts roundtrip and replay without samples",
       | { reportedGender?: string }
       | undefined;
 
-    assert.equal(observations.get("activity-minutes"), 78);
-    assert.equal(observations.get("low-activity-minutes"), 60);
-    assert.equal(observations.get("medium-activity-minutes"), 13);
-    assert.equal(observations.get("high-activity-minutes"), 5);
+    assert.equal(observations.get("activity-minutes"), 128);
+    assert.equal(observations.get("low-activity-minutes"), 84);
+    assert.equal(observations.get("medium-activity-minutes"), 15);
+    assert.equal(observations.get("high-activity-minutes"), 29);
     assert.equal(observations.get("average-heart-rate"), 72);
     assert.equal(observations.get("walking-average-heart-rate"), 83);
     assert.equal(observations.get("minimum-heart-rate"), 44);
@@ -2329,6 +2369,71 @@ test("Junction summary completeness facts roundtrip and replay without samples",
       first.events.map((event) => event.id).sort(),
     );
     assert.doesNotMatch(JSON.stringify(first.events), /cervical_mucus|sexual_activity/u);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction production-shaped activity minutes roundtrip exactly for Garmin and Oura", async () => {
+  const [garmin, oura] = await Promise.all([
+    readHostedSmokeActivityRow("garmin"),
+    readHostedSmokeActivityRow("oura"),
+  ]);
+  const snapshot = {
+    importedAt: "2026-09-29T00:00:00.000Z",
+    summaries: { activity: [garmin, oura] },
+  };
+  const normalized = normalizeJunctionSnapshot(snapshot);
+  const normalizedValue = (sourceProviderSlug: string, metric: string) =>
+    normalized.events?.find((event) =>
+      event.dataOrigin?.sourceProviderSlug === sourceProviderSlug
+      && event.fields?.metric === metric
+    )?.fields?.value;
+
+  assert.equal(normalizedValue("garmin", "low-activity-minutes"), 84);
+  assert.equal(normalizedValue("garmin", "medium-activity-minutes"), 15);
+  assert.equal(normalizedValue("garmin", "high-activity-minutes"), 29);
+  assert.equal(normalizedValue("garmin", "activity-minutes"), 128);
+  assert.equal(normalizedValue("oura", "low-activity-minutes"), 55);
+  assert.equal(normalizedValue("oura", "medium-activity-minutes"), 231);
+  assert.equal(normalizedValue("oura", "high-activity-minutes"), 23);
+  assert.equal(normalizedValue("oura", "activity-minutes"), 309);
+  assert.equal(normalized.samples?.length ?? 0, 0);
+
+  const vaultRoot = await makeTempDirectory("murph-junction-production-activity-minutes");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-09-29T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const input = { provider: "junction" as const, vaultRoot, snapshot };
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      input,
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      input,
+      { corePort: coreRuntime },
+    );
+    const importedValue = (sourceProviderSlug: string, metric: string) => {
+      const event = first.events.find((candidate) =>
+        candidate.dataOrigin?.sourceProviderSlug === sourceProviderSlug
+        && candidate.kind === "observation"
+        && candidate.metric === metric
+      );
+      return event?.kind === "observation" ? event.value : undefined;
+    };
+
+    assert.equal(importedValue("garmin", "activity-minutes"), 128);
+    assert.equal(importedValue("oura", "activity-minutes"), 309);
+    assert.equal(first.samples.length, 0);
+    assert.equal(replay.samples.length, 0);
+    assert.equal(replay.applied, false);
+    assert.deepEqual(
+      replay.events.map((event) => event.id).sort(),
+      first.events.map((event) => event.id).sort(),
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -5337,12 +5442,13 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   });
   assert.deepEqual(readMeasurement(flowEvents[1])?.qualifiers, { flow: "medium" });
   assert.equal(flowEvents[0]?.dayKey, "2026-04-07");
-  // Result-bearing facet: same-day flow changes keep distinct identities.
-  assert.equal(flowEvents[0]?.externalRef?.facet, "menstrual-flow-light-2026-04-07");
+  // Stable ordinal facets let a newer complete snapshot revise one value while
+  // preserving simultaneously reported same-day facts.
+  assert.equal(flowEvents[0]?.externalRef?.facet, "menstrual-flow-2026-04-07-1");
 
   const ovulationEvents = measurementEvents.filter((event) => event.title === "Junction ovulation test");
   // Two same-day tests with different results land as two events with
-  // distinct result-bearing facets; the indeterminate row stays raw-only.
+  // distinct ordinal facets; the indeterminate row stays raw-only.
   assert.equal(ovulationEvents.length, 2);
   assert.deepEqual(readMeasurement(ovulationEvents[0]), {
     metric: "ovulation-test",
@@ -5357,7 +5463,7 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
     qualifiers: { result: "negative" },
   });
   assert.notEqual(ovulationEvents[0]?.externalRef?.facet, ovulationEvents[1]?.externalRef?.facet);
-  assert.equal(ovulationEvents[0]?.externalRef?.facet?.includes("luteinizing"), true);
+  assert.equal(ovulationEvents[0]?.externalRef?.facet, "ovulation-test-2026-04-19-1");
 
   const pregnancyEvent = measurementEvents.find((event) => event.title === "Junction pregnancy test");
   assert.deepEqual(readMeasurement(pregnancyEvent), {
@@ -5452,7 +5558,7 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
   });
   assert.equal(
     deviationEvent?.externalRef?.facet,
-    "menstrual-cycle-deviation-irregular-menstrual-cycles-2026-04-30",
+    "menstrual-cycle-deviation-2026-04-30-1",
   );
 
   const sexualActivityEvent = measurementEvents.find((event) => event.title === "Junction sexual activity");
@@ -6007,6 +6113,155 @@ test("Junction menstrual cycles keep legacy scalar lengths evidence-only", () =>
     cycle.legacyCycleLengthDays === 200
   ));
   assertJsonOmits(evidence, ["cycle-explicit-lengths", "cycle-start-only"]);
+});
+
+test("Junction menstrual canonicalization rejects impossible dates and accepts leap day", async () => {
+  const snapshot = {
+    importedAt: "2024-03-03T12:00:00.000Z",
+    summaries: {
+      menstrual_cycle: [{
+        id: "invalid-calendar-cycle",
+        updated_at: "2024-03-03T09:00:00Z",
+        period_start: "2024-02-30",
+        period_end: "2024-03-02",
+        cervical_mucus: [{ date: "2024-02-30", quality: "watery" }],
+        source: { provider: "apple_health", type: "phone" },
+      }, {
+        id: "valid-leap-cycle",
+        updated_at: "2024-03-03T09:00:00Z",
+        period_start: "2024-02-29",
+        period_end: "2024-03-02",
+        cervical_mucus: [{ date: "2024-02-29", quality: "egg_white" }],
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  };
+  const payload = normalizeJunctionSnapshot(snapshot);
+  const evidence = readJunctionMenstrualCycleEvidence(payload);
+
+  assert.equal(payload.events?.some((event) => event.dayKey === "2024-02-30"), false);
+  assert.equal(payload.events?.some((event) => event.occurredAt.startsWith("2024-03-01")), false);
+  assert.ok(payload.events?.some((event) =>
+    event.dayKey === "2024-02-29" && event.fields?.metric === "period-length-days"
+  ));
+  assert.ok(payload.events?.some((event) =>
+    event.dayKey === "2024-02-29" && JSON.stringify(event.fields).includes("egg_white")
+  ));
+  assert.ok(evidence.facts.some((fact) => fact.date === "2024-02-30"));
+
+  const vaultRoot = await makeTempDirectory("murph-junction-strict-cycle-dates");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2024-03-03T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+    assert.equal(result.events.some((event) => event.dayKey === "2024-02-30"), false);
+    assert.ok(result.events.some((event) => event.dayKey === "2024-02-29"));
+    assert.equal(result.samples.length, 0);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction corrected profile and cycle snapshots retract omitted sensitive facets", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-authoritative-summary-corrections");
+  const snapshot = (corrected: boolean) => ({
+    importedAt: corrected ? "2026-05-22T12:00:00.000Z" : "2026-05-21T12:00:00.000Z",
+    summaries: {
+      profile: {
+        id: "stable-profile",
+        gender: corrected ? "unknown" : "other",
+        updated_at: corrected ? "2026-05-22T09:00:00Z" : "2026-05-21T09:00:00Z",
+        source: { provider: "apple_health_kit", type: "phone" },
+      },
+      menstrual_cycle: [{
+        id: "stable-cycle",
+        updated_at: corrected ? "2026-05-22T10:00:00Z" : "2026-05-21T10:00:00Z",
+        period_start: "2026-05-01",
+        home_pregnancy_test: [{
+          date: "2026-05-18",
+          test_result: corrected ? "positive" : "negative",
+        }],
+        cervical_mucus: corrected
+          ? [{ date: "2026-05-12", quality: "egg_white" }]
+          : [
+              { date: "2026-05-12", quality: "egg_white" },
+              { date: "2026-05-12", quality: "watery" },
+            ],
+        contraceptive: corrected
+          ? []
+          : [{ date: "2026-05-15", type: "oral" }],
+        source: { provider: "apple_health", type: "phone" },
+      }],
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-20T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const importSnapshot = (corrected: boolean) =>
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        { provider: "junction", vaultRoot, snapshot: snapshot(corrected) },
+        { corePort: coreRuntime },
+      );
+    const first = await importSnapshot(false);
+    const correction = await importSnapshot(true);
+    const replay = await importSnapshot(true);
+    const firstPregnancy = first.events.find((event) => event.title === "Junction pregnancy test");
+    const correctedPregnancy = correction.events.find((event) => event.title === "Junction pregnancy test");
+    const records = (
+      await Promise.all(
+        [...new Set([...first.eventShardPaths, ...correction.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const live = latestLiveRecords(records);
+    const liveMeasurements = live.filter((record) => record.kind === "measurement");
+
+    assert.equal(
+      live.some((record) => record.kind === "note" && record.title === "Junction profile"),
+      false,
+    );
+    assert.deepEqual(
+      liveMeasurements
+        .flatMap(storedMeasurements)
+        .filter((measurement) => measurement.metric === "pregnancy-test")
+        .map((measurement) => measurement.qualifiers?.result),
+      ["positive"],
+    );
+    assert.deepEqual(
+      liveMeasurements
+        .flatMap(storedMeasurements)
+        .filter((measurement) => measurement.metric === "cervical-mucus")
+        .map((measurement) => measurement.qualifiers?.quality),
+      ["egg_white"],
+    );
+    assert.equal(
+      liveMeasurements.some((record) =>
+        storedMeasurements(record).some((measurement) => measurement.metric === "contraceptive-use")
+      ),
+      false,
+    );
+    assert.equal(first.samples.length, 0);
+    assert.equal(correction.samples.length, 0);
+    assert.equal(replay.samples.length, 0);
+    assert.ok(firstPregnancy?.id);
+    assert.equal(correctedPregnancy?.id, firstPregnancy.id);
+    assert.equal(correctedPregnancy?.lifecycle?.revision, 2);
+    assert.equal(correction.applied, true);
+    assert.equal(replay.applied, false);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction menstrual evidence admits actual cycles and known facts before bounded evidence", () => {
@@ -9863,9 +10118,9 @@ test("Junction normalizer maps documented activity and body summary scalar field
           min_bpm: 44,
           resting_bpm: 52,
         },
-        high: 300,
-        low: 3600,
-        medium: 780,
+        high: 29,
+        low: 84,
+        medium: 15,
         steps: 9400,
       }],
       body: [{
@@ -9897,7 +10152,7 @@ test("Junction normalizer maps documented activity and body summary scalar field
   );
   const rawBodyArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-body");
 
-  assert.equal(activityMinutes?.fields?.value, 78);
+  assert.equal(activityMinutes?.fields?.value, 128);
   assert.equal(activityMinutes?.fields?.unit, "minutes");
   assert.equal(activityMinutes?.externalRef?.facet, "activity-minutes");
   assert.equal(metricValue("low-activity-minutes"), 60);

@@ -2043,6 +2043,81 @@ test("importDeviceBatch rejects changed content for immutable externalRefs while
   assert.equal(eventRecords.length, 1);
 });
 
+test("importDeviceBatch retracts omitted facets from a newer bounded authoritative snapshot", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-authoritative-facets");
+  await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
+  const identity = {
+    system: "junction",
+    resourceType: "junction-apple-health-profile",
+    resourceId: "profile-stable-1",
+  } as const;
+  const facet = "profile-demographics";
+  const first = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-01T09:00:00.000Z",
+    events: [{
+      kind: "note",
+      occurredAt: "2026-05-01T08:00:00.000Z",
+      recordedAt: "2026-05-01T09:00:00.000Z",
+      title: "Junction profile",
+      note: "Reported gender: other.",
+      externalRef: {
+        ...identity,
+        facet,
+        version: "2026-05-01T08:00:00.000Z",
+      },
+      fields: { reportedGender: "other" },
+    }],
+    authoritativeEventSets: [{
+      ...identity,
+      version: "2026-05-01T08:00:00.000Z",
+      facetPrefixes: [facet],
+      currentFacets: [facet],
+    }],
+    evidenceParts: [{
+      role: "junction-summary-profile",
+      fileName: "profile.json",
+      content: { revision: 1 },
+    }],
+  });
+  const correctionInput = {
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-05-02T09:00:00.000Z",
+    events: [],
+    authoritativeEventSets: [{
+      ...identity,
+      version: "2026-05-02T08:00:00.000Z",
+      facetPrefixes: [facet],
+      currentFacets: [],
+    }],
+    evidenceParts: [{
+      role: "junction-summary-profile",
+      fileName: "profile.json",
+      content: { revision: 2 },
+    }],
+  };
+  const correction = await importDeviceBatch(correctionInput);
+  const replay = await importDeviceBatch(correctionInput);
+  const eventShardPath = first.eventShardPaths[0];
+  assert.ok(eventShardPath);
+  const eventRecords = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: eventShardPath,
+  })) as EventRecord[];
+  const tombstone = eventRecords.find((record) => record.lifecycle?.revision === 2);
+
+  assert.equal(correction.applied, true);
+  assert.equal(correction.events.length, 0);
+  assert.deepEqual(correction.eventShardPaths, [eventShardPath]);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.ingestId, null);
+  assert.equal(eventRecords.length, 2);
+  assert.equal(tombstone?.id, first.events[0]?.id);
+  assert.equal(tombstone?.lifecycle?.state, "deleted");
+});
+
 test("importDeviceBatch makes byte-identical overlap a storage no-op for one provider account", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-storage-idempotency");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });

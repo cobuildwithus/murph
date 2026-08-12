@@ -104,6 +104,7 @@ import {
 } from "./junction-origin.ts";
 
 import type {
+  DeviceAuthoritativeEventSetPayload,
   DeviceDataOrigin,
   DeviceEventPayload,
   DeviceExternalRefPayload,
@@ -202,6 +203,7 @@ interface NormalizationContext {
   evidenceParts: DeviceEvidencePartPayload[];
   events: DeviceEventPayload[];
   samples: DeviceSamplePayload[];
+  authoritativeEventSets: DeviceAuthoritativeEventSetPayload[];
 }
 
 interface JunctionResourceEntry {
@@ -1080,6 +1082,7 @@ export function normalizeJunctionSnapshot(
     evidenceParts,
     events,
     samples,
+    authoritativeEventSets: [],
   };
 
   normalizeSummaries(snapshot.summaries, context);
@@ -1093,6 +1096,9 @@ export function normalizeJunctionSnapshot(
     events,
     samples: samples.length > 0 ? samples : undefined,
     evidenceParts,
+    authoritativeEventSets: context.authoritativeEventSets.length > 0
+      ? context.authoritativeEventSets
+      : undefined,
     provenance: stripUndefined({
       schema: "junction.snapshot.v1",
       normalizerVersion: "junction-normalizer.v1",
@@ -1191,6 +1197,7 @@ export function identifyJunctionBloodPressureProviderRecords(
     evidenceParts: [],
     events: [],
     samples: [],
+    authoritativeEventSets: [],
   };
   const repairStableExternalRefResourceIds: Array<string | null> = [];
 
@@ -1440,6 +1447,7 @@ function normalizeSummaries(
     }
 
     resolvedEntries.forEach(({ entry, resourceContext }) => {
+      const firstEventIndex = context.events.length;
       switch (resource) {
         case "activity":
           pushObservationMetrics(entry, resourceContext, context, ACTIVITY_METRICS);
@@ -1466,6 +1474,12 @@ function normalizeSummaries(
           pushElectrocardiogramSummary(entry, resourceContext, context);
           break;
       }
+      pushJunctionAuthoritativeSummaryEventSet(
+        entry,
+        resourceContext,
+        context,
+        context.events.slice(firstEventIndex),
+      );
     });
   }
 }
@@ -5814,12 +5828,17 @@ function collectJunctionMenstrualFactDrafts(entry: PlainObject): JunctionMenstru
     valuePaths: readonly string[],
     isCanonical: (value: string) => boolean,
   ): void => {
-    for (const sub of junctionDatedSubEntries(entry, paths)) {
+    for (const sub of junctionDatedEvidenceSubEntries(entry, paths)) {
       const value = normalizeJunctionMenstrualEvidenceLabel(
         firstStringFromPaths(sub.entry, valuePaths),
       );
       if (value) {
-        facts.push({ canonical: isCanonical(value), date: sub.date, kind, value });
+        facts.push({
+          canonical: isStrictIsoDate(sub.date) && isCanonical(value),
+          date: sub.date,
+          kind,
+          value,
+        });
       }
     }
   };
@@ -5867,20 +5886,24 @@ function collectJunctionMenstrualFactDrafts(entry: PlainObject): JunctionMenstru
     (value) => Object.hasOwn(JUNCTION_PROGESTERONE_TEST_RESULT_VALUES, value),
   );
 
-  for (const sub of junctionDatedSubEntries(entry, ["intermenstrualBleeding", "intermenstrual_bleeding"])) {
-    facts.push({ canonical: true, date: sub.date, kind: "intermenstrual_bleeding" });
+  for (const sub of junctionDatedEvidenceSubEntries(entry, ["intermenstrualBleeding", "intermenstrual_bleeding"])) {
+    facts.push({
+      canonical: isStrictIsoDate(sub.date),
+      date: sub.date,
+      kind: "intermenstrual_bleeding",
+    });
   }
-  for (const sub of junctionDatedSubEntries(entry, ["basalBodyTemperature", "basal_body_temperature"])) {
+  for (const sub of junctionDatedEvidenceSubEntries(entry, ["basalBodyTemperature", "basal_body_temperature"])) {
     const value = finiteNumber(firstValueFromPaths(sub.entry, ["value"]));
     if (value !== undefined) {
       facts.push({ canonical: false, date: sub.date, kind: "basal_body_temperature", value });
     }
   }
-  for (const sub of junctionDatedSubEntries(entry, ["sexualActivity", "sexual_activity"])) {
+  for (const sub of junctionDatedEvidenceSubEntries(entry, ["sexualActivity", "sexual_activity"])) {
     const rawProtectionUsed = firstValueFromPaths(sub.entry, ["protectionUsed", "protection_used"]);
     if (rawProtectionUsed === undefined || rawProtectionUsed === null || typeof rawProtectionUsed === "boolean") {
       facts.push(stripUndefined({
-        canonical: true,
+        canonical: isStrictIsoDate(sub.date),
         date: sub.date,
         kind: "sexual_activity" as const,
         value: typeof rawProtectionUsed === "boolean" ? rawProtectionUsed : undefined,
@@ -6004,9 +6027,16 @@ function pushMenstrualCycleSummary(
   }
 
   const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
-  const periodStart = firstIsoDateFromPaths(entry, ["periodStart", "period_start"]);
-  const periodEnd = firstIsoDateFromPaths(entry, ["periodEnd", "period_end"]);
-  const cycleEnd = firstIsoDateFromPaths(entry, ["cycleEnd", "cycle_end"]);
+  const periodStart = firstStrictIsoDateFromPaths(entry, ["periodStart", "period_start"]);
+  const periodEnd = firstStrictIsoDateFromPaths(entry, ["periodEnd", "period_end"]);
+  const cycleEnd = firstStrictIsoDateFromPaths(entry, ["cycleEnd", "cycle_end"]);
+  const facetCounts = new Map<string, number>();
+  const nextDailyFacet = (prefix: string, date: string): string => {
+    const key = `${prefix}\u0000${date}`;
+    const ordinal = (facetCounts.get(key) ?? 0) + 1;
+    facetCounts.set(key, ordinal);
+    return `${prefix}-${date}-${ordinal}`;
+  };
 
   if (periodStart) {
     const cycleTimestamp = junctionDateOnlyTimestamp(baseTimestamp, periodStart);
@@ -6063,11 +6093,11 @@ function pushMenstrualCycleSummary(
       continue;
     }
 
-    // Result-bearing facet (same invariant as ovulation/pregnancy tests):
-    // a same-day flow change, e.g. light then heavy, keeps both facts.
+    // Deterministic ordinal slots let one corrected fact revise in place while
+    // preserving multiple values that are simultaneously present that day.
     pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
       date: sub.date,
-      facet: `menstrual-flow-${slugify(flow, "flow")}-${sub.date}`,
+      facet: nextDailyFacet("menstrual-flow", sub.date),
       measurement: {
         metric: "menstrual-flow",
         value,
@@ -6154,12 +6184,9 @@ function pushMenstrualCycleSummary(
         continue;
       }
 
-      // The facet carries the normalized result so two same-day tests with
-      // different outcomes (e.g. negative then surge) keep distinct
-      // identities; repeated identical (date, result) rows still merge.
       pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
         date: sub.date,
-        facet: `${test.metric}-${slugify(result, "result")}-${sub.date}`,
+        facet: nextDailyFacet(test.metric, sub.date),
         measurement: {
           metric: test.metric,
           value,
@@ -6205,7 +6232,7 @@ function pushMenstrualCycleSummary(
 
     pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
       date: sub.date,
-      facet: `sexual-activity-${protectionFacet}-${sub.date}`,
+      facet: nextDailyFacet("sexual-activity", sub.date),
       measurement: {
         metric: "sexual-activity",
         value: 1,
@@ -6224,7 +6251,7 @@ function pushMenstrualCycleSummary(
 
     pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
       date: sub.date,
-      facet: `menstrual-cycle-deviation-${trimSlugToLength(slugify(deviation, "deviation"), 80)}-${sub.date}`,
+      facet: nextDailyFacet("menstrual-cycle-deviation", sub.date),
       measurement: {
         metric: "menstrual-cycle-deviation",
         value: 1,
@@ -6242,11 +6269,23 @@ interface JunctionDatedSubEntry {
 }
 
 function junctionDatedSubEntries(entry: PlainObject, paths: readonly string[]): JunctionDatedSubEntry[] {
+  return junctionDatedEvidenceSubEntries(entry, paths).filter((subEntry) =>
+    isStrictIsoDate(subEntry.date)
+  );
+}
+
+function junctionDatedEvidenceSubEntries(
+  entry: PlainObject,
+  paths: readonly string[],
+): JunctionDatedSubEntry[] {
   const subEntries: JunctionDatedSubEntry[] = [];
 
   for (const value of asArray(firstValueFromPaths(entry, paths))) {
     const subEntry = asPlainObject(value);
-    const date = subEntry ? firstIsoDateFromPaths(subEntry, ["date"]) : undefined;
+    const date = trimOptionalToLength(
+      subEntry ? firstStringFromPaths(subEntry, ["date"]) : undefined,
+      40,
+    );
     if (subEntry && date) {
       subEntries.push({ date, entry: subEntry });
     }
@@ -7226,12 +7265,12 @@ function makeJunctionExternalRef(
     "junction",
     resourceContext.externalRefResourceType,
     buildStableResourceId(resourceContext, entry, timestamp),
-    junctionCompanionExternalRefVersion(resourceContext, entry),
+    junctionExternalRefVersion(resourceContext, entry),
     slugify(facet, "value"),
   );
 }
 
-function junctionCompanionExternalRefVersion(
+function junctionExternalRefVersion(
   resourceContext: ResourceContext,
   entry: PlainObject,
 ): string | undefined {
@@ -7239,13 +7278,29 @@ function junctionCompanionExternalRefVersion(
     resourceContext.sourceProviderSlug !== "apple-health-kit"
     || resourceContext.origin.sourceType !== "companion-whoop-metadata-unverified"
   ) {
-    return undefined;
+    return junctionAuthoritativeSummaryVersion(resourceContext, entry);
   }
 
   const version = entry.companionSyncVersion;
   return typeof version === "number" && Number.isSafeInteger(version) && version >= 0
     ? String(version)
     : undefined;
+}
+
+function junctionAuthoritativeSummaryVersion(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+): string | undefined {
+  if (
+    resourceContext.identityKind !== "summary"
+    || (resourceContext.resource !== "profile" && resourceContext.resource !== "menstrual_cycle")
+  ) {
+    return undefined;
+  }
+  return resolveSafeTimestamp(
+    firstValueFromPaths(entry, ["updatedAt", "updated_at", "createdAt", "created_at"]),
+    resourceContext.sourceProviderSlug,
+  );
 }
 
 function buildJunctionResourceType(sourceProviderSlug: string, resourceSlug: string): string {
@@ -8879,6 +8934,14 @@ function firstIsoDateFromPaths(source: PlainObject | undefined, paths: readonly 
   }
 
   return undefined;
+}
+
+function firstStrictIsoDateFromPaths(
+  source: PlainObject | undefined,
+  paths: readonly string[],
+): string | undefined {
+  const date = firstIsoDateFromPaths(source, paths);
+  return date && isStrictIsoDate(date) ? date : undefined;
 }
 
 function trimOptionalToLength(value: string | undefined, maxLength: number): string | undefined {

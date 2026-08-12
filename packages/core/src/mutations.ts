@@ -310,6 +310,15 @@ interface DeviceSampleInput extends LooseRecord {
   sample?: unknown;
 }
 
+interface DeviceAuthoritativeEventSetInput extends LooseRecord {
+  system?: unknown;
+  resourceType?: unknown;
+  resourceId?: unknown;
+  version?: unknown;
+  facetPrefixes?: unknown;
+  currentFacets?: unknown;
+}
+
 interface ImportDeviceBatchInput {
   vaultRoot: string;
   provider: string;
@@ -319,6 +328,7 @@ interface ImportDeviceBatchInput {
   events?: readonly DeviceEventInput[];
   samples?: readonly DeviceSampleInput[];
   evidenceParts?: readonly DeviceEvidencePartInput[];
+  authoritativeEventSets?: readonly DeviceAuthoritativeEventSetInput[];
   ingestReceipt?: Record<string, unknown>;
   provenance?: Record<string, unknown>;
 }
@@ -393,6 +403,16 @@ interface NormalizedDeviceBatchInputs {
   events: NormalizedDeviceEvent[];
   samples: NormalizedDeviceSample[];
   evidenceParts: NormalizedDeviceEvidencePart[];
+  authoritativeEventSets: NormalizedDeviceAuthoritativeEventSet[];
+}
+
+interface NormalizedDeviceAuthoritativeEventSet {
+  system: string;
+  resourceType: string;
+  resourceId: string;
+  version: string;
+  facetPrefixes: readonly string[];
+  currentFacets: ReadonlySet<string>;
 }
 
 interface PreparedJsonlEntry<RecordType extends { id: string }> {
@@ -426,6 +446,7 @@ interface DeviceBatchPlan {
   evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
   preparedSamples: PreparedJsonlEntry<SampleRecord>[];
   preparedEvidenceParts: IntegrationEvidencePart[];
+  authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[];
 }
 
 const MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT = 1_000;
@@ -1489,6 +1510,100 @@ function normalizeDeviceBatchObjectArray<T extends LooseRecord>(input: {
   );
 }
 
+function normalizeDeviceAuthoritativeEventSets(
+  inputs: readonly DeviceAuthoritativeEventSetInput[],
+  events: readonly NormalizedDeviceEvent[],
+): NormalizedDeviceAuthoritativeEventSet[] {
+  if (inputs.length > 128) {
+    throw new VaultError(
+      "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SETS",
+      "Device batch authoritativeEventSets exceeds 128 resources.",
+    );
+  }
+
+  const sets = inputs.map((input, index): NormalizedDeviceAuthoritativeEventSet => {
+    const parsedRef = safeParseContract(externalRefSchema, {
+      system: input.system,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      version: input.version,
+    });
+    if (!parsedRef.success || !parsedRef.data.version || !isWritableIsoDateTime(parsedRef.data.version)) {
+      throw new VaultError(
+        "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
+        `Device authoritative event set ${index + 1} requires a valid versioned externalRef identity.`,
+      );
+    }
+    const facetPrefixes = normalizeUniqueTextList(
+      input.facetPrefixes,
+      `authoritativeEventSets[${index}].facetPrefixes`,
+      32,
+      200,
+    );
+    const currentFacets = normalizeUniqueTextList(
+      input.currentFacets,
+      `authoritativeEventSets[${index}].currentFacets`,
+      512,
+      200,
+    ) ?? [];
+    if (!facetPrefixes || facetPrefixes.length === 0) {
+      throw new VaultError(
+        "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
+        `Device authoritative event set ${index + 1} requires at least one facet prefix.`,
+      );
+    }
+    const ownsFacet = (facet: string): boolean => facetPrefixes.some((prefix) =>
+      facet === prefix || facet.startsWith(`${prefix}-`)
+    );
+    if (currentFacets.some((facet) => !ownsFacet(facet))) {
+      throw new VaultError(
+        "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
+        `Device authoritative event set ${index + 1} contains a current facet outside its owned prefixes.`,
+      );
+    }
+
+    return {
+      system: parsedRef.data.system,
+      resourceType: parsedRef.data.resourceType,
+      resourceId: parsedRef.data.resourceId,
+      version: parsedRef.data.version,
+      facetPrefixes: [...facetPrefixes].sort(),
+      currentFacets: new Set(currentFacets),
+    };
+  });
+  const identityKeys = sets.map((set) => stableStringify({
+    system: set.system,
+    resourceType: set.resourceType,
+    resourceId: set.resourceId,
+  }));
+  if (new Set(identityKeys).size !== identityKeys.length) {
+    throw new VaultError(
+      "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SETS",
+      "Device batch authoritativeEventSets contains duplicate resource identities.",
+    );
+  }
+
+  for (const set of sets) {
+    for (const facet of set.currentFacets) {
+      const hasCurrentEvent = events.some(({ seed }) =>
+        seed.externalRef?.system === set.system
+        && seed.externalRef.resourceType === set.resourceType
+        && seed.externalRef.resourceId === set.resourceId
+        && seed.externalRef.version === set.version
+        && seed.externalRef.facet === facet
+      );
+      if (!hasCurrentEvent) {
+        throw new VaultError(
+          "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
+          `Device authoritative event set current facet "${facet}" has no matching versioned event.`,
+        );
+      }
+    }
+  }
+
+  return sets;
+}
+
 function normalizeDeviceBatchInputs({
   provider,
   accountId,
@@ -1498,6 +1613,7 @@ function normalizeDeviceBatchInputs({
   events = [],
   samples = [],
   evidenceParts = [],
+  authoritativeEventSets = [],
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
@@ -1540,6 +1656,13 @@ function normalizeDeviceBatchInputs({
     itemCode: "VAULT_INVALID_RAW_ARTIFACT",
     itemLabel: "Device raw artifact",
   });
+  const authoritativeEventSetInputs = normalizeDeviceBatchObjectArray<DeviceAuthoritativeEventSetInput>({
+    value: authoritativeEventSets,
+    code: "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SETS",
+    message: "Device batch authoritativeEventSets must be an array when provided.",
+    itemCode: "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
+    itemLabel: "Device authoritative event set",
+  });
 
   if (
     eventInputs.length === 0
@@ -1553,6 +1676,14 @@ function normalizeDeviceBatchInputs({
     );
   }
 
+  const normalizedEvents = normalizeDeviceEventInputs(eventInputs, {
+    provider: normalizedProvider,
+    accountId: normalizedAccountId,
+    importedAt: normalizedImportedAt,
+    source: normalizedSource,
+    defaultTimeZone,
+  });
+
   return {
     provider: normalizedProvider,
     accountId: normalizedAccountId,
@@ -1562,13 +1693,7 @@ function normalizeDeviceBatchInputs({
     provenance: normalizedProvenance,
     ingestReceipt: normalizedIngestReceipt,
     legacyIngestReceipt,
-    events: normalizeDeviceEventInputs(eventInputs, {
-      provider: normalizedProvider,
-      accountId: normalizedAccountId,
-      importedAt: normalizedImportedAt,
-      source: normalizedSource,
-      defaultTimeZone,
-    }),
+    events: normalizedEvents,
     samples: normalizeDeviceSampleInputs(sampleInputs, {
       provider: normalizedProvider,
       accountId: normalizedAccountId,
@@ -1576,6 +1701,10 @@ function normalizeDeviceBatchInputs({
       defaultTimeZone,
     }),
     evidenceParts: normalizeDeviceEvidencePartInputs(evidencePartInputs, normalizedProvider),
+    authoritativeEventSets: normalizeDeviceAuthoritativeEventSets(
+      authoritativeEventSetInputs,
+      normalizedEvents,
+    ),
   };
 }
 
@@ -1651,6 +1780,7 @@ interface EventExternalRefReconciliation {
   retainedPreparedIds: ReadonlySet<string>;
   skippedDuplicateCount: number;
   supersededCount: number;
+  retractedCount: number;
 }
 
 // externalRef.version is intentionally NOT part of the reconcile identity:
@@ -2379,8 +2509,9 @@ function buildLegacyExternalRefReservations(
 async function buildDeviceEventIdentityContext(
   vaultRoot: string,
   entries: readonly PreparedDeviceEventEntry[],
+  authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[] = [],
 ): Promise<DeviceEventIdentityContext> {
-  if (entries.length === 0) {
+  if (entries.length === 0 && authoritativeEventSets.length === 0) {
     return {
       index: {
         deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
@@ -2712,6 +2843,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
   entries: readonly PreparedDeviceEventEntry[],
   existingContext?: DeviceEventIdentityContext,
   preferredCanonicalIdByPreparedId: ReadonlyMap<string, string> = new Map(),
+  authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[] = [],
 ): Promise<EventExternalRefReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
   const context = existingContext ?? await buildDeviceEventIdentityContext(vaultRoot, entries);
@@ -2723,6 +2855,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
   const retainedPreparedIds = new Set<string>();
   let skippedDuplicateCount = 0;
   let supersededCount = 0;
+  let retractedCount = 0;
 
   for (const entry of entries) {
     const externalRef = entry.record.externalRef;
@@ -2766,6 +2899,42 @@ async function reconcileDeviceEventEntriesByExternalRef(
       appendRecordIdByPreparedRecordId.set(entry.record.id, canonicalRecord.id);
       records.push(canonicalRecord);
       continue;
+    }
+
+    const authoritativeSet = authoritativeEventSets.find((set) =>
+      externalRef.system === set.system
+      && externalRef.resourceType === set.resourceType
+      && externalRef.resourceId === set.resourceId
+      && externalRef.facet !== undefined
+      && set.currentFacets.has(externalRef.facet)
+    );
+    if (authoritativeSet) {
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        matchedEntries.find((match) => match.refKey === refKey)?.indexedMatch.indexedExternalRef
+          ?? matchedEntries[0]?.indexedMatch.indexedExternalRef
+          ?? latest.externalRef
+          ?? externalRef,
+        externalRef,
+      );
+      if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
+        skippedDuplicateCount += 1;
+        records.push(latest);
+        continue;
+      }
+      if (
+        sourceVersionComparison === 0
+        && (
+          isDeletedEventSpineRecord(latest)
+          || deviceEventContentKey(latest) !== deviceEventContentKey(entry.record)
+        )
+      ) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Authoritative device event externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+            `${externalRef.resourceId}#${externalRef.facet}" has conflicting content for source revision ` +
+            `"${authoritativeSet.version}"; nothing was imported.`,
+        );
+      }
     }
 
     // externalRef identity does not include kind. Event spines are kind-stable,
@@ -2932,6 +3101,74 @@ async function reconcileDeviceEventEntriesByExternalRef(
     supersededCount += 1;
   }
 
+  for (const set of authoritativeEventSets) {
+    const ownsFacet = (facet: string): boolean => set.facetPrefixes.some((prefix) =>
+      facet === prefix || facet.startsWith(`${prefix}-`)
+    );
+    const candidates = [...index.latestByRefKey.entries()].filter(([, match]) => {
+      const externalRef = match.record.externalRef;
+      return externalRef?.system === set.system
+        && externalRef.resourceType === set.resourceType
+        && externalRef.resourceId === set.resourceId
+        && typeof externalRef.facet === "string"
+        && ownsFacet(externalRef.facet)
+        && !set.currentFacets.has(externalRef.facet)
+        && !isDeletedEventSpineRecord(match.record);
+    });
+
+    for (const [refKey, latestMatch] of candidates) {
+      const latest = latestMatch.record;
+      const latestRef = latest.externalRef;
+      if (!latestRef?.facet) {
+        continue;
+      }
+      const incomingRef: ExternalRef = { ...latestRef, version: set.version };
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        latestMatch.indexedExternalRef,
+        incomingRef,
+      );
+      if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
+        continue;
+      }
+      if (sourceVersionComparison === 0) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Authoritative device event externalRef "${set.system}/${set.resourceType}/` +
+            `${set.resourceId}#${latestRef.facet}" has conflicting membership for source revision ` +
+            `"${set.version}"; nothing was imported.`,
+        );
+      }
+      if (hasHistoricalExternalRefUserAuthoredChanges(latestMatch)) {
+        throw new VaultError(
+          "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+          `Authoritative device event externalRef "${set.system}/${set.resourceType}/` +
+            `${set.resourceId}#${latestRef.facet}" has user-authored revisions and cannot be retracted automatically.`,
+        );
+      }
+
+      const revision = Math.max(
+        eventSpineRevision(latest),
+        index.maxRevisionById.get(latest.id) ?? 0,
+      ) + 1;
+      const tombstone: EventRecord = {
+        ...latest,
+        recordedAt: set.version,
+        externalRef: incomingRef,
+        lifecycle: buildEventSpineLifecycle(revision, "deleted"),
+      };
+      const latestPath = latestMatch.relativePath || toEventLedgerFile(latest.occurredAt);
+
+      forceAppendIds.add(latest.id);
+      index.latestByRefKey.set(
+        refKey,
+        toIndexedExternalRefMatch(tombstone, incomingRef, latestPath),
+      );
+      index.maxRevisionById.set(latest.id, revision);
+      appendEntries.push({ relativePath: latestPath, record: tombstone });
+      retractedCount += 1;
+    }
+  }
+
   return {
     appendEntries,
     appendRecordIdByPreparedRecordId,
@@ -2940,6 +3177,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     retainedPreparedIds,
     skippedDuplicateCount,
     supersededCount,
+    retractedCount,
   };
 }
 
@@ -3443,6 +3681,7 @@ function buildDeviceBatchAuditSummary(input: {
   sampleCount: number;
   skippedDuplicateCount: number;
   supersededCount: number;
+  retractedCount: number;
 }): string {
   const dedupeNotes: string[] = [];
 
@@ -3452,6 +3691,10 @@ function buildDeviceBatchAuditSummary(input: {
 
   if (input.supersededCount > 0) {
     dedupeNotes.push(`${input.supersededCount} event(s) updated in place by externalRef`);
+  }
+
+  if (input.retractedCount > 0) {
+    dedupeNotes.push(`${input.retractedCount} omitted authoritative event(s) retracted`);
   }
 
   const dedupeSuffix = dedupeNotes.length > 0 ? ` (${dedupeNotes.join(", ")})` : "";
@@ -3511,6 +3754,7 @@ function prepareDeviceBatchPlan({
   events = [],
   samples = [],
   evidenceParts = [],
+  authoritativeEventSets = [],
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
@@ -3525,6 +3769,7 @@ function prepareDeviceBatchPlan({
     events,
     samples,
     evidenceParts,
+    authoritativeEventSets,
     ingestReceipt,
     provenance,
   });
@@ -3567,6 +3812,18 @@ function prepareDeviceBatchPlan({
       receipt: compactedIngestReceipt ?? null,
       eventIds: normalizedInputs.events.map(({ recordId }) => recordId),
       sampleIds: normalizedInputs.samples.map(({ recordId }) => recordId),
+      ...(normalizedInputs.authoritativeEventSets.length === 0
+        ? {}
+        : {
+            authoritativeEventSets: normalizedInputs.authoritativeEventSets.map((set) => ({
+              system: set.system,
+              resourceType: set.resourceType,
+              resourceId: set.resourceId,
+              version: set.version,
+              facetPrefixes: set.facetPrefixes,
+              currentFacets: [...set.currentFacets].sort(),
+            })),
+          }),
       evidenceParts: fingerprint,
     }),
   );
@@ -3590,6 +3847,7 @@ function prepareDeviceBatchPlan({
     evidenceRolesByPreparedRecordId: eventPlan.evidenceRolesByPreparedRecordId,
     preparedSamples,
     preparedEvidenceParts,
+    authoritativeEventSets: normalizedInputs.authoritativeEventSets,
   };
 }
 
@@ -4542,6 +4800,7 @@ export async function importDeviceBatch({
   events = [],
   samples = [],
   evidenceParts = [],
+  authoritativeEventSets = [],
   ingestReceipt,
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
@@ -4556,6 +4815,7 @@ export async function importDeviceBatch({
     events,
     samples,
     evidenceParts,
+    authoritativeEventSets,
     ingestReceipt,
     provenance,
   });
@@ -4569,6 +4829,7 @@ export async function importDeviceBatch({
   const eventIdentityContext = await buildDeviceEventIdentityContext(
     vaultRoot,
     deviceBatchPlan.preparedEvents,
+    deviceBatchPlan.authoritativeEventSets,
   );
   const currentEventOwners = mapCurrentDeviceEventOwners(
     deviceBatchPlan.preparedEvents,
@@ -4617,6 +4878,8 @@ export async function importDeviceBatch({
     vaultRoot,
     ordinaryReconciliationEntries,
     cloneDeviceEventIdentityContext(eventIdentityContext),
+    new Map(),
+    deviceBatchPlan.authoritativeEventSets,
   );
   const replayRetainedPreparedIds = new Set([
     ...protectedPreparedEventIds,
@@ -5066,6 +5329,8 @@ export async function importDeviceBatch({
           vaultRoot,
           persistenceReconciliationEntries,
           cloneDeviceEventIdentityContext(eventIdentityContext),
+          new Map(),
+          deviceBatchPlan.authoritativeEventSets,
         )
       : currentEventReconciliation;
     const reconciledRecordByPreparedId = new Map(
@@ -5160,7 +5425,7 @@ export async function importDeviceBatch({
       associablePreparedEventIds.has(entry.record.id)
       && persistenceEvidenceRolesByPreparedRecordId.has(entry.record.id)
     );
-    const hasAppendedOutputs = appendedPreparedEventIds.size > 0
+    const hasAppendedOutputs = eventAppendPlan.appendedRecordIds.length > 0
       || sampleAppendPlan.appendedRecordIds.length > 0;
     const eventIdsByEvidenceRole = new Map<string, Set<string>>();
     for (const entry of deviceBatchPlan.preparedEvents) {
@@ -5391,6 +5656,7 @@ export async function importDeviceBatch({
           sampleCount: sampleRecords.length,
           skippedDuplicateCount: eventReconciliation.skippedDuplicateCount,
           supersededCount: eventReconciliation.supersededCount,
+          retractedCount: eventReconciliation.retractedCount,
         }),
         occurredAt: deviceBatchPlan.importedAt,
         files: touchedPaths,
@@ -5406,7 +5672,12 @@ export async function importDeviceBatch({
         importedAt: deviceBatchPlan.importedAt,
         events: canonicalEventRecords,
         samples: sampleRecords,
-        eventShardPaths: eventTargetShardPaths,
+        eventShardPaths: [
+          ...new Set([
+            ...eventTargetShardPaths,
+            ...eventAppendPlan.targetShardPaths,
+          ]),
+        ].sort(),
         sampleShardPaths: sampleAppendPlan.targetShardPaths,
         evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,
         persistedEvidencePartCount: retainedEvidenceParts.length,

@@ -114,6 +114,7 @@ export async function prepareDeviceProviderSnapshotImport(
     events: normalized.events,
     samples: normalized.samples,
     evidenceParts: normalized.evidenceParts,
+    authoritativeEventSets: normalized.authoritativeEventSets,
     provenance: normalized.provenance,
   });
   const payloadWithEvidence = ensureProviderEvidencePart(basePayload, sanitizedSnapshot);
