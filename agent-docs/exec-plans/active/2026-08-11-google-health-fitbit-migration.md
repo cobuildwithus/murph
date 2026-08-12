@@ -1,6 +1,6 @@
 # Migrate Fitbit Connections to Google Health
 
-Status: active
+Status: blocked on external review and browser proof
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -71,17 +71,21 @@ Updated: 2026-08-11
 
 ## Tasks
 
-1. Send the corrected official-contract and automatic-cutover packet to
-   ReviewGPT and retrieve its scoped patch.
-2. Inspect the patch, reconcile it with current Junction/Google documentation,
-   and apply only scoped, maintainable changes.
-3. Add or refine focused tests and synthetic documented-contract fixtures for
-   every migration edge.
-4. Run local focused verification plus rendered desktop/mobile catalog proof.
-5. Commit and push an exact candidate head, update the PR, and run preliminary
-   and final ReviewGPT gates concurrently with required CI.
-6. Resolve accepted findings, run parent final review, archive this plan, and
-   leave the PR/worktree ready for the authorized merge boundary.
+1. Completed: reconciled the implementation with Junction's documented Google
+   Health migration contract and applied only scoped changes.
+2. Completed: added focused tests and a synthetic documented-contract fixture
+   for authorization, readiness, retry, cutover, and admission edges.
+3. Completed: ran focused verification, typechecks, lint, privacy checks, and
+   exact-head required functional CI.
+4. Completed: pushed the base-reconciled candidate and inspected the only manual
+   merge resolution, which combined compatible compatibility-matrix text.
+5. Blocked: the required exact-head ReviewGPT file-backed gates cannot attach
+   their packages because ChatGPT reports a full file library. A GitHub-connector
+   fallback accepted the exact-head prompt but remained in model thinking after
+   an extended wait and did not return review findings.
+6. Blocked: exact-head desktop/mobile design screenshots cannot be captured
+   because no in-app browser runtime is available. Existing hosted images remain
+   labeled as prior baselines and are not represented as current proof.
 
 ## Decisions
 
@@ -98,12 +102,28 @@ Updated: 2026-08-11
 
 ## Verification
 
-- Commands to run: focused device-sync config/provider tests, hosted connect and
-  connect-page tests, importer/query fixture tests, affected typechecks,
-  `git diff --check`, design-catalog proof, exact-head required CI, preliminary
-  completion-specialists ReviewGPT, and the final sensitive ReviewGPT loop.
-- Expected outcomes: all focused and required checks pass; one Fitbit card starts
-  `google_health`; legacy identity remains truthful; cancellation preserves the
-  old connection; verified successor readiness automatically cuts over without a
-  second member action; duplicate legacy/successor observations are not admitted;
-  and no unsupported readiness or sleep-score promise remains.
+- `packages/device-syncd`: 225 focused public-account and Junction provider tests
+  passed after the base update.
+- `apps/web`: 197 focused settings, Connect, and hosted-authority tests passed.
+- `packages/importers`: 149 focused Junction importer tests passed.
+- Affected device-sync, importer, and Web typechecks passed before the base-only
+  update; exact-head release build/typecheck and app verification passed in CI.
+- Exact-head package coverage, host matrices, fixture coverage, sandbox,
+  artifact, billing, and overflow checks passed.
+- The frontend design-proof check remains failed only because current hosted
+  desktop/mobile screenshots are unavailable; its architecture and changelog
+  declarations pass.
+- The protected ReviewGPT gate remains uncompleted due to the external upload
+  quota. The connector fallback has not returned an outcome and does not replace
+  the protected gate.
+
+## Blocked handoff
+
+- Keep the pull request draft.
+- Free space in the ChatGPT file library, then rerun the protected preliminary
+  and final ReviewGPT gates against the unchanged PR-authored patch.
+- Make an in-app browser runtime available, capture the real Connect design study
+  at desktop and mobile widths, update the pull-request proof, and rerun the
+  frontend design-proof check.
+- Resolve any accepted ReviewGPT finding before archiving this plan or moving to
+  the merge boundary.
