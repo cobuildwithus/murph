@@ -1855,6 +1855,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# Ordinary hosted member turns may mutate the vault except canonical automations.",
       `[permissions.${MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE}.filesystem]`,
       '":minimal" = "read"',
+      '"/app" = "read"',
       '":tmpdir" = "write"',
       '":slash_tmp" = "write"',
       "glob_scan_max_depth = 64",
