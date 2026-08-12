@@ -3406,9 +3406,9 @@ test.each([
       })
 
     const result = await sendAssistantNotificationLocal({
-      channel: 'linq',
+      channel: 'telegram',
       deferCommitUntilDeliveryAccepted: true,
-      deliveryTarget: 'direct-workout-overflow',
+      deliveryTarget: 'direct-telegram-workout-overflow',
       instructions: 'Send the complete current tracked workout.',
       ...(responsePolicy === undefined ? {} : { responsePolicy }),
       scheduledInvocationAuthority: {
@@ -3435,6 +3435,7 @@ test.each([
     expect(result.response).not.toContain('evt_')
     expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
       card: null,
+      channel: 'telegram',
       message: renderedText,
     }))
     expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(

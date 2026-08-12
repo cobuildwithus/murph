@@ -163,3 +163,24 @@ Updated: 2026-08-12
   state owner. Focused notification tests cover fitting-card send, cardless
   overflow send, transcript authority, and rejection of a cardless-overflow
   skip so cron cannot terminalize it as a no-op.
+
+## ReviewGPT round 3
+
+- ReviewGPT verified every prior accepted correction, including the round-2
+  retrospective, then found one original cross-channel scope omission: raising
+  the shared workout contract necessarily expands Telegram rich workout cards
+  because private direct and exact scheduled Telegram turns already use the
+  same response-card planner and projector.
+- Accept the finding without a channel fork. Disclose Telegram as an affected
+  surface and add production-adapter proof that an 11-exercise, 33-set workout
+  uses one rich message containing its first and last exercise/set, while a
+  semantically valid 16x16 workout fails measured card admission and uses the
+  complete tracking-free text path.
+- Run the existing scheduled overflow proof with a Telegram delivery channel
+  for both send-or-skip and require-send policies, asserting complete delivery,
+  authoritative transcript persistence, and illegal-skip rejection. Add no
+  Telegram-specific bound, flag, schema, renderer, or compatibility mechanism.
+- Corrected-head broad Murph CI passed before this test-only disclosure
+  remediation. The linked iOS exact-head hosted verification and ReviewGPT
+  round 1 also passed; repository Xcode worker/package-loading stalls and a
+  physical Messages journey remain explicit downstream release gates.
