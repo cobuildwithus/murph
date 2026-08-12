@@ -411,32 +411,46 @@ async function readLegacyHostedStripeActivationMailboxItemsForCompletedEvent(inp
   prisma: PrismaClient;
 }): Promise<Array<{ dedupeKey: string; id: string; userId: string }>> {
   const activations = new Map<string, { dedupeKey: string; id: string; userId: string }>();
+  const stripeSourceType = normalizeHostedStripeDispatchSourceType(input.eventType);
+  // Legacy Pulse trial conversion preserves the raw Stripe event id but
+  // intentionally replaces its source type. Completed receipts written before
+  // activationResultJson need both exact identities.
+  const legacyTrialSourceType =
+    input.eventType === "checkout.session.completed" ||
+    input.eventType.startsWith("customer.subscription.")
+      ? "hosted.legacy_trial.converted_to_starter"
+      : null;
 
   for (const sourceEventId of await resolveHostedStripeActivationSourceEventIds(input.eventId)) {
-    const sourceType = sourceEventId.startsWith("family-subscription:")
-      ? "hosted.family.sponsorship"
-      : normalizeHostedStripeDispatchSourceType(input.eventType);
-    const sourceActivations = await input.prisma.hostedMailboxItem.findMany({
-      orderBy: {
-        createdAt: "desc",
-      },
-      select: {
-        dedupeKey: true,
-        id: true,
-        userId: true,
-      },
-      where: {
-        dedupeKey: {
-          endsWith: `:${sourceEventId}`,
-          startsWith: `member.activated:${sourceType}:`,
-        },
-        kind: "member.activated",
-      },
-    });
+    const sourceTypes = sourceEventId.startsWith("family-subscription:")
+      ? ["hosted.family.sponsorship"]
+      : sourceEventId === input.eventId && legacyTrialSourceType
+        ? [stripeSourceType, legacyTrialSourceType]
+        : [stripeSourceType];
 
-    for (const activation of sourceActivations) {
-      if (!activations.has(activation.dedupeKey)) {
-        activations.set(activation.dedupeKey, activation);
+    for (const sourceType of sourceTypes) {
+      const sourceActivations = await input.prisma.hostedMailboxItem.findMany({
+        orderBy: {
+          createdAt: "desc",
+        },
+        select: {
+          dedupeKey: true,
+          id: true,
+          userId: true,
+        },
+        where: {
+          dedupeKey: {
+            endsWith: `:${sourceEventId}`,
+            startsWith: `member.activated:${sourceType}:`,
+          },
+          kind: "member.activated",
+        },
+      });
+
+      for (const activation of sourceActivations) {
+        if (!activations.has(activation.dedupeKey)) {
+          activations.set(activation.dedupeKey, activation);
+        }
       }
     }
   }
