@@ -4,13 +4,14 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { beforeEach, describe, test, vi } from "vitest";
-import { initializeVault, updateVaultSummary } from "@murphai/core";
+import { initializeVault, readJsonlRecords, updateVaultSummary } from "@murphai/core";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  eventRevisionFromLifecycle,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
@@ -265,6 +266,7 @@ function buildRuntimeSnapshot(input: {
   };
   metadata?: Record<string, unknown>;
   provider?: string;
+  providerConfigs?: HostedExecutionDeviceSyncRuntimeSnapshotResponse["providerConfigs"];
   setupExpiresAt?: string | null;
   setupPhase?: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
   status?: HostedExecutionDeviceSyncRuntimeConnectionStatus;
@@ -337,6 +339,7 @@ function buildRuntimeSnapshot(input: {
       },
     ],
     generatedAt: input.generatedAt ?? "2026-04-04T09:10:00.000Z",
+    ...(input.providerConfigs === undefined ? {} : { providerConfigs: input.providerConfigs }),
     userId: "member_123",
   };
 }
@@ -480,6 +483,38 @@ function readJobsForAccount(service: DeviceSyncService, accountId: string) {
   } finally {
     database.close();
   }
+}
+
+async function readCanonicalEventRecords(vaultRoot: string) {
+  const eventPaths = [
+    "ledger/events/2026/2026-04.jsonl",
+  ];
+  return (
+    await Promise.all(eventPaths.map(async (relativePath) => {
+      try {
+        return await readJsonlRecords({ vaultRoot, relativePath });
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+          return [];
+        }
+        throw error;
+      }
+    }))
+  ).flat();
+}
+
+function eventHasMetric(record: Awaited<ReturnType<typeof readCanonicalEventRecords>>[number], metric: string): boolean {
+  if (record.kind === "observation") {
+    return record.metric === metric;
+  }
+  return record.kind === "measurement"
+    && Array.isArray(record.measurements)
+    && record.measurements.some((measurement) =>
+      typeof measurement === "object"
+      && measurement !== null
+      && !Array.isArray(measurement)
+      && Reflect.get(measurement, "metric") === metric
+    );
 }
 
 function setAccountUpdatedAtForTesting(
@@ -9938,6 +9973,304 @@ describe("hosted device-sync runtime", () => {
         occurredAt: "2026-04-06T10:10:00.000Z",
         updates: [],
       });
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("hosted Junction yields keep prior daily resources durable across multiple slow peers", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-junction-resource-boundary-",
+    );
+    await initializeVault({
+      createdAt: "2026-04-01T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    const connectedAt = "2026-04-01T00:00:00.000Z";
+    const externalAccountId = "junction-hosted-resource-boundary";
+    const hostedConnectionId = "hosted_conn_junction_resource_boundary";
+    const yieldedAt = "2026-04-03T00:00:00.000Z";
+    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: hostedConnectionId,
+      sourceProviderSlug: "garmin",
+    });
+    assert.ok(sourceInstanceKey);
+    const metadata = {
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2026-03-31T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: connectedAt,
+    };
+    const snapshot = buildRuntimeSnapshot({
+      connectedAt,
+      connectionId: hostedConnectionId,
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      externalAccountId,
+      generatedAt: yieldedAt,
+      hostedUpdatedAt: yieldedAt,
+      localState: { nextReconcileAt: yieldedAt },
+      metadata,
+      provider: "junction",
+      providerConfigs: {
+        junction: {
+          environment: "sandbox",
+          reconcileDays: 1,
+          reconcileIntervalMs: 60 * 60_000,
+          region: "us",
+          summaryBackfillDays: 1,
+          summaryResources: [],
+          timeseriesBackfillDays: 1,
+        },
+      },
+      sources: [{
+        displayName: "Garmin",
+        firstSeenAt: connectedAt,
+        lastDataAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: yieldedAt,
+        resourceCount: 4,
+        resourceAvailabilitySummary: {
+          blood_oxygen: true,
+          caffeine: true,
+          stress_level: true,
+          water: true,
+        },
+        sourceInstanceKey,
+        sourceProviderSlug: "garmin",
+        status: "connected",
+      }],
+    });
+    let failurePhase: "stress" | "caffeine" | "recovered" = "stress";
+    let shouldYield = false;
+    let stressRequestCount = 0;
+    let caffeineRequestCount = 0;
+    let waterRequestCount = 0;
+    let resolveThirdStressRequest: (() => void) | null = null;
+    let resolveThirdCaffeineRequest: (() => void) | null = null;
+    const thirdStressRequest = new Promise<void>((resolve) => {
+      resolveThirdStressRequest = resolve;
+    });
+    const thirdCaffeineRequest = new Promise<void>((resolve) => {
+      resolveThirdCaffeineRequest = resolve;
+    });
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: {
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileDays: 1,
+        reconcileIntervalMs: 60 * 60_000,
+        requestTimeoutMs: 500,
+        summaryBackfillDays: 1,
+        summaryResources: [],
+        timeseriesBackfillDays: 1,
+        timeseriesResources: ["blood_oxygen", "stress_level", "caffeine", "water"],
+        fetchImpl: async (input, init) => {
+          const url = new URL(readTestUrl(input));
+          if (url.pathname === `/v2/user/providers/${externalAccountId}`) {
+            return createTestJsonResponse({ providers: [{
+              id: "provider-garmin-hosted-resource-boundary",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                blood_oxygen: true,
+                caffeine: true,
+                stress_level: true,
+                water: true,
+              },
+            }] });
+          }
+          if (url.pathname.startsWith("/v2/summary/") && url.pathname.endsWith(`/${externalAccountId}`)) {
+            return createTestJsonResponse({ data: [] });
+          }
+          if (url.pathname === `/v2/timeseries/${externalAccountId}/blood_oxygen/grouped`) {
+            return createTestJsonResponse({ groups: { garmin: [{
+              data: [{
+                id: "blood-oxygen-hosted-stable",
+                timestamp: "2026-04-02T08:00:00.000Z",
+                unit: "%",
+                value: 97,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }] } });
+          }
+          if (url.pathname === `/v2/timeseries/${externalAccountId}/stress_level/grouped`) {
+            stressRequestCount += 1;
+            if (failurePhase === "stress") {
+              if (stressRequestCount < 3) {
+                await new Promise((resolve) => setTimeout(resolve, 450));
+                return new Response(JSON.stringify({ code: "upstream_unavailable" }), {
+                  status: 503,
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Retry-After": "0",
+                  },
+                });
+              }
+              resolveThirdStressRequest?.();
+              await new Promise<void>((resolve, reject) => {
+                const abort = () => reject(init?.signal?.reason ?? new DOMException("Aborted", "AbortError"));
+                init?.signal?.addEventListener("abort", abort, { once: true });
+                setTimeout(resolve, 2_000);
+              });
+              throw new Error("The hosted yield should abort the slow resource request.");
+            }
+            return createTestJsonResponse({ groups: { garmin: [{
+              data: [{ start: "2026-04-02T09:00:00.000Z", value: 31 }],
+              source: { provider: "garmin", type: "watch" },
+            }] } });
+          }
+          if (url.pathname === `/v2/timeseries/${externalAccountId}/caffeine/grouped`) {
+            caffeineRequestCount += 1;
+            if (failurePhase === "caffeine") {
+              if (caffeineRequestCount < 3) {
+                await new Promise((resolve) => setTimeout(resolve, 450));
+                return new Response(JSON.stringify({ code: "upstream_unavailable" }), {
+                  status: 503,
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Retry-After": "0",
+                  },
+                });
+              }
+              resolveThirdCaffeineRequest?.();
+              await new Promise<void>((resolve, reject) => {
+                const abort = () => reject(init?.signal?.reason ?? new DOMException("Aborted", "AbortError"));
+                init?.signal?.addEventListener("abort", abort, { once: true });
+                setTimeout(resolve, 2_000);
+              });
+              throw new Error("The hosted yield should abort the second slow resource request.");
+            }
+            return createTestJsonResponse({ groups: { garmin: [{
+              data: [{ start: "2026-04-02T10:00:00.000Z", value: 0.095 }],
+              source: { provider: "garmin", type: "watch" },
+            }] } });
+          }
+          if (url.pathname === `/v2/timeseries/${externalAccountId}/water/grouped`) {
+            waterRequestCount += 1;
+            return createTestJsonResponse({ groups: { garmin: [{
+              data: [{ start: "2026-04-02T11:00:00.000Z", value: 250 }],
+              source: { provider: "garmin", type: "watch" },
+            }] } });
+          }
+          throw new Error(`Unexpected Junction hosted-resource request: ${url.pathname}`);
+        },
+      },
+    });
+    assert.ok(provider);
+    const service = createHostedRuntimeDeviceSyncService({
+      clock: { now: () => new Date(yieldedAt) },
+      deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
+      secret: DEVICE_SYNC_SECRET,
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        shouldYieldJobExecution: () => shouldYield,
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      providers: [provider],
+    });
+
+    try {
+      const deviceSyncPort = createSnapshotOnlyDeviceSyncPort(snapshot);
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        snapshot,
+        wake: buildCronWake(yieldedAt),
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      await service.runSchedulerOnce();
+      const scheduledJobs = readJobsForAccount(service, localAccountId);
+      assert.equal(
+        scheduledJobs.filter((job) => job.kind === "reconcile" && job.status === "queued").length,
+        1,
+        JSON.stringify(scheduledJobs),
+      );
+      const yieldingWorker = service.runWorkerOnce();
+      await Promise.race([
+        thirdStressRequest,
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error("Timed out waiting for Junction's third stress request.")), 10_000);
+        }),
+      ]);
+      shouldYield = true;
+      assert.equal((await yieldingWorker)?.kind, "reconcile");
+      shouldYield = false;
+
+      const firstRecords = await readCanonicalEventRecords(vaultRoot);
+      const firstSpo2 = firstRecords.filter((record) => eventHasMetric(record, "spo2"));
+      assert.equal(firstSpo2.length, 1);
+      assert.equal(firstRecords.some((record) => eventHasMetric(record, "stress-level")), false);
+      assert.equal(firstRecords.some((record) => eventHasMetric(record, "caffeine")), false);
+      assert.equal(caffeineRequestCount, 0);
+      assert.equal(waterRequestCount, 0);
+      assert.equal(
+        Object.hasOwn(
+          getStore(service).getAccountById(localAccountId)?.metadata ?? {},
+          "junctionExtendedHistoryCoverage",
+        ),
+        false,
+      );
+      const yieldedJobs = readJobsForAccount(service, localAccountId);
+      assert.equal(yieldedJobs.filter((job) => job.kind === "reconcile" && job.status === "queued").length, 1);
+
+      failurePhase = "caffeine";
+      const secondYieldingWorker = service.runWorkerOnce();
+      await Promise.race([
+        thirdCaffeineRequest,
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => reject(new Error("Timed out waiting for Junction's third caffeine request.")), 10_000);
+        }),
+      ]);
+      shouldYield = true;
+      assert.equal((await secondYieldingWorker)?.kind, "reconcile");
+      shouldYield = false;
+
+      const secondRecords = await readCanonicalEventRecords(vaultRoot);
+      const firstStress = secondRecords.filter((record) => eventHasMetric(record, "stress-level"));
+      assert.equal(firstStress.length, 1);
+      assert.equal(secondRecords.some((record) => eventHasMetric(record, "caffeine")), false);
+      assert.equal(waterRequestCount, 0);
+      const twiceYieldedJobs = readJobsForAccount(service, localAccountId);
+      assert.equal(twiceYieldedJobs.filter((job) => job.kind === "reconcile" && job.status === "queued").length, 1);
+
+      failurePhase = "recovered";
+      assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+      const recoveredRecords = await readCanonicalEventRecords(vaultRoot);
+      for (const firstRecord of firstSpo2) {
+        assert.deepEqual(
+          recoveredRecords
+            .filter((record) => record.id === firstRecord.id)
+            .map((record) => eventRevisionFromLifecycle(record.lifecycle)),
+          [1],
+        );
+      }
+      for (const stressRecord of firstStress) {
+        assert.deepEqual(
+          recoveredRecords
+            .filter((record) => record.id === stressRecord.id)
+            .map((record) => eventRevisionFromLifecycle(record.lifecycle)),
+          [1],
+        );
+      }
+      assert.equal(recoveredRecords.filter((record) => eventHasMetric(record, "caffeine")).length, 1);
+      assert.equal(recoveredRecords.filter((record) => eventHasMetric(record, "water")).length, 1);
+      assert.equal(stressRequestCount, 5);
+      assert.equal(caffeineRequestCount, 4);
+      assert.equal(waterRequestCount, 1);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

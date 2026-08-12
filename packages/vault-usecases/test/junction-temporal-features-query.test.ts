@@ -30,11 +30,21 @@ function junctionSnapshot(input: {
 async function importJunction(
   vaultRoot: string,
   snapshot: unknown,
-  completeSourceDay?: { dayKey: string; revisionAt: string },
+  completeSourceDay?: {
+    dayKey: string;
+    resources: readonly string[];
+    revisionAt: string;
+  },
 ): Promise<void> {
   await importDeviceProviderSnapshot(
     {
-      completeSourceDay,
+      completeSourceDay: completeSourceDay
+        ? {
+            ...completeSourceDay,
+            connectionId: "junction-connection-1",
+            timeZone: "America/Chicago",
+          }
+        : undefined,
       deliveryMode: "scheduled_reconcile",
       provider: "junction",
       snapshot,
@@ -72,7 +82,7 @@ function groupedTimeseries(resource: string, rows: readonly Record<string, unkno
   };
 }
 
-test("precise Junction partitions never publish temporal facts before the complete offset source-day owner", async () => {
+test("precise Junction partitions never publish temporal facts before the complete vault-local source-day owner", async () => {
   const parentRoot = await mkdtemp(path.join(tmpdir(), "junction-temporal-partitions-"));
   const rows = offsetStressRows();
   const chunks = [rows.slice(0, 2), rows.slice(2)];
@@ -83,7 +93,7 @@ test("precise Junction partitions never publish temporal facts before the comple
       const vaultRoot = path.join(parentRoot, `vault-${index}`);
       await coreRuntime.initializeVault({
         createdAt: "2026-04-22T00:00:00.000Z",
-        timezone: "UTC",
+        timezone: "America/Chicago",
         vaultRoot,
       });
 
@@ -114,6 +124,7 @@ test("precise Junction partitions never publish temporal facts before the comple
         timeseries: groupedTimeseries("stress_level", rows),
       }), {
         dayKey: "2026-04-22",
+        resources: ["stress_level"],
         revisionAt: "2026-04-24T12:00:00.000Z",
       });
 
@@ -184,14 +195,14 @@ test("complete Junction source-day retries retract stale facets after insufficie
   try {
     await coreRuntime.initializeVault({
       createdAt: "2026-04-22T00:00:00.000Z",
-      timezone: "UTC",
+      timezone: "America/Chicago",
       vaultRoot,
     });
 
     await importJunction(
       vaultRoot,
       completeSnapshot(bloodOxygenRows, "2026-04-24T12:00:00.000Z"),
-      { dayKey, revisionAt: "2026-04-24T12:00:00.000Z" },
+      { dayKey, resources: ["blood_oxygen"], revisionAt: "2026-04-24T12:00:00.000Z" },
     );
     expect(await pointsFor(TEMPORAL_METRICS)).toHaveLength(3);
 
@@ -201,10 +212,12 @@ test("complete Junction source-day retries retract stale facets after insufficie
     );
     await importJunction(vaultRoot, insufficient, {
       dayKey,
+      resources: ["blood_oxygen"],
       revisionAt: "2026-04-24T13:00:00.000Z",
     });
     await importJunction(vaultRoot, insufficient, {
       dayKey,
+      resources: ["blood_oxygen"],
       revisionAt: "2026-04-24T13:00:00.000Z",
     });
     expect(await pointsFor(TEMPORAL_METRICS)).toHaveLength(0);
@@ -213,22 +226,24 @@ test("complete Junction source-day retries retract stale facets after insufficie
     await importJunction(
       vaultRoot,
       completeSnapshot(bloodOxygenRows, "2026-04-24T14:00:00.000Z"),
-      { dayKey, revisionAt: "2026-04-24T14:00:00.000Z" },
+      { dayKey, resources: ["blood_oxygen"], revisionAt: "2026-04-24T14:00:00.000Z" },
     );
     expect(await pointsFor(TEMPORAL_METRICS)).toHaveLength(3);
 
     const cappedRows = Array.from({ length: 5_001 }, (_, index) => ({
-      timestamp: new Date(Date.UTC(2026, 3, 22) + index * 1_000).toISOString(),
+      timestamp: new Date(Date.UTC(2026, 3, 22, 5) + index * 1_000).toISOString(),
       unit: "percent",
       value: index % 2 === 0 ? 88 : 95,
     }));
     const capped = completeSnapshot(cappedRows, "2026-04-24T15:00:00.000Z");
     await importJunction(vaultRoot, capped, {
       dayKey,
+      resources: ["blood_oxygen"],
       revisionAt: "2026-04-24T15:00:00.000Z",
     });
     await importJunction(vaultRoot, capped, {
       dayKey,
+      resources: ["blood_oxygen"],
       revisionAt: "2026-04-24T15:00:00.000Z",
     });
     expect(await pointsFor(TEMPORAL_METRICS)).toHaveLength(0);
@@ -237,7 +252,7 @@ test("complete Junction source-day retries retract stale facets after insufficie
     await importJunction(vaultRoot, junctionSnapshot({
       importedAt: "2026-04-24T15:30:00.000Z",
       timeseries: groupedTimeseries("stress_level", offsetStressRows()),
-    }), { dayKey, revisionAt: "2026-04-24T15:30:00.000Z" });
+    }), { dayKey, resources: ["stress_level"], revisionAt: "2026-04-24T15:30:00.000Z" });
     expect((await pointsFor(TEMPORAL_METRICS)).filter((point) =>
       point.metricKey.startsWith("stress-")
     )).toHaveLength(3);
@@ -249,12 +264,12 @@ test("complete Junction source-day retries retract stale facets after insufficie
     await importJunction(
       vaultRoot,
       partialStress,
-      { dayKey, revisionAt: "2026-04-24T15:45:00.000Z" },
+      { dayKey, resources: ["stress_level"], revisionAt: "2026-04-24T15:45:00.000Z" },
     );
     await importJunction(
       vaultRoot,
       partialStress,
-      { dayKey, revisionAt: "2026-04-24T15:45:00.000Z" },
+      { dayKey, resources: ["stress_level"], revisionAt: "2026-04-24T15:45:00.000Z" },
     );
     const partialStressPoints = (await pointsFor(TEMPORAL_METRICS)).filter((point) =>
       point.metricKey.startsWith("stress-")
@@ -267,7 +282,7 @@ test("complete Junction source-day retries retract stale facets after insufficie
     await importJunction(vaultRoot, junctionSnapshot({
       importedAt: "2026-04-24T15:50:00.000Z",
       timeseries: groupedTimeseries("stress_level", offsetStressRows()),
-    }), { dayKey, revisionAt: "2026-04-24T15:50:00.000Z" });
+    }), { dayKey, resources: ["stress_level"], revisionAt: "2026-04-24T15:50:00.000Z" });
     expect((await pointsFor(TEMPORAL_METRICS)).filter((point) =>
       point.metricKey.startsWith("stress-")
     )).toHaveLength(3);
@@ -286,7 +301,11 @@ test("complete Junction source-day retries retract stale facets after insufficie
         },
         stress_level: groupedTimeseries("stress_level", offsetStressRows()).stress_level,
       },
-    }), { dayKey, revisionAt: "2026-04-24T16:00:00.000Z" });
+    }), {
+      dayKey,
+      resources: ["blood_oxygen", "stress_level"],
+      revisionAt: "2026-04-24T16:00:00.000Z",
+    });
     const finalPoints = await metricPoints(vaultRoot);
     expect(finalPoints.some((point) => point.metricKey === "stress-level")).toBe(true);
     expect(finalPoints.some((point) => point.metricKey.startsWith("stress-")

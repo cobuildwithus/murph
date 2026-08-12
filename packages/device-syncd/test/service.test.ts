@@ -1411,12 +1411,30 @@ test("device sync service supplies the vault timezone to Junction jobs", async (
   const demoDescriptor = createFakeProvider().descriptor;
   const provider = createFakeProvider({
     provider: "junction",
+    credentialPolicy: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+    },
     descriptor: {
       ...demoDescriptor,
       provider: "junction",
       oauth: demoDescriptor.oauth
         ? { ...demoDescriptor.oauth, callbackPath: "/oauth/junction/callback" }
         : undefined,
+    },
+    async exchangeAuthorizationCode() {
+      return {
+        externalAccountId: "junction-timezone-test",
+        displayName: "Junction timezone test",
+        scopes: ["offline", "read:data"],
+        metadata: {},
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        initialJobs: [{ kind: "backfill", payload: {} }],
+        nextReconcileAt: "2026-03-17T12:00:00.000Z",
+      };
     },
     async executeJob(context) {
       observedTimeZones.push(context.vaultTimeZone);
@@ -1635,6 +1653,131 @@ test("Junction composed history metadata survives real import, sanitizer, merge,
     ), false);
   } finally {
     reopenedStore.close();
+  }
+});
+
+test("Junction schedule-time history keeps one durable retry chain across UTC days", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-schedule-history-retry");
+  let now = new Date("2026-08-11T12:00:00.000Z");
+  let caffeineRequestCount = 0;
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 1,
+    reconcileIntervalMs: 60 * 60_000,
+    summaryBackfillDays: 1,
+    summaryResources: [],
+    timeseriesResources: ["caffeine"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-schedule-history") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-schedule-history",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true },
+        }] });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-schedule-history/caffeine/grouped") {
+        caffeineRequestCount += 1;
+        return createJsonResponse({ code: "historical_window_not_ready" }, 422);
+      }
+      if (url.pathname.startsWith("/v2/summary/") && url.pathname.endsWith("/junction-user-schedule-history")) {
+        return createJsonResponse({ data: [] });
+      }
+      throw new Error(`Unexpected Junction schedule-history request: ${url.pathname}`);
+    },
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(snapshot) {
+        const prepared = await prepareDeviceProviderSnapshotImport(snapshot);
+        return { events: prepared.events ?? [] };
+      },
+    },
+    providers: [provider],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-schedule-history",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-03T12:00:00.000Z",
+      metadata: {
+        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      },
+      nextReconcileAt: now.toISOString(),
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      resourceAvailabilitySummary: { caffeine: true },
+      lastSeenAt: now.toISOString(),
+    });
+    const activeHistoryJobs = () => readJobsForAccountForTesting(store, account.id)
+      .flatMap((row) => {
+        const job = store.getJobById(row.id);
+        return job
+          && job.kind === "resource"
+          && job.payload.historicalBackfill === true
+          && (job.status === "queued" || job.status === "running")
+          ? [job]
+          : [];
+      });
+
+    await service.runSchedulerOnce();
+    const initialHistoryJob = activeHistoryJobs()[0];
+    assert.ok(initialHistoryJob);
+    const stableDedupeKey = initialHistoryJob.dedupeKey;
+    assert.equal(activeHistoryJobs().length, 1);
+
+    assert.equal((await service.runWorkerOnce())?.kind, "reconcile");
+    assert.equal((await service.runWorkerOnce())?.kind, "resource");
+    const retryHistoryJob = activeHistoryJobs()[0];
+    assert.ok(retryHistoryJob);
+    assert.equal(activeHistoryJobs().length, 1);
+    assert.equal(retryHistoryJob.dedupeKey, stableDedupeKey);
+    assert.equal(caffeineRequestCount, 2);
+
+    for (const scheduledAt of [
+      "2026-08-12T12:00:00.000Z",
+      "2026-08-13T12:00:00.000Z",
+    ]) {
+      now = new Date(scheduledAt);
+      store.patchAccount(account.id, { nextReconcileAt: scheduledAt });
+      await service.runSchedulerOnce();
+      const active = activeHistoryJobs();
+      assert.equal(active.length, 1);
+      assert.equal(active[0]?.dedupeKey, stableDedupeKey);
+    }
+
+    assert.equal(caffeineRequestCount, 2);
+  } finally {
+    close();
   }
 });
 

@@ -8,6 +8,7 @@ import {
   JUNCTION_DEFAULT_TIMESERIES_HISTORY_DAYS,
   JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
   JUNCTION_KNOWN_WEBHOOK_RESOURCES,
+  JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES,
   JUNCTION_TIMESERIES_RESOURCES,
   parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
@@ -165,11 +166,6 @@ export {
 
 interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
-}
-
-interface JunctionTimeseriesSnapshotFetchResult {
-  firstRetryableError: unknown | null;
-  snapshots: Record<string, unknown[]>;
 }
 
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
@@ -343,6 +339,14 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = new Map(
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
 );
+const JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCE_SET = new Set<string>(
+  JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCES,
+);
+// The importer applies this after validation and stable-identity deduplication.
+// Keeping the remaining budget in the existing daily invocation makes replay
+// consume the same deterministic configured-resource prefix without persisting
+// another progress owner or admitting full timeseries payloads.
+const JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_DAY = 100;
 const JUNCTION_MAX_EXTENDED_HISTORY_SOURCES_PER_RESOURCE = JUNCTION_CONNECT_SOURCE_TARGETS.length;
 const JUNCTION_MAX_EXTENDED_HISTORY_JOBS_PER_SCHEDULE = 8;
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
@@ -2640,53 +2644,20 @@ export function createJunctionDeviceSyncProvider(
     sourceProviderSlug?: string | null,
     options: JunctionWindowFetchOptions = {},
   ): Promise<Record<string, unknown[]>> {
-    const result = await fetchTimeseriesSnapshotsPreservingResourceFailures(
-      context,
-      windowStart,
-      windowEnd,
-      skippedOptionalResources,
-      resources,
-      sourceProviderSlug,
-      options,
-    );
-    if (result.firstRetryableError !== null) {
-      throw result.firstRetryableError;
-    }
-    return result.snapshots;
-  }
-
-  async function fetchTimeseriesSnapshotsPreservingResourceFailures(
-    context: ProviderJobContext,
-    windowStart: string,
-    windowEnd: string,
-    skippedOptionalResources: JunctionSkippedOptionalResource[],
-    resources: readonly string[] = timeseriesResources,
-    sourceProviderSlug?: string | null,
-    options: JunctionWindowFetchOptions = {},
-  ): Promise<JunctionTimeseriesSnapshotFetchResult> {
     const snapshots: Record<string, unknown[]> = {};
-    let firstRetryableError: unknown | null = null;
-
     for (const resource of resources) {
-      try {
-        snapshots[resource] = await fetchTimeseriesResourceInChunks(
-          context,
-          resource,
-          windowStart,
-          windowEnd,
-          skippedOptionalResources,
-          sourceProviderSlug,
-          options,
-        );
-      } catch (error) {
-        if (!isRetryableDeviceSyncFailure(error)) {
-          throw error;
-        }
-        firstRetryableError ??= error;
-      }
+      snapshots[resource] = await fetchTimeseriesResourceInChunks(
+        context,
+        resource,
+        windowStart,
+        windowEnd,
+        skippedOptionalResources,
+        sourceProviderSlug,
+        options,
+      );
     }
 
-    return { firstRetryableError, snapshots };
+    return snapshots;
   }
 
   async function fetchTimeseriesResourceInChunks(
@@ -3008,66 +2979,82 @@ export function createJunctionDeviceSyncProvider(
       authorityTimeZone ?? "UTC",
       context.now,
     )) {
-      if (context.shouldYield?.()) {
-        return {
-          yieldedAt: window.windowStart,
-        };
-      }
-      const fetchResult = await fetchTimeseriesSnapshotsPreservingResourceFailures(
-        context,
-        window.windowStart,
-        window.windowEnd,
-        skippedOptionalResources,
-        resources,
-        sourceProviderSlug,
-        {},
-      );
-      const timeseries = fetchResult.snapshots;
-      const authoritativeResources = authorityTimeZone && window.authoritative
-        ? Object.keys(timeseries).filter((resource) =>
-            JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
-          )
-        : [];
-      if (!hasJunctionSnapshotRecords(timeseries) && authoritativeResources.length === 0) {
-        if (fetchResult.firstRetryableError !== null) {
-          throw fetchResult.firstRetryableError;
+      let remainingSparseClinicalReadings = JUNCTION_MAX_SPARSE_CLINICAL_READINGS_PER_DAY;
+      for (const resource of resources ?? timeseriesResources) {
+        const sparseClinicalResource =
+          JUNCTION_SPARSE_CLINICAL_TIMESERIES_RESOURCE_SET.has(resource);
+        if (sparseClinicalResource && remainingSparseClinicalReadings === 0) {
+          continue;
         }
-        continue;
-      }
+        if (context.shouldYield?.()) {
+          return {
+            yieldedAt: window.windowStart,
+          };
+        }
+        const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
+        const timeseries = await fetchTimeseriesSnapshots(
+          context,
+          window.windowStart,
+          window.windowEnd,
+          skippedOptionalResources,
+          [resource],
+          sourceProviderSlug,
+        );
+        if (skippedOptionalResources.length > skippedResourceCountBeforeFetch) {
+          continue;
+        }
 
-      const preparedImport = await prepareJunctionImportSnapshot(
-        context,
-        timeseries,
-        sourceProviders,
-      );
-      if (
-        hasJunctionSnapshotRecords(preparedImport.snapshots)
-        || authoritativeResources.length > 0
-      ) {
-        await context.importSnapshot({
-          provider: "junction",
-          accountId: buildJunctionImportAccountId(context.account.externalAccountId),
-          connectionId: context.account.id,
-          importedAt: window.windowEnd,
-          windowStart: window.windowStart,
-          windowEnd: window.windowEnd,
-          connections: preparedImport.connections,
-          summaries: {},
-          timeseries: preparedImport.snapshots,
-        }, authorityTimeZone && authoritativeResources.length > 0
+        const completeSourceDay = (
+          authorityTimeZone
+          && window.authoritative
+          && JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+        )
           ? {
-              completeSourceDay: {
-                connectionId: context.account.id,
-                dayKey: window.dayKey,
-                resources: authoritativeResources,
-                revisionAt: context.now,
-                timeZone: authorityTimeZone,
-              },
+              connectionId: context.account.id,
+              dayKey: window.dayKey,
+              resources: [resource],
+              revisionAt: context.now,
+              timeZone: authorityTimeZone,
             }
-          : undefined);
-      }
-      if (fetchResult.firstRetryableError !== null) {
-        throw fetchResult.firstRetryableError;
+          : undefined;
+        if (!hasJunctionSnapshotRecords(timeseries) && !completeSourceDay) {
+          continue;
+        }
+        const preparedImport = await prepareJunctionImportSnapshot(
+          context,
+          timeseries,
+          sourceProviders,
+        );
+        if (
+          hasJunctionSnapshotRecords(preparedImport.snapshots)
+          || completeSourceDay
+        ) {
+          const receipt = await context.importSnapshot({
+            provider: "junction",
+            accountId: buildJunctionImportAccountId(context.account.externalAccountId),
+            connectionId: context.account.id,
+            importedAt: window.windowEnd,
+            windowStart: window.windowStart,
+            windowEnd: window.windowEnd,
+            connections: preparedImport.connections,
+            summaries: {},
+            timeseries: preparedImport.snapshots,
+            ...(sparseClinicalResource
+              ? { sparseClinicalReadingLimit: remainingSparseClinicalReadings }
+              : {}),
+          }, completeSourceDay ? { completeSourceDay } : undefined);
+          if (sparseClinicalResource) {
+            const admittedReadingCount = readProviderSnapshotCanonicalEventCount(receipt);
+            if (admittedReadingCount > remainingSparseClinicalReadings) {
+              throw deviceSyncError({
+                code: "JUNCTION_SPARSE_CLINICAL_IMPORT_LIMIT_EXCEEDED",
+                message: "Junction sparse clinical import exceeded its daily admission limit.",
+                retryable: false,
+              });
+            }
+            remainingSparseClinicalReadings -= admittedReadingCount;
+          }
+        }
       }
     }
     return {
@@ -6339,13 +6326,15 @@ function buildJunctionExtendedTimeseriesBackfillDedupeKey(
     return null;
   }
 
-  if (resource === "note") {
+  const policy = [...JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES]
+    .find(([candidate]) => candidate === resource)?.[1];
+  if (policy?.historyAnchor === "schedule_time") {
     return sha256Text(JSON.stringify([
       "junction",
       "extended-timeseries-backfill",
       normalizeProviderSlug(payload.sourceProviderSlug),
       resource,
-      JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES.get(resource)?.version ?? 1,
+      policy.version,
     ]));
   }
 

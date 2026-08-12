@@ -17,7 +17,10 @@ import { test } from "vitest";
 import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
 
 import { DeviceSyncError } from "../src/errors.ts";
-import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
+import {
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+} from "../src/junction-historical-backfill-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -568,7 +571,7 @@ test("Junction omitted timeseries config defaults to compact resources only", as
     ),
     true,
   );
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length);
 });
 
 test("Junction known dense programmatic timeseries config falls back to compact daily defaults", async () => {
@@ -665,7 +668,7 @@ test("Junction known dense programmatic timeseries config falls back to compact 
     ),
     true,
   );
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length);
 });
 
 function buildExpectedJunctionDedupeKey(
@@ -7223,6 +7226,56 @@ test("Junction closed daily timeseries imports carry the exclusive temporal sour
   assert.equal(dailySnapshot.timeseries?.stress_level?.[0]?.start, "2026-04-22T12:00:00.000Z");
 });
 
+test("Junction successful-empty temporal days still carry authoritative replacement proof", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+  const imports: Array<{ options: unknown; snapshot: unknown }> = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-24T12:00:00.000Z",
+      importSnapshot: async (snapshot, options) => {
+        imports.push({ options, snapshot });
+        return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-22T00:00:00.000Z",
+      windowEnd: "2026-04-23T00:00:00.000Z",
+    }),
+  );
+
+  const authoritativeImport = imports.find(({ options }) =>
+    Boolean((options as { completeSourceDay?: unknown } | undefined)?.completeSourceDay)
+  );
+  assert.deepEqual(
+    (authoritativeImport?.options as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "acct-junction-1",
+      dayKey: "2026-04-22",
+      resources: ["stress_level"],
+      revisionAt: "2026-04-24T12:00:00.000Z",
+      timeZone: "UTC",
+    },
+  );
+  assert.deepEqual(
+    (authoritativeImport?.snapshot as { timeseries?: unknown })?.timeseries,
+    { stress_level: [] },
+  );
+});
+
 test("Junction temporal authority waits for a closed vault-local day plus the safety lag", async () => {
   const requestedWindows: Array<[string | null, string | null]> = [];
   const provider = createJunctionProvider(async (input) => {
@@ -7330,9 +7383,12 @@ test("Junction daily timeseries imports successful resources before retrying a f
         },
       });
     }
+    if (parsed.pathname === "/v2/timeseries/junction-user-1/hrv/grouped") {
+      throw new Error("Junction should stop before fetching later peers after a retryable failure.");
+    }
     throw new Error(`Unexpected request: ${url}`);
   }, {
-    timeseriesResources: ["blood_oxygen", "water"],
+    timeseriesResources: ["water", "blood_oxygen", "hrv"],
   });
 
   await assert.rejects(
@@ -7359,6 +7415,7 @@ test("Junction daily timeseries imports successful resources before retrying a f
 
   assert.equal(requests.some((url) => url.includes("/blood_oxygen/grouped")), true);
   assert.equal(requests.some((url) => url.includes("/water/grouped")), true);
+  assert.equal(requests.some((url) => url.includes("/hrv/grouped")), false);
   const importedTimeseries = importedSnapshots.flatMap((snapshot) =>
     Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {})
   );
@@ -9252,7 +9309,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_id, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_name, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.user_id, undefined);
-  assert.equal(importedSnapshots.length, 2);
+  assert.equal(importedSnapshots.length, 3);
   assert.match(JSON.stringify(importedSnapshots), /"provider":"junction"/u);
   const snapshotJson = JSON.stringify(importedSnapshots);
   assert.doesNotMatch(snapshotJson, /provider-connection-oura-ring|device-oura-ring|app-oura-cloud/u);
@@ -9307,6 +9364,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.deepEqual(
     timeseriesSnapshots.map((snapshot) => [snapshot.windowStart, snapshot.windowEnd]),
     [
+      ["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z"],
       ["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z"],
     ],
   );
@@ -9871,7 +9929,7 @@ test("Junction polling skips optional unavailable resource collections", async (
   assert.deepEqual(summarySnapshot.timeseries, {});
   assert.deepEqual(timeseriesSnapshot.summaries, {});
   assert.equal(timeseriesSnapshot.timeseries?.blood_oxygen?.length, 1);
-  assert.deepEqual(timeseriesSnapshot.timeseries?.stress_level, []);
+  assert.equal(timeseriesSnapshot.timeseries?.stress_level, undefined);
   assert.deepEqual(
     warnings.map((warning) => ({
       accountId: warning.accountId,
@@ -14102,7 +14160,7 @@ test("Junction sparse-history scheduling caps global fanout and rotates across e
   assert.equal(observedPairs.size, candidateCount);
 });
 
-test("Junction sparse-history policy anchors rollout resources at scheduling time", () => {
+test("Junction sparse-history policy keeps schedule-time retry identity stable across UTC days", () => {
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
     clientUserIdSecret: "junction-client-user-id-secret",
@@ -14126,17 +14184,68 @@ test("Junction sparse-history policy anchors rollout resources at scheduling tim
     lastSeenAt: "2026-08-11T12:00:00.000Z",
     lastDataAt: null,
   };
-  const jobs = provider.jobExecutor?.createScheduledJobs?.(
+  const firstJobs = provider.jobExecutor?.createScheduledJobs?.(
     createStoredAccount({ sources: [source] }),
     "2026-08-11T12:00:00.000Z",
   ).jobs ?? [];
-  const bloodPressure = requireValue(jobs.find((job) =>
+  const secondJobs = provider.jobExecutor?.createScheduledJobs?.(
+    createStoredAccount({ sources: [source] }),
+    "2026-08-12T12:00:00.000Z",
+  ).jobs ?? [];
+  const bloodPressure = requireValue(firstJobs.find((job) =>
     job.payload?.resource === "blood_pressure"
   ));
-  const caffeine = requireValue(jobs.find((job) => job.payload?.resource === "caffeine"));
+  const secondBloodPressure = requireValue(secondJobs.find((job) =>
+    job.payload?.resource === "blood_pressure"
+  ));
+  const caffeine = requireValue(firstJobs.find((job) => job.payload?.resource === "caffeine"));
+  const secondCaffeine = requireValue(secondJobs.find((job) =>
+    job.payload?.resource === "caffeine"
+  ));
+  const earlierSource = {
+    ...source,
+    firstSeenAt: "2026-03-01T12:00:00.000Z",
+  };
+  const earlierJobs = provider.jobExecutor?.createScheduledJobs?.(
+    createStoredAccount({ sources: [earlierSource] }),
+    "2026-08-12T12:00:00.000Z",
+  ).jobs ?? [];
+  const earlierBloodPressure = requireValue(earlierJobs.find((job) =>
+    job.payload?.resource === "blood_pressure"
+  ));
+  const earlierCaffeine = requireValue(earlierJobs.find((job) =>
+    job.payload?.resource === "caffeine"
+  ));
+  const expectedCaffeineDedupeKey = createHash("sha256")
+    .update(JSON.stringify([
+      "junction",
+      "extended-timeseries-backfill",
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ]))
+    .digest("hex");
+  const nextPolicyVersionDedupeKey = createHash("sha256")
+    .update(JSON.stringify([
+      "junction",
+      "extended-timeseries-backfill",
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION + 1,
+    ]))
+    .digest("hex");
 
   assert.equal(bloodPressure.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+  assert.equal(secondBloodPressure.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+  assert.equal(bloodPressure.dedupeKey, secondBloodPressure.dedupeKey);
+  assert.equal(earlierBloodPressure.payload?.windowEnd, "2026-03-01T00:00:00.000Z");
+  assert.notEqual(earlierBloodPressure.dedupeKey, bloodPressure.dedupeKey);
   assert.equal(caffeine.payload?.windowEnd, "2026-08-11T00:00:00.000Z");
+  assert.equal(secondCaffeine.payload?.windowEnd, "2026-08-12T00:00:00.000Z");
+  assert.equal(caffeine.dedupeKey, secondCaffeine.dedupeKey);
+  assert.equal(caffeine.dedupeKey, earlierCaffeine.dedupeKey);
+  assert.equal(caffeine.dedupeKey, expectedCaffeineDedupeKey);
+  assert.notEqual(caffeine.dedupeKey, nextPolicyVersionDedupeKey);
 });
 
 test("Junction sparse-history scheduling and live admission honor raw availability aliases", async () => {
