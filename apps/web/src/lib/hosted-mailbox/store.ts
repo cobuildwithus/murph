@@ -35,7 +35,6 @@ import type {
 import {
   getHostedCryptoDomainForLane,
   parseHostedEmailThreadTarget,
-  type HostedCryptoDomain,
 } from "@murphai/runtime-state";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
@@ -279,25 +278,8 @@ type HostedMailboxPayloadEncryptionOwner =
 const HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN =
   getHostedCryptoDomainForLane("mailbox-payload");
 const HOSTED_MAILBOX_APPEND_CRYPTO_PREPARATION_ATTEMPTS = 2;
-const preparedHostedMailboxAppendRoots = new WeakMap<
-  PreparedHostedMailboxItemAppendCrypto,
-  PreparedHostedDomainRootForWeb
->();
-
-export interface PreparedHostedMailboxItemAppendCrypto {
-  readonly domain: HostedCryptoDomain;
-  readonly rootKeyId: string;
-  readonly userId: string;
-}
-
-export class HostedMailboxAppendPreparationMismatchError extends Error {
-  readonly code = "HOSTED_MAILBOX_APPEND_PREPARATION_MISMATCH";
-
-  constructor() {
-    super("Hosted mailbox append crypto preparation is stale.");
-    this.name = "HostedMailboxAppendPreparationMismatchError";
-  }
-}
+export type PreparedHostedMailboxItemAppendCrypto =
+  PreparedHostedDomainRootForWeb;
 
 /**
  * Provider-capable mailbox crypto preparation. The returned token contains
@@ -310,20 +292,13 @@ export async function prepareHostedMailboxItemAppendCrypto(input: {
   userId: string;
 }): Promise<PreparedHostedMailboxItemAppendCrypto> {
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
-  const preparedRoot = await prepareHostedDomainRootForWeb({
+  return prepareHostedDomainRootForWeb({
     domain: HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN,
     prepareMissing: false,
     prisma: input.prisma,
     reason: "hosted-mailbox.append-payload",
     userId,
   });
-  const prepared = Object.freeze({
-    domain: HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN,
-    rootKeyId: preparedRoot.rootKeyId,
-    userId,
-  });
-  preparedHostedMailboxAppendRoots.set(prepared, preparedRoot);
-  return prepared;
 }
 
 async function revalidatePreparedHostedMailboxAppendCryptoTx(input: {
@@ -338,12 +313,7 @@ async function revalidatePreparedHostedMailboxAppendCryptoTx(input: {
   if (
     !prepared
     || typeof prepared !== "object"
-    || !preparedHostedMailboxAppendRoots.has(prepared)
-  ) {
-    throw new TypeError("Hosted mailbox append requires its prepared crypto token.");
-  }
-  if (
-    prepared.domain !== HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN
+    || prepared.domain !== HOSTED_MAILBOX_APPEND_CRYPTO_DOMAIN
     || prepared.userId !== input.userId
     || typeof prepared.rootKeyId !== "string"
     || prepared.rootKeyId.trim().length === 0
@@ -352,24 +322,10 @@ async function revalidatePreparedHostedMailboxAppendCryptoTx(input: {
       "Hosted mailbox append prepared crypto identity does not match the append.",
     );
   }
-
-  const preparedRoot = preparedHostedMailboxAppendRoots.get(prepared);
-  if (!preparedRoot) {
-    throw new TypeError(
-      "Hosted mailbox append prepared root is not the exact scoped cache entry.",
-    );
-  }
-  try {
-    return await revalidatePreparedHostedDomainRootForWebTx({
-      prepared: preparedRoot,
-      tx: input.tx,
-    });
-  } catch (error) {
-    if (error instanceof HostedDomainRootPreparationMismatchError) {
-      throw new HostedMailboxAppendPreparationMismatchError();
-    }
-    throw error;
-  }
+  return revalidatePreparedHostedDomainRootForWebTx({
+    prepared,
+    tx: input.tx,
+  });
 }
 
 export async function appendHostedMailboxItem(
@@ -432,7 +388,7 @@ export async function appendHostedMailboxItem(
           ? runWithHostedDomainRootUnwrapCache(runAttempt)
           : runWithFreshHostedDomainRootUnwrapCache(runAttempt));
       } catch (error) {
-        if (!(error instanceof HostedMailboxAppendPreparationMismatchError)) {
+        if (!(error instanceof HostedDomainRootPreparationMismatchError)) {
           throw error;
         }
         if (

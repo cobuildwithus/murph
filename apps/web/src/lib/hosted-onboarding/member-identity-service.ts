@@ -44,6 +44,7 @@ import {
 import {
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
+  lookupHostedMemberIdByPhoneNumber,
   readHostedMemberIdentity,
   type HostedMemberIdentityWriteInput,
   type HostedMemberIdentityLookup,
@@ -611,11 +612,11 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
     && !currentIdentity?.phoneLookupKey
     && !currentIdentity?.phoneNumber
   ) {
-    const phoneOwner = await lookupHostedMemberIdentityByPhoneNumber({
+    const phoneOwnerMemberId = await lookupHostedMemberIdByPhoneNumber({
       phoneNumber: phoneToPersist.number,
       prisma: input.prisma,
     });
-    if (phoneOwner && phoneOwner.core.id !== currentMember.id) {
+    if (phoneOwnerMemberId && phoneOwnerMemberId !== currentMember.id) {
       phoneToPersist = null;
     }
   }

@@ -58,8 +58,9 @@ Last verified: 2026-08-12
   before `BEGIN`; the transaction locks and re-reads that root identity, then
   seals only from the matching request-scoped cache entry. A root change rolls
   back and permits one fresh full preparation attempt. The prepared envelope
-  transaction adapter carries the same crypto-only token without replacing
-  envelope target or workspace checks. Legacy transaction append adapters stay
+  transaction adapter carries the same generic crypto-only token without a
+  mailbox proxy capability or second drift error, and does not replace envelope
+  target or workspace checks. Legacy transaction append adapters stay
   provider-capable for separately migrated producers and must not be mistaken
   for the prepared surface.
 - Privy completion settles live provider authority, the exact control-domain
@@ -68,7 +69,9 @@ Last verified: 2026-08-12
   and verified-email writes revalidate the exact root in the transaction and
   seal locally; exact root drift rolls back and permits one fresh full
   preparation attempt. The token is crypto identity only and is not member,
-  invite, routing, or email authority.
+  invite, routing, or email authority. Cross-member phone conflict suppression
+  reads only the blind-index owner id, so it neither decrypts the other
+  member's private identity nor needs that member's root in the transaction.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.

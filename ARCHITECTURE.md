@@ -2550,7 +2550,9 @@ on a miss, unwraps the exact active ingress root before opening its transaction.
 The transaction locks and re-reads root authority, seals only from the matching
 request-scoped cache entry, and permits one full reprepare after typed root
 drift. Its prepared envelope adapter retains the envelope owner's ordinary
-target and workspace checks. Existing transaction-owned envelope, identity,
+target and workspace checks while carrying the same generic prepared-root
+capability; mailbox adds no proxy capability or drift-error owner. Existing
+transaction-owned envelope, identity,
 source-message, and specialized append adapters remain explicitly legacy and
 provider-capable until their owning flows migrate; they gain neither implicit
 preparation nor a second retry owner from the standalone append.
@@ -2563,7 +2565,9 @@ revalidates the exact root under the canonical root lock and member identity
 and verified-email writes seal from that local root. Exact winner drift rolls
 back and permits one fresh full attempt. The prepared root conveys no member,
 invite, email, routing, or provider authority, all of which remain revalidated
-by their owning stores.
+by their owning stores. Phone-conflict suppression reads only the blind-index
+owner id, so preserving another member's binding never decrypts that member's
+private identity or requires a second prepared root inside the transaction.
 
 One case is actionable immediately: an affirmative added reaction from the
 active participant is adapted into the existing `message.received` planner
