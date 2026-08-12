@@ -127,6 +127,34 @@ describe("hosted device connect intent route", () => {
     expect(mocks.claimHostedDeviceConnectIntentForStart).not.toHaveBeenCalled();
   });
 
+  it("keeps an exact member-owned claim read-only until the app page continues it", async () => {
+    mocks.readHostedDeviceConnectIntent.mockResolvedValueOnce({
+      status: "available",
+      intent: createIntentRecord({
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        providerSetupId: "dps_synthetic",
+      }),
+    });
+
+    const response = await deviceConnectIntentRoute.GET(
+      new Request("https://join.example.test/device/connect/dc_opaque"),
+      createRouteContext({ claim: "dc_opaque" }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "/connect#deviceConnectIntent=dc_opaque&connectSource=strava",
+    );
+    expect(mocks.readHostedDeviceConnectIntent).toHaveBeenCalledWith("dc_opaque");
+    expect(mocks.claimHostedDeviceConnectIntentForStart).not.toHaveBeenCalled();
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.advanceMemberOwnedProviderSetup).not.toHaveBeenCalled();
+    expect(mocks.startMemberOwnedProviderSetupOAuth).not.toHaveBeenCalled();
+    expect(mocks.startHostedDeviceSyncConnection).not.toHaveBeenCalled();
+  });
+
   it("returns unavailable claim responses without redirecting", async () => {
     mocks.readHostedDeviceConnectIntent.mockResolvedValueOnce({
       status: "expired",

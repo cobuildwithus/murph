@@ -26,7 +26,7 @@ interface ProviderSetupDeletionStore {
 
 type ProviderSetupDeletionAdapter = Pick<
   MemberOwnedProviderSetupAdapter,
-  "deleteOwnedApplication" | "ensureBrowserRun" | "finishBrowserRun" | "pauseForUser"
+  "cancelBrowserRun" | "deleteOwnedApplication" | "ensureBrowserRun" | "pauseForUser"
 >;
 
 type ProviderSetupDeletionAdapterFactory = (
@@ -116,8 +116,17 @@ async function deleteProviderSetup(input: {
       status: "deletion_pending",
     });
   }
+  if (run.status === "awaiting_user") {
+    const handoff = await input.adapter.pauseForUser({
+      memberId: deleting.memberId,
+      reason: run.awaitingReason === "login_needed" ? "signed_out" : "challenge",
+      runId: run.runId,
+      setupId: deleting.id,
+    });
+    throw accountDeletionProviderHandoffRequired(handoff.handoffUrl);
+  }
   if (run.status !== "running") {
-    throw accountDeletionProviderHandoffRequired(null);
+    throw accountDeletionProviderBrowserCleanupIncomplete();
   }
 
   const result = await input.adapter.deleteOwnedApplication({
@@ -143,18 +152,13 @@ async function deleteProviderSetup(input: {
     });
   }
 
-  const runStatus = await input.adapter.finishBrowserRun({
+  const runStatus = await input.adapter.cancelBrowserRun({
     memberId: deleting.memberId,
     runId: run.runId,
     setupId: deleting.id,
   });
   if (runStatus !== "canceled") {
-    throw hostedOnboardingError({
-      code: "ACCOUNT_DELETION_PROVIDER_BROWSER_CLEANUP_INCOMPLETE",
-      httpStatus: 503,
-      message: "Murph could not finish the private provider cleanup browser safely. Retry account deletion.",
-      retryable: true,
-    });
+    throw accountDeletionProviderBrowserCleanupIncomplete();
   }
 
   // The exact deterministic marker is the only external deletion authority.
@@ -168,9 +172,21 @@ async function deleteProviderSetup(input: {
   });
 }
 
+function accountDeletionProviderBrowserCleanupIncomplete() {
+  return hostedOnboardingError({
+    code: "ACCOUNT_DELETION_PROVIDER_BROWSER_CLEANUP_INCOMPLETE",
+    httpStatus: 503,
+    message: "Murph could not finish the private provider cleanup browser safely. Retry account deletion.",
+    retryable: true,
+  });
+}
+
 function accountDeletionProviderHandoffRequired(
   handoffUrl: string | null,
 ) {
+  if (!handoffUrl) {
+    return accountDeletionProviderBrowserCleanupIncomplete();
+  }
   return hostedOnboardingError({
     code: "ACCOUNT_DELETION_PROVIDER_HANDOFF_REQUIRED",
     details: {

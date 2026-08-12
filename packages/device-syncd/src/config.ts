@@ -186,6 +186,7 @@ export {
   isMemberOwnedDeviceSyncConnectTarget,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
+  listDeviceSyncReconnectTargets,
   listMemberOwnedDeviceSyncConnectTargets,
   normalizeDeviceSyncConnectTargetKey,
   resolveConfiguredDeviceSyncConnectTarget,

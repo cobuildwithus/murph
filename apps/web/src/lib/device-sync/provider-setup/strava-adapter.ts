@@ -144,7 +144,14 @@ implements MemberOwnedProviderSetupAdapter {
     runId: string;
     setupId: string;
   }) {
-    return this.cancelBrowserRun(input);
+    const finished = await this.computer.finishOwnedRun({
+      memberId: input.memberId,
+      outcome: "completed",
+      ownerKey: input.setupId,
+      ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+      runId: input.runId,
+    });
+    return finished.status;
   }
 
   async createOwnedApplication(input: {

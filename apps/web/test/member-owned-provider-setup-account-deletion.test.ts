@@ -49,8 +49,12 @@ class MemoryDeletionStore {
 }
 
 function createAdapter(input: {
+  awaitingReason?: "login_needed" | "other" | null;
+  cancelError?: Error;
+  cancelResult?: "canceled" | "completed" | "failed";
   deleteError?: Error;
   deleteResult?: MemberOwnedProviderApplicationDeleteResult;
+  handoffUrl?: string | null;
   runId?: string;
   runStatus?: string;
 } = {}) {
@@ -67,14 +71,21 @@ function createAdapter(input: {
       memberId: string;
       setupId: string;
     }) => ({
-      awaitingReason: null,
+      awaitingReason: input.awaitingReason ?? null,
       reused: runInput.expectedRunId === runId,
       runId,
       status: input.runStatus ?? "running",
     })),
-    finishBrowserRun: vi.fn(async () => "canceled" as const),
+    cancelBrowserRun: vi.fn(async () => {
+      if (input.cancelError) {
+        throw input.cancelError;
+      }
+      return input.cancelResult ?? ("canceled" as const);
+    }),
     pauseForUser: vi.fn(async () => ({
-      handoffUrl: "https://web.example.test/computer/handoff/synthetic-handoff",
+      handoffUrl: input.handoffUrl === undefined
+        ? "https://web.example.test/computer/handoff/synthetic-handoff"
+        : input.handoffUrl,
       runId,
     })),
   };
@@ -214,6 +225,11 @@ describe("member-owned provider setup account deletion", () => {
         runId: "hcr_setup_owned",
         setupId: "dps_synthetic",
       });
+      expect(adapter.cancelBrowserRun).toHaveBeenCalledWith({
+        memberId: "member_synthetic",
+        runId: "hcr_setup_owned",
+        setupId: "dps_synthetic",
+      });
       expect(store.statuses[0]).toBe("deletion_pending");
       expect(store.setup.status).toBe("deleted");
       expect(store.setup.browserRunId).toBeNull();
@@ -238,6 +254,67 @@ describe("member-owned provider setup account deletion", () => {
       expectedRunId: "hcr_setup_owned",
       memberId: "member_synthetic",
       setupId: "dps_synthetic",
+    });
+  });
+
+  it("rotates or returns the exact handoff when the deletion-owned run already awaits the member", async () => {
+    const store = new MemoryDeletionStore();
+    store.setup = buildSetup({
+      browserRunId: "hcr_setup_owned",
+      status: "deletion_pending",
+    });
+    const adapter = createAdapter({
+      awaitingReason: "login_needed",
+      runStatus: "awaiting_user",
+    });
+
+    await expect(deleteMemberOwnedProviderSetupExternalStateForAccountDeletion({
+      adapterFactory: adapterFactory(adapter),
+      memberId: "member_synthetic",
+      prisma: PRISMA_NOT_USED,
+      store,
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PROVIDER_HANDOFF_REQUIRED",
+      details: {
+        handoffUrl: "https://web.example.test/computer/handoff/synthetic-handoff",
+      },
+      retryable: true,
+    });
+
+    expect(adapter.pauseForUser).toHaveBeenCalledWith({
+      memberId: "member_synthetic",
+      reason: "signed_out",
+      runId: "hcr_setup_owned",
+      setupId: "dps_synthetic",
+    });
+    expect(adapter.deleteOwnedApplication).not.toHaveBeenCalled();
+    expect(adapter.cancelBrowserRun).not.toHaveBeenCalled();
+    expect(store.setup).toMatchObject({
+      browserRunId: "hcr_setup_owned",
+      status: "deletion_pending",
+    });
+  });
+
+  it("does not emit a URL-less handoff error", async () => {
+    const store = new MemoryDeletionStore();
+    store.setup = buildSetup({
+      browserRunId: "hcr_setup_owned",
+      status: "deletion_pending",
+    });
+    const adapter = createAdapter({
+      awaitingReason: "other",
+      handoffUrl: null,
+      runStatus: "awaiting_user",
+    });
+
+    await expect(deleteMemberOwnedProviderSetupExternalStateForAccountDeletion({
+      adapterFactory: adapterFactory(adapter),
+      memberId: "member_synthetic",
+      prisma: PRISMA_NOT_USED,
+      store,
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PROVIDER_BROWSER_CLEANUP_INCOMPLETE",
+      retryable: true,
     });
   });
 
@@ -270,6 +347,29 @@ describe("member-owned provider setup account deletion", () => {
       reason: "challenge",
       runId: "hcr_setup_owned",
       setupId: "dps_synthetic",
+    });
+  });
+
+  it("does not report deletion success when the exact browser run cannot be canceled", async () => {
+    const store = new MemoryDeletionStore();
+    const adapter = createAdapter({ cancelResult: "completed" });
+
+    await expect(deleteMemberOwnedProviderSetupExternalStateForAccountDeletion({
+      adapterFactory: adapterFactory(adapter),
+      memberId: "member_synthetic",
+      prisma: PRISMA_NOT_USED,
+      store,
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_PROVIDER_BROWSER_CLEANUP_INCOMPLETE",
+      retryable: true,
+    });
+
+    expect(adapter.deleteOwnedApplication).toHaveBeenCalledTimes(1);
+    expect(adapter.cancelBrowserRun).toHaveBeenCalledTimes(1);
+    expect(store.setup).toMatchObject({
+      browserRunId: "hcr_setup_owned",
+      completedAt: null,
+      status: "deletion_pending",
     });
   });
 

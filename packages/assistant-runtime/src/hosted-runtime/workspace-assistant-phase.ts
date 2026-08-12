@@ -85,9 +85,11 @@ import {
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import {
   isDeviceConnectSourceAvailableForConnection,
+  isMemberOwnedDeviceSyncConnectTarget,
   listConfiguredDeviceSyncConnectTargets,
-  listConfiguredDeviceSyncReconnectTargets,
+  listDeviceSyncReconnectTargets,
   listMemberOwnedDeviceSyncConnectTargets,
+  type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 import {
   type AssistantCurrentDeliveryRoute,
@@ -8274,21 +8276,19 @@ function resolveHostedWorkspaceDeviceConnectProviders(
 function resolveHostedWorkspaceDeviceReconnectTargets(
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">,
 ): HostedDeviceSyncStatusPromptReconnectTarget[] {
-  const providerConfigs = runtime.resolvedConfig.deviceSync?.providerConfigs ?? null;
-  if (!providerConfigs) {
-    return [];
-  }
-
-  const targets = listConfiguredDeviceSyncReconnectTargets(providerConfigs);
+  const providerConfigs = runtime.resolvedConfig.deviceSync?.providerConfigs ?? {};
+  const targets = listDeviceSyncReconnectTargets(providerConfigs);
   const publicTargetsByConnectTarget = new Map(
-    listConfiguredDeviceSyncConnectTargets(providerConfigs)
-      .filter((target) =>
-        isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
-      )
-      .map((target) => [
-        target.connectTarget,
-        target,
-      ]),
+    [
+      ...listConfiguredDeviceSyncConnectTargets(providerConfigs)
+        .filter((target) =>
+          isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
+        ),
+      ...listMemberOwnedDeviceSyncConnectTargets(),
+    ].map((target) => [
+      target.connectTarget,
+      target,
+    ]),
   );
   const connectTargetCounts = new Map<string, number>();
   for (const target of targets) {
@@ -8299,9 +8299,8 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
   }
 
   return targets.map((target) => ({
-    connectionAvailable: isDeviceConnectSourceAvailableForConnection(
-      target.connectSourceId,
-    ),
+    connectionAvailable: isMemberOwnedDeviceSyncConnectTarget(target)
+      || isDeviceConnectSourceAvailableForConnection(target.connectSourceId),
     connectTarget: target.connectTarget,
     connectTargetAmbiguous: (connectTargetCounts.get(target.connectTarget) ?? 0) > 1,
     connectTargetCommandSafe: sameHostedDeviceSyncConnectTarget(
@@ -8316,13 +8315,9 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
   }));
 }
 
-type HostedDeviceSyncConnectTarget = ReturnType<
-  typeof listConfiguredDeviceSyncConnectTargets
->[number];
-
 function sameHostedDeviceSyncConnectTarget(
-  left: HostedDeviceSyncConnectTarget,
-  right: HostedDeviceSyncConnectTarget | null,
+  left: DeviceSyncConnectTarget,
+  right: DeviceSyncConnectTarget | null,
 ): boolean {
   if (!right) {
     return false;

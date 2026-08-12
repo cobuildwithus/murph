@@ -2279,7 +2279,7 @@ function createStore(input: {
     ownerInput: Parameters<
       ComputerUseStore["requireMemberOwnedProviderSetupRun"]
     >[0],
-  ): Promise<ComputerRunRecord> => {
+  ): ReturnType<ComputerUseStore["requireMemberOwnedProviderSetupRun"]> => {
     if (
       latestRun.memberId !== ownerInput.memberId
       || latestRun.id !== ownerInput.runId
@@ -2288,7 +2288,10 @@ function createStore(input: {
     ) {
       throw new Error("Browser run ownership does not match setup.");
     }
-    return latestRun;
+    return {
+      ...latestRun,
+      deletionPending: false,
+    };
   });
   const requireMemberOwnedProviderSetupRunAcquisition = vi.fn(async (
     ownerInput: Parameters<

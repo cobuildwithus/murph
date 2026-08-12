@@ -256,6 +256,31 @@ describe("hosted app session", () => {
     });
   });
 
+  it("keeps an already-issued authenticated session resolvable after suspension", async () => {
+    const {
+      issueHostedAppSession,
+      requireHostedAppSessionFromRequest,
+    } = await import("@/src/lib/hosted-onboarding/app-session");
+    const result = await issueHostedAppSession({
+      memberId: "member_123",
+      now: new Date("2099-01-01T00:00:00.000Z"),
+      privyUserId: "did:privy:user_123",
+    });
+    const suspendedAt = new Date("2099-01-02T00:00:00.000Z");
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce(createHostedMember({
+      suspendedAt,
+    }));
+
+    await expect(
+      requireHostedAppSessionFromRequest(requestWithCookie(result.cookie)),
+    ).resolves.toEqual({
+      expiresAt: new Date("2099-01-31T00:00:00.000Z"),
+      member: createHostedMember({ suspendedAt }),
+      privyUserId: "did:privy:user_123",
+      sessionId: result.sessionId,
+    });
+  });
+
   it("rejects a caller-computable forged database row before member access", async () => {
     const { getHostedAppSessionFromRequest } = await import(
       "@/src/lib/hosted-onboarding/app-session"

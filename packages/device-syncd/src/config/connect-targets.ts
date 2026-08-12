@@ -86,6 +86,24 @@ export function listConfiguredDeviceSyncReconnectTargets(
   });
 }
 
+export function listDeviceSyncReconnectTargets(
+  providerConfigs: DeviceSyncConnectTargetProviderConfigs = {},
+): DeviceSyncConnectTarget[] {
+  const targets = [
+    ...listConfiguredDeviceSyncReconnectTargets(providerConfigs),
+    ...listMemberOwnedDeviceSyncConnectTargets(),
+  ];
+  const seen = new Set<string>();
+  return targets.filter((target) => {
+    const key = buildDeviceSyncConnectTargetCoordinateKey(target);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 function collectConfiguredDeviceSyncConnectTargets(
   providerConfigs: DeviceSyncConnectTargetProviderConfigs,
   options: { dedupeBySourceId: boolean },
@@ -181,6 +199,17 @@ export function resolveConfiguredDeviceSyncConnectTargetBySourceId(
   return listConfiguredDeviceSyncConnectTargets(providerConfigs).find(
     (target) => target.connectSourceId === connectSourceId,
   ) ?? null;
+}
+
+function buildDeviceSyncConnectTargetCoordinateKey(
+  target: DeviceSyncConnectTarget,
+): string {
+  return [
+    normalizeDeviceConnectSourceId(target.connectSourceId) ?? "",
+    normalizeDeviceSyncConnectTargetKey(target.connectTarget) ?? "",
+    target.provider,
+    normalizeDeviceSyncConnectTargetKey(target.sourceProviderSlug ?? "") ?? "",
+  ].join("\u0000");
 }
 
 function addDeviceSyncConnectTarget(

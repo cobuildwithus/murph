@@ -20,8 +20,8 @@ const mocks = vi.hoisted(() => {
     redirect: vi.fn((url: string) => {
       throw Object.assign(new Error("NEXT_REDIRECT"), { url });
     }),
-    requireActiveHostedAppSession: vi.fn(),
-    requireActiveHostedAppSessionFromRequest: vi.fn(),
+    requireHostedAppSession: vi.fn(),
+    requireHostedAppSessionFromRequest: vi.fn(),
     service,
     withHostedComputerToolFailureRuntimeLog: vi.fn(
       async (input: { run: () => Promise<unknown> }) => await input.run(),
@@ -45,9 +45,9 @@ vi.mock("@/src/lib/computer-use/runtime-log", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
-  requireActiveHostedAppSession: mocks.requireActiveHostedAppSession,
-  requireActiveHostedAppSessionFromRequest:
-    mocks.requireActiveHostedAppSessionFromRequest,
+  requireHostedAppSession: mocks.requireHostedAppSession,
+  requireHostedAppSessionFromRequest:
+    mocks.requireHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
@@ -81,8 +81,8 @@ describe("computer handoff route and page", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireActiveHostedAppSession.mockResolvedValue(createSession());
-    mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue(createSession());
+    mocks.requireHostedAppSession.mockResolvedValue(createSession());
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue(createSession());
     mocks.service.completeHandoff.mockResolvedValue({
       redirectTo: null,
       returnContactKind: "text",
@@ -101,9 +101,9 @@ describe("computer handoff route and page", () => {
     mocks.getHostedMurphContactContext.mockResolvedValue(createContactContext());
   });
 
-  it("requires an active hosted app session before completing a handoff", async () => {
+  it("requires an authenticated hosted app session before completing a handoff", async () => {
     const authError = new Error("Sign in to continue.");
-    mocks.requireActiveHostedAppSessionFromRequest.mockRejectedValueOnce(authError);
+    mocks.requireHostedAppSessionFromRequest.mockRejectedValueOnce(authError);
 
     await expect(computerHandoffDoneRoute.POST(
       new Request("https://join.example.test/computer/handoff/handoff-token/done", {
@@ -117,7 +117,7 @@ describe("computer handoff route and page", () => {
   });
 
   it("renders an auth-required handoff state without reading handoff details", async () => {
-    mocks.requireActiveHostedAppSession.mockRejectedValueOnce(
+    mocks.requireHostedAppSession.mockRejectedValueOnce(
       hostedOnboardingError({
         code: "AUTH_REQUIRED",
         httpStatus: 401,
@@ -149,13 +149,35 @@ describe("computer handoff route and page", () => {
     expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
   });
 
+  it("lets an authenticated suspended deletion owner reach the exact deletion return surface", async () => {
+    mocks.requireHostedAppSession.mockResolvedValueOnce(createSession("suspended"));
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "redirect",
+      url: "/settings/data-privacy?accountDeletion=retry",
+    });
+
+    await expect(computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    })).rejects.toMatchObject({
+      url: "/settings/data-privacy?accountDeletion=retry",
+    });
+
+    expect(mocks.service.readHandoffPageState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      token: "handoff-token",
+    });
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      "/settings/data-privacy?accountDeletion=retry",
+    );
+  });
+
   it("does not hide non-auth handoff page errors behind the auth state", async () => {
     const accessError = hostedOnboardingError({
       code: "HOSTED_MEMBER_ACCESS_REQUIRED",
       httpStatus: 403,
       message: "Hosted member access is required.",
     });
-    mocks.requireActiveHostedAppSession.mockRejectedValueOnce(accessError);
+    mocks.requireHostedAppSession.mockRejectedValueOnce(accessError);
 
     await expect(computerHandoffPage.default({
       params: Promise.resolve({ token: "handoff-token" }),
@@ -201,6 +223,35 @@ describe("computer handoff route and page", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ redirectTo: "/connect" });
+    expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
+  });
+
+  it("lets an authenticated suspended deletion owner complete the exact handoff", async () => {
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce(
+      createSession("suspended"),
+    );
+    mocks.service.completeHandoff.mockResolvedValueOnce({
+      redirectTo: "/settings/data-privacy?accountDeletion=retry",
+      returnContactKind: null,
+      status: "completed",
+      suggestedReply: null,
+    });
+
+    const response = await computerHandoffDoneRoute.POST(
+      new Request("https://join.example.test/computer/handoff/handoff-token/done", {
+        method: "POST",
+      }),
+      createRouteContext({ token: "handoff-token" }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      redirectTo: "/settings/data-privacy?accountDeletion=retry",
+    });
+    expect(mocks.service.completeHandoff).toHaveBeenCalledWith({
+      memberId: "member_123",
+      token: "handoff-token",
+    });
     expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
   });
 
@@ -404,6 +455,33 @@ describe("computer handoff route and page", () => {
       "https://join.example.test/connect",
     );
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("lets an authenticated suspended deletion owner finish exact managed login", async () => {
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce(
+      createSession("suspended"),
+    );
+    mocks.service.continueManagedLoginHandoff.mockResolvedValueOnce({
+      kind: "redirect",
+      url: "/settings/data-privacy?accountDeletion=retry",
+    });
+
+    const response = await computerManagedLoginRoute.GET(
+      new Request(
+        "https://join.example.test/api/computer/handoff/handoff-token/managed-login",
+      ),
+      createRouteContext({ token: "handoff-token" }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://join.example.test/settings/data-privacy?accountDeletion=retry",
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(mocks.service.continueManagedLoginHandoff).toHaveBeenCalledWith({
+      memberId: "member_123",
+      token: "handoff-token",
+    });
   });
 
   it("returns completed managed login callbacks to the handoff page", async () => {
@@ -657,13 +735,12 @@ describe("computer handoff route and page", () => {
 
 });
 
-
-function createSession() {
+function createSession(status: "active" | "suspended" = "active") {
   return {
     expiresAt: new Date("2035-06-22T12:00:00.000Z"),
     member: {
       id: "member_123",
-      status: "active",
+      status,
     },
     privyUserId: "privy_123",
     sessionId: "hws_test",

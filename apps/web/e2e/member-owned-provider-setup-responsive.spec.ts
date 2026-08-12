@@ -60,10 +60,23 @@ test.describe("member-owned provider setup design proof", () => {
         exact: true,
         name: "Strava",
       });
-      await expect(stravaHeadings).toHaveCount(2);
+      await expect(stravaHeadings).toHaveCount(3);
 
-      const prerequisiteCard = stravaHeadings.nth(0).locator("xpath=../../..");
-      const disconnectCard = stravaHeadings.nth(1).locator("xpath=../../..");
+      const connectIntentCard = stravaHeadings.nth(0).locator("xpath=../../..");
+      const prerequisiteCard = stravaHeadings.nth(1).locator("xpath=../../..");
+      const disconnectCard = stravaHeadings.nth(2).locator("xpath=../../..");
+      await expect(connectIntentCard.getByText(
+        "No provider work starts before you continue.",
+        { exact: false },
+      )).toHaveCount(1);
+      await expect(connectIntentCard.getByRole("button", {
+        exact: true,
+        name: "Continue",
+      })).toHaveCount(1);
+      await expect(connectIntentCard.getByRole("button", {
+        exact: true,
+        name: "Cancel",
+      })).toHaveCount(1);
       await expect(prerequisiteCard.getByRole("button", {
         name: "Continue in Strava for Strava",
       })).toHaveCount(1);
@@ -76,6 +89,7 @@ test.describe("member-owned provider setup design proof", () => {
       await expect(disconnectCard.getByRole("button")).toHaveCount(1);
 
       for (const [state, card] of [
+        ["connect-intent", connectIntentCard],
         ["prerequisite", prerequisiteCard],
         ["disconnect-first", disconnectCard],
       ] as const) {

@@ -276,7 +276,21 @@ export function resolveConnectIntentRedirectSource(
     return null;
   }
 
-  return resolveConnectIntentStartSource(intent, sources);
+  const source = resolveConnectIntentStartSource(intent, sources);
+  return source?.memberOwnedSetupProvider ? null : source;
+}
+
+export function resolveMemberOwnedConnectIntentSource(
+  intent: InitialDeviceConnectIntent,
+  sources: readonly ConnectSource[],
+  authenticated: boolean,
+): ConnectSource | null {
+  if (!authenticated || !intent?.claim) {
+    return null;
+  }
+
+  const source = resolveConnectIntentStartSource(intent, sources);
+  return source?.memberOwnedSetupProvider ? source : null;
 }
 
 export function resolveConnectIntentStartSource(

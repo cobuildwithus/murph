@@ -514,14 +514,14 @@ class FakeSetupComputer implements MemberOwnedProviderSetupComputer {
   readonly page: FakePage;
   readonly finishOwnedRun = vi.fn(async (input: {
     memberId: string;
-    outcome: "canceled";
+    outcome: "canceled" | "completed";
     ownerKey: string;
     ownerPurpose: typeof MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE;
     runId: string;
   }) => {
     this.assertOwner(input);
     this.assertRun(input.runId);
-    return { ok: true as const, runId: RUN_ID, status: "canceled" as const };
+    return { ok: true as const, runId: RUN_ID, status: input.outcome };
   });
   runtimeSnapshot = "";
 
@@ -696,6 +696,24 @@ describe("Strava member-owned provider setup adapter", () => {
     expect(computer.finishOwnedRun).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       outcome: "canceled",
+      ownerKey: SETUP_ID,
+      ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
+      runId: RUN_ID,
+    });
+  });
+
+  it("completes only the exact setup-owned browser run after credentials are sealed", async () => {
+    const computer = new FakeSetupComputer(surface);
+    const adapter = createAdapter(computer, surface);
+
+    await expect(adapter.finishBrowserRun({
+      memberId: MEMBER_ID,
+      runId: RUN_ID,
+      setupId: SETUP_ID,
+    })).resolves.toBe("completed");
+    expect(computer.finishOwnedRun).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      outcome: "completed",
       ownerKey: SETUP_ID,
       ownerPurpose: MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
       runId: RUN_ID,

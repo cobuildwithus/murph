@@ -19,6 +19,7 @@ import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple
 type ConnectSourceCardStudyCase = {
   authenticated: boolean;
   errorMessage: string | null;
+  memberOwnedConnectIntentDisclosure?: boolean;
   source: ConnectSource;
 };
 
@@ -38,6 +39,7 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     errorMessage: null,
     source: MOBVOI_HEALTH_CONNECT_SOURCE,
   },
+  buildStravaConnectIntentStudyCase(),
   buildStravaSetupStudyCase("provider_prerequisite"),
   buildStravaSetupStudyCase("disconnect_first"),
   {
@@ -242,11 +244,24 @@ export function ConnectSourceCardStudy({
         inert
       >
         <div className="grid items-stretch gap-4 lg:grid-cols-3">
-          {studyCases.map(({ authenticated, errorMessage, source }) => (
+          {studyCases.map(({
+            authenticated,
+            errorMessage,
+            memberOwnedConnectIntentDisclosure,
+            source,
+          }) => (
             <SourceCard
               key={source.id}
               authenticated={authenticated}
               errorMessage={errorMessage}
+              memberOwnedConnectIntentDisclosure={
+                memberOwnedConnectIntentDisclosure
+                  ? {
+                      onCancel: () => {},
+                      onContinue: () => {},
+                    }
+                  : undefined
+              }
               pending={false}
               pendingDisconnect={false}
               source={source}
@@ -308,6 +323,18 @@ function buildStravaSetupStudyCase(
         STRAVA_MEMBER_OWNED_PROVIDER_SETUP_PRESENTATION,
       memberOwnedSetupProvider: "strava",
       name: "Strava",
+    },
+  };
+}
+
+function buildStravaConnectIntentStudyCase(): ConnectSourceCardStudyCase {
+  const studyCase = buildStravaSetupStudyCase("provider_prerequisite");
+  return {
+    ...studyCase,
+    memberOwnedConnectIntentDisclosure: true,
+    source: {
+      ...studyCase.source,
+      id: "strava-connect-intent-review",
     },
   };
 }

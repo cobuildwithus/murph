@@ -9,9 +9,19 @@ import type {
   ConnectSourceSetupGuideId,
 } from "./connect-page-types";
 
+export interface MemberOwnedConnectIntentDisclosure {
+  onCancel: () => void;
+  onContinue: () => void;
+}
+
+export function buildConnectSourceCardId(sourceId: string): string {
+  return `connect-source-${sourceId}`;
+}
+
 export function SourceCard({
   authenticated,
   errorMessage,
+  memberOwnedConnectIntentDisclosure,
   pending,
   pendingDisconnect,
   source,
@@ -22,6 +32,7 @@ export function SourceCard({
 }: {
   authenticated: boolean;
   errorMessage: string | null;
+  memberOwnedConnectIntentDisclosure?: MemberOwnedConnectIntentDisclosure;
   pending: boolean;
   pendingDisconnect: boolean;
   source: ConnectSource;
@@ -79,7 +90,11 @@ export function SourceCard({
     || Boolean(errorMessage);
 
   return (
-    <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
+    <div
+      id={buildConnectSourceCardId(source.id)}
+      tabIndex={memberOwnedConnectIntentDisclosure ? -1 : undefined}
+      className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5"
+    >
       {!setupOnly ? (
         <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
           <SourceStatusDot
@@ -114,21 +129,57 @@ export function SourceCard({
 
         {memberOwnedSetup && source.memberOwnedSetupPresentation ? (
           <div className="flex w-full flex-col items-stretch gap-2 self-stretch sm:mt-auto">
-            <MemberOwnedProviderSetup
-              actionAvailable={authenticated}
-              connected={source.connected === true}
-              pending={pending}
-              presentation={source.memberOwnedSetupPresentation}
-              setup={source.memberOwnedSetup ?? null}
-              onAction={() => {
-                void onStartConnection(source);
-              }}
-              onCancel={onCancelSetup
-                ? () => {
-                    void onCancelSetup(source);
-                  }
-                : undefined}
-            />
+            {memberOwnedConnectIntentDisclosure ? (
+              <div
+                data-member-owned-connect-intent-disclosure
+                className="flex w-full flex-col gap-3"
+              >
+                <div aria-live="polite" className="min-w-0">
+                  <p className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+                    Review before setup
+                  </p>
+                  <p className="mt-1 text-sm leading-relaxed text-pretty text-foreground">
+                    {source.memberOwnedSetupPresentation.messages.pending}
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-pretty text-muted-foreground">
+                    Continue lets Murph open a secure browser and begin this private provider setup. No provider work starts before you continue. {source.memberOwnedSetupPresentation.readOnlyAccessLabel} still requires your approval on {source.memberOwnedSetupPresentation.providerName}.
+                  </p>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={pending}
+                    onClick={memberOwnedConnectIntentDisclosure.onCancel}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={pending}
+                    onClick={memberOwnedConnectIntentDisclosure.onContinue}
+                  >
+                    {pending ? "Working…" : "Continue"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <MemberOwnedProviderSetup
+                actionAvailable={authenticated}
+                connected={source.connected === true}
+                pending={pending}
+                presentation={source.memberOwnedSetupPresentation}
+                setup={source.memberOwnedSetup ?? null}
+                onAction={() => {
+                  void onStartConnection(source);
+                }}
+                onCancel={onCancelSetup
+                  ? () => {
+                      void onCancelSetup(source);
+                    }
+                  : undefined}
+              />
+            )}
             {!authenticated ? (
               <AuthButton
                 aria-label={`Sign in to set up ${source.name}`}

@@ -681,15 +681,22 @@ Last verified: 2026-08-11
   reusable run is rejected, and a lost acquisition response resumes only by
   inspecting that same owner binding. Re-entering an awaiting setup rotates or
   reuses its latest valid handoff without repeating provider submission. Completing
-  the exact setup-owned handoff resumes that run without a conversation reply and
-  returns to `/connect`; generic handoffs retain their contact return. Provider
+  the exact setup-owned handoff resumes that run without a conversation reply;
+  ordinary setup returns to `/connect`, while the exact suspended
+  `deletion_pending` owner returns to the authenticated data-privacy retry
+  surface and every generic or non-deletion suspended run remains rejected.
+  Generic handoffs retain their contact return. Provider
   prerequisite cancellation is exact-owner and fails closed unless durable state
   proves no submission, application binding, or connection exists. Connection
   rows and upstream revoke results are authoritative; setup projection writes after
   callback or disconnect are idempotent best-effort repairs, and every read
   reconciles projection from live
   connection truth. OAuth-ready transitions commit before a usable state is
-  issued. Account deletion commits the suspension fence before external cleanup;
+  issued, then the exact setup-owned browser run finishes `completed` and its
+  setup binding is CAS-cleared. A finish/clear interruption retains the exact
+  application and run binding for bounded retry, never recaptures a known sealed
+  credential, and never reports cleanup failure as success. Account deletion
+  commits the suspension fence before external cleanup;
   cleanup failure preserves local setup, application, and run ownership for
   retry. Late OAuth and disconnect transitions cannot overwrite deletion
   ownership.

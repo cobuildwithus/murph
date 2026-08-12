@@ -7,7 +7,7 @@ import { ComputerHandoffReplyAction } from "@/src/components/computer-use/comput
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { buttonVariants } from "@/src/components/ui/button";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
-import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
+import { requireHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import type { MurphContactKind, MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
@@ -197,7 +197,7 @@ function readManagedHandoffState(
 
 async function readHandoffSessionOrAuthState() {
   try {
-    return await requireActiveHostedAppSession();
+    return await requireHostedAppSession();
   } catch (error) {
     if (
       isHostedOnboardingError(error)

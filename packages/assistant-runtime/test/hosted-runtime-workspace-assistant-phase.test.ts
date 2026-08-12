@@ -8001,12 +8001,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(assistantLaneCall?.executionContext.hosted?.deviceTool).toEqual(
       expect.objectContaining({ request: expect.any(Function) }),
     );
-    expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
-      "fitbit",
-      "garmin",
-      "oura",
-      "withings",
-      "whoop_v2",
+    expect(fetchSnapshotRequests.map((request) => ({
+      provider: request?.provider,
+      sourceProviderSlug: request?.sourceProviderSlug,
+    }))).toEqual([
+      { provider: undefined, sourceProviderSlug: "fitbit" },
+      { provider: undefined, sourceProviderSlug: "garmin" },
+      { provider: undefined, sourceProviderSlug: "oura" },
+      { provider: undefined, sourceProviderSlug: "withings" },
+      { provider: undefined, sourceProviderSlug: "whoop_v2" },
+      { provider: "strava", sourceProviderSlug: undefined },
     ]);
     expect(fetchSnapshotRequests).toEqual(
       expect.arrayContaining([
@@ -8061,7 +8065,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("omits Junction source commands when the public connect target resolves direct", async () => {
+  it("preserves configured Junction ambiguity while exposing member-owned Strava reconnect", async () => {
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
@@ -8174,10 +8178,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             clientId: "synthetic-oura-client",
             clientSecret: "synthetic-oura-secret",
           },
-          strava: {
-            clientId: "synthetic-strava-client",
-            clientSecret: "synthetic-strava-secret",
-          },
         },
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
@@ -8194,8 +8194,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).toContain("generic device-connect command is ambiguous");
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
     expect(prompt).toContain("Strava currently needs reconnect");
-    expect(prompt).toContain("No hosted reconnect target is configured for this wearable/source");
-    expect(prompt).not.toContain("vault-cli device connect strava --format json");
+    expect(prompt).toContain("vault-cli device connect strava --format json");
+    expect(prompt).not.toContain("No hosted reconnect target is configured for this wearable/source");
   });
 
   it("skips lazy device context when pending input appears before the automation lane", async () => {
@@ -8368,7 +8368,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
     const prompt = await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
-    expect(fetchSnapshotCalls).toBe(1);
+    expect(fetchSnapshotCalls).toBe(2);
     expect(fetchSnapshotSignal).toBeInstanceOf(AbortSignal);
     expect(prompt).toBeNull();
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();

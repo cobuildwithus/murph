@@ -66,6 +66,7 @@ const POST_DELETE_REDIRECT_DELAY_MS = 2_500;
 const POST_DELETE_REDIRECT_FALLBACK_MS = 8_000;
 
 export function HostedDataPrivacySettings(props: {
+  accountDeletionRetry?: boolean;
   authenticated: boolean;
   authorizationEnabled?: boolean;
 }) {
@@ -75,12 +76,14 @@ export function HostedDataPrivacySettings(props: {
 
   return (
     <HostedDataPrivacySettingsAuthorized
+      accountDeletionRetry={props.accountDeletionRetry === true}
       authenticated={props.authenticated}
     />
   );
 }
 
 function HostedDataPrivacySettingsAuthorized(props: {
+  accountDeletionRetry: boolean;
   authenticated: boolean;
 }) {
   const { authorize } = useSensitiveActionAuthorization();
@@ -288,6 +291,15 @@ function HostedDataPrivacySettingsAuthorized(props: {
 
   return (
     <div className="flex flex-col gap-4">
+      {props.accountDeletionRetry ? (
+        <Alert aria-live="polite">
+          <AlertTitle>Provider sign-in complete</AlertTitle>
+          <AlertDescription>
+            Retry Delete account to finish removing your private provider application and Murph account.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {exportSuccess ? (
         <HostedDataExportSuccess message={exportSuccess} />
       ) : null}

@@ -1,6 +1,7 @@
 import {
   isDeviceConnectSourceAvailableForConnection,
-  listConfiguredDeviceSyncReconnectTargets,
+  isMemberOwnedDeviceSyncConnectTarget,
+  listDeviceSyncReconnectTargets,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
   readConfiguredDeviceSyncConnectTargetConfigs,
@@ -13,7 +14,6 @@ import {
 } from "./connect-intent-core";
 import {
   createMemberOwnedProviderSetupService,
-  listMemberOwnedProviderSetupRegistrations,
   readMemberOwnedProviderSetupRegistration,
 } from "./provider-setup";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
@@ -114,29 +114,20 @@ export function resolveHostedDeviceReconnectLinkTarget(
     return { status: "missing" };
   }
 
-  const memberOwnedTargets = listMemberOwnedProviderSetupRegistrations()
-    .map((registration) => ({
-      ...registration.coordinates,
-      label: registration.presentation.providerName,
-    }))
-    .filter((target) =>
-      !sourceProviderSlug
-      && (!connectSourceId || target.connectSourceId === connectSourceId)
-      && (!connectTarget || target.connectTarget === connectTarget)
-    );
-
-  const matches = [
-    ...memberOwnedTargets,
-    ...listConfiguredDeviceSyncReconnectTargets(
-      readConfiguredDeviceSyncConnectTargetConfigs(env),
-    ).filter((target) =>
-      !readMemberOwnedProviderSetupRegistration(target.provider)
-      && isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
-      && (!connectSourceId || target.connectSourceId === connectSourceId)
-      && (!connectTarget || target.connectTarget === connectTarget)
-      && (!sourceProviderSlug || (target.sourceProviderSlug ?? null) === sourceProviderSlug)
-    ),
-  ];
+  const matches = listDeviceSyncReconnectTargets(
+    readConfiguredDeviceSyncConnectTargetConfigs(env),
+  ).filter((target) =>
+    (
+      isMemberOwnedDeviceSyncConnectTarget(target)
+      || isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
+    )
+    && (!connectSourceId || target.connectSourceId === connectSourceId)
+    && (!connectTarget || target.connectTarget === connectTarget)
+    && (!sourceProviderSlug || (target.sourceProviderSlug ?? null) === sourceProviderSlug)
+  ).map((target) => isMemberOwnedDeviceSyncConnectTarget(target)
+    ? { ...target, sourceProviderSlug: target.sourceProviderSlug ?? null }
+    : target
+  );
   const firstMatch = matches[0];
 
   if (matches.length === 1 && firstMatch) {
@@ -181,9 +172,11 @@ export async function createHostedDeviceReconnectLink(input: {
   }
 
   const request = new Request(resolveHostedDeviceReconnectLinkBaseUrl(env, input.args.baseUrl));
-  const setupRegistration = readMemberOwnedProviderSetupRegistration(
-    targetResult.target.provider,
-  );
+  const setupRegistration = isMemberOwnedDeviceSyncConnectTarget(
+    targetResult.target,
+  )
+    ? readMemberOwnedProviderSetupRegistration(targetResult.target.provider)
+    : null;
   const setup = setupRegistration
     ? await createMemberOwnedProviderSetupService(
         setupRegistration.coordinates.provider,

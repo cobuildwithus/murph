@@ -72,8 +72,11 @@ Last verified: 2026-08-11
   fixtures, and UI must never receive the secret. Human sign-in, MFA, CAPTCHA,
   provider prerequisites, and consent use only the same-origin
   `/computer/handoff/` surface. A setup-owned completed handoff resumes only its
-  exact member/setup run and returns to authenticated `/connect`, without contact
-  routing or an inbound-reply dependency. Prerequisite cancellation terminates
+  exact member/setup run and returns ordinary setup to authenticated `/connect`,
+  without contact routing or an inbound-reply dependency. The sole suspended
+  exception is the exact `deletion_pending` member/setup/run binding, which may
+  return only to the authenticated data-privacy retry surface; generic, foreign,
+  stale, and non-deletion runs remain rejected. Prerequisite cancellation terminates
   only that exact run and is rejected unless durable state proves there is no
   provider submission, application binding, or connection. The Strava
   adapter may inspect, create, repair, or delete only the exact deterministic

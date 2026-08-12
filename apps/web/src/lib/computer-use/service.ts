@@ -33,6 +33,7 @@ import {
   type ComputerRunRecord,
   type ComputerUseStore,
   type MemberOwnedProviderSetupComputerRunPurpose,
+  type MemberOwnedProviderSetupRunRecord,
   type PersistedComputerHandoffPurpose,
 } from "./store";
 
@@ -48,6 +49,8 @@ const COMPUTER_OBSERVE_TIMEOUT_MS = 15_000;
 const COMPUTER_ACT_RESULT_MARGIN_MS = 3_000;
 const COMPUTER_OS_CONTROL_PREFLIGHT_TIMEOUT_MS = 5_000;
 const MEMBER_OWNED_PROVIDER_SETUP_RETURN_PATH = "/connect";
+const MEMBER_OWNED_PROVIDER_DELETION_RETURN_PATH =
+  "/settings/data-privacy?accountDeletion=retry";
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
 type ReplaceRunBrowserInput = Parameters<ComputerUseStore["replaceRunBrowser"]>[0];
@@ -1855,7 +1858,7 @@ export class ComputerUseService {
   private async readMemberOwnedProviderSetupRun(
     run: ComputerRunRecord,
     store: ComputerUseStore,
-  ): Promise<ComputerRunRecord | null> {
+  ): Promise<MemberOwnedProviderSetupRunRecord | null> {
     if (!run.ownerKey && !run.ownerPurpose) {
       return null;
     }
@@ -1886,7 +1889,7 @@ export class ComputerUseService {
       runId: input.handoff.runId,
     });
     const owned = await this.readMemberOwnedProviderSetupRun(candidate, input.store);
-    return owned ? MEMBER_OWNED_PROVIDER_SETUP_RETURN_PATH : null;
+    return owned ? resolveMemberOwnedProviderSetupReturnPath(owned) : null;
   }
 
   private async resumeMemberOwnedProviderSetupAfterHandoff(input: {
@@ -1905,8 +1908,9 @@ export class ComputerUseService {
     if (!owned) {
       return null;
     }
+    const returnPath = resolveMemberOwnedProviderSetupReturnPath(owned);
     if (owned.status === "running") {
-      return MEMBER_OWNED_PROVIDER_SETUP_RETURN_PATH;
+      return returnPath;
     }
     if (
       input.handoff.status !== "completed"
@@ -1952,7 +1956,7 @@ export class ComputerUseService {
         throw error;
       }
     }
-    return MEMBER_OWNED_PROVIDER_SETUP_RETURN_PATH;
+    return returnPath;
   }
 
   private async buildHandoffCompletion(
@@ -4020,6 +4024,14 @@ async function assertReusableComputerRunOwner(input: {
       ownerPurpose: input.owner.ownerPurpose,
     });
   }
+}
+
+function resolveMemberOwnedProviderSetupReturnPath(
+  run: MemberOwnedProviderSetupRunRecord,
+): string {
+  return run.deletionPending
+    ? MEMBER_OWNED_PROVIDER_DELETION_RETURN_PATH
+    : MEMBER_OWNED_PROVIDER_SETUP_RETURN_PATH;
 }
 
 function assertGenericComputerRun(run: ComputerRunRecord): void {

@@ -918,10 +918,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   newly acquired setup-owned run persisted before navigation). Re-entering
   `/connect` while that run is awaiting the member rotates or reuses only its
   latest same-origin handoff capability and never repeats provider submission.
-  Completing that exact setup-owned handoff resumes the run directly and returns
-  the authenticated member to `/connect`; it never creates a conversation reply
-  or contact deeplink. Generic browser handoffs retain their existing return
-  behavior.
+  Completing that exact setup-owned handoff resumes the run directly. Ordinary
+  setup returns the authenticated member to `/connect`; a suspension-fenced
+  `deletion_pending` setup returns only to the authenticated data-privacy retry
+  surface. It never creates a conversation reply or contact deeplink, and
+  generic browser handoffs retain their existing return behavior. Once an exact
+  application binding is durably usable, setup finishes that exact browser run
+  with `completed` and compare-and-set clears its run binding before OAuth can
+  continue; an interrupted finish or clear remains explicit and retryable.
   `DeviceProviderApplication` owns encrypted credentials, while device-sync owns
   OAuth, authoritative connection activation, initial backfill, polling, revoke,
   and disconnect. Setup reads reconcile their visible projection from current
@@ -935,6 +939,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   route family, handoff owner, projection owner, or deletion orchestrator.
   Providers with a different credential or application lifecycle require a new
   product and ownership decision rather than being forced through this seam.
+  The reconnect projection is the exact-coordinate-deduplicated union of
+  configured routes and that finite member-owned catalog, so another registered
+  provider participates without a shared-core branch. A signed member-owned
+  connect claim may select and focus its existing source card, but cannot claim
+  durable work, acquire a browser, or start OAuth until the member has seen the
+  prerequisite disclosure and explicitly chooses Continue.
   Strava is the first registry entry: it
   recognizes only the deterministic Murph marker, models the provider's
   subscription prerequisite as a disclosed recoverable pause with explicit

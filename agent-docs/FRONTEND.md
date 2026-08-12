@@ -114,6 +114,12 @@ When frontend behavior changes:
   action; in disconnect-first, the source card's confirmation-opening
   registered `Disconnect <provider> first` control is the sole action. Never
   render client-id or client-secret fields, and never display a captured secret.
+- A signed member-owned connect claim selects and focuses this same source card,
+  keeps the claim read-only, and shows the provider prerequisite disclosure with
+  Continue and Cancel. Mounting or canceling that state performs no setup
+  mutation, browser acquisition, provider navigation, or OAuth start; Continue
+  consumes the exact claim at most once. Ordinary configured-provider claims
+  retain their existing automatic redirect behavior.
 - Browser handoffs must remain same-origin under `/computer/handoff/`; external
   redirects are reserved for the exact OAuth authorization URL. Preserve source
   card semantics, keyboard focus, accessible status copy, and narrow-screen flow.

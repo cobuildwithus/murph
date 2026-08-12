@@ -67,7 +67,7 @@ export interface MemberOwnedProviderSetupComputer {
   }>;
   finishOwnedRun(input: {
     memberId: string;
-    outcome: "canceled";
+    outcome: "canceled" | "completed";
     ownerKey: string;
     ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
     runId: string;

@@ -41,11 +41,15 @@ import {
   resolveCallbackSourceId,
   resolveConnectIntentRedirectSource,
   resolveConnectIntentStartSource,
+  resolveMemberOwnedConnectIntentSource,
   resolveInitialConnectIntentPresentation,
   stripConnectCallbackParams,
   stripDeviceConnectIntentParams,
 } from "./connect-page-helpers";
-import { SourceCard } from "./connect-source-card";
+import {
+  buildConnectSourceCardId,
+  SourceCard,
+} from "./connect-source-card";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 import type {
   ConnectCallbackInput,
@@ -79,8 +83,9 @@ interface MemberOwnedProviderOAuthResponse {
 }
 
 type ConnectStartOptions = {
-  vitalDisclosureConfirmed?: boolean;
   intentClaim?: string;
+  preserveIntentDisclosure?: boolean;
+  vitalDisclosureConfirmed?: boolean;
 };
 
 type VitalConnectionRequest = {
@@ -168,6 +173,7 @@ export function ConnectSourcesGrid({
     useState(false);
   const initialConnectIntentAuthOpenedRef = useRef(false);
   const initialConnectIntentAttemptedRef = useRef(false);
+  const memberOwnedConnectIntentSubmittedRef = useRef<string | null>(null);
   const { openAuthDialog } = useAuth();
   const callbackConnectedSourceId =
     initialCallback?.status === "connected"
@@ -216,6 +222,22 @@ export function ConnectSourcesGrid({
   );
   const hasInitialCallback = Boolean(initialCallback);
   const activeConnectIntent = initialConnectIntent ?? locationConnectIntent;
+  const memberOwnedConnectIntentSource = useMemo(
+    () =>
+      initialConnectIntentDismissed
+        ? null
+        : resolveMemberOwnedConnectIntentSource(
+            activeConnectIntent,
+            displaySources,
+            authenticated,
+          ),
+    [
+      activeConnectIntent,
+      authenticated,
+      displaySources,
+      initialConnectIntentDismissed,
+    ],
+  );
   const initialConnectIntentPresentation = useMemo(
     () =>
       initialConnectIntentDismissed || !authenticated
@@ -268,6 +290,15 @@ export function ConnectSourcesGrid({
       stripConnectCallbackParams();
     }
   }, [hasInitialCallback]);
+
+  useEffect(() => {
+    if (!memberOwnedConnectIntentSource) {
+      return;
+    }
+    document
+      .getElementById(buildConnectSourceCardId(memberOwnedConnectIntentSource.id))
+      ?.focus();
+  }, [memberOwnedConnectIntentSource]);
 
   useEffect(() => {
     if (
@@ -382,7 +413,9 @@ export function ConnectSourcesGrid({
         return;
       }
 
-      setInitialConnectIntentDismissed(true);
+      if (!options.preserveIntentDisclosure) {
+        setInitialConnectIntentDismissed(true);
+      }
       setActionError(null);
       setNotice(null);
       setConnectIntentRecovery(null);
@@ -437,6 +470,7 @@ export function ConnectSourcesGrid({
       } catch (error) {
         if (options.intentClaim) {
           setConnectIntentRedirectName(null);
+          setInitialConnectIntentDismissed(true);
         }
 
         if (
@@ -471,11 +505,47 @@ export function ConnectSourcesGrid({
     [authenticated, startMemberOwnedProviderSetup],
   );
 
+  const cancelMemberOwnedConnectIntent = useCallback(() => {
+    initialConnectIntentAttemptedRef.current = true;
+    stripDeviceConnectIntentParams();
+    setInitialConnectIntentDismissed(true);
+  }, []);
+
+  const continueMemberOwnedConnectIntent = useCallback(() => {
+    const claim = activeConnectIntent?.claim;
+    const source = memberOwnedConnectIntentSource;
+    if (
+      !claim
+      || !source
+      || memberOwnedConnectIntentSubmittedRef.current === claim
+    ) {
+      return;
+    }
+
+    memberOwnedConnectIntentSubmittedRef.current = claim;
+    initialConnectIntentAttemptedRef.current = true;
+    stripDeviceConnectIntentParams();
+    void startConnection(source, {
+      intentClaim: claim,
+      preserveIntentDisclosure: true,
+    });
+  }, [activeConnectIntent, memberOwnedConnectIntentSource, startConnection]);
+
   useEffect(() => {
     if (
       initialConnectIntentAttemptedRef.current ||
       !authenticated ||
       !activeConnectIntent?.claim
+    ) {
+      return;
+    }
+
+    if (
+      resolveMemberOwnedConnectIntentSource(
+        activeConnectIntent,
+        displaySources,
+        authenticated,
+      )
     ) {
       return;
     }
@@ -711,6 +781,14 @@ export function ConnectSourcesGrid({
                   : null
               }
               pending={pendingSourceIds.has(source.id)}
+              memberOwnedConnectIntentDisclosure={
+                memberOwnedConnectIntentSource?.id === source.id
+                  ? {
+                      onCancel: cancelMemberOwnedConnectIntent,
+                      onContinue: continueMemberOwnedConnectIntent,
+                    }
+                  : undefined
+              }
               pendingDisconnect={pendingDisconnectSourceId === source.id}
               source={source}
               onCancelSetup={cancelMemberOwnedProviderSetup}

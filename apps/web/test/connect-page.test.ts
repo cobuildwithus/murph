@@ -2981,6 +2981,8 @@ test("connect source card design study renders the production action states", as
   assert.match(markup, /aria-label="Sign in to connect Oura"/u);
   assert.match(markup, /Whoop needs a fresh connection/u);
   assert.match(markup, /aria-label="Disconnect account"/u);
+  assert.match(markup, /Review before setup/u);
+  assert.match(markup, /No provider work starts before you continue\./u);
   assert.match(markup, /Peloton could not open\. Please try again\./u);
 });
 
@@ -3578,6 +3580,184 @@ test("ConnectSourcesGrid redeems an initial device connect intent through the ap
     rendered.container.textContent ?? "",
     /Connect Whoop to Murph/u,
   );
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid discloses a member-owned connect intent without starting provider work", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const projection = createStravaSetupProjection().strava;
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [{
+        connectTarget: "strava",
+        description:
+          "Rides, runs, workouts, route context, power, and training load.",
+        id: "strava",
+        logo: {
+          className: "h-auto max-h-9 w-auto max-w-[8rem] object-contain",
+          height: 20,
+          src: "/brand-logos/connect/strava.svg",
+          width: 96,
+        },
+        memberOwnedSetup: projection.setup,
+        memberOwnedSetupPresentation: projection.presentation,
+        memberOwnedSetupProvider: "strava" as const,
+        name: "Strava",
+      }],
+    }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=strava`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=strava`,
+        origin: "https://join.example.test",
+        pathname: "/connect",
+        search: "",
+      },
+    },
+  );
+
+  await vi.waitFor(() => {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Review before setup/u,
+    );
+    const selectedCard = rendered.container.querySelector("#connect-source-strava");
+    assert.ok(selectedCard instanceof rendered.window.HTMLElement);
+    assert.equal(selectedCard.getAttribute("tabindex"), "-1");
+  });
+  assert.match(
+    rendered.container.textContent ?? "",
+    /No provider work starts before you continue\./u,
+  );
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Strava may first require a developer subscription or another provider prerequisite\./u,
+  );
+  assert.equal(fetch.mock.calls.length, 0);
+  assert.equal(rendered.assign.mock.calls.length, 0);
+
+  const cancelButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Cancel");
+  if (!(cancelButton instanceof rendered.window.HTMLButtonElement)) {
+    throw new Error("Expected member-owned connect intent Cancel button.");
+  }
+  await act(async () => {
+    cancelButton.click();
+  });
+
+  assert.equal(fetch.mock.calls.length, 0);
+  assert.equal(rendered.assign.mock.calls.length, 0);
+  assert.doesNotMatch(
+    rendered.container.textContent ?? "",
+    /Review before setup/u,
+  );
+  assert.equal(rendered.replaceState.mock.calls.length, 1);
+  assert.equal(rendered.window.location.hash, "");
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid submits a member-owned connect intent exactly once after Continue", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  let resolveAuthorizationResponse:
+    | ((response: Response) => void)
+    | null = null;
+  const fetch = vi.fn(
+    (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Promise<Response>((resolve) => {
+        resolveAuthorizationResponse = resolve;
+      });
+    },
+  );
+  vi.stubGlobal("fetch", fetch);
+  const projection = createStravaSetupProjection().strava;
+
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const rendered = await renderClientComponent(
+    createElement(ConnectSourcesGrid, {
+      sources: [{
+        connectTarget: "strava",
+        description:
+          "Rides, runs, workouts, route context, power, and training load.",
+        id: "strava",
+        logo: {
+          className: "h-auto max-h-9 w-auto max-w-[8rem] object-contain",
+          height: 20,
+          src: "/brand-logos/connect/strava.svg",
+          width: 96,
+        },
+        memberOwnedSetup: projection.setup,
+        memberOwnedSetupPresentation: projection.presentation,
+        memberOwnedSetupProvider: "strava" as const,
+        name: "Strava",
+      }],
+    }),
+    {
+      location: {
+        hash: `#deviceConnectIntent=${claim}&connectSource=strava`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=strava`,
+        origin: "https://join.example.test",
+        pathname: "/connect",
+        search: "",
+      },
+    },
+  );
+
+  const continueButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Continue");
+  if (!(continueButton instanceof rendered.window.HTMLButtonElement)) {
+    throw new Error("Expected member-owned connect intent Continue button.");
+  }
+  await act(async () => {
+    continueButton.click();
+    continueButton.click();
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Working…/u);
+  });
+  assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
+  assert.deepEqual(fetch.mock.calls[0]?.[1], {
+    body: undefined,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      accept: "application/json",
+    },
+    method: "POST",
+    keepalive: false,
+  });
+  assert.equal(rendered.assign.mock.calls.length, 0);
+  assert.equal(rendered.replaceState.mock.calls.length, 1);
+
+  assert.ok(resolveAuthorizationResponse);
+  await act(async () => {
+    resolveAuthorizationResponse?.(
+      Response.json({
+        authorizationUrl:
+          "https://join.example.test/computer/handoff/synthetic-handoff",
+      }),
+    );
+  });
+  await vi.waitFor(() => {
+    assert.equal(
+      rendered.assign.mock.calls[0]?.[0],
+      "https://join.example.test/computer/handoff/synthetic-handoff",
+    );
+  });
+  assert.equal(fetch.mock.calls.length, 1);
 
   await rendered.cleanup();
 });

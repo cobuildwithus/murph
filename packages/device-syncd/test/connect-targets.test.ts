@@ -6,6 +6,7 @@ import {
   isMemberOwnedDeviceSyncConnectTarget,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
+  listDeviceSyncReconnectTargets,
   listMemberOwnedDeviceSyncConnectTargets,
   readConfiguredDeviceSyncProviderConfigs,
   resolveConfiguredDeviceSyncConnectTarget,
@@ -92,6 +93,50 @@ test("reconnect targets retain duplicate direct and Junction routes for exact re
     [
       { connectSourceId: "whoop", connectTarget: "whoop", provider: "whoop", sourceProviderSlug: null },
       { connectSourceId: "whoop", connectTarget: "whoop", provider: "junction", sourceProviderSlug: "whoop_v2" },
+    ],
+  );
+});
+
+test("reconnect targets include member-owned direct providers without global credentials", () => {
+  assert.deepEqual(listDeviceSyncReconnectTargets(), [{
+    connectSourceId: "strava",
+    connectTarget: "strava",
+    label: "Strava",
+    provider: "strava",
+  }]);
+});
+
+test("reconnect targets deduplicate exact member-owned coordinates but retain Junction ambiguity", () => {
+  const configs = readConfiguredDeviceSyncProviderConfigs({
+    JUNCTION_API_KEY: "sk_us_junction-test",
+    JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_PROVIDER_FILTER: "strava",
+    JUNCTION_REGION: "us",
+    STRAVA_CLIENT_ID: "strava-client-id",
+    STRAVA_CLIENT_SECRET: "strava-client-secret",
+  });
+
+  assert.deepEqual(
+    listDeviceSyncReconnectTargets(configs).map((target) => ({
+      connectSourceId: target.connectSourceId,
+      connectTarget: target.connectTarget,
+      provider: target.provider,
+      sourceProviderSlug: target.sourceProviderSlug ?? null,
+    })),
+    [
+      {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        sourceProviderSlug: null,
+      },
+      {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "junction",
+        sourceProviderSlug: "strava",
+      },
     ],
   );
 });

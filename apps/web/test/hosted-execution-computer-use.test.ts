@@ -4381,6 +4381,34 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("returns a suspended exact deletion-owned handoff to data privacy", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const handoff = createHandoffRecord({ status: "completed" });
+    const store = new FakeComputerUseStore({
+      computerUseAvailable: false,
+      handoff,
+      memberOwnedProviderSetupDeletionPending: true,
+      run: createRunRecord({
+        ownerKey: "dps_deletion_exact",
+        ownerPurpose: "member_owned_provider_setup",
+        status: "running",
+      }),
+    });
+    const service = new ComputerUseService({
+      kernel: createFakeKernel(),
+      now: () => now,
+      store,
+    });
+
+    await expect(service.readHandoffPageState({
+      memberId: "member_123",
+      token: "handoff-token",
+    })).resolves.toEqual({
+      kind: "redirect",
+      url: "/settings/data-privacy?accountDeletion=retry",
+    });
+  });
+
   it("blocks suspended members from opening a handoff page", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const handoff = createHandoffRecord({ purpose: "login" });
@@ -7060,6 +7088,62 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedSessionIds).toEqual(["kernel-session-1"]);
   });
 
+  it("releases a completed setup-owned run for generic work and a second setup owner", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        ownerKey: "dps_setup123",
+        ownerPurpose: "member_owned_provider_setup",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.finishOwnedRun({
+      memberId: "member_123",
+      outcome: "completed",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: "hcr_run123",
+    })).resolves.toMatchObject({
+      runId: "hcr_run123",
+      status: "completed",
+    });
+
+    const generic = await service.startRun({
+      memberId: "member_123",
+      startUrl: null,
+    });
+    expect(generic).toMatchObject({
+      reused: false,
+      status: "running",
+    });
+    expect(store.run).toMatchObject({
+      ownerKey: null,
+      ownerPurpose: null,
+    });
+
+    await service.finishRun({
+      memberId: "member_123",
+      outcome: "completed",
+      runId: generic.runId,
+    });
+    const secondSetup = await service.acquireOwnedRun({
+      expectedRunId: null,
+      memberId: "member_123",
+      ownerKey: "dps_second_provider",
+      ownerPurpose: "member_owned_provider_setup",
+    });
+    expect(secondSetup).toMatchObject({
+      reused: false,
+      status: "running",
+    });
+    expect(store.run).toMatchObject({
+      ownerKey: "dps_second_provider",
+      ownerPurpose: "member_owned_provider_setup",
+    });
+  });
+
   it("deletes stored Kernel sessions and profiles even when namespace cleanup is not configured", async () => {
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -7116,6 +7200,127 @@ describe("ComputerUseService", () => {
 });
 
 describe("PrismaComputerUseStore", () => {
+  it("permits only the exact suspended deletion-owned run", async () => {
+    const run = createRunRecord({
+      id: "hcr_deletion_exact",
+      memberId: "member_suspended",
+      ownerKey: "dps_deletion_exact",
+      ownerPurpose: "member_owned_provider_setup",
+    });
+    const staleRun = createRunRecord({
+      id: "hcr_deletion_stale",
+      memberId: "member_suspended",
+      ownerKey: "dps_deletion_exact",
+      ownerPurpose: "member_owned_provider_setup",
+    });
+    const queryRaw = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "member_suspended" }]);
+    const store = new PrismaComputerUseStore({
+      $queryRaw: queryRaw,
+      deviceProviderSetup: {
+        findFirst: vi.fn(async ({ where }: {
+          where: { active: boolean; id: string; memberId: string };
+        }) => where.active
+          && where.id === "dps_deletion_exact"
+          && where.memberId === "member_suspended"
+          ? {
+              browserRunId: "hcr_deletion_exact",
+              status: "deletion_pending",
+            }
+          : null),
+      },
+      hostedComputerRun: {
+        findFirst: vi.fn(async ({ where }: {
+          where: {
+            id: string;
+            memberId: string;
+            ownerKey: string;
+            ownerPurpose: string;
+          };
+        }) => {
+          const candidate = where.id === run.id
+            ? run
+            : where.id === staleRun.id
+              ? staleRun
+              : null;
+          return candidate
+            && candidate.memberId === where.memberId
+            && candidate.ownerKey === where.ownerKey
+            && candidate.ownerPurpose === where.ownerPurpose
+            ? candidate
+            : null;
+        }),
+      },
+      hostedMember: {
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+          where.id === "member_suspended"
+            ? { id: "member_suspended", suspendedAt: new Date("2026-06-17T11:00:00.000Z") }
+            : null),
+      },
+    } as never);
+
+    await expect(store.requireMemberOwnedProviderSetupRun({
+      memberId: "member_suspended",
+      ownerKey: "dps_deletion_exact",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: "hcr_deletion_exact",
+    })).resolves.toMatchObject({
+      deletionPending: true,
+      id: "hcr_deletion_exact",
+      memberId: "member_suspended",
+      ownerKey: "dps_deletion_exact",
+    });
+
+    await expect(store.requireMemberComputerUseAvailable({
+      memberId: "member_suspended",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+    });
+    await expect(store.requireMemberOwnedProviderSetupRun({
+      memberId: "member_foreign",
+      ownerKey: "dps_deletion_exact",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: "hcr_deletion_exact",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    });
+    await expect(store.requireMemberOwnedProviderSetupRun({
+      memberId: "member_suspended",
+      ownerKey: "dps_deletion_exact",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: "hcr_deletion_stale",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    });
+
+    const nonDeletionStore = new PrismaComputerUseStore({
+      deviceProviderSetup: {
+        findFirst: vi.fn(async () => ({
+          browserRunId: "hcr_deletion_exact",
+          status: "oauth_ready",
+        })),
+      },
+      hostedComputerRun: {
+        findFirst: vi.fn(async () => run),
+      },
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          id: "member_suspended",
+          suspendedAt: new Date("2026-06-17T11:00:00.000Z"),
+        })),
+      },
+    } as never);
+    await expect(nonDeletionStore.requireMemberOwnedProviderSetupRun({
+      memberId: "member_suspended",
+      ownerKey: "dps_deletion_exact",
+      ownerPurpose: "member_owned_provider_setup",
+      runId: "hcr_deletion_exact",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+    });
+  });
+
   it("uses mailbox sequence as the managed fallback reply boundary", async () => {
     const findFirst = vi.fn(async () => ({ id: "hmi_user_reply" }));
     const store = new PrismaComputerUseStore({
@@ -9032,6 +9237,7 @@ class FakeComputerUseStore implements ComputerUseStore {
   handoffs: ComputerHandoffRecord[] = [];
   lastResumeAwaitingReason: Parameters<ComputerUseStore["markRunRunning"]>[0]["awaitingReason"] | null = null;
   managedLoginFallbackReplyBoundarySeq: bigint | null = null;
+  memberOwnedProviderSetupDeletionPending = false;
   memberRuns: ComputerRunRecord[] | null = null;
   pauseRunBeforeSecondRequireOwnedRun = false;
   pauseRunAfterFailedAttachRunBrowser = false;
@@ -9058,6 +9264,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     failNextUpdateRunBrowserState?: boolean;
     handoff?: ComputerHandoffRecord | null;
     managedLoginFallbackReplyBoundarySeq?: bigint | null;
+    memberOwnedProviderSetupDeletionPending?: boolean;
     memberRuns?: ComputerRunRecord[];
     pauseRunAfterFailedAttachRunBrowser?: boolean;
     pauseRunBeforeSecondRequireOwnedRun?: boolean;
@@ -9087,6 +9294,8 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.handoffs = this.handoff ? [this.handoff] : [];
     this.managedLoginFallbackReplyBoundarySeq =
       input.managedLoginFallbackReplyBoundarySeq ?? null;
+    this.memberOwnedProviderSetupDeletionPending =
+      input.memberOwnedProviderSetupDeletionPending ?? false;
     this.memberRuns = input.memberRuns ?? null;
     this.pauseRunAfterFailedAttachRunBrowser =
       input.pauseRunAfterFailedAttachRunBrowser ?? false;
@@ -9126,6 +9335,11 @@ class FakeComputerUseStore implements ComputerUseStore {
   ): Promise<void> {
     if (input.memberId !== this.run.memberId) {
       throw new Error("Member not found.");
+    }
+    if (!this.computerUseAvailable && !this.memberOwnedProviderSetupDeletionPending) {
+      throw Object.assign(new Error("Computer use is not available for this hosted member."), {
+        code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+      });
     }
     const runs = this.memberRuns ?? [this.run];
     const now = input.now ?? new Date("2026-06-17T12:00:00.000Z");
@@ -9179,7 +9393,7 @@ class FakeComputerUseStore implements ComputerUseStore {
 
   async requireMemberOwnedProviderSetupRun(
     input: Parameters<ComputerUseStore["requireMemberOwnedProviderSetupRun"]>[0],
-  ): Promise<ComputerRunRecord> {
+  ): ReturnType<ComputerUseStore["requireMemberOwnedProviderSetupRun"]> {
     if (
       input.memberId !== this.run.memberId
       || input.runId !== this.run.id
@@ -9190,7 +9404,15 @@ class FakeComputerUseStore implements ComputerUseStore {
         code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
       });
     }
-    return this.run;
+    if (!this.computerUseAvailable && !this.memberOwnedProviderSetupDeletionPending) {
+      throw Object.assign(new Error("Computer use is not available for this hosted member."), {
+        code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+      });
+    }
+    return {
+      ...this.run,
+      deletionPending: this.memberOwnedProviderSetupDeletionPending,
+    };
   }
 
   async requireComputerHandoffAccess(

@@ -4,11 +4,27 @@ import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth
 
 import { SettingsDataPrivacyAuthRequired } from "./settings-data-privacy-auth-required";
 
-export default async function SettingsDataPrivacyPage() {
+type SettingsDataPrivacySearchParams = {
+  accountDeletion?: string | string[];
+};
+
+export default async function SettingsDataPrivacyPage({
+  searchParams,
+}: {
+  searchParams?: Promise<SettingsDataPrivacySearchParams>;
+} = {}) {
   const { authenticated } = await getHostedPageAuthSnapshot();
 
   if (authenticated) {
-    redirect("/settings#data-privacy");
+    const resolvedSearchParams: SettingsDataPrivacySearchParams = await (
+      searchParams ?? Promise.resolve({})
+    );
+    const accountDeletion = Array.isArray(resolvedSearchParams.accountDeletion)
+      ? resolvedSearchParams.accountDeletion[0]
+      : resolvedSearchParams.accountDeletion;
+    redirect(accountDeletion === "retry"
+      ? "/settings?accountDeletion=retry#data-privacy"
+      : "/settings#data-privacy");
   }
 
   return (

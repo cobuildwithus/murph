@@ -63,6 +63,10 @@ export interface ComputerRunRecord {
   updatedAt: Date;
 }
 
+export interface MemberOwnedProviderSetupRunRecord extends ComputerRunRecord {
+  deletionPending: boolean;
+}
+
 export interface ComputerRunCheckpointContext {
   conversationId: string | null;
   recipientKey: string | null;
@@ -320,7 +324,7 @@ export interface ComputerUseStore {
     ownerKey: string;
     ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
     runId: string;
-  }): Promise<ComputerRunRecord>;
+  }): Promise<MemberOwnedProviderSetupRunRecord>;
   requireMemberOwnedProviderSetupRunAcquisition(input: {
     candidateRunId?: string | null;
     expectedRunId: string | null;
@@ -598,7 +602,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     ownerKey: string;
     ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
     runId: string;
-  }): Promise<ComputerRunRecord> {
+  }): Promise<MemberOwnedProviderSetupRunRecord> {
     const run = await this.prisma.hostedComputerRun.findFirst({
       where: {
         id: input.runId,
@@ -614,12 +618,15 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         retryable: false,
       });
     }
-    await requireMemberOwnedProviderSetupRunAccess(this.prisma, {
+    const access = await requireMemberOwnedProviderSetupRunAccess(this.prisma, {
       memberId: input.memberId,
       ownerKey: input.ownerKey,
       runId: input.runId,
     });
-    return mapRun(run);
+    return {
+      ...mapRun(run),
+      deletionPending: access.deletionPending,
+    };
   }
 
   async requireMemberOwnedProviderSetupRunAcquisition(input: {
@@ -1793,7 +1800,7 @@ async function requireMemberOwnedProviderSetupRunAccess(
     ownerKey: string;
     runId?: string;
   },
-): Promise<void> {
+): Promise<{ deletionPending: boolean }> {
   const member = await prisma.hostedMember.findUnique({
     select: { id: true, suspendedAt: true },
     where: { id: input.memberId },
@@ -1857,16 +1864,18 @@ async function requireMemberOwnedProviderSetupRunAccess(
     });
   }
 
+  const deletionPending = setup.status === "deletion_pending";
   if (member.suspendedAt === null) {
-    return;
+    return { deletionPending };
   }
-  if (setup.status !== "deletion_pending") {
+  if (!deletionPending) {
     throw computerUseConflictError({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
       message: "Computer use is not available for this hosted member.",
       retryable: false,
     });
   }
+  return { deletionPending };
 }
 
 async function requireMemberOwnedProviderSetupAcquisitionRecovery(

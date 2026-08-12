@@ -182,6 +182,35 @@ afterEach(async () => {
 });
 
 describe("HostedDataPrivacySettings", () => {
+  test("shows exact provider-cleanup retry guidance after a deletion handoff", async () => {
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, {
+        accountDeletionRetry: true,
+        authenticated: true,
+      }));
+    });
+
+    assert.match(container.textContent ?? "", /Provider sign-in complete/u);
+    assert.match(
+      container.textContent ?? "",
+      /Retry Delete account to finish removing your private provider application and Murph account\./u,
+    );
+  });
+
   test("treats every nonconfirmed Cloudflare result as pending for legacy servers", () => {
     expect(hasIncompleteHostedAccountDeletionCleanup({
       cloudflare: { configured: false, deleted: false },

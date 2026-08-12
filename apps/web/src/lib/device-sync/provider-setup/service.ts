@@ -93,6 +93,7 @@ interface ProviderSetupIngress {
 }
 type CreateIngress = (request: Request) => ProviderSetupIngress;
 const PROVIDER_SETUP_WORKING_STALE_MS = 2 * 60 * 1000;
+const PROVIDER_SETUP_BROWSER_RELEASE_CAS_ATTEMPTS = 3;
 
 export class MemberOwnedProviderSetupService {
   private adapterInstance: MemberOwnedProviderSetupAdapter | null;
@@ -695,6 +696,7 @@ export class MemberOwnedProviderSetupService {
       providerSubmissionAt: null,
       status: "oauth_ready",
     });
+    setup = await this.releaseBoundBrowserRunAfterApplicationBinding(setup);
     return { setup: this.toView(setup) };
   }
 
@@ -784,6 +786,14 @@ export class MemberOwnedProviderSetupService {
   private async recoverStoredApplicationBinding(
     setup: MemberOwnedProviderSetupRecord,
   ): Promise<MemberOwnedProviderSetupRecord> {
+    if (
+      !setup.active
+      || setup.status === "canceling"
+      || setup.status === "deletion_pending"
+      || setup.status === "deleted"
+    ) {
+      return setup;
+    }
     const binding = readMemberOwnedProviderSetupBinding(setup);
     const application = await this.readApplicationView({
       memberId: setup.memberId,
@@ -796,7 +806,7 @@ export class MemberOwnedProviderSetupService {
       binding?.applicationId === application.applicationId
       && binding.revision === application.revision
     ) {
-      return setup;
+      return this.releaseBoundBrowserRunAfterApplicationBinding(setup);
     }
     if (
       binding
@@ -812,11 +822,66 @@ export class MemberOwnedProviderSetupService {
         retryable: false,
       });
     }
-    return this.transition(setup, {
+    const recovered = await this.transition(setup, {
       providerApplicationId: application.applicationId,
       providerApplicationRevision: application.revision,
       status: setup.status,
     });
+    return this.releaseBoundBrowserRunAfterApplicationBinding(recovered);
+  }
+
+  private async releaseBoundBrowserRunAfterApplicationBinding(
+    setup: MemberOwnedProviderSetupRecord,
+  ): Promise<MemberOwnedProviderSetupRecord> {
+    const runId = setup.browserRunId;
+    if (!runId) {
+      return setup;
+    }
+    const binding = readMemberOwnedProviderSetupBinding(setup);
+    if (!binding) {
+      throw providerSetupBrowserCleanupIncompleteError();
+    }
+
+    const runStatus = await this.adapter.finishBrowserRun({
+      memberId: setup.memberId,
+      runId,
+      setupId: setup.id,
+    });
+    if (runStatus !== "completed") {
+      throw providerSetupBrowserCleanupIncompleteError();
+    }
+
+    let current = setup;
+    for (let attempt = 0; attempt < PROVIDER_SETUP_BROWSER_RELEASE_CAS_ATTEMPTS; attempt += 1) {
+      assertSetupAvailable(current);
+      if (current.browserRunId === null) {
+        return current;
+      }
+      const currentBinding = readMemberOwnedProviderSetupBinding(current);
+      if (
+        current.browserRunId !== runId
+        || currentBinding?.applicationId !== binding.applicationId
+        || currentBinding.revision !== binding.revision
+      ) {
+        throw providerSetupBrowserCleanupIncompleteError();
+      }
+      try {
+        return await this.transition(current, {
+          browserRunId: null,
+          status: current.status,
+        });
+      } catch (error) {
+        if (!isDeviceSyncError(error) || error.code !== "DEVICE_PROVIDER_SETUP_CONFLICT") {
+          throw error;
+        }
+        current = await this.store.readOwned({
+          memberId: setup.memberId,
+          provider: setup.provider,
+          setupId: setup.id,
+        });
+      }
+    }
+    throw providerSetupBrowserCleanupIncompleteError();
   }
 
   private async recoverInterruptedWorking(
@@ -1076,6 +1141,15 @@ function readSafeProviderSetupErrorCode(error: unknown): string {
     return error.code;
   }
   return "PROVIDER_SETUP_DASHBOARD_UNAVAILABLE";
+}
+
+function providerSetupBrowserCleanupIncompleteError() {
+  return deviceSyncError({
+    code: "PROVIDER_SETUP_BROWSER_CLEANUP_INCOMPLETE",
+    httpStatus: 503,
+    message: "Private provider setup saved the application, but browser cleanup is incomplete. Retry setup to finish cleanup safely.",
+    retryable: true,
+  });
 }
 
 function unsafeProviderSetupCancellationError(providerName: string) {
