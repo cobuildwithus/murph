@@ -30,6 +30,12 @@ describe('assistant reply bubble prompt guidance', () => {
         'A semantic card that carries the complete answer replaces final text.',
       )
       expect(layers.threadContextPrompt).toContain(
+        "Repeating or improving an existing structured answer's layout keeps the same owned presentation",
+      )
+      expect(layers.threadContextPrompt).toContain(
+        'Telegram text styles are not Rich Messages.',
+      )
+      expect(layers.threadContextPrompt).toContain(
         'Response media accompanies concise semantic text; do not recreate its visual content as long prose.',
       )
       expect(layers.threadContextPrompt).not.toContain('response media alone')
