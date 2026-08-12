@@ -37,6 +37,9 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - A current `starting` row remains pending on every same-key replay without
   another Lob create call, even when a refreshed private-media URL changes the
   request body.
+- A distinct request blocked while the original Lob call is in flight is
+  narrowed atomically to accepted-prior or unknown when that original call
+  terminalizes, so its exact replay cannot remain factually unresolved.
 - Pre-migration failed rows without a reason and current `starting` rows form
   one member-wide unresolved-effect guard. A distinct request is persisted as
   unsent before an age-gated lookup can resolve the older row, and never sends
@@ -252,3 +255,13 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   guard. Focused Web proof now shows the historical replay and blocker remain
   stable while one later eligible request uses ordinary paid admission and one
   provider create. Assistant guidance scopes no-retry to the blocked request.
+- Round 14 found that a distinct blocker committed while the original provider
+  call was still in flight remained `prior_note_unresolved` after the ordinary
+  provider path accepted or definitely rejected the source row. Settle those
+  blockers inside the existing member-locked source terminalizers: acceptance
+  uses `prior_note_accepted`, while a successful definite-failure compare-and-
+  set uses `unknown` rather than copying a possibly unrelated address or
+  artwork category. Real PostgreSQL deferred-provider cases prove both
+  interleavings, stable provider-free blocker replay, exact usage ownership,
+  complimentary release, and ordinary admission after acceptance. No state,
+  link, queue, lifecycle, or reconciliation owner was added.

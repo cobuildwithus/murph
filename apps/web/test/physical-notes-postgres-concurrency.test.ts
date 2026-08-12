@@ -12,6 +12,7 @@ import {
 } from "vitest";
 
 import { createPrismaClient } from "@/src/lib/prisma";
+import type { LobPhysicalNoteCreateResult } from "@/src/lib/physical-notes/lob-runtime";
 
 const mocks = vi.hoisted(() => ({
   readUsageGate: vi.fn(),
@@ -150,6 +151,169 @@ describe.skipIf(!runPostgresProof)(
       })).resolves.toBe(1);
       expect(mocks.recordUsage).not.toHaveBeenCalled();
     });
+
+    it.each([
+      {
+        blockerReason: "prior_note_accepted" as const,
+        sourceResult: {
+          kind: "accepted" as const,
+          providerLetterId: "ltr_concurrent_accepted",
+        },
+        sourceStatus: "accepted" as const,
+      },
+      {
+        blockerReason: "unknown" as const,
+        sourceResult: {
+          kind: "definite_failure" as const,
+          reason: "request_invalid" as const,
+          status: 422,
+        },
+        sourceStatus: "failed" as const,
+      },
+    ])(
+      "settles a committed blocker after the source becomes $sourceStatus",
+      async ({ blockerReason, sourceResult, sourceStatus }) => {
+        const sourceClient = requirePrisma(firstClient);
+        const blockerClient = requirePrisma(secondClient);
+        const observer = requirePrisma(observerClient);
+        const beneficiary = requireMemberId(memberId);
+        const { createHostedPhysicalNote } = await import(
+          "@/src/lib/physical-notes/service"
+        );
+        const createStarted = createDeferred();
+        const completeCreate = createDeferred<LobPhysicalNoteCreateResult>();
+        if (sourceStatus === "accepted") {
+          const complimentaryId = `hpn_${randomUUID().replaceAll("-", "")}`;
+          await observer.hostedPhysicalNote.create({
+            data: {
+              acceptedAt: new Date(),
+              complimentaryOfferCode: "physical-note-v1",
+              failureReason: null,
+              id: complimentaryId,
+              memberId: beneficiary,
+              pricingVersion: "lob-test-v1",
+              provider: "lob",
+              providerCostUsdMicros: 250_000n,
+              providerLetterId: `ltr_${complimentaryId}`,
+              requestFingerprint: `fingerprint_${complimentaryId}`,
+              requestKey: `request_${complimentaryId}`,
+              status: "accepted",
+            },
+          });
+        }
+        const sourceCreate = vi.fn(async () => {
+          createStarted.resolve();
+          return await completeCreate.promise;
+        });
+        const blockerCreate = vi.fn(async () => ({
+          kind: "ambiguous_failure" as const,
+        }));
+        const sourceRequest = buildRequest(10, beneficiary);
+        const blockerRequest = buildRequest(11, beneficiary);
+        const source = createHostedPhysicalNote({
+          ...sourceRequest,
+          prisma: sourceClient,
+          runtime: {
+            create: sourceCreate,
+            async findLetterByNoteId() {
+              return { kind: "indeterminate" };
+            },
+          },
+        });
+        await createStarted.promise;
+
+        const blocker = await createHostedPhysicalNote({
+          ...blockerRequest,
+          prisma: blockerClient,
+          runtime: {
+            create: blockerCreate,
+            async findLetterByNoteId() {
+              return { kind: "indeterminate" };
+            },
+          },
+        });
+        expect(blocker).toMatchObject({
+          failureReason: "prior_note_unresolved",
+          status: "failed",
+        });
+        expect(blockerCreate).not.toHaveBeenCalled();
+        const blockerId = blocker.physicalNoteId;
+        if (!blockerId) {
+          throw new Error("Expected a persisted physical-note blocker.");
+        }
+
+        completeCreate.resolve(sourceResult);
+        await expect(source).resolves.toMatchObject({ status: sourceStatus });
+        if (sourceStatus === "accepted") {
+          expect(mocks.recordUsage).toHaveBeenCalledOnce();
+        }
+        await expect(observer.hostedPhysicalNote.findUnique({
+          where: { id: blockerId },
+        })).resolves.toMatchObject({
+          failureReason: blockerReason,
+          status: "failed",
+        });
+        const replayCreate = vi.fn(async () => ({
+          kind: "ambiguous_failure" as const,
+        }));
+        await expect(createHostedPhysicalNote({
+          ...blockerRequest,
+          prisma: blockerClient,
+          runtime: {
+            create: replayCreate,
+            async findLetterByNoteId() {
+              return { kind: "indeterminate" };
+            },
+          },
+        })).resolves.toMatchObject({
+          failureReason: blockerReason,
+          physicalNoteId: blockerId,
+          status: "failed",
+        });
+        expect(replayCreate).not.toHaveBeenCalled();
+
+        const sourceRow = await observer.hostedPhysicalNote.findUniqueOrThrow({
+          where: {
+            memberId_requestKey: {
+              memberId: beneficiary,
+              requestKey: sourceRequest.requestKey,
+            },
+          },
+        });
+        if (sourceStatus === "accepted") {
+          const laterCreate = vi.fn(async () => ({
+            kind: "accepted" as const,
+            providerLetterId: "ltr_after_concurrent_acceptance",
+          }));
+          await expect(createHostedPhysicalNote({
+            ...buildRequest(12, beneficiary),
+            prisma: observer,
+            runtime: {
+              create: laterCreate,
+              async findLetterByNoteId() {
+                return { kind: "indeterminate" };
+              },
+            },
+          })).resolves.toMatchObject({
+            complimentary: false,
+            status: "accepted",
+          });
+          expect(sourceRow).toMatchObject({
+            complimentaryOfferCode: null,
+            status: "accepted",
+          });
+          expect(laterCreate).toHaveBeenCalledOnce();
+          expect(mocks.recordUsage).toHaveBeenCalledTimes(2);
+        } else {
+          expect(sourceRow).toMatchObject({
+            complimentaryOfferCode: null,
+            failureReason: "request_invalid",
+            status: "failed",
+          });
+          expect(mocks.recordUsage).not.toHaveBeenCalled();
+        }
+      },
+    );
 
     it("enters Lob once for concurrent replay of the same request", async () => {
       const first = requirePrisma(firstClient);

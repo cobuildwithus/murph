@@ -635,6 +635,9 @@ describe('assistant physical notes', () => {
       }
       if (failureReason === 'prior_note_accepted') {
         expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'is still unresolved',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
           'may recheck',
         )
         expect(result.rpcResult.contentItems[0]?.text).toContain(
@@ -642,6 +645,11 @@ describe('assistant physical notes', () => {
         )
         expect(result.rpcResult.contentItems[0]?.text).toContain(
           'A separately authorized future request is distinct',
+        )
+      }
+      if (failureReason === 'unknown') {
+        expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+          'is still unresolved',
         )
       }
     },

@@ -108,6 +108,16 @@ marks the guarded row and current blocker `unknown` and releases any
 complimentary claim; the blocked request remains unsent, so only a later new
 explicit request may enter ordinary admission.
 
+The same blocker narrowing happens when the original provider call completes
+after a distinct request has already committed its blocker. Ordinary acceptance
+atomically moves every blocker created behind that in-flight member effect to
+`prior_note_accepted`. A successful definite-rejection transition atomically
+moves them to `unknown`, because the blocked requests may have different
+recipients or artwork and cannot inherit the source rejection category. If the
+rejection compare-and-set loses to acceptance, only the acceptance finalizer
+settles the blockers. Exact blocker replay therefore never remains in the
+present-tense unresolved state after the source reaches a terminal result.
+
 `memberId + complimentaryOfferCode` atomically admits one complimentary note per
 direct member or synthetic group member. A definite provider rejection releases
 the promotional claim; an ambiguous outcome keeps the row pending and is never

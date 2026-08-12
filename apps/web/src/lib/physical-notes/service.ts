@@ -356,7 +356,6 @@ async function resolveGuardedPhysicalNote(input: {
       await finalizeHostedPhysicalNoteAcceptance({
         acceptedAt: new Date(),
         memberId: input.memberId,
-        narrowUnresolvedBlockers: true,
         noteId: input.prior.id,
         prisma: input.prisma,
         providerLetterId: providerResult.providerLetterId,
@@ -589,7 +588,6 @@ async function finalizeLegacyPhysicalNoteAcceptance(input: {
 async function finalizeHostedPhysicalNoteAcceptance(input: {
   acceptedAt: Date;
   memberId: string;
-  narrowUnresolvedBlockers?: boolean;
   noteId: string;
   prisma: PrismaClient;
   providerLetterId: string;
@@ -622,17 +620,15 @@ async function finalizeHostedPhysicalNoteAcceptance(input: {
       throw new Error("Hosted physical-note acceptance invariant failed.");
     }
     await recordPaidPhysicalNoteUsageTx({ note, tx });
-    if (input.narrowUnresolvedBlockers) {
-      await tx.hostedPhysicalNote.updateMany({
-        data: { failureReason: "prior_note_accepted" },
-        where: {
-          failureReason: "prior_note_unresolved",
-          memberId: input.memberId,
-          providerLetterId: null,
-          status: "failed",
-        },
-      });
-    }
+    await tx.hostedPhysicalNote.updateMany({
+      data: { failureReason: "prior_note_accepted" },
+      where: {
+        failureReason: "prior_note_unresolved",
+        memberId: input.memberId,
+        providerLetterId: null,
+        status: "failed",
+      },
+    });
     return note;
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
@@ -675,7 +671,7 @@ async function markHostedPhysicalNoteFailed(input: {
 }): Promise<void> {
   await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
-    await tx.hostedPhysicalNote.updateMany({
+    const failed = await tx.hostedPhysicalNote.updateMany({
       data: {
         complimentaryOfferCode: null,
         failureReason: input.failureReason,
@@ -688,6 +684,17 @@ async function markHostedPhysicalNoteFailed(input: {
         status: "starting",
       },
     });
+    if (failed.count > 0) {
+      await tx.hostedPhysicalNote.updateMany({
+        data: { failureReason: "unknown" },
+        where: {
+          failureReason: "prior_note_unresolved",
+          memberId: input.memberId,
+          providerLetterId: null,
+          status: "failed",
+        },
+      });
+    }
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
