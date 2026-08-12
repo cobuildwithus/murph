@@ -179,6 +179,10 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
   assert.equal(resolveMetricDefinition("bodyfat")?.key, "body-fat-percentage");
+  assert.equal(resolveMetricDefinition("bone_mass_percentage")?.key, "bone-mass-percentage");
+  assert.equal(resolveMetricDefinition("muscle_mass_percentage")?.key, "muscle-mass-percentage");
+  assert.equal(resolveMetricDefinition("visceral_fat_index")?.key, "visceral-fat-index");
+  assert.equal(resolveMetricDefinition("water_percentage")?.key, "body-water-percentage");
   assert.equal(resolveMetricDefinition("bodymassindex")?.key, "bmi");
   assert.equal(resolveMetricDefinition("systolicbloodpressure")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinition("diastolicbloodpressure")?.key, "diastolic-blood-pressure");
@@ -335,6 +339,10 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   );
   assert.equal(resolveWearableCanonicalMetricKey("sleep-latency-minutes"), "sleepLatencyMinutes");
   assert.equal(resolveWearableCanonicalMetricKey("sleep_latency_minutes"), "sleepLatencyMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("bone_mass_percentage"), "boneMassPercentage");
+  assert.equal(resolveWearableCanonicalMetricKey("muscle_mass_percentage"), "muscleMassPercentage");
+  assert.equal(resolveWearableCanonicalMetricKey("visceral_fat_index"), "visceralFatIndex");
+  assert.equal(resolveWearableCanonicalMetricKey("water_percentage"), "bodyWaterPercentage");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:unknown"), null);
   assert.deepEqual(createCustomMetricDefinition("hydration score", "%"), {
     aliases: [],
@@ -371,7 +379,11 @@ test("resolves every legacy collapsed body and blood-pressure identity from the 
   for (const wearableKey of [
     "bmi",
     "bodyFatPercentage",
+    "bodyWaterPercentage",
+    "boneMassPercentage",
     "leanBodyMassKg",
+    "muscleMassPercentage",
+    "visceralFatIndex",
     "waistCircumference",
     "weightKg",
   ] as const) {
