@@ -1819,7 +1819,9 @@ function pushJunctionDailyTimeseriesObservations(
         value: junctionDailyTimeseriesStatisticValue(aggregate, observation.statistic),
       });
     }
-    if (isJunctionDenseFidelityResource(resource) && aggregate.fidelitySamples.length > 0) {
+    // Keep the complete feature identity present even when the provider supplied
+    // only date precision, so an empty temporal view clears older clocked facts.
+    if (isJunctionDenseFidelityResource(resource)) {
       pushJunctionTimeseriesFeatureEnvelope(context, aggregate, resource);
     }
   }
@@ -2015,7 +2017,13 @@ function buildJunctionTimeseriesFidelityPoint(input: {
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   value: number;
 }): JunctionTimeseriesFidelityPoint | undefined {
-  if (!input.timestamp.observedAtRaw) return undefined;
+  if (
+    !input.timestamp.observedAtRaw
+    || isDateOnlyJunctionTimestamp(input.timestamp.observedAtRaw)
+  ) {
+    // Calendar precision belongs in the established daily aggregate only.
+    return undefined;
+  }
   const observedAtMs = resolveJunctionFidelityObservedAtMs(input.timestamp);
   const localMinute = resolveJunctionFidelityLocalMinute(
     input.entry,
@@ -2542,6 +2550,11 @@ function pushJunctionTimeseriesFeatureEnvelope(
     resource,
     aggregate.fidelitySamples,
   );
+  const featureSampleTimes = aggregate.fidelitySamples
+    .map((sample) => sample.observedAtMs)
+    .sort((left, right) => left - right);
+  const firstFeatureSampleAt = featureSampleTimes[0];
+  const lastFeatureSampleAt = featureSampleTimes[featureSampleTimes.length - 1];
   const identityHash = shortHash([
     policy.identityVersion,
     aggregate.resourceContext.resourceSlug,
@@ -2572,8 +2585,12 @@ function pushJunctionTimeseriesFeatureEnvelope(
           sourceProviderSlug: aggregate.resourceContext.sourceProviderSlug,
           sourceType: aggregate.resourceContext.origin.sourceType,
           sourceInstanceId: aggregate.resourceContext.origin.sourceInstanceId,
-          firstSampleAt: aggregate.firstSampleAt,
-          lastSampleAt: aggregate.lastSampleAt,
+          firstSampleAt: firstFeatureSampleAt === undefined
+            ? undefined
+            : new Date(firstFeatureSampleAt).toISOString(),
+          lastSampleAt: lastFeatureSampleAt === undefined
+            ? undefined
+            : new Date(lastFeatureSampleAt).toISOString(),
           duplicateSampleCount: aggregate.duplicateSampleCount > 0
             ? aggregate.duplicateSampleCount
             : undefined,

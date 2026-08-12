@@ -20,7 +20,7 @@ Updated: 2026-08-12
   exact replays remain no-ops.
 - Durable architecture and ingestion docs describe the implemented ownership.
 - Focused tests, affected package typechecks/build, repository guards, required
-  CI, and the next exact-head ReviewGPT round pass.
+  CI, and the routed ReviewGPT stopping condition pass.
 
 ## Scope
 
@@ -39,8 +39,12 @@ Updated: 2026-08-12
 3. [x] Add store-level closure-race, non-empty complete-set growth/removal,
    stable-row, and exact-replay regression coverage.
 4. [x] Align the architecture, importer, and ingestion-invariant owners.
-5. [ ] Complete local verification, commit and push the exact candidate, then
-   run required CI and ReviewGPT to a clean stopping condition.
+5. [x] Reproduce and reject round six's proposed output-cap correction as a
+   pre-existing integration-ingest limit, then clarify the durable contract.
+6. [ ] Remove round seven's synthetic-midnight temporal derivation, complete
+   local proof, commit and push the exact candidate, then run required CI.
+7. [ ] Record the hard-cap retrospective and obtain an explicit continuation
+   decision before any eighth ReviewGPT round.
 
 ## Decisions
 
@@ -57,6 +61,29 @@ Updated: 2026-08-12
   PR-caused: the proposed 11,522-event reproduction also fails the unchanged
   base integration-ingest contract, and live imports always persist a complete
   output list. Expanding that contract is outside this fidelity change.
+- ReviewGPT round seven's date-only temporal finding is accepted. Date-only
+  dense rows remain daily facts but cannot become temporal samples; their
+  complete-day feature owner publishes zero coverage so stale clock-derived
+  facts clear without another state owner.
+
+## Hard-cap retrospective
+
+- The original requirement remains one bounded six-resource outcome: retain
+  exact sparse timing and truthful compact dense temporal shape without raw
+  sample retention or another canonical/state owner.
+- The first-reviewed patch had 2,030 source additions and 38 deletions. The
+  remediated patch has 2,483 source additions and 68 deletions; the cumulative
+  first-head remediation is 513 additions and 90 deletions. Round seven's fix
+  contributes 67 source additions and 5 deletions, with no new owner, queue,
+  cursor, watermark, schema family, dependency, or persisted state.
+- Deleting the temporal feature path would abandon the requested glucose,
+  oxygen, and stress outcome. Merely skipping date-only envelopes would strand
+  prior clock-derived facts. The smallest complete correction is therefore the
+  current provider-clock admission check plus an empty envelope through the
+  existing feature identity.
+- Decision: continue with this bounded correction, then pause at the seven-round
+  hard cap. Do not start round eight until the user explicitly chooses to
+  continue after reviewing this retrospective.
 
 ## Verification
 
@@ -64,12 +91,18 @@ Updated: 2026-08-12
   higher-priority resource completion, and post-closure daily import.
 - Passed focused query regression proving same-max set growth, lower-max set
   removal, paired daily/feature publication, and exact-replay collapse.
-- Passed all 222 Junction provider tests, all 162 Junction importer tests, and
-  all 19 normalized wearable-surface tests.
+- Passed all 222 Junction provider tests, all 164 Junction importer tests, and
+  all 20 normalized wearable-surface tests.
 - Passed affected `core`, `importers`, `device-syncd`, and `query` typechecks,
   the importer build, scenario-manifest integrity, and `git diff --check`.
 - Reproduced ReviewGPT round six's proposed 11,522-event historical batch and
   proved it fails the base branch's pre-existing 10,000-output integration
   ingest contract; no out-of-scope contract expansion was retained.
-- Pending: docs drift, final privacy/diff review, exact-head CI, and ReviewGPT
-  round seven.
+- Round seven returned one original-PR finding: date-only dense readings were
+  assigned synthetic midnight temporal evidence. Focused importer and canonical
+  query regressions now prove provider-clock-only derivation and stale temporal
+  fact removal.
+- Passed the final scoped importer/query suites, affected typechecks and importer
+  build, docs drift, scenario integrity, privacy scan, and `git diff --check`.
+- Pending: final commit/push, exact-head CI, and the explicit post-hard-cap
+  ReviewGPT continuation decision.

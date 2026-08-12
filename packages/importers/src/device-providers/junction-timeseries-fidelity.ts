@@ -375,7 +375,7 @@ export function deriveJunctionTimeseriesFeatureEnvelope(
 } {
   assertJunctionTimeseriesSourceDayBound(resource, inputSamples.length);
   if (inputSamples.length === 0) {
-    throw new TypeError(`Junction ${resource} feature envelope requires at least one sample.`);
+    return deriveEmptyJunctionTimeseriesFeatureEnvelope(resource);
   }
 
   const samples = inputSamples
@@ -399,6 +399,51 @@ export function deriveJunctionTimeseriesFeatureEnvelope(
       return deriveStressEnvelope(supportedSamples, buildCoverage(supportedSamples, policy), policy);
     }
   }
+}
+
+function deriveEmptyJunctionTimeseriesFeatureEnvelope(
+  resource: JunctionDenseFidelityResource,
+): {
+  readonly envelope: JunctionTimeseriesFeatureEnvelope;
+  readonly facts: readonly JunctionTimeseriesDerivedFact[];
+} {
+  const policy = getJunctionDenseFidelityPolicy(resource);
+  const metricPrefix = resource === "blood_oxygen"
+    ? "spo2"
+    : resource === "stress_level"
+      ? "stress"
+      : "glucose";
+  const facts: readonly JunctionTimeseriesDerivedFact[] = [
+    {
+      metric: `${metricPrefix}-estimated-coverage-minutes`,
+      unit: "minutes",
+      value: 0,
+    },
+    {
+      metric: `${metricPrefix}-observed-span-minutes`,
+      unit: "minutes",
+      value: 0,
+    },
+  ];
+  assertDerivedFactBound(policy, facts);
+  return {
+    envelope: buildEnvelope({
+      coverage: {
+        cappedGapCount: 0,
+        estimatedCoverageMinutes: 0,
+        lastSampleSupportMinutes: policy.coverage.lastSampleSupportMinutes,
+        method: policy.coverage.method,
+        observedSpanMinutes: 0,
+      },
+      episodes: [],
+      features: {},
+      hourlyBucketFields: [],
+      hourlyBuckets: Array.from({ length: 24 }, () => null),
+      policy,
+      sampleCount: 0,
+    }),
+    facts,
+  };
 }
 
 function validatePointSample(

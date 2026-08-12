@@ -147,6 +147,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    not publish a partial day under the daily fact or 24-hour feature identity.
    A provider calendar date becomes publishable only after it has closed at
    UTC-12, so UTC midnight cannot freeze a partial negative-offset source day.
+   Only dense rows with a provider-supplied clock contribute temporal samples.
+   Date-only rows remain daily aggregate inputs and publish a zero-coverage
+   feature envelope without fabricated hourly, overnight, rate, peak, or
+   episode facts, allowing a complete response to clear older temporal facts.
    Sparse `caffeine`, `water`, and `mindfulness_minutes` direct-resource jobs
    retain precise windows because each admitted interval has its own exact-start
    identity, but those precise snapshots emit intervals only. The calendar-day

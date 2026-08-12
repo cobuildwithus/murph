@@ -836,6 +836,85 @@ test("Junction timed and derived timeseries facts survive core replay and remain
   }
 });
 
+test("Junction date-only dense corrections clear temporal metrics without losing daily facts", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-date-only-fidelity-query-"));
+  const importSnapshot = async (snapshot: Parameters<typeof normalizeJunctionSnapshot>[0]) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", snapshot, vaultRoot },
+      { corePort: coreRuntime },
+    );
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    const timed = await importSnapshot({
+      accountId: "junction-account-date-only-fidelity",
+      importedAt: "2026-04-23T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: [
+                { timestamp: "2026-04-22T00:00:00Z", unit: "mmol/L", value: 3.5 },
+                { timestamp: "2026-04-22T00:05:00Z", unit: "mmol/L", value: 7 },
+              ],
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    });
+    const timedOvernight = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-overnight-average",
+    });
+
+    assert.equal(timed.applied, true);
+    assert.equal(timedOvernight.length, 1);
+
+    const dateOnlySnapshot = {
+      accountId: "junction-account-date-only-fidelity",
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: [{ date: "2026-04-22", unit: "mmol/L", value: 5.5 }],
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    };
+    const dateOnly = await importSnapshot(dateOnlySnapshot);
+    const replay = await importSnapshot(dateOnlySnapshot);
+    const overnight = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-overnight-average",
+    });
+    const coverage = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-coverage-minutes",
+    });
+    const daily = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose",
+    });
+
+    assert.equal(dateOnly.applied, true);
+    assert.equal(replay.applied, false);
+    assert.deepEqual(overnight, []);
+    assert.equal(coverage.length, 1);
+    assert.equal(coverage[0]?.value, 0);
+    assert.equal(daily.find((point) => point.source.kind === "observation")?.value, 99.1001);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction child revisions do not order complete daily aggregate sets", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-aggregate-set-reconcile-"));
   const reading = (

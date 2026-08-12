@@ -1262,6 +1262,143 @@ test("Junction normalizer keeps floating stress timestamps on their raw day desp
   assert.equal(stressEvents.some((event) => event.dayKey === "2026-04-22"), false);
 });
 
+test("Junction date-only dense readings remain daily facts without fabricated clock time", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: [{
+              date: "2026-04-23",
+              recordedAt: "2026-04-23T12:00:00Z",
+              unit: "mmol/L",
+              value: 5.5,
+            }],
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+      blood_oxygen: {
+        groups: {
+          garmin: [{
+            data: [{ date: "2026-04-23", unit: "percent", value: 88 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-23T06:30:00.000", score: 44 },
+              { date: "2026-04-23", value: 56 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+  const dailyValue = (metric: string) => payload.events?.find((event) =>
+    event.kind === "observation" && event.fields?.metric === metric
+  )?.fields?.value;
+  const featureArtifact = (resourceSlug: string) =>
+    findJunctionTimeseriesFeatureArtifacts(payload, resourceSlug)[0]?.content as {
+      coverage?: { estimatedCoverageMinutes?: number; observedSpanMinutes?: number };
+      features?: Record<string, number>;
+      firstSampleAt?: string;
+      hourlyBuckets?: Array<unknown[] | null>;
+      lastSampleAt?: string;
+      sampleCount?: number;
+    };
+  const featureMetrics = (resource: string) => {
+    const event = payload.events?.find((candidate) =>
+      candidate.kind === "measurement"
+      && candidate.externalRef?.facet === "features"
+      && candidate.title === `Junction ${resource.replaceAll("_", " ")} temporal features`
+    );
+    return readJunctionEventMeasurements(event).map((measurement) => measurement.metric).sort();
+  };
+
+  assert.equal(dailyValue("glucose"), 99.1001);
+  assert.equal(dailyValue("spo2"), 88);
+  assert.equal(dailyValue("stress-level"), 50);
+
+  const glucose = featureArtifact("glucose");
+  assert.equal(glucose.sampleCount, 0);
+  assert.deepEqual(glucose.features, {});
+  assert.equal(glucose.coverage?.estimatedCoverageMinutes, 0);
+  assert.equal(glucose.coverage?.observedSpanMinutes, 0);
+  assert.equal(glucose.firstSampleAt, undefined);
+  assert.equal(glucose.lastSampleAt, undefined);
+  assert.equal(glucose.hourlyBuckets?.length, 24);
+  assert.equal(glucose.hourlyBuckets?.every((bucket) => bucket === null), true);
+  assert.deepEqual(featureMetrics("glucose"), [
+    "glucose-estimated-coverage-minutes",
+    "glucose-observed-span-minutes",
+  ]);
+
+  const bloodOxygen = featureArtifact("blood-oxygen");
+  assert.equal(bloodOxygen.sampleCount, 0);
+  assert.deepEqual(bloodOxygen.features, {});
+  assert.equal(bloodOxygen.firstSampleAt, undefined);
+  assert.equal(bloodOxygen.lastSampleAt, undefined);
+  assert.equal(bloodOxygen.hourlyBuckets?.every((bucket) => bucket === null), true);
+  assert.deepEqual(featureMetrics("blood_oxygen"), [
+    "spo2-estimated-coverage-minutes",
+    "spo2-observed-span-minutes",
+  ]);
+
+  const stress = featureArtifact("stress-level");
+  assert.equal(stress.sampleCount, 1);
+  assert.equal(stress.features?.peakLocalHour, 6);
+  assert.equal(stress.firstSampleAt, "2026-04-23T06:30:00.000Z");
+  assert.equal(stress.lastSampleAt, "2026-04-23T06:30:00.000Z");
+  assert.equal(stress.hourlyBuckets?.[0], null);
+  assert.equal(stress.hourlyBuckets?.[6]?.[0], 1);
+  assert.equal(featureMetrics("stress_level").includes("stress-peak-local-hour"), true);
+});
+
+test("Junction date-only stress publishes zero temporal coverage", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-24T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [{ date: "2026-04-23", value: 56 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+  const daily = payload.events?.find((event) =>
+    event.kind === "observation" && event.fields?.metric === "stress-level"
+  );
+  const feature = findJunctionTimeseriesFeatureArtifacts(payload, "stress-level")[0]?.content as {
+    coverage?: { estimatedCoverageMinutes?: number; observedSpanMinutes?: number };
+    features?: Record<string, number>;
+    hourlyBuckets?: Array<unknown[] | null>;
+    sampleCount?: number;
+  };
+  const featureEvent = payload.events?.find((event) =>
+    event.kind === "measurement" && event.externalRef?.facet === "features"
+  );
+
+  assert.equal(daily?.fields?.value, 56);
+  assert.equal(feature.sampleCount, 0);
+  assert.deepEqual(feature.features, {});
+  assert.equal(feature.coverage?.estimatedCoverageMinutes, 0);
+  assert.equal(feature.coverage?.observedSpanMinutes, 0);
+  assert.equal(feature.hourlyBuckets?.every((bucket) => bucket === null), true);
+  assert.deepEqual(
+    readJunctionEventMeasurements(featureEvent).map((measurement) => measurement.metric).sort(),
+    ["stress-estimated-coverage-minutes", "stress-observed-span-minutes"],
+  );
+});
+
 test("Junction WHOOP workout summaries use provider offset local day across UTC midnight", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-06-25T12:00:00.000Z",
