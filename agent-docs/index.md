@@ -30,8 +30,10 @@ close-only path, a native workspace-only Codex
 permission profile, canonical parent-owned ReviewGPT gates whose complete prompt-preset surface is
 trusted-main-bound and whose archive uses the exact digest-bound parent-local
 body with pre/post-wait and pre-persistence drift checks that preserve a new
-operator handoff, an explicit Frog-script merge allowlist excluding GitHub
-Actions helpers, one non-closing issue binding with parent-only post-merge
+operator handoff, an explicit Frog-script merge allowlist with one canonical
+issue-bound completed-plan exception and exclusions for policy, skills,
+friction tasks, general documentation, and GitHub Actions helpers, one
+non-closing issue binding with parent-only post-merge
 closure and bounded never-closed recovery that refuses a deliberate reopen, durable
 descendant/closed-unmerged findings/retrospective
 handoffs for terminal checks and conflicts, one absolute process-group-bounded

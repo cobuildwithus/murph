@@ -260,10 +260,12 @@ Last verified: 2026-08-12
   receives the fixed-body handoff without autonomous rebaselining. Before merge
   it revalidates live issue authority, PR head, exact parent body digest/editor/
   issue binding, required checks, current-base mergeability, and both old and
-  new paths of any rename or copy. Only the enumerated Frog autofix script files
-  and documented local process surfaces may merge automatically;
-  `scripts/frog-pr-context.ts` and every other GitHub Actions/runtime path remain
-  human-owned. The body has no closing keyword. Once the exact merge is proven,
+  new paths of any rename or copy. Only the enumerated Frog autofix script files,
+  semantic package and architecture exceptions, and one canonical
+  parent-rendered completed plan bound to the current issue and phase may merge
+  automatically. Repository instructions, skills, friction tasks, all other
+  durable documentation, `scripts/frog-pr-context.ts`, and every other GitHub
+  Actions/runtime path remain human-owned. The body has no closing keyword. Once the exact merge is proven,
   the parent explicitly closes only the bound issue, and subsequent
   presentation edits cannot invalidate that merge proof. If the explicit close
   call still fails, a later interval revalidates the exact merged PR/head and

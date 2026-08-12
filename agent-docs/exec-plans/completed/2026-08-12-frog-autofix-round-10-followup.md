@@ -18,6 +18,9 @@ diagnostic without adding another authority owner or retry system.
 - Reject GitHub full-URL closing relationships as well as short closing forms.
 - Recover a verified merged-but-open issue closure, while treating a
   post-merge reopen as human-owned.
+- Replace broad policy, skill, documentation, and successor-task auto-merge
+  authority with one canonical parent-rendered completed-plan exception bound
+  to the current issue and phase.
 
 ## Boundaries
 
@@ -42,6 +45,8 @@ diagnostic without adding another authority owner or retry system.
 - [x] Reproduce and accept the five diagnostic findings.
 - [x] Implement the corrections inside existing owners.
 - [x] Run focused and broad local verification for the corrected source.
-- [ ] Push the corrected exact head.
+- [x] Push the first corrected exact head.
+- [x] Reproduce and correct the valid exact-head auto-merge allowlist finding.
+- [ ] Verify and push the narrowed exact head.
 - [ ] Obtain valid exact-head ReviewGPT PASS and green CI.
 - [ ] Merge, install, and verify the two-hour service.

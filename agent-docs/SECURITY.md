@@ -1175,12 +1175,14 @@ Last verified: 2026-08-12
   re-fetches and revalidates App author, open state, label, exactly one committed
   binding, PR head, exact body digest/editor/non-closing issue binding, checks,
   and the exact-head scope classifier immediately before an ordinary
-  `--match-head-commit` squash merge. Only `.agents` content, `AGENTS.md`,
-  `agent-docs`, the enumerated Frog autofix implementation/launcher/worker/test
-  files, the exact Frog package script, and the isolated Local Frog Autofix
-  architecture section may auto-merge. The shared ReviewGPT controls already
-  force a human handoff, and `scripts/frog-pr-context.ts` remains excluded
-  because GitHub Actions executes it. Any other path, changed product
+  `--match-head-commit` squash merge. Only the enumerated Frog autofix
+  implementation/launcher/worker/test files, the exact Frog package script,
+  the isolated Local Frog Autofix architecture section, and one canonical
+  parent-rendered completed plan whose exact path and content bind the current
+  issue and repair phase may auto-merge. `AGENTS.md`, `.agents/skills/**`,
+  `.agents/friction-log/**`, every other `agent-docs/**` path, the shared
+  ReviewGPT controls, and `scripts/frog-pr-context.ts` force a human handoff;
+  the latter remains excluded because GitHub Actions executes it. Any other path, changed product
   architecture outside that section, GitHub workflow/action, hook, or possible
   runtime surface remains open for a human merge decision and does not close its
   issue. The PR body contains only one non-closing issue binding. After proving

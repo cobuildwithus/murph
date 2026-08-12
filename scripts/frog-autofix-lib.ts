@@ -558,9 +558,97 @@ const localAgentScriptPaths = new Set([
 export interface AutoMergeScopeInput {
   architectureBase?: string;
   architectureHead?: string;
+  completedPlanContent?: string;
+  completedPlanPath?: string;
+  issueNumber?: number;
   packageBase?: string;
   packageHead?: string;
   paths: string[];
+}
+
+const repairPlanPhasePattern = /^(?:implementation|resume)(?:-(?:[2-9]|[1-9][0-9]+))?$/u;
+const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/u;
+
+function validIsoDate(value: string): boolean {
+  if (!isoDatePattern.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.valueOf())
+    && parsed.toISOString().slice(0, 10) === value;
+}
+
+export function renderRepairPlanContent(options: {
+  completed?: string;
+  issueNumber: number;
+  phase: string;
+  status: "active" | "completed";
+  updated: string;
+}): string {
+  if (
+    !Number.isSafeInteger(options.issueNumber)
+    || options.issueNumber <= 0
+    || !repairPlanPhasePattern.test(options.phase)
+    || !validIsoDate(options.updated)
+    || (options.status === "active" && options.completed !== undefined)
+    || (options.status === "completed"
+      && (options.completed === undefined || !validIsoDate(options.completed)))
+  ) {
+    throw new Error("invalid Frog repair plan metadata");
+  }
+  return `# Frog Autofix Repair
+
+## Goal
+
+Repair trusted Frog issue #${options.issueNumber} through the ordinary repository
+verification and review gates without granting the edit-only child Git,
+GitHub, ReviewGPT, merge, or issue-close authority.
+
+## Tasks
+
+1. [ ] Perform the mandatory foul-play assessment of the issue, proposals, and
+   existing branch/worktree state; stop on unexplained scope or weakened
+   authentication, review, sandbox, credential, or network boundaries.
+2. [ ] Inspect and integrate the parent-applied proposal.
+3. [ ] Add focused regression coverage and update durable owner docs.
+4. [ ] Leave a complete private PR body so the parent can validate it and bind
+   the committed exact head before any first push.
+5. [ ] Let the parent refresh origin/main and exact issue authority immediately
+   before push and again before PR creation, then run fixed verification,
+   commit, review, CI, and the local-tooling-only merge gate.
+
+Phase: ${options.phase}
+Status: ${options.status}
+Updated: ${options.updated}
+${options.completed === undefined ? "" : `Completed: ${options.completed}\n`}`;
+}
+
+function completedRepairPlanIsExact(input: AutoMergeScopeInput): boolean {
+  if (
+    !input.completedPlanPath
+    || input.completedPlanContent === undefined
+    || !Number.isSafeInteger(input.issueNumber)
+    || Number(input.issueNumber) <= 0
+  ) return false;
+  const match = input.completedPlanContent.match(
+    /\nPhase: ([a-z0-9-]+)\nStatus: completed\nUpdated: (\d{4}-\d{2}-\d{2})\nCompleted: (\d{4}-\d{2}-\d{2})\n$/u,
+  );
+  if (!match) return false;
+  const [, phase, updated, completed] = match;
+  if (!phase || !updated || !completed || !repairPlanPhasePattern.test(phase)) {
+    return false;
+  }
+  const expectedPath = `agent-docs/exec-plans/completed/frog-autofix-repair-${input.issueNumber}-${phase}.md`;
+  if (input.completedPlanPath !== expectedPath) return false;
+  try {
+    return input.completedPlanContent === renderRepairPlanContent({
+      completed,
+      issueNumber: Number(input.issueNumber),
+      phase,
+      status: "completed",
+      updated,
+    });
+  } catch {
+    return false;
+  }
 }
 
 export function authorityChangedPaths(
@@ -654,14 +742,10 @@ export function localAgentOnlyChange(input: AutoMergeScopeInput): boolean {
   if (input.paths.length === 0 || new Set(input.paths).size !== input.paths.length) {
     return false;
   }
+  const completedPlanIsAllowed = completedRepairPlanIsExact(input);
   return input.paths.every((filePath) => {
-    if (
-      filePath === "AGENTS.md"
-      || filePath.startsWith(".agents/friction-log/")
-      || filePath.startsWith(".agents/skills/")
-      || filePath.startsWith("agent-docs/")
-      || localAgentScriptPaths.has(filePath)
-    ) return true;
+    if (localAgentScriptPaths.has(filePath)) return true;
+    if (filePath === input.completedPlanPath) return completedPlanIsAllowed;
     if (filePath === "package.json") {
       return typeof input.packageBase === "string"
         && typeof input.packageHead === "string"

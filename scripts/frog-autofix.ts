@@ -38,6 +38,7 @@ import {
   normalizeGitHubRepository,
   parseAuthenticatedGitHubOperator,
   parseEventLog,
+  renderRepairPlanContent,
   renderInstalledLauncher,
   renderLaunchAgentPlist,
   renderWorkerPrompt,
@@ -1340,31 +1341,12 @@ function writeRepairPlan(worktree: string, issueNumber: number, phase: string) {
     worktree,
     repairPlanRelative(issueNumber, phase, false),
   );
-  const content = `# Frog Autofix Repair
-
-## Goal
-
-Repair trusted Frog issue #${issueNumber} through the ordinary repository
-verification and review gates without granting the edit-only child Git,
-GitHub, ReviewGPT, merge, or issue-close authority.
-
-## Tasks
-
-1. [ ] Perform the mandatory foul-play assessment of the issue, proposals, and
-   existing branch/worktree state; stop on unexplained scope or weakened
-   authentication, review, sandbox, credential, or network boundaries.
-2. [ ] Inspect and integrate the parent-applied proposal.
-3. [ ] Add focused regression coverage and update durable owner docs.
-4. [ ] Leave a complete private PR body so the parent can validate it and bind
-   the committed exact head before any first push.
-5. [ ] Let the parent refresh origin/main and exact issue authority immediately
-   before push and again before PR creation, then run fixed verification,
-   commit, review, CI, and the local-tooling-only merge gate.
-
-Phase: ${phase}
-Status: active
-Updated: ${new Date().toISOString().slice(0, 10)}
-`;
+  const content = renderRepairPlanContent({
+    issueNumber,
+    phase,
+    status: "active",
+    updated: new Date().toISOString().slice(0, 10),
+  });
   writePrivateFileAtomically(planPath, content, 0o600);
 }
 
@@ -1375,9 +1357,15 @@ function closeRepairPlan(worktree: string, issueNumber: number, phase: string) {
   );
   const completedRelative = repairPlanRelative(issueNumber, phase, true);
   const completed = path.join(worktree, completedRelative);
-  const content = readBoundedParentFile(active, 64 * 1024)
-    .replace("Status: active", "Status: completed")
-    .concat(`Completed: ${new Date().toISOString().slice(0, 10)}\n`);
+  if (!existsSync(active)) throw new Error("active repair plan is missing");
+  const completedAt = new Date().toISOString().slice(0, 10);
+  const content = renderRepairPlanContent({
+    completed: completedAt,
+    issueNumber,
+    phase,
+    status: "completed",
+    updated: completedAt,
+  });
   if (existsSync(completed)) {
     throw new Error("completed repair plan path already exists");
   }
@@ -2634,6 +2622,7 @@ function requiredPullRequestChecksPass(root: string, pullRequest: number): boole
 function exactHeadIsLocalAgentOnly(
   primary: string,
   head: string,
+  issueNumber: number,
 ): boolean {
   fetchMain(primary);
   const mergeBase = requireCommand(
@@ -2642,11 +2631,13 @@ function exactHeadIsLocalAgentOnly(
     primary,
   );
   const paths = changedAuthorityPaths(primary, mergeBase, head);
-  const show = (ref: string, filePath: string) => requireCommand(
-    "git",
-    ["show", `${ref}:${filePath}`],
-    primary,
-  );
+  const completedPlans = paths.filter((filePath) => (
+    filePath.startsWith("agent-docs/exec-plans/completed/frog-autofix-repair-")
+  ));
+  const show = (ref: string, filePath: string) => {
+    const result = runCommand("git", ["show", `${ref}:${filePath}`], primary);
+    return result.status === 0 ? result.stdout : undefined;
+  };
   return localAgentOnlyChange({
     architectureBase: paths.includes("ARCHITECTURE.md")
       ? show(mergeBase, "ARCHITECTURE.md")
@@ -2654,6 +2645,13 @@ function exactHeadIsLocalAgentOnly(
     architectureHead: paths.includes("ARCHITECTURE.md")
       ? show(head, "ARCHITECTURE.md")
       : undefined,
+    completedPlanContent: completedPlans.length === 1
+      ? show(head, completedPlans[0]!)
+      : undefined,
+    completedPlanPath: completedPlans.length === 1
+      ? completedPlans[0]
+      : undefined,
+    issueNumber,
     packageBase: paths.includes("package.json")
       ? show(mergeBase, "package.json")
       : undefined,
@@ -2685,6 +2683,7 @@ function finalizeReviewedRepair(
     autoMergeAllowed: (identity) => exactHeadIsLocalAgentOnly(
       primary,
       identity.head,
+      identity.issueNumber,
     ),
     closeIssue: (identity) => requireCommand(
       "gh",

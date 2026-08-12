@@ -129,13 +129,17 @@ checks, and current-base mergeability. A deterministic exact-file allowlist,
 using both sides of detected renames and copies, permits automatic merge only
 for the enumerated Frog autofix implementation, launcher, worker, and focused
 test scripts, with semantic exceptions limited to the Frog script entry in
-`package.json` and this section of `ARCHITECTURE.md`. The GitHub Actions-owned
-`scripts/frog-pr-context.ts` is explicitly outside that authority. Any possible
-product-runtime, deployment, shared ReviewGPT-control, or GitHub-workflow
-change stays as a reviewed ready PR with its issue open for a human merge
-decision. Exact-head open or closed-unmerged handoff markers remove that issue
-from later automated scans so it cannot starve the queue. Only a newly verified
-parent merge may precede issue closure. The invocation has one eight-hour deadline; each model
+`package.json`, this section of `ARCHITECTURE.md`, and the one canonical
+parent-rendered completed repair plan whose filename and content are bound to
+the current issue and repair phase. `AGENTS.md`, `.agents/skills/**`,
+`.agents/friction-log/**`, every other `agent-docs/**` path, and the GitHub
+Actions-owned `scripts/frog-pr-context.ts` are explicitly outside that
+authority. Any possible policy, successor-task, product-runtime, deployment,
+shared ReviewGPT-control, or GitHub-workflow change stays as a reviewed ready
+PR with its issue open for a human merge decision. Exact-head open or
+closed-unmerged handoff markers remove that issue from later automated scans so
+it cannot starve the queue. Only a newly verified parent merge may precede
+issue closure. The invocation has one eight-hour deadline; each model
 worker is bounded to two hours and every spawned command or worker has exact
 process-group ownership.
 

@@ -30,6 +30,7 @@ import {
   normalizeGitHubRepository,
   parseAuthenticatedGitHubOperator,
   parseEventLog,
+  renderRepairPlanContent,
   renderInstalledLauncher,
   renderLaunchAgentPlist,
   renderWorkerPrompt,
@@ -1852,39 +1853,80 @@ describe("Frog autofix guards", () => {
     })).toBe("awaiting-human-conflict");
   });
 
-  it("stops before merge and issue closure for possible product-runtime changes", () => {
-    let mergeCalls = 0;
-    let closeCalls = 0;
-    const outcome = finalizeReadyRepair({
+  it("hands off every broader authority class and merges exact Frog script scope", () => {
+    const identity = {
       bodySha256: authoritativeBodySha256,
       branch: "agent/frog-autofix-42",
       head: "a".repeat(40),
       issueNumber: 42,
       pullRequest: 99,
-    }, {
-      autoMergeAllowed: () => false,
+    };
+    for (const broaderPath of [
+      "AGENTS.md",
+      ".agents/skills/frog/SKILL.md",
+      ".agents/friction-log/new-task/friction.md",
+      "agent-docs/SECURITY.md",
+      "agent-docs/RELIABILITY.md",
+      "agent-docs/operations/pr-reviewgpt-loop.md",
+      "agent-docs/product-specs/repo.md",
+    ]) {
+      let mergeCalls = 0;
+      let closeCalls = 0;
+      const outcome = finalizeReadyRepair(identity, {
+        autoMergeAllowed: () => localAgentOnlyChange({
+          paths: ["scripts/frog-autofix.ts", broaderPath],
+        }),
+        closeIssue: () => {
+          closeCalls += 1;
+        },
+        currentPullRequest: () => ({
+          bodyAuthoritative: true,
+          bodySha256: authoritativeBodySha256,
+          head: identity.head,
+          issueBound: true,
+          pullRequest: identity.pullRequest,
+        }),
+        issueIsClosed: () => false,
+        merge: () => {
+          mergeCalls += 1;
+        },
+        mergeTreePasses: () => true,
+        pullRequestIsMerged: () => false,
+        refreshAndVerifyIssue: () => undefined,
+        requiredChecksPass: () => true,
+      });
+      expect(outcome, broaderPath).toBe("awaiting-human-product");
+      expect(mergeCalls, broaderPath).toBe(0);
+      expect(closeCalls, broaderPath).toBe(0);
+    }
+
+    let merged = false;
+    let closed = false;
+    expect(finalizeReadyRepair(identity, {
+      autoMergeAllowed: () => localAgentOnlyChange({
+        paths: ["scripts/frog-autofix.ts"],
+      }),
       closeIssue: () => {
-        closeCalls += 1;
+        closed = true;
       },
       currentPullRequest: () => ({
         bodyAuthoritative: true,
         bodySha256: authoritativeBodySha256,
-        head: "a".repeat(40),
+        head: identity.head,
         issueBound: true,
-        pullRequest: 99,
+        pullRequest: identity.pullRequest,
       }),
-      issueIsClosed: () => false,
+      issueIsClosed: () => closed,
       merge: () => {
-        mergeCalls += 1;
+        merged = true;
       },
       mergeTreePasses: () => true,
-      pullRequestIsMerged: () => false,
+      pullRequestIsMerged: () => merged,
       refreshAndVerifyIssue: () => undefined,
       requiredChecksPass: () => true,
-    });
-    expect(outcome).toBe("awaiting-human-product");
-    expect(mergeCalls).toBe(0);
-    expect(closeCalls).toBe(0);
+    })).toBe("merged");
+    expect(merged).toBe(true);
+    expect(closed).toBe(true);
   });
 
   it("redacts local identifiers from unexpected failure text", () => {
@@ -1958,23 +2000,32 @@ describe("Frog autofix guards", () => {
     expect(args).not.toContain("danger-full-access");
   });
 
-  it("auto-merges only deterministic local agent and Codex workflow scope", () => {
+  it("auto-merges only deterministic Frog implementation and issue-bound plan scope", () => {
     const packageBase = JSON.stringify({ scripts: { typecheck: "tsc" } });
     const packageHead = JSON.stringify({
       scripts: { typecheck: "tsc", "frog:autofix": "scripts/frog-autofix" },
     });
     const architectureBase = "# Murph Architecture\n\nLast verified: 2026-08-10\n\n## Product\n\nRuntime.\n";
     const architectureHead = "# Murph Architecture\n\nLast verified: 2026-08-11\n\n## Local Frog Autofix\n\nLocal only.\n\n## Product\n\nRuntime.\n";
+    const completedPlanPath = "agent-docs/exec-plans/completed/frog-autofix-repair-42-resume-2.md";
+    const completedPlanContent = renderRepairPlanContent({
+      completed: "2026-08-12",
+      issueNumber: 42,
+      phase: "resume-2",
+      status: "completed",
+      updated: "2026-08-12",
+    });
     expect(localAgentOnlyChange({
       architectureBase,
       architectureHead,
+      completedPlanContent,
+      completedPlanPath,
+      issueNumber: 42,
       packageBase,
       packageHead,
       paths: [
-        ".agents/friction-log/entry/friction.md",
-        "AGENTS.md",
         "ARCHITECTURE.md",
-        "agent-docs/SECURITY.md",
+        completedPlanPath,
         "package.json",
         "scripts/frog-autofix.ts",
         "scripts/frog-autofix.test.ts",
@@ -2000,9 +2051,43 @@ describe("Frog autofix guards", () => {
       "scripts/frog-pr-context.ts",
       "scripts/frog-safe.ts",
       "scripts/review-gpt.config.sh",
+      "AGENTS.md",
+      ".agents/skills/frog/SKILL.md",
+      ".agents/friction-log/new-task/friction.md",
+      "agent-docs/SECURITY.md",
+      "agent-docs/RELIABILITY.md",
+      "agent-docs/operations/pr-reviewgpt-loop.md",
+      "agent-docs/product-specs/repo.md",
     ]) {
       expect(localAgentOnlyChange({ paths: [productPath] })).toBe(false);
     }
+    expect(localAgentOnlyChange({
+      completedPlanContent,
+      completedPlanPath,
+      issueNumber: 43,
+      paths: [completedPlanPath],
+    })).toBe(false);
+    expect(localAgentOnlyChange({
+      completedPlanContent: completedPlanContent.replace(
+        "without granting the edit-only child Git,",
+        "with expanded child Git authority,",
+      ),
+      completedPlanPath,
+      issueNumber: 42,
+      paths: [completedPlanPath],
+    })).toBe(false);
+    const anotherIssuePlan = completedPlanPath.replace("42", "43");
+    expect(localAgentOnlyChange({
+      completedPlanContent,
+      completedPlanPath: anotherIssuePlan,
+      issueNumber: 42,
+      paths: [anotherIssuePlan],
+    })).toBe(false);
+    expect(localAgentOnlyChange({
+      completedPlanPath,
+      issueNumber: 42,
+      paths: [completedPlanPath],
+    })).toBe(false);
     expect(localAgentOnlyChange({
       packageBase,
       packageHead: JSON.stringify({ scripts: { typecheck: "echo bypass" } }),
