@@ -192,13 +192,6 @@ export function SourceCard({
               >
                 {setupGuideActionLabel}
               </Button>
-            ) : !authenticated ? (
-              <AuthButton
-                aria-label={`Sign in to connect ${source.name}`}
-                className="self-end"
-              >
-                Sign in
-              </AuthButton>
             ) : unavailableMessage && source.unavailableActionLabel ? (
               <Button
                 type="button"
@@ -208,6 +201,13 @@ export function SourceCard({
               >
                 {source.unavailableActionLabel}
               </Button>
+            ) : !authenticated ? (
+              <AuthButton
+                aria-label={`Sign in to connect ${source.name}`}
+                className="self-end"
+              >
+                Sign in
+              </AuthButton>
             ) : reconnectUnavailable
               || requiresConnectionReset
               || historicalReconnectUnavailable

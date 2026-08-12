@@ -105,6 +105,24 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     },
   },
   {
+    authenticated: false,
+    errorMessage: null,
+    source: {
+      connectionAvailable: false,
+      description: "CGM glucose readings and trends.",
+      id: "dexcom",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/dexcom.png",
+        width: 128,
+      },
+      name: "Dexcom",
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage: "Dexcom connections are coming soon.",
+    },
+  },
+  {
     authenticated: true,
     errorMessage: null,
     source: {
