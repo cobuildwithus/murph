@@ -45,9 +45,11 @@ counts only when its canonical note type, external reference, and data origin al
 prove Oura, and only the exact product-owned `sauna` tag is admitted. The same
 tag from another Junction source, unknown/custom Oura tags, and symptom, context,
 or outcome tags remain neutral notes. Legacy Junction `tag-*` intervention rows
-are excluded from factor derivation while any persisted-state repair remains an
-explicit migration decision. Missed and skipped intervention sessions do not
-count.
+are excluded from factor derivation. Junction note-history coverage version 2
+performs one bounded semantic reimport for sources covered by the legacy
+normalizer so neutral replacement notes restore eligible Oura sauna history
+without rewriting old event kinds. Missed and skipped intervention sessions do
+not count.
 
 Activity days use the existing canonical activity-evidence date. Intervention
 days use the existing scheduled/session local date before the generic event

@@ -91,8 +91,16 @@ Updated: 2026-08-11
 - Do not add a destructive legacy-vault migration. Bounded read-only production
   evidence found no note-history coverage marker or source advertising note
   collection, so ordinary encrypted vault state cannot prove affected rows.
-  Personal Patterns instead excludes the recognizable legacy Junction
-  `tag-*` intervention shape, while future reconcile writes neutral notes.
+  The completed v1 marker remains a valid durable rollout state, however:
+  note-history coverage version 2 therefore performs one bounded semantic
+  reimport for each legacy-covered source. Personal Patterns excludes the
+  recognizable legacy Junction `tag-*` intervention shape while neutral
+  replacements arrive.
+- Accepted the preliminary ReviewGPT existing-member finding: keeping the note
+  coverage version at 1 would permanently suppress older Oura sauna history for
+  a source already marked complete under the legacy normalizer. The v2
+  obligation is terminal after one successful bounded pass and requires no
+  event rewrite or deletion.
 - Bump the Browser Vault replica generation so existing projections rebuild
   under the corrected factor interpretation.
 
@@ -103,6 +111,9 @@ Updated: 2026-08-11
 - Focused hosted replica-generation test: passed, 1 test.
 - Focused vault import-to-Patterns and revision test: passed, 2 tests under the
   default timeout.
+- Focused Junction historical-backfill test after ReviewGPT remediation:
+  passed, 62 tests; a stored `v1|oura` marker schedules exactly one v2 bounded
+  note-history pass and terminal coverage prevents repetition.
 - Focused Web changelog tests: passed, 56 tests.
 - Contracts, importers, query, vault-usecases, device-syncd,
   hosted-execution, and full Web typechecks: passed.

@@ -775,7 +775,7 @@ test("an existing source receives one migration anchored to its first-seen windo
   );
 });
 
-test("Oura notes receive one full summary-history migration while dense timeseries stay bounded", async () => {
+test("v1 Oura note coverage receives one v2 semantic reimport while dense timeseries stay bounded", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({
     additionalProviders: [{
@@ -810,7 +810,10 @@ test("Oura notes receive one full summary-history migration while dense timeseri
     { blood_pressure: false, note: true, stress_level: true },
   )];
   const scheduled = createScheduledJobs(
-    createStoredAccount({ sources }),
+    createStoredAccount({
+      metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      sources,
+    }),
     NOW,
   );
   const note = requireValue(scheduled.jobs.find((job) =>
@@ -829,14 +832,19 @@ test("Oura notes receive one full summary-history migration while dense timeseri
 
   const importedSnapshots: unknown[] = [];
   const { executionCount, result } = await executeImmediateResourceContinuations({
-    context: createJobContext({ importedSnapshots }),
+    context: createJobContext({
+      account: createAccount({
+        metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      }),
+      importedSnapshots,
+    }),
     job: toJobRecord(note, 1),
     provider,
     resource: "note",
   });
   assert.equal(executionCount, 180);
   assert.equal(importedSnapshots.length, 2);
-  assert.equal(result.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v1|oura");
+  assert.equal(result.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v2|oura");
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   assert.equal(
     requests.filter((request) => request.resource === "note").length,
@@ -844,7 +852,10 @@ test("Oura notes receive one full summary-history migration while dense timeseri
   );
 
   const nextDayPending = createScheduledJobs(
-    createStoredAccount({ sources }),
+    createStoredAccount({
+      metadata: { [NOTE_HISTORY_COVERAGE_KEY]: "v1|oura" },
+      sources,
+    }),
     "2026-06-12T12:00:00.000Z",
   );
   const nextDayNote = requireValue(nextDayPending.jobs.find((job) =>
@@ -906,7 +917,7 @@ test("empty Oura note history reaches terminal source coverage", async () => {
     resource: "note",
   });
 
-  assert.equal(result.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v1|oura");
+  assert.equal(result.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v2|oura");
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   const completed = createScheduledJobs(
     createStoredAccount({ metadata: result.metadataPatch, sources }),

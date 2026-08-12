@@ -329,7 +329,10 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   },
   note: {
     metadataKey: JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
-    version: 1,
+    // v2 reopens sources completed under the legacy per-tag intervention
+    // normalizer. One bounded history pass writes neutral note spines, then
+    // the source becomes terminal again without rewriting old event kinds.
+    version: 2,
   },
 } as const satisfies Record<
   (typeof JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES)[number],

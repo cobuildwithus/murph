@@ -39,7 +39,9 @@ Current providers:
   Patterns currently derives an action factor only from the exact Oura `sauna`
   tag; other-source, symptom, context, outcome, and custom tags remain neutral.
   Free-text note values are dropped before raw snapshot and compact evidence
-  retention.
+  retention. Note-history coverage version 2 reopens sources completed under
+  the legacy intervention normalizer for one bounded semantic reimport, then
+  records terminal source coverage again.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
