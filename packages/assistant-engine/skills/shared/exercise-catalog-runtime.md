@@ -39,6 +39,9 @@ programmatically appropriate.
    sound more substantial. When `murph.attach_exercise_routine_card` is
    available, use one card when it alone fully answers the request. Do not
    replace that card with one or more long plain-text messages. Copy
+   the same card-owned presentation when the member asks to repeat, resend, or
+   improve the layout of a routine already present in the conversation. Styled
+   Telegram text is not a Rich Message and does not satisfy that request. Copy
    each selected catalog image URL, alt, and step exactly. Construct its source as
    `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`. Keep
    the returned image order when assigning that position. Use short concrete

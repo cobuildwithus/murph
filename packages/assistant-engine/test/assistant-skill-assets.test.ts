@@ -1466,6 +1466,12 @@ describe('assistant skill assets', () => {
       'Do not replace that card with one or more long plain-text messages.',
     )
     expect(compactCatalog).toContain(
+      'when the member asks to repeat, resend, or improve the layout of a routine already present in the conversation',
+    )
+    expect(compactCatalog).toContain(
+      'Styled Telegram text is not a Rich Message',
+    )
+    expect(compactCatalog).toContain(
       'do not pad a short plan to sound more substantial.',
     )
     expect(compactCatalog).toContain(
