@@ -4,6 +4,7 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   hostedVaultShareProjectionKindToScope,
 } from "@murphai/hosted-execution/vault-share";
+import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -64,7 +65,9 @@ describe.skipIf(!runPostgresProof)(
             grantorMemberId,
             id: shareIds[index] ?? `share_vault_fallback_${index}_${suffix}`,
             projectionKind: SLEEP_SCOPE.projectionKind,
-            projectionScopeJson: SLEEP_SCOPE,
+            projectionScopeJson: JSON.parse(
+              JSON.stringify(SLEEP_SCOPE),
+            ) as Prisma.InputJsonValue,
             projectionScopeKey: SLEEP_SCOPE_KEY,
             status: "granted",
           })),
