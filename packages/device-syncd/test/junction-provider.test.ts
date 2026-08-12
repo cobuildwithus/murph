@@ -559,11 +559,11 @@ test("Junction omitted timeseries config defaults to compact resources only", as
   );
   assert.equal(
     requests.every((url) =>
-      !url.includes("heartrate") &&
-      !url.includes("steps") &&
-      !url.includes("distance") &&
-      !url.includes("calories_active") &&
-      !url.includes("weight")
+      !url.includes("/heartrate/") &&
+      !url.includes("/steps/") &&
+      !url.includes("/distance/") &&
+      !url.includes("/calories_active/") &&
+      !url.includes("/weight/")
     ),
     true,
   );
@@ -656,11 +656,11 @@ test("Junction known dense programmatic timeseries config falls back to compact 
   );
   assert.equal(
     requests.every((url) =>
-      !url.includes("heartrate") &&
-      !url.includes("steps") &&
-      !url.includes("distance") &&
-      !url.includes("calories_active") &&
-      !url.includes("weight")
+      !url.includes("/heartrate/") &&
+      !url.includes("/steps/") &&
+      !url.includes("/distance/") &&
+      !url.includes("/calories_active/") &&
+      !url.includes("/weight/")
     ),
     true,
   );
@@ -13689,9 +13689,9 @@ test("Junction provider rejects unsupported configured resources", () => {
   );
   assert.throws(
     () => createJunctionProvider(async () => createJsonResponse({}), {
-      timeseriesResources: ["workout_distance"],
+      timeseriesResources: ["electrocardiogram_voltage"],
     }),
-    /Junction timeseries resources include unsupported resource\(s\): workout_distance\./u,
+    /Junction timeseries resources include unsupported resource\(s\): electrocardiogram_voltage\./u,
   );
 });
 
@@ -13970,6 +13970,9 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
 
   assert.equal(jobPayload.objectId, "workout-stream-1");
   assert.equal(jobPayload.resource, "workout_stream");
+  assert.equal(jobPayload.sourceInstanceId, "source-774aa2ab0133069118cf5c1e");
+  assert.equal(jobPayload.sourceType, "watch");
+  assert.equal(jobPayload.sport, "running");
   assert.equal(Object.hasOwn(jobPayload, "webhookDataJson"), false);
   assert.equal(
     requests.filter((url) => url.includes("/v2/timeseries/workouts/workout-stream-1/stream")).length,
