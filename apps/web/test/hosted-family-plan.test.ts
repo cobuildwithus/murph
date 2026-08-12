@@ -159,6 +159,7 @@ type FamilyPlanTxMock = Prisma.TransactionClient & {
     update: MockFn;
   };
   hostedAccountGroupBillingRef: Prisma.TransactionClient["hostedAccountGroupBillingRef"] & {
+    findFirst: MockFn;
     findMany: MockFn;
     findUnique: MockFn;
     update: MockFn;
@@ -8665,6 +8666,36 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
+  it("does not create Family Checkout while a future effect owns the group", async () => {
+    const tx = createTxMock({
+      group: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+    });
+    tx.hostedAccountGroupBillingRef.findFirst.mockResolvedValue({
+      stripeEffectClaimId: "opaque-future-family-checkout-claim",
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+  });
+
   it("updates exact mixed-tier capacity through one Stripe subscription", async () => {
     const tx = createTxMock({
       activeMembershipCount: 1,
@@ -8725,6 +8756,29 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupPlanCapacity.deleteMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
     expect(nextServerMocks.after).not.toHaveBeenCalled();
+  });
+
+  it("does not read Stripe while a future effect owns Family billing", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupBillingRef.findFirst.mockResolvedValue({
+      stripeEffectClaimId: "opaque-future-family-claim",
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(updateHostedFamilyPlanCapacities({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      targetCapacities: { edge: 2, max: 0, pulse: 1 },
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
   });
 
   it("revalidates an automatic-seat invite target under the capacity owner lock", async () => {
@@ -9436,6 +9490,7 @@ function createTxMock(input: {
       update: vi.fn().mockResolvedValue(group),
     },
     hostedAccountGroupBillingRef: {
+      findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(billingRef),
       update: vi.fn().mockResolvedValue({ ...billingRef }),

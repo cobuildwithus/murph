@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn<(task: () => Promise<void>) => void>(),
+  assertNoHostedMemberStripeEffectTx: vi.fn(),
   getPrisma: vi.fn(),
   prismaClient: {
     hostedMember: {
@@ -35,6 +36,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  assertNoHostedMemberStripeEffectTx: mocks.assertNoHostedMemberStripeEffectTx,
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock: mocks.withHostedMemberStripeMutationLock,
 }));
@@ -57,6 +59,7 @@ import {
 describe("upgradeHostedBillingPlan", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.assertNoHostedMemberStripeEffectTx.mockResolvedValue(undefined);
     vi.stubEnv(
       "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY",
       "bpc_edge_plan_change",
@@ -95,6 +98,26 @@ describe("upgradeHostedBillingPlan", () => {
     mocks.stripe.billingPortal.sessions.create.mockResolvedValue({
       url: "https://billing.stripe.test/session_fixture",
     });
+  });
+
+  test("does not create a Portal session while a future effect owns the member", async () => {
+    mocks.assertNoHostedMemberStripeEffectTx.mockRejectedValueOnce(
+      Object.assign(new Error("Billing is already changing."), {
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        retryable: true,
+      }),
+    );
+
+    await expect(upgradeHostedBillingPlan({
+      memberId: "member_fixture",
+      targetPlanCode: "launch_edge_monthly",
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

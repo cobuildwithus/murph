@@ -39,6 +39,7 @@ import {
 } from "./member-activation";
 import {
   acceptHostedMemberStripeCheckoutCompletionTx,
+  assertNoHostedMemberStripeEffectTx,
   clearHostedMemberLegacyTrialBillingUnderLockTx,
   clearHostedMemberStripeCheckoutAttemptForSessionTx,
   prepareHostedMemberStripeCheckoutCompletion,
@@ -93,6 +94,7 @@ import {
   applyHostedFamilyStripeCheckoutExpiredTx,
   applyHostedFamilyStripeCheckoutCompletedTx,
   applyHostedFamilyStripeSubscriptionUpdatedTx,
+  assertNoHostedFamilyStripeEffectTx,
   HOSTED_FAMILY_BILLING_PLAN_CODE,
   HOSTED_FAMILY_STRIPE_METADATA_KIND,
   lookupHostedAccountGroupIdByStripeSubscriptionId,
@@ -950,6 +952,16 @@ export async function cleanupHostedFamilySponsoredDirectSubscription(input: {
       ) {
         throw new HostedStripeFamilySponsoredCleanupPendingError();
       }
+      await Promise.all([
+        assertNoHostedFamilyStripeEffectTx({
+          groupId: familyClaim.groupId,
+          tx,
+        }),
+        assertNoHostedMemberStripeEffectTx({
+          memberId: input.memberId,
+          tx,
+        }),
+      ]);
 
       const familyBillingRef = await readHostedAccountGroupStripeBillingRef({
         groupId: familyClaim.groupId,

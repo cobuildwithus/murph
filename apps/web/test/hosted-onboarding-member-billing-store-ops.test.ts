@@ -2,9 +2,22 @@ import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  assertHostedStripeEffectClaimAbsent,
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+
+describe("hosted Stripe effect compatibility fence", () => {
+  it("allows an empty future claim and rejects an opaque owned claim", () => {
+    expect(() => assertHostedStripeEffectClaimAbsent(null)).not.toThrow();
+    expect(() => assertHostedStripeEffectClaimAbsent("opaque-future-claim"))
+      .toThrow(expect.objectContaining({
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        httpStatus: 409,
+        retryable: true,
+      }));
+  });
+});
 
 function createPrismaHarness(queryRaw = vi.fn().mockResolvedValue([])) {
   const tx = {

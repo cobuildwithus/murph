@@ -21,6 +21,7 @@ import {
   isHostedOnboardingError,
 } from "./errors";
 import {
+  assertNoHostedMemberStripeEffectTx,
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
   type HostedMemberStripeBillingRefSnapshot,
@@ -241,6 +242,10 @@ async function readHostedBillingPlanUpgradeOwner(input: {
           message: "Finish signup from your latest Murph link before continuing.",
         });
       }
+      await assertNoHostedMemberStripeEffectTx({
+        memberId: input.memberId,
+        tx,
+      });
       const billingRef = await readHostedMemberStripeBillingRef({
         memberId: input.memberId,
         prisma: tx,

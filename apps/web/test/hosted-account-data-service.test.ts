@@ -1233,6 +1233,54 @@ describe("deleteHostedAccountData", () => {
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
   });
 
+  it("does not suspend an owner while a future Family Stripe effect is pending", async () => {
+    const hostedMemberUpdateCalls: unknown[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      familyBillingRefRecords: [{
+        groupId: "hbag_family",
+        stripeEffectClaimId: "opaque-future-family-claim",
+      }],
+      hostedMemberUpdateCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(hostedMemberUpdateCalls).toEqual([]);
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).not.toHaveBeenCalled();
+  });
+
+  it("rechecks future Family Stripe effects before the final local delete", async () => {
+    const operationOrder: string[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => undefined,
+      operationOrder,
+      transactionFamilyBillingRefRecords: [{
+        groupId: "hbag_family",
+        stripeEffectClaimId: "opaque-raced-family-claim",
+      }],
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).toHaveBeenCalledOnce();
+    expect(operationOrder).not.toContain("delete:hostedMember");
+  });
+
   it("persists cleanup ownership in the canonical deletion transaction before member removal", async () => {
     const order: string[] = [];
     serviceMocks.persistHostedAccountDeletionCleanupTx.mockImplementation(async () => {
@@ -3878,6 +3926,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedAccountGroupBillingRef: {
       ...makeDeleteDelegate("hostedAccountGroupBillingRef"),
+      findFirst: async () =>
+        (transactionCallCount >= 2
+          ? input.transactionFamilyBillingRefRecords ?? input.familyBillingRefRecords
+          : input.familyBillingRefRecords)?.find(
+          (record) => record.stripeEffectClaimId != null,
+        ) ?? null,
       findUnique: async (args: { where: { groupId: string } }) =>
         (input.transactionFamilyBillingRefRecords ?? input.familyBillingRefRecords)?.find(
           (record) => record.groupId === args.where.groupId,
@@ -3900,6 +3954,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedMemberBillingRef: {
       ...makeDeleteDelegate("hostedMemberBillingRef"),
+      findFirst: async () => {
+        const record = transactionCallCount >= 2
+          ? input.transactionBillingRefRecord ?? input.billingRefRecord ?? null
+          : input.billingRefRecord ?? null;
+        return record?.stripeEffectClaimId != null ? record : null;
+      },
       findUnique: async () => input.transactionBillingRefRecord
         ?? input.billingRefRecord
         ?? null,
@@ -4217,12 +4277,14 @@ type HostedAccountDeletionPrismaTransactionFake = {
     findMany: () => Promise<Array<{ id: string }>>;
   };
   hostedAccountGroupBillingRef: HostedAccountDeletionPrismaDeleteDelegate & {
+    findFirst: () => Promise<unknown>;
     findUnique: (args: { where: { groupId: string } }) => Promise<unknown>;
   };
   hostedMember: HostedAccountDeletionPrismaDeleteDelegate & {
     updateMany: (args: unknown) => Promise<{ count: number }>;
   };
   hostedMemberBillingRef: HostedAccountDeletionPrismaDeleteDelegate & {
+    findFirst: () => Promise<unknown>;
     findUnique: () => Promise<unknown>;
   };
   hostedMemberSubscriptionCheckout: HostedAccountDeletionPrismaDeleteDelegate & {

@@ -158,6 +158,12 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMemberBillingRef: [
     'memberId String @unique @map("member_id")',
+    'stripeEffectClaimId String? @map("stripe_effect_claim_id")',
+    'stripeEffectKind String? @map("stripe_effect_kind")',
+    'stripeEffectTargetPlanCode String? @map("stripe_effect_target_plan_code")',
+    'stripeEffectClaimedAt DateTime? @map("stripe_effect_claimed_at")',
+    'stripeEffectExecutionId String? @map("stripe_effect_execution_id")',
+    'stripeEffectExecutionStartedAt DateTime? @map("stripe_effect_execution_started_at")',
     'stripeCheckoutSessionLookupKey String? @unique @map("stripe_checkout_session_lookup_key")',
     'stripeCheckoutSessionIdEncrypted String? @map("stripe_checkout_session_id_encrypted")',
     'stripeCustomerLookupKey String? @unique @map("stripe_customer_lookup_key")',
@@ -915,6 +921,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const stripeEffectCompatibilityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260812150000_stripe_effect_compatibility_cutover/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -1094,8 +1107,18 @@ describe("hosted Prisma baseline migration", () => {
       "20260810150000_hosted_usage_credit_grant_slot_release",
       "20260811160000_add_group_sponsorship_funding_alias_publication",
       "20260811190000_hosted_linq_provider_event_diagnostics_retention_index",
+      "20260812150000_stripe_effect_compatibility_cutover",
       "migration_lock.toml",
     ]);
+    expect(stripeEffectCompatibilityMigrationSql).toContain(
+      'ALTER TABLE "hosted_member_billing_ref"',
+    );
+    expect(stripeEffectCompatibilityMigrationSql).toContain(
+      'ALTER TABLE "hosted_account_group_billing_ref"',
+    );
+    expect(stripeEffectCompatibilityMigrationSql).not.toMatch(
+      /UPDATE|CREATE\s+(?:UNIQUE\s+)?INDEX|NOT\s+NULL/iu,
+    );
     expect(hostedPendingGroupSetupMigrationSql).toContain(
       'CREATE TABLE "hosted_pending_group_setup"',
     );

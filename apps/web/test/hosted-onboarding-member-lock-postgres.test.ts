@@ -19,9 +19,14 @@ import {
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
 import { ensureHostedCompanionMemberId } from "@/src/lib/hosted-onboarding/companion-member-access";
 import {
+  issueHostedFamilyInvite,
+  updateHostedFamilyPlanCapacities,
+} from "@/src/lib/hosted-onboarding/family-plan";
+import {
   HostedMemberStripeMutationLockBusyError,
   withHostedMemberStripeMutationLockForOps,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { ensureHostedMemberStripeCustomer } from "@/src/lib/hosted-onboarding/hosted-member-stripe-customer";
 import {
   lookupHostedMemberByVerifiedEmailAddress,
   readHostedMemberBillingSnapshot,
@@ -395,6 +400,156 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         });
         await disconnectClients([owner, contender]);
+      }
+    });
+
+    it.each([
+      { kind: "direct-customer" as const },
+      { kind: "family-capacity" as const },
+      { kind: "account-deletion" as const },
+      { kind: "account-deletion-beneficiary" as const },
+      { kind: "account-deletion-claim-beneficiary" as const },
+      { kind: "family-authority" as const },
+    ])("makes a waiting legacy $kind writer observe a committed future claim", async ({
+      kind,
+    }) => {
+      const claimOwner = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_compatibility_${fixtureId}`;
+      const beneficiaryMemberId = `hbm_compatibility_beneficiary_${fixtureId}`;
+      const groupId = `hbag_compatibility_${fixtureId}`;
+      const deletionMemberId = kind === "account-deletion-beneficiary"
+        || kind === "account-deletion-claim-beneficiary"
+        ? beneficiaryMemberId
+        : memberId;
+      const claimPrepared = createDeferred();
+      const releaseClaim = createDeferred();
+      let writerPromise: Promise<unknown> | null = null;
+      stripeProvider.subscriptionsRetrieve.mockClear();
+
+      await observer.hostedMember.create({
+        data: {
+          billingStatus: HostedBillingStatus.active,
+          id: memberId,
+        },
+      });
+      await observer.hostedMember.create({
+        data: {
+          billingStatus: HostedBillingStatus.active,
+          id: beneficiaryMemberId,
+        },
+      });
+      await observer.hostedAccountGroup.create({
+        data: {
+          billingStatus: HostedBillingStatus.active,
+          id: groupId,
+          ownerMemberId: memberId,
+        },
+      });
+      await observer.hostedAccountGroupMembership.create({
+        data: {
+          groupId,
+          id: `hbagm_compatibility_${fixtureId}`,
+          memberId: beneficiaryMemberId,
+          planCode: "pulse",
+          role: "member",
+          status: kind === "account-deletion-claim-beneficiary" ? "removed" : "active",
+        },
+      });
+      const [writerBackend] = await writer.$queryRaw<Array<{ pid: number }>>(
+        Prisma.sql`SELECT pg_backend_pid()::int AS pid`,
+      );
+      if (!writerBackend) {
+        throw new Error("Expected the compatibility writer PostgreSQL backend id.");
+      }
+
+      const claimTransaction = claimOwner.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT "id"
+          FROM "hosted_member"
+          WHERE "id" = ${deletionMemberId}
+          FOR UPDATE
+        `;
+        if (kind === "direct-customer") {
+          await tx.hostedMemberBillingRef.create({
+            data: {
+              memberId,
+              stripeEffectClaimedAt: new Date("2026-08-12T12:00:00.000Z"),
+              stripeEffectClaimId: `member-customer:${fixtureId}`,
+              stripeEffectKind: "member.customer-create",
+            },
+          });
+        } else {
+          await tx.hostedAccountGroupBillingRef.create({
+            data: {
+              groupId,
+              stripeEffectClaimedAt: new Date("2026-08-12T12:00:00.000Z"),
+              stripeEffectClaimId: `family-capacity:${fixtureId}`,
+              stripeEffectBeneficiaryMemberId: kind === "account-deletion-claim-beneficiary"
+                ? beneficiaryMemberId
+                : null,
+              stripeEffectKind: "family.capacity",
+            },
+          });
+        }
+        claimPrepared.resolve();
+        await releaseClaim.promise;
+      }, { timeout: transactionTimeoutMs });
+
+      try {
+        await claimPrepared.promise;
+        writerPromise = kind === "direct-customer"
+          ? ensureHostedMemberStripeCustomer({ memberId, prisma: writer })
+          : kind === "family-capacity"
+            ? updateHostedFamilyPlanCapacities({
+                groupId,
+                ownerMemberId: memberId,
+                prisma: writer,
+                targetCapacities: { edge: 0, max: 0, pulse: 2 },
+              })
+            : kind === "account-deletion"
+                || kind === "account-deletion-beneficiary"
+                || kind === "account-deletion-claim-beneficiary"
+              ? deleteHostedAccountData({
+                  memberId: deletionMemberId,
+                  prisma: writer,
+                  request: new Request("https://app.example.test/settings"),
+                })
+              : issueHostedFamilyInvite({
+                  groupId,
+                  invitedByMemberId: memberId,
+                  prisma: writer,
+                  targetEmail: "invitee@example.test",
+                });
+
+        await waitForPostgresLock({
+          observer,
+          pid: writerBackend.pid,
+        });
+        releaseClaim.resolve();
+        await claimTransaction;
+        await expect(writerPromise).rejects.toMatchObject({
+          code: "HOSTED_STRIPE_EFFECT_PENDING",
+          retryable: true,
+        });
+        await expect(observer.hostedMember.findUnique({
+          select: { suspendedAt: true },
+          where: { id: deletionMemberId },
+        })).resolves.toEqual({ suspendedAt: null });
+        expect(stripeProvider.subscriptionsRetrieve).not.toHaveBeenCalled();
+      } finally {
+        releaseClaim.resolve();
+        await Promise.allSettled([
+          claimTransaction,
+          ...(writerPromise ? [writerPromise] : []),
+        ]);
+        await observer.hostedAccountGroup.deleteMany({ where: { id: groupId } });
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [beneficiaryMemberId, memberId] } },
+        });
+        await disconnectClients([claimOwner, observer, writer]);
       }
     });
 

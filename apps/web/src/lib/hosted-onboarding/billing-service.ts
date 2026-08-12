@@ -25,6 +25,7 @@ import {
   type HostedOnboardingError,
 } from "./errors";
 import {
+  assertNoHostedMemberStripeEffectTx,
   bindHostedMemberStripeCheckoutSessionTx,
   clearHostedMemberStripeCheckoutAttemptTx,
   prepareHostedMemberStripeCheckoutSession,
@@ -329,6 +330,10 @@ async function prepareHostedBillingCheckoutAttempt(input: {
       message: "Your hosted member record was not found.",
     });
   }
+  await assertNoHostedMemberStripeEffectTx({
+    memberId: input.memberId,
+    tx: input.tx,
+  });
   if (isHostedMemberSuspended(member.suspendedAt)) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",

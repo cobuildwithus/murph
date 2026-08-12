@@ -101,6 +101,8 @@ import {
 } from "./member-activation-runtime-wake";
 import { createHostedMember } from "./hosted-member-store";
 import {
+  assertHostedStripeEffectClaimAbsent,
+  assertNoHostedMemberStripeEffectTx,
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
@@ -1339,6 +1341,20 @@ export async function readHostedAccountGroupStripeBillingRef(input: {
   return billingRef ? projectHostedAccountGroupBillingRefSnapshot(billingRef, prisma) : null;
 }
 
+export async function assertNoHostedFamilyStripeEffectTx(input: {
+  groupId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const billingRef = await input.tx.hostedAccountGroupBillingRef.findFirst({
+    select: { stripeEffectClaimId: true },
+    where: {
+      groupId: input.groupId,
+      stripeEffectClaimId: { not: null },
+    },
+  });
+  assertHostedStripeEffectClaimAbsent(billingRef?.stripeEffectClaimId);
+}
+
 /**
  * A Family membership can own billing before it grants active access. Direct
  * Checkout must respect the persisted Family attempt or subscription as well
@@ -2442,6 +2458,13 @@ async function createOrResumeHostedFamilyBillingCheckout(
     }
 
     await lockHostedMemberRow(tx, group.ownerMemberId);
+    await Promise.all([
+      assertNoHostedFamilyStripeEffectTx({ groupId: group.id, tx }),
+      assertNoHostedMemberStripeEffectTx({
+        memberId: group.ownerMemberId,
+        tx,
+      }),
+    ]);
     if (hasHostedAccountGroupAccess(group)) {
       return {
         alreadyActive: true,
@@ -3000,6 +3023,13 @@ async function upgradeHostedFamilyDirectPaidSubscription(
           retryable: true,
         });
       }
+      await Promise.all([
+        assertNoHostedFamilyStripeEffectTx({ groupId: input.group.id, tx }),
+        assertNoHostedMemberStripeEffectTx({
+          memberId: input.group.ownerMemberId,
+          tx,
+        }),
+      ]);
       return upgradeHostedFamilyDirectPaidSubscriptionUnderOwnerLock(input);
     },
   });
@@ -3425,6 +3455,7 @@ export async function updateHostedFamilyPlanCapacities(input: {
           message: "Family billing must be active before changing capacity.",
         });
       }
+      await assertNoHostedFamilyStripeEffectTx({ groupId: group.id, tx });
       await assertHostedFamilyOwnerCanStartBillingTx({
         allowDirectPaidOwner: true,
         groupId: group.id,
@@ -4180,6 +4211,10 @@ export async function issueHostedFamilyInviteTx(input: {
   }
 
   await lockHostedMemberRow(input.tx, input.invitedByMemberId);
+  await assertNoHostedFamilyStripeEffectTx({
+    groupId: group.id,
+    tx: input.tx,
+  });
   const capacities = await readConfirmedHostedFamilyPlanCapacitiesTx({
     group,
     tx: input.tx,
@@ -4968,6 +5003,16 @@ export async function acceptHostedFamilyInviteTx(input: {
 
   await lockHostedMemberRow(input.tx, invite.group.ownerMemberId);
   await lockHostedMemberRow(input.tx, input.acceptedMemberId);
+  await Promise.all([
+    assertNoHostedFamilyStripeEffectTx({
+      groupId: invite.groupId,
+      tx: input.tx,
+    }),
+    assertNoHostedMemberStripeEffectTx({
+      memberId: input.acceptedMemberId,
+      tx: input.tx,
+    }),
+  ]);
   const existingGroupMembership = await input.tx.hostedAccountGroupMembership.findFirst({
     select: { id: true },
     where: {
@@ -5199,6 +5244,7 @@ export async function updateHostedFamilyMemberPlan(input: {
       });
     }
     await lockHostedMemberRow(tx, group.ownerMemberId);
+    await assertNoHostedFamilyStripeEffectTx({ groupId: group.id, tx });
     const [membership, capacities, assignments, pendingElsewhere] = await Promise.all([
       tx.hostedAccountGroupMembership.findFirst({
         select: { id: true, pendingPlanCode: true, planCode: true, updatedAt: true },
@@ -5325,6 +5371,7 @@ export async function updateHostedFamilyMemberPlan(input: {
               message: "Family billing must be active before changing member tiers.",
             });
           }
+          await assertNoHostedFamilyStripeEffectTx({ groupId: group.id, tx });
           await assertHostedFamilyOwnerCanStartBillingTx({
             allowDirectPaidOwner: true,
             groupId: group.id,
@@ -5477,6 +5524,10 @@ export async function removeHostedFamilyMemberTx(input: {
   }
 
   await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  await assertNoHostedFamilyStripeEffectTx({
+    groupId: group.id,
+    tx: input.tx,
+  });
   const membership = await input.tx.hostedAccountGroupMembership.findFirst({
     select: { id: true, pendingPlanCode: true },
     where: {
@@ -5533,6 +5584,11 @@ export async function revokeHostedFamilyInviteTx(input: {
     });
   }
 
+  await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  await assertNoHostedFamilyStripeEffectTx({
+    groupId: group.id,
+    tx: input.tx,
+  });
   const result = await input.tx.hostedAccountGroupInvite.updateMany({
     data: {
       status: "revoked",

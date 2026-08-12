@@ -19,6 +19,7 @@ import {
   isHostedOnboardingError,
 } from "./errors";
 import {
+  assertNoHostedMemberStripeEffectTx,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
   readHostedMemberStripeBillingRef,
   withHostedMemberStripeMutationLock,
@@ -134,6 +135,10 @@ async function scheduleHostedBillingPlanSwitchWithLockedOwner(input: {
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,
     prisma: input.tx,
+  });
+  await assertNoHostedMemberStripeEffectTx({
+    memberId: input.memberId,
+    tx: input.tx,
   });
   assertHostedMemberOwnPaidBillingAllowed({
     ...member,

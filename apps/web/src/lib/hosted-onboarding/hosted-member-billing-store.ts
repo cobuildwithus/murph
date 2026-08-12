@@ -171,6 +171,31 @@ export class HostedMemberStripeMutationLockBusyError extends Error {
   }
 }
 
+export function assertHostedStripeEffectClaimAbsent(
+  claimId: string | null | undefined,
+): void {
+  if (!claimId) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_STRIPE_EFFECT_PENDING",
+    httpStatus: 409,
+    message: "Billing is already changing. Try again shortly.",
+    retryable: true,
+  });
+}
+
+export async function assertNoHostedMemberStripeEffectTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const billingRef = await input.tx.hostedMemberBillingRef.findUnique({
+    select: { stripeEffectClaimId: true },
+    where: { memberId: input.memberId },
+  });
+  assertHostedStripeEffectClaimAbsent(billingRef?.stripeEffectClaimId);
+}
+
 export async function withHostedMemberStripeMutationLock<TResult>(input: {
   memberId: string;
   prisma: PrismaClient;

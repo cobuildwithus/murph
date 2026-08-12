@@ -1590,6 +1590,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     const hostedAccountGroupMembershipFindFirst = vi.fn().mockResolvedValue(null);
     const prisma = withPrismaTransaction({
       hostedAccountGroupBillingRef: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockResolvedValue({
           billedSeatCount: 2,
         }),
@@ -1621,6 +1622,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           billingRef: null,
           billingStatus: HostedBillingStatus.not_started,
         }),
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMemberIdentity: {
         findUnique: vi.fn().mockResolvedValue(null),
@@ -1854,6 +1858,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           suspendedAt: null,
         }),
       },
+      hostedAccountGroupBillingRef: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
       hostedAccountGroupInvite: {
         count: vi.fn().mockResolvedValue(0),
         findMany: vi.fn().mockResolvedValue([{ inviteCode: invite.inviteCode }]),
@@ -1876,6 +1883,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           billingRef: null,
           billingStatus: HostedBillingStatus.not_started,
         }),
+      },
+      hostedMemberBillingRef: {
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMemberIdentity: {
         findUnique: vi.fn().mockResolvedValue(null),

@@ -25,7 +25,10 @@ import {
   hostedOnboardingError,
   isHostedOnboardingError,
 } from "../hosted-onboarding/errors";
-import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-member-billing-store";
+import {
+  assertHostedStripeEffectClaimAbsent,
+  readHostedMemberStripeBillingRef,
+} from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import {
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
@@ -1022,6 +1025,10 @@ async function deleteHostedAccountDataInternal(input: {
       now: deletionStartedAt,
       prisma: tx,
     });
+    await assertNoHostedStripeEffectClaimsForAccountDeletionTx({
+      memberIds: transactionDeletionMemberIds,
+      prisma: tx,
+    });
     const transactionDeletionTargets = await readHostedAccountDeletionExternalTargets({
       memberId: input.memberId,
       prisma: tx,
@@ -1354,6 +1361,10 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         prisma: tx,
       });
     }
+    await assertNoHostedStripeEffectClaimsForAccountDeletionTx({
+      memberIds,
+      prisma: tx,
+    });
     await tx.hostedMember.updateMany({
       data: {
         suspendedAt: input.now,
@@ -1384,6 +1395,48 @@ async function refreshHostedMembersAccountDeletionFenceTx(input: {
       id: buildStringInFilter(input.memberIds),
     },
   });
+}
+
+async function assertNoHostedStripeEffectClaimsForAccountDeletionTx(input: {
+  memberIds: readonly string[];
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const memberIdFilter = buildStringInFilter(input.memberIds);
+  const [memberClaim, familyClaim] = await Promise.all([
+    input.prisma.hostedMemberBillingRef.findFirst({
+      select: { stripeEffectClaimId: true },
+      where: {
+        memberId: memberIdFilter,
+        stripeEffectClaimId: { not: null },
+      },
+    }),
+    input.prisma.hostedAccountGroupBillingRef.findFirst({
+      select: { stripeEffectClaimId: true },
+      where: {
+        OR: [
+          { stripeEffectBeneficiaryMemberId: memberIdFilter },
+          {
+            group: {
+              OR: [
+                { ownerMemberId: memberIdFilter },
+                {
+                  memberships: {
+                    some: {
+                      memberId: memberIdFilter,
+                      status: "active",
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        stripeEffectClaimId: { not: null },
+      },
+    }),
+  ]);
+  assertHostedStripeEffectClaimAbsent(memberClaim?.stripeEffectClaimId);
+  assertHostedStripeEffectClaimAbsent(familyClaim?.stripeEffectClaimId);
 }
 
 function uniqueStrings(values: readonly string[]): string[] {

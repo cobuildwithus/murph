@@ -482,6 +482,32 @@ describe("createHostedBillingCheckout", () => {
     );
   });
 
+  it("does not create Checkout while a future Stripe effect owns the member", async () => {
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+    const prisma = makePrisma({
+      billingRef: {
+        memberId: "member_123",
+        stripeCustomerIdEncrypted: null,
+        stripeCustomerLookupKey: null,
+        stripeEffectClaimId: "opaque-future-member-claim",
+        stripeSubscriptionIdEncrypted: null,
+        stripeSubscriptionLookupKey: null,
+      },
+    });
+
+    await expect(createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["Pulse", "launch_monthly", "price_monthly_123"],
     ["Edge", "launch_edge_monthly", "price_edge_monthly_123"],
@@ -1310,6 +1336,7 @@ type BillingRefFixture = {
   memberId: string;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
+  stripeEffectClaimId?: string | null;
   stripeCheckoutSessionIdEncrypted?: string | null;
   stripeCheckoutSessionLookupKey?: string | null;
   stripeCustomerIdEncrypted: string | null;

@@ -544,8 +544,12 @@ test("phone-bound invite to a full plan is not web-acceptable", async () => {
 
 test("revoke cancels a pending invite for the owner", async () => {
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([{ id: "m_owner" }]),
     hostedAccountGroup: {
       findUnique: vi.fn().mockResolvedValue(GROUP),
+    },
+    hostedAccountGroupBillingRef: {
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     hostedAccountGroupInvite: {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -591,8 +595,12 @@ test("revoke rejects a non-owner", async () => {
 
 test("revoke returns false when no pending invite matches", async () => {
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([{ id: "m_owner" }]),
     hostedAccountGroup: {
       findUnique: vi.fn().mockResolvedValue(GROUP),
+    },
+    hostedAccountGroupBillingRef: {
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     hostedAccountGroupInvite: {
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
