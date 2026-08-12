@@ -211,6 +211,7 @@ The adapter should:
 
 Strong recommendations:
 - Reuse `makeNormalizedDeviceBatch()` and the helpers in `shared-normalization.ts`.
+- Declare bounded `authoritativeEventSets` only for a complete, versioned provider resource snapshot with stable resource and facet identities. Core's existing external-reference reconciliation owns revisions and tombstones for omitted facets; partial responses and unversioned snapshots must not claim authority.
 - Retain unsupported-but-useful upstream sections as `snapshot-section:*` evidence parts instead of silently discarding them.
 - Prefer existing event kinds such as `observation`, `sleep_session`, and `activity_session`.
 - Do not retain high-frequency provider timeseries as full sample-array evidence by default. Fetch only product-needed timeseries, reduce them to compact facts in memory, and persist only tiny evidence parts unless an explicit debug/deep-inspection feature proves the need for full-fidelity retention. Core rejects oversized provider sample batches; do the reduction in the adapter before canonical import.

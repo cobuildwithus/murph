@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "More complete connected-health summaries",
     "summary": "Murph can now use sleep latency, separate activity-intensity minutes, additional heart-rate fields, and bounded profile and cycle facts from connected health sources.",
-    "details": "Reported gender stays distinct from canonical sex. Cycle predictions, unfamiliar values, and legacy length fields remain bounded supporting evidence instead of being promoted to health truth.",
+    "details": "Activity intensity keeps the source's minute values. Newer profile and cycle corrections now replace changed facts and remove omitted facts, while invalid dates, predictions, unfamiliar values, and legacy length fields remain bounded supporting evidence.",
     "relevanceTags": ["wearables", "sleep", "activity", "heart-rate", "cycle"],
     "sourcePullRequests": [1702]
   }
