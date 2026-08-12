@@ -792,7 +792,18 @@ export function enqueueDeviceSyncJobInTransaction(
       where account_id = ?
         and provider = ?
         and dedupe_key = ?
-        and status in ('queued', 'running')
+        and (
+          status in ('queued', 'running')
+          or (
+            status = 'succeeded'
+            and provider = 'junction'
+            and kind = 'resource'
+            and coalesce(json_extract(payload_json, '$.resourceCategory'), '') = 'timeseries'
+            and coalesce(json_extract(payload_json, '$.resource'), '') in ('blood_oxygen', 'stress_level')
+            and json_type(payload_json, '$.temporalAuthorityDayKey') = 'text'
+            and json_type(payload_json, '$.temporalAuthorityTimeZone') = 'text'
+          )
+        )
         and not (
           status = 'running'
           and lease_expires_at is not null

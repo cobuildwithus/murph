@@ -50,7 +50,15 @@ Current providers:
   imports keep the ordinary compact daily facts but never publish day-scoped
   temporal features from partial windows. Each authorized date fetch replaces
   the fixed feature-facet set through canonical upserts and retractions, so an
-  insufficient or capped retry removes older derived facts.
+  insufficient or capped retry removes older derived facts. The temporal
+  reconcile horizon is clamped to 1–14 authoritative vault-local days: the
+  newest day imports inline, while up to 26 older resource/day coordinates use
+  the existing durable job queue in newest-first order. Succeeded job history
+  proves populated or successful-empty completion across restarts and repeated
+  scheduling; failed, yielded, or dead jobs grant no authority. Each child owns
+  one resource/day collection and one canonical import transaction. Collection
+  remains capped at 100 pages and 25,000 records, with at most three attempts
+  per page request, and full timeseries values are never retained.
 - Extended source/resource completion has one writable owner:
   `junctionExtendedHistoryCoverage`. Its `mN` prefix is the normalization
   coverage-policy version; adding support for a previously noncanonical shape

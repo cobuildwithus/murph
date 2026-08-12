@@ -10199,6 +10199,9 @@ describe("hosted device-sync runtime", () => {
       assert.equal(populatedPoints.some((point) =>
         point.metricKey.startsWith("stress-") && point.metricKey !== "stress-level"
       ), true);
+      assert.equal((await service.runWorkerOnce())?.kind, "resource");
+      currentNow = new Date(Date.parse(initialNow) + 1).toISOString();
+      assert.equal((await service.runWorkerOnce())?.kind, "resource");
 
       phase = "empty";
       currentNow = new Date(Date.parse(initialNow) + 30 * 60_000).toISOString();
@@ -10218,11 +10221,12 @@ describe("hosted device-sync runtime", () => {
       assert.equal(replacedPoints.some((point) =>
         point.metricKey.startsWith("stress-") && point.metricKey !== "stress-level"
       ), false);
-      assert.deepEqual(requestedWindows, [
-        [dayStart, dayEnd],
-        [dayStart, dayEnd],
-        [dayStart, dayEnd],
-      ]);
+      assert.equal(requestedWindows.length, 7);
+      assert.equal(requestedWindows.filter(([start, end]) =>
+        start === dayStart && end === dayEnd
+      ).length, 3);
+      assert.deepEqual(requestedWindows[0], [dayStart, dayEnd]);
+      assert.deepEqual(requestedWindows.at(-1), [dayStart, dayEnd]);
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -10447,7 +10451,7 @@ describe("hosted device-sync runtime", () => {
             return createTestJsonResponse({ groups: { garmin: [{
               data: [{
                 id: "blood-oxygen-hosted-stable",
-                timestamp: "2026-04-02T08:00:00.000Z",
+                timestamp: "2026-04-01T08:00:00.000Z",
                 unit: "%",
                 value: 97,
               }],
@@ -10476,7 +10480,7 @@ describe("hosted device-sync runtime", () => {
               throw new Error("The hosted yield should abort the slow resource request.");
             }
             return createTestJsonResponse({ groups: { garmin: [{
-              data: [{ start: "2026-04-02T09:00:00.000Z", value: 31 }],
+              data: [{ start: "2026-04-01T09:00:00.000Z", value: 31 }],
               source: { provider: "garmin", type: "watch" },
             }] } });
           }

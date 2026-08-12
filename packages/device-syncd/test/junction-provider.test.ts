@@ -433,6 +433,10 @@ test("Junction provider defaults fetch every default summary resource", async ()
         });
       }
 
+      if (new URL(url).pathname.startsWith("/v2/timeseries/")) {
+        return createJsonResponse({ groups: {} });
+      }
+
       throw new Error(`Unexpected request: ${url}`);
     },
   });
@@ -470,7 +474,13 @@ test("Junction provider defaults fetch every default summary resource", async ()
   assert.deepEqual(new Set(summaryResources), new Set([...JUNCTION_DEFAULT_SUMMARY_RESOURCES]));
   assert.equal(profileSearchParams.has("start_date"), false);
   assert.equal(profileSearchParams.has("end_date"), false);
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 3);
+  assert.deepEqual(
+    importedSnapshots.slice(1).map((snapshot) =>
+      Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {})
+    ),
+    [["blood_oxygen"], ["stress_level"]],
+  );
 });
 
 test("Junction omitted timeseries config defaults to compact resources only", async () => {
@@ -7143,6 +7153,293 @@ test("Junction reconcile keeps summaries current while compact timeseries stays 
     [
       ["2026-04-01T00:00:00.000Z", "2026-04-02T00:00:00.000Z"],
     ],
+  );
+});
+
+test("Junction one-day reconcile still imports the newest lag-complete temporal day", async () => {
+  const requestedWindows: Array<[string | null, string | null]> = [];
+  const authority: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/blood_oxygen/grouped") {
+      requestedWindows.push([
+        url.searchParams.get("start_date"),
+        url.searchParams.get("end_date"),
+      ]);
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    reconcileDays: 1,
+    timeseriesResources: ["blood_oxygen"],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T00:00:00.000Z",
+      importSnapshot: async (_snapshot, options) => {
+        if (options) {
+          authority.push(options);
+        }
+        return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requestedWindows, [[
+    "2026-04-01T00:00:00.000Z",
+    "2026-04-02T00:00:00.000Z",
+  ]]);
+  assert.deepEqual(
+    (authority[0] as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "acct-junction-1",
+      dayKey: "2026-04-01",
+      resources: ["blood_oxygen"],
+      revisionAt: "2026-04-03T00:00:00.000Z",
+      timeZone: "UTC",
+    },
+  );
+});
+
+test("Junction reconcile schedules the remaining temporal horizon newest-first as stable day jobs", async () => {
+  const requestedWindows: Array<[string, string | null, string | null]> = [];
+  const imports: Array<{ options: unknown; snapshot: unknown }> = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    const resource = url.pathname.match(
+      /^\/v2\/timeseries\/junction-user-1\/(blood_oxygen|stress_level)\/grouped$/u,
+    )?.[1];
+    if (resource) {
+      requestedWindows.push([
+        resource,
+        url.searchParams.get("start_date"),
+        url.searchParams.get("end_date"),
+      ]);
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    reconcileDays: 3,
+    timeseriesResources: ["blood_oxygen", "stress_level"],
+  });
+  const context = createJunctionJobContext({
+    now: "2026-04-06T00:00:00.000Z",
+    importSnapshot: async (snapshot, options) => {
+      imports.push({ options, snapshot });
+      return { canonicalEventCount: 0, durableDeliveryAccepted: true };
+    },
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    context,
+    createJob("reconcile", {
+      windowStart: "2026-04-03T00:00:00.000Z",
+      windowEnd: "2026-04-06T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(requestedWindows, [
+    ["blood_oxygen", "2026-04-04T00:00:00.000Z", "2026-04-05T00:00:00.000Z"],
+    ["stress_level", "2026-04-04T00:00:00.000Z", "2026-04-05T00:00:00.000Z"],
+  ]);
+  const catchUpJobs = result.scheduledJobs ?? [];
+  assert.equal(catchUpJobs.length, 4);
+  assert.deepEqual(
+    catchUpJobs.map((job) => ({
+      availableAt: job.availableAt,
+      dayKey: job.payload?.temporalAuthorityDayKey,
+      priority: job.priority,
+      resource: job.payload?.resource,
+      windowEnd: job.payload?.windowEnd,
+      windowStart: job.payload?.windowStart,
+    })),
+    [
+      {
+        availableAt: "2026-04-06T00:00:00.000Z",
+        dayKey: "2026-04-03",
+        priority: 45,
+        resource: "blood_oxygen",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      {
+        availableAt: "2026-04-06T00:00:00.000Z",
+        dayKey: "2026-04-03",
+        priority: 45,
+        resource: "stress_level",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      {
+        availableAt: "2026-04-06T00:00:00.001Z",
+        dayKey: "2026-04-02",
+        priority: 45,
+        resource: "blood_oxygen",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+      {
+        availableAt: "2026-04-06T00:00:00.001Z",
+        dayKey: "2026-04-02",
+        priority: 45,
+        resource: "stress_level",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+    ],
+  );
+  assert.equal(new Set(catchUpJobs.map((job) => job.dedupeKey)).size, 4);
+
+  const firstCatchUp = requireValue(catchUpJobs[0], "Expected the newest blood-oxygen catch-up job.");
+  const firstCatchUpPayload = requireValue(
+    firstCatchUp.payload,
+    "Expected the temporal catch-up payload.",
+  );
+  await executeJunctionJob(
+    provider,
+    context,
+    {
+      ...createJob("resource", firstCatchUpPayload),
+      dedupeKey: firstCatchUp.dedupeKey ?? null,
+      priority: firstCatchUp.priority ?? 0,
+    },
+  );
+  assert.deepEqual(requestedWindows.at(-1), [
+    "blood_oxygen",
+    "2026-04-03T00:00:00.000Z",
+    "2026-04-04T00:00:00.000Z",
+  ]);
+  assert.deepEqual(
+    (imports.at(-1)?.options as { completeSourceDay?: unknown })?.completeSourceDay,
+    {
+      connectionId: "acct-junction-1",
+      dayKey: "2026-04-03",
+      resources: ["blood_oxygen"],
+      revisionAt: "2026-04-06T00:00:00.000Z",
+      timeZone: "UTC",
+    },
+  );
+  assert.deepEqual(
+    (imports.at(-1)?.snapshot as { timeseries?: unknown }).timeseries,
+    { blood_oxygen: [] },
+  );
+});
+
+test("Junction temporal recovery clamps its composed horizon to fourteen days", async () => {
+  let temporalRequests = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    if (url.pathname.startsWith("/v2/timeseries/junction-user-1/")) {
+      temporalRequests += 1;
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    reconcileDays: 99,
+    timeseriesResources: ["blood_oxygen", "stress_level"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({ now: "2026-04-20T00:00:00.000Z" }),
+    createJob("reconcile", {
+      windowStart: "2026-01-01T00:00:00.000Z",
+      windowEnd: "2026-04-20T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(temporalRequests, 2);
+  assert.equal(result.scheduledJobs?.length, 26);
+  assert.deepEqual(
+    result.scheduledJobs?.slice(0, 2).map((job) => job.payload?.temporalAuthorityDayKey),
+    ["2026-04-17", "2026-04-17"],
+  );
+  assert.deepEqual(
+    result.scheduledJobs?.slice(-2).map((job) => job.payload?.temporalAuthorityDayKey),
+    ["2026-04-05", "2026-04-05"],
+  );
+});
+
+test("Junction temporal catch-up yields and upstream failures remain retryable", async () => {
+  const payload = {
+    resource: "stress_level",
+    resourceCategory: "timeseries",
+    temporalAuthorityDayKey: "2026-04-03",
+    temporalAuthorityTimeZone: "UTC",
+    windowEnd: "2026-04-04T00:00:00.000Z",
+    windowStart: "2026-04-03T00:00:00.000Z",
+  };
+  const yieldedProvider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    throw new Error(`Unexpected request after yield: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      yieldedProvider,
+      createJunctionJobContext({
+        now: "2026-04-06T00:00:00.000Z",
+        shouldYield: () => true,
+      }),
+      createJob("resource", payload),
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_TEMPORAL_AUTHORITY_JOB_YIELDED");
+      assert.equal(error.retryable, true);
+      return true;
+    },
+  );
+
+  const failedProvider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/stress_level/grouped") {
+      return createJsonResponse({ code: "upstream_unavailable" }, 503);
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, { timeseriesResources: ["stress_level"] });
+  await assert.rejects(
+    () => executeJunctionJob(
+      failedProvider,
+      createJunctionJobContext({ now: "2026-04-06T00:00:00.000Z" }),
+      createJob("resource", payload),
+    ),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.retryable, true);
+      return true;
+    },
   );
 });
 

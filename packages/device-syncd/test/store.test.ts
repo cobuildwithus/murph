@@ -3022,6 +3022,128 @@ test("device sync store reuses queued jobs with the same dedupe key", async () =
   }
 });
 
+test("device sync store retains completed Junction temporal days across restart and drains newer backlog first", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-temporal-history");
+  const databasePath = path.join(tempDir, "state.sqlite");
+  let store = new SqliteDeviceSyncStore(databasePath);
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-temporal-history",
+      displayName: "Junction",
+      scopes: [],
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const completed = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T00:00:00.000Z",
+      dedupeKey: "junction-temporal-authority:completed",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-03",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    assert.equal(
+      store.claimDueJob("worker-before-restart", "2026-04-06T00:00:00.000Z", 60_000)?.id,
+      completed.id,
+    );
+    store.completeJob(completed.id, "2026-04-06T00:00:01.000Z");
+    store.close();
+
+    store = new SqliteDeviceSyncStore(databasePath);
+    const duplicate = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.000Z",
+      dedupeKey: "junction-temporal-authority:completed",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-03",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowStart: "2026-04-03T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    assert.equal(duplicate.id, completed.id);
+    assert.equal(duplicate.status, "succeeded");
+
+    const older = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.001Z",
+      dedupeKey: "junction-temporal-authority:older",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-01",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-02T00:00:00.000Z",
+        windowStart: "2026-04-01T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const newer = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.000Z",
+      dedupeKey: "junction-temporal-authority:newer",
+      kind: "resource",
+      payload: {
+        resource: "blood_oxygen",
+        resourceCategory: "timeseries",
+        temporalAuthorityDayKey: "2026-04-02",
+        temporalAuthorityTimeZone: "UTC",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+        windowStart: "2026-04-02T00:00:00.000Z",
+      },
+      priority: 45,
+      provider: "junction",
+    });
+    const urgent = store.enqueueJob({
+      accountId: account.id,
+      availableAt: "2026-04-06T01:00:00.000Z",
+      dedupeKey: "junction-webhook:urgent",
+      kind: "resource",
+      payload: { resource: "activity", resourceCategory: "summary" },
+      priority: 50,
+      provider: "junction",
+    });
+
+    const first = store.claimDueJob("worker-after-restart", "2026-04-06T01:00:00.002Z", 60_000);
+    assert.equal(first?.id, urgent.id);
+    store.completeJob(urgent.id, "2026-04-06T01:00:01.000Z");
+    const second = store.claimDueJob("worker-after-restart", "2026-04-06T01:00:01.000Z", 60_000);
+    assert.equal(second?.id, newer.id);
+    store.completeJob(newer.id, "2026-04-06T01:00:02.000Z");
+    assert.equal(
+      store.claimDueJob("worker-after-restart", "2026-04-06T01:00:02.000Z", 60_000)?.id,
+      older.id,
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store bootstraps current tables even when stale legacy tables remain and consumes missing or expired OAuth state safely", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-legacy");
   const legacyDatabasePath = path.join(tempDir, "legacy.sqlite");
