@@ -99,6 +99,10 @@ Updated: 2026-08-12
     passed.
   - Web projection-store and hosted group shared-read proof: 2 files and 30
     passed after generating the worktree-local Prisma client.
+  - Web changelog fragment proof: 2 files and 45 passed; full Web typecheck
+    passed.
   - `git diff --check`: clean.
+- The in-app Browser was unavailable, so changelog rendered evidence remains an
+  explicit preliminary-specialist gap rather than an inferred visual pass.
 - Remaining proof: exact-head preliminary specialists, final ReviewGPT rounds,
   required GitHub Actions, and current-base merge-tree verification.
