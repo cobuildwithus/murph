@@ -2639,7 +2639,7 @@ describe('assistant Codex turn planning', () => {
       'attach_exercise_routine_card',
     )
 
-    await expect(cardTool({
+    const scheduledPrivateOptions = {
       input: {
         ...createMessageInput(),
         scheduledInvocationAuthority: {
@@ -2649,7 +2649,13 @@ describe('assistant Codex turn planning', () => {
         scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
         turnTrigger: 'automation-cron',
       },
-    })).resolves.toBeDefined()
+    } satisfies Parameters<typeof dynamicToolsFor>[0]
+    await expect(cardTool(scheduledPrivateOptions)).resolves.toBeDefined()
+    await expect(dynamicToolsFor(scheduledPrivateOptions)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+      ]),
+    )
 
     const hostedExecutionContext = {
       hosted: {

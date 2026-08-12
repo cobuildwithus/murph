@@ -93,6 +93,7 @@
   },
   "devDependencies": {
     "@linqapp/sdk": "0.34.0",
+    "@murphai/assistant-runtime": "workspace:*",
     "@murphai/hosted-local-harness": "workspace:*",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.3.0",

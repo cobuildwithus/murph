@@ -12,46 +12,60 @@ import {
   sanitizeHostedConnectionLastErrorMessage,
 } from "../shared";
 
+const hostedRuntimeConnectionRecordSelect = {
+  accessTokenExpiresAt: true,
+  connectedAt: true,
+  createdAt: true,
+  credentialKind: true,
+  credentialMetadataJson: true,
+  displayName: true,
+  id: true,
+  keyVersion: true,
+  lastErrorCode: true,
+  lastErrorMessage: true,
+  lastSyncCompletedAt: true,
+  lastSyncErrorAt: true,
+  lastSyncStartedAt: true,
+  lastWebhookAt: true,
+  metadataJson: true,
+  nextReconcileAt: true,
+  provider: true,
+  providerApplicationId: true,
+  providerApplicationRevision: true,
+  providerConfigKey: true,
+  refreshLeaseExpiresAt: true,
+  refreshLeaseOwner: true,
+  refreshLeaseTokenVersion: true,
+  scopesJson: true,
+  setupExpiresAt: true,
+  setupPhase: true,
+  status: true,
+  tokenVersion: true,
+  updatedAt: true,
+  userId: true,
+} satisfies Prisma.DeviceConnectionSelect;
+
+export const hostedRuntimeRedactedConnectionRecordArgs = {
+  select: hostedRuntimeConnectionRecordSelect,
+} satisfies Prisma.DeviceConnectionDefaultArgs;
+
 export const hostedConnectionRecordArgs = {
   select: {
+    ...hostedRuntimeConnectionRecordSelect,
     accessTokenEncrypted: true,
-    accessTokenExpiresAt: true,
-    connectedAt: true,
-    createdAt: true,
-    credentialKind: true,
-    credentialMetadataJson: true,
-    displayName: true,
     externalAccountIdEncrypted: true,
-    id: true,
-    keyVersion: true,
-    lastErrorCode: true,
-    lastErrorMessage: true,
-    lastSyncCompletedAt: true,
-    lastSyncErrorAt: true,
-    lastSyncStartedAt: true,
-    lastWebhookAt: true,
-    metadataJson: true,
-    nextReconcileAt: true,
-    provider: true,
     providerAccountBlindIndex: true,
-    providerConfigKey: true,
-    providerApplicationId: true,
-    providerApplicationRevision: true,
     refreshTokenEncrypted: true,
-    refreshLeaseExpiresAt: true,
-    refreshLeaseOwner: true,
-    refreshLeaseTokenVersion: true,
-    scopesJson: true,
-    setupExpiresAt: true,
-    setupPhase: true,
-    status: true,
-    tokenVersion: true,
-    updatedAt: true,
-    userId: true,
   },
 } satisfies Prisma.DeviceConnectionDefaultArgs;
 
 export type HostedConnectionRecord = Prisma.DeviceConnectionGetPayload<typeof hostedConnectionRecordArgs>;
+export type HostedRuntimeRedactedConnectionRecord = Prisma.DeviceConnectionGetPayload<
+  typeof hostedRuntimeRedactedConnectionRecordArgs
+>;
+export type HostedRuntimeConnectionRecord =
+  | HostedConnectionRecord
+  | HostedRuntimeRedactedConnectionRecord;
 export type HostedStoredDeviceSyncAccount = DeviceSyncAccount & {
   keyVersion: string | null;
   tokenVersion: number | null;
@@ -61,6 +75,22 @@ export function mapHostedConnectionRecord(record: HostedConnectionRecord): Hoste
   const credentialKind = normalizeHostedDeviceSyncCredentialKind(record.credentialKind);
   validateHostedConnectionCredentialRecord(record, credentialKind);
 
+  return mapHostedRuntimeConnectionRecord(record, credentialKind);
+}
+
+export function mapHostedRuntimeRedactedConnectionRecord(
+  record: HostedRuntimeRedactedConnectionRecord,
+): HostedStaticDeviceSyncConnectionRecord {
+  const credentialKind = normalizeHostedDeviceSyncCredentialKind(record.credentialKind);
+  validateHostedRuntimeRedactedCredentialRecord(record, credentialKind);
+
+  return mapHostedRuntimeConnectionRecord(record, credentialKind);
+}
+
+function mapHostedRuntimeConnectionRecord(
+  record: HostedRuntimeRedactedConnectionRecord,
+  credentialKind: DeviceAccountCredentialKind,
+): HostedStaticDeviceSyncConnectionRecord {
   return {
     accessTokenExpiresAt: maybeIsoTimestamp(record.accessTokenExpiresAt),
     connectedAt: record.connectedAt.toISOString(),
@@ -160,6 +190,20 @@ function validateHostedConnectionCredentialRecord(
   record: HostedConnectionRecord,
   credentialKind: DeviceAccountCredentialKind,
 ): void {
+  validateHostedRuntimeRedactedCredentialRecord(record, credentialKind);
+
+  if (credentialKind !== "oauth_tokens" && (
+    normalizeNullableString(record.accessTokenEncrypted)
+    || normalizeNullableString(record.refreshTokenEncrypted)
+  )) {
+    throw new TypeError("Hosted non-token credential rows must not contain token material.");
+  }
+}
+
+function validateHostedRuntimeRedactedCredentialRecord(
+  record: HostedRuntimeRedactedConnectionRecord,
+  credentialKind: DeviceAccountCredentialKind,
+): void {
   if (credentialKind === "oauth_tokens") {
     if (normalizeNullableString(record.providerConfigKey)) {
       throw new TypeError("Hosted OAuth token credential rows must not contain providerConfigKey.");
@@ -168,9 +212,7 @@ function validateHostedConnectionCredentialRecord(
   }
 
   if (
-    normalizeNullableString(record.accessTokenEncrypted)
-    || normalizeNullableString(record.refreshTokenEncrypted)
-    || record.accessTokenExpiresAt
+    record.accessTokenExpiresAt
     || normalizeNullableString(record.keyVersion)
     || typeof record.tokenVersion === "number"
   ) {
