@@ -145,12 +145,14 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
       expiresAt: new Date("2026-03-25T01:00:00.000Z"),
       consumedAt: null,
     };
+    const queryRaw = vi.fn(async () => [{ state: session.state }]);
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
 
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
         $transaction: async <TResult>(
           callback: (transaction: {
+            $queryRaw: typeof queryRaw;
             deviceOauthSession: {
               findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
               updateMany: typeof updateMany;
@@ -158,6 +160,7 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
           }) => Promise<TResult>,
         ) =>
           callback({
+            $queryRaw: queryRaw,
             deviceOauthSession: {
               findUnique: async ({ where }) => (where.state === session.state ? cloneOAuthSession(session) : null),
               updateMany,
@@ -174,6 +177,7 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
         ownerId: "user-123",
       },
     });
+    expect(queryRaw).toHaveBeenCalledOnce();
     expect(updateMany).toHaveBeenCalledWith({
       data: {
         consumedAt: new Date("2026-03-25T00:30:00.000Z"),

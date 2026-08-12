@@ -97,6 +97,17 @@ Updated: 2026-08-12
   actionable race finding is corrected with exact consumer row locks, unit SQL
   ordering assertions, and a real PostgreSQL consumer-versus-retention proof.
   A fresh exact-head follow-up remains required before the plan can close.
+- After one authorized normal current-main merge, the effective cleanup patch
+  remains the same 28-file behavior scope and has a clean merge-tree. Focused
+  proof passes 194 Web tests, 70 device-sync tests, four isolated real-
+  PostgreSQL contention tests, both affected typechecks, scoped Web lint, docs,
+  architecture, privacy, and diff guards. Exact-head CI then exposed one
+  current-main fixture gap: the existing OAuth delegation transaction double
+  lacked the `$queryRaw` lock seam now used by the store. The test-only double
+  now provides and asserts that seam; its 65-test OAuth slice, Web typecheck,
+  lint, privacy, and diff checks pass. Preliminary specialist and final round-1
+  ReviewGPT retain their immutable reviewed-head baseline while CI evaluates
+  the test-only correction.
 
 ## Verification
 
