@@ -98,7 +98,7 @@ export const wearableMetricCatalog = Object.freeze({
   averageHeartRate: defineMetric("averageHeartRate", "bpm", "session_observation", 1, ["average_heart_rate", "avg_hr", "heart_rate"]),
   awakeMinutes: defineMetric("awakeMinutes", "minutes", "session_observation", 5, ["awake", "awake_minutes"]),
   basalBodyTemperature: defineMetric("basalBodyTemperature", "celsius", "daily_observation", 0.2, []),
-  bmi: defineMetric("bmi", "kg_m2", "daily_observation", 0.1, ["body_mass_index"]),
+  bmi: defineMetric("bmi", "kg/m^2", "daily_observation", 0.1, ["body_mass_index"]),
   bodyBattery: defineMetric("bodyBattery", "score", "daily_observation", 1, ["body_battery"]),
   bodyWaterPercentage: defineMetric("bodyWaterPercentage", "%", "daily_observation", 1, [
     "body_water_percentage",

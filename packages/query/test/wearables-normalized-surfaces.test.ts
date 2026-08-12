@@ -946,8 +946,12 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         source: { provider: "garmin", type: "scale" },
         id: "body-expanded-fields",
         date: "2026-05-20T08:00:00Z",
+        body_water_percentage: 55.2,
+        bone_mass_percentage: 4.1,
         body_temperature: 36.7,
         lean_body_mass_kilogram: 40.1,
+        muscle_mass_percentage: 62.3,
+        visceral_fat_index: 7,
         waist_circumference_centimeter: 86.36,
       }],
     },
@@ -967,7 +971,11 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   assert.equal(latest?.sleep?.sleepConsistency.selection.value, 91);
   assert.equal(latest?.sleep?.sleepPerformance.selection.value, 88);
   assert.equal(latest?.bodyState?.leanBodyMassKg.selection.value, 40.1);
+  assert.equal(latest?.bodyState?.bodyWaterPercentage.selection.value, 55.2);
+  assert.equal(latest?.bodyState?.boneMassPercentage.selection.value, 4.1);
+  assert.equal(latest?.bodyState?.muscleMassPercentage.selection.value, 62.3);
   assert.equal(latest?.bodyState?.temperature.selection.value, 36.7);
+  assert.equal(latest?.bodyState?.visceralFatIndex.selection.value, 7);
   assert.equal(latest?.bodyState?.waistCircumference.selection.value, 86.36);
   assert.equal(leanBodyMass?.metric, "leanBodyMassKg");
   assert.equal(leanBodyMass?.summaryKind, "bodyState");
@@ -975,6 +983,62 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   assert.equal(waistCircumference?.metric, "waistCircumference");
   assert.equal(waistCircumference?.summaryKind, "bodyState");
   assert.equal(waistCircumference?.value, 86.36);
+});
+
+test("sparse body observations remain sample-grain while wearable metric reads use canonical points", () => {
+  const vault = makeVault([
+    makeEntity({
+      attributes: {
+        dataOrigin: {
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "withings",
+          sourceType: "scale",
+        },
+        dayKey: "2026-05-20",
+        externalRef: {
+          resourceId: "bmi-reading-1",
+          resourceType: "junction-body-mass-index-withings",
+          system: "junction",
+        },
+        metric: "bmi",
+        observationGrain: "sample",
+        recordedAt: "2026-05-20T08:06:00.000Z",
+        unit: "kg_m2",
+        value: 23.7,
+      },
+      date: "2026-05-20",
+      entityId: "event_junction_bmi_reading_1",
+      family: "event",
+      kind: "observation",
+      occurredAt: "2026-05-20T08:05:00.000Z",
+      recordClass: "ledger",
+      title: "Junction BMI reading",
+    }),
+  ]);
+
+  const latest = summarizeWearableMetricLatest(vault, "body-mass-index", { windowDays: 1 });
+  const trend = summarizeWearableMetricTrend(vault, "bmi", { windowDays: 1 });
+
+  assert.equal(summarizeWearableLatest(vault), null);
+  assert.equal(latest?.metric, "bmi");
+  assert.equal(latest?.summaryKind, "bodyState");
+  assert.equal(latest?.provider, "withings");
+  assert.equal(latest?.unit, "kg/m^2");
+  assert.equal(latest?.value, 23.7);
+  assert.equal(latest?.date, "2026-05-20");
+  assert.equal(latest?.notes.some((note) => note.includes("canonical metric-point history")), true);
+  assert.deepEqual(trend?.points.map((point) => ({
+    date: point.date,
+    provider: point.provider,
+    unit: point.unit,
+    value: point.value,
+  })), [{
+    date: "2026-05-20",
+    provider: "withings",
+    unit: "kg/m^2",
+    value: 23.7,
+  }]);
 });
 
 test("metric latest and trend surfaces keep derived sleep and aggregate-backed points", () => {

@@ -268,7 +268,7 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
 
 const BODY_METRICS: readonly MetricDescriptor[] = [
   { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["weightKg", "weight_kg", "weight"] },
-  { metric: "bmi", unit: "kg_m2", title: "Junction BMI", paths: ["bmi", "body_mass_index"] },
+  { metric: "bmi", unit: "kg/m^2", title: "Junction BMI", paths: ["bmi", "body_mass_index"] },
   { metric: "body-fat-percentage", unit: "%", title: "Junction body fat", paths: ["bodyFatPercentage", "body_fat_percentage", "body_fat_percent", "bodyFat", "body_fat", "fat"] },
   { metric: "lean-body-mass", unit: "kg", title: "Junction lean body mass", paths: ["leanBodyMassKg", "lean_body_mass_kg", "leanBodyMassKilogram", "lean_body_mass_kilogram", "leanMassKg", "lean_mass_kg"] },
   { metric: "waist-circumference", unit: "cm", title: "Junction waist circumference", paths: ["waistCircumference", "waist_circumference", "waistCircumferenceCentimeter", "waist_circumference_centimeter", "waistCircumferenceCm", "waist_circumference_cm"] },
@@ -1609,7 +1609,7 @@ const JUNCTION_SPARSE_BODY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
     metric: "bmi",
     normalizeValue: normalizeBodyMassIndex,
     title: "Junction BMI",
-    unit: "kg_m2",
+    unit: "kg/m^2",
     upstreamUnit: "index",
     valuePaths: ["value", "bmi", "bodyMassIndex", "body_mass_index"],
   }],

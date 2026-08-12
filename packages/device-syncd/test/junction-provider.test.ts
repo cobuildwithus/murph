@@ -685,6 +685,110 @@ test("Junction configured sparse body resources fetch only documented endpoints"
   assert.equal(importedSnapshots.length, 1);
 });
 
+test("Junction sparse body fetch identity follows each resource's canonical timestamp", async () => {
+  const importedSnapshots: Array<{
+    timeseries?: Record<string, Array<Record<string, unknown>>>;
+  }> = [];
+  const endpointByResource: Record<string, string> = {
+    body_mass_index: "body_mass_index",
+    fat: "body_fat",
+    lean_body_mass: "lean_body_mass",
+    waist_circumference: "waist_circumference",
+    weight: "body_weight",
+  };
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: Object.keys(endpointByResource),
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({ providers: [{
+          id: "provider-withings-body-timestamps",
+          slug: "withings",
+          name: "Withings",
+          status: "connected",
+          resource_availability: Object.fromEntries(
+            Object.values(endpointByResource).map((resource) => [resource, true]),
+          ),
+        }] });
+      }
+      const endpoint = Object.values(endpointByResource).find((candidate) =>
+        url.pathname === `/v2/timeseries/junction-user-1/${candidate}/grouped`
+      );
+      if (!endpoint) {
+        throw new Error(`Unexpected request: ${url.toString()}`);
+      }
+
+      const instant = endpoint === "body_weight" || endpoint === "body_fat";
+      const accepted = instant
+        ? {
+            observedAt: "2026-04-03T08:00:00.000Z",
+            timestamp: "2026-04-02T08:00:00.000Z",
+            unit: endpoint === "body_weight" ? "kg" : "%",
+            value: 20,
+          }
+        : {
+            end: "2026-04-03T00:10:00.000Z",
+            start: "2026-04-02T23:50:00.000Z",
+            timestamp: "2026-04-03T08:00:00.000Z",
+            unit: endpoint === "body_mass_index" ? "index" : "kg",
+            value: 20,
+          };
+      const rejected = instant
+        ? {
+            observedAt: "2026-04-02T09:00:00.000Z",
+            timestamp: "2026-04-03T09:00:00.000Z",
+            unit: endpoint === "body_weight" ? "kg" : "%",
+            value: 21,
+          }
+        : {
+            end: "2026-04-02T09:10:00.000Z",
+            start: "2026-04-01T09:00:00.000Z",
+            timestamp: "2026-04-02T09:00:00.000Z",
+            unit: endpoint === "body_mass_index" ? "index" : "kg",
+            value: 21,
+          };
+      return createJsonResponse({
+        groups: {
+          withings: [{
+            data: [accepted, rejected],
+            source: { provider: "withings", type: "scale" },
+          }],
+        },
+      });
+    },
+  });
+
+  for (const resource of Object.keys(endpointByResource)) {
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot as typeof importedSnapshots[number]);
+          return { imported: true };
+        },
+      }),
+      createJob("resource", {
+        resource,
+        resourceCategory: "timeseries",
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    );
+  }
+
+  assert.equal(importedSnapshots.length, 5);
+  for (const snapshot of importedSnapshots) {
+    const entries = Object.values(snapshot.timeseries ?? {}).flat();
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0]?.value, 20);
+  }
+});
+
 test("Junction known dense programmatic timeseries config falls back to compact daily defaults", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
@@ -1895,7 +1999,7 @@ test("Junction REST diagnostic probes a compact resource without returning raw r
   const result = await probeRest({
     account: createAccount(),
     endpoint: "timeseries",
-    now: "2026-04-03T12:00:00.000Z",
+    now: "2026-04-03T00:00:00.000Z",
     resource: "blood_oxygen",
     sourceProviderSlug: "garmin",
     windowStart: "2026-04-02T10:15:30.000Z",
@@ -8519,6 +8623,65 @@ test("Junction webhook jobs dedupe by resource window instead of Svix trace", as
   assert.notEqual(first.traceId, second.traceId);
   assert.equal(first.jobs[0]?.kind, "resource");
   assert.equal(first.jobs[0]?.dedupeKey, second.jobs[0]?.dedupeKey);
+});
+
+test.each([
+  {
+    data: {
+      end: "2026-04-03T00:10:00.000Z",
+      observedAt: "2026-04-01T12:00:00.000Z",
+      resource: "body_mass_index",
+      source: { provider: "withings" },
+      start: "2026-04-02T23:50:00.000Z",
+      timestamp: "2026-04-01T13:00:00.000Z",
+    },
+    eventType: "daily.data.body_mass_index.created",
+    label: "interval start",
+  },
+  {
+    data: {
+      observedAt: "2026-04-01T12:00:00.000Z",
+      resource: "weight",
+      source: { provider: "withings" },
+      timestamp: "2026-04-02T08:00:00.000Z",
+    },
+    eventType: "daily.data.weight.created",
+    label: "instant timestamp",
+  },
+])("Junction webhook body range uses canonical $label instead of aliases", async ({
+  data,
+  eventType,
+  label,
+}) => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: eventType,
+      user_id: "junction-user-1",
+      data,
+    },
+    messageId: `msg_body_range_${label.replaceAll(" ", "_")}`,
+    timestamp: "1775174400",
+  });
+
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+
+  assert.equal(parsed.occurredAt, label === "interval start"
+    ? "2026-04-02T23:50:00.000Z"
+    : "2026-04-02T08:00:00.000Z");
+  assert.equal(parsed.jobs[0]?.payload?.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(parsed.jobs[0]?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 });
 
 test("Junction webhook source-provider extraction covers documented payload shapes", async () => {

@@ -2518,7 +2518,7 @@ export function createJunctionDeviceSyncProvider(
     const resource = inferJunctionWebhookResource(eventType, data);
     const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
     const objectId = extractJunctionWebhookObjectId(data);
-    const eventOccurredAt = extractJunctionWebhookOccurredAt(data);
+    const eventOccurredAt = extractJunctionWebhookOccurredAt(data, resource);
     const occurredAt = eventOccurredAt ?? context.now;
     const window = buildJunctionWebhookWindow(data, occurredAt, context.now, resource);
     const webhookDataJsons = buildJunctionWebhookDataJobJsons({
@@ -2688,6 +2688,7 @@ export function createJunctionDeviceSyncProvider(
         const chunkRecords = await client.listTimeseries(request);
         records.push(
           ...filterJunctionTimeseriesRecordsToWindow(
+            resource,
             chunkRecords,
             chunkWindowStart,
             chunkWindowEnd,
@@ -5109,6 +5110,7 @@ function dedupeJunctionTimeseriesSnapshotRecords(
 }
 
 function filterJunctionTimeseriesRecordsToWindow(
+  resource: string,
   records: readonly unknown[],
   windowStart: string,
   windowEnd: string,
@@ -5124,7 +5126,7 @@ function filterJunctionTimeseriesRecordsToWindow(
     if (!entry) {
       return true;
     }
-    const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry);
+    const timestamp = resolveJunctionTimeseriesRecordTimestamp(resource, entry);
     if (!timestamp) {
       return true;
     }
@@ -5144,7 +5146,7 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
 
   const origin = resolveJunctionOrigin(entry);
   const sourceProviderSlug = normalizeProviderSlug(origin.sourceProviderSlug);
-  const timestamp = resolveJunctionTimeseriesRecordTimestamp(entry);
+  const timestamp = resolveJunctionTimeseriesRecordTimestamp(resource, entry);
   if (!sourceProviderSlug || !timestamp) {
     return null;
   }
@@ -5196,7 +5198,42 @@ function junctionTimeseriesRecordValueIdentity(
   return [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
 }
 
-function resolveJunctionTimeseriesRecordTimestamp(record: Record<string, unknown>): string | null {
+const JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES = new Set([
+  "fat",
+  "weight",
+]);
+const JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES = new Set([
+  "body_mass_index",
+  "lean_body_mass",
+  "waist_circumference",
+]);
+
+function isJunctionBodyTimeseriesResource(resource: string | null | undefined): boolean {
+  return resource !== null
+    && resource !== undefined
+    && (
+      JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES.has(resource)
+      || JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES.has(resource)
+    );
+}
+
+function resolveJunctionTimeseriesRecordTimestamp(
+  resource: string,
+  record: Record<string, unknown>,
+): string | null {
+  if (JUNCTION_INSTANT_BODY_TIMESERIES_RESOURCES.has(resource)) {
+    return toIsoTimestampIfValid(record.timestamp);
+  }
+
+  if (JUNCTION_INTERVAL_BODY_TIMESERIES_RESOURCES.has(resource)) {
+    const start = toIsoTimestampIfValid(record.start);
+    const end = toIsoTimestampIfValid(record.end);
+    if (!start || !end || Date.parse(end) <= Date.parse(start)) {
+      return null;
+    }
+    return start;
+  }
+
   for (const key of [
     "observedAt",
     "observed_at",
@@ -6750,7 +6787,14 @@ function extractJunctionWebhookRootTimestamp(data: Record<string, unknown> | nul
   return null;
 }
 
-function extractJunctionWebhookOccurredAt(data: Record<string, unknown> | null): string | null {
+function extractJunctionWebhookOccurredAt(
+  data: Record<string, unknown> | null,
+  resource: { name: string } | null,
+): string | null {
+  if (isJunctionBodyTimeseriesResource(resource?.name)) {
+    return readJunctionWebhookDataTimestampRange(data, resource?.name)?.firstTimestamp ?? null;
+  }
+
   const rootTimestamp = extractJunctionWebhookRootTimestamp(data);
   if (rootTimestamp) {
     return rootTimestamp;
@@ -6761,7 +6805,7 @@ function extractJunctionWebhookOccurredAt(data: Record<string, unknown> | null):
     return nestedTimestamp;
   }
 
-  return readJunctionWebhookDataTimestampRange(data)?.firstTimestamp ?? null;
+  return readJunctionWebhookDataTimestampRange(data, resource?.name)?.firstTimestamp ?? null;
 }
 
 function buildJunctionWebhookWindow(
@@ -6770,15 +6814,20 @@ function buildJunctionWebhookWindow(
   now: string,
   resource: { name: string } | null,
 ): { windowStart: string; windowEnd: string } {
+  const bodyTimeseriesResource = isJunctionBodyTimeseriesResource(resource?.name);
   const explicitStart =
     toJunctionWebhookWindowBoundaryTimestampIfValid(data?.window_start, "start")
     ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.start_date, "start")
-    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.start, "start")
+    ?? (bodyTimeseriesResource
+      ? null
+      : toJunctionWebhookWindowBoundaryTimestampIfValid(data?.start, "start"))
     ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.from, "start");
   const explicitEnd =
     toJunctionWebhookWindowBoundaryTimestampIfValid(data?.window_end, "end")
     ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.end_date, "end")
-    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.end, "end")
+    ?? (bodyTimeseriesResource
+      ? null
+      : toJunctionWebhookWindowBoundaryTimestampIfValid(data?.end, "end"))
     ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data?.to, "end");
 
   if (explicitStart && explicitEnd) {
@@ -6788,7 +6837,7 @@ function buildJunctionWebhookWindow(
     };
   }
 
-  const dataTimestampRange = readJunctionWebhookDataTimestampRange(data);
+  const dataTimestampRange = readJunctionWebhookDataTimestampRange(data, resource?.name);
   if (dataTimestampRange) {
     const windowStart = floorUtcDayTimestamp(dataTimestampRange.firstTimestamp);
     const windowEnd = minIsoTimestamp(
@@ -6848,13 +6897,16 @@ function toJunctionWebhookWindowBoundaryTimestampIfValid(
 
 function readJunctionWebhookDataTimestampRange(
   data: Record<string, unknown> | null,
+  resource: string | null | undefined,
 ): { firstTimestamp: string; lastTimestamp: string } | null {
   const record = data ? readPlainObject(data) : null;
   const timestamps = record
-    ? expandJunctionWebhookTimeseriesDataRecords(record).slice(1).flatMap((entry) => {
-        const timestamp = toIsoTimestampIfValid(resolveJunctionTimeseriesRecordTimestamp(entry));
-        return timestamp ? [timestamp] : [];
-      })
+    ? expandJunctionWebhookTimeseriesDataRecords(record)
+        .slice(isJunctionBodyTimeseriesResource(resource) ? 0 : 1)
+        .flatMap((entry) => {
+          const timestamp = resolveJunctionTimeseriesRecordTimestamp(resource ?? "", entry);
+          return timestamp ? [timestamp] : [];
+        })
     : [];
 
   if (timestamps.length === 0) {
