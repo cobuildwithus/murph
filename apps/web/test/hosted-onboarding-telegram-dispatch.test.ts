@@ -57,6 +57,8 @@ const mocks = vi.hoisted(() => {
     activeRootKeyIdsByDomain: new Map<string, string[]>(),
     drainHostedExecutionOutboxBestEffort: vi.fn(),
     enqueueHostedExecutionOutbox: vi.fn(),
+    familyFallbackResolutionOverrides: [] as Array<string | null>,
+    familyInboundResolutionOverrides: [] as Array<string | null>,
     lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(),
     preparedRootKeyIdsByDomain: new Map<string, string[]>(),
     providerKmsWork: vi.fn(),
@@ -286,6 +288,27 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
   hasHostedPrivyPhoneAuthConfig: vi.fn(() => false),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/family-plan")
+  >("@/src/lib/hosted-onboarding/family-plan");
+  return {
+    ...actual,
+    resolveHostedFamilyInviteCodeFromTelegramStartFallback: (
+      ...args: Parameters<
+        typeof actual.resolveHostedFamilyInviteCodeFromTelegramStartFallback
+      >
+    ) => mocks.familyFallbackResolutionOverrides.length > 0
+      ? Promise.resolve(mocks.familyFallbackResolutionOverrides.shift() ?? null)
+      : actual.resolveHostedFamilyInviteCodeFromTelegramStartFallback(...args),
+    resolveHostedFamilyInviteTokenForInbound: (
+      ...args: Parameters<typeof actual.resolveHostedFamilyInviteTokenForInbound>
+    ) => mocks.familyInboundResolutionOverrides.length > 0
+      ? Promise.resolve(mocks.familyInboundResolutionOverrides.shift() ?? null)
+      : actual.resolveHostedFamilyInviteTokenForInbound(...args),
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/webhook-service-stripe", () => ({
   handleHostedStripeWebhook: vi.fn(),
 }));
@@ -357,6 +380,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.activeRootKeyIdsByDomain.clear();
+    mocks.familyFallbackResolutionOverrides.length = 0;
+    mocks.familyInboundResolutionOverrides.length = 0;
     mocks.preparedRootKeyIdsByDomain.clear();
     installDefaultHostedSecureBoxStringTestCodec();
     mocks.rootApiCalls.length = 0;
@@ -612,6 +637,131 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     ).toBe(true);
   });
 
+  it("preserves the first direct root failure while draining a slower sibling", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const member = buildTelegramRoutingCore("member_telegram_parallel_failure");
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([{
+          member,
+          memberId: member.id,
+        }]),
+        findUnique: vi.fn().mockResolvedValue({
+          member,
+          memberId: member.id,
+        }),
+      },
+    });
+    const ingressError = new Error("direct Telegram ingress preparation failed first");
+    const controlError = new Error("direct Telegram control preparation failed later");
+    let releaseControlPreparation: (() => void) | undefined;
+    const controlPreparationGate = new Promise<void>((resolve) => {
+      releaseControlPreparation = resolve;
+    });
+    let controlPreparationSettled = false;
+    mocks.providerKmsWork.mockImplementation(async (input: {
+      domain: HostedCryptoDomain;
+    }) => {
+      if (input.domain === "ingress") {
+        throw ingressError;
+      }
+      await controlPreparationGate;
+      controlPreparationSettled = true;
+      throw controlError;
+    });
+
+    const outcome = handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: buildDirectTelegramWebhookRawBody({ updateId: 900_005 }),
+      secretToken: "telegram-secret",
+    }).then(
+      (value) => ({ error: null, value }),
+      (error: unknown) => ({ error, value: null }),
+    );
+
+    await vi.waitFor(() => expect(mocks.providerKmsWork).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(controlPreparationSettled).toBe(false);
+    if (!releaseControlPreparation) {
+      throw new Error("Expected the direct control preparation gate.");
+    }
+    releaseControlPreparation();
+
+    await expect(outcome).resolves.toEqual({
+      error: ingressError,
+      value: null,
+    });
+    expect(controlPreparationSettled).toBe(true);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("re-prepares as an ordinary member when Family preflight loses precedence", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    mocks.familyFallbackResolutionOverrides.push("invite_preflight", null);
+    mocks.familyInboundResolutionOverrides.push(null, null);
+    const member = buildTelegramRoutingCore("member_telegram_family_reclassified");
+    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([{
+          member,
+          memberId: member.id,
+        }]),
+        findUnique: vi.fn().mockResolvedValue({
+          member,
+          memberId: member.id,
+        }),
+        upsert: hostedMemberRoutingUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: buildDirectTelegramWebhookRawBody({ updateId: 900_006 }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when Family preflight loses precedence twice", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    mocks.familyFallbackResolutionOverrides.push(
+      "invite_preflight_attempt_1",
+      "invite_preflight_attempt_2",
+    );
+    mocks.familyInboundResolutionOverrides.push(null, null);
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: buildDirectTelegramWebhookRawBody({ updateId: 900_007 }),
+      secretToken: "telegram-secret",
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      details: {
+        preparationTarget: "direct_telegram_sender_route",
+      },
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.providerKmsWork).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("prewarms the exact direct Telegram roots before BEGIN and keeps transaction crypto cache-only", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const member = buildTelegramRoutingCore("member_telegram_cache_only");
@@ -779,6 +929,331 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       ),
     ).toBe(true);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-prepares once when the direct Telegram control root changes under lock", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const member = buildTelegramRoutingCore("member_telegram_control_retry");
+    mocks.preparedRootKeyIdsByDomain.set("control", [
+      "root_control_attempt_1",
+      "root_control_attempt_2",
+    ]);
+    mocks.activeRootKeyIdsByDomain.set("control", [
+      "root_control_winner_1",
+      "root_control_attempt_2",
+    ]);
+    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([{
+          member,
+          memberId: member.id,
+        }]),
+        findUnique: vi.fn().mockResolvedValue({
+          member,
+          memberId: member.id,
+        }),
+        upsert: hostedMemberRoutingUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: buildDirectTelegramWebhookRawBody({ updateId: 900_008 }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.providerKmsWork).toHaveBeenCalledTimes(4);
+  });
+
+  it("fails closed after repeated direct Telegram control-root drift", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const member = buildTelegramRoutingCore("member_telegram_control_drift");
+    mocks.preparedRootKeyIdsByDomain.set("control", [
+      "root_control_attempt_1",
+      "root_control_attempt_2",
+    ]);
+    mocks.activeRootKeyIdsByDomain.set("control", [
+      "root_control_winner_1",
+      "root_control_winner_2",
+    ]);
+    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([{
+          member,
+          memberId: member.id,
+        }]),
+        findUnique: vi.fn().mockResolvedValue({
+          member,
+          memberId: member.id,
+        }),
+        upsert: hostedMemberRoutingUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: buildDirectTelegramWebhookRawBody({ updateId: 900_009 }),
+      secretToken: "telegram-secret",
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      details: {
+        preparationTarget: "direct_telegram_control_root",
+      },
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(hostedMemberRoutingUpsert).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.providerKmsWork).toHaveBeenCalledTimes(4);
+  });
+
+  it("re-prepares once when the encrypted direct Telegram route changes under lock", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const member = buildTelegramRoutingCore("member_telegram_route_retry");
+    setHostedSecureBoxStringTestCodecForTests(null);
+    try {
+      mocks.preparedRootKeyIdsByDomain.set("control", [
+        "root_control_historical_1",
+      ]);
+      const firstRouting = await buildHostedMemberRoutingPrivateColumns({
+        linqChatId: null,
+        linqRecipientPhone: null,
+        memberId: member.id,
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        telegramThreadId: "123",
+        telegramUserId: "456",
+      });
+      mocks.preparedRootKeyIdsByDomain.set("control", [
+        "root_control_historical_2",
+      ]);
+      const secondRouting = await buildHostedMemberRoutingPrivateColumns({
+        linqChatId: null,
+        linqRecipientPhone: null,
+        memberId: member.id,
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        telegramThreadId: "123",
+        telegramUserId: "456",
+      });
+      mocks.providerKmsWork.mockClear();
+      mocks.rootApiCalls.length = 0;
+      let activeKmsCalls = 0;
+      let maxActiveKmsCalls = 0;
+      mocks.providerKmsWork.mockImplementation(async () => {
+        activeKmsCalls += 1;
+        maxActiveKmsCalls = Math.max(maxActiveKmsCalls, activeKmsCalls);
+        await Promise.resolve();
+        activeKmsCalls -= 1;
+      });
+      mocks.preparedRootKeyIdsByDomain.set("control", [
+        "root_control_active_1",
+        "root_control_active_2",
+      ]);
+      mocks.activeRootKeyIdsByDomain.set("control", [
+        "root_control_active_1",
+        "root_control_active_2",
+      ]);
+      const hostedMemberRoutingFindUnique = vi.fn()
+        .mockResolvedValueOnce({
+          member,
+          memberId: member.id,
+          telegramUserIdEncrypted: firstRouting.telegramUserIdEncrypted,
+        })
+        .mockResolvedValue({
+          member,
+          memberId: member.id,
+          telegramUserIdEncrypted: secondRouting.telegramUserIdEncrypted,
+        });
+      const hostedMemberRoutingFindMany = vi.fn().mockResolvedValue([{
+        member,
+        memberId: member.id,
+      }]);
+      const hostedMemberFindUnique = vi.fn().mockResolvedValue({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      });
+      const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+      const prisma = withPrismaTransaction({
+        hostedMember: {
+          findUnique: hostedMemberFindUnique,
+        },
+        hostedMemberRouting: {
+          findMany: hostedMemberRoutingFindMany,
+          findUnique: hostedMemberRoutingFindUnique,
+          upsert: hostedMemberRoutingUpsert,
+        },
+      });
+      const executionOrder: string[] = [];
+      mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockImplementation(
+        async (input: { domain: HostedCryptoDomain; userId: string }) => {
+          executionOrder.push(`${input.domain}-root-lock`);
+          return mocks.activeRootKeyIdsByDomain.get(input.domain)?.shift()
+            ?? defaultTelegramRootKeyId(input);
+        },
+      );
+      prisma.$queryRaw = vi.fn(async () => {
+        executionOrder.push("member-lock");
+        return [];
+      });
+      const defaultAppend = mocks.appendHostedMailboxEnvelopeTx
+        .getMockImplementation();
+      if (!defaultAppend) {
+        throw new Error("Expected the Telegram mailbox append mock.");
+      }
+      mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input) => {
+        executionOrder.push("append");
+        return defaultAppend(input);
+      });
+      const defaultTransaction = prisma.$transaction.bind(prisma);
+      let activeTransactions = 0;
+      let maxActiveTransactions = 0;
+      prisma.$transaction = vi.fn(async (callback) => {
+        activeTransactions += 1;
+        maxActiveTransactions = Math.max(
+          maxActiveTransactions,
+          activeTransactions,
+        );
+        try {
+          return await defaultTransaction(callback);
+        } finally {
+          activeTransactions -= 1;
+        }
+      });
+
+      await expect(handleHostedOnboardingTelegramWebhook({
+        prisma,
+        rawBody: buildDirectTelegramWebhookRawBody({ updateId: 900_010 }),
+        secretToken: "telegram-secret",
+      })).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(hostedMemberRoutingFindUnique).toHaveBeenCalledTimes(5);
+      expect(hostedMemberRoutingFindMany).toHaveBeenCalledTimes(7);
+      expect(hostedMemberFindUnique).toHaveBeenCalledTimes(4);
+      expect(hostedMemberRoutingFindUnique.mock.calls.filter(([query]) =>
+        Object.keys(query.select ?? {}).length === 1
+        && query.select?.telegramUserIdEncrypted === true
+      )).toHaveLength(4);
+      expect(hostedMemberRoutingFindMany.mock.calls.every(([query]) =>
+        query.select
+        && query.select.telegramUserIdEncrypted !== true
+      )).toBe(true);
+      expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
+      expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+      expect(mocks.providerKmsWork).toHaveBeenCalledTimes(6);
+      expect(maxActiveKmsCalls).toBe(2);
+      expect(maxActiveTransactions).toBe(1);
+      expect(mocks.providerKmsWork.mock.calls.every(
+        ([call]) => call.transactionOpen === false,
+      )).toBe(true);
+      expect(executionOrder.slice(0, 2)).toEqual([
+        "control-root-lock",
+        "member-lock",
+      ]);
+      expect(executionOrder.slice(-2)).toEqual([
+        "ingress-root-lock",
+        "append",
+      ]);
+      expect(mocks.rootApiCalls.filter((call) => call.transactionOpen))
+        .toHaveLength(3);
+    } finally {
+      installDefaultHostedSecureBoxStringTestCodec();
+    }
+  });
+
+  it("fails closed after repeated encrypted direct Telegram route drift", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const member = buildTelegramRoutingCore("member_telegram_route_drift");
+    setHostedSecureBoxStringTestCodecForTests(null);
+    try {
+      mocks.preparedRootKeyIdsByDomain.set("control", [
+        "root_control_historical",
+      ]);
+      const preparedRouting = await buildHostedMemberRoutingPrivateColumns({
+        linqChatId: null,
+        linqRecipientPhone: null,
+        memberId: member.id,
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        telegramThreadId: "123",
+        telegramUserId: "456",
+      });
+      if (!preparedRouting.telegramUserIdEncrypted) {
+        throw new Error("Expected an encrypted Telegram routing fixture.");
+      }
+      mocks.providerKmsWork.mockClear();
+      mocks.preparedRootKeyIdsByDomain.set("control", [
+        "root_control_active_1",
+        "root_control_active_2",
+      ]);
+      mocks.activeRootKeyIdsByDomain.set("control", [
+        "root_control_active_1",
+        "root_control_active_2",
+      ]);
+      const preparedRecord = {
+        member,
+        memberId: member.id,
+        telegramUserIdEncrypted: preparedRouting.telegramUserIdEncrypted,
+      };
+      const changedRecord = {
+        ...preparedRecord,
+        telegramUserIdEncrypted: `${preparedRouting.telegramUserIdEncrypted}changed`,
+      };
+      const hostedMemberRoutingFindUnique = vi.fn()
+        .mockResolvedValueOnce(preparedRecord)
+        .mockResolvedValueOnce(changedRecord)
+        .mockResolvedValueOnce(preparedRecord)
+        .mockResolvedValueOnce(changedRecord);
+      const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+      const prisma = withPrismaTransaction({
+        hostedMemberRouting: {
+          findMany: vi.fn().mockResolvedValue([{
+            member,
+            memberId: member.id,
+          }]),
+          findUnique: hostedMemberRoutingFindUnique,
+          upsert: hostedMemberRoutingUpsert,
+        },
+      });
+
+      await expect(handleHostedOnboardingTelegramWebhook({
+        prisma,
+        rawBody: buildDirectTelegramWebhookRawBody({ updateId: 900_011 }),
+        secretToken: "telegram-secret",
+      })).rejects.toMatchObject({
+        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+        details: {
+          preparationTarget: "direct_telegram_sender_route",
+        },
+        retryable: true,
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(hostedMemberRoutingFindUnique).toHaveBeenCalledTimes(4);
+      expect(hostedMemberRoutingUpsert).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(mocks.providerKmsWork).toHaveBeenCalledTimes(6);
+    } finally {
+      installDefaultHostedSecureBoxStringTestCodec();
+    }
   });
 
   it("fails closed after one fresh preparation when the direct Telegram ingress root keeps drifting", async () => {
@@ -2581,7 +3056,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     })).resolves.toEqual({
       ignored: true,
       ok: true,
-      reason: "unlinked-telegram",
+      reason: "telegram-binding-changed",
     });
 
     const queryRaw = prisma.$queryRaw as ReturnType<typeof vi.fn>;

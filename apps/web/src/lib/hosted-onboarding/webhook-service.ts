@@ -1822,6 +1822,11 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     };
   }
 
+  let initialDirectSenderResolution:
+    | "ambiguous"
+    | "found"
+    | "missing"
+    | undefined;
   const plan = await runHostedThreadRoutingPreparedTransaction({
     plan: ({ preparation, transaction }) =>
       planHostedOnboardingTelegramWebhook({
@@ -1852,10 +1857,23 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
         prisma: transaction,
         update,
       }),
-    prepare: () => prepareHostedTelegramThreadRoutingCrypto({
-      prisma,
-      update,
-    }),
+    prepare: async ({ attempt }) => {
+      const preparation = await prepareHostedTelegramThreadRoutingCrypto({
+        ...(initialDirectSenderResolution
+          ? { initialDirectSenderResolution }
+          : {}),
+        prisma,
+        update,
+      });
+      const preparedDirectRouting = preparation.preparedDirectTelegramRouting;
+      if (
+        attempt === 0
+        && preparedDirectRouting?.kind === "member"
+      ) {
+        initialDirectSenderResolution = preparedDirectRouting.senderResolution;
+      }
+      return preparation;
+    },
     prisma,
   });
 
@@ -1949,6 +1967,7 @@ interface HostedDirectTelegramFamilyRoutingCryptoPreparation {
 interface HostedDirectTelegramMemberRoutingCryptoPreparation {
   activeControlRootKeyId: string | null;
   existingControlRootKeyId: string | null;
+  initialSenderResolution: "ambiguous" | "found" | "missing";
   kind: "member";
   mailboxRootKeyId: string | null;
   memberId: string | null;
@@ -2141,6 +2160,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
 }
 
 async function prepareHostedTelegramThreadRoutingCrypto(input: {
+  initialDirectSenderResolution?: "ambiguous" | "found" | "missing";
   prisma: PrismaClient;
   update: ReturnType<typeof parseHostedTelegramWebhookUpdate>;
 }): Promise<HostedThreadRoutingCryptoPreparation> {
@@ -2172,6 +2192,9 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
         };
       }
       return await prepareHostedDirectTelegramThreadRoutingCrypto({
+        ...(input.initialDirectSenderResolution
+          ? { initialSenderResolution: input.initialDirectSenderResolution }
+          : {}),
         prisma: input.prisma,
         senderTelegramUserId: summary.senderTelegramUserId,
         threadId: message.threadId,
@@ -2275,6 +2298,7 @@ async function shouldDeferDirectTelegramPreparationToFamilyRouting(input: {
 }
 
 async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
+  initialSenderResolution?: "ambiguous" | "found" | "missing";
   prisma: PrismaClient;
   senderTelegramUserId: string;
   threadId: string;
@@ -2286,6 +2310,8 @@ async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
   const preparedDirectTelegramRouting: HostedDirectTelegramMemberRoutingCryptoPreparation = {
     activeControlRootKeyId: null,
     existingControlRootKeyId: null,
+    initialSenderResolution:
+      input.initialSenderResolution ?? memberLookup.status,
     kind: "member",
     mailboxRootKeyId: null,
     memberId: memberLookup.status === "found" ? memberLookup.core.id : null,
@@ -2346,16 +2372,38 @@ async function prepareHostedDirectTelegramThreadRoutingCrypto(input: {
       root.rootKey.fill(0);
     }
   };
+  let firstRootPreparationError: unknown;
+  let hasRootPreparationError = false;
+  const preserveFirstRootPreparationError = async <T>(
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!hasRootPreparationError) {
+        firstRootPreparationError = error;
+        hasRootPreparationError = true;
+      }
+      throw error;
+    }
+  };
   const [controlRootResult, mailboxRootResult] = await Promise.allSettled([
-    controlRootRequired
-      ? prewarmActiveRoot(
-          getHostedCryptoDomainForLane("hosted-member-private-field"),
-        )
-      : Promise.resolve(null),
-    mailboxRootRequired
-      ? prewarmActiveRoot(getHostedCryptoDomainForLane("mailbox-payload"))
-      : Promise.resolve(null),
+    preserveFirstRootPreparationError(() =>
+      controlRootRequired
+        ? prewarmActiveRoot(
+            getHostedCryptoDomainForLane("hosted-member-private-field"),
+          )
+        : Promise.resolve(null)
+    ),
+    preserveFirstRootPreparationError(() =>
+      mailboxRootRequired
+        ? prewarmActiveRoot(getHostedCryptoDomainForLane("mailbox-payload"))
+        : Promise.resolve(null)
+    ),
   ]);
+  if (hasRootPreparationError) {
+    throw firstRootPreparationError;
+  }
   if (controlRootResult.status === "rejected") {
     throw controlRootResult.reason;
   }

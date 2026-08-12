@@ -1,11 +1,20 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+  type HostedCryptoDomain,
+  type HostedDomainRootKeyEnvelopeV1,
+} from "@murphai/runtime-state";
+import {
   HostedBillingStatus,
   type Prisma,
   type PrismaClient,
 } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  getHostedDomainRootUnwrapCache,
+} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 
 import {
   readHostedMemberRoutingState,
@@ -22,7 +31,35 @@ import {
 import {
   planHostedOnboardingTelegramWebhook,
 } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
+import {
+  runHostedOnboardingWebhookTransaction,
+} from "@/src/lib/hosted-onboarding/webhook-service";
 import { createPrismaClient } from "@/src/lib/prisma";
+
+const rootAuthority = vi.hoisted(() => ({
+  activeRootKeyIdsByDomain: new Map<HostedCryptoDomain, string[]>(),
+  lockAndReadActiveHostedDomainRootKeyIdTx: vi.fn(
+    async (input: { domain: HostedCryptoDomain }) => {
+      const rootKeyId = rootAuthority.activeRootKeyIdsByDomain
+        .get(input.domain)?.shift();
+      if (!rootKeyId) {
+        throw new Error(`Missing test ${input.domain} root authority.`);
+      }
+      return rootKeyId;
+    },
+  ),
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >("@/src/lib/hosted-crypto/domain-root-store");
+  return {
+    ...actual,
+    lockAndReadActiveHostedDomainRootKeyIdTx:
+      rootAuthority.lockAndReadActiveHostedDomainRootKeyIdTx,
+  };
+});
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresConcurrencyProof =
@@ -279,8 +316,201 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await disconnectClients([observer, owner, contender]);
       }
     });
+
+    it("rolls back a route write on mailbox-root drift and commits one stable replay", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_telegram_rollback_${fixtureId}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const update = buildDirectTelegramUpdate(710_004);
+      const activeControlRootKeyId = `control_${fixtureId}`;
+      const mailboxRootKeyId = `ingress_${fixtureId}`;
+
+      await observer.hostedMember.create({
+        data: {
+          billingStatus: HostedBillingStatus.active,
+          id: memberId,
+        },
+      });
+      await observer.$transaction(
+        (tx) => upsertHostedMemberTelegramRoutingBindingTx({
+          memberId,
+          prisma: tx,
+          telegramUserId,
+        }),
+        transactionOptions,
+      );
+
+      try {
+        const routingRecord = await observer.hostedMemberRouting.findUnique({
+          select: {
+            telegramUserIdEncrypted: true,
+          },
+          where: { memberId },
+        });
+        if (!routingRecord?.telegramUserIdEncrypted) {
+          throw new Error("Expected an encrypted Telegram routing fixture.");
+        }
+        const preparedDirectTelegramRouting = {
+          activeControlRootKeyId,
+          existingControlRootKeyId: null,
+          initialSenderResolution: "found" as const,
+          kind: "member" as const,
+          mailboxRootKeyId,
+          memberId,
+          routeEncrypted: routingRecord.telegramUserIdEncrypted,
+          senderResolution: "found" as const,
+          telegramThreadId,
+          telegramUserId,
+        };
+
+        rootAuthority.activeRootKeyIdsByDomain.clear();
+        rootAuthority.activeRootKeyIdsByDomain.set("control", [
+          activeControlRootKeyId,
+        ]);
+        rootAuthority.activeRootKeyIdsByDomain.set("ingress", [
+          `drifted_${mailboxRootKeyId}`,
+        ]);
+        await expect(runPreparedTelegramPlanTransaction({
+          activeControlRootKeyId,
+          mailboxRootKeyId,
+          memberId,
+          preparedDirectTelegramRouting,
+          prisma: observer,
+          update,
+        })).rejects.toMatchObject({
+          code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+          details: {
+            preparationTarget: "direct_telegram_mailbox_root",
+          },
+        });
+
+        let routing = await readHostedMemberRoutingState({
+          memberId,
+          prisma: observer,
+        });
+        expect(routing?.telegramThreadId).toBeNull();
+        await expect(observer.hostedMailboxItem.count({
+          where: {
+            kind: "conversation.message",
+            userId: memberId,
+          },
+        })).resolves.toBe(0);
+
+        rootAuthority.activeRootKeyIdsByDomain.clear();
+        rootAuthority.activeRootKeyIdsByDomain.set("control", [
+          activeControlRootKeyId,
+        ]);
+        rootAuthority.activeRootKeyIdsByDomain.set("ingress", [
+          mailboxRootKeyId,
+        ]);
+        await expect(runPreparedTelegramPlanTransaction({
+          activeControlRootKeyId,
+          mailboxRootKeyId,
+          memberId,
+          preparedDirectTelegramRouting,
+          prisma: observer,
+          update,
+        })).resolves.toMatchObject({
+          response: {
+            ok: true,
+            reason: "wake-appended-active-member",
+          },
+        });
+
+        routing = await readHostedMemberRoutingState({
+          memberId,
+          prisma: observer,
+        });
+        expect(routing?.telegramThreadId).toBe(telegramThreadId);
+        await expect(observer.hostedMailboxItem.count({
+          where: {
+            kind: "conversation.message",
+            userId: memberId,
+          },
+        })).resolves.toBe(1);
+      } finally {
+        rootAuthority.activeRootKeyIdsByDomain.clear();
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: memberId,
+          },
+        });
+        await observer.$disconnect();
+      }
+    });
   },
 );
+
+async function runPreparedTelegramPlanTransaction(input: {
+  activeControlRootKeyId: string;
+  mailboxRootKeyId: string;
+  memberId: string;
+  preparedDirectTelegramRouting: NonNullable<
+    Parameters<typeof planHostedOnboardingTelegramWebhook>[0][
+      "preparedDirectTelegramRouting"
+    ]
+  >;
+  prisma: PrismaClient;
+  update: ReturnType<typeof buildDirectTelegramUpdate>;
+}) {
+  return runHostedOnboardingWebhookTransaction(
+    input.prisma,
+    (transaction) => planHostedOnboardingTelegramWebhook({
+      preparedDirectTelegramRouting: input.preparedDirectTelegramRouting,
+      prisma: transaction,
+      update: input.update,
+    }),
+    async () => {
+      seedPreparedTelegramRoot({
+        domain: "control",
+        rootKeyId: input.activeControlRootKeyId,
+        userId: input.memberId,
+      });
+      seedPreparedTelegramRoot({
+        domain: "ingress",
+        rootKeyId: input.mailboxRootKeyId,
+        userId: input.memberId,
+      });
+    },
+  );
+}
+
+function seedPreparedTelegramRoot(input: {
+  domain: HostedCryptoDomain;
+  rootKeyId: string;
+  userId: string;
+}): void {
+  const timestamp = "2026-08-12T00:00:00.000Z";
+  const envelope: HostedDomainRootKeyEnvelopeV1 = {
+    authoritySignature: {
+      alg: "GCP-KMS-EC-P256-SHA256",
+      keyVersionName: "test-authority-key",
+      signature: "test-signature",
+      signedAt: timestamp,
+    },
+    createdAt: timestamp,
+    domain: input.domain,
+    generation: 1,
+    rootKeyId: input.rootKeyId,
+    schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+    updatedAt: timestamp,
+    userId: input.userId,
+    wraps: [],
+  };
+  const pendingRoot = Promise.resolve({
+    envelope,
+    rootKey: new Uint8Array(32),
+  });
+  const cache = getHostedDomainRootUnwrapCache();
+  if (!cache) {
+    throw new Error("Expected a scoped hosted root cache.");
+  }
+  cache.set(`${input.userId}|${input.domain}|@active`, pendingRoot);
+  cache.set(
+    `${input.userId}|${input.domain}|${input.rootKeyId}`,
+    pendingRoot,
+  );
+}
 
 function buildDirectTelegramUpdate(updateId: number) {
   return parseHostedTelegramWebhookUpdate(JSON.stringify({

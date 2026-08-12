@@ -86,6 +86,7 @@ interface HostedDirectTelegramFamilyRoutingPreparation {
 interface HostedDirectTelegramMemberRoutingPreparation {
   activeControlRootKeyId: string | null;
   existingControlRootKeyId: string | null;
+  initialSenderResolution: "ambiguous" | "found" | "missing";
   kind: "member";
   mailboxRootKeyId: string | null;
   memberId: string | null;
@@ -275,7 +276,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     : null;
 
   if (!existingMember) {
-    if (input.preparedSenderMemberId) {
+    if (
+      input.preparedSenderMemberId
+      || preparedDirectAuthority?.initialSenderResolution === "found"
+    ) {
       return buildIgnoredTelegramWebhookPlan("telegram-binding-changed");
     }
     if (!summary.isDirect) {
