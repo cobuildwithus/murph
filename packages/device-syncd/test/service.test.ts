@@ -6,7 +6,6 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
-  JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
@@ -15,6 +14,7 @@ import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtim
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
 import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
+import { mergeHostedDeviceSyncConnectionMetadata } from "../src/hosted-runtime.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
 import {
@@ -25,11 +25,7 @@ import {
   createJunctionDeviceSyncProvider,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
 } from "../src/providers/junction.ts";
-import { JUNCTION_CONNECT_SOURCE_TARGETS } from "../src/config/junction-connect-sources.ts";
-import {
-  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
-  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
-} from "../src/junction-historical-backfill-progress.ts";
+import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
@@ -1105,9 +1101,18 @@ test("persisted provider-projected disconnects can recover an evidence-bearing p
       "connected",
     );
     assert.equal(importedSnapshots.length > 0, true);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      store.getAccountById(account.id)?.metadata ?? {},
+      "omron",
+      "blood_pressure",
+      1,
+    ), true);
     assert.equal(
-      store.getAccountById(account.id)?.metadata.junctionBloodPressureHistoryBackfillCoverage,
-      "v1|omron",
+      Object.hasOwn(
+        store.getAccountById(account.id)?.metadata ?? {},
+        "junctionBloodPressureHistoryBackfillCoverage",
+      ),
+      false,
     );
   } finally {
     close();
@@ -1288,9 +1293,18 @@ test("hosted listed-only recovery publishes connected before pressure egress res
     }
 
     assert.equal(importedSnapshots.length > 0, true);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      store.getAccountById(account.id)?.metadata ?? {},
+      "omron",
+      "blood_pressure",
+      1,
+    ), true);
     assert.equal(
-      store.getAccountById(account.id)?.metadata.junctionBloodPressureHistoryBackfillCoverage,
-      "v1|omron",
+      Object.hasOwn(
+        store.getAccountById(account.id)?.metadata ?? {},
+        "junctionBloodPressureHistoryBackfillCoverage",
+      ),
+      false,
     );
   } finally {
     close();
@@ -1352,13 +1366,40 @@ test("device sync service reports canonical counts separately from durable deliv
   }
 });
 
-test("Junction compact history coverage survives SQLite reload and suppresses all completed jobs", async () => {
+test("Junction composed history metadata survives real import, sanitizer, merge, and SQLite reload", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-history-coverage");
   const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
   const store = new SqliteDeviceSyncStore(databasePath);
-  const availability = Object.fromEntries(
-    JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.map((resource) => [resource, true]),
-  );
+  const hostedMetadata = {
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillEmptyAttempts: 0,
+    junctionHistoricalBackfillLastEmptyAt: null,
+    junctionHistoricalBackfillWindowStart: "2026-02-12T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-08-11T00:00:00.000Z",
+    junctionHistoricalBackfillEvidence:
+      "e2|2026-02-12T00:00:00.000Z|2026-08-11T00:00:00.000Z|garmin:7",
+    junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+  };
+  const merged = mergeHostedDeviceSyncConnectionMetadata({
+    hostedMetadata,
+    localConnectionStateUnpublished: true,
+    localMetadata: { junctionNoteHistoryBackfillCoverage: "v1|oura" },
+  });
+  assert.equal(merged.preservedLocalProgress, true);
+  assert.equal(Object.hasOwn(merged.metadata, "junctionBloodPressureHistoryBackfillCoverage"), false);
+  assert.equal(Object.hasOwn(merged.metadata, "junctionNoteHistoryBackfillCoverage"), false);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    merged.metadata,
+    "omron",
+    "blood_pressure",
+    1,
+  ), true);
+  assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+    merged.metadata,
+    "oura",
+    "note",
+    1,
+  ), true);
   const account = store.upsertAccount({
     provider: "junction",
     externalAccountId: "junction-user-history-coverage",
@@ -1371,80 +1412,138 @@ test("Junction compact history coverage survives SQLite reload and suppresses al
       credentialMetadata: {},
     },
     connectedAt: "2026-08-11T00:00:00.000Z",
+    metadata: merged.metadata,
     nextReconcileAt: null,
   });
-  for (const source of JUNCTION_CONNECT_SOURCE_TARGETS) {
-    store.upsertConnectionSource({
-      connectionId: account.id,
-      sourceInstanceKey: source.providerSlug,
-      sourceProviderSlug: source.providerSlug,
-      status: "connected",
-      resourceAvailabilitySummary: availability,
-      lastSeenAt: "2026-08-11T00:00:00.000Z",
-    });
+  store.upsertConnectionSource({
+    connectionId: account.id,
+    sourceInstanceKey: "garmin",
+    sourceProviderSlug: "garmin",
+    status: "connected",
+    resourceAvailabilitySummary: { caffeine: true },
+    lastSeenAt: "2026-08-11T00:00:00.000Z",
+  });
+  store.enqueueJob({
+    accountId: account.id,
+    provider: "junction",
+    kind: "backfill",
+    payload: {
+      windowStart: "2026-02-12T00:00:00.000Z",
+      windowEnd: "2026-08-11T00:00:00.000Z",
+    },
+    availableAt: "2026-08-11T12:00:00.000Z",
+  });
+  store.enqueueJob({
+    accountId: account.id,
+    provider: "junction",
+    kind: "resource",
+    payload: {
+      historicalBackfill: true,
+      historicalWindowStart: "2026-07-12T00:00:00.000Z",
+      resource: "caffeine",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowStart: "2026-07-12T00:00:00.000Z",
+      windowEnd: "2026-08-11T00:00:00.000Z",
+    },
+    availableAt: "2026-08-11T12:00:00.000Z",
+  });
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["profile"],
+    timeseriesResources: ["caffeine"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-history-coverage") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-history-coverage",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true, profile: true },
+        }] });
+      }
+      if (url.pathname === "/v2/summary/profile/junction-user-history-coverage") {
+        return createJsonResponse({ code: "profile_not_available" }, 404);
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-history-coverage/caffeine/grouped") {
+        return createJsonResponse({ groups: { garmin: [{
+          data: [
+            { start: "2026-08-10T08:00:00.000Z", value: 0.095 },
+            { start: "2026-08-10T12:00:00.000Z", value: 0.063 },
+          ],
+          source: { provider: "garmin", type: "watch" },
+        }] } });
+      }
+      throw new Error(`Unexpected Junction composed-history request: ${url.pathname}`);
+    },
+  });
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => new Date("2026-08-11T12:00:00.000Z") },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(snapshot) {
+        const prepared = await prepareDeviceProviderSnapshotImport(snapshot);
+        return { events: prepared.events ?? [] };
+      },
+    },
+    providers: [provider],
+    store,
+  });
+  await service.runWorkerOnce();
+  await service.runWorkerOnce();
+  const persisted = store.getAccountById(account.id);
+  assert.ok(persisted);
+  assert.equal(Object.keys(persisted.metadata).length, 15);
+  assert.equal(persisted.metadata.junctionProfileSummaryCheckedAt, "2026-08-11T12:00:00.000Z");
+  for (const diagnosticKey of [
+    "junctionSkippedResourceTotal",
+    "junctionSkippedSummaryTotal",
+    "junctionSkippedTimeseriesTotal",
+    "junctionSkippedResourceJobCount",
+    "junctionSkippedResourceLastAt",
+    "junctionSkippedResourceLast",
+    "junctionSkippedResourceLastDetail",
+  ]) {
+    assert.equal(Object.hasOwn(persisted.metadata, diagnosticKey), true);
   }
-  let metadata: Record<string, unknown> = {
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
-    junctionHistoricalBackfillEmptyAttempts: 0,
-    junctionHistoricalBackfillLastEmptyAt: null,
-    junctionHistoricalBackfillWindowStart: "2026-02-12T00:00:00.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-08-11T00:00:00.000Z",
-    junctionHistoricalBackfillEvidence:
-      "e2|2026-02-12T00:00:00.000Z|2026-08-11T00:00:00.000Z|garmin:7",
-    profileRevision: 1,
-    diagnosticState: "healthy",
-  };
-  for (const resource of JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES) {
-    for (const source of JUNCTION_CONNECT_SOURCE_TARGETS) {
-      const patch = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
-        existingMetadata: metadata,
-        providerSlug: source.providerSlug,
-        resource,
-        version: 1,
-      });
-      assert.ok(patch);
-      metadata = { ...metadata, ...patch };
-    }
+  for (const [source, resource] of [
+    ["garmin", "caffeine"],
+    ["omron", "blood_pressure"],
+    ["oura", "note"],
+  ] as const) {
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      persisted.metadata,
+      source,
+      resource,
+      1,
+    ), true);
   }
-  assert.equal(store.markSyncSucceeded(account.id, "2026-08-11T01:00:00.000Z", null, {
-    metadataPatch: metadata,
-  }), true);
-  store.close();
+  assert.equal(Object.hasOwn(persisted.metadata, "junctionBloodPressureHistoryBackfillCoverage"), false);
+  assert.equal(Object.hasOwn(persisted.metadata, "junctionNoteHistoryBackfillCoverage"), false);
+  close();
 
   const reopenedStore = new SqliteDeviceSyncStore(databasePath);
   try {
     const reloaded = reopenedStore.getAccountById(account.id);
     assert.ok(reloaded);
-    assert.ok(Object.keys(reloaded.metadata).length < 16);
-    assert.equal(reloaded.metadata.profileRevision, 1);
-    assert.equal(reloaded.metadata.diagnosticState, "healthy");
-    for (const resource of JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES) {
-      for (const source of JUNCTION_CONNECT_SOURCE_TARGETS) {
-        assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
-          reloaded.metadata,
-          source.providerSlug,
-          resource,
-          1,
-        ), true);
-      }
-    }
-
-    const provider = createJunctionDeviceSyncProvider({
-      apiKey: "sk_us_test_123",
-      clientUserIdSecret: "junction-client-user-id-secret",
-      environment: "sandbox",
-      region: "us",
-      summaryResources: ["activity"],
-      timeseriesResources: [...JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES],
-      fetchImpl: async (input) => {
-        throw new Error(`Unexpected request after completed coverage: ${readUrl(input)}`);
-      },
-    });
+    assert.equal(Object.keys(reloaded.metadata).length, 15);
     const scheduledHistoryJobs = provider.jobExecutor?.createScheduledJobs?.(
       reloaded,
       "2026-08-12T00:00:00.000Z",
     ).jobs.filter((job) => job.payload?.historicalBackfill === true);
-    assert.deepEqual(scheduledHistoryJobs, []);
+    assert.equal(scheduledHistoryJobs?.some((job) =>
+      job.payload?.sourceProviderSlug === "garmin"
+      && job.payload?.resource === "caffeine"
+    ), false);
   } finally {
     reopenedStore.close();
   }

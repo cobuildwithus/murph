@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd/public-ingress";
-import { mergeStoredDeviceSyncMetadataPatch } from "../src/shared.ts";
+import {
+  DEVICE_SYNC_METADATA_DELETE,
+  mergeStoredDeviceSyncMetadataPatch,
+} from "../src/shared.ts";
 
 describe("sanitizeStoredDeviceSyncMetadata", () => {
   it("drops secret-like keys before connection metadata is persisted or mirrored", () => {
@@ -119,6 +122,21 @@ describe("mergeStoredDeviceSyncMetadataPatch", () => {
     ).toEqual({
       retryLastEmptyAt: null,
       retryStatus: "retrying",
+    });
+  });
+
+  it("deletes only keys carrying the explicit patch instruction", () => {
+    expect(
+      mergeStoredDeviceSyncMetadataPatch(
+        { legacyCoverage: "v1|garmin", nullableStatus: "pending", retained: true },
+        {
+          legacyCoverage: DEVICE_SYNC_METADATA_DELETE,
+          nullableStatus: null,
+        },
+      ),
+    ).toEqual({
+      nullableStatus: null,
+      retained: true,
     });
   });
 

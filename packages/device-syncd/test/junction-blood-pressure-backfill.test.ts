@@ -3,6 +3,8 @@ import { junctionProviderAdapter } from "@murphai/importers/device-providers/jun
 import { test } from "vitest";
 
 import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
+import { hasJunctionExtendedTimeseriesHistoryBackfillCoverage } from "../src/junction-historical-backfill-progress.ts";
+import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -42,6 +44,25 @@ interface MutableProviderState {
   present?: boolean;
   resourceAvailability: Record<string, unknown>;
   status: string;
+}
+
+function assertHistoryCoveragePatch(
+  result: Pick<ProviderJobResult, "metadataPatch">,
+  providerSlug: string,
+  resource: "blood_pressure" | "note",
+): void {
+  const metadata = mergeStoredDeviceSyncMetadataPatch({}, result.metadataPatch);
+  assert.equal(
+    hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      metadata,
+      providerSlug,
+      resource,
+      1,
+    ),
+    true,
+  );
+  assert.equal(Object.hasOwn(metadata, BP_HISTORY_COVERAGE_KEY), false);
+  assert.equal(Object.hasOwn(metadata, NOTE_HISTORY_COVERAGE_KEY), false);
 }
 
 function createAccount(input: {
@@ -649,7 +670,7 @@ test("empty blood-pressure history retries are bounded and mark source coverage 
   });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(result, "omron", "blood_pressure");
 });
 
 test("SDK setup before a source is known does not fetch unusable full history", async () => {
@@ -693,7 +714,8 @@ test("a source-scoped terminal pass preserves completed sibling coverage", async
   });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron,withings");
+  assertHistoryCoveragePatch(result, "omron", "blood_pressure");
+  assertHistoryCoveragePatch(result, "withings", "blood_pressure");
 });
 
 test("a newly confirmed source backfills older blood pressure after sibling coverage", async () => {
@@ -735,7 +757,8 @@ test("a newly confirmed source backfills older blood pressure after sibling cove
     true,
   );
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron,withings");
+  assertHistoryCoveragePatch(result, "omron", "blood_pressure");
+  assertHistoryCoveragePatch(result, "withings", "blood_pressure");
 });
 
 test("an existing source receives one migration anchored to its first-seen window", () => {
@@ -836,7 +859,7 @@ test("Oura notes receive one full summary-history migration while dense timeseri
   });
   assert.equal(executionCount, 180);
   assert.equal(importedSnapshots.length, 2);
-  assert.equal(result.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v1|oura");
+  assertHistoryCoveragePatch(result, "oura", "note");
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   assert.equal(
     requests.filter((request) => request.resource === "note").length,
@@ -906,7 +929,7 @@ test("empty Oura note history reaches terminal source coverage", async () => {
     resource: "note",
   });
 
-  assert.equal(result.metadataPatch?.[NOTE_HISTORY_COVERAGE_KEY], "v1|oura");
+  assertHistoryCoveragePatch(result, "oura", "note");
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   const completed = createScheduledJobs(
     createStoredAccount({ metadata: result.metadataPatch, sources }),
@@ -971,7 +994,7 @@ test("a Link reconnect cannot narrow or certify an older persisted-source window
     job: toJobRecord(schedulerJob, 1),
     provider,
   });
-  assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(completed, "omron", "blood_pressure");
   assert.equal(requests[0]?.start, "2026-02-18T00:00:00.000Z");
   assert.equal(requests.at(-1)?.end, "2026-03-20T00:00:00.000Z");
 
@@ -1188,7 +1211,7 @@ test("live blood-pressure capability gates provider egress and terminal coverage
     job: toJobRecord(recreated, 2),
     provider: recoveredProvider,
   });
-  assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(completed, "omron", "blood_pressure");
   assert.equal(
     recoveredRequests.some((request) => request.resource === "blood_pressure"),
     true,
@@ -1408,7 +1431,7 @@ test("a fetched blood-pressure record completes without an empty retry", async (
   });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(result, "omron", "blood_pressure");
 });
 
 test("partial optional failure retries the uncompleted segment after importing canonical events", async () => {
@@ -1449,7 +1472,7 @@ test("partial optional failure retries the uncompleted segment after importing c
     provider,
   });
   assert.equal(completed.scheduledJobs?.length ?? 0, 0);
-  assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(completed, "omron", "blood_pressure");
   assert.equal(
     requests.filter((request) => request.resource === "blood_pressure").length,
     31,
@@ -1557,7 +1580,7 @@ test("retryable provider failure after raw rows preserves evidence through later
   });
 
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
-  assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(recovered, "omron", "blood_pressure");
 });
 
 test("retryable post-fetch failures preserve raw evidence and replay the anchored window", async () => {
@@ -1651,11 +1674,7 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
     });
 
     assert.equal(recovered.scheduledJobs?.length ?? 0, 0, boundary);
-    assert.equal(
-      recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY],
-      "v1|omron",
-      boundary,
-    );
+    assertHistoryCoveragePatch(recovered, "omron", "blood_pressure");
   }
 });
 
@@ -1819,7 +1838,7 @@ test("source history partial failure stays recoverable after the empty retry lad
     provider,
   });
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
-  assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(recovered, "omron", "blood_pressure");
 });
 
 test("source-scoped partial failure stays recoverable after the empty retry ladder", async () => {
@@ -1866,7 +1885,7 @@ test("source-scoped partial failure stays recoverable after the empty retry ladd
     provider,
   });
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
-  assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(recovered, "omron", "blood_pressure");
 });
 
 test("raw provider rows without canonical imported events remain on the retry ladder", async () => {
@@ -1935,7 +1954,7 @@ test("exhausted malformed provider rows stay recoverable until canonical import 
   });
 
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
-  assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(recovered, "omron", "blood_pressure");
 });
 
 test("mixed canonical and malformed history stays unresolved until a complete repair", async () => {
@@ -2027,7 +2046,7 @@ test("mixed canonical and malformed history stays unresolved until a complete re
   });
 
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(repaired, "omron", "blood_pressure");
 });
 
 test("mixed source admission preserves rejected exact identity until authorized replay", async () => {
@@ -2103,10 +2122,7 @@ test("mixed source admission preserves rejected exact identity until authorized 
   });
 
   assert.equal(admittedReplay.scheduledJobs?.length ?? 0, 0);
-  assert.equal(
-    admittedReplay.metadataPatch?.[BP_HISTORY_COVERAGE_KEY],
-    "v1|omron",
-  );
+  assertHistoryCoveragePatch(admittedReplay, "omron", "blood_pressure");
 });
 
 test("an unrelated canonical reading cannot clear a malformed provider row", async () => {
@@ -2180,7 +2196,7 @@ test("an unrelated canonical reading cannot clear a malformed provider row", asy
     provider,
   });
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(repaired, "omron", "blood_pressure");
 });
 
 test("every malformed provider identity must be repaired before coverage completes", async () => {
@@ -2241,7 +2257,7 @@ test("every malformed provider identity must be repaired before coverage complet
     provider,
   });
   assert.equal(fullyRepaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(fullyRepaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(fullyRepaired, "omron", "blood_pressure");
 });
 
 test("more than 64 stable unresolved identities survive yield and clear exactly after repair", async () => {
@@ -2342,7 +2358,7 @@ test("more than 64 stable unresolved identities survive yield and clear exactly 
   });
 
   assert.equal(fullyRepaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(fullyRepaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(fullyRepaired, "omron", "blood_pressure");
 });
 
 test("legacy and identity-less unresolved evidence cannot be cleared speculatively", async () => {
@@ -2436,7 +2452,7 @@ test("exact provider duplicates do not create false unresolved history", async (
   });
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(result, "omron", "blood_pressure");
 });
 
 test("a malformed post-yield segment requires one repaired anchored scan", async () => {
@@ -2509,7 +2525,7 @@ test("a malformed post-yield segment requires one repaired anchored scan", async
   });
 
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(repaired, "omron", "blood_pressure");
 });
 
 test.each(SOURCE_DISCONNECT_FENCE_CODES)(
@@ -2613,10 +2629,7 @@ test.each(["error", "unavailable"] as const)(
       provider,
     });
     assert.equal(completedTraversal.scheduledJobs?.length ?? 0, 0);
-    assert.equal(
-      completedTraversal.metadataPatch?.[BP_HISTORY_COVERAGE_KEY],
-      "v1|omron",
-    );
+    assertHistoryCoveragePatch(completedTraversal, "omron", "blood_pressure");
   },
 );
 
@@ -2689,7 +2702,7 @@ test.each(["error", "unavailable"] as const)(
       toJobRecord(continuation, status === "error" ? 94 : 95),
     );
     assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
-    assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(repaired, "omron", "blood_pressure");
   },
 );
 
@@ -3007,7 +3020,7 @@ test("yielded blood-pressure history keeps one identity and remembers earlier re
     provider,
   });
   assert.equal(completed.scheduledJobs?.length ?? 0, 0);
-  assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(completed, "omron", "blood_pressure");
 });
 
 test("malformed history cannot starve later valid days or clear without exact repair", async () => {
@@ -3126,7 +3139,7 @@ test("malformed history cannot starve later valid days or clear without exact re
   });
 
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
-  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assertHistoryCoveragePatch(repaired, "omron", "blood_pressure");
 });
 
 test("an empty yielded scan retries from the original anchored window", async () => {

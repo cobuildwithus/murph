@@ -439,8 +439,6 @@ export function normalizeJunctionResourceName(value: unknown): string | null {
       return "weight";
     case "body_fat":
       return "fat";
-    case "body_fat":
-      return "fat";
     case "sleep_cycle":
     case "hypnogram":
       return "sleep_cycle";

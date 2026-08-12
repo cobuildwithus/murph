@@ -99,6 +99,7 @@ describe("Junction wearable resource policy", () => {
       expect(JUNCTION_RESOURCE_POLICIES[resource].historyChunkDays).toBe(
         JUNCTION_SPARSE_HISTORY_CHUNK_DAYS,
       );
+      expect(JUNCTION_RESOURCE_POLICIES[resource].historyAnchor).toBe("schedule_time");
     }
     for (const resource of [
       "weight",
@@ -116,7 +117,9 @@ describe("Junction wearable resource policy", () => {
       });
     }
     expect(JUNCTION_RESOURCE_POLICIES.blood_pressure.historyChunkDays).toBe(1);
+    expect(JUNCTION_RESOURCE_POLICIES.blood_pressure.historyAnchor).toBe("source_first_seen");
     expect(JUNCTION_RESOURCE_POLICIES.note.historyChunkDays).toBe(1);
+    expect(JUNCTION_RESOURCE_POLICIES.note.historyAnchor).toBe("schedule_time");
     expect(JUNCTION_RESOURCE_POLICIES.glucose.initialHistoryDays).toBe(14);
     expect(JUNCTION_RESOURCE_POLICIES.heartrate.admission).toBe("known");
   });
