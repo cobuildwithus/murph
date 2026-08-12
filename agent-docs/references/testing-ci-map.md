@@ -548,6 +548,14 @@ supported provider credential.
   and the same isolated Resend stub, proving paced lost-ack retry,
   identifier-free aggregation, active-incident coalescing, recovery/rearm, and
   independence from the latency monitor.
+- `apps/web/test/hosted-runtime-latency-alert-query-postgres.test.ts` is an
+  opt-in local-PostgreSQL plan and cardinality proof for the five-minute reply
+  latency monitor. It runs the production query against 50,000 stale rows per
+  trace, delivery, and mailbox owner, admits one row through each recent
+  accepted, staged, provider-started, delivery-accepted, and mailbox-consumed
+  branch, and requires PostgreSQL to use the matching time indexes without a
+  sequential scan of those owners. It then proves the exact hydration keeps
+  usage-denial restart chronology and the 20,001-row truncation boundary.
 - `apps/web/test/hosted-mailbox-usage-denial-postgres.test.ts` is an opt-in
   local-PostgreSQL proof that the usage-denial write marks only the observed
   conversation sequence window with database-owned chronology and leaves a
