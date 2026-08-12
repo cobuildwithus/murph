@@ -42,6 +42,7 @@ import {
 import {
   lookupHostedMemberIdentityByPhoneLookupKey,
   lookupHostedMemberIdentityByPhoneNumber,
+  lookupHostedMemberIdByPhoneNumber,
   lookupHostedMemberIdentityByPrivyUserId,
   type HostedMemberIdentityState,
   upsertHostedMemberIdentity,
@@ -573,6 +574,35 @@ describe("hosted-member-store", () => {
       },
       include: {
         member: true,
+      },
+    });
+  });
+
+  it("reads only blind-index ownership when private identity projection is unnecessary", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { memberId: "member_phone_owner" },
+    ]);
+    const prisma = {
+      hostedMemberIdentity: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      lookupHostedMemberIdByPhoneNumber({
+        phoneNumber: "+15551234567",
+        prisma,
+      }),
+    ).resolves.toBe("member_phone_owner");
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        phoneLookupKey: {
+          in: [expect.stringMatching(/^hbidx:phone:v1:/u)],
+        },
+      },
+      select: {
+        memberId: true,
       },
     });
   });
