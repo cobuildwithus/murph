@@ -348,34 +348,6 @@ export function hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
   return hasJunctionBloodPressureHistoryBackfillCoverage(value, providerSlug, version);
 }
 
-export function removeJunctionExtendedTimeseriesHistoryBackfillCoverage(input: {
-  existingValue: unknown;
-  providerSlug: string;
-  version: number;
-}): { changed: boolean; value: string | null } {
-  const providerSlug = input.providerSlug.trim().toLowerCase();
-  const existing = readJunctionExtendedTimeseriesHistoryBackfillCoverage(input.existingValue);
-  if (
-    existing === null
-    || existing.version !== input.version
-    || !isSafeJunctionHistoricalBackfillEvidenceSource(providerSlug)
-    || !existing.providerSlugs.includes(providerSlug)
-  ) {
-    return {
-      changed: false,
-      value: existing ? encodeJunctionBloodPressureHistoryBackfillCoverage(existing) : null,
-    };
-  }
-
-  return {
-    changed: true,
-    value: encodeJunctionBloodPressureHistoryBackfillCoverage({
-      providerSlugs: existing.providerSlugs.filter((slug) => slug !== providerSlug),
-      version: existing.version,
-    }),
-  };
-}
-
 export function canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
   value: unknown,
   version: number,

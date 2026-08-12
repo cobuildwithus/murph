@@ -3,10 +3,6 @@ import { junctionProviderAdapter } from "@murphai/importers/device-providers/jun
 import { test } from "vitest";
 
 import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
-import {
-  JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
-  removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
-} from "../src/junction-historical-backfill-progress.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -1000,12 +996,6 @@ test("weight receives summary-history backfill while dense opt-ins stay bounded"
     false,
   );
 
-  const resetCoverage = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
-    existingValue: "v1|withings",
-    providerSlug: "withings",
-    version: JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_VERSION,
-  });
-  assert.deepEqual(resetCoverage, { changed: true, value: null });
   const afterReconnect = createScheduledJobs(
     createStoredAccount({ metadata: {}, sources }),
     "2026-06-12T12:00:00.000Z",

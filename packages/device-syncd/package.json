@@ -58,10 +58,6 @@
       "types": "./dist/junction-push-source-recovery.d.ts",
       "default": "./dist/junction-push-source-recovery.js"
     },
-    "./junction-historical-backfill-progress": {
-      "types": "./dist/junction-historical-backfill-progress.d.ts",
-      "default": "./dist/junction-historical-backfill-progress.js"
-    },
     "./hosted-runtime": {
       "types": "./dist/hosted-runtime.d.ts",
       "default": "./dist/hosted-runtime.js"
