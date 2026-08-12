@@ -4351,7 +4351,7 @@
         },
         "unit": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9._/%-]+$"
+          "pattern": "^[A-Za-z0-9._/%^-]+$"
         }
       },
       "required": [
@@ -4920,7 +4920,7 @@
               },
               "unit": {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9._/%-]+$"
+                "pattern": "^[A-Za-z0-9._/%^-]+$"
               },
               "qualifiers": {
                 "type": "object",
@@ -7288,7 +7288,7 @@
         },
         "unit": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9._/%-]+$"
+          "pattern": "^[A-Za-z0-9._/%^-]+$"
         }
       },
       "required": [
@@ -8412,7 +8412,7 @@
         },
         "unit": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9._/%-]+$"
+          "pattern": "^[A-Za-z0-9._/%^-]+$"
         },
         "experimentId": {
           "type": "string",
