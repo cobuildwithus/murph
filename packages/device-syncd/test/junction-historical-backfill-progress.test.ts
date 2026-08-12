@@ -4,7 +4,10 @@ import {
   addJunctionHistoricalBackfillEvidence,
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   encodeJunctionHistoricalBackfillStatus,
+  JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
+  JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+  JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   mergeHostedJunctionHistoricalBackfillMetadata,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
@@ -27,6 +30,27 @@ describe("Junction historical backfill progress versions", () => {
     expect(canCurrentRuntimeMutateJunctionHistoricalBackfillProgress({
       junctionHistoricalBackfillStatus: "coverage_v3_complete",
     })).toBe(true);
+  });
+
+  it("merges sparse resource coverage independently, including weight", () => {
+    const result = mergeHostedJunctionHistoricalBackfillMetadata({
+      hostedMetadata: {
+        [JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]: "v1|omron",
+        [JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]: "v1|withings",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        [JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]: "v1|oura",
+        [JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]: "v1|renpho",
+      },
+    });
+
+    expect(result.metadata).toMatchObject({
+      [JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]: "v1|omron",
+      [JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]: "v1|oura",
+      [JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY]: "v1|renpho,withings",
+    });
+    expect(result.preservedLocalProgress).toBe(true);
   });
 
   it("leaves future coverage versions opaque and immutable", () => {

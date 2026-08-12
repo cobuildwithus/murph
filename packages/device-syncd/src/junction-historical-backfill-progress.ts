@@ -52,11 +52,14 @@ export const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
   "junctionBloodPressureHistoryBackfillCoverage";
 export const JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
   "junctionNoteHistoryBackfillCoverage";
-const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX = "v";
+export const JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
+  "junctionWeightHistoryBackfillCoverage";
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_PREFIX = "v";
 
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS = Object.freeze([
   JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+  JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
 ] as const);
 
 const JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS = Object.freeze([
@@ -413,9 +416,9 @@ function readJunctionBloodPressureHistoryBackfillCoverage(
   }
   const versionPart = value.slice(0, separatorIndex);
   const providerSlugs = value.slice(separatorIndex + 1).split(",");
-  const version = Number(versionPart.slice(JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX.length));
+  const version = Number(versionPart.slice(JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_PREFIX.length));
   if (
-    !versionPart.startsWith(JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX)
+    !versionPart.startsWith(JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_PREFIX)
     || !Number.isSafeInteger(version)
     || version < 1
     || providerSlugs.some((providerSlug) => !isSafeJunctionHistoricalBackfillEvidenceSource(providerSlug))
@@ -445,7 +448,7 @@ function encodeJunctionBloodPressureHistoryBackfillCoverage(
   if (providerSlugs.length === 0) {
     return null;
   }
-  const encoded = `${JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX}${coverage.version}|${providerSlugs.join(",")}`;
+  const encoded = `${JUNCTION_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_PREFIX}${coverage.version}|${providerSlugs.join(",")}`;
   return encoded.length <= DEVICE_SYNC_METADATA_MAX_STRING_LENGTH ? encoded : null;
 }
 

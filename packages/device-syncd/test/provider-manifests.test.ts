@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { JUNCTION_DEFAULT_TIMESERIES_RESOURCES } from "@murphai/importers/device-providers/junction-resources";
+import {
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+} from "@murphai/contracts";
 import {
   cloneConfiguredDeviceSyncRuntimeConfig,
   cloneSerializableConfiguredDeviceSyncProviderConfigs,
@@ -116,6 +119,49 @@ describe("deviceSyncProviderManifests", () => {
     expect(normalizeJunctionDeviceSyncRuntimeConfig(junctionConfig).timeseriesResources)
       .toEqual([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]);
     expect(() => createConfiguredDeviceSyncProvidersFromConfigs(configs)).not.toThrow();
+  });
+
+  it("admits exact Junction timeseries opt-ins without substituting defaults", () => {
+    const configs = readConfiguredDeviceSyncProviderConfigs({
+      JUNCTION_API_KEY: "sk_us_test_manifest",
+      JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+    });
+    const junctionConfig = configs.junction;
+    if (!junctionConfig) {
+      throw new Error("Expected Junction config to be present.");
+    }
+
+    expect([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES]).toEqual([
+      "steps",
+      "distance",
+      "calories_active",
+      "heartrate",
+      "weight",
+    ]);
+    for (const resource of JUNCTION_OPT_IN_TIMESERIES_RESOURCES) {
+      expect(normalizeJunctionDeviceSyncRuntimeConfig({
+        ...junctionConfig,
+        timeseriesResources: [resource],
+      }).timeseriesResources).toEqual([resource]);
+    }
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...junctionConfig,
+      timeseriesResources: [...JUNCTION_OPT_IN_TIMESERIES_RESOURCES],
+    }).timeseriesResources).toEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES]);
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...junctionConfig,
+      timeseriesResources: ["heart_rate", "body_weight"],
+    }).timeseriesResources).toEqual(["heartrate", "weight"]);
+    expect(normalizeJunctionDeviceSyncRuntimeConfig({
+      ...junctionConfig,
+      timeseriesResources: [],
+    }).timeseriesResources).toEqual([]);
+    expect(() => normalizeJunctionDeviceSyncRuntimeConfig({
+      ...junctionConfig,
+      timeseriesResources: ["workout_heartrate"],
+    })).toThrow(/unsupported resource/u);
   });
 
   it("resolves Junction canonical base URLs from environment and region", () => {

@@ -37,6 +37,18 @@ Current providers:
 - Junction fetches the sparse `note` timeseries by default. Oura note tags become
   completed intervention events for Personal Patterns. Free-text note values are
   dropped before raw snapshot and compact evidence retention.
+- Junction's established default summary and timeseries lists are unchanged. The
+  code-owned `timeseriesResources` policy additionally admits five off-by-default
+  opt-ins: `steps`, `distance`, `calories_active`, `heartrate`, and `weight`.
+  Omitting the list uses the existing defaults; an explicit empty list disables all
+  timeseries; an explicit non-empty list resolves exactly to supported canonical
+  names and rejects unknown names instead of substituting defaults.
+- Opted-in `steps` and `distance` use provider/source-partitioned daily aggregates.
+  Opted-in `calories_active` and `heartrate` use provider/source-partitioned UTC-hour
+  or upstream-session features. These four dense resources retain the bounded
+  dense-timeseries fetch window and never persist raw sample arrays or full provider
+  snapshots. Opted-in `weight` uses sparse canonical measurements with compact
+  per-reading evidence and the existing long summary-history backfill window.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use

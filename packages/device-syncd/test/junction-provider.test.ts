@@ -568,7 +568,7 @@ test("Junction omitted timeseries config defaults to compact resources only", as
   assert.equal(importedSnapshots.length, 1);
 });
 
-test("Junction known dense programmatic timeseries config falls back to compact daily defaults", async () => {
+test("Junction programmatic timeseries opt-ins fetch exactly the requested resources", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -589,12 +589,11 @@ test("Junction known dense programmatic timeseries config falls back to compact 
             slug: "garmin",
             name: "Garmin",
             status: "connected",
-            resource_availability: Object.fromEntries([
-              "activity",
-              ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-              "steps",
-              "heartrate",
-            ].map((resource) => [resource, true])),
+            resource_availability: {
+              activity: true,
+              steps: true,
+              heartrate: true,
+            },
           }],
         });
       }
@@ -603,19 +602,17 @@ test("Junction known dense programmatic timeseries config falls back to compact 
         return createJsonResponse({ data: [] });
       }
 
-      const timeseriesResource = new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
-      if (timeseriesResource) {
-        assert.ok(
-          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
-          `Unexpected default timeseries resource: ${timeseriesResource}`,
-        );
+      const timeseriesResource = new URL(url).pathname.match(
+        /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+      )?.[1];
+      if (timeseriesResource === "steps" || timeseriesResource === "heartrate") {
         return createJsonResponse({
           groups: {
             garmin: [{
               data: [{
                 timestamp: "2026-04-02T12:00:00.000Z",
-                unit: timeseriesResource === "blood_oxygen" ? "%" : "count",
-                value: timeseriesResource === "blood_oxygen" ? 97 : 24,
+                unit: timeseriesResource === "steps" ? "count" : "bpm",
+                value: timeseriesResource === "steps" ? 24 : 72,
               }],
               source: { provider: "garmin", type: "watch" },
             }],
@@ -645,22 +642,17 @@ test("Junction known dense programmatic timeseries config falls back to compact 
   );
 
   const requestedTimeseriesResources = requests
-    .map((url) => new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1])
+    .map((url) => new URL(url).pathname.match(
+      /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+    )?.[1])
     .filter((resource): resource is string => Boolean(resource));
 
-  assert.deepEqual(
-    [...new Set(requestedTimeseriesResources)].sort(),
-    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
-  );
+  assert.deepEqual([...new Set(requestedTimeseriesResources)].sort(), ["heartrate", "steps"]);
   assert.equal(
-    requests.every((url) =>
-      !url.includes("heartrate") &&
-      !url.includes("steps") &&
-      !url.includes("distance") &&
-      !url.includes("calories_active") &&
-      !url.includes("weight")
+    requestedTimeseriesResources.some((resource) =>
+      (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(resource)
     ),
-    true,
+    false,
   );
   assert.equal(importedSnapshots.length, 1);
 });

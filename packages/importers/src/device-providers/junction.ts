@@ -687,6 +687,88 @@ const JUNCTION_GLUCOSE_VALUE_PATHS = [
   "bloodGlucose",
   "blood_glucose",
 ] as const;
+const JUNCTION_STEPS_VALUE_PATHS = [
+  "value",
+  "steps",
+  "stepCount",
+  "step_count",
+] as const;
+const JUNCTION_DISTANCE_VALUE_PATHS = [
+  "value",
+  "distance",
+  "distanceMeters",
+  "distance_meters",
+  "distanceKm",
+  "distance_km",
+] as const;
+const JUNCTION_ACTIVE_CALORIES_VALUE_PATHS = [
+  "value",
+  "calories",
+  "activeCalories",
+  "active_calories",
+  "caloriesActive",
+  "calories_active",
+] as const;
+const JUNCTION_HEARTRATE_VALUE_PATHS = [
+  "value",
+  "heartrate",
+  "heartRate",
+  "heart_rate",
+  "bpm",
+] as const;
+const JUNCTION_WEIGHT_VALUE_PATHS = [
+  "value",
+  "weight",
+  "bodyWeight",
+  "body_weight",
+  "weightKg",
+  "weight_kg",
+] as const;
+const JUNCTION_FEATURE_SESSION_ID_PATHS = [
+  "sessionId",
+  "session_id",
+  "activityId",
+  "activity_id",
+  "workoutId",
+  "workout_id",
+  "recordingId",
+  "recording_id",
+] as const;
+const JUNCTION_FEATURE_SESSION_START_PATHS = [
+  "sessionStart",
+  "session_start",
+  "activityStart",
+  "activity_start",
+  "workoutStart",
+  "workout_start",
+] as const;
+const JUNCTION_FEATURE_SESSION_END_PATHS = [
+  "sessionEnd",
+  "session_end",
+  "activityEnd",
+  "activity_end",
+  "workoutEnd",
+  "workout_end",
+] as const;
+const JUNCTION_FEATURE_SESSION_TYPE_PATHS = [
+  "sessionType",
+  "session_type",
+  "activityType",
+  "activity_type",
+  "workoutType",
+  "workout_type",
+  "type",
+] as const;
+const JUNCTION_READING_STABLE_ID_PATHS = [
+  "id",
+  "resourceId",
+  "resource_id",
+  "externalId",
+  "external_id",
+  "providerId",
+  "provider_id",
+] as const;
+
 const JUNCTION_BLOOD_PRESSURE_SYSTOLIC_PATHS = [
   "systolic",
 ] as const;
@@ -778,6 +860,28 @@ interface JunctionDailyTimeseriesAggregate {
   evidencePartRole: string;
   resourceContext: ResourceContext;
   sampleCount: number;
+  sum: number;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  timeZone?: string;
+}
+
+interface JunctionFeatureTimeseriesAggregate {
+  bucketEndAt: string;
+  bucketIdentity: string;
+  bucketKind: "hour" | "session";
+  bucketStartAt: string;
+  dayKey: string;
+  entry: PlainObject;
+  evidencePartRole: string;
+  firstSampleAt: string;
+  lastRecordedAt?: string;
+  lastSampleAt: string;
+  maxValue: number;
+  minValue: number;
+  resourceContext: ResourceContext;
+  sampleCount: number;
+  sessionId?: string;
+  sessionType?: string;
   sum: number;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   timeZone?: string;
@@ -1390,15 +1494,30 @@ interface JunctionDailyTimeseriesObservationDescriptor {
 }
 
 interface JunctionDailyTimeseriesDescriptor {
-  normalizeValue: (value: unknown) => number | undefined;
+  normalizeValue: (value: unknown, entry: PlainObject) => number | undefined;
   observations: readonly JunctionDailyTimeseriesObservationDescriptor[];
+  requireExplicitTimestamp?: boolean;
   unit: string;
   valuePaths: readonly string[];
 }
 
-// Every default-enabled timeseries resource must appear here with a bounded
-// daily-aggregate mapping (or, for paired-shape `blood_pressure` only, the
-// dedicated sparse per-reading handler below); raw evidence stays one compact
+interface JunctionFeatureTimeseriesObservationDescriptor {
+  metric: string;
+  statistic: "mean" | "min" | "max" | "sum";
+  title: string;
+}
+
+interface JunctionFeatureTimeseriesDescriptor {
+  normalizeValue: (value: unknown, entry: PlainObject) => number | undefined;
+  observations: readonly JunctionFeatureTimeseriesObservationDescriptor[];
+  unit: string;
+  valuePaths: readonly string[];
+}
+
+// Every daily-aggregate timeseries resource must appear here. Defaults keep
+// their established bounded mapping; opt-in `steps` and `distance` use the
+// same provider-partitioned day owner. Paired/sparse and feature-shaped
+// resources use dedicated handlers below. Raw evidence stays one compact
 // ~430 B `junction.timeseries_daily_aggregate.v1` artifact per day per
 // resource (~160 KB/member-year/resource) no matter how dense the provider
 // stream is: glucose CGM streams (288 samples/day, ~10-15 MB/yr raw) reduce
@@ -1414,6 +1533,24 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
   JunctionTimeseriesResource,
   JunctionDailyTimeseriesDescriptor,
 ])[] = [
+  ["steps", {
+    normalizeValue: normalizeStepCount,
+    observations: [
+      { metric: "daily-steps", statistic: "sum", title: "Junction steps" },
+    ],
+    requireExplicitTimestamp: true,
+    unit: "count",
+    valuePaths: JUNCTION_STEPS_VALUE_PATHS,
+  }],
+  ["distance", {
+    normalizeValue: normalizeDistanceKilometers,
+    observations: [
+      { metric: "distance-km", statistic: "sum", title: "Junction distance" },
+    ],
+    requireExplicitTimestamp: true,
+    unit: "km",
+    valuePaths: JUNCTION_DISTANCE_VALUE_PATHS,
+  }],
   ["blood_oxygen", {
     normalizeValue: normalizeBloodOxygenPercent,
     observations: [
@@ -1544,6 +1681,33 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
 const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTimeseriesDescriptor> =
   new Map(JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES);
 
+const JUNCTION_FEATURE_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
+  JunctionTimeseriesResource,
+  JunctionFeatureTimeseriesDescriptor,
+])[] = [
+  ["calories_active", {
+    normalizeValue: normalizeActiveCaloriesKilocalories,
+    observations: [
+      { metric: "active-calories", statistic: "sum", title: "Junction active calories" },
+    ],
+    unit: "kcal",
+    valuePaths: JUNCTION_ACTIVE_CALORIES_VALUE_PATHS,
+  }],
+  ["heartrate", {
+    normalizeValue: normalizeHeartRateBpm,
+    observations: [
+      { metric: "average-heart-rate", statistic: "mean", title: "Junction heart rate average" },
+      { metric: "lowest-heart-rate", statistic: "min", title: "Junction heart rate minimum" },
+      { metric: "max-heart-rate", statistic: "max", title: "Junction heart rate maximum" },
+    ],
+    unit: "bpm",
+    valuePaths: JUNCTION_HEARTRATE_VALUE_PATHS,
+  }],
+];
+
+const JUNCTION_FEATURE_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionFeatureTimeseriesDescriptor> =
+  new Map(JUNCTION_FEATURE_TIMESERIES_DESCRIPTOR_ENTRIES);
+
 // Junction's blood-pressure timeseries pairs `systolic`/`diastolic` per
 // reading (docs.junction.com/api-reference/data/timeseries/blood-pressure),
 // so it cannot reduce through the single-value daily-aggregate descriptors.
@@ -1551,14 +1715,17 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTi
 // `measurement` event plus one compact per-reading evidence part.
 const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
 const JUNCTION_NOTE_RESOURCE = "note";
+const JUNCTION_WEIGHT_RESOURCE = "weight";
 
 // Derived from the descriptor entries (plus the sparse paired blood-pressure
 // resource) so the raw-snapshot sanitization allowlist cannot drift from the
 // bounded normalization set.
 const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set([
   ...JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
+  ...JUNCTION_FEATURE_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
   JUNCTION_BLOOD_PRESSURE_RESOURCE,
   JUNCTION_NOTE_RESOURCE,
+  JUNCTION_WEIGHT_RESOURCE,
 ]);
 
 function normalizeTimeseries(
@@ -1576,9 +1743,32 @@ function normalizeTimeseries(
       continue;
     }
 
-    const descriptor = JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource);
-    if (descriptor) {
-      pushJunctionDailyTimeseriesObservations(payload, resource, slugify(resource, "timeseries"), context, descriptor);
+    if (resource === JUNCTION_WEIGHT_RESOURCE) {
+      pushJunctionWeightReadings(payload, resource, slugify(resource, "timeseries"), context);
+      continue;
+    }
+
+    const dailyDescriptor = JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource);
+    if (dailyDescriptor) {
+      pushJunctionDailyTimeseriesObservations(
+        payload,
+        resource,
+        slugify(resource, "timeseries"),
+        context,
+        dailyDescriptor,
+      );
+      continue;
+    }
+
+    const featureDescriptor = JUNCTION_FEATURE_TIMESERIES_DESCRIPTORS.get(resource);
+    if (featureDescriptor) {
+      pushJunctionFeatureTimeseriesObservations(
+        payload,
+        resource,
+        slugify(resource, "timeseries"),
+        context,
+        featureDescriptor,
+      );
     }
   }
 }
@@ -1705,6 +1895,7 @@ function pushJunctionDailyTimeseriesObservations(
     context,
     valuePaths: descriptor.valuePaths,
     normalizeValue: descriptor.normalizeValue,
+    requireExplicitTimestamp: descriptor.requireExplicitTimestamp === true,
   })) {
     for (const observation of descriptor.observations) {
       pushJunctionDailyTimeseriesObservation(context, aggregate, {
@@ -1735,8 +1926,9 @@ function junctionDailyTimeseriesStatisticValue(
 
 function buildJunctionDailyTimeseriesAggregates(input: {
   context: NormalizationContext;
-  normalizeValue: (value: unknown) => number | undefined;
+  normalizeValue: (value: unknown, entry: PlainObject) => number | undefined;
   payload: unknown;
+  requireExplicitTimestamp: boolean;
   resource: string;
   resourceSlug: string;
   valuePaths: readonly string[];
@@ -1760,13 +1952,21 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       continue;
     }
 
-    const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths));
+    const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths), entry);
     const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
     const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp);
     const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt, input.context.defaultTimeZone);
     const legacyDayKey = resolveLegacyJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
 
-    if (value === undefined || !sampleAt || !dayKey) {
+    if (
+      value === undefined
+      || (
+        input.requireExplicitTimestamp
+        && !hasValidJunctionExplicitTimeseriesTimestamp(timestamp)
+      )
+      || !sampleAt
+      || !dayKey
+    ) {
       continue;
     }
 
@@ -1905,6 +2105,9 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
             meanValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
             minValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
             maxValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
+            sumValue: resource === "steps" || resource === "distance"
+              ? roundJunctionTimeseriesAggregateValue(resource, aggregate.sum)
+              : undefined,
             unit: junctionDailyTimeseriesAggregateUnit(resource),
           }),
         ),
@@ -1926,7 +2129,10 @@ function junctionDailyTimeseriesAggregateUnit(resource: string): string | undefi
 function withJunctionCompactTimeseriesMetadata(
   resource: string,
   artifact: DeviceEvidencePartPayload | null,
-  resourceCategory: "timeseries_daily_aggregate" | "timeseries_reading" = "timeseries_daily_aggregate",
+  resourceCategory:
+    | "timeseries_daily_aggregate"
+    | "timeseries_feature_aggregate"
+    | "timeseries_reading" = "timeseries_daily_aggregate",
 ): DeviceEvidencePartPayload | null {
   if (!artifact) {
     return null;
@@ -2018,6 +2224,349 @@ function legacyJunctionDailyTimeseriesAggregateExternalRefs(
       metric,
     )
   );
+}
+
+// Dense opt-in streams never retain provider rows. They collapse into one
+// provider-partitioned feature artifact per UTC hour, or per upstream session
+// when Junction supplies a stable session id or explicit session bounds.
+function pushJunctionFeatureTimeseriesObservations(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+  descriptor: JunctionFeatureTimeseriesDescriptor,
+): void {
+  const aggregates = buildJunctionFeatureTimeseriesAggregates({
+    context,
+    descriptor,
+    payload,
+    resource,
+    resourceSlug,
+  });
+
+  if (aggregates.length === 0) {
+    const role = `junction-timeseries-feature-${resourceSlug}:no-valid-samples`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          {
+            schema: "junction.timeseries_feature_aggregate.v1",
+            provider: "junction",
+            resource,
+            sampleCount: 0,
+            status: "no_valid_samples",
+          },
+        ),
+        "timeseries_feature_aggregate",
+      ),
+    );
+    return;
+  }
+
+  for (const aggregate of aggregates) {
+    const role = `${aggregate.evidencePartRole}:${aggregate.bucketKind}:${shortHash([
+      aggregate.resourceContext.externalRefResourceType,
+      aggregate.resourceContext.origin.sourceType ?? "",
+      aggregate.resourceContext.origin.sourceInstanceId ?? "",
+      aggregate.bucketIdentity,
+    ])}`;
+    aggregate.evidencePartRole = role;
+
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          stripUndefined({
+            schema: "junction.timeseries_feature_aggregate.v1",
+            provider: "junction",
+            resource,
+            bucketKind: aggregate.bucketKind,
+            bucketStartAt: aggregate.bucketStartAt,
+            bucketEndAt: aggregate.bucketEndAt,
+            dayKey: aggregate.dayKey,
+            sourceProviderSlug: aggregate.resourceContext.sourceProviderSlug,
+            sourceType: aggregate.resourceContext.origin.sourceType,
+            sourceInstanceId: aggregate.resourceContext.origin.sourceInstanceId,
+            sessionId: aggregate.sessionId,
+            sessionType: aggregate.sessionType,
+            sampleCount: aggregate.sampleCount,
+            firstSampleAt: aggregate.firstSampleAt,
+            lastSampleAt: aggregate.lastSampleAt,
+            lastRecordedAt: aggregate.lastRecordedAt,
+            sumValue: roundJunctionDailyAggregateValue(aggregate.sum),
+            meanValue: roundJunctionDailyAggregateValue(aggregate.sum / aggregate.sampleCount),
+            minValue: roundJunctionDailyAggregateValue(aggregate.minValue),
+            maxValue: roundJunctionDailyAggregateValue(aggregate.maxValue),
+            unit: descriptor.unit,
+          }),
+        ),
+        "timeseries_feature_aggregate",
+      ),
+    );
+
+    for (const observation of descriptor.observations) {
+      pushJunctionFeatureTimeseriesObservation(
+        context,
+        aggregate,
+        observation,
+        descriptor.unit,
+      );
+    }
+  }
+}
+
+function buildJunctionFeatureTimeseriesAggregates(input: {
+  context: NormalizationContext;
+  descriptor: JunctionFeatureTimeseriesDescriptor;
+  payload: unknown;
+  resource: string;
+  resourceSlug: string;
+}): JunctionFeatureTimeseriesAggregate[] {
+  const evidencePartRole = `junction-timeseries-feature-${input.resourceSlug}`;
+  const aggregates = new Map<string, JunctionFeatureTimeseriesAggregate>();
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(input.payload).entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource: input.resource,
+      resourceSlug: input.resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: evidencePartRole,
+      context: input.context,
+    });
+    if (!resourceContext) {
+      continue;
+    }
+
+    const value = input.descriptor.normalizeValue(
+      firstNumberFromPaths(entry, input.descriptor.valuePaths),
+      entry,
+    );
+    const rawSampleAt = firstValueFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS);
+    const sampleAt = resolveSafeTimestamp(rawSampleAt, resourceContext.sourceProviderSlug);
+    if (value === undefined || !sampleAt) {
+      continue;
+    }
+
+    const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(
+      entry,
+      timestamp,
+      sampleAt,
+      input.context.defaultTimeZone,
+    );
+    if (!dayKey) {
+      continue;
+    }
+
+    const bucket = resolveJunctionFeatureTimeseriesBucket(
+      entry,
+      sampleAt,
+      resourceContext.sourceProviderSlug,
+    );
+    const key = [
+      resourceContext.externalRefResourceType,
+      resourceContext.origin.sourceType ?? "",
+      resourceContext.origin.sourceInstanceId ?? "",
+      bucket.kind,
+      bucket.identity,
+    ].join("\u0000");
+    const existing = aggregates.get(key);
+    const recordedAt = timestamp.recordedAt ?? sampleAt;
+    const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+
+    if (!existing) {
+      aggregates.set(key, {
+        bucketEndAt: bucket.endAt,
+        bucketIdentity: bucket.identity,
+        bucketKind: bucket.kind,
+        bucketStartAt: bucket.startAt,
+        dayKey,
+        entry,
+        evidencePartRole,
+        firstSampleAt: sampleAt,
+        lastRecordedAt: recordedAt,
+        lastSampleAt: sampleAt,
+        maxValue: value,
+        minValue: value,
+        resourceContext,
+        sampleCount: 1,
+        sessionId: bucket.sessionId,
+        sessionType: bucket.sessionType,
+        sum: value,
+        timestamp,
+        timeZone,
+      });
+      continue;
+    }
+
+    existing.sampleCount += 1;
+    existing.sum += value;
+    existing.bucketStartAt = earlierIsoTimestamp(existing.bucketStartAt, bucket.startAt);
+    existing.bucketEndAt = laterIsoTimestamp(existing.bucketEndAt, bucket.endAt);
+    if (value < existing.minValue) {
+      existing.minValue = value;
+    }
+    if (value > existing.maxValue) {
+      existing.maxValue = value;
+    }
+    if (sampleAt < existing.firstSampleAt) {
+      existing.firstSampleAt = sampleAt;
+    }
+    if (sampleAt >= existing.lastSampleAt) {
+      existing.dayKey = dayKey;
+      existing.entry = entry;
+      existing.lastRecordedAt = recordedAt;
+      existing.lastSampleAt = sampleAt;
+      existing.timestamp = timestamp;
+      existing.timeZone = timeZone;
+    }
+    existing.sessionType ??= bucket.sessionType;
+  }
+
+  return [...aggregates.values()].sort(compareJunctionFeatureTimeseriesAggregates);
+}
+
+function resolveJunctionFeatureTimeseriesBucket(
+  entry: PlainObject,
+  sampleAt: string,
+  sourceProviderSlug: string,
+): {
+  endAt: string;
+  identity: string;
+  kind: "hour" | "session";
+  sessionId?: string;
+  sessionType?: string;
+  startAt: string;
+} {
+  const sessionId = trimOptionalToLength(
+    firstStringFromPaths(entry, JUNCTION_FEATURE_SESSION_ID_PATHS),
+    160,
+  );
+  const explicitStartAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, JUNCTION_FEATURE_SESSION_START_PATHS),
+    sourceProviderSlug,
+  );
+  const explicitEndAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, JUNCTION_FEATURE_SESSION_END_PATHS),
+    sourceProviderSlug,
+  );
+  const hasValidExplicitRange = Boolean(
+    explicitStartAt
+    && explicitEndAt
+    && Date.parse(explicitEndAt) >= Date.parse(explicitStartAt),
+  );
+
+  if (sessionId || hasValidExplicitRange) {
+    const startAt = hasValidExplicitRange && explicitStartAt ? explicitStartAt : sampleAt;
+    const endAt = hasValidExplicitRange && explicitEndAt ? explicitEndAt : sampleAt;
+    const sessionType = trimOptionalToLength(
+      firstStringFromPaths(entry, JUNCTION_FEATURE_SESSION_TYPE_PATHS),
+      120,
+    );
+    return {
+      endAt: laterIsoTimestamp(endAt, sampleAt),
+      identity: sessionId
+        ? `id:${sessionId}`
+        : `range:${startAt}:${endAt}`,
+      kind: "session",
+      ...(sessionId ? { sessionId } : {}),
+      ...(sessionType ? { sessionType } : {}),
+      startAt: earlierIsoTimestamp(startAt, sampleAt),
+    };
+  }
+
+  const hourStartMs = Math.floor(Date.parse(sampleAt) / 3_600_000) * 3_600_000;
+  const startAt = new Date(hourStartMs).toISOString();
+  return {
+    endAt: new Date(hourStartMs + 3_600_000).toISOString(),
+    identity: startAt,
+    kind: "hour",
+    startAt,
+  };
+}
+
+function pushJunctionFeatureTimeseriesObservation(
+  context: NormalizationContext,
+  aggregate: JunctionFeatureTimeseriesAggregate,
+  observation: JunctionFeatureTimeseriesObservationDescriptor,
+  unit: string,
+): void {
+  const value = junctionFeatureTimeseriesStatisticValue(aggregate, observation.statistic);
+  const resourceId = `${aggregate.resourceContext.resourceSlug}-${shortHash([
+    aggregate.resourceContext.externalRefResourceType,
+    aggregate.resourceContext.origin.sourceType ?? "",
+    aggregate.resourceContext.origin.sourceInstanceId ?? "",
+    aggregate.bucketKind,
+    aggregate.bucketIdentity,
+  ])}`;
+  const timestamp = withTimestampOverride(aggregate.timestamp, {
+    occurredAt: aggregate.lastSampleAt,
+    recordedAt: aggregate.lastRecordedAt,
+    dayKey: aggregate.dayKey,
+  });
+
+  context.events.push(stripUndefined({
+    kind: "observation",
+    occurredAt: aggregate.lastSampleAt,
+    recordedAt: aggregate.lastRecordedAt,
+    dayKey: aggregate.dayKey,
+    timeZone: aggregate.timeZone,
+    source: "device",
+    title: observation.title,
+    evidenceRoles: [aggregate.evidencePartRole],
+    externalRef: makeProviderExternalRef(
+      "junction",
+      aggregate.resourceContext.externalRefResourceType,
+      resourceId,
+      undefined,
+      observation.metric,
+    ),
+    dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
+    fields: {
+      metric: observation.metric,
+      observationGrain: "summary",
+      value: roundJunctionDailyAggregateValue(value),
+      unit,
+    },
+  }));
+}
+
+function junctionFeatureTimeseriesStatisticValue(
+  aggregate: JunctionFeatureTimeseriesAggregate,
+  statistic: JunctionFeatureTimeseriesObservationDescriptor["statistic"],
+): number {
+  switch (statistic) {
+    case "min":
+      return aggregate.minValue;
+    case "max":
+      return aggregate.maxValue;
+    case "sum":
+      return aggregate.sum;
+    case "mean":
+      return aggregate.sum / aggregate.sampleCount;
+  }
+}
+
+function compareJunctionFeatureTimeseriesAggregates(
+  left: JunctionFeatureTimeseriesAggregate,
+  right: JunctionFeatureTimeseriesAggregate,
+): number {
+  return left.bucketStartAt.localeCompare(right.bucketStartAt)
+    || left.resourceContext.sourceProviderSlug.localeCompare(right.resourceContext.sourceProviderSlug)
+    || (left.resourceContext.origin.sourceType ?? "").localeCompare(right.resourceContext.origin.sourceType ?? "")
+    || (left.resourceContext.origin.sourceInstanceId ?? "").localeCompare(right.resourceContext.origin.sourceInstanceId ?? "")
+    || left.bucketKind.localeCompare(right.bucketKind)
+    || left.bucketIdentity.localeCompare(right.bucketIdentity);
 }
 
 // Sparse paired blood-pressure readings land as-is: one canonical
@@ -2149,6 +2698,152 @@ function pushJunctionBloodPressureReadings(
           `${role}.json`,
           {
             schema: "junction.blood_pressure_reading.v1",
+            provider: "junction",
+            resource,
+            readingCount: 0,
+            status: "no_valid_samples",
+          },
+        ),
+        "timeseries_reading",
+      ),
+    );
+  }
+}
+
+// Sparse opt-in weight readings use the same canonical measurement path as
+// other queryable body measurements. Each accepted reading retains only one
+// compact evidence record and a replay-stable external reference.
+function pushJunctionWeightReadings(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+): void {
+  const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
+  const seenReadingIdentityHashes = new Set<string>();
+  let readingCount = 0;
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: baseArtifactRole,
+      context,
+    });
+    if (!resourceContext) {
+      continue;
+    }
+
+    const weightKilograms = normalizeWeightKilograms(
+      firstNumberFromPaths(entry, JUNCTION_WEIGHT_VALUE_PATHS),
+      entry,
+    );
+    const rawOccurredAt = firstValueFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS);
+    const occurredAt = resolveSafeTimestamp(rawOccurredAt, resourceContext.sourceProviderSlug);
+    if (weightKilograms === undefined || !occurredAt) {
+      continue;
+    }
+
+    const timestamp = withTimestampOverride(
+      resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug),
+      { occurredAt },
+    );
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(
+      entry,
+      timestamp,
+      occurredAt,
+      context.defaultTimeZone,
+    );
+    if (!dayKey) {
+      continue;
+    }
+
+    const providerReadingId = trimOptionalToLength(
+      firstStringFromPaths(entry, JUNCTION_READING_STABLE_ID_PATHS),
+      160,
+    );
+    const readingIdentityHash = shortHash([
+      resourceSlug,
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType ?? "",
+      resourceContext.origin.sourceInstanceId ?? "",
+      providerReadingId ?? "",
+      timestamp.observedAtRaw ?? occurredAt,
+      weightKilograms,
+    ]);
+    if (seenReadingIdentityHashes.has(readingIdentityHash)) {
+      continue;
+    }
+    seenReadingIdentityHashes.add(readingIdentityHash);
+    readingCount += 1;
+
+    const role = `${baseArtifactRole}:${dayKey}:${readingIdentityHash}`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          stripUndefined({
+            schema: "junction.weight_reading.v1",
+            provider: "junction",
+            resource,
+            dayKey,
+            sourceProviderSlug: resourceContext.sourceProviderSlug,
+            sourceType: resourceContext.origin.sourceType,
+            sourceInstanceId: resourceContext.origin.sourceInstanceId,
+            providerReadingId,
+            occurredAt,
+            recordedAt: timestamp.recordedAt,
+            weightKilograms,
+            unit: "kg",
+          }),
+        ),
+        "timeseries_reading",
+      ),
+    );
+
+    context.events.push(stripUndefined({
+      kind: "measurement",
+      occurredAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey,
+      timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+      source: "device",
+      title: "Junction body weight",
+      evidenceRoles: [role],
+      externalRef: makeProviderExternalRef(
+        "junction",
+        resourceContext.externalRefResourceType,
+        `${resourceSlug}-${readingIdentityHash}`,
+        undefined,
+        "weight",
+      ),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      fields: {
+        measurements: [
+          { metric: "weight", value: weightKilograms, unit: "kg" },
+        ],
+      },
+    }));
+  }
+
+  if (readingCount === 0) {
+    const role = `${baseArtifactRole}:no-valid-samples`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          {
+            schema: "junction.weight_reading.v1",
             provider: "junction",
             resource,
             readingCount: 0,
@@ -5536,6 +6231,20 @@ function resolveJunctionTimeseriesAggregateDayKey(
   return timestamp.dayKey ?? vaultDayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
 }
 
+function hasValidJunctionExplicitTimeseriesTimestamp(
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): boolean {
+  if (!timestamp.observedAtRaw) {
+    return false;
+  }
+
+  if (timestamp.timestampSemantics === "floating") {
+    return Boolean(timestamp.dayKey);
+  }
+
+  return normalizeTimestamp(timestamp.observedAtRaw) !== undefined;
+}
+
 function resolveJunctionDailyAggregateSampleAt(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string | undefined {
@@ -5843,6 +6552,157 @@ function metersToKilometers(value: unknown): number | undefined {
   }
 
   return numeric / 1000;
+}
+
+
+function normalizeStepCount(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+  if (
+    numeric === undefined
+    || !Number.isSafeInteger(numeric)
+    || numeric < 0
+    || numeric > 1_000_000
+  ) {
+    return undefined;
+  }
+
+  return numeric;
+}
+
+function normalizeDistanceKilometers(value: unknown, entry: PlainObject): number | undefined {
+  const numeric = finiteNumber(value);
+  if (numeric === undefined || numeric < 0) {
+    return undefined;
+  }
+
+  const unit = readJunctionTimeseriesUnit(entry);
+  let kilometers: number | undefined;
+  switch (unit) {
+    case undefined: {
+      const kilometerField = firstNumberFromPaths(entry, ["distanceKm", "distance_km"]);
+      const meterField = firstNumberFromPaths(
+        entry,
+        ["value", "distance", "distanceMeters", "distance_meters"],
+      );
+      kilometers = kilometerField !== undefined && meterField === undefined
+        ? numeric
+        : numeric / 1000;
+      break;
+    }
+    case "m":
+    case "meter":
+    case "meters":
+    case "metre":
+    case "metres":
+      kilometers = numeric / 1000;
+      break;
+    case "km":
+    case "kilometer":
+    case "kilometers":
+    case "kilometre":
+    case "kilometres":
+      kilometers = numeric;
+      break;
+    case "mi":
+    case "mile":
+    case "miles":
+      kilometers = numeric * 1.609344;
+      break;
+    default:
+      return undefined;
+  }
+
+  if (
+    kilometers === undefined
+    || !Number.isFinite(kilometers)
+    || kilometers < 0
+    || kilometers > 1000
+  ) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(kilometers);
+}
+
+function normalizeActiveCaloriesKilocalories(value: unknown, entry: PlainObject): number | undefined {
+  const numeric = finiteNumber(value);
+  if (numeric === undefined || numeric < 0) {
+    return undefined;
+  }
+
+  const unit = readJunctionTimeseriesUnit(entry);
+  const kilocalories = unit === undefined || isJunctionKilocalorieUnit(unit)
+    ? numeric
+    : isJunctionKilojouleUnit(unit)
+      ? kilojoulesToKilocalories(numeric)
+      : undefined;
+  if (kilocalories === undefined || kilocalories < 0 || kilocalories > 20_000) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(kilocalories);
+}
+
+function normalizeHeartRateBpm(value: unknown, entry: PlainObject): number | undefined {
+  const numeric = finiteNumber(value);
+  const unit = readJunctionTimeseriesUnit(entry);
+  if (
+    numeric === undefined
+    || numeric < 20
+    || numeric > 300
+    || (unit !== undefined && !["bpm", "beatperminute", "beatsperminute"].includes(unit))
+  ) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(numeric);
+}
+
+function normalizeWeightKilograms(value: unknown, entry: PlainObject): number | undefined {
+  const numeric = finiteNumber(value);
+  if (numeric === undefined || numeric <= 0) {
+    return undefined;
+  }
+
+  const unit = readJunctionTimeseriesUnit(entry);
+  let kilograms: number | undefined;
+  switch (unit) {
+    case undefined:
+    case "kg":
+    case "kilogram":
+    case "kilograms":
+      kilograms = numeric;
+      break;
+    case "g":
+    case "gram":
+    case "grams":
+      kilograms = numeric / 1000;
+      break;
+    case "lb":
+    case "lbs":
+    case "pound":
+    case "pounds":
+      kilograms = numeric / 2.2046226218;
+      break;
+    default:
+      return undefined;
+  }
+
+  if (
+    kilograms === undefined
+    || !Number.isFinite(kilograms)
+    || kilograms <= 0
+    || kilograms > 500
+  ) {
+    return undefined;
+  }
+
+  return roundJunctionDailyAggregateValue(kilograms);
+}
+
+function readJunctionTimeseriesUnit(entry: PlainObject): string | undefined {
+  const unit = firstStringFromPaths(entry, ["unit", "units", "valueUnit", "value_unit"]);
+  return unit ? normalizeNutritionUnit(unit) : undefined;
 }
 
 function normalizePercentRatio(value: unknown): number | undefined {

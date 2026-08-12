@@ -4,9 +4,17 @@ import type { Junction } from "@junction-api/sdk";
 import type * as JunctionSerialization from "@junction-api/sdk/serialization";
 import {
   COMPANION_HRV_RMSSD_RESOURCE,
+  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
+  JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES,
+  normalizeJunctionResourceName,
   parseCompanionHrvRmssdAdmissionId,
   parseSerializedCompanionHrvRmssdObservation,
   serializeCompanionHrvRmssdObservation,
+  type JunctionTimeseriesResource,
 } from "@murphai/contracts";
 import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
@@ -16,14 +24,8 @@ import {
 } from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
-  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
-  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
-  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
-  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   isJunctionRawDirectIdentityContainerKey,
   isJunctionRawDirectIdentityKey,
-  normalizeJunctionResourceName,
 } from "@murphai/importers/device-providers/junction-resources";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
@@ -49,6 +51,7 @@ import {
   JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
   JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+  JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
   readJunctionHistoricalBackfillEvidence,
   readJunctionHistoricalBackfillStatus,
   type JunctionHistoricalBackfillEvidence,
@@ -318,10 +321,8 @@ const DEFAULT_TIMESERIES_BACKFILL_DAYS = 14;
 // Sparse readings are cheap enough to backfill across the full summary-history
 // window. Dense timeseries retain the bounded default
 // below, and an explicit timeseriesBackfillDays override still wins.
-const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES = Object.freeze([
-  "blood_pressure",
-  "note",
-] as const);
+const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES =
+  JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES;
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
   blood_pressure: {
     metadataKey: JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
@@ -331,10 +332,14 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_POLICIES = Object.freeze({
     metadataKey: JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
     version: 1,
   },
-} as const satisfies Record<
-  (typeof JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES)[number],
+  weight: {
+    metadataKey: JUNCTION_WEIGHT_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
+    version: 1,
+  },
+} as const satisfies Partial<Record<
+  JunctionTimeseriesResource,
   { metadataKey: string; version: number }
->);
+>>);
 const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
 );
@@ -698,9 +703,9 @@ export function createJunctionDeviceSyncProvider(
       }
 
       return [...scheduledSources.entries()].map(([sourceProviderSlug, firstSeenAt]) => {
-        // Blood pressure existed before the member connected its source, so
-        // its history ends at first-seen. Notes became ingestible in a newer
-        // runtime, so existing sources need recent history ending now.
+        // Sparse measurements existed before the member connected its source,
+        // so their history ends at first-seen. Notes became ingestible in a
+        // newer runtime, so existing sources need recent history ending now.
         const window = buildExtendedTimeseriesBackfillWindow(
           resource === "note" ? now : firstSeenAt,
         );

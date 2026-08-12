@@ -3,9 +3,8 @@ import {
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
   normalizeJunctionResourceName,
-} from "@murphai/importers/device-providers/junction-resources";
+} from "@murphai/contracts";
 import {
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
@@ -564,7 +563,6 @@ export function normalizeJunctionDeviceSyncRuntimeConfig(
     config.timeseriesResources,
     JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
     JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
-    JUNCTION_KNOWN_TIMESERIES_RESOURCES,
     "timeseries",
   );
   const providerFilter = normalizeJunctionProviderFilter(config.providerFilter);
@@ -753,25 +751,25 @@ function normalizeOptionalJunctionResourceList(
   value: string[] | undefined,
   defaults: readonly string[],
   allowedResources: readonly string[],
-  knownResources: readonly string[],
   label: string,
 ): string[] {
-  const normalized = (value === undefined ? defaults : value)
-    .map(normalizeJunctionResourceName)
-    .filter((entry): entry is string => entry !== null);
   const allowedResourceSet = new Set<string>(allowedResources);
-  const knownResourceSet = new Set<string>([...allowedResources, ...knownResources]);
-  const unsupportedResources = normalized.filter((entry) => !knownResourceSet.has(entry));
+  const enabledResources: string[] = [];
+  const unsupportedResources: string[] = [];
+
+  for (const requestedResource of value === undefined ? defaults : value) {
+    const normalized = normalizeJunctionResourceName(requestedResource);
+    if (!normalized || !allowedResourceSet.has(normalized)) {
+      unsupportedResources.push(normalized ?? requestedResource);
+      continue;
+    }
+    enabledResources.push(normalized);
+  }
 
   if (unsupportedResources.length > 0) {
     throw new TypeError(
       `Junction ${label} resources include unsupported resource(s): ${[...new Set(unsupportedResources)].join(", ")}.`,
     );
-  }
-
-  const enabledResources = normalized.filter((entry) => allowedResourceSet.has(entry));
-  if (value !== undefined && value.length > 0 && enabledResources.length === 0) {
-    return [...new Set(defaults)];
   }
 
   return [...new Set(enabledResources)];

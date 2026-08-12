@@ -25,6 +25,7 @@ const SAME_DAY_LATER = "2026-06-11T18:00:00.000Z";
 const BACKFILL_WINDOW_END = "2026-06-11T00:00:00.000Z";
 const BP_HISTORY_COVERAGE_KEY = "junctionBloodPressureHistoryBackfillCoverage";
 const NOTE_HISTORY_COVERAGE_KEY = "junctionNoteHistoryBackfillCoverage";
+const WEIGHT_HISTORY_COVERAGE_KEY = "junctionWeightHistoryBackfillCoverage";
 const SOURCE_DISCONNECT_FENCE_CODES = [
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
@@ -284,6 +285,8 @@ function createProvider(input: {
   bloodPressureRecords?: readonly Record<string, unknown>[];
   includeNote?: boolean;
   noteRecords?: readonly Record<string, unknown>[];
+  timeseriesResources?: string[];
+  weightRecords?: readonly Record<string, unknown>[];
   bloodPressureRequestFailure?: {
     active: boolean;
     fromRequest: number;
@@ -315,9 +318,9 @@ function createProvider(input: {
     region: "us",
     summaryResources: ["activity"],
     summaryBackfillDays: input.summaryBackfillDays ?? 30,
-    timeseriesResources: input.includeNote
+    timeseriesResources: input.timeseriesResources ?? (input.includeNote
       ? ["blood_pressure", "stress_level", "note"]
-      : ["blood_pressure", "stress_level"],
+      : ["blood_pressure", "stress_level"]),
     ...(input.timeseriesBackfillDays === undefined
       ? {}
       : { timeseriesBackfillDays: input.timeseriesBackfillDays }),
@@ -391,22 +394,32 @@ function createProvider(input: {
         const bloodPressureGroups = input.bloodPressureGroups ?? {
           omron: input.bloodPressureRecords ?? [],
         };
-        const noteWindowStart = url.searchParams.get("start_date");
-        const noteWindowEnd = url.searchParams.get("end_date");
+        const windowStart = url.searchParams.get("start_date");
+        const windowEnd = url.searchParams.get("end_date");
         const noteRecords = (input.noteRecords ?? []).filter((record) => {
           const timestamp = typeof record.start === "string" ? record.start : null;
           return timestamp !== null
-            && (noteWindowStart === null || timestamp >= noteWindowStart)
-            && (noteWindowEnd === null || timestamp < noteWindowEnd);
+            && (windowStart === null || timestamp >= windowStart)
+            && (windowEnd === null || timestamp < windowEnd);
+        });
+        const weightRecords = (input.weightRecords ?? []).filter((record) => {
+          const timestamp = typeof record.timestamp === "string" ? record.timestamp : null;
+          return timestamp !== null
+            && (windowStart === null || timestamp >= windowStart)
+            && (windowEnd === null || timestamp < windowEnd);
         });
         const resourceGroups = resource === "note"
           ? { oura: noteRecords }
-          : bloodPressureGroups;
+          : resource === "body_weight"
+            ? { withings: weightRecords }
+            : bloodPressureGroups;
         const records = resource === "blood_pressure"
           ? Object.values(bloodPressureGroups).flat()
           : resource === "note"
             ? noteRecords
-            : [];
+            : resource === "body_weight"
+              ? weightRecords
+              : [];
         return createJsonResponse(
           records.length > 0
             ? {
@@ -871,6 +884,103 @@ test("Oura notes receive one full summary-history migration while dense timeseri
   );
   assert.equal(
     completed.jobs.some((job) => job.kind === "resource" && job.payload?.resource === "note"),
+    false,
+  );
+});
+
+test("weight receives summary-history backfill while dense opt-ins stay bounded", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{
+      resourceAvailability: {
+        heartrate: true,
+        steps: true,
+        weight: true,
+      },
+      slug: "withings",
+    }],
+    requests,
+    summaryBackfillDays: 180,
+    timeseriesResources: ["weight", "steps", "heartrate"],
+    weightRecords: [{
+      id: "weight-history-1",
+      timestamp: "2025-12-13T08:00:00.000Z",
+      unit: "kg",
+      value: 80,
+    }],
+  });
+  const createScheduledJobs = requireValue(
+    requireValue(provider.jobExecutor).createScheduledJobs,
+  );
+  const sources = [createSourceSummary(
+    "withings",
+    NOW,
+    "connected",
+    { heartrate: true, steps: true, weight: true },
+  )];
+  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+  const weight = requireValue(scheduled.jobs.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "weight"
+  ));
+
+  assert.deepEqual(weight.payload, {
+    historicalBackfill: true,
+    historicalWindowStart: "2025-12-13T00:00:00.000Z",
+    resource: "weight",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "withings",
+    windowEnd: BACKFILL_WINDOW_END,
+    windowStart: "2025-12-13T00:00:00.000Z",
+  });
+  assert.equal(
+    scheduled.jobs.some((job) =>
+      job.kind === "resource"
+      && (job.payload?.resource === "steps" || job.payload?.resource === "heartrate")
+    ),
+    false,
+  );
+
+  const importedSnapshots: unknown[] = [];
+  const firstHistoryResult = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ importedSnapshots }),
+    toJobRecord(weight, 1),
+  );
+  assert.equal(requests.filter((request) => request.resource === "body_weight").length, 1);
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(JSON.stringify(importedSnapshots).includes("weight-history-1"), true);
+  assert.equal(
+    firstHistoryResult.scheduledJobs?.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "weight"
+    ),
+    true,
+  );
+
+  requests.length = 0;
+  const reconcile = requireValue(scheduled.jobs.find((job) => job.kind === "reconcile"));
+  await requireValue(provider.jobExecutor).executeJob(
+    createJobContext(),
+    toJobRecord(reconcile, 2),
+  );
+  for (const denseResource of ["steps", "heartrate"]) {
+    const denseRequests = requests.filter((request) => request.resource === denseResource);
+    assert.equal(denseRequests.length, 7);
+    assert.ok(denseRequests.every((request) =>
+      request.start !== null
+      && Date.parse(request.start) >= Date.parse("2026-06-04T00:00:00.000Z")
+    ));
+  }
+
+  const completed = createScheduledJobs(
+    createStoredAccount({
+      metadata: { [WEIGHT_HISTORY_COVERAGE_KEY]: "v1|withings" },
+      sources,
+    }),
+    "2026-06-12T12:00:00.000Z",
+  );
+  assert.equal(
+    completed.jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "weight"
+    ),
     false,
   );
 });
