@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Purpose
 
@@ -174,6 +174,12 @@ public redirect ownership, explicit recovery ownership, replay defense, and
 the rule that alerts never become billing or retry authority are jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `apps/web/README.md`.
+
+Hosted mailbox and Privy identity preparation use one request-local,
+crypto-only exact-root boundary: provider/KMS work settles before `BEGIN`, the
+transaction revalidates the precise root under its canonical lock, and a typed
+winner drift permits one fresh full preparation attempt. The contract is
+specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
 
 ## Canonical Docs
 

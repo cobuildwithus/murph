@@ -53,6 +53,22 @@ Last verified: 2026-08-11
   attempt. Both prewarm operations settle before transaction entry; signing,
   provider, or KMS failure starts no transaction, and activation's control and
   ingress unwraps must be scoped-cache hits.
+- Standalone generic mailbox-item append resolves an already-durable dedupe
+  replay before crypto work. On a miss it unwraps the exact active ingress root
+  before `BEGIN`; the transaction locks and re-reads that root identity, then
+  seals only from the matching request-scoped cache entry. A root change rolls
+  back and permits one fresh full preparation attempt. The prepared envelope
+  transaction adapter carries the same crypto-only token without replacing
+  envelope target or workspace checks. Legacy transaction append adapters stay
+  provider-capable for separately migrated producers and must not be mistaken
+  for the prepared surface.
+- Privy completion settles live provider authority, the exact control-domain
+  root, and existing private projections before `BEGIN`. It drains sibling
+  preparation after a failure and reports the first observed failure. Identity
+  and verified-email writes revalidate the exact root in the transaction and
+  seal locally; exact root drift rolls back and permits one fresh full
+  preparation attempt. The token is crypto identity only and is not member,
+  invite, routing, or email authority.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
