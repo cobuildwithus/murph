@@ -250,6 +250,9 @@ interface JunctionWindowFetchOptions {
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
 const JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY = "junctionProfileSummaryCheckedAt";
+const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION = 1;
+const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY =
+  "junctionProfileSummaryNormalizationRevision";
 
 // `profile` is deliberately excluded: it is a current-state snapshot, so
 // counting it as completion evidence would mark every backfill useful and
@@ -3320,6 +3323,8 @@ function buildJunctionProfileSummaryCheckedMetadataPatch(
 ): Record<string, unknown> {
   return {
     [JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY]: context.now,
+    [JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY]:
+      JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION,
   };
 }
 
@@ -3360,7 +3365,10 @@ function isJunctionProfileSummaryResource(resource: string): boolean {
 
 function hasCheckedJunctionProfileSummary(metadata: Record<string, unknown>): boolean {
   const checkedAt = normalizeString(metadata[JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY]);
-  return checkedAt !== undefined && Number.isFinite(Date.parse(checkedAt));
+  return checkedAt !== undefined
+    && Number.isFinite(Date.parse(checkedAt))
+    && metadata[JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY]
+      === JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION;
 }
 
 function classifyOptionalJunctionResourceFailure(

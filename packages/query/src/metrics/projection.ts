@@ -176,6 +176,10 @@ const ACTIVITY_METRIC_EVIDENCE = [
 const BODY_STATE_METRIC_EVIDENCE = [
   { metricKey: "body-weight", summaryField: "weightKg", sourceKind: "wearable-summary" },
   { metricKey: "body-fat-percentage", summaryField: "bodyFatPercentage", sourceKind: "wearable-summary" },
+  { metricKey: "body-water-percentage", summaryField: "bodyWaterPercentage", sourceKind: "wearable-summary" },
+  { metricKey: "bone-mass-percentage", summaryField: "boneMassPercentage", sourceKind: "wearable-summary" },
+  { metricKey: "muscle-mass-percentage", summaryField: "muscleMassPercentage", sourceKind: "wearable-summary" },
+  { metricKey: "visceral-fat-index", summaryField: "visceralFatIndex", sourceKind: "wearable-summary" },
 ] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableBodyStateSummary>>[];
 
 const SUMMARY_METRIC_EVIDENCE_ENTRIES = [

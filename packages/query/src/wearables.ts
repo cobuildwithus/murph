@@ -1195,14 +1195,26 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
     const bodyFatPercentage = resolveMetric("bodyFatPercentage", selectMetricCandidates(dateCandidates, "bodyFatPercentage"), {
       metricFamily: "body",
     });
+    const bodyWaterPercentage = resolveMetric("bodyWaterPercentage", selectMetricCandidates(dateCandidates, "bodyWaterPercentage"), {
+      metricFamily: "body",
+    });
+    const boneMassPercentage = resolveMetric("boneMassPercentage", selectMetricCandidates(dateCandidates, "boneMassPercentage"), {
+      metricFamily: "body",
+    });
     const bmi = resolveMetric("bmi", selectMetricCandidates(dateCandidates, "bmi"), {
       metricFamily: "body",
     });
     const leanBodyMassKg = resolveMetric("leanBodyMassKg", selectMetricCandidates(dateCandidates, "leanBodyMassKg"), {
       metricFamily: "body",
     });
+    const muscleMassPercentage = resolveMetric("muscleMassPercentage", selectMetricCandidates(dateCandidates, "muscleMassPercentage"), {
+      metricFamily: "body",
+    });
     const temperature = resolveMetric("temperature", selectMetricCandidates(dateCandidates, "temperature"), {
       metricFamily: "temperature",
+    });
+    const visceralFatIndex = resolveMetric("visceralFatIndex", selectMetricCandidates(dateCandidates, "visceralFatIndex"), {
+      metricFamily: "body",
     });
     const waistCircumference = resolveMetric("waistCircumference", selectMetricCandidates(dateCandidates, "waistCircumference"), {
       metricFamily: "body",
@@ -1210,9 +1222,13 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
     const summaryConfidence = summarizeMetricsConfidence([
       ["weightKg", weightKg],
       ["bodyFatPercentage", bodyFatPercentage],
+      ["bodyWaterPercentage", bodyWaterPercentage],
+      ["boneMassPercentage", boneMassPercentage],
       ["bmi", bmi],
       ["leanBodyMassKg", leanBodyMassKg],
+      ["muscleMassPercentage", muscleMassPercentage],
       ["temperature", temperature],
+      ["visceralFatIndex", visceralFatIndex],
       ["waistCircumference", waistCircumference],
     ], {
       missingSummaryNote: "No body-state metrics were available for this date.",
@@ -1226,11 +1242,15 @@ function listWearableBodyStateDaysFromDataset(dataset: WearableDataset): Wearabl
     return {
       bmi,
       bodyFatPercentage,
+      bodyWaterPercentage,
+      boneMassPercentage,
       date,
       leanBodyMassKg,
+      muscleMassPercentage,
       notes,
       summaryConfidence,
       temperature,
+      visceralFatIndex,
       waistCircumference,
       weightKg,
     };

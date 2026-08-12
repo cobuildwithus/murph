@@ -301,11 +301,15 @@ export interface WearableRecoveryDay {
 export interface WearableBodyStateDay {
   bmi: WearableResolvedMetric;
   bodyFatPercentage: WearableResolvedMetric;
+  bodyWaterPercentage: WearableResolvedMetric;
+  boneMassPercentage: WearableResolvedMetric;
   date: string;
   leanBodyMassKg: WearableResolvedMetric;
+  muscleMassPercentage: WearableResolvedMetric;
   notes: string[];
   summaryConfidence: WearableSummaryConfidence;
   temperature: WearableResolvedMetric;
+  visceralFatIndex: WearableResolvedMetric;
   waistCircumference: WearableResolvedMetric;
   weightKg: WearableResolvedMetric;
 }
@@ -719,8 +723,12 @@ export const RECOVERY_METRIC_KEYS = new Set<WearableMetricKey>([
 export const BODY_METRIC_KEYS = new Set<WearableMetricKey>([
   "bmi",
   "bodyFatPercentage",
+  "bodyWaterPercentage",
+  "boneMassPercentage",
   "leanBodyMassKg",
+  "muscleMassPercentage",
   "temperature",
+  "visceralFatIndex",
   "waistCircumference",
   "weightKg",
 ]);

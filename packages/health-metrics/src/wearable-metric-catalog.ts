@@ -10,6 +10,8 @@ export const wearableCanonicalMetricKeys = [
   "bmi",
   "bodyBattery",
   "bodyFatPercentage",
+  "bodyWaterPercentage",
+  "boneMassPercentage",
   "caffeine",
   "dayStrain",
   "deepMinutes",
@@ -31,6 +33,7 @@ export const wearableCanonicalMetricKeys = [
   "maxHeartRate",
   "mediumActivityMinutes",
   "mindfulnessMinutes",
+  "muscleMassPercentage",
   "percentRecorded",
   "readinessScore",
   "recoveryScore",
@@ -55,6 +58,7 @@ export const wearableCanonicalMetricKeys = [
   "totalCalories",
   "totalElevationGainMeters",
   "totalSleepMinutes",
+  "visceralFatIndex",
   "waistCircumference",
   "walkingAverageHeartRate",
   "water",
@@ -107,6 +111,13 @@ export const wearableMetricCatalog = Object.freeze({
     "body_fat_percentage",
     "body_fat_pct",
   ]),
+  bodyWaterPercentage: defineMetric("bodyWaterPercentage", "%", "daily_observation", 1, [
+    "body_water_percentage",
+    "water_percentage",
+  ]),
+  boneMassPercentage: defineMetric("boneMassPercentage", "%", "daily_observation", 1, [
+    "bone_mass_percentage",
+  ]),
   caffeine: defineMetric("caffeine", "mg", "daily_observation", 5, ["caffeine_mg"]),
   dayStrain: defineMetric("dayStrain", "whoop_strain", "daily_observation", 0.5, ["day_strain", "strain"]),
   deepMinutes: defineMetric("deepMinutes", "minutes", "session_observation", 5, ["deep", "deep_minutes"]),
@@ -156,6 +167,9 @@ export const wearableMetricCatalog = Object.freeze({
   maxHeartRate: defineMetric("maxHeartRate", "bpm", "session_observation", 1, ["max_heart_rate", "max_hr"]),
   mediumActivityMinutes: defineMetric("mediumActivityMinutes", "minutes", "daily_observation", 5, ["medium_activity_minutes"]),
   mindfulnessMinutes: defineMetric("mindfulnessMinutes", "minutes", "daily_observation", 2, ["mindful_minutes"]),
+  muscleMassPercentage: defineMetric("muscleMassPercentage", "%", "daily_observation", 1, [
+    "muscle_mass_percentage",
+  ]),
   percentRecorded: defineMetric("percentRecorded", "%", "session_observation", 1, ["percent_recorded"]),
   readinessScore: defineMetric("readinessScore", "%", "daily_observation", 1, ["readiness", "readiness_score"]),
   recoveryScore: defineMetric("recoveryScore", "%", "daily_observation", 1, ["recovery", "recovery_score"]),
@@ -198,6 +212,9 @@ export const wearableMetricCatalog = Object.freeze({
     "elevation_gain",
   ]),
   totalSleepMinutes: defineMetric("totalSleepMinutes", "minutes", "session_observation", 5, ["asleep", "total_sleep", "total_sleep_minutes"]),
+  visceralFatIndex: defineMetric("visceralFatIndex", "index", "daily_observation", 1, [
+    "visceral_fat_index",
+  ]),
   waistCircumference: defineMetric("waistCircumference", "cm", "daily_observation", 0.5, [
     "waist_circumference",
     "waist_circumference_centimeter",

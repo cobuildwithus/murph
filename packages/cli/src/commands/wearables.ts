@@ -203,11 +203,15 @@ const wearableRecoverySummarySchema = z.object({
 const wearableBodyStateSummarySchema = z.object({
   bmi: wearableResolvedMetricSchema.optional(),
   bodyFatPercentage: wearableResolvedMetricSchema.optional(),
+  bodyWaterPercentage: wearableResolvedMetricSchema.optional(),
+  boneMassPercentage: wearableResolvedMetricSchema.optional(),
   date: localDateSchema,
   leanBodyMassKg: wearableResolvedMetricSchema.optional(),
+  muscleMassPercentage: wearableResolvedMetricSchema.optional(),
   notes: z.array(z.string()).optional(),
   summaryConfidence: wearableSummaryConfidenceSchema,
   temperature: wearableResolvedMetricSchema.optional(),
+  visceralFatIndex: wearableResolvedMetricSchema.optional(),
   waistCircumference: wearableResolvedMetricSchema.optional(),
   weightKg: wearableResolvedMetricSchema.optional(),
 })
@@ -902,7 +906,7 @@ export function registerWearablesCommands(
 
   const body = Cli.create('body', {
     description:
-      'Deduplicated daily body-state summaries with weight, body-fat, BMI, temperature, and source-confidence notes.',
+      'Deduplicated daily body-state and body-composition summaries with source-confidence notes.',
   })
 
   body.command('list', {

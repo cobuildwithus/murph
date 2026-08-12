@@ -13,6 +13,7 @@ import {
   type MealMicronutrientKey,
   type MealMicronutrients,
   type MealNutrition,
+  type MeasurementQualifiers,
   type WorkoutSession,
 } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
@@ -296,6 +297,34 @@ const BODY_METRICS: readonly MetricDescriptor[] = [
   { metric: "weight", unit: "kg", title: "Junction body weight", paths: ["weightKg", "weight_kg", "weight"] },
   { metric: "bmi", unit: "kg_m2", title: "Junction BMI", paths: ["bmi", "body_mass_index"] },
   { metric: "body-fat-percentage", unit: "%", title: "Junction body fat", paths: ["bodyFatPercentage", "body_fat_percentage", "body_fat_percent", "bodyFat", "body_fat", "fat"] },
+  {
+    metric: "bone-mass-percentage",
+    unit: "%",
+    title: "Junction bone mass percentage",
+    paths: [],
+    value: (entry) => firstNumberFromPaths(entry, ["boneMassPercentage", "bone_mass_percentage"]),
+  },
+  {
+    metric: "muscle-mass-percentage",
+    unit: "%",
+    title: "Junction muscle mass percentage",
+    paths: [],
+    value: (entry) => firstNumberFromPaths(entry, ["muscleMassPercentage", "muscle_mass_percentage"]),
+  },
+  {
+    metric: "visceral-fat-index",
+    unit: "index",
+    title: "Junction visceral fat index",
+    paths: [],
+    value: (entry) => firstNumberFromPaths(entry, ["visceralFatIndex", "visceral_fat_index"]),
+  },
+  {
+    metric: "body-water-percentage",
+    unit: "%",
+    title: "Junction body water percentage",
+    paths: [],
+    value: (entry) => firstNumberFromPaths(entry, ["waterPercentage", "water_percentage"]),
+  },
   { metric: "lean-body-mass", unit: "kg", title: "Junction lean body mass", paths: ["leanBodyMassKg", "lean_body_mass_kg", "leanBodyMassKilogram", "lean_body_mass_kilogram", "leanMassKg", "lean_mass_kg"] },
   { metric: "waist-circumference", unit: "cm", title: "Junction waist circumference", paths: ["waistCircumference", "waist_circumference", "waistCircumferenceCentimeter", "waist_circumference_centimeter", "waistCircumferenceCm", "waist_circumference_cm"] },
   { metric: "temperature", unit: "celsius", title: "Junction body temperature", paths: ["temperature", "bodyTemperature", "body_temperature", "temperatureCelsius", "temperature_celsius", "skin_temperature"] },
@@ -2401,9 +2430,26 @@ function sanitizeProfilePayload(payload: unknown, connection?: PlainObject): Pla
   }
 
   const origin = resolveJunctionOrigin(profile, connection);
+  const gender = firstStringFromPaths(profile, JUNCTION_PROFILE_GENDER_PATHS);
+  const sourceProviderSlug = readJunctionSourceProviderSlug(profile, connection)
+    ?? origin.sourceProviderSlug;
+  const updatedAt = resolveSafeTimestamp(
+    firstValueFromPaths(profile, ["updatedAt", "updated_at", "createdAt", "created_at"]),
+    origin.sourceProviderSlug,
+  );
   const sanitized = stripUndefined({
-    sourceProviderSlug: readJunctionSourceProviderSlug(profile, connection) ?? origin.sourceProviderSlug,
+    gender: gender ? trimToLength(gender, 80) : undefined,
+    stableResourceId: buildStableProfileResourceId(
+      profile,
+      sourceProviderSlug,
+      origin.sourceType,
+      origin.sourceInstanceId,
+      updatedAt,
+    ),
+    sourceProviderSlug,
+    sourceInstanceId: origin.sourceInstanceId,
     sourceType: origin.sourceType,
+    updatedAt,
   });
 
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
@@ -3692,11 +3738,13 @@ const JUNCTION_PROFILE_SEX_PATHS = [
   "biologicalSex",
   "biological_sex",
 ] as const;
+const JUNCTION_PROFILE_GENDER_PATHS = ["gender"] as const;
 
 // Junction profile is a single current-state snapshot per source. Height
-// follows the body-summary observation pattern; birth date, biological sex,
-// and wheelchair use are categorical, so they land as one structured note
-// event keyed by a stable external ref instead of fake numeric observations.
+// follows the body-summary observation pattern; gender is a distinct
+// categorical measurement, while birth date, biological sex, and wheelchair
+// use remain one structured note. Gender must never be folded into or labeled
+// as biological sex.
 function pushProfileSummary(
   entry: PlainObject,
   resourceContext: ResourceContext,
@@ -3722,15 +3770,51 @@ function pushProfileSummary(
     occurredAt: pinnedOccurredAt,
     recordedAt: baseTimestamp.observedAtRaw ? baseTimestamp.recordedAt : providerTimestamp,
     dayKey: extractIsoDatePrefix(pinnedOccurredAt) ?? baseTimestamp.dayKey,
-    observedAtRaw: baseTimestamp.observedAtRaw
-      ?? stringId(providerTimestampRaw)
-      ?? "current",
+    observedAtRaw: pinnedOccurredAt,
   });
+  const legacyExternalRefs = (facet: string) => buildJunctionProfileLegacyExternalRefs(
+    resourceContext,
+    entry,
+    timestamp,
+    providerTimestampRaw,
+    facet,
+  );
 
-  pushObservationMetrics(entry, resourceContext, context, JUNCTION_PROFILE_METRICS, timestamp);
+  pushObservationMetrics(
+    entry,
+    resourceContext,
+    context,
+    JUNCTION_PROFILE_METRICS,
+    timestamp,
+    legacyExternalRefs,
+  );
 
   if (!timestamp.occurredAt) {
     return;
+  }
+
+  const gender = firstStringFromPaths(entry, JUNCTION_PROFILE_GENDER_PATHS);
+  if (gender) {
+    context.events.push(stripUndefined({
+      kind: "measurement",
+      occurredAt: timestamp.occurredAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey: timestamp.dayKey,
+      source: "device",
+      title: "Junction gender",
+      evidenceRoles: resourceContext.evidenceRoles,
+      externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "gender"),
+      legacyExternalRefs: legacyExternalRefs("gender"),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      fields: {
+        measurements: [{
+          metric: "gender",
+          value: 1,
+          unit: "recording",
+          qualifiers: { gender: trimToLength(gender, 80) },
+        }],
+      },
+    }));
   }
 
   const birthDate = firstIsoDateFromPaths(entry, JUNCTION_PROFILE_BIRTH_DATE_PATHS);
@@ -3756,6 +3840,7 @@ function pushProfileSummary(
     note: trimToLength(segments.join(" "), 4000),
     evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "profile-demographics"),
+    legacyExternalRefs: legacyExternalRefs("profile-demographics"),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
   }));
 }
@@ -3884,6 +3969,59 @@ function pushMenstrualCycleSummary(
     });
   }
 
+  for (const sub of junctionDatedSubEntries(entry, ["cervicalMucus", "cervical_mucus"])) {
+    const quality = firstStringFromPaths(sub.entry, ["quality"]);
+    if (!quality) {
+      continue;
+    }
+
+    const boundedQuality = trimToLength(quality, 80);
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `cervical-mucus-quality-${trimSlugToLength(slugify(boundedQuality, "quality"), 80)}-${sub.date}`,
+      measurement: {
+        metric: "cervical-mucus-quality",
+        value: 1,
+        unit: "recording",
+        qualifiers: { quality: boundedQuality },
+      },
+      title: "Junction cervical mucus quality",
+    });
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["intermenstrualBleeding", "intermenstrual_bleeding"])) {
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `intermenstrual-bleeding-${sub.date}`,
+      measurement: {
+        metric: "intermenstrual-bleeding",
+        value: 1,
+        unit: "flag",
+      },
+      title: "Junction intermenstrual bleeding",
+    });
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["contraceptive"])) {
+    const contraceptiveType = firstStringFromPaths(sub.entry, ["type"]);
+    if (!contraceptiveType) {
+      continue;
+    }
+
+    const boundedType = trimToLength(contraceptiveType, 80);
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `contraceptive-type-${trimSlugToLength(slugify(boundedType, "type"), 80)}-${sub.date}`,
+      measurement: {
+        metric: "contraceptive-type",
+        value: 1,
+        unit: "recording",
+        qualifiers: { type: boundedType },
+      },
+      title: "Junction contraceptive type",
+    });
+  }
+
   for (const test of [
     { metric: "ovulation-test", paths: ["ovulationTest", "ovulation_test"], title: "Junction ovulation test" },
     { metric: "pregnancy-test", paths: ["homePregnancyTest", "home_pregnancy_test"], title: "Junction pregnancy test" },
@@ -3910,6 +4048,51 @@ function pushMenstrualCycleSummary(
         title: test.title,
       });
     }
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["homeProgesteroneTest", "home_progesterone_test"])) {
+    const result = firstStringFromPaths(sub.entry, ["testResult", "test_result"]);
+    if (!result) {
+      continue;
+    }
+
+    const boundedResult = trimToLength(result, 80);
+    // This records the provider's categorical result rather than coercing it
+    // into a positive/negative scalar, so indeterminate and unknown remain
+    // truthful queryable values instead of being dropped or guessed.
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `home-progesterone-test-${trimSlugToLength(slugify(boundedResult, "result"), 80)}-${sub.date}`,
+      measurement: {
+        metric: "home-progesterone-test",
+        value: 1,
+        unit: "recording",
+        qualifiers: { result: boundedResult },
+      },
+      title: "Junction home progesterone test",
+    });
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["sexualActivity", "sexual_activity"])) {
+    const protectionUsedRaw = firstValueFromPaths(sub.entry, ["protectionUsed", "protection_used"]);
+    const protectionUsed = typeof protectionUsedRaw === "boolean" ? protectionUsedRaw : undefined;
+    const protectionFacet = protectionUsed === true
+      ? "protected"
+      : protectionUsed === false
+        ? "unprotected"
+        : "protection-unspecified";
+
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `sexual-activity-${protectionFacet}-${sub.date}`,
+      measurement: {
+        metric: "sexual-activity",
+        value: 1,
+        unit: "recording",
+        qualifiers: protectionUsed === undefined ? undefined : { "protection-used": protectionUsed },
+      },
+      title: "Junction sexual activity",
+    });
   }
 
   for (const sub of junctionDatedSubEntries(entry, ["detectedDeviations", "detected_deviations"])) {
@@ -3963,7 +4146,7 @@ function pushJunctionCycleDailyMeasurement(
       metric: string;
       value: number;
       unit: string;
-      qualifiers: Record<string, string>;
+      qualifiers?: MeasurementQualifiers;
     };
     title: string;
   },
@@ -3981,7 +4164,7 @@ function pushJunctionCycleDailyMeasurement(
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, input.facet),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
     fields: {
-      measurements: [input.measurement],
+      measurements: [stripUndefined(input.measurement)],
     },
   }));
 }
@@ -4640,6 +4823,7 @@ function pushObservationMetrics(
   context: NormalizationContext,
   metrics: readonly MetricDescriptor[],
   timestampOverride?: ReturnType<typeof resolveRecordTimestamp>,
+  legacyExternalRefs?: (facet: string) => DeviceExternalRefPayload[] | undefined,
 ): void {
   const timestamp = timestampOverride ?? resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const occurredAt = timestamp.occurredAt;
@@ -4671,6 +4855,7 @@ function pushObservationMetrics(
       // supersedes an existing generic Apple HRV event instead of duplicating
       // it under the corrected SDNN metric.
       externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
+      legacyExternalRefs: legacyExternalRefs?.(metric.metric),
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
       fields: {
         metric: metricKey,
@@ -4973,6 +5158,19 @@ function buildStableSummaryResourceId(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string {
+  if (resourceContext.resource === "profile") {
+    const profileResourceId = buildStableProfileResourceId(
+      entry,
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      timestamp.occurredAt,
+    );
+    if (profileResourceId) {
+      return profileResourceId;
+    }
+  }
+
   const explicitId = resourceContext.resource === "workouts"
     ? firstStringFromPaths(entry, JUNCTION_WORKOUT_STABLE_ID_PATHS)
     : resourceContext.resource === "meal"
@@ -4999,6 +5197,72 @@ function buildStableSummaryResourceId(
       ...(resourceContext.fallbackIdentityDisambiguator ? [resourceContext.fallbackIdentityDisambiguator] : []),
     ] : []),
   ])}`;
+}
+
+function buildStableProfileResourceId(
+  entry: PlainObject,
+  sourceProviderSlug: string | null | undefined,
+  sourceType: string | null | undefined,
+  sourceInstanceId: string | null | undefined,
+  updatedAt: string | undefined,
+): string | undefined {
+  const retainedResourceId = firstStringFromPaths(entry, ["stableResourceId"]);
+  if (retainedResourceId && /^profile-[a-f0-9]{16}$/u.test(retainedResourceId)) {
+    return retainedResourceId;
+  }
+
+  const explicitId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+  if (explicitId) {
+    return `profile-${shortHash([
+      sourceProviderSlug,
+      sourceType,
+      sourceInstanceId,
+      explicitId,
+    ])}`;
+  }
+
+  return updatedAt
+    ? `profile-${shortHash([
+        "profile",
+        sourceProviderSlug,
+        sourceType,
+        sourceInstanceId,
+        updatedAt,
+      ])}`
+    : undefined;
+}
+
+function buildJunctionProfileLegacyExternalRefs(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  providerTimestampRaw: unknown,
+  facet: string,
+): DeviceExternalRefPayload[] | undefined {
+  if (
+    firstStringFromPaths(entry, ["stableResourceId"])
+    || firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
+  ) {
+    return undefined;
+  }
+
+  const rawTimestamp = stringId(providerTimestampRaw);
+  if (!rawTimestamp) {
+    return undefined;
+  }
+
+  const primary = makeJunctionExternalRef(resourceContext, entry, timestamp, facet);
+  const legacyResourceId = `profile-${shortHash([
+    "profile",
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType,
+    resourceContext.origin.sourceInstanceId,
+    rawTimestamp,
+  ])}`;
+
+  return legacyResourceId === primary.resourceId
+    ? undefined
+    : [{ ...primary, resourceId: legacyResourceId }];
 }
 
 function buildStableTimeseriesResourceId(

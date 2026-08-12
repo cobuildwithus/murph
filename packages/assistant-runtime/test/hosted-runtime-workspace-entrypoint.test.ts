@@ -31081,13 +31081,14 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("forces browser-vault refresh maintenance from assistant phase refresh intent", async () => {
+  test("does not schedule a continuation when forced browser-vault refresh maintenance times out", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
 
     mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
     mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockResolvedValueOnce({
-      status: "skipped_no_port",
+      source: { fileCount: 0, totalBytes: 0 },
+      status: "deferred_timeout",
     });
 
     try {
@@ -31136,6 +31137,7 @@ describe("hosted workspace runtime entrypoint", () => {
         }),
       );
       expect(result.status).toBe("idle");
+      expect(result.nextWakeAt).toBeNull();
     } finally {
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await removeTempRoot(vaultRoot);

@@ -41,6 +41,23 @@ function createMetricConfidence() {
   }
 }
 
+function createResolvedMetric(metric: string, value: number, unit: string) {
+  return {
+    candidateCount: 1,
+    confidence: 'high' as const,
+    conflictingProviders: [],
+    exactDuplicateCount: 0,
+    metric,
+    occurredAt: '2026-04-05T08:00:00.000Z',
+    provider: 'withings',
+    recordedAt: '2026-04-05T08:05:00.000Z',
+    sourceKind: 'body-summary',
+    title: `Withings ${metric}`,
+    unit,
+    value,
+  }
+}
+
 function createWindowStats(overrides: Partial<{
   average: number | null
   count: number
@@ -162,6 +179,28 @@ test('wearables additive commands return the shared normalized result envelopes'
       vault,
     }),
   )
+  const listWearableBodyState = vi.fn(
+    async (_input: { requestId: string | null; vault: string }) => ({
+      count: 1,
+      filters: {
+        date: null,
+        from: null,
+        limit: 3,
+        providers: [],
+        to: null,
+      },
+      items: [{
+        bodyWaterPercentage: createResolvedMetric('bodyWaterPercentage', 55.3, '%'),
+        boneMassPercentage: createResolvedMetric('boneMassPercentage', 4.2, '%'),
+        date: '2026-04-05',
+        muscleMassPercentage: createResolvedMetric('muscleMassPercentage', 42.7, '%'),
+        notes: [],
+        summaryConfidence: { level: 'high' as const },
+        visceralFatIndex: createResolvedMetric('visceralFatIndex', 7, 'index'),
+      }],
+      vault,
+    }),
+  )
   const showWearableMetricLatest = vi.fn(
     async (_input: { metric: string; requestId: string | null; vault: string }) => ({
       filters: {
@@ -266,6 +305,11 @@ test('wearables additive commands return the shared normalized result envelopes'
   )
 
   Object.defineProperties(services.query, {
+    listWearableBodyState: {
+      configurable: true,
+      value: listWearableBodyState,
+      writable: true,
+    },
     showWearableDrift: {
       configurable: true,
       value: showWearableDrift,
@@ -356,6 +400,36 @@ test('wearables additive commands return the shared normalized result envelopes'
     date: '2026-04-05',
     providers: ['whoop'],
     requestId: null,
+    vault,
+  })
+
+  const bodyResult = await runInProcessJsonCli<{
+    items: Array<{
+      bodyWaterPercentage?: { value: number | null }
+      boneMassPercentage?: { value: number | null }
+      muscleMassPercentage?: { value: number | null }
+      visceralFatIndex?: { value: number | null }
+    }>
+  }>(cli, [
+    'wearables',
+    'body',
+    'list',
+    '--vault',
+    vault,
+  ])
+  assert.equal(bodyResult.exitCode, null)
+  const bodyData = requireData(bodyResult.envelope)
+  assert.equal(bodyData.items[0]?.bodyWaterPercentage?.value, 55.3)
+  assert.equal(bodyData.items[0]?.boneMassPercentage?.value, 4.2)
+  assert.equal(bodyData.items[0]?.muscleMassPercentage?.value, 42.7)
+  assert.equal(bodyData.items[0]?.visceralFatIndex?.value, 7)
+  assert.deepEqual(listWearableBodyState.mock.calls[0]?.[0], {
+    date: undefined,
+    from: undefined,
+    limit: 3,
+    providers: [],
+    requestId: null,
+    to: undefined,
     vault,
   })
 

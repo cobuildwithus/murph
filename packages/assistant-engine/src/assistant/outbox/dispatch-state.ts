@@ -405,6 +405,8 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
     const baseIntent = current ?? input.sending
     const preserveNonConfirmableLinqRichLinkCheckpoint =
       carriesNonConfirmableLinqRichLinkCheckpoint(baseIntent)
+    const retainLinqReactionConfirmation =
+      hasConcreteLinqMessageReactionReceipt(baseIntent)
     const attemptCount = baseIntent.attemptCount
     const failedAt = input.failedAt.toISOString()
     const retryExhausted = retryRequested &&
@@ -434,7 +436,7 @@ export async function updateAssistantOutboxAfterDispatchFailure(input: {
           : abandonedDelivery || retryExhausted
           ? false
           : input.deliveryMayHaveSucceeded
-            ? input.deliveryTransportIdempotent
+            ? input.deliveryTransportIdempotent || retainLinqReactionConfirmation
             : false,
         deliveryTransportIdempotent: abandonedDelivery
           ? false
@@ -688,7 +690,17 @@ function isLinqMessageReactionAmbiguityWithoutProviderIds(input: {
   return input.deliveryMayHaveSucceeded &&
     input.sending.channel === 'linq' &&
     input.sending.operation?.kind === 'message-reaction' &&
-    input.sending.deliveryTransportIdempotent === false
+    input.sending.deliveryTransportIdempotent === false &&
+    !hasConcreteLinqMessageReactionReceipt(input.sending)
+}
+
+function hasConcreteLinqMessageReactionReceipt(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return intent.channel === 'linq' &&
+    intent.operation?.kind === 'message-reaction' &&
+    intent.delivery?.kind === 'message-reaction' &&
+    intent.delivery.channel === 'linq'
 }
 
 function readTelegramAmbiguousDeliveryFromError(input: {
