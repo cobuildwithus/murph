@@ -47,6 +47,7 @@ export type PreparedHostedLinqChatHealthInventoryProjection = {
   isGroup: boolean | null;
   line: PreparedHostedLinqLinePhone | null;
   lookupKeyReadCandidates: readonly string[];
+  projectsChatHealth: boolean;
   providerStatus: HostedLinqChatHealthStatus;
   providerUpdatedAt: Date;
   service: string | null;
@@ -233,15 +234,17 @@ export async function projectHostedLinqChatHealthTx(input: {
 /**
  * Freezes privacy-derived lookup candidates and encrypted line material for one
  * complete provider inventory before any database statement begins. Provider
- * order is retained so equal-timestamp duplicate chats keep the former
- * sequential owner semantics when a duplicate crosses a chunk boundary.
+ * order is retained while one global winner is frozen for every logical chat.
+ * Every duplicate still carries its line observation, but only the newest
+ * provider timestamp (and the later provider row on an equal timestamp) may
+ * project chat health. This makes independently committed chunks replay-safe.
  */
 export function prepareHostedLinqChatHealthInventoryProjection(
   chats: readonly HostedLinqChatHealthInventoryProjectionInput[],
 ): PreparedHostedLinqChatHealthInventoryProjection[] {
   type PreparedChatWithoutLine = Omit<
     PreparedHostedLinqChatHealthInventoryProjection,
-    "line"
+    "line" | "projectsChatHealth"
   > & { linePhoneNumber: string | null };
 
   const preparedChats: PreparedChatWithoutLine[] = chats.map((chat) => {
@@ -283,14 +286,29 @@ export function prepareHostedLinqChatHealthInventoryProjection(
   const lineByPhoneNumber = new Map(
     preparedLines.map((line) => [line.normalizedPhoneNumber, line]),
   );
+  const winningChatIndexByLookupKey = new Map<string, number>();
+  for (const [index, chat] of preparedChats.entries()) {
+    const existingIndex = winningChatIndexByLookupKey.get(chat.currentLookupKey);
+    const existing = existingIndex === undefined
+      ? null
+      : preparedChats[existingIndex] ?? null;
+    if (
+      !existing
+      || existing.providerUpdatedAt.getTime() <= chat.providerUpdatedAt.getTime()
+    ) {
+      winningChatIndexByLookupKey.set(chat.currentLookupKey, index);
+    }
+  }
 
-  return preparedChats.map(({ linePhoneNumber, ...chat }) => {
+  return preparedChats.map(({ linePhoneNumber, ...chat }, index) => {
     const normalizedLinePhoneNumber = normalizePhoneNumber(linePhoneNumber);
     return {
       ...chat,
       line: normalizedLinePhoneNumber
         ? lineByPhoneNumber.get(normalizedLinePhoneNumber) ?? null
         : null,
+      projectsChatHealth:
+        winningChatIndexByLookupKey.get(chat.currentLookupKey) === index,
     };
   });
 }
@@ -314,6 +332,9 @@ export async function projectHostedLinqChatHealthInventoryChunk(input: {
       `Hosted Linq chat-health projection requires at most ${HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE} chat(s) per chunk.`,
     );
   }
+  if (!input.chats.some((chat) => chat.projectsChatHealth || chat.line)) {
+    return 0;
+  }
 
   return input.prisma.$transaction(async (tx) => {
     await acquireHostedLinqChatHealthInventoryChunkLocksTx(tx, input.chats);
@@ -329,8 +350,12 @@ async function acquireHostedLinqChatHealthInventoryChunkLocksTx(
   chats: readonly PreparedHostedLinqChatHealthInventoryProjection[],
 ): Promise<void> {
   const lockValues = [...new Set(chats.flatMap((chat) => [
-    `chat:${chat.currentLookupKey}`,
-    ...(chat.line ? [`line:${chat.line.currentLookupKey}`] : []),
+    ...(chat.projectsChatHealth
+      ? chat.lookupKeyReadCandidates.map((lookupKey) => `chat:${lookupKey}`)
+      : []),
+    ...(chat.line
+      ? chat.line.lookupKeyReadCandidates.map((lookupKey) => `line:${lookupKey}`)
+      : []),
   ]))].sort();
   await tx.$executeRaw(Prisma.sql`
     WITH lock_budget AS MATERIALIZED (
@@ -370,6 +395,7 @@ function buildHostedLinqChatHealthInventoryChunkQuery(input: {
   const lines = [...linesByCurrentLookupKey.values()].sort((left, right) =>
     left.currentLookupKey.localeCompare(right.currentLookupKey)
   );
+  const chats = input.chats.filter((chat) => chat.projectsChatHealth);
   const inputLineRows = lines.length > 0
     ? Prisma.sql`VALUES ${Prisma.join(lines.map((line) => Prisma.sql`(
         ${line.currentLookupKey}::text,
@@ -385,16 +411,27 @@ function buildHostedLinqChatHealthInventoryChunkQuery(input: {
           NULL::text
         WHERE FALSE
       `;
-  const inputChatRows = Prisma.join(input.chats.map((chat, index) => Prisma.sql`(
-    ${chat.currentLookupKey}::text,
-    ARRAY[${Prisma.join(chat.lookupKeyReadCandidates)}]::text[],
-    ${chat.line?.currentLookupKey ?? null}::text,
-    ${chat.providerStatus}::text,
-    ${chat.providerUpdatedAt}::timestamp,
-    ${chat.isGroup}::boolean,
-    ${chat.service}::text,
-    ${index + 1}::integer
-  )`));
+  const inputChatRows = chats.length > 0
+    ? Prisma.sql`VALUES ${Prisma.join(chats.map((chat) => Prisma.sql`(
+        ${chat.currentLookupKey}::text,
+        ARRAY[${Prisma.join(chat.lookupKeyReadCandidates)}]::text[],
+        ${chat.line?.currentLookupKey ?? null}::text,
+        ${chat.providerStatus}::text,
+        ${chat.providerUpdatedAt}::timestamp,
+        ${chat.isGroup}::boolean,
+        ${chat.service}::text
+      )`))}`
+    : Prisma.sql`
+        SELECT
+          NULL::text,
+          ARRAY[]::text[],
+          NULL::text,
+          NULL::text,
+          NULL::timestamp,
+          NULL::boolean,
+          NULL::text
+        WHERE FALSE
+      `;
 
   return Prisma.sql`
     WITH input_line (
@@ -486,25 +523,9 @@ function buildHostedLinqChatHealthInventoryChunkQuery(input: {
       provider_status,
       provider_updated_at,
       is_group,
-      service,
-      input_ordinal
+      service
     ) AS (
-      VALUES ${inputChatRows}
-    ),
-    deduplicated_chat AS MATERIALIZED (
-      SELECT DISTINCT ON (input.current_lookup_key)
-        input.current_lookup_key,
-        input.lookup_key_candidates,
-        input.line_current_lookup_key,
-        input.provider_status,
-        input.provider_updated_at,
-        input.is_group,
-        input.service
-      FROM input_chat AS input
-      ORDER BY
-        input.current_lookup_key,
-        input.provider_updated_at DESC,
-        input.input_ordinal DESC
+      ${inputChatRows}
     ),
     resolved_chat AS MATERIALIZED (
       SELECT
@@ -515,7 +536,7 @@ function buildHostedLinqChatHealthInventoryChunkQuery(input: {
         input.provider_updated_at,
         input.is_group,
         input.service
-      FROM deduplicated_chat AS input
+      FROM input_chat AS input
       LEFT JOIN LATERAL (
         SELECT chat.linq_chat_lookup_key
         FROM unnest(input.lookup_key_candidates) WITH ORDINALITY

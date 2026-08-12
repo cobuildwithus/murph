@@ -1,6 +1,6 @@
 # iMessage Deliverability and Reply Safety
 
-Last verified: 2026-08-09
+Last verified: 2026-08-12
 
 ## Purpose
 
@@ -257,10 +257,14 @@ Design messaging flows to earn genuine replies early, then keep letting current 
 - Chat-health reconciliation must finish its provider pagination before opening
   database transactions, reject inventories above 5,000 records, and project
   at most 250 records per short transaction. Each chunk prepares blinded keys
-  and encrypted line material first, then acquires its complete chat/line lock
-  set in canonical order under a tight local lock timeout before the set-based
+  and encrypted line material first, freezes one provider-ordered winner per
+  logical chat across the complete inventory while retaining every line
+  observation, then acquires every current and legacy chat/line read-candidate
+  lock in canonical order under a tight local lock timeout before the set-based
   projection. Chunks commit independently so a later failure can replay prior
-  chunks idempotently without holding one connection across the full inventory.
+  chunks idempotently without holding one connection across the full inventory;
+  the full read-candidate lock set keeps the conflict token stable across a
+  current privacy-key-version flip.
 - Existing routes remain sticky on `AT_RISK`; new assignments avoid those
   lines. Scheduled turns may receive only a closed cautious/recovery posture,
   while the existing Web egress authority rechecks hard blocks immediately

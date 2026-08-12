@@ -498,6 +498,45 @@ describe("Linq provider health inventory synchronization", () => {
     );
   });
 
+  it("keeps a maximum current-plus-legacy chunk below PostgreSQL bind limits", async () => {
+    const restore = configureContactPrivacyKeyringForTest("v2");
+    const queryRaw = vi.fn().mockResolvedValue([{
+      syncedCount: BigInt(HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE),
+    }]);
+    const projection = createChatHealthProjectionPrisma(queryRaw);
+
+    try {
+      const prepared = prepareHostedLinqChatHealthInventoryProjection(
+        Array.from(
+          { length: HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE },
+          (_, index) => ({
+            chatId: `chat-parameter-bound-${index}`,
+            isGroup: false,
+            linePhoneNumber: `+1555${String(index).padStart(7, "0")}`,
+            providerStatus: "HEALTHY" as const,
+            providerUpdatedAt: new Date("2026-07-29T16:12:00.000Z"),
+            service: "iMessage",
+          }),
+        ),
+      );
+
+      await expect(projectHostedLinqChatHealthInventoryChunk({
+        chats: prepared,
+        observedAt: new Date("2026-07-29T16:13:00.000Z"),
+        prisma: projection.prisma,
+      })).resolves.toBe(HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE);
+
+      const lockQuery = projection.executeRaw.mock.calls[0]?.[0] as {
+        values: unknown[];
+      };
+      const query = queryRaw.mock.calls[0]?.[0] as { values: unknown[] };
+      expect(lockQuery.values).toHaveLength(1_001);
+      expect(query.values.length).toBeLessThan(65_535);
+    } finally {
+      restore();
+    }
+  });
+
   it("rejects one chat over the hard inventory cap before database work", async () => {
     const queryRaw = vi.fn();
     const projection = createChatHealthProjectionPrisma(queryRaw);
@@ -564,6 +603,11 @@ describe("Linq provider health inventory synchronization", () => {
     const projection = createChatHealthProjectionPrisma(queryRaw);
 
     expect(prepared).toHaveLength(3);
+    expect(prepared.map((chat) => chat.projectsChatHealth)).toEqual([
+      false,
+      false,
+      true,
+    ]);
     await expect(projectHostedLinqChatHealthInventoryChunk({
       chats: prepared,
       observedAt: new Date("2026-07-29T16:13:00.000Z"),
@@ -577,15 +621,77 @@ describe("Linq provider health inventory synchronization", () => {
     expect(query.values).toEqual(expect.arrayContaining([
       createHostedPhoneLookupKey("+12025550123"),
       createHostedPhoneLookupKey("+12025550124"),
-      "first-equal",
-      "stale",
       "later-equal",
     ]));
+    expect(query.values).not.toContain("first-equal");
+    expect(query.values).not.toContain("stale");
     const sql = query.strings.join("");
-    expect(sql).toContain("SELECT DISTINCT ON (input.current_lookup_key)");
-    expect(sql).toMatch(
-      /input\.provider_updated_at DESC,\s*input\.input_ordinal DESC/u,
+    expect(sql).not.toContain("SELECT DISTINCT ON (input.current_lookup_key)");
+    expect(sql).not.toContain("input_ordinal");
+  });
+
+  it("freezes the later equal-timestamp winner before independently committed chunks", async () => {
+    const providerUpdatedAt = new Date("2026-07-29T16:12:00.000Z");
+    const prepared = prepareHostedLinqChatHealthInventoryProjection([
+      {
+        chatId: "chat-cross-chunk-duplicate",
+        isGroup: false,
+        linePhoneNumber: "+12025550123",
+        providerStatus: "AT_RISK",
+        providerUpdatedAt,
+        service: "first-equal",
+      },
+      {
+        chatId: "chat-cross-chunk-duplicate",
+        isGroup: true,
+        linePhoneNumber: "+12025550124",
+        providerStatus: "HEALTHY",
+        providerUpdatedAt,
+        service: "later-equal",
+      },
+    ]);
+    const queryRaw = vi.fn()
+      .mockResolvedValueOnce([{ syncedCount: 0n }])
+      .mockResolvedValueOnce([{ syncedCount: 1n }]);
+    const projection = createChatHealthProjectionPrisma(queryRaw);
+
+    expect(prepared.map((chat) => chat.projectsChatHealth)).toEqual([
+      false,
+      true,
+    ]);
+    await expect(projectHostedLinqChatHealthInventoryChunk({
+      chats: prepared.slice(0, 1),
+      observedAt: new Date("2026-07-29T16:13:00.000Z"),
+      prisma: projection.prisma,
+    })).resolves.toBe(0);
+    await expect(projectHostedLinqChatHealthInventoryChunk({
+      chats: prepared.slice(1),
+      observedAt: new Date("2026-07-29T16:13:00.000Z"),
+      prisma: projection.prisma,
+    })).resolves.toBe(1);
+
+    const firstLockQuery = projection.executeRaw.mock.calls[0]?.[0] as {
+      values: unknown[];
+    };
+    expect(firstLockQuery.values).toContain(
+      `line:${createHostedPhoneLookupKey("+12025550123")}`,
     );
+    expect(firstLockQuery.values).not.toContain(
+      `chat:${createHostedLinqChatLookupKey("chat-cross-chunk-duplicate")}`,
+    );
+    const firstQuery = queryRaw.mock.calls[0]?.[0] as {
+      strings: string[];
+      values: unknown[];
+    };
+    expect(firstQuery.values).toContain(
+      createHostedPhoneLookupKey("+12025550123"),
+    );
+    expect(firstQuery.values).not.toContain("first-equal");
+    expect(firstQuery.strings.join("")).toMatch(
+      /input_chat[\s\S]*SELECT\s+NULL::text,[\s\S]*WHERE FALSE/u,
+    );
+    const secondQuery = queryRaw.mock.calls[1]?.[0] as { values: unknown[] };
+    expect(secondQuery.values).toContain("later-equal");
   });
 
   it("carries current and legacy chat and line keys into the set projection", async () => {
@@ -647,6 +753,20 @@ describe("Linq provider health inventory synchronization", () => {
       expect(query.strings.join("")).toContain(
         "linq_chat_lookup_key = resolved.current_lookup_key",
       );
+      const lockQuery = projection.executeRaw.mock.calls[0]?.[0] as {
+        values: unknown[];
+      };
+      expect(lockQuery.values).toEqual([
+        "2000ms",
+        ...[
+          `chat:${legacyChatLookupKey}`,
+          `chat:${currentChatLookupKey}`,
+          `line:${legacyLineLookupKey}`,
+          `line:${currentLineLookupKey}`,
+        ].sort(),
+      ]);
+      expect(lockQuery.values).not.toContain("chat-legacy-batch");
+      expect(lockQuery.values).not.toContain("+12025550123");
     } finally {
       restoreV2();
     }

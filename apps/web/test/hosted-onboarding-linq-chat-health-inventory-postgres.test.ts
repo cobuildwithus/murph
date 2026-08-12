@@ -261,7 +261,125 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("preserves the newer projection when concurrent owners migrate a legacy chat key", async () => {
+    it("keeps the global duplicate winner stable when an earlier line-only chunk is replayed", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const chatId = `pg-chat-health-chunk-replay-${randomUUID()}`;
+      const firstPhoneNumber = buildSyntheticProofPhoneNumber();
+      const secondPhoneNumber = buildSyntheticProofPhoneNumber();
+      const restore = configureHostedContactPrivacyKeyringForTest({
+        currentVersion: "v1",
+        entries: { v1: TEST_KEYRING_ENTRIES.v1 },
+      });
+      const chatLookupKey = createHostedLinqChatLookupKey(chatId);
+      const firstLineLookupKey = createHostedPhoneLookupKey(firstPhoneNumber);
+      const secondLineLookupKey = createHostedPhoneLookupKey(secondPhoneNumber);
+      const providerUpdatedAt = new Date("2026-08-11T13:30:00.000Z");
+      const prepared = prepareHostedLinqChatHealthInventoryProjection([
+        {
+          chatId,
+          isGroup: false,
+          linePhoneNumber: firstPhoneNumber,
+          providerStatus: "AT_RISK",
+          providerUpdatedAt,
+          service: "first-equal",
+        },
+        {
+          chatId,
+          isGroup: true,
+          linePhoneNumber: secondPhoneNumber,
+          providerStatus: "HEALTHY",
+          providerUpdatedAt,
+          service: "later-equal",
+        },
+      ]);
+      restore();
+
+      if (!chatLookupKey || !firstLineLookupKey || !secondLineLookupKey) {
+        await prisma.$disconnect();
+        throw new Error("Expected Hosted Linq chat and line lookup keys.");
+      }
+
+      const firstObservedAt = new Date("2026-08-11T13:31:00.000Z");
+      const replayObservedAt = new Date("2026-08-11T13:32:00.000Z");
+      try {
+        expect(prepared.map((chat) => chat.projectsChatHealth)).toEqual([
+          false,
+          true,
+        ]);
+        await expect(projectHostedLinqChatHealthInventoryChunk({
+          chats: prepared.slice(0, 1),
+          observedAt: firstObservedAt,
+          prisma,
+        })).resolves.toBe(0);
+        await expect(projectHostedLinqChatHealthInventoryChunk({
+          chats: prepared.slice(1),
+          observedAt: firstObservedAt,
+          prisma,
+        })).resolves.toBe(1);
+
+        await expect(prisma.hostedLinqChatHealth.findUnique({
+          where: { linqChatLookupKey: chatLookupKey },
+          select: {
+            isGroup: true,
+            phoneNumberLookupKey: true,
+            providerStatus: true,
+            providerUpdatedAt: true,
+            service: true,
+          },
+        })).resolves.toEqual({
+          isGroup: true,
+          phoneNumberLookupKey: secondLineLookupKey,
+          providerStatus: "HEALTHY",
+          providerUpdatedAt,
+          service: "later-equal",
+        });
+
+        await expect(projectHostedLinqChatHealthInventoryChunk({
+          chats: prepared.slice(0, 1),
+          observedAt: replayObservedAt,
+          prisma,
+        })).resolves.toBe(0);
+        await expect(prisma.hostedLinqChatHealth.findUnique({
+          where: { linqChatLookupKey: chatLookupKey },
+          select: {
+            phoneNumberLookupKey: true,
+            providerStatus: true,
+            providerUpdatedAt: true,
+            service: true,
+          },
+        })).resolves.toEqual({
+          phoneNumberLookupKey: secondLineLookupKey,
+          providerStatus: "HEALTHY",
+          providerUpdatedAt,
+          service: "later-equal",
+        });
+        await expect(prisma.hostedLinqLine.findUnique({
+          where: { phoneNumberLookupKey: firstLineLookupKey },
+          select: { providerLastSeenAt: true },
+        })).resolves.toEqual({ providerLastSeenAt: replayObservedAt });
+        await expect(prisma.hostedLinqLine.count({
+          where: {
+            phoneNumberLookupKey: {
+              in: [firstLineLookupKey, secondLineLookupKey],
+            },
+          },
+        })).resolves.toBe(2);
+      } finally {
+        await prisma.hostedLinqChatHealth.deleteMany({
+          where: { linqChatLookupKey: chatLookupKey },
+        });
+        await prisma.hostedLinqLine.deleteMany({
+          where: {
+            phoneNumberLookupKey: {
+              in: [firstLineLookupKey, secondLineLookupKey],
+            },
+          },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("preserves the newer projection when opposite current key versions concurrently migrate one legacy chat", async () => {
       const blocker = createPrismaClient({ databaseUrl, poolMax: 1 });
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const applicationSuffix = randomUUID().slice(0, 8);
@@ -287,8 +405,37 @@ describe.skipIf(!runPostgresProof)(
         entries: TEST_KEYRING_ENTRIES,
       });
       const currentChatLookupKey = createHostedLinqChatLookupKey(chatId);
+      const olderProjection = prepareHostedLinqChatHealthInventoryProjection([{
+        chatId,
+        isGroup: false,
+        linePhoneNumber: null,
+        providerStatus: "AT_RISK",
+        providerUpdatedAt: new Date("2026-08-11T14:01:00.000Z"),
+        service: "older",
+      }]);
+      restoreV2();
+      const restoreV1WithReadCandidates = configureHostedContactPrivacyKeyringForTest({
+        currentVersion: "v1",
+        entries: TEST_KEYRING_ENTRIES,
+      });
+      const newerProjection = prepareHostedLinqChatHealthInventoryProjection([{
+        chatId,
+        isGroup: false,
+        linePhoneNumber: null,
+        providerStatus: "CRITICAL",
+        providerUpdatedAt: new Date("2026-08-11T14:02:00.000Z"),
+        service: "newer",
+      }]);
+      const staleProjection = prepareHostedLinqChatHealthInventoryProjection([{
+        chatId,
+        isGroup: false,
+        linePhoneNumber: null,
+        providerStatus: "AT_RISK",
+        providerUpdatedAt: new Date("2026-08-11T14:02:00.000Z"),
+        service: "stale-observation",
+      }]);
+      restoreV1WithReadCandidates();
       if (!legacyChatLookupKey || !currentChatLookupKey) {
-        restoreV2();
         await Promise.all([
           blocker.$disconnect(),
           observer.$disconnect(),
@@ -331,29 +478,21 @@ describe.skipIf(!runPostgresProof)(
         });
         await legacyRowLockAcquired;
 
-        const older = applyProjection({
-          chatId,
-          linePhoneNumber: null,
+        const older = applyPreparedProjection({
+          chats: olderProjection,
           observedAt: new Date("2026-08-11T14:01:00.000Z"),
           prisma: olderWriter,
-          providerStatus: "AT_RISK",
-          providerUpdatedAt: new Date("2026-08-11T14:01:00.000Z"),
-          service: "older",
         });
         await waitForPostgresLock({
           applicationName: olderApplicationName,
           observer,
         });
-        const newer = applyProjection({
-          chatId,
-          linePhoneNumber: null,
+        const newer = applyPreparedProjection({
+          chats: newerProjection,
           observedAt: new Date("2026-08-11T14:02:00.000Z"),
           prisma: newerWriter,
-          providerStatus: "CRITICAL",
-          providerUpdatedAt: new Date("2026-08-11T14:02:00.000Z"),
-          service: "newer",
         });
-        await waitForPostgresLock({
+        await waitForPostgresAdvisoryLock({
           applicationName: newerApplicationName,
           observer,
         });
@@ -365,7 +504,7 @@ describe.skipIf(!runPostgresProof)(
         ]);
 
         await expect(observer.hostedLinqChatHealth.findUnique({
-          where: { linqChatLookupKey: currentChatLookupKey },
+          where: { linqChatLookupKey: legacyChatLookupKey },
           select: {
             providerStatus: true,
             providerUpdatedAt: true,
@@ -376,17 +515,16 @@ describe.skipIf(!runPostgresProof)(
           providerUpdatedAt: new Date("2026-08-11T14:02:00.000Z"),
           service: "newer",
         });
-        await expect(applyProjection({
-          chatId,
-          linePhoneNumber: null,
-          observedAt: new Date("2026-08-11T14:01:30.000Z"),
-          prisma: olderWriter,
-          providerStatus: "AT_RISK",
-          providerUpdatedAt: new Date("2026-08-11T14:02:00.000Z"),
-          service: "stale-observation",
-        })).resolves.toBe(0);
         await expect(observer.hostedLinqChatHealth.findUnique({
           where: { linqChatLookupKey: currentChatLookupKey },
+        })).resolves.toBeNull();
+        await expect(applyPreparedProjection({
+          chats: staleProjection,
+          observedAt: new Date("2026-08-11T14:01:30.000Z"),
+          prisma: olderWriter,
+        })).resolves.toBe(0);
+        await expect(observer.hostedLinqChatHealth.findUnique({
+          where: { linqChatLookupKey: legacyChatLookupKey },
           select: {
             providerStatus: true,
             providerUpdatedAt: true,
@@ -406,7 +544,6 @@ describe.skipIf(!runPostgresProof)(
             },
           },
         });
-        restoreV2();
         await Promise.all([
           blocker.$disconnect(),
           observer.$disconnect(),
@@ -440,6 +577,36 @@ async function waitForPostgresLock(input: {
   throw new Error("Expected the chat-health projection to wait on the row lock.");
 }
 
+async function waitForPostgresAdvisoryLock(input: {
+  applicationName: string;
+  observer: ReturnType<typeof createPrismaClient>;
+}): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const [activity] = await input.observer.$queryRaw<
+      Array<{ waiting: boolean }>
+    >`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity AS activity
+        INNER JOIN pg_locks AS held_lock
+          ON held_lock.pid = activity.pid
+        WHERE activity.application_name = ${input.applicationName}
+          AND activity.state = 'active'
+          AND held_lock.locktype = 'advisory'
+          AND held_lock.granted = FALSE
+      ) AS waiting
+    `;
+    if (activity?.waiting === true) {
+      return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(
+    "Expected the chat-health projection to wait on the complete advisory lock set.",
+  );
+}
+
 function withPostgresApplicationName(value: string, applicationName: string): string {
   const url = new URL(value);
   url.searchParams.set("application_name", applicationName);
@@ -467,6 +634,14 @@ async function applyProjection(input: {
     observedAt: input.observedAt,
     prisma: input.prisma,
   });
+}
+
+async function applyPreparedProjection(input: {
+  chats: ReturnType<typeof prepareHostedLinqChatHealthInventoryProjection>;
+  observedAt: Date;
+  prisma: Parameters<typeof projectHostedLinqChatHealthInventoryChunk>[0]["prisma"];
+}): Promise<number> {
+  return projectHostedLinqChatHealthInventoryChunk(input);
 }
 
 function buildSyntheticProofPhoneNumber(): string {
