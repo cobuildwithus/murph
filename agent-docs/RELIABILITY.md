@@ -759,7 +759,12 @@ Last verified: 2026-08-12
   valid stamps with no execution evidence. It derives one effective latency
   origin from ingress, staging, provider, delivery, and consumption facts
   before applying its 24-hour window, bounded scan, or delivery/provider
-  grouping. Post-denial execution is measured from its earliest milestone even
+  grouping. Candidate admission unions trace identities from five independently
+  time-indexed ingress, staging, provider, delivery, and consumption branches,
+  then exactly hydrates those traces before chronology, origin, grouping, and
+  the 20,001-row truncation probe. Retained history outside the window therefore
+  does not participate in the cross-owner candidate scan. Post-denial execution
+  is measured from its earliest milestone even
   when the original ingress is older than the window. An unblocked row sharing
   the same reply remains alertable. The existing seven-day ingress-trace cleanup
   retires a trace only after both its original ingress and latest activity are
