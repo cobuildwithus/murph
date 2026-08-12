@@ -13,8 +13,9 @@ Updated: 2026-08-12
 
 - Every scheduled reconcile reaches the bounded closed-calendar importer even
   when earlier resource jobs have advanced the account completion clock.
-- Daily sums and dense feature envelopes reconcile complete-set growth and
-  removal without treating a child-row revision as the collection revision.
+- Daily sums and dense feature envelopes reconcile non-empty complete-set
+  growth and removal without treating a child-row revision as the collection
+  revision.
 - Stable sparse interval identities retain their explicit revision ordering and
   exact replays remain no-ops.
 - Durable architecture and ingestion docs describe the implemented ownership.
@@ -35,8 +36,8 @@ Updated: 2026-08-12
    inside the bounded daily importer.
 2. [x] Remove derived max-child versions from daily and dense feature facts;
    retain revisions only on stable sparse interval records.
-3. [x] Add store-level closure-race, complete-set growth/removal, stable-row,
-   and exact-replay regression coverage.
+3. [x] Add store-level closure-race, non-empty complete-set growth/removal,
+   stable-row, and exact-replay regression coverage.
 4. [x] Align the architecture, importer, and ingestion-invariant owners.
 5. [ ] Complete local verification, commit and push the exact candidate, then
    run required CI and ReviewGPT to a clean stopping condition.
@@ -50,6 +51,12 @@ Updated: 2026-08-12
   unversioned daily and dense feature facts.
 - Sparse stable-row revisions remain useful because they order one durable
   identity rather than a changing set.
+- Empty provider collections do not emit aggregate tombstones; the documented
+  revision surface is limited to non-empty set growth and removal.
+- ReviewGPT round six's global-output finding is pre-existing rather than
+  PR-caused: the proposed 11,522-event reproduction also fails the unchanged
+  base integration-ingest contract, and live imports always persist a complete
+  output list. Expanding that contract is outside this fidelity change.
 
 ## Verification
 
@@ -61,5 +68,8 @@ Updated: 2026-08-12
   all 19 normalized wearable-surface tests.
 - Passed affected `core`, `importers`, `device-syncd`, and `query` typechecks,
   the importer build, scenario-manifest integrity, and `git diff --check`.
-- Pending: docs drift after this plan, final privacy/diff review, exact-head CI,
-  and the next ReviewGPT round.
+- Reproduced ReviewGPT round six's proposed 11,522-event historical batch and
+  proved it fails the base branch's pre-existing 10,000-output integration
+  ingest contract; no out-of-scope contract expansion was retained.
+- Pending: docs drift, final privacy/diff review, exact-head CI, and ReviewGPT
+  round seven.

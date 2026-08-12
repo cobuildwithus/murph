@@ -158,7 +158,9 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    resource/day collection, so a maximum child-row revision must not version or
    order that set. Serialized complete-calendar imports reconcile those
    unversioned facts through the canonical event spine, where exact replays are
-   no-ops and later set growth or removal remains revisionable. Explicit
+   no-ops and later non-empty set growth or removal remains revisionable. An
+   empty provider collection emits no aggregate tombstone, so it cannot delete
+   a previously published fact. Explicit
    provider revisions belong only to stable sparse interval identities. One
    versioned interval may supersede a pre-versioning baseline; after that, only
    a strictly newer revision may change it, while stale replay is a no-op and
