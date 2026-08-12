@@ -1621,13 +1621,33 @@ export async function planHostedOnboardingLinqWebhook(input: {
       now: new Date(occurredAt),
       prisma: input.prisma,
     });
+    if (directMailboxPreparationFailureProvided) {
+      // The exact mailbox row is already the durable classification for this
+      // event. Repair its wake before reclassifying current policy state, then
+      // defer the carried crypto error to the stable policy owners below.
+      const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
+        dedupeKey: input.event.event_id,
+        prisma: input.prisma,
+        userId: existingMember.id,
+      });
+      if (existingMailboxItem) {
+        return buildExistingMemberDuplicatePlan({
+          existingMemberActive: existingMemberEffectiveActive,
+          mailboxItemId: existingMailboxItem.id,
+          memberId: existingMember.id,
+        });
+      }
+      if (
+        !exactMemberAccess.allowed
+        && exactMemberAccess.reason !== "health_data_consent_withdrawn"
+      ) {
+        throw input.directMailboxPreparationFailure;
+      }
+    }
     if (
       !exactMemberAccess.allowed
       && exactMemberAccess.reason === "health_data_consent_withdrawn"
     ) {
-      if (directMailboxPreparationFailureProvided) {
-        throw input.directMailboxPreparationFailure;
-      }
       if (
         !isHostedLinqDirectChatAttested(messageEvent)
         || !exactMemberAccess.userNotice
@@ -1666,28 +1686,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       );
     }
 
-    if (directMailboxPreparationFailureProvided) {
-      if (!exactMemberAccess.allowed) {
-        throw input.directMailboxPreparationFailure;
-      }
-      // Once an ordinary direct append commits, its exact member/event mailbox
-      // row is the durable classification authority for wake repair. Mutable
-      // group-outreach state may become eligible afterward and must not veto
-      // that repair or add a collection scan to this failure-only path.
-      const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
-        dedupeKey: input.event.event_id,
-        prisma: input.prisma,
-        userId: existingMember.id,
-      });
-      if (existingMailboxItem) {
-        return buildExistingMemberDuplicatePlan({
-          existingMemberActive: true,
-          mailboxItemId: existingMailboxItem.id,
-          memberId: existingMember.id,
-        });
-      }
-      throw input.directMailboxPreparationFailure;
-    }
   }
 
   const buildUnassignableHomeLinePlan = (routeStage: string) =>
@@ -2118,7 +2116,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (existingMember && existingMemberEffectiveActive) {
-    if (!groupJoinContext) {
+    if (!groupJoinContext && !directMailboxPreparationFailureProvided) {
       const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
         dedupeKey: input.event.event_id,
         prisma: input.prisma,
@@ -2132,6 +2130,51 @@ export async function planHostedOnboardingLinqWebhook(input: {
           memberId: existingMember.id,
         });
       }
+    }
+
+    if (directMailboxPreparationFailureProvided) {
+      // Preserve the existing route-before-count ordering for ordinary input.
+      // Only a member already at the limit is known to have a terminal quota
+      // outcome without consulting or mutating private routing.
+      const existingDailyState = groupJoinContext
+        ? null
+        : await readHostedLinqDailyState({
+            memberId: existingMember.id,
+            occurredAt,
+            prisma: input.prisma,
+          });
+      if (
+        existingDailyState
+        && existingDailyState.inboundCount >= HOSTED_LINQ_DAILY_TEXT_LIMIT
+      ) {
+        const dailyState = await incrementHostedLinqInboundDailyState({
+          memberId: existingMember.id,
+          occurredAt,
+          prisma: input.prisma,
+        });
+        const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
+          context,
+          dailyState,
+          dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
+          event: input.event,
+          logDetails: {
+            existingMemberActive: true,
+            existingMemberMatch,
+          },
+          memberId: existingMember.id,
+          routeStages: {
+            dailyQuotaReached: "active-member-daily-quota-reached",
+            dailyQuotaReply: "active-member-daily-quota-reply",
+          },
+        });
+        if (admissionPlan) {
+          return {
+            ...admissionPlan,
+            postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
+          };
+        }
+      }
+      throw input.directMailboxPreparationFailure;
     }
 
     const preparedDirectMailbox = directMailboxPreparationProvided

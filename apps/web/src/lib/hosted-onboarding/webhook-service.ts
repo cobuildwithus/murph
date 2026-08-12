@@ -2105,11 +2105,9 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     };
   }
 
-  if (!accountLookupKey) {
-    throw new TypeError(
-      "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
-    );
-  }
+  // Direct preparation resolves the member from participant and saved-home
+  // authority. Sparse saved-home events legitimately omit the recipient
+  // handle, so the thread/container account key is not a direct prerequisite.
   try {
     return {
       preparedDirectMailboxPayloadRoot:
@@ -2119,9 +2117,9 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
         }),
     };
   } catch (error) {
-    // The planner may use this failure only to repair the wake for an exact
-    // durable duplicate. Every nonduplicate path rethrows the original error
-    // without route mutation, append work, or KMS under transaction locks.
+    // Carry the original error into the transaction for exact duplicate
+    // recovery and stable no-append policy outcomes. A branch that still needs
+    // private routing or mailbox append rethrows it unchanged.
     return { directMailboxPreparationFailure: error };
   }
 }

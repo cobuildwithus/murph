@@ -1,6 +1,6 @@
 # Finish direct Linq preparation binding
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-12
 
@@ -17,9 +17,10 @@ Updated: 2026-08-12
 - Preparation binds the resolved direct member and mailbox ingress root.
 - Member, owner, or root drift rolls back and receives at most one fresh
   prepare-before-transaction attempt; repeated drift fails closed.
-- Preparation failure may open one transaction only to recover an exact
-  durable duplicate and its missing wake; every nonduplicate rethrows the
-  original failure without route mutation, append work, or KMS under locks.
+- Preparation failure may open one transaction to recover an exact durable
+  duplicate or settle stable consent/quota owners without private routing;
+  an eligible append rethrows the original failure without route mutation,
+  append work, or KMS under locks.
 - Prepared direct ingress takes control-root authority before a nonblocking
   member-row lock, then home-route and chat-route authority.
 - Direct root preparation performs at most two concurrent KMS operations even
@@ -69,6 +70,18 @@ Updated: 2026-08-12
    Mitigation: after active-member authority, treat the unique member/event
    mailbox row as canonical for failure-only recovery and do not consult group
    outreach semantics before that fixed read.
+7. Risk: sparse saved-home events have no incoming recipient handle, so a
+   thread-only account-key guard can throw before direct preparation records
+   either a prepared package or its original failure.
+   Mitigation: require the recipient key only for explicit thread/container
+   preparation; direct preparation resolves from participant and saved-home
+   authority and always returns a package, explicit null, or failure marker.
+8. Risk: carrying one preparation failure across the whole active-member path
+   can suppress consent-withdrawn and daily-quota outcomes that require no
+   private route or mailbox append.
+   Mitigation: exact duplicates retain first precedence; stable consent and
+   already-at-limit quota owners settle without crypto, while the first branch
+   that still needs private routing or append rethrows the original error.
 
 ## Tasks
 
@@ -93,6 +106,14 @@ Updated: 2026-08-12
   failure-only wake repair. Later group-membership or delivery-state changes
   cannot veto that exact retry, while absence of the row still rethrows the
   original preparation failure.
+- Direct saved-home preparation does not require incoming recipient metadata.
+  The recipient account key remains mandatory for explicit thread/container
+  routes, while sparse direct events use their participant and durable home
+  route to prepare outside the transaction.
+- A direct preparation failure is deferred only across exact duplicate,
+  consent-withdrawn, and already-at-limit quota owners. It is not a new policy
+  authority: eligible append, group join, and other private-route work retain
+  the exact original failure.
 
 ## Review retrospective
 
@@ -110,6 +131,20 @@ Updated: 2026-08-12
   one exact repair handoff with no second append/count/routing mutation, no
   collection read on failure recovery, and a paired missing-row retry that
   preserves the original preparation error.
+- ReviewGPT then found that sparse direct events threw at the shared recipient
+  account-key guard before the direct branch could return a prepared package
+  or failure marker. Because the outer warm-up is best effort, that property
+  absence reopened the legacy transaction-time crypto path.
+- The corrected boundary keeps the guard on explicit thread/container routes
+  only. Production-format sparse saved-home proof now covers pre-transaction
+  control/ingress provider work, request-cache-backed routing decrypt, the
+  root/member/home/chat/ingress lock order, one append and wake, and sparse
+  duplicate failure recovery with the original no-row error preserved.
+- ReviewGPT then found that the carried crypto failure still ran ahead of
+  canonical consent-withdrawn and daily-quota terminal owners. The correction
+  keeps exact duplicate precedence, allows stable consent and quota reply or
+  suppression to settle without private routing, and preserves the identical
+  failure object for an eligible append.
 
 ## Verification
 
@@ -119,5 +154,10 @@ Updated: 2026-08-12
   GitHub checks and ReviewGPT gates.
 - Expected outcomes: the direct route is unchanged for a stable identity/root;
   drift or member contention gets one fresh pre-transaction preparation;
-  preparation/KMS failure recovers only an exact duplicate; no new persisted
-  state or privacy expansion.
+  preparation/KMS failure recovers an exact duplicate or settles an existing
+  no-append policy owner; no new persisted state or privacy expansion.
+- Focused proof after the terminal corrections: 224 direct-dispatch and
+  mailbox-root-prewarm tests pass, including sparse direct preparation,
+  consent drift, quota reply/suppression, exact duplicate recovery, and exact
+  eligible-append failure preservation.
+Completed: 2026-08-12
