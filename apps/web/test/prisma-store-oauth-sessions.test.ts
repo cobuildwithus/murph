@@ -344,6 +344,27 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
         consumedAt: null,
       },
     });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const lockSql = String(tx.$queryRaw.mock.calls[0]?.[0].join("?"));
+    expect(lockSql).toContain(
+      'FROM "device_oauth_session" AS oauth_session',
+    );
+    expect(lockSql).toContain('WHERE oauth_session."state" = ?');
+    expect(lockSql).toContain("FOR UPDATE OF oauth_session");
+    expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual([record.state]);
+    expect(
+      tx.$queryRaw.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      tx.deviceOauthSession.findUnique.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+    expect(
+      tx.deviceOauthSession.findUnique.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      tx.deviceOauthSession.updateMany.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 });
@@ -371,6 +392,9 @@ function createTransaction(input: {
   updateManyCount?: number;
 }) {
   return {
+    $queryRaw: vi.fn().mockResolvedValue(
+      input.record ? [{ state: input.record.state }] : [],
+    ),
     deviceOauthSession: {
       deleteMany: vi.fn().mockResolvedValue({ count: input.deleteManyCount ?? 1 }),
       findUnique: vi.fn().mockResolvedValue(input.record ?? null),

@@ -220,6 +220,15 @@ async function consumeClinicalOauthSession(input: {
   if (!stateHash) throw invalidOauthStateError();
 
   return getPrisma().$transaction(async (tx) => {
+    // Retention uses SKIP LOCKED. Acquire the exact callback owner before the
+    // replay decision so cleanup either wins first and leaves this missing, or
+    // skips a live consumer until its consume mark commits.
+    await tx.$queryRaw<Array<{ stateHash: string }>>`
+      SELECT oauth_session."state_hash" AS "stateHash"
+      FROM "clinical_record_oauth_session" AS oauth_session
+      WHERE oauth_session."state_hash" = ${stateHash}
+      FOR UPDATE OF oauth_session
+    `;
     const session = await tx.clinicalRecordOauthSession.findUnique({ where: { stateHash } });
     if (!session) throw invalidOauthStateError();
     if (

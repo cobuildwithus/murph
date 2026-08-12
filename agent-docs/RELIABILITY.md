@@ -373,14 +373,16 @@ Last verified: 2026-08-11
 - Short-lived connected-app, sensitive-action, device-connect, device OAuth,
   Clinical Records connect, and Clinical Records OAuth rows never trigger a
   global expiry sweep from foreground creation or provider admission. Exact
-  reads and consumes fail closed when the addressed row is expired; the hourly
-  retention owner owns backlog deletion. Started connected-app and Clinical
-  Records intents remain non-redeemable but retain their exact completion row
-  for one bounded 30-minute grace past link expiry, covering provider setup and
-  valid OAuth callback finalization without creating another worker or lease
-  table. Retention deletes eligible expiry-indexed rows serially in
-  expiry-and-primary-key order under the smaller control-artifact batch and
-  max-batch ceilings, with `FOR UPDATE SKIP LOCKED`. The unbound
+  reads and consumes fail closed when the addressed row is expired; exact OAuth
+  consumers lock their addressed state row before replay classification and
+  consume, so retention skips a live consumer instead of fabricating replay
+  evidence. The hourly retention owner owns backlog deletion. Started
+  connected-app and Clinical Records intents remain non-redeemable but retain
+  their exact completion row for one bounded 30-minute grace past link expiry,
+  covering provider setup and valid OAuth callback finalization without creating
+  another worker or lease table. Retention deletes eligible expiry-indexed rows
+  serially in expiry-and-primary-key order under the smaller control-artifact
+  batch and max-batch ceilings, with `FOR UPDATE SKIP LOCKED`. The unbound
   sensitive-action lane has a partial expiry-and-token index so durable
   approval history cannot enlarge its transient claim scan. Approval-backed
   rows remain with their approval owner.

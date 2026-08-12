@@ -1629,11 +1629,12 @@ async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
   prisma: Prisma.TransactionClient;
   providerCleanupStartedAt: Date;
 }): Promise<void> {
+  // Retention owns when a started intent stops being provider-cleanup work.
+  // Public bearer expiry must not make account deletion discard that owner.
   const writes = await input.prisma.hostedConnectedAppConnectIntent.findMany({
     select: { claimHash: true },
     take: 1,
     where: {
-      expiresAt: { gt: new Date() },
       memberId: input.memberId,
       startedAt: { gte: input.providerCleanupStartedAt },
     },
@@ -2634,7 +2635,8 @@ async function listInFlightConnectedAppIntentsForDeletion(input: {
   connectedAccountId: string | null;
   toolkit: string;
 }>> {
-  const now = new Date();
+  // A still-present started intent remains the exact provider-cleanup owner,
+  // even after its public bearer link expires.
   return await input.prisma.hostedConnectedAppConnectIntent.findMany({
     select: {
       alias: true,
@@ -2643,7 +2645,6 @@ async function listInFlightConnectedAppIntentsForDeletion(input: {
     },
     where: {
       completedAt: null,
-      expiresAt: { gt: now },
       memberId: input.memberId,
       startedAt: { not: null },
     },

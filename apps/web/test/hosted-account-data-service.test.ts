@@ -3499,6 +3499,7 @@ describe("deleteHostedAccountData", () => {
 
   it("blocks local account deletion while a connected-app link is being created", async () => {
     const order: string[] = [];
+    const intentFindManyCalls: unknown[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
       connectedAppConnectIntentRows: [
         {
@@ -3507,6 +3508,7 @@ describe("deleteHostedAccountData", () => {
           toolkit: "gmail",
         },
       ],
+      connectedAppConnectIntentFindManyCalls: intentFindManyCalls,
       connectedAppsSession: true,
       onTransaction: () => order.push("transaction"),
       operationOrder: order,
@@ -3524,12 +3526,25 @@ describe("deleteHostedAccountData", () => {
 
     expect(serviceMocks.connectedAppsClient.listAccounts).not.toHaveBeenCalled();
     expect(serviceMocks.connectedAppsClient.deleteAccount).not.toHaveBeenCalled();
+    expect(intentFindManyCalls).toContainEqual({
+      select: {
+        alias: true,
+        connectedAccountId: true,
+        toolkit: true,
+      },
+      where: {
+        completedAt: null,
+        memberId: "member_123",
+        startedAt: { not: null },
+      },
+    });
     expect(order).toContain("update:hostedMember");
     expect(order).not.toContain("delete:hostedMember");
   });
 
   it("deletes in-flight connected-app provider accounts not returned by the account list", async () => {
     const order: string[] = [];
+    const intentFindManyCalls: unknown[] = [];
     serviceMocks.connectedAppsClient.listAccounts.mockResolvedValue([]);
     serviceMocks.connectedAppsClient.deleteAccount.mockImplementation(async (accountId: string) => {
       order.push(`composio-delete:${accountId}`);
@@ -3542,6 +3557,7 @@ describe("deleteHostedAccountData", () => {
           toolkit: "gmail",
         },
       ],
+      connectedAppConnectIntentFindManyCalls: intentFindManyCalls,
       connectedAppsSession: true,
       onTransaction: () => order.push("transaction"),
       operationOrder: order,
@@ -3559,6 +3575,18 @@ describe("deleteHostedAccountData", () => {
       userId: "member_123",
     });
     expect(serviceMocks.connectedAppsClient.deleteAccount).toHaveBeenCalledWith("ca_started");
+    expect(intentFindManyCalls).toContainEqual({
+      select: {
+        alias: true,
+        connectedAccountId: true,
+        toolkit: true,
+      },
+      where: {
+        completedAt: null,
+        memberId: "member_123",
+        startedAt: { not: null },
+      },
+    });
     expect(order.indexOf("update:hostedMember")).toBeLessThan(
       order.indexOf("composio-delete:ca_started"),
     );
@@ -3578,6 +3606,7 @@ describe("deleteHostedAccountData", () => {
 
   it("re-fences before local deletion and aborts if a connected-app write starts after provider cleanup", async () => {
     const order: string[] = [];
+    const transactionIntentFindManyCalls: unknown[] = [];
     serviceMocks.connectedAppsClient.listAccounts.mockResolvedValue([]);
     const prisma = createHostedAccountDeletionPrismaForTest({
       connectedAppsSession: true,
@@ -3591,6 +3620,8 @@ describe("deleteHostedAccountData", () => {
           toolkit: "gmail",
         },
       ],
+      transactionConnectedAppConnectIntentFindManyCalls:
+        transactionIntentFindManyCalls,
     });
 
     await expect(deleteHostedAccountData({
@@ -3607,6 +3638,14 @@ describe("deleteHostedAccountData", () => {
       statuses: null,
       toolkits: null,
       userId: "member_123",
+    });
+    expect(transactionIntentFindManyCalls).toContainEqual({
+      select: { claimHash: true },
+      take: 1,
+      where: {
+        memberId: "member_123",
+        startedAt: { gte: expect.any(Date) },
+      },
     });
     expect(order.filter((entry) => entry === "update:hostedMember")).toHaveLength(2);
     expect(order).not.toContain("delete:hostedMember");
@@ -3733,6 +3772,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     stripeCheckoutSessionIdEncrypted: string;
   }>;
   connectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
+  connectedAppConnectIntentFindManyCalls?: unknown[];
   connectedAppsSession?: boolean;
   countResults?: Record<string, number>;
   dailyStateUpdates?: unknown[];
@@ -3764,6 +3804,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     summary: string;
   }>;
   transactionConnectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
+  transactionConnectedAppConnectIntentFindManyCalls?: unknown[];
   transactionBillingRefRecord?: Record<string, unknown> | null;
   transactionCheckoutSessionRecords?: Array<{
     memberId: string;
@@ -3859,7 +3900,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedConnectedAppConnectIntent: {
       ...makeDeleteDelegate("hostedConnectedAppConnectIntent"),
-      findMany: async () => input.transactionConnectedAppConnectIntentRows ?? [],
+      findMany: async (args = {}) => {
+        input.transactionConnectedAppConnectIntentFindManyCalls?.push(args);
+        return input.transactionConnectedAppConnectIntentRows ?? [];
+      },
     },
     hostedThreadContainer: {
       ...makeDeleteDelegate("hostedThreadContainer"),
@@ -4004,7 +4048,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
         : null,
     },
     hostedConnectedAppConnectIntent: {
-      findMany: async () => input.connectedAppConnectIntentRows ?? [],
+      findMany: async (args: unknown) => {
+        input.connectedAppConnectIntentFindManyCalls?.push(args);
+        return input.connectedAppConnectIntentRows ?? [];
+      },
     },
     hostedThreadContainer: {
       findMany: async () => (input.ownedThreadContainerMemberIds ?? []).map((memberId) => ({
@@ -4205,7 +4252,7 @@ type HostedAccountDeletionPrismaTransactionFake = {
     findMany: () => Promise<unknown[]>;
   };
   hostedConnectedAppConnectIntent: HostedAccountDeletionPrismaDeleteDelegate & {
-    findMany: () => Promise<unknown[]>;
+    findMany: (args?: { where?: unknown; select?: unknown }) => Promise<unknown[]>;
   };
   hostedLinqDailyState: HostedAccountDeletionPrismaDeleteDelegate & {
     updateMany: (args: unknown) => Promise<{ count: number }>;
