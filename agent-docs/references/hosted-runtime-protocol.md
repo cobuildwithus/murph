@@ -694,12 +694,15 @@ unbound work. The direct output-only Assistant Ask continuation applies the
 same bound-only rule before provider planning because it can be the next
 same-session history consumer. Hosted text turns use their nested
 direct-conversation route plus accepted assistant-input authority; multimodal
-payload shape is irrelevant, and detached system work does not trigger repair.
+payload shape is irrelevant. A direct exact notification that resolves the
+ordinary session also applies bound-only repair before it can append newer
+history; it cannot claim explicit-null work, and a genuinely detached session
+cannot import an obligation bound to another session.
 The runtime recognizes this
 exception only from the complete queue-only, exact-text, one-mailbox-item,
 direct Linq-or-Telegram private-completion proof plus its matching durable
 delivery. Rejected completions, an expiry marker alone, and all generic
-detached notifications remain isolated.
+detached notification sessions remain isolated.
 
 A legacy usage-referral notification can be authority-less even after Web has
 repaired its producer, because the local system mailbox may already have

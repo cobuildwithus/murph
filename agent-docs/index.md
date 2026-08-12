@@ -64,7 +64,8 @@ continuity with queue-time causal binding across compatible model changes,
 pre-sent first-attended binding without conversation mutation, legacy omission
 fail-closed behavior, and unresolved outbox retention,
 including bound-only repair before ordinary direct scheduled and Assistant Ask
-continuation turns while unbound ownership stays attended-only,
+continuation turns or direct exact-notification history mutation while unbound
+ownership stays attended-only,
 are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and

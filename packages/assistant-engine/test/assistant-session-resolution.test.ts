@@ -611,22 +611,7 @@ describe('assistant session resolution', () => {
     })
   })
 
-  it.each([
-    {
-      label: 'group continuation',
-      message: {
-        threadIsDirect: false,
-        turnTrigger: 'automation-auto-reply' as const,
-      },
-    },
-    {
-      label: 'detached notification',
-      message: {
-        threadIsDirect: true,
-        turnTrigger: 'manual-deliver' as const,
-      },
-    },
-  ])('does not repair private continuity for a $label', async ({ message }) => {
+  it('does not repair private continuity for a group continuation', async () => {
     const target = createDefaultLocalAssistantModelTarget()
     const resolvedSession = createResolvedAssistantSessionForTest({ target })
     sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
@@ -634,10 +619,34 @@ describe('assistant session resolution', () => {
     await resolveAssistantSessionForMessage({
       boundaryDefaultTarget: target,
       defaults: null,
-      message: createMessageInput(message),
+      message: createMessageInput({
+        threadIsDirect: false,
+        turnTrigger: 'automation-auto-reply',
+      }),
     })
 
     expect(sessionResolutionMocks.reconcilePrivateCompletion).not.toHaveBeenCalled()
+  })
+
+  it('repairs only bound completions before a direct notification mutates its resolved session', async () => {
+    const target = createDefaultLocalAssistantModelTarget()
+    const resolvedSession = createResolvedAssistantSessionForTest({ target })
+    sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
+
+    await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: target,
+      defaults: null,
+      message: createMessageInput({
+        threadIsDirect: true,
+        turnTrigger: 'manual-deliver',
+      }),
+    })
+
+    expect(sessionResolutionMocks.reconcilePrivateCompletion).toHaveBeenCalledWith({
+      allowUnbound: false,
+      sessionId: resolvedSession.session.sessionId,
+      vault: '/tmp/assistant-session-resolution-vault',
+    })
   })
 
   it('repairs manual direct asks regardless of multimodal payload shape', async () => {

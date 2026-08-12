@@ -597,6 +597,14 @@ describe('notification audience authority integration', () => {
       consumer: 'assistant-ask-continuation',
       stage: 'after-prepared-session-write',
     },
+    {
+      consumer: 'exact-notification',
+      stage: 'after-canonical-sent',
+    },
+    {
+      consumer: 'exact-notification',
+      stage: 'after-prepared-session-write',
+    },
   ])(
     'imports a bound private completion before $consumer provider planning $stage',
     async ({ stage, consumer }) => {
@@ -613,7 +621,9 @@ describe('notification audience authority integration', () => {
       const privateText = 'Private context before scheduled planning.'
       const consumerText = consumer === 'scheduled'
         ? 'Scheduled result after private context.'
-        : 'Assistant Ask continuation after private context.'
+        : consumer === 'assistant-ask-continuation'
+          ? 'Assistant Ask continuation after private context.'
+          : 'You joined the group after the private context.'
       const locator = {
         actorId: 'h1_121212121212121212121212',
         channel: 'linq',
@@ -762,7 +772,9 @@ describe('notification audience authority integration', () => {
         ordinaryWithResume.sessionId,
       )).resolves.toEqual([])
 
-      boundaries.executeProvider.mockImplementationOnce(async (input) => {
+      const executeConsumerProvider = async (
+        input: Parameters<typeof boundaries.executeProvider>[0],
+      ): ReturnType<typeof executeCodexTurnWithRecovery> => {
         expect(input.resolvedSession).toMatchObject({
           codexResume: null,
           resumeState: null,
@@ -812,8 +824,10 @@ describe('notification audience authority integration', () => {
             workingDirectory: input.plan.requestedWorkingDirectory,
           },
         }
-      })
-      boundaries.persistTurn.mockImplementationOnce(async (input) => {
+      }
+      const persistConsumerTurn = async (
+        input: Parameters<typeof boundaries.persistTurn>[0],
+      ) => {
         await appendAssistantTranscriptEntries(vaultRoot, ordinaryWithResume.sessionId, [{
           createdAt: '2026-08-11T18:01:00.000Z',
           kind: 'assistant',
@@ -825,7 +839,19 @@ describe('notification audience authority integration', () => {
           turnCount: input.session.turnCount + 1,
           updatedAt: '2026-08-11T18:01:00.000Z',
         })
-      })
+      }
+      if (consumer === 'exact-notification') {
+        boundaries.appendTranscript.mockImplementationOnce(
+          async (sessionId, entries) =>
+            await appendAssistantTranscriptEntries(vaultRoot, sessionId, entries),
+        )
+        boundaries.saveSession.mockImplementationOnce(async (session) =>
+          await saveAssistantSession(vaultRoot, session),
+        )
+      } else {
+        boundaries.executeProvider.mockImplementationOnce(executeConsumerProvider)
+        boundaries.persistTurn.mockImplementationOnce(persistConsumerTurn)
+      }
 
       if (consumer === 'scheduled') {
         await sendAssistantNotificationLocal({
@@ -843,7 +869,7 @@ describe('notification audience authority integration', () => {
           turnTrigger: 'automation-cron',
           vault: vaultRoot,
         })
-      } else {
+      } else if (consumer === 'assistant-ask-continuation') {
         await sendAssistantAskContinuationLocal({
           ...locator,
           bindingDeliveryTarget: locator.threadId,
@@ -861,6 +887,22 @@ describe('notification audience authority integration', () => {
           vault: vaultRoot,
           workingDirectory: vaultRoot,
         })
+      } else {
+        await sendAssistantNotificationLocal({
+          ...locator,
+          bindingDeliveryTarget: locator.threadId,
+          deliveryIdempotencyKey: 'group-join-after-private-continuity',
+          deliveryKind: 'thread',
+          deliveryTarget: locator.threadId,
+          executionContext,
+          instructions: 'Send the exact group confirmation.',
+          responsePolicy: {
+            kind: 'require_send_exact_text',
+            text: consumerText,
+          },
+          vault: vaultRoot,
+        })
+        expect(boundaries.executeProvider).not.toHaveBeenCalled()
       }
 
       const transcript = await listAssistantTranscriptEntries(

@@ -300,7 +300,8 @@ Require managed-container smoke to report the new runner fingerprint, monitor
 same-channel private completion is delivered exactly once, never to the group,
 and is visible before the next ordinary direct turn, whether that consumer is
 an attended member turn, an exact-session scheduled occurrence, or an
-exact-session Assistant Ask continuation.
+exact-session Assistant Ask continuation, and before a direct exact notification
+can append newer ordinary-session history.
 
 ## Audience-Key Rollout
 

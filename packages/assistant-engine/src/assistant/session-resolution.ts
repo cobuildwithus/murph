@@ -254,7 +254,10 @@ function resolveAssistantPrivateCompletionAdmission(
   ) {
     return 'allow-unbound'
   }
-  if (input.turnTrigger === 'automation-cron') {
+  if (
+    input.turnTrigger === 'automation-cron'
+    || input.turnTrigger === 'manual-deliver'
+  ) {
     return 'bound-only'
   }
   if (input.turnTrigger !== 'automation-auto-reply') {

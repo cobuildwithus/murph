@@ -81,9 +81,11 @@ An ordinary direct scheduled occurrence also repairs an exact session-bound
 obligation before provider-resume selection, but cannot claim unbound work;
 that remains reserved for the first attended direct turn.
 The direct output-only Assistant Ask continuation uses that same bound-only
-admission before provider planning. Rejected completions, unrelated-session
-continuations, and every generic detached notification remain isolated and
-cannot claim this continuity behavior.
+admission before provider planning. A direct exact notification also repairs
+only an obligation already bound to its resolved ordinary session before it
+appends newer history; an isolated notification session cannot import another
+session's obligation. Rejected completions, unrelated-session continuations,
+and every generic detached notification remain unable to claim unbound work.
 An outbox intent written before the explicit continuity binding existed fails
 closed instead of inferring an owner. Partial or ambiguous provider receipts do
 not participate, even when they preserve message metadata for transport retry.
