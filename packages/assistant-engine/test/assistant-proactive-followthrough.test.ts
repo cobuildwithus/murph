@@ -31,28 +31,33 @@ describe('assistant proactive follow-through', () => {
       progressUpdateMode: 'group',
     })
     const skill = await readFile(behaviorFollowthroughSkillPath, 'utf8')
+    const normalizedSkill = skill.replace(/\s+/g, ' ')
 
     expect(ASSISTANT_SKILLS.find(({ slug }) =>
       slug === 'behavior-followthrough'
     )).toBeDefined()
     expect(direct).not.toContain('Direct proactive follow-through:')
     expect(group).not.toContain('Direct proactive follow-through:')
-    expect(skill).toContain('one exact finite support package')
-    expect(skill).toContain(
+    expect(normalizedSkill).toContain('one exact finite support package')
+    expect(normalizedSkill).toContain(
       'A clear yes authorizes only the named plan and support writes',
     )
-    expect(skill).toContain('without a second confirmation')
-    expect(skill).toContain('only in a private member conversation')
-    expect(skill).toContain("Never use a group participant's message")
-    expect(skill).toContain(
+    expect(normalizedSkill).toContain('without a second confirmation')
+    expect(normalizedSkill).toContain('only in a private member conversation')
+    expect(normalizedSkill).toContain("Never use a group participant's message")
+    expect(normalizedSkill).toContain(
       'private automation, memory, preference, plan, goal, or health context',
     )
-    expect(skill).toContain('room-owned support')
-    expect(skill).toContain('stop asking about a topic')
-    expect(skill).toContain('pause or archive the narrowest matching automation')
-    expect(skill).toContain('preserving unrelated support')
-    expect(skill).toContain('topic-specific no-proactive-support boundary')
-    expect(skill).toContain('canonical memory or preference surface')
+    expect(normalizedSkill).toContain('room-owned support')
+    expect(normalizedSkill).toContain('stop asking about a topic')
+    expect(normalizedSkill).toContain(
+      'pause or archive the narrowest matching automation',
+    )
+    expect(normalizedSkill).toContain('preserving unrelated support')
+    expect(normalizedSkill).toContain(
+      'topic-specific no-proactive-support boundary',
+    )
+    expect(normalizedSkill).toContain('canonical memory or preference surface')
   })
 
   it('keeps the first health read separate from one finite three-day support check', () => {

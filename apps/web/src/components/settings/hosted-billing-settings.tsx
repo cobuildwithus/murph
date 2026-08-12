@@ -23,9 +23,13 @@ import {
   SETTINGS_PULSE_FEATURES,
 } from "@/src/lib/hosted-onboarding/plan-features";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
+import type {
+  HostedFamilyDraftRecoveryProjection,
+} from "@/src/lib/hosted-onboarding/family-plan";
 import { cn } from "@/src/lib/utils";
 
 import { BillingPortalButton } from "./billing-portal-button";
+import { HostedFamilyAbandonButton } from "./hosted-family-abandon-button";
 import { HostedFamilyStartButton } from "./hosted-family-start-button";
 import { HostedPlanChangeButton } from "./hosted-plan-change-button";
 import { HostedPlanCheckoutButton } from "./hosted-plan-checkout-button";
@@ -66,6 +70,8 @@ export function HostedBillingSettings(props: {
   currentBillingPlanCode?: unknown;
   currentPeriodEnd?: Date | null;
   familyBillingOwner?: boolean;
+  familyDraftRecovery?: HostedFamilyDraftRecoveryProjection | null;
+  familyInviteReturnPath?: string | null;
   familyState?: "none" | "owner" | "sponsored";
   groupPaymentMethodSaved?: boolean;
   payerMemberId?: string | null;
@@ -107,6 +113,10 @@ export function HostedBillingSettings(props: {
   const familyCurrent = familyState === "owner" || familyState === "sponsored";
   const activeFamilyOwner = familyState === "owner";
   const familyBillingOwner = props.familyBillingOwner === true || activeFamilyOwner;
+  const familyDraftRecovery = familyBillingOwner
+    ? null
+    : props.familyDraftRecovery ?? null;
+  const familyDraftRecoveryState = familyDraftRecovery?.state ?? null;
   const sponsoredMember = familyState === "sponsored";
   const ownAccessActive =
     props.billingStatus === "active"
@@ -477,7 +487,42 @@ export function HostedBillingSettings(props: {
             ? null
           : props.canStartFamily === true
             ? (
-                <HostedFamilyStartButton block label="Choose Family" />
+                <div className="flex w-full flex-col gap-1">
+                  {familyDraftRecoveryState === "recovery_required" ? (
+                    <ContactSupportAction
+                      className="w-full"
+                      subject="Family checkout recovery"
+                    >
+                      Contact support
+                    </ContactSupportAction>
+                  ) : (
+                    <HostedFamilyStartButton
+                      block
+                      familyInviteReturnPath={props.familyInviteReturnPath}
+                      label={familyDraftRecoveryState
+                        ? "Continue your Family setup"
+                        : "Start your own Family plan"}
+                      ownershipConfirmation
+                      returnDirectlyToInvite={
+                        familyDraftRecoveryState === null
+                        && props.familyInviteReturnPath !== null
+                        && props.familyInviteReturnPath !== undefined
+                      }
+                      resolveCheckoutForInvite={
+                        familyDraftRecoveryState === "checkout_starting"
+                        && props.familyInviteReturnPath !== null
+                        && props.familyInviteReturnPath !== undefined
+                      }
+                    />
+                  )}
+                  {familyDraftRecovery?.state === "abandonable" ? (
+                    <HostedFamilyAbandonButton
+                      checkoutAttemptId={familyDraftRecovery.checkoutAttemptId}
+                      groupId={familyDraftRecovery.groupId}
+                      returnPath={props.familyInviteReturnPath}
+                    />
+                  ) : null}
+                </div>
               )
             : null,
       current: familyCurrent,
@@ -502,7 +547,15 @@ export function HostedBillingSettings(props: {
   const retainedPlan = currentPlanCode
     ? getHostedBillingPlanDefinition(currentPlanCode)
     : null;
-  const noPlanText = familyBillingOwner && !activeFamilyOwner
+  const noPlanText = familyDraftRecoveryState === "abandonable"
+    ? "Your unfinished Family setup is not paid. Continue checkout to start a plan you own, or abandon it before joining someone else's Family."
+    : familyDraftRecoveryState === "checkout_starting"
+      ? "Your Family checkout is still starting. Continue it before changing Family plans."
+      : familyDraftRecoveryState === "recovery_required"
+        ? "Murph could not verify an earlier Family checkout. Contact support before changing Family plans."
+        : familyDraftRecoveryState === "not_abandonable"
+          ? "Your Family setup has membership or billing state to preserve. Continue setup instead of abandoning it."
+    : familyBillingOwner && !activeFamilyOwner
     ? "Your Family plan needs billing attention. Use Manage Family billing to repair or cancel it."
     : starterAccessActive
       ? null

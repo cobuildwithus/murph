@@ -148,6 +148,12 @@ describe("hosted-local harness", () => {
         "^hosted local foreground checkpoint ordering e2e",
       ],
     });
+    expect(resolveHostedLocalE2eScenarios("hosted-web-browser-smoke")[0]).toEqual({
+      dedicatedVitestProcess: true,
+      file: "apps/cloudflare/test/hosted-local-web-browser-smoke-e2e.test.ts",
+      manualOnly: true,
+      name: "hosted-web-browser-smoke",
+    });
     for (const [name, file] of [
       ["canonical-receipt-lost-ack-recovery", "hosted-local-canonical-receipt-lost-ack-recovery"],
       ["computer-handoff-linq-roundtrip", "hosted-local-computer-handoff-linq-roundtrip"],
@@ -169,6 +175,8 @@ describe("hosted-local harness", () => {
     );
     expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name))
       .not.toContain("cold-start-benchmark");
+    expect(resolveHostedLocalE2eScenarios("all").map((scenario) => scenario.name))
+      .not.toContain("hosted-web-browser-smoke");
     expect(resolveHostedLocalE2eScenarios([
       "linq-delivery",
       "temporal-orchestration",

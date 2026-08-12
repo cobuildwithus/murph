@@ -53,9 +53,6 @@ import {
   requireHostedStripeCheckoutConfig,
 } from "./runtime";
 import { withHostedStripeActionFailureAlert } from "./stripe-error-log";
-import {
-  retireHostedLegacyPulseTrialToStarter,
-} from "./pulse-trial-subscription-cleanup";
 import { assertHostedBillingPlanSelectable } from "./billing-plan-eligibility";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -178,18 +175,6 @@ export async function createHostedBillingCheckout(
     const { priceId, stripe, stripeLiveMode } = requireHostedStripeCheckoutConfig({
       billingPlanCode,
     });
-
-    if (invite.member.billingRef?.stripeSubscriptionLookupKey) {
-      const { priceId: legacyPulsePriceId } = requireHostedStripeCheckoutConfig({
-        billingPlanCode: "launch_monthly",
-      });
-      await retireHostedLegacyPulseTrialToStarter({
-        memberId: invite.member.id,
-        priceId: legacyPulsePriceId,
-        prisma,
-        stripe,
-      });
-    }
 
     await assertHostedMemberBillingStartMessagingReady({
       identity: invite.member.identity,

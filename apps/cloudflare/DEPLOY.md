@@ -493,6 +493,29 @@ New runners may send an optional `lineLookupKey` solely for post-send
 line-health attribution; old Web ignores it, and new Web retains its existing
 fallback when an older supported runner omits it.
 
+### Canonical Linq Send-Route Rollout
+
+Deploy Web first with the complete ephemeral `resolvedRoute` response while it
+continues returning the deprecated `threadIsDirect` and conditional
+`targetOverride` fields. The existing runtime ignores the additive route and
+continues using the legacy fields, so this short reader-first window preserves
+ordinary delivery. Then deploy Cloudflare and the runner bundle immediately
+with `container_rollout=immediate`; the new runtime requires `resolvedRoute`,
+uses it as the sole provider target/recipient/sender/directness source, and
+reasserts the exact value before capability lookup and provider dispatch.
+
+Do not deploy the new runtime before Web. It intentionally fails closed when
+the canonical route is absent. If rollback is required during the compatibility
+window, roll Cloudflare back first and Web second. Keep the legacy Web fields
+until a later independently reviewed cleanup after the old runtime is outside
+the rollback window; no database migration or persisted runtime-state floor is
+introduced by this protocol.
+
+After rollout, prove one authorized private scheduled native card, one ordinary
+direct reply, one group reply, and one private Assistant Ask continuation.
+Confirm no canonical-route protocol-unavailable or route-mismatch error appears
+for those controlled sends.
+
 ## Group Usage Projection Privacy and Monthly Sponsorship Rollout
 
 The current group-tool `read_usage` response is
