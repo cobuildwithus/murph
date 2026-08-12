@@ -1460,6 +1460,12 @@ describe('assistant skill assets', () => {
       '`murph.attach_exercise_routine_card`',
     )
     expect(compactCatalog).toContain(
+      'use one card when it alone fully answers the request',
+    )
+    expect(compactCatalog).toContain(
+      'Do not replace that card with one or more long plain-text messages.',
+    )
+    expect(compactCatalog).toContain(
       'do not pad a short plan to sound more substantial.',
     )
     expect(compactCatalog).toContain(

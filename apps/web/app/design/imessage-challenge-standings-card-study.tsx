@@ -1,6 +1,7 @@
 "use client";
 
 import type { ChallengeStandingsResponseCardV1 } from "@murphai/contracts";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import {
   ChallengeStandingsCardImage,
@@ -12,7 +13,7 @@ const SYNTHETIC_TEAM_CARD: ChallengeStandingsResponseCardV1 = {
   version: 1,
   format: "teams",
   title: "Challenge standings",
-  subtitle: null,
+  subtitle: "Week 2 of 4",
   objective: { kind: "target", targetPoints: 250 },
   entries: [
     {
@@ -57,7 +58,11 @@ const SYNTHETIC_COLLECTIVE_CARD: ChallengeStandingsResponseCardV1 = {
 
 export function ImessageChallengeStandingsCardStudy() {
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 sm:p-8" inert>
+    <div
+      className="rounded-2xl border border-border bg-card p-4 sm:p-8"
+      data-design-component="imessage-challenge-standings-card"
+      inert
+    >
       <div className="mb-6">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Static Messages preview
@@ -69,16 +74,15 @@ export function ImessageChallengeStandingsCardStudy() {
           The identity-free image fallback mirrors the native ranked and
           collective hierarchy. Generic labels preserve scorer order,
           incomplete ranks stay neutral, and a shared target remains group
-          progress rather than an individual result.
+          progress rather than an individual result. The canonical Murph mark
+          and title share the same aligned header used by workout and table
+          cards, with optional supporting text aligned to the card content edge
+          below the shared row.
         </p>
       </div>
-      <div className="hidden flex-col gap-8 sm:flex">
-        <ScaledStandingsCard card={SYNTHETIC_TEAM_CARD} scale={0.72} />
-        <ScaledStandingsCard card={SYNTHETIC_COLLECTIVE_CARD} scale={0.72} />
-      </div>
-      <div className="flex flex-col gap-5 sm:hidden">
-        <ScaledStandingsCard card={SYNTHETIC_TEAM_CARD} scale={0.285} />
-        <ScaledStandingsCard card={SYNTHETIC_COLLECTIVE_CARD} scale={0.285} />
+      <div className="flex flex-col gap-5 sm:gap-8">
+        <ScaledStandingsCard card={SYNTHETIC_TEAM_CARD} />
+        <ScaledStandingsCard card={SYNTHETIC_COLLECTIVE_CARD} />
       </div>
     </div>
   );
@@ -86,19 +90,43 @@ export function ImessageChallengeStandingsCardStudy() {
 
 function ScaledStandingsCard({
   card,
-  scale,
 }: {
   card: ChallengeStandingsResponseCardV1;
-  scale: number;
 }) {
   const size = getChallengeStandingsCardImageSize(card);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.18);
+
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    if (frame === null) return;
+    const updateScale = () => {
+      const contentWidth = Math.max(0, frame.clientWidth - 2);
+      setScale(Math.min(0.72, contentWidth / size.width));
+    };
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [size.width]);
+
   return (
     <div
-      className="overflow-hidden rounded-xl border border-border"
-      style={{ width: size.width * scale, height: size.height * scale }}
+      ref={frameRef}
+      className="relative overflow-clip rounded-xl border border-border"
+      data-challenge-card-frame={card.format}
+      data-render-scale={scale.toFixed(4)}
+      style={{
+        width: "100%",
+        maxWidth: size.width * 0.72,
+        height: size.height * scale + 2,
+      }}
     >
       <div
         style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
           width: size.width,
           height: size.height,
           transform: `scale(${scale})`,

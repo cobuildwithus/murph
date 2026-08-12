@@ -2846,6 +2846,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           payload: {
             emptyBackfillAttempts: 2,
             historicalBackfill: true,
+            historicalBackfillVersion: 2,
             historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
             historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
@@ -2862,6 +2863,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(hint?.jobs?.[0]?.payload).toEqual({
       emptyBackfillAttempts: 2,
       historicalBackfill: true,
+      historicalBackfillVersion: 2,
       historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,

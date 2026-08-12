@@ -153,6 +153,23 @@ test("metric catalog resolves the Junction tier-1 timeseries metric keys", () =>
   });
 });
 
+test("metric catalog resolves Junction activity and sleep summary fidelity keys", () => {
+  const junctionSummaryMetrics: readonly [string, string][] = [
+    ["activity-minutes", "activityMinutes"],
+    ["low-activity-minutes", "lowActivityMinutes"],
+    ["medium-activity-minutes", "mediumActivityMinutes"],
+    ["high-activity-minutes", "highActivityMinutes"],
+    ["average-heart-rate", "averageHeartRate"],
+    ["walking-average-heart-rate", "walkingAverageHeartRate"],
+    ["lowest-heart-rate", "lowestHeartRate"],
+    ["sleep-latency-minutes", "sleepLatencyMinutes"],
+  ];
+
+  for (const [metric, expectedKey] of junctionSummaryMetrics) {
+    assert.equal(resolveWearableCanonicalMetricKey(metric), expectedKey, metric);
+  }
+});
+
 test("metric catalog rejects unsupported metrics and non-finite values", () => {
   assert.equal(normalizeWearableMetricValue("unknown_metric", 10, "count"), null);
   assert.equal(normalizeWearableMetricValue("steps", Number.NaN, "count"), null);
