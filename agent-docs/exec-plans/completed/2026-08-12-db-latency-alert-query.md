@@ -1,6 +1,6 @@
 # Bound the hosted runtime latency monitor query
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -29,9 +29,11 @@ Updated: 2026-08-12
 
 ## Tasks
 
-1. [ ] Complete the existing exact-base ReviewGPT thread without creating a
-   duplicate. Its one-character partial response remains inaccessible through
-   the live review browser, so no patch or finding is currently available.
+1. [x] Complete the valid pushed-head review gates. The recovered pre-PR thread
+   remained an unusable one-character partial and was not treated as a pass;
+   draft PR #1735 supplied the exact candidate context for a preliminary
+   specialist PASS and final ReviewGPT round-one PASS with no findings or patch
+   artifact.
 2. [x] Replace the broad cross-owner `OR` with five independently time-indexed
    candidate branches and one exact hydration query.
 3. [x] Add PostgreSQL query-plan/cardinality proof under dominant stale history
@@ -43,6 +45,9 @@ Updated: 2026-08-12
 
 - Run the latency alert monitor and cron suites, the relevant opt-in PostgreSQL
   proof, Web typecheck, and scoped lint.
+- Exact-head GitHub Actions passed on the corrected candidate, including Web
+  app verification, build/typecheck, all package coverage shards, CLI host
+  matrices, migration/fixture proof, repo hygiene, billing, and release gates.
 
 ## Outcome
 
@@ -61,3 +66,14 @@ Updated: 2026-08-12
   Web typecheck, scoped lint, Prisma generation/validation/migration deploy, the
   production migration guard, workspace and architecture guards, docs drift,
   privacy scan, and `git diff --check` passed.
+- CI found one stale migration-inventory test expectation. The current
+  candidate adds only the missing migration name to that proof; its focused
+  suite passes 9/9 and exact-current-head CI passes. This isolated test-only
+  proof update does not change the reviewed production patch or implemented
+  contract.
+- Preliminary specialist review at `fddb2f65b3e` returned
+  `SPECIALIST_OUTCOME: PASS` with no findings and no patch artifact. Final
+  ReviewGPT round 1 at the same exact candidate returned `ROUND_OUTCOME: PASS`
+  with no qualifying findings. Its PR-body note about index write maintenance
+  was accepted as an accuracy correction and resolved in the PR description.
+Completed: 2026-08-12
