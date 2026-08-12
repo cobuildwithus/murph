@@ -6,7 +6,7 @@ import {
 } from "./provider-job-definitions.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
-import { JunctionWorkoutStreamProgressError } from "./junction-workout-stream-progress.ts";
+import { JunctionTimeseriesProgressError } from "./junction-timeseries-progress.ts";
 import {
   isJunctionCompanionHrvRmssdJob,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
@@ -1162,11 +1162,11 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
-      const workoutStreamProgress = error instanceof JunctionWorkoutStreamProgressError
+      const timeseriesProgress = error instanceof JunctionTimeseriesProgressError
         ? error
         : null;
-      const failure = normalizeExecutionError(workoutStreamProgress?.failure ?? error);
-      const replacementPayload = workoutStreamProgress
+      const failure = normalizeExecutionError(timeseriesProgress?.failure ?? error);
+      const replacementPayload = timeseriesProgress
         ? normalizeConfiguredDeviceSyncJobRecord(
             provider.provider,
             {
@@ -1175,12 +1175,21 @@ class DeviceSyncServiceController {
                 ...job.payload,
                 ...(job.kind === "backfill"
                   ? {
-                      timeseriesCursor: workoutStreamProgress.dailyWindowStart,
-                      timeseriesPhase: "dense",
+                      timeseriesCursor: timeseriesProgress.windowStart,
+                      timeseriesPhase: timeseriesProgress.timeseriesPhase,
+                      timeseriesResourceCursor:
+                        timeseriesProgress.timeseriesResourceCursor ?? undefined,
                     }
-                  : { windowStart: workoutStreamProgress.dailyWindowStart }),
+                  : job.kind === "reconcile"
+                    ? {
+                        timeseriesPhase: timeseriesProgress.timeseriesPhase,
+                        timeseriesResourceCursor:
+                          timeseriesProgress.timeseriesResourceCursor ?? undefined,
+                        windowStart: timeseriesProgress.windowStart,
+                      }
+                    : { windowStart: timeseriesProgress.windowStart }),
                 workoutStreamCursor:
-                  workoutStreamProgress.workoutStreamCursor ?? undefined,
+                  timeseriesProgress.workoutStreamCursor ?? undefined,
               },
             },
             "retry progress",

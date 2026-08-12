@@ -722,6 +722,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   sourceProviderSlug: "string",
   timeseriesCursor: "isoTimestamp",
   timeseriesPhase: "string",
+  timeseriesResourceCursor: "string",
   webhookDataJson: "string",
   workoutStreamCursor: "string",
   windowEnd: "isoTimestamp",

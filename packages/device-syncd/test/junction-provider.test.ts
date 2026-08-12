@@ -21,14 +21,16 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  resolveJunctionTimeseriesResourcePolicy,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { test } from "vitest";
 
+import { JUNCTION_PRODUCTION_TIMESERIES_RESOURCES } from "../src/config/junction-config.ts";
 import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
 
 import { DeviceSyncError } from "../src/errors.ts";
-import { JunctionWorkoutStreamProgressError } from "../src/junction-workout-stream-progress.ts";
+import { JunctionTimeseriesProgressError } from "../src/junction-timeseries-progress.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -696,7 +698,19 @@ test("Junction omitted timeseries config defaults to compact resources only", as
     ),
     true,
   );
-  assert.equal(importedSnapshots.length, 1);
+  const importedTimeseriesResources = importedSnapshots.flatMap((snapshot) =>
+    Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {})
+  );
+  assert.equal(
+    importedSnapshots.every((snapshot) =>
+      Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {}).length === 1
+    ),
+    true,
+  );
+  assert.deepEqual(
+    [...importedTimeseriesResources].sort(),
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
+  );
 });
 
 test("Junction programmatic timeseries opt-ins fetch exactly the requested resources", async () => {
@@ -785,7 +799,16 @@ test("Junction programmatic timeseries opt-ins fetch exactly the requested resou
     ),
     false,
   );
-  assert.equal(importedSnapshots.length, 1);
+  const importedTimeseriesResources = importedSnapshots.flatMap((snapshot) =>
+    Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {})
+  );
+  assert.equal(
+    importedSnapshots.every((snapshot) =>
+      Object.keys((snapshot as { timeseries?: Record<string, unknown[]> }).timeseries ?? {}).length === 1
+    ),
+    true,
+  );
+  assert.deepEqual([...importedTimeseriesResources].sort(), ["heartrate", "steps"]);
 });
 
 test("Junction dense opt-in resource jobs import only complete closed UTC days", async () => {
@@ -3533,6 +3556,7 @@ test("Junction yielded connect-window backfills keep owner window and resume wit
     windowStart: ownerWindowStart,
     windowEnd: ownerWindowEnd,
     timeseriesCursor: cursor,
+    timeseriesPhase: "dense",
   });
   assert.equal(
     continuation.dedupeKey,
@@ -9492,7 +9516,6 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_id, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_name, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.user_id, undefined);
-  assert.equal(importedSnapshots.length, 2);
   assert.match(JSON.stringify(importedSnapshots), /"provider":"junction"/u);
   const snapshotJson = JSON.stringify(importedSnapshots);
   assert.doesNotMatch(snapshotJson, /provider-connection-oura-ring|device-oura-ring|app-oura-cloud/u);
@@ -9544,11 +9567,13 @@ test("Junction polling updates source projection and imports bounded summary/tim
     windowEnd?: string;
     windowStart?: string;
   }>;
-  assert.deepEqual(
-    timeseriesSnapshots.map((snapshot) => [snapshot.windowStart, snapshot.windowEnd]),
-    [
-      ["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z"],
-    ],
+  assert.equal(
+    timeseriesSnapshots.every((snapshot) =>
+      snapshot.windowStart === "2026-04-02T00:00:00.000Z"
+      && snapshot.windowEnd === "2026-04-03T00:00:00.000Z"
+      && Object.keys(snapshot.timeseries ?? {}).length === 1
+    ),
+    true,
   );
   const timeseries = timeseriesSnapshots.reduce<Record<string, Array<Record<string, unknown>>>>(
     (merged, snapshot) => {
@@ -10097,21 +10122,36 @@ test("Junction polling skips optional unavailable resource collections", async (
     }),
   );
 
-  assert.equal(importedSnapshots.length, 2);
   const summarySnapshot = importedSnapshots[0] as {
     summaries?: Record<string, unknown[]>;
     timeseries?: Record<string, unknown[]>;
   };
-  const timeseriesSnapshot = importedSnapshots[1] as {
+  const timeseriesSnapshots = importedSnapshots.slice(1) as Array<{
     summaries?: Record<string, unknown[]>;
     timeseries?: Record<string, unknown[]>;
-  };
+  }>;
   assert.equal(summarySnapshot.summaries?.activity?.length, 1);
   assert.equal(summarySnapshot.summaries?.profile, undefined);
   assert.deepEqual(summarySnapshot.timeseries, {});
-  assert.deepEqual(timeseriesSnapshot.summaries, {});
-  assert.equal(timeseriesSnapshot.timeseries?.blood_oxygen?.length, 1);
-  assert.deepEqual(timeseriesSnapshot.timeseries?.stress_level, []);
+  assert.equal(
+    timeseriesSnapshots.every((snapshot) =>
+      Object.keys(snapshot.summaries ?? {}).length === 0
+      && Object.keys(snapshot.timeseries ?? {}).length === 1
+    ),
+    true,
+  );
+  const timeseries = timeseriesSnapshots.reduce<Record<string, unknown[]>>(
+    (merged, snapshot) => {
+      for (const [resource, records] of Object.entries(snapshot.timeseries ?? {})) {
+        merged[resource] = [...(merged[resource] ?? []), ...records];
+      }
+      return merged;
+    },
+    {},
+  );
+  assert.deepEqual(Object.keys(timeseries), ["blood_oxygen"]);
+  assert.equal(timeseries.blood_oxygen?.length, 1);
+  assert.equal(timeseries.stress_level, undefined);
   assert.deepEqual(
     warnings.map((warning) => ({
       accountId: warning.accountId,
@@ -15372,44 +15412,75 @@ test("Junction workout_stream hard call bound is 100 index pages plus 32 serial 
   assert.equal(indexPages + streamCalls, 132);
 });
 
-test("Junction workout_stream composed provider-call bounds match the documented admitted windows", async () => {
-  const maxIndexPagesPerDay = 100;
+test("Junction production timeseries composed provider-call bounds match the documented admitted windows", async () => {
+  const productionResources = [...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES];
+  const wideResources = productionResources.filter(
+    (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) > 1,
+  );
+  const denseResources = productionResources.filter(
+    (resource) => (resolveJunctionTimeseriesResourcePolicy(resource)?.fetchChunkDays ?? 1) === 1,
+  );
+  const ordinaryDenseResources = denseResources.filter(
+    (resource) => resource !== "workout_stream",
+  );
+  assert.deepEqual(
+    [productionResources.length, wideResources.length, denseResources.length, ordinaryDenseResources.length],
+    [43, 13, 30, 29],
+  );
+
+  const maxPagesPerGroupedResourceWindow = 100;
+  const maxWorkoutIndexPagesPerDay = 100;
   const maxStreamsPerDay = 32;
   const maxGetAttempts = 3;
   const maxJobAttempts = 5;
-  const perDayLogicalGets = maxIndexPagesPerDay + maxStreamsPerDay;
-  const perDayNetworkAttempts = perDayLogicalGets * maxGetAttempts;
+  const denseLogicalGetsPerDay =
+    ordinaryDenseResources.length * maxPagesPerGroupedResourceWindow
+    + maxWorkoutIndexPagesPerDay
+    + maxStreamsPerDay;
+  const wideLogicalGetsPerWindow =
+    wideResources.length * maxPagesPerGroupedResourceWindow;
   const backfillDays = 14;
+  const backfillWideWindows = 6;
   const reconcileDays = 7;
+  const reconcileWideWindows = 1;
   const bounds = {
-    backfill: {
-      logicalPerAttempt: perDayLogicalGets * backfillDays,
-      networkPerAttempt: perDayNetworkAttempts * backfillDays,
-      logicalAcrossJobAttempts: perDayLogicalGets * backfillDays * maxJobAttempts,
-      networkAcrossJobAttempts:
-        perDayNetworkAttempts * backfillDays * maxJobAttempts,
-    },
-    reconcile: {
-      logicalPerAttempt: perDayLogicalGets * reconcileDays,
-      networkPerAttempt: perDayNetworkAttempts * reconcileDays,
-      logicalAcrossJobAttempts: perDayLogicalGets * reconcileDays * maxJobAttempts,
-      networkAcrossJobAttempts:
-        perDayNetworkAttempts * reconcileDays * maxJobAttempts,
-    },
+    backfill: buildJunctionTimeseriesProviderCallBound(
+      denseLogicalGetsPerDay * backfillDays
+        + wideLogicalGetsPerWindow * backfillWideWindows,
+      maxGetAttempts,
+      maxJobAttempts,
+    ),
+    reconcile: buildJunctionTimeseriesProviderCallBound(
+      denseLogicalGetsPerDay * reconcileDays
+        + wideLogicalGetsPerWindow * reconcileWideWindows,
+      maxGetAttempts,
+      maxJobAttempts,
+    ),
+    denseDay: buildJunctionTimeseriesProviderCallBound(
+      denseLogicalGetsPerDay,
+      maxGetAttempts,
+      1,
+    ),
   };
 
   assert.deepEqual(bounds, {
     backfill: {
-      logicalPerAttempt: 1_848,
-      networkPerAttempt: 5_544,
-      logicalAcrossJobAttempts: 9_240,
-      networkAcrossJobAttempts: 27_720,
+      logicalPerAttempt: 50_248,
+      networkPerAttempt: 150_744,
+      logicalAcrossJobAttempts: 251_240,
+      networkAcrossJobAttempts: 753_720,
     },
     reconcile: {
-      logicalPerAttempt: 924,
-      networkPerAttempt: 2_772,
-      logicalAcrossJobAttempts: 4_620,
-      networkAcrossJobAttempts: 13_860,
+      logicalPerAttempt: 22_524,
+      networkPerAttempt: 67_572,
+      logicalAcrossJobAttempts: 112_620,
+      networkAcrossJobAttempts: 337_860,
+    },
+    denseDay: {
+      logicalPerAttempt: 3_032,
+      networkPerAttempt: 9_096,
+      logicalAcrossJobAttempts: 3_032,
+      networkAcrossJobAttempts: 9_096,
     },
   });
 
@@ -15419,14 +15490,35 @@ test("Junction workout_stream composed provider-call bounds match the documented
     "utf8",
   );
   for (const documentation of [readme, compatibilityMatrix]) {
-    assert.match(documentation, /132 logical GETs/u);
-    assert.match(documentation, /396 network attempts/u);
-    assert.match(documentation, /1,848 \/ 5,544/u);
-    assert.match(documentation, /9,240 \/ 27,720/u);
-    assert.match(documentation, /924 \/ 2,772/u);
-    assert.match(documentation, /4,620 \/ 13,860/u);
+    assert.match(documentation, /43 production timeseries resources/u);
+    assert.match(documentation, /13 wide and 30 dense/u);
+    assert.match(documentation, /3,032 \/ 9,096/u);
+    assert.match(documentation, /50,248 \/ 150,744/u);
+    assert.match(documentation, /251,240 \/ 753,720/u);
+    assert.match(documentation, /22,524 \/ 67,572/u);
+    assert.match(documentation, /112,620\s*\/\s*337,860/u);
+    assert.match(documentation, /single unfinished resource/u);
   }
 });
+
+function buildJunctionTimeseriesProviderCallBound(
+  logicalPerAttempt: number,
+  maxGetAttempts: number,
+  maxJobAttempts: number,
+): {
+  logicalAcrossJobAttempts: number;
+  logicalPerAttempt: number;
+  networkAcrossJobAttempts: number;
+  networkPerAttempt: number;
+} {
+  const networkPerAttempt = logicalPerAttempt * maxGetAttempts;
+  return {
+    logicalPerAttempt,
+    networkPerAttempt,
+    logicalAcrossJobAttempts: logicalPerAttempt * maxJobAttempts,
+    networkAcrossJobAttempts: networkPerAttempt * maxJobAttempts,
+  };
+}
 
 test("Junction workout_stream rejects an over-cap index before fetching any stream", async () => {
   let streamCalls = 0;
@@ -15544,6 +15636,104 @@ test("Junction workout_stream resource jobs reuse precise continuation windows",
   assert.equal(continuation.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
 });
 
+test("Junction timeseries resource continuation metadata fails closed before provider egress", async () => {
+  const requestUrls: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    requestUrls.push(readUrl(input));
+    throw new Error("resource continuation validation must precede provider egress");
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["steps", "distance"],
+  });
+  const validResources = ["distance", "steps"].sort();
+  const invalidPayloads = [
+    { timeseriesPhase: "dense", timeseriesResourceCursor: "not-json" },
+    { timeseriesPhase: "dense", timeseriesResourceCursor: JSON.stringify({ v: 1, i: [] }) },
+    {
+      timeseriesPhase: "dense",
+      timeseriesResourceCursor: JSON.stringify({ v: 1, i: [...validResources].reverse() }),
+    },
+    {
+      timeseriesPhase: "dense",
+      timeseriesResourceCursor: JSON.stringify({ v: 1, i: ["steps", "steps"] }),
+    },
+    {
+      timeseriesPhase: "dense",
+      timeseriesResourceCursor: JSON.stringify({ v: 1, i: ["removed_resource"] }),
+    },
+    { timeseriesResourceCursor: JSON.stringify({ v: 1, i: ["steps"] }) },
+    {
+      timeseriesPhase: "dense",
+      workoutStreamCursor: JSON.stringify({
+        v: 1,
+        i: [JSON.stringify(["garmin", "watch", "watch-1", "workout-1"])],
+      }),
+    },
+    { timeseriesPhase: "stale", timeseriesResourceCursor: JSON.stringify({ v: 1, i: ["steps"] }) },
+  ];
+
+  for (const payload of invalidPayloads) {
+    await assert.rejects(
+      () => executeJunctionJob(
+        provider,
+        createJunctionJobContext(),
+        createJob("reconcile", {
+          windowEnd: "2026-04-03T00:00:00.000Z",
+          windowStart: "2026-04-02T00:00:00.000Z",
+          ...payload,
+        }),
+      ),
+      (error) => {
+        assert.ok(error instanceof DeviceSyncError);
+        assert.equal(error.code, "DEVICE_SYNC_JOB_PAYLOAD_INVALID");
+        assert.equal(error.retryable, false);
+        return true;
+      },
+    );
+  }
+  assert.deepEqual(requestUrls, []);
+});
+
+test("Junction timeseries exact resource progress survives insertion and reordering", async () => {
+  const groupedRequests: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    const resource = url.pathname.match(
+      /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+    )?.[1];
+    if (resource) {
+      groupedRequests.push(decodeURIComponent(resource));
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    summaryResources: ["activity"],
+    // `calories_active` is newly inserted and `steps` moved after the prior
+    // completed name. Exact identity membership, not position, is authority.
+    timeseriesResources: ["distance", "calories_active", "steps"],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext(),
+    createJob("reconcile", {
+      timeseriesPhase: "dense",
+      timeseriesResourceCursor: JSON.stringify({ v: 1, i: ["steps"] }),
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-02T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(groupedRequests, ["distance", "calories_active"]);
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+});
+
 test("Junction workout_stream continuation metadata fails closed before provider egress", async () => {
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["workout-1"],
@@ -15619,9 +15809,9 @@ test("Junction workout_stream exact progress survives comparator-adversarial ins
       createJunctionWorkoutStreamResourceJob(),
     ),
     (error) => {
-      assert.ok(error instanceof JunctionWorkoutStreamProgressError);
+      assert.ok(error instanceof JunctionTimeseriesProgressError);
       assert.equal(error.failure, failure);
-      assert.equal(error.dailyWindowStart, "2026-04-02T00:00:00.000Z");
+      assert.equal(error.windowStart, "2026-04-02T00:00:00.000Z");
       progressCursor = error.workoutStreamCursor;
       return true;
     },
@@ -15675,11 +15865,11 @@ test("Junction workout_stream retryable index failure carries the owning day wit
       createJunctionWorkoutStreamResourceJob(),
     ),
     (error) => {
-      assert.ok(error instanceof JunctionWorkoutStreamProgressError);
+      assert.ok(error instanceof JunctionTimeseriesProgressError);
       assert.ok(error.failure instanceof DeviceSyncError);
       assert.equal(error.failure.code, "JUNCTION_API_REQUEST_FAILED");
       assert.equal(error.failure.retryable, true);
-      assert.equal(error.dailyWindowStart, "2026-04-02T00:00:00.000Z");
+      assert.equal(error.windowStart, "2026-04-02T00:00:00.000Z");
       assert.equal(error.workoutStreamCursor, null);
       return true;
     },
@@ -15731,43 +15921,41 @@ test("Junction workout_stream retires first and middle optional 404/422 candidat
   assert.equal(result.metadataPatch?.junctionSkippedTimeseriesTotal, 2);
 });
 
-test("Junction workout_stream yields before and after exact candidate progress", async () => {
+test("Junction workout_stream only creates a cooperative successor after exact progress", async () => {
   const beforeImported: string[] = [];
   const beforeHarness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["workout-1", "workout-2"],
   });
-  const importBefore = async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
-    const feature = snapshot.timeseries?.workout_stream?.[0] as
-      | Record<string, unknown>
-      | undefined;
-    beforeImported.push(String(feature?.workoutId));
-    return { imported: true };
-  };
-  const beforeYield = await executeJunctionJob(
-    beforeHarness.provider,
-    createJunctionJobContext({
-      importSnapshot: importBefore,
-      shouldYield: () => true,
-    }),
-    {
-      ...createJunctionWorkoutStreamResourceJob(),
-      attempts: 2,
-      maxAttempts: 5,
+  const beforeAbort = new Error("cooperative yield before progress");
+  await assert.rejects(
+    () => executeJunctionJob(
+      beforeHarness.provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+          const feature = snapshot.timeseries?.workout_stream?.[0] as
+            | Record<string, unknown>
+            | undefined;
+          beforeImported.push(String(feature?.workoutId));
+          return { imported: true };
+        },
+        shouldYield: () => true,
+        throwIfAborted: () => {
+          throw beforeAbort;
+        },
+      }),
+      {
+        ...createJunctionWorkoutStreamResourceJob(),
+        attempts: 2,
+        maxAttempts: 5,
+      },
+    ),
+    (error) => {
+      assert.equal(error, beforeAbort);
+      return true;
     },
   );
-  const beforeContinuation = readScheduledWorkoutStreamContinuation(beforeYield.scheduledJobs);
-  assert.equal(beforeContinuation.payload?.workoutStreamCursor, undefined);
-  assert.equal(beforeContinuation.payload?.windowStart, "2026-04-02T00:00:00.000Z");
-  assert.equal(beforeContinuation.maxAttempts, 4);
   assert.deepEqual(beforeHarness.streamRequests, []);
-
-  const beforeCompleted = await executeJunctionJob(
-    beforeHarness.provider,
-    createJunctionJobContext({ importSnapshot: importBefore }),
-    createJunctionWorkoutStreamResourceJob(beforeContinuation.payload ?? {}),
-  );
-  assert.deepEqual(beforeImported, ["workout-1", "workout-2"]);
-  assert.equal(beforeCompleted.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+  assert.deepEqual(beforeImported, []);
 
   const afterImported: string[] = [];
   const afterHarness = createJunctionWorkoutStreamTestProvider({
@@ -15824,9 +16012,9 @@ test("Junction workout_stream carries the owning day when retryable failure prec
       createJunctionWorkoutStreamResourceJob(),
     ),
     (error) => {
-      assert.ok(error instanceof JunctionWorkoutStreamProgressError);
+      assert.ok(error instanceof JunctionTimeseriesProgressError);
       assert.equal(error.failure, failure);
-      assert.equal(error.dailyWindowStart, "2026-04-02T00:00:00.000Z");
+      assert.equal(error.windowStart, "2026-04-02T00:00:00.000Z");
       assert.equal(error.workoutStreamCursor, null);
       return true;
     },
@@ -15868,7 +16056,7 @@ test("Junction workout_stream carries exact progress with its retryable provider
       createJunctionWorkoutStreamResourceJob(),
     ),
     (error) => {
-      assert.ok(error instanceof JunctionWorkoutStreamProgressError);
+      assert.ok(error instanceof JunctionTimeseriesProgressError);
       assert.ok(error.failure instanceof DeviceSyncError);
       assert.equal(error.failure.retryable, true);
       assert.deepEqual(readJunctionWorkoutProgressIdentities({

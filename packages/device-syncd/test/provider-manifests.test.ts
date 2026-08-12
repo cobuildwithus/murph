@@ -260,6 +260,7 @@ describe("deviceSyncProviderManifests", () => {
         sourceProviderSlug: { kind: "string", includeInHostedHint: true },
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
         timeseriesPhase: { kind: "string", includeInHostedHint: true },
+        timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
         workoutStreamCursor: { kind: "string", includeInHostedHint: true },
         windowEnd: { kind: "string", includeInHostedHint: true },
         windowStart: { kind: "string", includeInHostedHint: true },
@@ -267,6 +268,8 @@ describe("deviceSyncProviderManifests", () => {
     });
     expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "reconcile")).toMatchObject({
       payload: {
+        timeseriesPhase: { kind: "string", includeInHostedHint: true },
+        timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
         workoutStreamCursor: { kind: "string", includeInHostedHint: true },
       },
     });
@@ -584,6 +587,7 @@ describe("deviceSyncProviderManifests", () => {
       v: 1,
       i: [JSON.stringify(["garmin", "watch", "watch-1", "workout-1"])],
     });
+    const timeseriesResourceCursor = JSON.stringify({ v: 1, i: ["body_mass_index"] });
     expect(
       shapeHostedDeviceSyncJobHintPayload("junction", {
         kind: "backfill",
@@ -592,6 +596,7 @@ describe("deviceSyncProviderManifests", () => {
           resources: ["profile"],
           timeseriesCursor: "2026-04-01T00:00:00.000Z",
           timeseriesPhase: "wide",
+          timeseriesResourceCursor,
           workoutStreamCursor,
           windowEnd: "2026-04-22T00:00:00.000Z",
           windowStart: "2026-01-22T00:00:00.000Z",
@@ -601,6 +606,7 @@ describe("deviceSyncProviderManifests", () => {
       emptyBackfillAttempts: 2,
       timeseriesCursor: "2026-04-01T00:00:00.000Z",
       timeseriesPhase: "wide",
+      timeseriesResourceCursor,
       workoutStreamCursor,
       windowEnd: "2026-04-22T00:00:00.000Z",
       windowStart: "2026-01-22T00:00:00.000Z",

@@ -73,21 +73,29 @@ Current providers:
   clinically neutral feature record before a sync snapshot exists. Workout stream
   uses the ordinary workout index only to admit at most 32 stable workouts per
   one-day window, then reads Junction's dedicated per-workout stream endpoint
-  serially and caps each stream at 100,000 points. The common single-page bound is
-  33 logical GETs (one index plus 32 streams); the hard bound is 132 logical GETs
-  under the existing 100-page pagination ceiling and 396 network attempts with
-  the existing three-attempt GET retry policy for one closed day. The composed
-  logical/network ceilings are 1,848 / 5,544 per attempt and 9,240 / 27,720
-  across five attempts for the 14-day backfill, and 924 / 2,772 per attempt and
-  4,620 / 13,860 across five attempts for the seven-day reconcile. When workout
-  streams share a closed-day job with ordinary dense resources, the existing job
-  payload retains that day plus its bounded terminal workout identity set until
-  every configured resource for the day succeeds. Retryable failures conditionally
-  replace only that bounded `device_job.payload_json` under the existing owner and
-  lease fence; cooperative preemption uses the existing immediate successor. This
-  adds no control-database collection path, pooled transaction, or vault
-  persistence. Neither path retains waveform/stream points, provider envelopes,
-  or evidence whose size scales with sample count.
+  serially and caps each stream at 100,000 points. The exact production assembly has
+  43 production timeseries resources: 13 wide and 30 dense, including 29 ordinary
+  dense resources plus `workout_stream`. At the current 100-page collection ceiling
+  and three-attempt GET policy, one closed dense day is bounded to 3,032 / 9,096
+  logical GETs / network attempts. The full timeseries ceilings are 50,248 / 150,744
+  per attempt and 251,240 / 753,720 across five attempts for the 14-day backfill
+  plus six 30-day wide windows, and 22,524 / 67,572 per attempt and 112,620 /
+  337,860 across five attempts for the seven-day reconcile plus one wide window.
+  Each reduced resource is imported before the existing job payload marks its exact
+  resource name complete. Retryable failures replace only that bounded payload on
+  the same leased row; cooperative preemption creates the existing immediate
+  successor only after strict window, resource, or workout progress. Within the
+  active coordinate, insertion and reordering cannot skip a newly configured
+  resource, while malformed or removed resource identities fail closed. Pagination
+  remains in memory, so a handled retry or cooperative continuation can replay at
+  most the single unfinished resource (up to 100 grouped GETs, or the
+  bounded workout index and remaining streams), never an earlier completed resource.
+  The current window/day coordinate and at-most-32 workout identities clear only
+  after every configured resource for that window/day completes. This adds no
+  control-database collection path, pooled transaction, or vault persistence.
+  Resource progress stores only versioned resource names; neither it nor any import
+  path retains waveform/stream points, provider envelopes, grouped rows, or evidence
+  whose size scales with sample count.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day
