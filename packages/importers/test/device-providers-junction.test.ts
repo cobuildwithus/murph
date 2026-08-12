@@ -2117,6 +2117,7 @@ test("Junction tier-2 summary events pass the canonical device import contract",
           id: "profile-1",
           height: 172,
           birth_date: "1992-03-14",
+          gender: "other",
           sex: "female",
           source: { provider: "apple_health_kit", type: "phone" },
           updated_at: "2026-04-20T09:00:00Z",
@@ -2188,8 +2189,119 @@ test("Junction tier-2 summary events pass the canonical device import contract",
       ironMg: 4,
       vitaminCMg: 30,
     });
+    const importedProfile = result.events.find((event) => event.kind === "note") as
+      | { reportedGender?: string }
+      | undefined;
+    assert.equal(importedProfile?.reportedGender, "other");
     assert.ok(result.evidencePartCount >= 1);
     assert.notEqual(result.ingestShardPath, "");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction summary completeness facts roundtrip and replay without samples", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-summary-completeness");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-20T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const input = {
+      provider: "junction" as const,
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-account-hash-summary-completeness",
+        importedAt: "2026-05-21T12:00:00.000Z",
+        summaries: {
+          profile: {
+            id: "profile-summary-completeness",
+            gender: "other",
+            updated_at: "2026-05-20T09:00:00Z",
+            source: { provider: "apple_health_kit", type: "phone" },
+          },
+          activity: [{
+            id: "activity-summary-completeness",
+            date: "2026-05-20T00:00:00Z",
+            low: 3600,
+            medium: 780,
+            high: 300,
+            heart_rate: {
+              avg_bpm: 72,
+              avg_walking_bpm: 83,
+              min_bpm: 44,
+            },
+            source: { provider: "garmin", type: "watch" },
+          }],
+          sleep: [{
+            id: "sleep-summary-completeness",
+            bedtime_start: "2026-05-20T02:00:00Z",
+            bedtime_stop: "2026-05-20T10:00:00Z",
+            latency: 1080,
+            source: { provider: "oura", type: "ring" },
+          }],
+          menstrual_cycle: [{
+            id: "cycle-summary-completeness",
+            period_start: "2026-05-01",
+            cervical_mucus: [{ date: "2026-05-12", quality: "watery" }],
+            intermenstrual_bleeding: [{ date: "2026-05-13" }],
+            home_progesterone_test: [{ date: "2026-05-14", test_result: "negative" }],
+            contraceptive: [{ date: "2026-05-15", type: "oral" }],
+            sexual_activity: [{ date: "2026-05-16", protection_used: true }],
+            source: { provider: "apple_health", type: "phone" },
+          }],
+        },
+      },
+    };
+
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      input,
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      input,
+      { corePort: coreRuntime },
+    );
+    const observations = new Map(
+      first.events
+        .filter((event) => event.kind === "observation")
+        .map((event) => [event.metric, event.value]),
+    );
+    const measurements = first.events
+      .filter((event) => event.kind === "measurement")
+      .flatMap((event) => event.measurements ?? []);
+    const profile = first.events.find((event) => event.kind === "note") as
+      | { reportedGender?: string }
+      | undefined;
+
+    assert.equal(observations.get("activity-minutes"), 78);
+    assert.equal(observations.get("low-activity-minutes"), 60);
+    assert.equal(observations.get("medium-activity-minutes"), 13);
+    assert.equal(observations.get("high-activity-minutes"), 5);
+    assert.equal(observations.get("average-heart-rate"), 72);
+    assert.equal(observations.get("walking-average-heart-rate"), 83);
+    assert.equal(observations.get("minimum-heart-rate"), 44);
+    assert.equal(observations.get("sleep-latency-minutes"), 18);
+    assert.equal(profile?.reportedGender, "other");
+    assert.deepEqual(
+      measurements.map((measurement) => measurement.metric).sort(),
+      [
+        "cervical-mucus",
+        "contraceptive-use",
+        "intermenstrual-bleeding",
+        "progesterone-test",
+        "sexual-activity",
+      ],
+    );
+    assert.equal(first.samples.length, 0);
+    assert.equal(replay.samples.length, 0);
+    assert.equal(replay.applied, false);
+    assert.deepEqual(
+      replay.events.map((event) => event.id).sort(),
+      first.events.map((event) => event.id).sort(),
+    );
+    assert.doesNotMatch(JSON.stringify(first.events), /cervical_mucus|sexual_activity/u);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -5115,10 +5227,27 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
         home_pregnancy_test: [
           { date: "2026-04-28", test_result: "positive" },
         ],
+        home_progesterone_test: [
+          { date: "2026-04-24", test_result: "positive" },
+          { date: "2026-04-25", test_result: "indeterminate" },
+        ],
+        cervical_mucus: [
+          { date: "2026-04-18", quality: "watery" },
+          { date: "2026-04-18", quality: "egg_white" },
+          { date: "2026-04-19", quality: "unknown" },
+        ],
+        intermenstrual_bleeding: [{ date: "2026-04-15" }],
+        contraceptive: [
+          { date: "2026-04-12", type: "oral" },
+          { date: "2026-04-13", type: "unspecified" },
+        ],
         detected_deviations: [
           { date: "2026-04-30", deviation: "irregular_menstrual_cycles" },
         ],
-        sexual_activity: [{ date: "2026-04-13", protection_used: true }],
+        sexual_activity: [
+          { date: "2026-04-13", protection_used: true },
+          { date: "2026-04-13", protection_used: false },
+        ],
         source: {
           provider: "apple_health",
           type: "phone",
@@ -5208,6 +5337,70 @@ test("Junction normalizer maps menstrual cycle summaries to cycle and daily face
     unit: "result",
     qualifiers: { result: "positive" },
   });
+
+  const cervicalMucusEvents = measurementEvents.filter((event) =>
+    event.title === "Junction cervical mucus"
+  );
+  assert.equal(cervicalMucusEvents.length, 2);
+  assert.deepEqual(readMeasurement(cervicalMucusEvents[0]), {
+    metric: "cervical-mucus",
+    value: 1,
+    unit: "observation",
+    qualifiers: { quality: "watery" },
+  });
+  assert.notEqual(
+    cervicalMucusEvents[0]?.externalRef?.facet,
+    cervicalMucusEvents[1]?.externalRef?.facet,
+  );
+
+  const bleedingEvent = measurementEvents.find((event) =>
+    event.title === "Junction intermenstrual bleeding"
+  );
+  assert.deepEqual(readMeasurement(bleedingEvent), {
+    metric: "intermenstrual-bleeding",
+    value: 1,
+    unit: "event",
+    qualifiers: { bleeding: "intermenstrual" },
+  });
+  assert.equal(bleedingEvent?.dayKey, "2026-04-15");
+
+  const progesteroneEvent = measurementEvents.find((event) =>
+    event.title === "Junction progesterone test"
+  );
+  assert.deepEqual(readMeasurement(progesteroneEvent), {
+    metric: "progesterone-test",
+    value: 1,
+    unit: "result",
+    qualifiers: { result: "positive" },
+  });
+
+  const contraceptiveEvent = measurementEvents.find((event) =>
+    event.title === "Junction contraceptive use"
+  );
+  assert.deepEqual(readMeasurement(contraceptiveEvent), {
+    metric: "contraceptive-use",
+    value: 1,
+    unit: "event",
+    qualifiers: { type: "oral" },
+  });
+
+  const sexualActivityEvents = measurementEvents.filter((event) =>
+    event.title === "Junction sexual activity"
+  );
+  assert.equal(sexualActivityEvents.length, 2);
+  assert.deepEqual(readMeasurement(sexualActivityEvents[0]), {
+    metric: "sexual-activity",
+    value: 1,
+    unit: "event",
+    qualifiers: { "protection-used": true },
+  });
+  assert.deepEqual(readMeasurement(sexualActivityEvents[1])?.qualifiers, {
+    "protection-used": false,
+  });
+  assert.notEqual(
+    sexualActivityEvents[0]?.externalRef?.facet,
+    sexualActivityEvents[1]?.externalRef?.facet,
+  );
 
   const deviationEvent = measurementEvents.find((event) => event.title === "Junction cycle deviation");
   assert.deepEqual(readMeasurement(deviationEvent), {
@@ -5458,6 +5651,7 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
         id: "profile-1",
         height: 183,
         birth_date: "1990-05-14",
+        gender: "male",
         sex: "female",
         gender: "other",
         wheelchair_use: true,
@@ -5494,7 +5688,7 @@ test("Junction normalizer maps profile summaries to height and demographics", ()
   assert.equal(gender?.dataOrigin?.sourceProviderSlug, "apple-health-kit");
   assert.equal(
     demographics?.note,
-    "Birth date: 1990-05-14. Biological sex: female. Wheelchair use: yes.",
+    "Birth date: 1990-05-14. Reported gender: male. Biological sex: female. Wheelchair use: yes.",
   );
   assert.equal(demographics?.note?.includes("Gender"), false);
   assert.equal(demographics?.title, "Junction profile");
@@ -5693,14 +5887,18 @@ test("Junction no-id profile facets claim the pre-normalized timestamp identity"
   ), true);
 });
 
-test("Junction oversized menstrual deviation strings land with capped facet and qualifier", () => {
+test("Junction oversized cycle labels land with capped facets and qualifiers", () => {
   const oversizedDeviation = "a".repeat(200);
+  const oversizedQuality = "q".repeat(200);
+  const oversizedContraceptiveType = "t".repeat(200);
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-05-02T12:00:00.000Z",
     summaries: {
       menstrual_cycle: [{
         id: "cycle-long-deviation",
         period_start: "2026-04-07",
+        cervical_mucus: [{ date: "2026-04-18", quality: oversizedQuality }],
+        contraceptive: [{ date: "2026-04-19", type: oversizedContraceptiveType }],
         detected_deviations: [{ date: "2026-04-30", deviation: oversizedDeviation }],
         source: { provider: "apple_health", type: "phone" },
       }],
@@ -5720,6 +5918,20 @@ test("Junction oversized menstrual deviation strings land with capped facet and 
     `menstrual-cycle-deviation-${"a".repeat(80)}-2026-04-30`,
   );
   assert.equal(qualifiers?.deviation, "a".repeat(80));
+
+  for (const [title, qualifierKey, expectedFacet] of [
+    ["Junction cervical mucus", "quality", `cervical-mucus-${"q".repeat(80)}-2026-04-18`],
+    ["Junction contraceptive use", "type", `contraceptive-${"t".repeat(80)}-2026-04-19`],
+  ] as const) {
+    const event = payload.events?.find((candidate) => candidate.title === title);
+    const entry = (
+      event?.fields?.measurements as Array<Record<string, unknown>> | undefined
+    )?.[0];
+    const entryQualifiers = entry?.qualifiers as Record<string, string> | undefined;
+
+    assert.equal(event?.externalRef?.facet, expectedFacet);
+    assert.equal(entryQualifiers?.[qualifierKey]?.length, 80);
+  }
 });
 
 test("Junction menstrual cycles land explicit provider length fields when end dates are absent", () => {
@@ -9480,9 +9692,9 @@ test("Junction normalizer maps documented activity and body summary scalar field
           min_bpm: 44,
           resting_bpm: 52,
         },
-        high: 5,
-        low: 60,
-        medium: 13,
+        high: 300,
+        low: 3600,
+        medium: 780,
         steps: 9400,
       }],
       body: [{
@@ -9535,6 +9747,9 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("walking-average-heart-rate"), 101);
   assert.equal(metricValue("lowest-heart-rate"), 44);
   assert.equal(metricValue("max-heart-rate"), 148);
+  assert.equal(metricValue("average-heart-rate"), 72);
+  assert.equal(metricValue("walking-average-heart-rate"), 83);
+  assert.equal(metricValue("minimum-heart-rate"), 44);
   assert.equal(metricValue("resting-heart-rate"), 52);
 
   const activityFidelityMetrics = [
@@ -9690,6 +9905,38 @@ test("Junction normalizer rejects incomplete or invalid daily activity minute bu
   assert.equal(payload.events?.some((event) =>
     event.fields?.metric === "high-activity-minutes" && event.fields.value === 1441
   ), false);
+});
+
+test("Junction normalizer rejects invalid sleep latency and activity heart rates", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        source: { provider: "oura", type: "ring" },
+        id: "sleep-invalid-latency",
+        date: "2026-05-20T08:00:00+00:00",
+        latency: -60,
+      }],
+      activity: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "activity-invalid-heart-rates",
+        date: "2026-05-20T00:00:00+00:00",
+        heart_rate: {
+          avg_bpm: -1,
+          avg_walking_bpm: -2,
+          min_bpm: -3,
+        },
+      }],
+    },
+  });
+  const metrics = new Set(
+    (payload.events ?? []).map((event) => event.fields?.metric),
+  );
+
+  assert.equal(metrics.has("sleep-latency-minutes"), false);
+  assert.equal(metrics.has("average-heart-rate"), false);
+  assert.equal(metrics.has("walking-average-heart-rate"), false);
+  assert.equal(metrics.has("minimum-heart-rate"), false);
 });
 
 test("Junction recovery readiness score preserves source-specific semantics", () => {
