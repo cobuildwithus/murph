@@ -1,3 +1,5 @@
+import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
+
 import { stripUndefined } from "../shared.ts";
 import { resolveJunctionOrigin } from "./junction-origin.ts";
 import { stableStringify } from "./raw-ingest-receipt.ts";
@@ -8,9 +10,8 @@ import type { PlainObject } from "./shared-normalization.ts";
 export const JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA = "junction.ecg_voltage_feature.v1";
 export const JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA = "junction.workout_stream_feature.v1";
 
-const ECG_IDS = ["recordingId", "recording_id", "junctionGroupId"] as const;
+const ECG_IDS = ["junctionGroupId", "recordingId", "recording_id"] as const;
 const WORKOUT_IDS = ["workoutId", "workout_id", "id"] as const;
-const ECG_GAP_MS = 10_000;
 const MAX_FEATURE_BYTES = 16_384;
 
 const ECG_FIELDS = new Set([
@@ -31,6 +32,7 @@ export interface JunctionElectrocardiogramVoltageReductionLimits {
 }
 
 export interface JunctionWorkoutStreamCandidate {
+  readonly cursor: string;
   readonly summary: PlainObject;
   readonly workoutId: string;
 }
@@ -64,7 +66,6 @@ export function reduceJunctionElectrocardiogramVoltageRecords(
   }
 
   const identified = new Map<string, EcgSample[]>();
-  const idless = new Map<string, EcgSample[]>();
   records.forEach((value, index) => {
     const sample = parseEcgSample(value, index);
     const source = stableStringify([
@@ -73,27 +74,13 @@ export function reduceJunctionElectrocardiogramVoltageRecords(
       sample.sourceInstanceId ?? null,
       sample.unit,
     ]);
-    const buckets = sample.recordingId ? identified : idless;
-    const key = sample.recordingId ? `${source}:${sample.recordingId}` : source;
-    const bucket = buckets.get(key) ?? [];
+    const key = `${source}:${sample.recordingId}`;
+    const bucket = identified.get(key) ?? [];
     bucket.push(sample);
-    buckets.set(key, bucket);
+    identified.set(key, bucket);
   });
 
   const recordings = [...identified.values()];
-  for (const samples of idless.values()) {
-    let recording: EcgSample[] = [];
-    let previous: number | undefined;
-    for (const sample of [...samples].sort(compareSamples)) {
-      if (previous !== undefined && sample.timestampMs - previous > ECG_GAP_MS) {
-        recordings.push(recording);
-        recording = [];
-      }
-      recording.push(sample);
-      previous = sample.timestampMs;
-    }
-    if (recording.length > 0) recordings.push(recording);
-  }
   if (recordings.length > limits.maxRecordings) {
     invalid(`ECG exceeded ${limits.maxRecordings} recordings`);
   }
@@ -119,12 +106,12 @@ export function selectJunctionWorkoutStreamCandidates(
     if (existing && stableStringify(existing.summary) !== stableStringify(summary)) {
       invalid(`workout index contained conflicting workout ${workoutId}`);
     }
-    selected.set(key, { summary, workoutId });
+    selected.set(key, { cursor: key, summary, workoutId });
   });
   if (selected.size > maxWorkouts) {
     invalid(`workout index exceeded ${maxWorkouts} workouts`);
   }
-  return [...selected.values()].sort((left, right) => left.workoutId.localeCompare(right.workoutId));
+  return [...selected.values()].sort((left, right) => left.cursor.localeCompare(right.cursor));
 }
 
 export function reduceJunctionWorkoutStreamPayload(
@@ -170,9 +157,9 @@ export function reduceJunctionWorkoutStreamPayload(
   if (!workoutId || !origin.sourceProviderSlug) {
     invalid("workout summary lacked identity");
   }
-  const startAt = firstTimestamp(summary, ["startAt", "start_at", "start"])
+  const startAt = firstTimestamp(summary, ["time_start", "timeStart", "startAt", "start_at", "start"])
     ?? new Date(firstMs).toISOString();
-  const endAt = firstTimestamp(summary, ["endAt", "end_at", "end"])
+  const endAt = firstTimestamp(summary, ["time_end", "timeEnd", "endAt", "end_at", "end"])
     ?? new Date(lastMs).toISOString();
   const durationSeconds = (Date.parse(endAt) - Date.parse(startAt)) / 1_000;
   if (durationSeconds < 0) invalid("workout duration was invalid");
@@ -202,6 +189,10 @@ export function resolveJunctionBoundedFeatureRecords(
   records: readonly unknown[],
 ): PlainObject[] {
   const selected = new Map<string, PlainObject>();
+  const policy = resolveJunctionTimeseriesResourcePolicy(resource);
+  if (!policy?.maxRecordsPerWindow || records.length > policy.maxRecordsPerWindow) {
+    invalid(`${resource} exceeded its feature cardinality`);
+  }
   records.forEach((value, index) => {
     const feature = record(value, `${resource} feature ${index}`);
     assertFeature(resource, feature);
@@ -221,8 +212,7 @@ export function buildJunctionBoundedFeatureIdentity(
 ): string {
   const origin = resolveJunctionOrigin(feature);
   const stableId = consistentId(feature, resource === "electrocardiogram_voltage" ? ECG_IDS : WORKOUT_IDS, "feature");
-  const semantic = [feature.sessionStart, feature.sessionEnd, feature.voltageUnit];
-  if (!origin.sourceProviderSlug || (!stableId && (resource === "workout_stream" || !semantic[0] || !semantic[1]))) {
+  if (!origin.sourceProviderSlug || !stableId) {
     invalid(`${resource} feature lacked identity`);
   }
   return stableStringify([
@@ -230,7 +220,7 @@ export function buildJunctionBoundedFeatureIdentity(
     origin.sourceProviderSlug,
     origin.sourceType ?? null,
     origin.sourceInstanceId ?? null,
-    stableId ?? semantic.map((value) => value ?? null),
+    stableId,
   ]);
 }
 
@@ -241,12 +231,13 @@ function parseEcgSample(value: unknown, index: number): EcgSample {
   const unit = firstString(sample, ["unit"]);
   const lead = firstString(sample, ["type"]);
   const origin = resolveJunctionOrigin(sample);
-  if (!timestamp || voltage === undefined || !unit || !lead || !origin.sourceProviderSlug) {
+  const recordingId = consistentId(sample, ECG_IDS, "ECG sample");
+  if (!timestamp || voltage === undefined || !unit || !lead || !origin.sourceProviderSlug || !recordingId) {
     invalid(`ECG sample ${index} was incomplete`);
   }
   return stripUndefined({
     lead,
-    recordingId: consistentId(sample, ECG_IDS, "ECG sample"),
+    recordingId,
     sourceInstanceId: origin.sourceInstanceId ?? undefined,
     sourceProviderSlug: origin.sourceProviderSlug,
     sourceType: origin.sourceType,
@@ -333,10 +324,24 @@ function assertFeature(
     return (ecg || key === "durationSeconds" || value !== undefined)
       && finiteNumber(value) === undefined;
   });
+  const scalarOnly = Object.values(feature).every(
+    (value) => typeof value === "string" || typeof value === "number",
+  );
+  const policy = resolveJunctionTimeseriesResourcePolicy(resource);
+  const countLimit = ecg ? policy?.maxSamplesPerWindow : policy?.maxSamplesPerRecord;
+  const duration = finiteNumber(feature.durationSeconds);
+  const distance = finiteNumber(feature.distanceMeters);
+  const averageHeartRate = finiteNumber(feature.averageHeartRate);
+  const maxHeartRate = finiteNumber(feature.maxHeartRate);
+  const voltageMin = finiteNumber(feature.voltageMin);
+  const voltageMax = finiteNumber(feature.voltageMax);
+  const voltageMean = finiteNumber(feature.voltageMean);
+  const voltageRms = finiteNumber(feature.voltageRms);
+  const leadCount = finiteNumber(feature.leadCount);
   if (
     feature.schema !== schema
     || Object.keys(feature).some((key) => !fields.has(key))
-    || Object.values(feature).some(Array.isArray)
+    || !scalarOnly
     || Buffer.byteLength(JSON.stringify(feature), "utf8") > MAX_FEATURE_BYTES
     || !resolveJunctionOrigin(feature).sourceProviderSlug
     || !start
@@ -345,7 +350,21 @@ function assertFeature(
     || count === undefined
     || !Number.isSafeInteger(count)
     || count < 1
+    || countLimit === undefined
+    || count > countLimit
     || invalidNumber
+    || duration === undefined
+    || duration < 0
+    || (!ecg && distance !== undefined && distance < 0)
+    || (!ecg && averageHeartRate !== undefined && (averageHeartRate < 20 || averageHeartRate > 300))
+    || (!ecg && maxHeartRate !== undefined && (maxHeartRate < 20 || maxHeartRate > 300))
+    || (!ecg && averageHeartRate !== undefined && maxHeartRate !== undefined && averageHeartRate > maxHeartRate)
+    || (ecg && (voltageMin === undefined || voltageMax === undefined || voltageMean === undefined || voltageRms === undefined))
+    || (ecg && voltageMin !== undefined && voltageMax !== undefined && voltageMin > voltageMax)
+    || (ecg && voltageMean !== undefined && voltageMin !== undefined && voltageMean < voltageMin)
+    || (ecg && voltageMean !== undefined && voltageMax !== undefined && voltageMean > voltageMax)
+    || (ecg && voltageRms !== undefined && voltageRms < 0)
+    || (ecg && (leadCount === undefined || !Number.isSafeInteger(leadCount) || leadCount < 1))
     || (ecg && !firstString(feature, ["voltageUnit"]))
   ) invalid(`${resource} feature was invalid`);
   consistentId(feature, ecg ? ECG_IDS : WORKOUT_IDS, "feature");

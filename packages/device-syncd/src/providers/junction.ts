@@ -173,6 +173,10 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
+interface JunctionDailyTimeseriesImportResult extends JunctionTimeseriesImportResult {
+  workoutStreamCursor: string | null;
+}
+
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
   canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
@@ -1196,8 +1200,10 @@ export function createJunctionDeviceSyncProvider(
             window.windowEnd,
             skippedOptionalResources,
             denseTimeseriesResources,
+            undefined,
+            normalizeString(job.payload.workoutStreamCursor),
           )
-        : { yieldedAt: null };
+        : { workoutStreamCursor: null, yieldedAt: null };
       if (denseTimeseriesImport.yieldedAt) {
         return withJunctionSkippedResourceMetadata(
           context,
@@ -1216,6 +1222,7 @@ export function createJunctionDeviceSyncProvider(
                 && wideChunkTimeseriesResources.length > 0
                 ? "dense"
                 : null,
+              workoutStreamCursor: denseTimeseriesImport.workoutStreamCursor,
             }),
             profileMetadataPatch,
           ),
@@ -2162,6 +2169,7 @@ export function createJunctionDeviceSyncProvider(
             skippedOptionalResources,
             [effectiveResource],
             sourceProviderSlug,
+            normalizeString(job.payload.workoutStreamCursor),
           );
           return withJunctionSkippedResourceMetadata(
             context,
@@ -2171,6 +2179,7 @@ export function createJunctionDeviceSyncProvider(
                   job,
                   windowEnd: window.windowEnd,
                   windowStart: dailyImport.yieldedAt,
+                  workoutStreamCursor: dailyImport.workoutStreamCursor,
                 })
               : { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
             skippedOptionalResources,
@@ -3192,19 +3201,42 @@ export function createJunctionDeviceSyncProvider(
     skippedOptionalResources: JunctionSkippedOptionalResource[],
     resources?: readonly string[],
     sourceProviderSlug?: string | null,
-  ): Promise<JunctionTimeseriesImportResult> {
+    workoutStreamCursor?: string | null,
+  ): Promise<JunctionDailyTimeseriesImportResult> {
+    let resumeWorkoutStreamCursor: string | null =
+      normalizeString(workoutStreamCursor) ?? null;
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
       if (context.shouldYield?.()) {
         return {
+          workoutStreamCursor: resumeWorkoutStreamCursor,
           yieldedAt: window.windowStart,
         };
       }
+      const requestedResources = resources ?? timeseriesResources;
+      if (requestedResources.includes("workout_stream")) {
+        const workoutImport = await importJunctionWorkoutStreamWindow({
+          context,
+          resumeCursor: resumeWorkoutStreamCursor,
+          skippedOptionalResources,
+          sourceProviderSlug,
+          sourceProviders,
+          windowEnd: window.windowEnd,
+          windowStart: window.windowStart,
+        });
+        if (workoutImport.yieldedAt) {
+          return workoutImport;
+        }
+        resumeWorkoutStreamCursor = null;
+      }
+      const ordinaryResources = requestedResources.filter(
+        (resource) => resource !== "workout_stream",
+      );
       const timeseries = await fetchTimeseriesSnapshots(
         context,
         window.windowStart,
         window.windowEnd,
         skippedOptionalResources,
-        resources,
+        ordinaryResources,
         sourceProviderSlug,
         { dateQueryFormat: "date" },
       );
@@ -3232,8 +3264,113 @@ export function createJunctionDeviceSyncProvider(
       }
     }
     return {
+      workoutStreamCursor: null,
       yieldedAt: null,
     };
+  }
+
+  async function importJunctionWorkoutStreamWindow(input: {
+    context: ProviderJobContext;
+    resumeCursor: string | null;
+    skippedOptionalResources: JunctionSkippedOptionalResource[];
+    sourceProviderSlug?: string | null;
+    sourceProviders: readonly JunctionProviderConnection[];
+    windowEnd: string;
+    windowStart: string;
+  }): Promise<JunctionDailyTimeseriesImportResult> {
+    const policy = resolveJunctionTimeseriesResourcePolicy("workout_stream");
+    const maxWorkouts = policy?.maxRecordsPerWindow;
+    const maxSamples = policy?.maxSamplesPerRecord;
+    if (!maxWorkouts || !maxSamples) {
+      throw new TypeError("Junction workout_stream policy did not define bounded limits.");
+    }
+
+    const candidates = await listJunctionWorkoutStreamCandidates(client, {
+      resource: "workout_stream",
+      signal: input.context.signal ?? null,
+      sourceProviderSlug: input.sourceProviderSlug,
+      userId: input.context.account.externalAccountId,
+      windowEnd: input.windowEnd,
+      windowStart: input.windowStart,
+    });
+    let completedCursor = input.resumeCursor;
+    for (const candidate of candidates) {
+      if (completedCursor && candidate.cursor <= completedCursor) {
+        continue;
+      }
+      if (input.context.shouldYield?.()) {
+        return {
+          workoutStreamCursor: completedCursor,
+          yieldedAt: input.windowStart,
+        };
+      }
+
+      let feature: unknown;
+      try {
+        feature = await fetchJunctionWorkoutStreamFeature(
+          client,
+          candidate,
+          maxSamples,
+          input.context.signal ?? null,
+        );
+      } catch (error) {
+        if (
+          completedCursor
+          && (
+            isRetryableDeviceSyncFailure(error)
+            || isJunctionJobSignalAbort(error, input.context.signal)
+          )
+        ) {
+          return {
+            workoutStreamCursor: completedCursor,
+            yieldedAt: input.windowStart,
+          };
+        }
+        const failure = classifyOptionalJunctionResourceFailure(
+          error,
+          "timeseries",
+          "workout_stream",
+          input.context.account.externalAccountId,
+        );
+        if (!failure) {
+          throw error;
+        }
+        logSkippedOptionalJunctionResource(
+          input.context,
+          "timeseries",
+          "workout_stream",
+          failure,
+        );
+        input.skippedOptionalResources.push({
+          ...failure,
+          resource: "workout_stream",
+          resourceCategory: "timeseries",
+        });
+        return { workoutStreamCursor: null, yieldedAt: null };
+      }
+
+      const preparedImport = await prepareJunctionImportSnapshot(
+        input.context,
+        { workout_stream: [feature] },
+        input.sourceProviders,
+      );
+      if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
+        await input.context.importSnapshot({
+          provider: "junction",
+          accountId: buildJunctionImportAccountId(input.context.account.externalAccountId),
+          connectionId: input.context.account.id,
+          importedAt: input.windowEnd,
+          windowStart: input.windowStart,
+          windowEnd: input.windowEnd,
+          connections: preparedImport.connections,
+          summaries: {},
+          timeseries: preparedImport.snapshots,
+        });
+      }
+      completedCursor = candidate.cursor;
+    }
+
+    return { workoutStreamCursor: null, yieldedAt: null };
   }
 
   async function importJunctionDirectResourceSnapshot(
@@ -3380,6 +3517,7 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
     timeseriesPhase?: JunctionTimeseriesBackfillPhase | null;
+    workoutStreamCursor?: string | null;
     windowEnd: string;
     windowStart: string;
   }): ProviderJobResult {
@@ -3400,6 +3538,7 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
     timeseriesPhase?: JunctionTimeseriesBackfillPhase | null;
+    workoutStreamCursor?: string | null;
     windowEnd: string;
     windowStart: string;
   }): DeviceSyncJobInput | null {
@@ -3426,17 +3565,29 @@ export function createJunctionDeviceSyncProvider(
           ...(emptyBackfillAttempts > 0 ? { emptyBackfillAttempts } : {}),
           timeseriesCursor: cursor,
           ...(input.timeseriesPhase ? { timeseriesPhase: input.timeseriesPhase } : {}),
+          ...(input.workoutStreamCursor
+            ? { workoutStreamCursor: input.workoutStreamCursor }
+            : {}),
         },
       };
     }
 
     if (input.job.kind === "reconcile") {
-      return buildExactWindowJob({
+      const followUp = buildExactWindowJob({
         kind: input.job.kind,
         priority: input.job.priority,
         windowEnd: input.windowEnd,
         windowStart: input.windowStart,
       });
+      return {
+        ...followUp,
+        payload: {
+          ...followUp.payload,
+          ...(input.workoutStreamCursor
+            ? { workoutStreamCursor: input.workoutStreamCursor }
+            : {}),
+        },
+      };
     }
 
     if (input.job.kind !== "resource") {
@@ -3463,6 +3614,7 @@ export function createJunctionDeviceSyncProvider(
             : undefined,
       windowEnd: input.windowEnd,
       windowStart: input.windowStart,
+      workoutStreamCursor: input.workoutStreamCursor || undefined,
     });
     return {
       kind: "resource",
@@ -3610,35 +3762,19 @@ async function fetchJunctionTimeseriesWindow(
   }
 
   if (policy.fetchMode === "workout_stream") {
-    const maxWorkouts = policy.maxRecordsPerWindow;
     const maxSamples = policy.maxSamplesPerRecord;
-    if (!maxWorkouts || !maxSamples) {
+    if (!maxSamples) {
       throw new TypeError("Junction workout_stream policy did not define bounded limits.");
     }
-    const indexRecords = await junctionClient.listSummary({
-      resource: "workouts",
-      signal: input.signal ?? null,
-      sourceProviderSlug: input.sourceProviderSlug,
-      userId: input.userId,
-      windowStart: input.windowStart,
-      windowEnd: input.windowEnd,
-      maxRecords: maxWorkouts + 1,
-    });
-    const summaries = indexRecords.map((record) =>
-      withJunctionSourceProviderFallback(record, input.sourceProviderSlug)
-    );
-    const candidates = selectJunctionWorkoutStreamCandidates(summaries, maxWorkouts);
+    const candidates = await listJunctionWorkoutStreamCandidates(junctionClient, input);
     const features: unknown[] = [];
     for (const candidate of candidates) {
-      const stream = await junctionClient.getWorkoutStream({
-        signal: input.signal ?? null,
-        workoutId: candidate.workoutId,
-      });
-      features.push(reduceJunctionWorkoutStreamPayload({
+      features.push(await fetchJunctionWorkoutStreamFeature(
+        junctionClient,
+        candidate,
         maxSamples,
-        stream,
-        summary: candidate.summary,
-      }));
+        input.signal ?? null,
+      ));
     }
     return features;
   }
@@ -3656,6 +3792,47 @@ async function fetchJunctionTimeseriesWindow(
   return reduceJunctionElectrocardiogramVoltageRecords(records, {
     maxRecordings: policy.maxRecordsPerWindow,
     maxSamples: policy.maxSamplesPerWindow,
+  });
+}
+
+async function listJunctionWorkoutStreamCandidates(
+  junctionClient: JunctionClient,
+  input: JunctionWindowInput,
+) {
+  const maxWorkouts = resolveJunctionTimeseriesResourcePolicy("workout_stream")
+    ?.maxRecordsPerWindow;
+  if (!maxWorkouts) {
+    throw new TypeError("Junction workout_stream policy did not define a workout limit.");
+  }
+  const indexRecords = await junctionClient.listSummary({
+    resource: "workouts",
+    signal: input.signal ?? null,
+    sourceProviderSlug: input.sourceProviderSlug,
+    userId: input.userId,
+    windowStart: input.windowStart,
+    windowEnd: input.windowEnd,
+    maxRecords: maxWorkouts + 1,
+  });
+  const summaries = indexRecords.map((record) =>
+    withJunctionSourceProviderFallback(record, input.sourceProviderSlug)
+  );
+  return selectJunctionWorkoutStreamCandidates(summaries, maxWorkouts);
+}
+
+async function fetchJunctionWorkoutStreamFeature(
+  junctionClient: JunctionClient,
+  candidate: ReturnType<typeof selectJunctionWorkoutStreamCandidates>[number],
+  maxSamples: number,
+  signal: AbortSignal | null,
+): Promise<unknown> {
+  const stream = await junctionClient.getWorkoutStream({
+    signal,
+    workoutId: candidate.workoutId,
+  });
+  return reduceJunctionWorkoutStreamPayload({
+    maxSamples,
+    stream,
+    summary: candidate.summary,
   });
 }
 

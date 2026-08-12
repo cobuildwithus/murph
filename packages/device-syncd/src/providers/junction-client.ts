@@ -1203,13 +1203,36 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
     for (const rawGroup of asArray(rawGroups)) {
       const group = readPlainObject(rawGroup);
       if (!group) {
+        if (resource === "electrocardiogram_voltage") {
+          throw new TypeError("Junction ECG group must be an object.");
+        }
         continue;
+      }
+
+      const groupId = firstDefinedString(group, ["id", "recordingId", "recording_id"]);
+      if (resource === "electrocardiogram_voltage" && !groupId) {
+        throw new TypeError("Junction ECG group lacked a stable recording id.");
+      }
+      if (resource === "electrocardiogram_voltage" && !Array.isArray(group.data)) {
+        throw new TypeError("Junction ECG group data must be an array.");
       }
 
       for (const rawSample of asArray(group.data)) {
         const sample = readPlainObject(rawSample);
         if (!sample) {
+          if (resource === "electrocardiogram_voltage") {
+            throw new TypeError("Junction ECG sample must be an object.");
+          }
           continue;
+        }
+
+        const sampleId = firstDefinedString(sample, ["recordingId", "recording_id"]);
+        if (
+          resource === "electrocardiogram_voltage"
+          && sampleId
+          && sampleId !== groupId
+        ) {
+          throw new TypeError("Junction ECG sample conflicted with its group recording id.");
         }
 
         const origin = resolveJunctionOrigin(sample, {
@@ -1219,8 +1242,7 @@ function flattenGroupedTimeseries(resource: string, payload: unknown): unknown[]
         records.push(stripUndefinedRecord({
           ...sample,
           junctionGroupId: resource === "electrocardiogram_voltage"
-            ? firstDefinedString(sample, ["recordingId", "recording_id"])
-              ?? firstDefinedString(group, ["id", "recordingId", "recording_id"])
+            ? groupId
             : undefined,
           sourceProviderSlug: normalizeSourceSlug(origin.sourceProviderSlug) ?? undefined,
           sourceType: origin.sourceType,

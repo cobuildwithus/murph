@@ -168,6 +168,7 @@ test("Junction ECG grouped fetch rejects responses above the explicit dense cap"
   const client = createClient(async () => createJsonResponse({
     groups: {
       apple_health_kit: [{
+        id: "ecg-recording-over-cap",
         data: Array.from({ length: 100_001 }, (_, index) => ({
           timestamp: new Date(Date.parse("2026-01-15T12:00:00.000Z") + index).toISOString(),
           type: "lead_i",
@@ -187,4 +188,37 @@ test("Junction ECG grouped fetch rejects responses above the explicit dense cap"
     }),
     { code: "JUNCTION_API_RECORD_LIMIT" },
   );
+});
+
+test("Junction ECG grouped fetch requires group identity and rejects sample conflicts", async () => {
+  for (const group of [
+    {
+      data: [{
+        timestamp: "2026-01-15T12:00:00.000Z",
+        type: "lead_i",
+        unit: "mV",
+        value: 0.1,
+      }],
+      source: { provider: "apple_health_kit", type: "watch" },
+    },
+    {
+      id: "ecg-group-1",
+      data: [{
+        recording_id: "ecg-sample-2",
+        timestamp: "2026-01-15T12:00:00.000Z",
+        type: "lead_i",
+        unit: "mV",
+        value: 0.1,
+      }],
+      source: { provider: "apple_health_kit", type: "watch" },
+    },
+  ]) {
+    const client = createClient(async () => createJsonResponse({
+      groups: { apple_health_kit: [group] },
+    }));
+    await assert.rejects(
+      client.listTimeseries({ ...WINDOW, resource: "electrocardiogram_voltage" }),
+      /ECG (?:group lacked|sample conflicted)/u,
+    );
+  }
 });

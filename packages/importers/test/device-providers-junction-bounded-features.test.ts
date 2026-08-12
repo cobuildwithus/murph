@@ -138,7 +138,7 @@ test("raw receipt retention accepts only pre-reduced dense features", async () =
   assert.throws(() => normalizeJunctionSnapshot({
     importedAt: "2026-07-02T00:00:00.000Z",
     timeseries: { electrocardiogram_voltage: rawSamples },
-  }), /feature was invalid/u);
+  }), /exceeded its feature cardinality/u);
 
   const features = reduceJunctionElectrocardiogramVoltageRecords(rawSamples, {
     maxRecordings: 64,
@@ -181,8 +181,8 @@ test("workout stream reduction is bounded by admitted samples and never preserve
     summary: {
       id: "workout-1",
       source: { provider: "garmin", type: "watch", device_id: "garmin-1" },
-      start: "2026-07-01T12:00:00.000Z",
-      end: "2026-07-01T12:30:00.000Z",
+      time_start: "2026-07-01T12:00:00.000Z",
+      time_end: "2026-07-01T12:30:00.000Z",
       sport: "run",
       updated_at: "2026-07-01T13:00:00.000Z",
     },
@@ -196,6 +196,8 @@ test("workout stream reduction is bounded by admitted samples and never preserve
   assert.equal(feature.schema, JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA);
   assert.equal(feature.sampleCount, sampleCount);
   assert.equal(feature.maxHeartRate, 180);
+  assert.equal(feature.startAt, "2026-07-01T12:00:00.000Z");
+  assert.equal(feature.endAt, "2026-07-01T12:30:00.000Z");
   assertNoSampleSizedValue(feature);
 
   assert.throws(() => reduceJunctionWorkoutStreamPayload({
@@ -213,7 +215,7 @@ test("workout stream reduction is bounded by admitted samples and never preserve
   }), /1-1 timestamps/u);
 });
 
-test("workout features compose with the existing activity-session owner and correction identity", () => {
+test("workout features use one independent compact measurement correction identity", () => {
   const first = normalizeJunctionSnapshot({
     importedAt: "2026-07-02T00:00:00.000Z",
     timeseries: { workout_stream: [workoutFeature()] },
@@ -238,19 +240,20 @@ test("workout features compose with the existing activity-session owner and corr
   assert.equal(first.evidenceParts?.length, 1);
   assert.equal(replay.events?.length, 1);
   assert.equal(replay.evidenceParts?.length, 1);
-  assert.equal(firstEvent?.kind, "activity_session");
-  const firstWorkout = firstEvent?.fields?.workout as Record<string, unknown> | undefined;
-  assert.deepEqual(firstWorkout?.metrics, {
-    averageHeartRate: 130,
-    maxHeartRate: 170,
-  });
+  assert.equal(firstEvent?.kind, "measurement");
+  assert.deepEqual(firstEvent?.fields?.measurements, [
+    { metric: "workout-minutes", unit: "minutes", value: 30 },
+    { metric: "workout-distance-km", unit: "km", value: 5 },
+    { metric: "average-heart-rate", unit: "bpm", value: 130 },
+    { metric: "max-heart-rate", unit: "bpm", value: 170 },
+  ]);
   assert.equal(firstEvent?.externalRef?.resourceId, correctionEvent?.externalRef?.resourceId);
   assert.equal(first.evidenceParts?.some((part) => part.role === "provider-snapshot"), false);
   assertNoSampleSizedValue(first.evidenceParts?.[0]?.content);
 });
 
-test("bounded features reuse existing ECG and workout summary identities", () => {
-  const summaries = normalizeJunctionSnapshot({
+test("bounded features cannot replace complete ECG and workout summaries", () => {
+  const normalized = normalizeJunctionSnapshot({
     importedAt: "2026-07-02T00:00:00.000Z",
     summaries: {
       electrocardiogram: [{
@@ -275,21 +278,25 @@ test("bounded features reuse existing ECG and workout summary identities", () =>
         averagePowerWatts: 215,
       }],
     },
-  });
-  const features = normalizeJunctionSnapshot({
-    importedAt: "2026-07-02T01:00:00.000Z",
     timeseries: {
       electrocardiogram_voltage: [ecgFeature()],
       workout_stream: [workoutFeature()],
     },
   });
 
-  const summaryEcg = summaries.events?.find((event) => event.kind === "measurement");
-  const featureEcg = features.events?.find((event) => event.kind === "measurement");
-  const summaryWorkout = summaries.events?.find((event) => event.kind === "activity_session");
-  const featureWorkout = features.events?.find((event) => event.kind === "activity_session");
-  assert.equal(summaryEcg?.externalRef?.resourceId, featureEcg?.externalRef?.resourceId);
-  assert.equal(summaryWorkout?.externalRef?.resourceId, featureWorkout?.externalRef?.resourceId);
+  const measurements = normalized.events?.filter((event) => event.kind === "measurement") ?? [];
+  const summaryEcg = measurements.find((event) => event.title?.includes("sinus rhythm"));
+  const featureEcg = measurements.find((event) => event.title === "Junction ECG");
+  const summaryWorkout = normalized.events?.find((event) => event.kind === "activity_session");
+  const featureWorkout = measurements.find(
+    (event) => event.title === "Junction workout stream features",
+  );
+  assert.notEqual(summaryEcg?.externalRef?.resourceId, featureEcg?.externalRef?.resourceId);
+  assert.notEqual(summaryWorkout?.externalRef?.resourceId, featureWorkout?.externalRef?.resourceId);
+  const workout = summaryWorkout?.fields?.workout as Record<string, unknown> | undefined;
+  const workoutMetrics = workout?.metrics as Record<string, unknown> | undefined;
+  assert.equal(workoutMetrics?.activeCalories, 320);
+  assert.equal(workoutMetrics?.averagePowerWatts, 215);
 });
 
 test("stable ECG recording ids own correction identity without diagnostic synthesis", () => {
@@ -337,4 +344,25 @@ test("bounded feature identity requires workout ids and conflicts fail closed", 
   assert.throws(() => resolveJunctionBoundedFeatureRecords("workout_stream", [
     workoutFeature({ rawPointEnvelope: { 0: { heartRate: 120 } } }),
   ]), /feature was invalid/u);
+
+  assert.throws(() => resolveJunctionBoundedFeatureRecords("workout_stream", [
+    workoutFeature({ sport: { slug: "run" } }),
+  ]), /feature was invalid/u);
+  assert.throws(() => resolveJunctionBoundedFeatureRecords("workout_stream", [
+    workoutFeature({ sampleCount: 100_001 }),
+  ]), /feature was invalid/u);
+  assert.throws(() => resolveJunctionBoundedFeatureRecords(
+    "workout_stream",
+    Array.from({ length: 33 }, (_, index) => workoutFeature({
+      id: `workout-${index}`,
+      workoutId: `workout-${index}`,
+    })),
+  ), /feature cardinality/u);
+  assert.throws(() => resolveJunctionBoundedFeatureRecords(
+    "electrocardiogram_voltage",
+    Array.from({ length: 65 }, (_, index) => ecgFeature({
+      id: `ecg-${index}`,
+      recordingId: `ecg-${index}`,
+    })),
+  ), /feature cardinality/u);
 });

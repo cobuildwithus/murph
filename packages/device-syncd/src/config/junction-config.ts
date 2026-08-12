@@ -1,3 +1,5 @@
+import { JUNCTION_DEFAULT_TIMESERIES_RESOURCES } from "@murphai/contracts";
+
 import {
   JUNCTION_API_BASE_URL_ENV_KEYS,
   JUNCTION_API_KEY_ENV_KEYS,
@@ -30,6 +32,40 @@ import type {
   JunctionRegion,
 } from "./provider-types.ts";
 
+// One code-owned production activation boundary. These additions remain
+// non-serializable and cannot be widened by a member or environment value.
+// Raw provider arrays are never retained: each resource's contracts policy
+// selects a bounded sparse, daily, hourly, or dense-feature reducer.
+export const JUNCTION_PRODUCTION_TIMESERIES_RESOURCES = Object.freeze([
+  ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  "body_mass_index",
+  "calories_basal",
+  "carbohydrates",
+  "daylight_exposure",
+  "electrocardiogram_voltage",
+  "fall",
+  "fat",
+  "floors_climbed",
+  "forced_expiratory_volume_1",
+  "forced_vital_capacity",
+  "handwashing",
+  "heart_rate_alert",
+  "inhaler_usage",
+  "insulin_injection",
+  "lean_body_mass",
+  "peak_expiratory_flow_rate",
+  "sleep_apnea_alert",
+  "stand_duration",
+  "stand_hour",
+  "uv_exposure",
+  "waist_circumference",
+  "wheelchair_push",
+  "workout_distance",
+  "workout_duration",
+  "workout_stream",
+  "workout_swimming_stroke",
+] as const);
+
 export function readConfiguredJunctionDeviceSyncProviderConfig(
   env: DeviceSyncEnvSource,
 ): JunctionDeviceSyncProviderConfig | null {
@@ -57,6 +93,7 @@ export function readConfiguredJunctionDeviceSyncProviderConfig(
     apiBaseUrl: optionalEnv(env, JUNCTION_API_BASE_URL_ENV_KEYS),
     providerFilter: parseCsvEnv(env, JUNCTION_PROVIDER_FILTER_ENV_KEYS),
     summaryResources: parseCsvEnv(env, JUNCTION_SUMMARY_RESOURCES_ENV_KEYS),
+    timeseriesResources: [...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES],
     summaryBackfillDays: parseIntegerEnv(env, JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS),
     timeseriesBackfillDays: parseIntegerEnv(env, JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS),
     reconcileDays: parseIntegerEnv(env, JUNCTION_RECONCILE_DAYS_ENV_KEYS),

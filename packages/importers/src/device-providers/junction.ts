@@ -2012,10 +2012,6 @@ function pushJunctionBoundedTimeseriesFeatures(
   context: NormalizationContext,
 ): void {
   const features = normalizeJunctionBoundedTimeseriesFeatures(resource, payload);
-  const canonicalResource = resource === "electrocardiogram_voltage"
-    ? "electrocardiogram"
-    : "workouts";
-  const canonicalResourceSlug = slugify(canonicalResource, "summary");
   const featureResourceSlug = slugify(resource, "timeseries");
 
   features.forEach((entry, index) => {
@@ -2035,9 +2031,9 @@ function pushJunctionBoundedTimeseriesFeatures(
 
     const resourceContext = buildResourceContext({
       entry,
-      resource: canonicalResource,
-      resourceSlug: canonicalResourceSlug,
-      identityKind: "summary",
+      resource,
+      resourceSlug: featureResourceSlug,
+      identityKind: "timeseries",
       index,
       fallbackArtifactRole: evidenceRole,
       fallbackIdentityDisambiguator: identity,
@@ -2050,9 +2046,67 @@ function pushJunctionBoundedTimeseriesFeatures(
     if (resource === "electrocardiogram_voltage") {
       pushElectrocardiogramSummary(entry, resourceContext, context);
     } else {
-      pushWorkoutSummary(entry, resourceContext, context);
+      pushJunctionWorkoutStreamFeature(entry, resourceContext, context);
     }
   });
+}
+
+function pushJunctionWorkoutStreamFeature(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+): void {
+  const startRaw = firstValueFromPaths(entry, ["startAt"]);
+  const occurredAt = resolveSafeTimestamp(startRaw, resourceContext.sourceProviderSlug);
+  if (!occurredAt) {
+    return;
+  }
+
+  const baseTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const timestamp = withTimestampOverride(baseTimestamp, {
+    occurredAt,
+    dayKey: extractIsoDatePrefix(occurredAt) ?? baseTimestamp.dayKey,
+    observedAtRaw: stringId(startRaw) ?? occurredAt,
+  });
+  const durationSeconds = firstNonNegativeNumberFromPaths(entry, ["durationSeconds"]);
+  const distanceMeters = firstNonNegativeNumberFromPaths(entry, ["distanceMeters"]);
+  const averageHeartRate = firstNonNegativeNumberFromPaths(entry, ["averageHeartRate"]);
+  const maxHeartRate = firstNonNegativeNumberFromPaths(entry, ["maxHeartRate"]);
+  const measurements = [
+    ...(durationSeconds === undefined
+      ? []
+      : [{ metric: "workout-minutes", value: durationSeconds / 60, unit: "minutes" }]),
+    ...(distanceMeters === undefined
+      ? []
+      : [{ metric: "workout-distance-km", value: distanceMeters / 1_000, unit: "km" }]),
+    ...(averageHeartRate === undefined
+      ? []
+      : [{ metric: "average-heart-rate", value: averageHeartRate, unit: "bpm" }]),
+    ...(maxHeartRate === undefined
+      ? []
+      : [{ metric: "max-heart-rate", value: maxHeartRate, unit: "bpm" }]),
+  ];
+  if (measurements.length === 0) {
+    return;
+  }
+
+  context.events.push(stripUndefined({
+    kind: "measurement",
+    occurredAt,
+    recordedAt: timestamp.recordedAt,
+    dayKey: timestamp.dayKey,
+    source: "device",
+    title: "Junction workout stream features",
+    evidenceRoles: resourceContext.evidenceRoles,
+    externalRef: makeJunctionExternalRef(
+      resourceContext,
+      entry,
+      timestamp,
+      "workout-stream-feature",
+    ),
+    dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+    fields: { measurements },
+  }));
 }
 
 function normalizeJunctionBoundedTimeseriesFeatures(
@@ -5639,10 +5693,9 @@ function inclusiveDaysBetween(startDate: string, endDate: string | undefined): n
   return days >= 1 && days <= 120 ? days : undefined;
 }
 
-// One Junction ECG owner per recording. The default summary contributes its
-// documented bounded fields; the explicit voltage opt-in contributes only
-// neutral aggregate signal features and merges into that same owner. Waveform
-// samples never enter canonical events or retained evidence.
+// Summary and voltage-feature contexts deliberately use different resource
+// identities. Core revisions are whole-record replacements, so sharing an
+// owner here would let a compact voltage feature erase summary classification.
 function pushElectrocardiogramSummary(
   entry: PlainObject,
   resourceContext: ResourceContext,

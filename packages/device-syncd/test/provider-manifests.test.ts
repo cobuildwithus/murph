@@ -14,6 +14,7 @@ import {
   deviceSyncProviderRuntimeVariableEnvKeys,
   getConfiguredDeviceSyncProviderManifest,
   getConfiguredDeviceSyncProviderJobDefinition,
+  JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
   listDeviceSyncProviderCatalog,
   normalizeConfiguredDeviceSyncJobInput,
   normalizeConfiguredDeviceSyncJobRecord,
@@ -103,7 +104,36 @@ describe("deviceSyncProviderManifests", () => {
     expect(config).not.toHaveProperty("baseUrl");
   });
 
-  it("defaults Junction timeseries resources from the compact code-owned allowlist", () => {
+  it("activates the exact code-owned production timeseries list", () => {
+    expect([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]).toEqual([
+      ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+      "body_mass_index",
+      "calories_basal",
+      "carbohydrates",
+      "daylight_exposure",
+      "electrocardiogram_voltage",
+      "fall",
+      "fat",
+      "floors_climbed",
+      "forced_expiratory_volume_1",
+      "forced_vital_capacity",
+      "handwashing",
+      "heart_rate_alert",
+      "inhaler_usage",
+      "insulin_injection",
+      "lean_body_mass",
+      "peak_expiratory_flow_rate",
+      "sleep_apnea_alert",
+      "stand_duration",
+      "stand_hour",
+      "uv_exposure",
+      "waist_circumference",
+      "wheelchair_push",
+      "workout_distance",
+      "workout_duration",
+      "workout_stream",
+      "workout_swimming_stroke",
+    ]);
     const configs = readConfiguredDeviceSyncProviderConfigs({
       JUNCTION_API_KEY: "sk_us_test_manifest",
       JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
@@ -115,9 +145,10 @@ describe("deviceSyncProviderManifests", () => {
     if (!junctionConfig) {
       throw new Error("Expected Junction config to be present.");
     }
-    expect(junctionConfig).not.toHaveProperty("timeseriesResources");
+    expect(junctionConfig.timeseriesResources)
+      .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
     expect(normalizeJunctionDeviceSyncRuntimeConfig(junctionConfig).timeseriesResources)
-      .toEqual([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]);
+      .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
     expect(() => createConfiguredDeviceSyncProvidersFromConfigs(configs)).not.toThrow();
   });
 
@@ -229,8 +260,19 @@ describe("deviceSyncProviderManifests", () => {
         sourceProviderSlug: { kind: "string", includeInHostedHint: true },
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
         timeseriesPhase: { kind: "string", includeInHostedHint: true },
+        workoutStreamCursor: { kind: "string", includeInHostedHint: true },
         windowEnd: { kind: "string", includeInHostedHint: true },
         windowStart: { kind: "string", includeInHostedHint: true },
+      },
+    });
+    expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "reconcile")).toMatchObject({
+      payload: {
+        workoutStreamCursor: { kind: "string", includeInHostedHint: true },
+      },
+    });
+    expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "resource")).toMatchObject({
+      payload: {
+        workoutStreamCursor: { kind: "string", includeInHostedHint: true },
       },
     });
     expect(getConfiguredDeviceSyncProviderJobDefinition("oura", "resource")).toMatchObject({

@@ -58,15 +58,17 @@ Current providers:
   dense-timeseries fetch window and never persist raw sample arrays or full provider
   snapshots. Opted-in `weight` uses sparse canonical measurements with compact
   per-reading evidence and the existing long summary-history backfill window.
-- Twelve additional sparse Junction timeseries are code-owned opt-ins and remain
-  off by default: BMI, carbohydrates, body fat, FEV1, FVC, heart-rate alerts,
+- Twelve additional sparse Junction timeseries are code-owned opt-ins: BMI,
+  carbohydrates, body fat, FEV1, FVC, heart-rate alerts,
   inhaler usage, insulin injections, lean body mass, peak expiratory flow,
-  sleep-apnea alerts, and waist circumference. Enabled resources use the same
+  sleep-apnea alerts, and waist circumference. The contract default remains off,
+  while the production provider assembly enables this exact audited resource set;
+  member overlays and environment variables cannot widen or narrow it. Enabled resources use the same
   extended-history horizon as summaries, fetched in bounded 30-day windows;
   dense/default timeseries retain their one-day windows. `fat` remains the
   public resource name while the client requests Junction's `body_fat` path.
-- `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins and
-  remain off by default. ECG voltage uses one-day grouped windows capped at
+- `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins in
+  that same code-owned production set. ECG voltage uses one-day grouped windows capped at
   100,000 admitted samples and 64 recordings, then reduces each recording to one
   clinically neutral feature record before a sync snapshot exists. Workout stream
   uses the ordinary workout index only to admit at most 32 stable workouts per

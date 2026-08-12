@@ -14994,8 +14994,8 @@ test("Junction workout_stream resource jobs reuse precise continuation windows",
     windowStart?: string;
   };
   assert.deepEqual([snapshot.windowStart, snapshot.windowEnd], [
-    "2026-04-01T06:00:00.000Z",
-    "2026-04-02T06:00:00.000Z",
+    "2026-04-01T00:00:00.000Z",
+    "2026-04-02T00:00:00.000Z",
   ]);
   assert.equal(snapshot.timeseries?.workout_stream?.length, 1);
   assert.equal(Array.isArray(snapshot.timeseries?.workout_stream?.[0]?.stream), false);
@@ -15003,6 +15003,88 @@ test("Junction workout_stream resource jobs reuse precise continuation windows",
     result.scheduledJobs?.find((scheduled) => scheduled.kind === "resource"),
     "workout stream yield should schedule the remaining precise window",
   );
-  assert.equal(continuation.payload?.windowStart, "2026-04-02T06:00:00.000Z");
+  assert.equal(continuation.payload?.windowStart, "2026-04-02T00:00:00.000Z");
   assert.equal(continuation.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+});
+
+test("Junction workout_stream continuation resumes after the last imported workout", async () => {
+  const streamRequests: string[] = [];
+  const importedWorkoutIds: string[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const parsed = new URL(readUrl(input));
+    if (parsed.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({ providers: [] });
+    }
+    if (parsed.pathname === "/v2/summary/workouts/junction-user-1") {
+      return createJsonResponse({
+        data: ["workout-1", "workout-2"].map((id, index) => ({
+          id,
+          sourceProviderSlug: "garmin",
+          time_start: `2026-04-02T1${index}:00:00.000Z`,
+          time_end: `2026-04-02T1${index}:30:00.000Z`,
+        })),
+      });
+    }
+    if (parsed.pathname.startsWith("/v2/timeseries/workouts/")) {
+      streamRequests.push(parsed.pathname);
+      return createJsonResponse({
+        time: [1_775_131_200, 1_775_133_000],
+        heartrate: [100, 160],
+        distance: [0, 5_000],
+      });
+    }
+    throw new Error(`Unexpected request: ${parsed.toString()}`);
+  }, {
+    summaryResources: [],
+    timeseriesResources: ["workout_stream"],
+  });
+  const job = createJob("resource", {
+    resource: "workout_stream",
+    resourceCategory: "timeseries",
+    windowStart: "2026-04-02T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+  const importSnapshot = async (snapshot: {
+    timeseries?: Record<string, unknown[]>;
+  }) => {
+    const feature = snapshot.timeseries?.workout_stream?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    importedWorkoutIds.push(String(feature?.workoutId));
+    return { imported: true };
+  };
+
+  const first = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot,
+      now: "2026-04-03T12:00:00.000Z",
+      shouldYield: () => importedWorkoutIds.length === 1,
+    }),
+    job,
+  );
+  const continuation = requireValue(
+    first.scheduledJobs?.find((scheduled) => scheduled.kind === "resource"),
+    "same-day workout continuation",
+  );
+  assert.equal(continuation.payload?.workoutStreamCursor, "garmin:workout-1");
+  assert.deepEqual(streamRequests, ["/v2/timeseries/workouts/workout-1/stream"]);
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot,
+      now: "2026-04-03T12:05:00.000Z",
+    }),
+    {
+      ...createJob("resource", continuation.payload ?? {}),
+      dedupeKey: continuation.dedupeKey ?? null,
+      priority: continuation.priority ?? 50,
+    },
+  );
+  assert.deepEqual(streamRequests, [
+    "/v2/timeseries/workouts/workout-1/stream",
+    "/v2/timeseries/workouts/workout-2/stream",
+  ]);
+  assert.deepEqual(importedWorkoutIds, ["workout-1", "workout-2"]);
 });
