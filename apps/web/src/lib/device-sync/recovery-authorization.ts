@@ -6,7 +6,7 @@ import {
 } from "@murphai/device-syncd/connect-config";
 import {
   DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE,
-  isDeviceSyncConnectionSetupConfirmed,
+  resolveDeviceSyncExistingConnectionRecoveryReason,
 } from "@murphai/device-syncd/public-account";
 
 import { HOSTED_DEVICE_CONNECTION_SOURCE_RECONNECT_ERROR_CODES } from "./browser-connection-source";
@@ -80,9 +80,32 @@ export async function isHostedDeviceSyncExistingConnectionRecoveryAuthorized(inp
       ],
     },
     select: {
-      id: true,
+      lastErrorCode: true,
+      lastSyncCompletedAt: true,
+      lastSyncErrorAt: true,
+      setupPhase: true,
+      sources: {
+        where: {
+          sourceProviderSlug,
+          status: { not: "disconnected" },
+        },
+        select: {
+          lastErrorCode: true,
+          status: true,
+        },
+        take: 1,
+      },
+      status: true,
     },
   });
 
-  return connection !== null;
+  return connection !== null
+    && resolveDeviceSyncExistingConnectionRecoveryReason({
+      connection: {
+        ...connection,
+        lastSyncCompletedAt: connection.lastSyncCompletedAt?.toISOString() ?? null,
+        lastSyncErrorAt: connection.lastSyncErrorAt?.toISOString() ?? null,
+      },
+      source: connection.sources[0] ?? null,
+    }) !== null;
 }

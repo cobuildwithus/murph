@@ -21,6 +21,79 @@ export const DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE =
 export const DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE =
   "SOURCE_USER_DISCONNECTED";
 
+export const DEVICE_SYNC_EXISTING_CONNECTION_RECOVERY_SOURCE_ERROR_CODES = [
+  "TOKEN_REFRESH_FAILED",
+] as const;
+
+const DEVICE_SYNC_EXISTING_CONNECTION_RECOVERY_SOURCE_ERROR_CODE_SET =
+  new Set<string>(DEVICE_SYNC_EXISTING_CONNECTION_RECOVERY_SOURCE_ERROR_CODES);
+
+export type DeviceSyncExistingConnectionRecoveryReason =
+  | "account_reauthorization"
+  | "newer_sync_error"
+  | "source_token_refresh_failed";
+
+export function resolveDeviceSyncExistingConnectionRecoveryReason(input: {
+  connection: {
+    lastErrorCode?: string | null;
+    lastSyncCompletedAt?: string | null;
+    lastSyncErrorAt?: string | null;
+    setupPhase?: string | null;
+    status?: string | null;
+  };
+  source: {
+    lastErrorCode?: string | null;
+    status?: string | null;
+  } | null;
+}): DeviceSyncExistingConnectionRecoveryReason | null {
+  if (
+    !isDeviceSyncConnectionSetupConfirmed(input.connection)
+    || !input.source
+    || input.source.status === "disconnected"
+  ) {
+    return null;
+  }
+
+  if (
+    input.connection.status === "reauthorization_required"
+    && input.connection.lastErrorCode
+      !== DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE
+  ) {
+    return "account_reauthorization";
+  }
+
+  if (input.connection.status !== "active") {
+    return null;
+  }
+
+  if (
+    input.source.status === "error"
+    && typeof input.source.lastErrorCode === "string"
+    && DEVICE_SYNC_EXISTING_CONNECTION_RECOVERY_SOURCE_ERROR_CODE_SET.has(
+      input.source.lastErrorCode,
+    )
+  ) {
+    return "source_token_refresh_failed";
+  }
+
+  return isDeviceSyncTimestampNewer(
+      input.connection.lastSyncErrorAt,
+      input.connection.lastSyncCompletedAt,
+    )
+    ? "newer_sync_error"
+    : null;
+}
+
+function isDeviceSyncTimestampNewer(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const leftTime = left ? Date.parse(left) : Number.NaN;
+  const rightTime = right ? Date.parse(right) : Number.NaN;
+  return !Number.isNaN(leftTime)
+    && (Number.isNaN(rightTime) || leftTime > rightTime);
+}
+
 const DEVICE_SYNC_SOURCE_DISCONNECT_FENCE_CODES = new Set([
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,

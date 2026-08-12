@@ -7809,6 +7809,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("executes modern Dexcom recovery only while the live status exposes that target", async () => {
     let dexcomSourceStatus: "connected" | "disconnected" | "error" = "connected";
+    let dexcomSourceErrorCode: string | null = null;
+    let lastSyncErrorAt: string | null = null;
     const connectLinkRequests: RuntimeDeviceSyncConnectLinkRequest[] = [];
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
@@ -7862,7 +7864,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               lastErrorCode: null,
               lastErrorMessage: null,
               lastSyncCompletedAt: "2026-04-22T00:00:00.000Z",
-              lastSyncErrorAt: null,
+              lastSyncErrorAt,
               lastSyncStartedAt: "2026-04-29T00:00:00.000Z",
               lastWebhookAt: null,
               nextReconcileAt: null,
@@ -7870,8 +7872,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             sources: [{
               displayName: null,
               firstSeenAt: "2026-04-22T00:00:00.000Z",
-              lastErrorCode:
-                dexcomSourceStatus === "error" ? "TOKEN_REFRESH_FAILED" : null,
+              lastErrorCode: dexcomSourceErrorCode,
               lastErrorMessage:
                 dexcomSourceStatus === "error" ? "refresh failed" : null,
               lastSeenAt: "2026-04-29T00:00:00.000Z",
@@ -7922,7 +7923,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     })).rejects.toThrow("not available to connect");
     expect(connectLinkRequests).toEqual([]);
 
-    dexcomSourceStatus = "error";
+    lastSyncErrorAt = "2026-04-29T00:00:00.000Z";
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
     const prompt =
       await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({}) ?? "";
@@ -7936,12 +7937,36 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     expect(connectLinkRequests).toEqual([{ connectTarget: "dexcom_v3" }]);
 
-    dexcomSourceStatus = "disconnected";
+    lastSyncErrorAt = null;
+    dexcomSourceStatus = "error";
+    dexcomSourceErrorCode = "INVALID_GRANT";
+    const invalidPrompt =
+      await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({}) ?? "";
+    expect(invalidPrompt).not.toContain(
+      "vault-cli device connect dexcom_v3 --format json",
+    );
     await expect(deviceTool.request({
       action: "connect",
       provider: "dexcom_v3",
     })).rejects.toThrow("not available to connect");
     expect(connectLinkRequests).toHaveLength(1);
+
+    dexcomSourceErrorCode = "TOKEN_REFRESH_FAILED";
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom_v3",
+    })).resolves.toEqual({
+      action: "connect",
+      link: expect.objectContaining({ provider: "dexcom_v3" }),
+    });
+    expect(connectLinkRequests).toHaveLength(2);
+
+    dexcomSourceStatus = "disconnected";
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom_v3",
+    })).rejects.toThrow("not available to connect");
+    expect(connectLinkRequests).toHaveLength(2);
   });
 
   it("exposes the existing Clinical Records link method to the hosted assistant context", async () => {

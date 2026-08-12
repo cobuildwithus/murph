@@ -8300,6 +8300,9 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
       target,
       publicTargetsByConnectTarget.get(target.connectTarget) ?? null,
     ),
+    freshConnectionAvailable: isDeviceConnectSourceAvailableForConnection(
+      target.connectSourceId,
+    ),
     label: target.label,
     provider: target.provider,
     ...(target.sourceProviderSlug

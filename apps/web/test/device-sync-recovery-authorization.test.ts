@@ -42,14 +42,21 @@ describe("existing device connection recovery authorization", () => {
   });
 
   it("allows an established member-owned Dexcom account that requires reauthorization", async () => {
-    mocks.findFirst.mockResolvedValue({ id: "connection_existing" });
+    mocks.findFirst.mockResolvedValue({
+      lastErrorCode: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      setupPhase: "source_confirmed",
+      sources: [{ lastErrorCode: null, status: "connected" }],
+      status: "reauthorization_required",
+    });
 
     await expect(isHostedDeviceSyncExistingConnectionRecoveryAuthorized({
       memberId: "member_existing",
       target: DEXCOM_TARGET,
     })).resolves.toBe(true);
     expect(mocks.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      select: { id: true },
+      select: expect.objectContaining({ status: true }),
       where: expect.objectContaining({
         provider: "junction",
         setupPhase: "source_confirmed",
@@ -65,7 +72,14 @@ describe("existing device connection recovery authorization", () => {
   });
 
   it("allows an exact Dexcom source with a token-refresh recovery marker", async () => {
-    mocks.findFirst.mockResolvedValue({ id: "connection_existing" });
+    mocks.findFirst.mockResolvedValue({
+      lastErrorCode: null,
+      lastSyncCompletedAt: new Date("2026-04-28T00:00:00.000Z"),
+      lastSyncErrorAt: null,
+      setupPhase: "source_confirmed",
+      sources: [{ lastErrorCode: "TOKEN_REFRESH_FAILED", status: "error" }],
+      status: "active",
+    });
 
     await expect(isHostedDeviceSyncExistingConnectionRecoveryAuthorized({
       memberId: "member_existing",
@@ -90,7 +104,14 @@ describe("existing device connection recovery authorization", () => {
   });
 
   it("allows the same recent-error recovery state projected by Settings", async () => {
-    mocks.findFirst.mockResolvedValue({ id: "connection_existing" });
+    mocks.findFirst.mockResolvedValue({
+      lastErrorCode: null,
+      lastSyncCompletedAt: new Date("2026-04-28T00:00:00.000Z"),
+      lastSyncErrorAt: new Date("2026-04-29T00:00:00.000Z"),
+      setupPhase: "source_confirmed",
+      sources: [{ lastErrorCode: null, status: "connected" }],
+      status: "active",
+    });
 
     await expect(isHostedDeviceSyncExistingConnectionRecoveryAuthorized({
       memberId: "member_existing",

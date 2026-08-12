@@ -1,4 +1,7 @@
-import { requiresHistoricalResetDeviceSyncSource } from "@murphai/device-syncd/public-account";
+import {
+  DEVICE_SYNC_EXISTING_CONNECTION_RECOVERY_SOURCE_ERROR_CODES,
+  requiresHistoricalResetDeviceSyncSource,
+} from "@murphai/device-syncd/public-account";
 
 import type { HostedDeviceConnectionSource } from "./prisma-store/sources";
 
@@ -39,7 +42,7 @@ const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
   "sourceInstanceKeyFallback",
 ]);
 export const HOSTED_DEVICE_CONNECTION_SOURCE_RECONNECT_ERROR_CODES = [
-  "TOKEN_REFRESH_FAILED",
+  ...DEVICE_SYNC_EXISTING_CONNECTION_RECOVERY_SOURCE_ERROR_CODES,
 ] as const;
 const CONNECTION_SOURCE_RECONNECT_ERROR_CODES = new Set<string>(
   HOSTED_DEVICE_CONNECTION_SOURCE_RECONNECT_ERROR_CODES,
