@@ -931,6 +931,14 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         total_elevation_gain: 320,
         elevation_change: -12,
         percent_recorded: 0.95,
+        heart_rate: {
+          avg_bpm: 76,
+          avg_walking_bpm: 101,
+          min_bpm: 44,
+        },
+        high: 5,
+        low: 60,
+        medium: 13,
       }],
       sleep: [{
         source: { provider: "garmin", type: "watch" },
@@ -938,6 +946,7 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
         bedtime_start: "2026-05-20T02:00:00Z",
         bedtime_stop: "2026-05-20T10:00:00Z",
         duration: 28800,
+        latency: 600,
         time_in_bed: 30000,
         sleep_consistency: 91,
         sleep_performance: 88,
@@ -954,27 +963,62 @@ test("Junction expanded summaries project into wearable activity, sleep, and bod
   });
 
   const latest = summarizeWearableLatest(vault);
+  const activityMinutes = summarizeWearableMetricLatest(vault, "activity-minutes", { windowDays: 1 });
+  const lowActivityMinutes = summarizeWearableMetricLatest(vault, "low-activity-minutes", { windowDays: 1 });
+  const walkingAverageHeartRate = summarizeWearableMetricLatest(vault, "walking-average-heart-rate", { windowDays: 1 });
+  const sleepLatency = summarizeWearableMetricLatest(vault, "sleep-latency-minutes", { windowDays: 1 });
   const leanBodyMass = summarizeWearableMetricLatest(vault, "lean-body-mass", { windowDays: 1 });
   const waistCircumference = summarizeWearableMetricLatest(vault, "waist-circumference", { windowDays: 1 });
+  const projection = buildMetricProjection(vault);
 
   assert.equal(latest?.activity?.steps.selection.value, 9400);
+  assert.equal(latest?.activity?.activityMinutes.selection.value, 78);
+  assert.equal(latest?.activity?.lowActivityMinutes.selection.value, 60);
+  assert.equal(latest?.activity?.mediumActivityMinutes.selection.value, 13);
+  assert.equal(latest?.activity?.highActivityMinutes.selection.value, 5);
+  assert.equal(latest?.activity?.averageHeartRate.selection.value, 76);
+  assert.equal(latest?.activity?.walkingAverageHeartRate.selection.value, 101);
+  assert.equal(latest?.activity?.lowestHeartRate.selection.value, 44);
   assert.equal(latest?.activity?.floorsClimbed.selection.value, 18);
   assert.equal(latest?.activity?.estimatedVo2Max.selection.value, 48.5);
   assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 320);
   assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, -12);
   assert.equal(latest?.activity?.percentRecorded.selection.value, 95);
   assert.equal(latest?.sleep?.timeInBedMinutes.selection.value, 500);
+  assert.equal(latest?.sleep?.sleepLatencyMinutes.selection.value, 10);
+  assert.equal(latest?.sleep?.averageHeartRate.selection.value, null);
+  assert.equal(latest?.sleep?.lowestHeartRate.selection.value, null);
+  assert.equal(latest?.recovery?.restingHeartRate.selection.value, null);
   assert.equal(latest?.sleep?.sleepConsistency.selection.value, 91);
   assert.equal(latest?.sleep?.sleepPerformance.selection.value, 88);
   assert.equal(latest?.bodyState?.leanBodyMassKg.selection.value, 40.1);
   assert.equal(latest?.bodyState?.temperature.selection.value, 36.7);
   assert.equal(latest?.bodyState?.waistCircumference.selection.value, 86.36);
+  assert.equal(activityMinutes?.summaryKind, "activity");
+  assert.equal(activityMinutes?.value, 78);
+  assert.equal(lowActivityMinutes?.summaryKind, "activity");
+  assert.equal(lowActivityMinutes?.value, 60);
+  assert.equal(walkingAverageHeartRate?.summaryKind, "activity");
+  assert.equal(walkingAverageHeartRate?.value, 101);
+  assert.equal(sleepLatency?.summaryKind, "sleep");
+  assert.equal(sleepLatency?.value, 10);
   assert.equal(leanBodyMass?.metric, "leanBodyMassKg");
   assert.equal(leanBodyMass?.summaryKind, "bodyState");
   assert.equal(leanBodyMass?.value, 40.1);
   assert.equal(waistCircumference?.metric, "waistCircumference");
   assert.equal(waistCircumference?.summaryKind, "bodyState");
   assert.equal(waistCircumference?.value, 86.36);
+  const projectedActivitySummaryValue = (metricKey: string) =>
+    projection.metricPoints.find((point) =>
+      point.metricKey === metricKey && point.source.kind === "activity-summary"
+    )?.value;
+  assert.equal(projectedActivitySummaryValue("activity-minutes"), 78);
+  assert.equal(projectedActivitySummaryValue("low-activity-minutes"), 60);
+  assert.equal(projectedActivitySummaryValue("medium-activity-minutes"), 13);
+  assert.equal(projectedActivitySummaryValue("high-activity-minutes"), 5);
+  assert.equal(projectedActivitySummaryValue("average-heart-rate"), 76);
+  assert.equal(projectedActivitySummaryValue("walking-average-heart-rate"), 101);
+  assert.equal(projectedActivitySummaryValue("lowest-heart-rate"), 44);
 });
 
 test("metric latest and trend surfaces keep derived sleep and aggregate-backed points", () => {

@@ -47,6 +47,8 @@ import {
   JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS,
   JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
   JUNCTION_SLEEP_HRV_PATHS,
+  JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
+  JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
   JUNCTION_SLEEP_LIGHT_MINUTE_PATHS,
   JUNCTION_SLEEP_LIGHT_SECOND_PATHS,
   JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,
@@ -250,6 +252,27 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
     paths: [],
     value: resolveJunctionDailyActivityMinutes,
   },
+  {
+    metric: "low-activity-minutes",
+    unit: "minutes",
+    title: "Junction low activity minutes",
+    paths: [],
+    value: (entry) => resolveJunctionActivityIntensityMinutes(entry, "low"),
+  },
+  {
+    metric: "medium-activity-minutes",
+    unit: "minutes",
+    title: "Junction medium activity minutes",
+    paths: [],
+    value: (entry) => resolveJunctionActivityIntensityMinutes(entry, "medium"),
+  },
+  {
+    metric: "high-activity-minutes",
+    unit: "minutes",
+    title: "Junction high activity minutes",
+    paths: [],
+    value: (entry) => resolveJunctionActivityIntensityMinutes(entry, "high"),
+  },
   { metric: "daily-steps", unit: "count", title: "Junction activity steps", paths: ["steps", "step_count", "daily_steps"] },
   { metric: "active-calories", unit: "kcal", title: "Junction active calories", paths: ["activeCalories", "active_calories", "calories_active"] },
   { metric: "total-calories", unit: "kcal", title: "Junction total calories", paths: ["calories", "totalCalories", "total_calories", "calories_total"] },
@@ -262,6 +285,9 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "percent-recorded", unit: "%", title: "Junction activity recording coverage", paths: [], percentRatioPaths: ["percentRecorded", "percent_recorded", "recordingCoverage", "recording_coverage", "recordedRatio", "recorded_ratio", "percentRecordedRatio", "percent_recorded_ratio"] },
   { metric: "workout-strain", unit: "score", title: "Junction workout strain", paths: ["workoutStrain", "workout_strain"] },
   { metric: "day-strain", unit: "score", title: "Junction day strain", paths: ["dayStrain", "day_strain", "strain"] },
+  { metric: "average-heart-rate", unit: "bpm", title: "Junction activity average heart rate", paths: ["heart_rate.avg_bpm"] },
+  { metric: "walking-average-heart-rate", unit: "bpm", title: "Junction activity walking average heart rate", paths: ["heart_rate.avg_walking_bpm"] },
+  { metric: "lowest-heart-rate", unit: "bpm", title: "Junction activity lowest heart rate", paths: ["heart_rate.min_bpm"] },
   { metric: "max-heart-rate", unit: "bpm", title: "Junction activity max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr", "heart_rate.max_bpm"] },
   { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"] },
 ];
@@ -290,6 +316,13 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: JUNCTION_SLEEP_AWAKE_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_AWAKE_SECOND_PATHS },
   { metric: "time-in-bed-minutes", unit: "minutes", title: "Junction time in bed", paths: JUNCTION_SLEEP_TIME_IN_BED_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS },
   { metric: "sleep-efficiency", unit: "%", title: "Junction sleep efficiency", paths: [], percentRatioPaths: JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS },
+  {
+    metric: "sleep-latency-minutes",
+    unit: "minutes",
+    title: "Junction sleep latency",
+    paths: [],
+    value: resolveJunctionSleepLatencyMinutes,
+  },
   { metric: "sleep-consistency", unit: "%", title: "Junction sleep consistency", paths: JUNCTION_SLEEP_CONSISTENCY_PATHS },
   { metric: "sleep-performance", unit: "%", title: "Junction sleep performance", paths: JUNCTION_SLEEP_PERFORMANCE_PATHS },
   { metric: "hrv", unit: "ms", title: "Junction sleep HRV", paths: JUNCTION_SLEEP_HRV_PATHS },
@@ -4736,6 +4769,21 @@ function resolveMetricDescriptorValue(
   return null;
 }
 
+function resolveJunctionSleepLatencyMinutes(entry: PlainObject): number | undefined {
+  const explicitlyNamedMinutes = firstNumberFromPaths(
+    entry,
+    JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
+  );
+  if (explicitlyNamedMinutes !== undefined) {
+    return explicitlyNamedMinutes;
+  }
+
+  return secondsToMinutes(firstNumberFromPaths(
+    entry,
+    JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
+  ));
+}
+
 function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undefined {
   // Get Summary reports these buckets in minutes and `daily_movement` as
   // deprecated equivalent-walking meters. Sense's `*_second` query columns
@@ -4760,6 +4808,16 @@ function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undef
 
   return totalActivityMinutes <= 24 * 60
     ? totalActivityMinutes
+    : undefined;
+}
+
+function resolveJunctionActivityIntensityMinutes(
+  entry: PlainObject,
+  intensity: "low" | "medium" | "high",
+): number | undefined {
+  const minutes = firstNumberFromPaths(entry, [intensity]);
+  return minutes !== undefined && minutes >= 0 && minutes <= 24 * 60
+    ? minutes
     : undefined;
 }
 

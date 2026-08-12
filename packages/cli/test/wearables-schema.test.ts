@@ -17,6 +17,19 @@ test("wearables day schema preserves compact fallback metadata", () => {
       providers: [],
     },
     summary: {
+      activity: {
+        activityMinutes: compactResolvedMetric({ metric: "activityMinutes", unit: "minutes", value: 78 }),
+        averageHeartRate: compactResolvedMetric({ metric: "averageHeartRate", unit: "bpm", value: 76 }),
+        date: "2026-04-03",
+        highActivityMinutes: compactResolvedMetric({ metric: "highActivityMinutes", unit: "minutes", value: 5 }),
+        lowActivityMinutes: compactResolvedMetric({ metric: "lowActivityMinutes", unit: "minutes", value: 60 }),
+        lowestHeartRate: compactResolvedMetric({ metric: "lowestHeartRate", unit: "bpm", value: 44 }),
+        mediumActivityMinutes: compactResolvedMetric({ metric: "mediumActivityMinutes", unit: "minutes", value: 13 }),
+        summaryConfidence: {
+          level: "high",
+        },
+        walkingAverageHeartRate: compactResolvedMetric({ metric: "walkingAverageHeartRate", unit: "bpm", value: 101 }),
+      },
       date: "2026-04-03",
       providers: ["oura"],
       sleep: {
@@ -35,6 +48,7 @@ test("wearables day schema preserves compact fallback metadata", () => {
           value: 430,
         }),
         sleepEndAt: "2026-04-03T07:00:00.000Z",
+        sleepLatencyMinutes: compactResolvedMetric({ metric: "sleepLatencyMinutes", unit: "minutes", value: 15 }),
         sleepStartAt: "2026-04-02T23:50:00.000Z",
         sleepWindowProvider: "oura",
         summaryConfidence: {
@@ -47,6 +61,14 @@ test("wearables day schema preserves compact fallback metadata", () => {
     vault: "/tmp/example-vault",
   });
 
+  assert.equal(parsed.summary?.activity?.activityMinutes?.value, 78);
+  assert.equal(parsed.summary?.activity?.lowActivityMinutes?.value, 60);
+  assert.equal(parsed.summary?.activity?.mediumActivityMinutes?.value, 13);
+  assert.equal(parsed.summary?.activity?.highActivityMinutes?.value, 5);
+  assert.equal(parsed.summary?.activity?.averageHeartRate?.value, 76);
+  assert.equal(parsed.summary?.activity?.walkingAverageHeartRate?.value, 101);
+  assert.equal(parsed.summary?.activity?.lowestHeartRate?.value, 44);
+  assert.equal(parsed.summary?.sleep?.sleepLatencyMinutes?.value, 15);
   assert.equal(
     parsed.summary?.sleep?.sessionMinutes?.fallbackReason,
     "Used sleep-session duration because total sleep minutes were unavailable.",

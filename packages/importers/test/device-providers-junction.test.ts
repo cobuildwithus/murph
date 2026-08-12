@@ -8216,6 +8216,7 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
           light: 12600,
           awake: 1800,
           time_in_bed: 30000,
+          latency: 600,
           efficiency: 0.97,
           sleep_consistency: 91,
           sleep_performance: 88,
@@ -8251,6 +8252,7 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
   assert.equal(metricValue("sleep-light-minutes"), 210);
   assert.equal(metricValue("sleep-awake-minutes"), 30);
   assert.equal(metricValue("time-in-bed-minutes"), 500);
+  assert.equal(metricValue("sleep-latency-minutes"), 10);
   assert.equal(metricValue("sleep-efficiency"), 97);
   assert.equal(metricValue("sleep-consistency"), 91);
   assert.equal(metricValue("sleep-performance"), 88);
@@ -8267,6 +8269,46 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
   assert.ok(observations
     .filter((event) => typeof event.fields?.metric === "string" && stageMetricNames.has(event.fields.metric))
     .every((event) => event.externalRef?.resourceType === "junction-oura-sleep"));
+});
+
+test("Junction sleep latency only bypasses seconds conversion for minute-named fields", () => {
+  const secondsPayload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "sleep-latency-seconds",
+        date: "2026-05-20T08:00:00+00:00",
+        sleep_latency: 900,
+        unit: "minutes",
+      }],
+    },
+  });
+  const minutesPayload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      sleep: [{
+        source: { provider: "garmin", type: "watch" },
+        id: "sleep-latency-minutes",
+        date: "2026-05-20T08:00:00+00:00",
+        latency_minutes: 15,
+        unit: "seconds",
+      }],
+    },
+  });
+  const latencyObservation = (payload: ReturnType<typeof normalizeJunctionSnapshot>) =>
+    payload.events?.find((event) => event.fields?.metric === "sleep-latency-minutes");
+
+  for (const payload of [secondsPayload, minutesPayload]) {
+    const observation = latencyObservation(payload);
+    assert.equal(observation?.fields?.value, 15);
+    assert.equal(observation?.fields?.unit, "minutes");
+    assert.equal(observation?.externalRef?.facet, "sleep-latency-minutes");
+    assert.equal(observation?.externalRef?.resourceType, "junction-garmin-sleep");
+    assert.equal(observation?.dataOrigin?.aggregatorProvider, "junction");
+    assert.equal(observation?.dataOrigin?.sourceProviderSlug, "garmin");
+    assert.deepEqual(observation?.evidenceRoles, ["junction-summary-sleep"]);
+  }
 });
 
 test("Junction normalizer maps documented activity and body summary scalar fields", () => {
@@ -8291,7 +8333,10 @@ test("Junction normalizer maps documented activity and body summary scalar field
         day_strain: 10.4,
         workout_strain: 8.8,
         heart_rate: {
+          avg_bpm: 76,
+          avg_walking_bpm: 101,
           max_bpm: 148,
+          min_bpm: 44,
           resting_bpm: 52,
         },
         high: 5,
@@ -8327,6 +8372,9 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(activityMinutes?.fields?.value, 78);
   assert.equal(activityMinutes?.fields?.unit, "minutes");
   assert.equal(activityMinutes?.externalRef?.facet, "activity-minutes");
+  assert.equal(metricValue("low-activity-minutes"), 60);
+  assert.equal(metricValue("medium-activity-minutes"), 13);
+  assert.equal(metricValue("high-activity-minutes"), 5);
   assert.equal(metricValue("daily-steps"), 9400);
   assert.equal(metricValue("active-calories"), 640);
   assert.equal(metricValue("total-calories"), 2400);
@@ -8338,8 +8386,45 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("percent-recorded"), 95);
   assert.equal(metricValue("day-strain"), 10.4);
   assert.equal(metricValue("workout-strain"), 8.8);
+  assert.equal(metricValue("average-heart-rate"), 76);
+  assert.equal(metricValue("walking-average-heart-rate"), 101);
+  assert.equal(metricValue("lowest-heart-rate"), 44);
   assert.equal(metricValue("max-heart-rate"), 148);
   assert.equal(metricValue("resting-heart-rate"), 52);
+
+  const activityFidelityMetrics = [
+    "activity-minutes",
+    "low-activity-minutes",
+    "medium-activity-minutes",
+    "high-activity-minutes",
+    "average-heart-rate",
+    "walking-average-heart-rate",
+    "lowest-heart-rate",
+  ];
+  const activityFidelityObservations = activityFidelityMetrics.map((metric) =>
+    observations.find((event) => event.fields?.metric === metric)
+  );
+  assert.equal(activityFidelityObservations.every((event) => event !== undefined), true);
+  assert.deepEqual(
+    activityFidelityObservations.map((event) => event?.externalRef?.facet),
+    activityFidelityMetrics,
+  );
+  const activityFidelityResourceIds = activityFidelityObservations.map(
+    (event) => event?.externalRef?.resourceId,
+  );
+  assert.equal(
+    activityFidelityResourceIds.every((resourceId) => typeof resourceId === "string"),
+    true,
+  );
+  assert.equal(new Set(activityFidelityResourceIds).size, 1);
+  assert.ok(activityFidelityObservations.every((event) =>
+    event?.externalRef?.resourceType === "junction-garmin-activity"
+    && event?.dataOrigin?.aggregatorProvider === "junction"
+    && event?.dataOrigin?.sourceProviderSlug === "garmin"
+    && event?.evidenceRoles?.length === 1
+    && event?.evidenceRoles?.[0] === "junction-summary-activity"
+  ));
+
   assert.equal(metricValue("weight"), 80);
   assert.equal(metricValue("bmi"), 22.3);
   assert.equal(metricValue("body-fat-percentage"), 30);
@@ -8375,6 +8460,9 @@ test("Junction normalizer rejects incomplete or invalid daily activity minute bu
   });
 
   assert.equal(payload.events?.some((event) => event.fields?.metric === "activity-minutes"), false);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "low-activity-minutes").length, 4);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "medium-activity-minutes").length, 3);
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "high-activity-minutes").length, 2);
 });
 
 test("Junction recovery readiness score preserves source-specific semantics", () => {

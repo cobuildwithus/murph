@@ -121,6 +121,8 @@ import {
   ACTIVITY_BRANCH_SCOPED_METRIC_KEYS,
   ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
+  isActivitySummaryMetricCandidate,
+  isSleepSummaryMetricCandidate,
   RECOVERY_METRIC_KEYS,
   SLEEP_METRIC_KEYS,
 } from "./wearables/types.ts";
@@ -186,7 +188,7 @@ export function listWearableActivityDays(
 
 function listWearableActivityDaysFromDataset(dataset: WearableDataset): WearableActivityDay[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
-    dataset.metricCandidates.filter((candidate) => metricSetHas(ACTIVITY_METRIC_KEYS, candidate.metric)),
+    dataset.metricCandidates.filter(isActivitySummaryMetricCandidate),
   );
   const activitySessionDayRollupsByDate = groupActivitySessionAggregatesByDate(
     dataset.activitySessionDayRollups,
@@ -202,6 +204,26 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const aggregates = activitySessionDayRollupsByDate.get(date) ?? [];
     const workoutMetricCandidates = aggregates.flatMap(buildActivitySessionWorkoutMetricCandidates);
     const steps = resolveMetric("steps", selectMetricCandidates(explicitDateCandidates, "steps"), { metricFamily: "activity" });
+    const activityMinutes = resolveMetric(
+      "activityMinutes",
+      selectMetricCandidates(explicitDateCandidates, "activityMinutes"),
+      { metricFamily: "activity" },
+    );
+    const lowActivityMinutes = resolveMetric(
+      "lowActivityMinutes",
+      selectMetricCandidates(explicitDateCandidates, "lowActivityMinutes"),
+      { metricFamily: "activity" },
+    );
+    const mediumActivityMinutes = resolveMetric(
+      "mediumActivityMinutes",
+      selectMetricCandidates(explicitDateCandidates, "mediumActivityMinutes"),
+      { metricFamily: "activity" },
+    );
+    const highActivityMinutes = resolveMetric(
+      "highActivityMinutes",
+      selectMetricCandidates(explicitDateCandidates, "highActivityMinutes"),
+      { metricFamily: "activity" },
+    );
     const activeCalories = resolveDailyCumulativeMetric(
       "activeCalories",
       explicitDateCandidates,
@@ -245,6 +267,21 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       "maxHeartRate",
       selectMetricCandidates([...explicitDateCandidates, ...workoutMetricCandidates], "maxHeartRate"),
     );
+    const averageHeartRate = resolveMetric(
+      "averageHeartRate",
+      selectMetricCandidates(explicitDateCandidates, "averageHeartRate"),
+      { metricFamily: "activity" },
+    );
+    const walkingAverageHeartRate = resolveMetric(
+      "walkingAverageHeartRate",
+      selectMetricCandidates(explicitDateCandidates, "walkingAverageHeartRate"),
+      { metricFamily: "activity" },
+    );
+    const lowestHeartRate = resolveMetric(
+      "lowestHeartRate",
+      selectMetricCandidates(explicitDateCandidates, "lowestHeartRate"),
+      { metricFamily: "activity" },
+    );
     const percentRecorded = resolveMetric("percentRecorded", selectMetricCandidates(explicitDateCandidates, "percentRecorded"), {
       metricFamily: "activity",
     });
@@ -268,6 +305,10 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const heartRateZones = resolveSelectedHeartRateZones(aggregates, sessionMinutes.selection);
     const summaryConfidence = summarizeMetricsConfidence([
       ["steps", steps],
+      ["activityMinutes", activityMinutes],
+      ["lowActivityMinutes", lowActivityMinutes],
+      ["mediumActivityMinutes", mediumActivityMinutes],
+      ["highActivityMinutes", highActivityMinutes],
       ["activeCalories", activeCalories],
       ["totalCalories", totalCalories],
       ["distanceKm", distanceKm],
@@ -279,6 +320,9 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       ["dayStrain", dayStrain],
       ["workoutStrain", workoutStrain],
       ["maxHeartRate", maxHeartRate],
+      ["averageHeartRate", averageHeartRate],
+      ["walkingAverageHeartRate", walkingAverageHeartRate],
+      ["lowestHeartRate", lowestHeartRate],
       ["percentRecorded", percentRecorded],
       ["sessionMinutes", sessionMinutes],
       ["sessionCount", sessionCount],
@@ -295,15 +339,21 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     return {
       activityScore,
       activeCalories,
+      activityMinutes,
       activityTypes,
       altitudeChangeMeters,
+      averageHeartRate,
       date,
       dayStrain,
       distanceKm,
       estimatedVo2Max,
       floorsClimbed,
       heartRateZones,
+      highActivityMinutes,
+      lowActivityMinutes,
+      lowestHeartRate,
       maxHeartRate,
+      mediumActivityMinutes,
       notes,
       percentRecorded,
       sessionCount,
@@ -312,6 +362,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       summaryConfidence,
       totalCalories,
       totalElevationGainMeters,
+      walkingAverageHeartRate,
       workoutStrain,
     };
   });
@@ -671,7 +722,7 @@ function buildDerivedTotalSleepCandidatesForWindow(
 
 function listWearableSleepNightsFromDataset(dataset: WearableDataset): WearableSleepNight[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
-    dataset.metricCandidates.filter((candidate) => metricSetHas(SLEEP_METRIC_KEYS, candidate.metric)),
+    dataset.metricCandidates.filter(isSleepSummaryMetricCandidate),
   );
   const sleepWindowsByDate = groupSleepWindowsByDate(dataset.sleepWindows);
   const dates = collectSortedDatesDesc([
@@ -1038,7 +1089,8 @@ export function listWearableRecoveryDays(
 function listWearableRecoveryDaysFromDataset(dataset: WearableDataset): WearableRecoveryDay[] {
   const metricCandidatesByDate = groupMetricCandidatesByDate(
     dataset.metricCandidates.filter((candidate) =>
-      metricSetHas(RECOVERY_METRIC_KEYS, candidate.metric) || candidate.metric === "lowestHeartRate"
+      metricSetHas(RECOVERY_METRIC_KEYS, candidate.metric)
+      || (candidate.metric === "lowestHeartRate" && isSleepSummaryMetricCandidate(candidate))
     ),
   );
   const dates = collectSortedDatesDesc([...metricCandidatesByDate.keys()]);

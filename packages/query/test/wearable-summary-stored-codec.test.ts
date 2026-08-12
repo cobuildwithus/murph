@@ -558,9 +558,79 @@ test("stored activity composition matches direct numeric and provenance results 
     candidate({ date, facet: "max-heart-rate", metric: "maxHeartRate", provider, unit: "bpm", value: values[3] }),
     candidate({ date, facet: "workout-strain", metric: "workoutStrain", provider, unit: "strain", value: values[4] }),
   ];
+  const activitySummaryFidelityMetrics = (
+    provider: string,
+    values: readonly [number, number, number, number, number, number, number],
+  ) => [
+    candidate({
+      date,
+      facet: "activity-minutes",
+      metric: "activityMinutes",
+      provider,
+      resourceType: "activity_summary",
+      unit: "minutes",
+      value: values[0],
+    }),
+    candidate({
+      date,
+      facet: "low-activity-minutes",
+      metric: "lowActivityMinutes",
+      provider,
+      resourceType: "activity_summary",
+      unit: "minutes",
+      value: values[1],
+    }),
+    candidate({
+      date,
+      facet: "medium-activity-minutes",
+      metric: "mediumActivityMinutes",
+      provider,
+      resourceType: "activity_summary",
+      unit: "minutes",
+      value: values[2],
+    }),
+    candidate({
+      date,
+      facet: "high-activity-minutes",
+      metric: "highActivityMinutes",
+      provider,
+      resourceType: "activity_summary",
+      unit: "minutes",
+      value: values[3],
+    }),
+    candidate({
+      date,
+      facet: "average-heart-rate",
+      metric: "averageHeartRate",
+      provider,
+      resourceType: "activity_summary",
+      unit: "bpm",
+      value: values[4],
+    }),
+    candidate({
+      date,
+      facet: "walking-average-heart-rate",
+      metric: "walkingAverageHeartRate",
+      provider,
+      resourceType: "activity_summary",
+      unit: "bpm",
+      value: values[5],
+    }),
+    candidate({
+      date,
+      facet: "lowest-heart-rate",
+      metric: "lowestHeartRate",
+      provider,
+      resourceType: "activity_summary",
+      unit: "bpm",
+      value: values[6],
+    }),
+  ];
   const metricCandidates = [
     ...explicitMetrics("garmin", [800, 10, 200, 178, 15]),
+    ...activitySummaryFidelityMetrics("garmin", [78, 60, 13, 5, 76, 101, 44]),
     ...explicitMetrics("oura", [700, 12, 250, 180, 12]),
+    ...activitySummaryFidelityMetrics("oura", [72, 54, 12, 6, 74, 98, 43]),
   ];
   const run = {
     activityType: "Running",
@@ -637,9 +707,16 @@ test("stored activity composition matches direct numeric and provenance results 
     for (const metric of [
       "sessionMinutes",
       "sessionCount",
+      "activityMinutes",
+      "lowActivityMinutes",
+      "mediumActivityMinutes",
+      "highActivityMinutes",
       "activeCalories",
       "distanceKm",
       "totalElevationGainMeters",
+      "averageHeartRate",
+      "walkingAverageHeartRate",
+      "lowestHeartRate",
       "maxHeartRate",
       "workoutStrain",
     ] as const) {
@@ -652,6 +729,15 @@ test("stored activity composition matches direct numeric and provenance results 
     if (providers.length === 0) {
       assert.equal(stored.sessionMinutes.selection.value, 83);
       assert.equal(stored.sessionCount.selection.value, 2);
+    }
+    if (providers.length === 1 && providers[0] === "garmin") {
+      assert.equal(stored.activityMinutes.selection.value, 78);
+      assert.equal(stored.lowActivityMinutes.selection.value, 60);
+      assert.equal(stored.mediumActivityMinutes.selection.value, 13);
+      assert.equal(stored.highActivityMinutes.selection.value, 5);
+      assert.equal(stored.averageHeartRate.selection.value, 76);
+      assert.equal(stored.walkingAverageHeartRate.selection.value, 101);
+      assert.equal(stored.lowestHeartRate.selection.value, 44);
     }
   }
 });

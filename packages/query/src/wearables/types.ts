@@ -87,15 +87,21 @@ export interface WearableSummaryConfidence {
 export interface WearableActivityDay {
   activityScore: WearableResolvedMetric;
   activeCalories: WearableResolvedMetric;
+  activityMinutes: WearableResolvedMetric;
   activityTypes: string[];
   altitudeChangeMeters: WearableResolvedMetric;
+  averageHeartRate: WearableResolvedMetric;
   date: string;
   dayStrain: WearableResolvedMetric;
   distanceKm: WearableResolvedMetric;
   estimatedVo2Max: WearableResolvedMetric;
   floorsClimbed: WearableResolvedMetric;
   heartRateZones: WearableHeartRateZoneAggregate[];
+  highActivityMinutes: WearableResolvedMetric;
+  lowActivityMinutes: WearableResolvedMetric;
+  lowestHeartRate: WearableResolvedMetric;
   maxHeartRate: WearableResolvedMetric;
+  mediumActivityMinutes: WearableResolvedMetric;
   notes: string[];
   percentRecorded: WearableResolvedMetric;
   sessionCount: WearableResolvedMetric;
@@ -104,6 +110,7 @@ export interface WearableActivityDay {
   summaryConfidence: WearableSummaryConfidence;
   totalCalories: WearableResolvedMetric;
   totalElevationGainMeters: WearableResolvedMetric;
+  walkingAverageHeartRate: WearableResolvedMetric;
   workoutStrain: WearableResolvedMetric;
 }
 
@@ -720,21 +727,57 @@ export const BODY_METRIC_KEYS = new Set<WearableMetricKey>([
 
 export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "activeCalories",
+  "activityMinutes",
   "activityScore",
   "altitudeChangeMeters",
+  "averageHeartRate",
   "dayStrain",
   "distanceKm",
   "estimatedVo2Max",
   "floorsClimbed",
+  "highActivityMinutes",
+  "lowActivityMinutes",
+  "lowestHeartRate",
   "maxHeartRate",
+  "mediumActivityMinutes",
   "percentRecorded",
   "sessionCount",
   "sessionMinutes",
   "steps",
   "totalCalories",
   "totalElevationGainMeters",
+  "walkingAverageHeartRate",
   "workoutStrain",
 ]);
+
+const ACTIVITY_SLEEP_SHARED_METRIC_KEYS: ReadonlySet<WearableMetricKey> = new Set([
+  "averageHeartRate",
+  "lowestHeartRate",
+]);
+
+export function isActivitySummaryMetricCandidate(candidate: WearableMetricCandidate): boolean {
+  if (!ACTIVITY_METRIC_KEYS.has(candidate.metric as WearableMetricKey)) {
+    return false;
+  }
+
+  return !ACTIVITY_SLEEP_SHARED_METRIC_KEYS.has(candidate.metric as WearableMetricKey)
+    || isExplicitActivitySummaryResource(candidate);
+}
+
+export function isSleepSummaryMetricCandidate(candidate: WearableMetricCandidate): boolean {
+  if (!SLEEP_METRIC_KEYS.has(candidate.metric as WearableMetricKey)) {
+    return false;
+  }
+
+  return !ACTIVITY_SLEEP_SHARED_METRIC_KEYS.has(candidate.metric as WearableMetricKey)
+    || !isExplicitActivitySummaryResource(candidate);
+}
+
+function isExplicitActivitySummaryResource(candidate: WearableMetricCandidate): boolean {
+  const resourceType = candidate.externalRef?.resourceType?.trim().toLowerCase() ?? "";
+  return resourceType === "cycle"
+    || resourceType.includes("activity");
+}
 
 export const DAILY_CUMULATIVE_METRIC_KEYS: ReadonlySet<WearableMetricKey> = new Set(
   ACTIVITY_SESSION_WORKOUT_METRIC_SPECS

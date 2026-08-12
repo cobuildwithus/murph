@@ -333,6 +333,13 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
     resolveExperimentSessionMetricSpec("soreness_score")?.key,
     "muscle-soreness-score",
   );
+  assert.equal(resolveWearableCanonicalMetricKey("activity-minutes"), "activityMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("low-activity-minutes"), "lowActivityMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("medium_activity_minutes"), "mediumActivityMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("high-activity-minutes"), "highActivityMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("average-heart-rate"), "averageHeartRate");
+  assert.equal(resolveWearableCanonicalMetricKey("walking-average-heart-rate"), "walkingAverageHeartRate");
+  assert.equal(resolveWearableCanonicalMetricKey("lowest-heart-rate"), "lowestHeartRate");
   assert.equal(resolveWearableCanonicalMetricKey("sleep-latency-minutes"), "sleepLatencyMinutes");
   assert.equal(resolveWearableCanonicalMetricKey("sleep_latency_minutes"), "sleepLatencyMinutes");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:unknown"), null);
