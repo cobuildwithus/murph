@@ -124,7 +124,7 @@ builder through one package subpath and gives Web a test-only workspace
 dependency plus the repository's standard source-resolution mappings. It adds
 no production caller, query, state, helper implementation, or authority owner;
 the real-PostgreSQL proof still exercises the same production functions. The
-post-merge suite applied all 177 current migrations and passed all five proofs.
+post-merge suite applied all 178 current migrations and passed all five proofs.
 
 Round-six retrospective: the accepted finding exposed consumer fanout that
 multiplied the already-bounded complete snapshot collector by every configured
@@ -140,6 +140,10 @@ and four sequential requests, cancellation and 101-connection failure without
 partial context, direct-versus-Junction authority separation, and suppression
 of SDK-only or otherwise unconfigured sources. No query, credential/KMS path,
 cache, retry, cursor, persisted state, or new authority owner was added.
+After normal-merging current main without a textual conflict, the exact merged
+tree passes the two owning assistant-runtime suites (311 tests), assistant and
+Web typechecks, and all five fresh local-PostgreSQL proofs after all 178 current
+migrations.
 
 ## Rollout
 
