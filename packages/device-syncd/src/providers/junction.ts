@@ -16,21 +16,19 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import {
-  canNormalizeJunctionSleepCycleRecordToCompactStages,
-  classifyJunctionSummaryNormalizationEvidence,
-  identifyJunctionBloodPressureProviderRecords,
-  resolveJunctionWeightProviderRecordIdentity,
-  type JunctionSummaryNormalizationEvidence,
-} from "@murphai/importers/device-providers/junction";
-import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
   buildJunctionBoundedFeatureIdentity,
+  canNormalizeJunctionSleepCycleRecordToCompactStages,
+  classifyJunctionSummaryNormalizationEvidence,
+  identifyJunctionBloodPressureProviderRecords,
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
   resolveJunctionBoundedFeatureRecords,
+  resolveJunctionWeightProviderRecordIdentity,
   selectJunctionWorkoutStreamCandidates,
-} from "@murphai/importers/device-providers/junction-bounded-features";
+  type JunctionSummaryNormalizationEvidence,
+} from "@murphai/importers/device-providers/junction";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
   isJunctionRawDirectIdentityContainerKey,

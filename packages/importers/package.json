@@ -40,11 +40,6 @@
       "import": "./dist/device-providers/junction.js",
       "default": "./dist/device-providers/junction.js"
     },
-    "./device-providers/junction-bounded-features": {
-      "types": "./dist/device-providers/junction-bounded-features.d.ts",
-      "import": "./dist/device-providers/junction-bounded-features.js",
-      "default": "./dist/device-providers/junction-bounded-features.js"
-    },
     "./device-providers/junction-resources": {
       "types": "./dist/device-providers/junction-resources.d.ts",
       "import": "./dist/device-providers/junction-resources.js",

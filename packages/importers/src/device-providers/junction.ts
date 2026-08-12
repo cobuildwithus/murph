@@ -83,7 +83,10 @@ import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
   buildJunctionBoundedFeatureIdentity,
+  reduceJunctionElectrocardiogramVoltageRecords,
+  reduceJunctionWorkoutStreamPayload,
   resolveJunctionBoundedFeatureRecords,
+  selectJunctionWorkoutStreamCandidates,
 } from "./junction-bounded-features.ts";
 import {
   normalizeJunctionSourceProviderSlug,
@@ -119,6 +122,16 @@ export {
   normalizeJunctionResourceName,
   type JunctionTimeseriesResource,
 } from "./junction-resources.ts";
+
+export {
+  JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
+  JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  buildJunctionBoundedFeatureIdentity,
+  reduceJunctionElectrocardiogramVoltageRecords,
+  reduceJunctionWorkoutStreamPayload,
+  resolveJunctionBoundedFeatureRecords,
+  selectJunctionWorkoutStreamCandidates,
+};
 
 export interface JunctionCompanionHrvRmssdSnapshotEntry {
   admissionId: CompanionHrvRmssdAdmissionId;
