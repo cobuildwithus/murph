@@ -63,8 +63,10 @@ Updated: 2026-08-12
    existing dirty/recording continuation after failure, with no projection
    watermark or second retry loop.
 5. Risk: a wake-preempted older publication finishes after a newer checkpoint.
-   Mitigation: carry the committed source workspace version and serialize the
-   final Web replacement against that existing row; stale work becomes a no-op.
+   Mitigation: materialize every selected record while the invocation owns the
+   restored vault, detach only immutable delivery, carry the committed source
+   workspace version bound to those bytes, and serialize the final Web
+   replacement against that existing row; stale work becomes a no-op.
 
 ## Tasks
 
@@ -92,6 +94,9 @@ Updated: 2026-08-12
   but cannot consume the existing acknowledgement obligation.
 - Fence final Web replacement with the committed workspace version instead of
   adding a share watermark, generation table, or projection-specific state.
+- Split the existing projector into Web-owned scope resolution, vault-owned
+  complete capture, and immutable delivery. Only the two phases without vault
+  access may be wake-detached; capture drains before owner release.
 - Normalize Junction cadence once in its existing runtime-config owner and make
   the runtime descriptor report the same effective interval.
 
@@ -99,7 +104,9 @@ Updated: 2026-08-12
 
 - Local proof completed:
   - `@murphai/assistant-runtime` typecheck and full Vitest suite: 86 files,
-    2,209 passed and 4 skipped.
+    2,210 passed and 4 skipped. The remediation proof mutates a released warm
+    vault root between two captured-scope deliveries and proves the older
+    immutable payload remains bound to its checkpoint generation.
   - `@murphai/device-syncd` typecheck and full Vitest suite: 46 files and 979
     passed.
   - `@murphai/hosted-execution` full Vitest suite: 45 files and 502 passed.
@@ -112,5 +119,10 @@ Updated: 2026-08-12
     documentation drift/gardening, privacy search, and `git diff --check` pass.
   - Desktop and mobile changelog renders were captured and inspected at the
     exact authored entry.
-- Remaining proof: exact-head preliminary specialists, final ReviewGPT rounds,
-  required GitHub Actions, and current-base merge-tree verification.
+- ReviewGPT round 2 required a retrospective because the first stale-writer
+  correction retained lazy mutable-vault reads after invocation release. The PR
+  records the accepted owner-boundary redesign; the local capture/delivery race
+  proof is green.
+- Remaining proof: corrected exact-head preliminary specialists, ReviewGPT
+  round 3 PASS, required GitHub Actions, and current-base merge-tree
+  verification.

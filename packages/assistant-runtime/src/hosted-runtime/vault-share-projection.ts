@@ -172,59 +172,92 @@ export interface HostedVaultShareProjectionOfferResult {
     | "no-projectable-records";
 }
 
-/**
- * Deterministic, best-effort projection offer: ask the web control plane for the active
- * projection kinds first, then read and offer only those projectable kinds from the
- * member's own vault. The web control plane is the sole authority on whether shares exist;
- * this step holds no share state.
- *
- * Never throws — a projection failure must never affect the runtime's primary work. For
- * a projectable scope, an empty read still replaces the Web-owned snapshot so records
- * that disappeared from the member vault cannot remain visible as current data.
- */
-export async function offerHostedVaultShareProjectionBestEffort(input: {
-  sourceWorkspaceVersion: string;
-  vaultRoot: string;
-  vaultSharePort: HostedRuntimeVaultSharePort | null | undefined;
-}): Promise<HostedVaultShareProjectionOfferResult> {
-  const port = input.vaultSharePort ?? null;
-
-  if (!port) {
-    return { outcome: "no-port" };
+export type HostedVaultShareProjectionScopeResolution =
+  | {
+    outcome: "active-scopes";
+    projectionScopes: HostedVaultShareProjectionScope[];
   }
+  | { outcome: "error" }
+  | { outcome: "no-active-share" };
 
-  let projectionScopes: HostedVaultShareProjectionScope[];
+export interface HostedVaultShareProjectionCapture {
+  sourceWorkspaceVersion: string;
+  snapshots: Array<{
+    projectionScope: HostedVaultShareProjectionScope;
+    records: HostedVaultShareDeliveryRecord[];
+  }>;
+}
+
+export type HostedVaultShareProjectionCaptureResult =
+  | {
+    capture: HostedVaultShareProjectionCapture;
+    outcome: "captured";
+  }
+  | { outcome: "error" }
+  | { outcome: "no-projectable-records" };
+
+/**
+ * Resolve Web-owned active share scopes without retaining access to the member vault.
+ * This network-only phase is safe for the runtime to abandon when foreground work wakes.
+ */
+export async function resolveHostedVaultShareProjectionScopesBestEffort(input: {
+  vaultSharePort: HostedRuntimeVaultSharePort;
+}): Promise<HostedVaultShareProjectionScopeResolution> {
   try {
-    projectionScopes = uniqueHostedVaultShareProjectionScopes(
-      await port.listActiveProjectionScopes(),
+    const projectionScopes = uniqueHostedVaultShareProjectionScopes(
+      await input.vaultSharePort.listActiveProjectionScopes(),
     );
+    return projectionScopes.length === 0
+      ? { outcome: "no-active-share" }
+      : { outcome: "active-scopes", projectionScopes };
   } catch {
     return { outcome: "error" };
   }
+}
 
-  if (projectionScopes.length === 0) {
-    return { outcome: "no-active-share" };
-  }
-
-  const outcomes: HostedVaultShareOfferOutcome[] = [];
+/**
+ * Materialize every active projectable scope while the invocation still owns the
+ * restored vault. The returned capture contains no vault path or lazy read, so later
+ * delivery cannot observe a successor invocation's mutable workspace generation.
+ *
+ * Never throws. If any read fails, no scope is delivered from this capture. For a
+ * projectable scope, an empty read remains an intentional replacement snapshot.
+ */
+export async function captureHostedVaultShareProjectionBestEffort(input: {
+  projectionScopes: readonly HostedVaultShareProjectionScope[];
+  sourceWorkspaceVersion: string;
+  vaultRoot: string;
+}): Promise<HostedVaultShareProjectionCaptureResult> {
+  const snapshots: HostedVaultShareProjectionCapture["snapshots"] = [];
   const context: HostedVaultShareProjectionReadContext = {};
 
-  for (const projectionScope of projectionScopes) {
+  for (const projectionScope of input.projectionScopes) {
     const readRecords = resolveProjectableRecordReader(projectionScope);
     if (!readRecords) {
       continue;
     }
-    outcomes.push(await offerHostedVaultShareScopeBestEffort({
-      context,
-      port,
-      projectionScope,
-      readRecords,
-      sourceWorkspaceVersion: input.sourceWorkspaceVersion,
-      vaultRoot: input.vaultRoot,
-    }));
+    try {
+      snapshots.push({
+        projectionScope,
+        records: await readRecords({
+          context,
+          vaultRoot: input.vaultRoot,
+        }),
+      });
+    } catch {
+      return { outcome: "error" };
+    }
   }
 
-  return { outcome: combineHostedVaultShareOfferOutcomes(outcomes) };
+  return snapshots.length === 0
+    ? { outcome: "no-projectable-records" }
+    : {
+      capture: {
+        snapshots,
+        sourceWorkspaceVersion: input.sourceWorkspaceVersion,
+      },
+      outcome: "captured",
+    };
 }
 
 type HostedVaultShareOfferOutcome = HostedVaultShareProjectionOfferResult["outcome"];
@@ -242,31 +275,32 @@ type ProjectableRecordReader = (input: {
   vaultRoot: string;
 }) => Promise<HostedVaultShareDeliveryRecord[]>;
 
-async function offerHostedVaultShareScopeBestEffort(input: {
-  context: HostedVaultShareProjectionReadContext;
-  port: HostedRuntimeVaultSharePort;
-  projectionScope: HostedVaultShareProjectionScope;
-  readRecords: ProjectableRecordReader;
-  sourceWorkspaceVersion: string;
-  vaultRoot: string;
-}): Promise<HostedVaultShareOfferOutcome> {
-  try {
-    const records = await input.readRecords({
-      context: input.context,
-      vaultRoot: input.vaultRoot,
-    });
-
-    const response = await input.port.deliver({
-      projectionKind: input.projectionScope.projectionKind,
-      projectionScope: input.projectionScope,
-      records,
-      sourceWorkspaceVersion: input.sourceWorkspaceVersion,
-    });
-
-    return response.status === "delivered" ? "delivered" : "no-active-share";
-  } catch {
-    return "error";
+/**
+ * Deliver an immutable capture. This phase performs no vault reads and is safe to
+ * finish after its originating invocation releases the mutable workspace path; Web's
+ * committed-version fence remains the final stale-writer authority.
+ */
+export async function offerCapturedHostedVaultShareProjectionBestEffort(input: {
+  capture: HostedVaultShareProjectionCapture;
+  vaultSharePort: HostedRuntimeVaultSharePort;
+}): Promise<HostedVaultShareProjectionOfferResult> {
+  const outcomes: HostedVaultShareOfferOutcome[] = [];
+  for (const snapshot of input.capture.snapshots) {
+    try {
+      const response = await input.vaultSharePort.deliver({
+        projectionKind: snapshot.projectionScope.projectionKind,
+        projectionScope: snapshot.projectionScope,
+        records: snapshot.records,
+        sourceWorkspaceVersion: input.capture.sourceWorkspaceVersion,
+      });
+      outcomes.push(
+        response.status === "delivered" ? "delivered" : "no-active-share",
+      );
+    } catch {
+      outcomes.push("error");
+    }
   }
+  return { outcome: combineHostedVaultShareOfferOutcomes(outcomes) };
 }
 
 function resolveProjectableRecordReader(

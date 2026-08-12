@@ -637,10 +637,16 @@ Last verified: 2026-08-12
   fail-soft to the completed personal import and foreground reply, but they do
   not consume the existing dirty or system-mailbox recording obligation; that
   owner reuses its bounded device-sync continuation before acknowledgement.
-  Every delivery carries the committed source workspace version. Web encrypts
-  first, then briefly locks that existing workspace row before the final share
-  replacement; a delivery older than the current checkpoint becomes a no-op,
-  so detached wake-raced work cannot finish last and restore stale group data.
+  Active-scope resolution is network-only and may be abandoned on a wake. Once
+  scopes resolve, the runtime materializes all selected records before releasing
+  its restored-vault ownership; a wake during those bounded local reads is
+  observed after capture drains, and the capture is discarded without delivery.
+  Only the immutable captured payload may continue detached. Every delivery
+  carries the committed source workspace version bound to those bytes. Web
+  encrypts first, then briefly locks that existing workspace row before the
+  final share replacement; a delivery older than the current checkpoint becomes
+  a no-op, so detached wake-raced work cannot finish last or read successor-owned
+  vault state.
   This ordering adds no projection retry queue, group wake fanout, persisted
   projection watermark, or second freshness owner.
 - The composed maximum for one projection opportunity is one active-scope read,

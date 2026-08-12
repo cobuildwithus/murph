@@ -12055,6 +12055,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const projectionStarted = createDeferred<void>();
     const releaseProjection = createDeferred<void>();
     const firstProjectionFinished = createDeferred<void>();
+    const firstProjectedTimeZoneData: unknown[] = [];
     const deviceItem = createMailboxItem({
       dedupeKey: "device-sync.wake:projection-interrupt-recording",
       id: "mailbox_item_system_mailbox_projection_interrupt_recording",
@@ -12088,6 +12089,16 @@ describe("hosted workspace runtime entrypoint", () => {
       vi.setSystemTime(new Date(TEST_NOW));
       mocks.summarizeWearableSleepRuntime.mockResolvedValue([]);
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
+      const metadata = {
+        createdAt: TEST_NOW,
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        timezone: "UTC",
+        title: "Projection ownership test",
+        vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4G",
+      };
+      await mkdir(path.dirname(metadataPath), { recursive: true });
+      await writeFile(metadataPath, `${JSON.stringify(metadata)}\n`, "utf8");
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: deviceItem,
         vaultRoot,
@@ -12139,7 +12150,10 @@ describe("hosted workspace runtime entrypoint", () => {
           mailboxPort: createMailboxPort({ events, items: [] }),
           vaultSharePort: {
             async listActiveProjectionScopes() {
-              return [{ projectionKind: "sleep-times.v0" as const }];
+              return [
+                { projectionKind: "profile-name.v0" as const },
+                { projectionKind: "time-zone.v0" as const },
+              ];
             },
             async deliver(request) {
               projectionCalls += 1;
@@ -12149,8 +12163,13 @@ describe("hosted workspace runtime entrypoint", () => {
                 projectionStarted.resolve();
                 await releaseProjection.promise;
               }
+              if (projectionCalls === 2) {
+                firstProjectedTimeZoneData.push(
+                  request.records.map((record) => record.data),
+                );
+              }
               events.push(`vault-share.deliver:done:${projectionCalls}`);
-              if (projectionCalls === 1) {
+              if (projectionCalls === 2) {
                 firstProjectionFinished.resolve();
               }
               return { status: "delivered" as const };
@@ -12206,12 +12225,19 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(retainedItem?.postCheckpointRecord);
       assert.equal(checkpointRequests.length, 1);
 
+      await mkdir(path.dirname(metadataPath), { recursive: true });
+      await writeFile(
+        metadataPath,
+        `${JSON.stringify({ ...metadata, timezone: "America/Chicago" })}\n`,
+        "utf8",
+      );
       releaseProjection.resolve();
       await withRealTimeout(
         firstProjectionFinished.promise,
         1_000,
         () => "The detached synthetic projection did not finish after release.",
       );
+      assert.deepEqual(firstProjectedTimeZoneData, [[{ timeZone: "UTC" }]]);
       const durableRecordingCheckpoint = checkpointRequests[0];
       assert.ok(durableRecordingCheckpoint);
       const resumedWorkspace = createWorkspaceState({
@@ -12232,11 +12258,11 @@ describe("hosted workspace runtime entrypoint", () => {
         createRunOptions(createCoalescingRuntimeWakeSignal(), resumedWorkspace),
       );
 
-      assert.equal(projectionCalls, 2);
-      assert.deepEqual(projectedWorkspaceVersions, ["1", "2"]);
+      assert.equal(projectionCalls, 4);
+      assert.deepEqual(projectedWorkspaceVersions, ["1", "1", "2", "2"]);
       assert.equal(dirtyAckCalls, 1);
       assert.ok(
-        requireEventIndex(events, "vault-share.deliver:done:2")
+        requireEventIndex(events, "vault-share.deliver:done:4")
           < requireEventIndex(events, "device-sync.dirty-ack"),
         events.join(","),
       );

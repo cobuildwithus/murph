@@ -133,7 +133,9 @@ import {
   writeHostedRuntimeLogBestEffort,
 } from "./hosted-runtime/runtime-logs.ts";
 import {
-  offerHostedVaultShareProjectionBestEffort,
+  captureHostedVaultShareProjectionBestEffort,
+  offerCapturedHostedVaultShareProjectionBestEffort,
+  resolveHostedVaultShareProjectionScopesBestEffort,
 } from "./hosted-runtime/vault-share-projection.ts";
 import { createHostedGroupSharedReader } from "./hosted-runtime/group-shared-reader.ts";
 import type {
@@ -2011,7 +2013,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     assertRuntimeNotAborted();
     let initialMailboxImportPostCheckpointEffectsFinished = false;
     const logHostedVaultShareProjectionOfferOutcome = (
-      vaultShareOffer: Awaited<ReturnType<typeof offerHostedVaultShareProjectionBestEffort>>,
+      vaultShareOffer: Awaited<
+        ReturnType<typeof offerCapturedHostedVaultShareProjectionBestEffort>
+      >,
     ): void => {
       if (vaultShareOffer.outcome !== "error") {
         return;
@@ -2296,58 +2300,98 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           return "completed";
         }
 
-        const offer = offerHostedVaultShareProjectionBestEffort({
-          sourceWorkspaceVersion:
-            activeWorkspace?.version ?? input.request.workspaceVersion,
-          vaultRoot: restored.vaultRoot,
-          vaultSharePort,
-        });
         const workSignal = options.shutdownSignal
           ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
           : runtimeAbortController.signal;
-        const offerWithAbort = raceHostedRuntimeCancellation(offer, workSignal);
         const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
-        if (!runtimeWakeSignal) {
-          const vaultShareOffer = await offerWithAbort;
-          logHostedVaultShareProjectionOfferOutcome(vaultShareOffer);
-          return vaultShareOffer.outcome === "error" ? "retry" : "completed";
-        }
+        const waitForDetachableProjectionStage = async <T,>(
+          stage: Promise<T>,
+        ): Promise<
+          | { kind: "completed"; value: T }
+          | { kind: "wake" }
+        > => {
+          const stageWithAbort = raceHostedRuntimeCancellation(stage, workSignal);
+          if (!runtimeWakeSignal) {
+            return { kind: "completed", value: await stageWithAbort };
+          }
 
-        const wakeAbortController = new AbortController();
-        const abortWake = () => {
-          wakeAbortController.abort(readHostedRuntimeAbortReason(workSignal));
+          const wakeAbortController = new AbortController();
+          const abortWake = () => {
+            wakeAbortController.abort(readHostedRuntimeAbortReason(workSignal));
+          };
+          workSignal.addEventListener("abort", abortWake, { once: true });
+          if (workSignal.aborted) {
+            abortWake();
+          }
+          const stageResult = stageWithAbort.then((value) => ({
+            kind: "completed" as const,
+            value,
+          }));
+          const wakeResult = runtimeWakeSignal.wait(wakeAbortController.signal)
+            .then(() => ({ kind: "wake" as const }));
+          let result: Awaited<typeof stageResult> | Awaited<typeof wakeResult>;
+          try {
+            result = await Promise.race([stageResult, wakeResult]);
+          } finally {
+            workSignal.removeEventListener("abort", abortWake);
+          }
+
+          if (result.kind === "wake") {
+            foregroundWakeObserved = true;
+            void stageWithAbort.catch(() => undefined);
+            return result;
+          }
+          if (!wakeAbortController.signal.aborted) {
+            wakeAbortController.abort();
+          }
+          return result;
         };
-        workSignal.addEventListener("abort", abortWake, { once: true });
-        if (workSignal.aborted) {
-          abortWake();
-        }
-        const offerResult = offerWithAbort.then((vaultShareOffer) => ({
-          kind: "offer" as const,
-          vaultShareOffer,
-        }));
-        const wakeResult = runtimeWakeSignal.wait(wakeAbortController.signal)
-          .then(() => ({ kind: "wake" as const }));
-        let result: Awaited<typeof offerResult> | Awaited<typeof wakeResult>;
-        try {
-          result = await Promise.race([offerResult, wakeResult]);
-        } finally {
-          workSignal.removeEventListener("abort", abortWake);
-        }
 
-        if (result.kind === "wake") {
-          foregroundWakeObserved = true;
-          void offerWithAbort.then(
-            logHostedVaultShareProjectionOfferOutcome,
-            () => undefined,
-          );
+        const scopeResolutionResult = await waitForDetachableProjectionStage(
+          resolveHostedVaultShareProjectionScopesBestEffort({ vaultSharePort }),
+        );
+        if (scopeResolutionResult.kind === "wake") {
           return "preempted";
         }
-
-        if (!wakeAbortController.signal.aborted) {
-          wakeAbortController.abort();
+        if (scopeResolutionResult.value.outcome === "error") {
+          logHostedVaultShareProjectionOfferOutcome({ outcome: "error" });
+          return "retry";
         }
-        logHostedVaultShareProjectionOfferOutcome(result.vaultShareOffer);
-        if (result.vaultShareOffer.outcome === "error") {
+        if (scopeResolutionResult.value.outcome === "no-active-share") {
+          return consumeForegroundWake() ? "preempted" : "completed";
+        }
+
+        const capture = await captureHostedVaultShareProjectionBestEffort({
+          projectionScopes: scopeResolutionResult.value.projectionScopes,
+          sourceWorkspaceVersion:
+            activeWorkspace?.version ?? input.request.workspaceVersion,
+          vaultRoot: restored.vaultRoot,
+        });
+        if (workSignal.aborted) {
+          throw readHostedRuntimeAbortReason(workSignal);
+        }
+        if (consumeForegroundWake()) {
+          return "preempted";
+        }
+        if (capture.outcome === "error") {
+          logHostedVaultShareProjectionOfferOutcome({ outcome: "error" });
+          return "retry";
+        }
+        if (capture.outcome === "no-projectable-records") {
+          return "completed";
+        }
+
+        const offerResult = await waitForDetachableProjectionStage(
+          offerCapturedHostedVaultShareProjectionBestEffort({
+            capture: capture.capture,
+            vaultSharePort,
+          }),
+        );
+        if (offerResult.kind === "wake") {
+          return "preempted";
+        }
+        logHostedVaultShareProjectionOfferOutcome(offerResult.value);
+        if (offerResult.value.outcome === "error") {
           return "retry";
         }
         return consumeForegroundWake() ? "preempted" : "completed";
@@ -3433,7 +3477,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     type HostedVaultShareProjectionOpportunity = {
       outcome:
-        | Awaited<ReturnType<typeof offerHostedVaultShareProjectionBestEffort>>["outcome"]
+        | Awaited<
+          ReturnType<typeof offerCapturedHostedVaultShareProjectionBestEffort>
+        >["outcome"]
         | "preempted";
       wake: HostedVaultShareOfferWake | null;
     };
@@ -3538,163 +3584,206 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ): void => {
         deferredDeviceSyncWake = wake;
       };
-      const pendingWakeLatencySeed = consumePendingHostedRuntimeWake(
-        options.runtimeWakeSignal ?? null,
-        options.shutdownSignal ?? null,
-      );
-      if (pendingWakeLatencySeed) {
-        const classification = await classifyWake(pendingWakeLatencySeed);
+      const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
+      const consumePendingProjectionWake = async (): Promise<
+        HostedVaultShareOfferWake | null
+      > => {
+        const latencySeed = consumePendingHostedRuntimeWake(
+          runtimeWakeSignal,
+          options.shutdownSignal ?? null,
+        );
+        if (!latencySeed) {
+          return null;
+        }
+        const classification = await classifyWake(latencySeed);
         if (!classification.mayWaitForProjection) {
-          return { outcome: "preempted", wake: classification.wake };
+          return classification.wake;
         }
         rememberDeferredDeviceSyncWake(classification.wake);
+        return null;
+      };
+      type VaultShareDetachableStageWaitResult<T> =
+        | { kind: "external_wake"; notification: RuntimeWakeNotification }
+        | { kind: "finished" }
+        | { kind: "stage"; value: T };
+      const waitForDetachableProjectionStage = async <T,>(
+        stage: Promise<T>,
+      ): Promise<
+        | { kind: "completed"; value: T }
+        | { kind: "preempted"; wake: HostedVaultShareOfferWake | null }
+      > => {
+        if (!runtimeWakeSignal) {
+          const stageSignal = options.shutdownSignal
+            ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
+            : runtimeAbortController.signal;
+          try {
+            return {
+              kind: "completed",
+              value: await raceHostedRuntimeCancellation(stage, stageSignal),
+            };
+          } catch (error) {
+            if (shutdownWasSignaled() && !runtimeAbortController.signal.aborted) {
+              return { kind: "preempted", wake: deferredDeviceSyncWake };
+            }
+            throw error;
+          }
+        }
+
+        const stageWithAbort = raceHostedRuntimeCancellation(
+          stage,
+          runtimeAbortController.signal,
+        );
+        const stageResult = stageWithAbort.then((value) => ({
+          kind: "stage" as const,
+          value,
+        }));
+        while (true) {
+          if (shutdownWasSignaled()) {
+            void stageWithAbort.catch(() => undefined);
+            return { kind: "preempted", wake: deferredDeviceSyncWake };
+          }
+
+          const wakeAbortController = new AbortController();
+          const abortWake = () => {
+            wakeAbortController.abort(
+              readHostedRuntimeAbortReason(runtimeAbortController.signal),
+            );
+          };
+          const abortWakeAfterShutdown = () => {
+            wakeAbortController.abort(
+              options.shutdownSignal?.reason instanceof Error
+                ? options.shutdownSignal.reason
+                : new Error("Hosted vault-share projection stage skipped after shutdown."),
+            );
+          };
+          runtimeAbortController.signal.addEventListener("abort", abortWake, { once: true });
+          options.shutdownSignal?.addEventListener("abort", abortWakeAfterShutdown, { once: true });
+          if (shutdownWasSignaled()) {
+            abortWakeAfterShutdown();
+          }
+          let waitResult: VaultShareDetachableStageWaitResult<T> = { kind: "finished" };
+          let wake: Promise<VaultShareDetachableStageWaitResult<T>> = Promise.resolve({
+            kind: "finished",
+          });
+          try {
+            wake = runtimeWakeSignal.wait(wakeAbortController.signal)
+              .then((notification) => ({
+                kind: "external_wake" as const,
+                notification,
+              }))
+              .catch((error: unknown) => {
+                if (
+                  wakeAbortController.signal.aborted
+                  && !runtimeAbortController.signal.aborted
+                ) {
+                  return { kind: "finished" as const };
+                }
+                throw error;
+              });
+            waitResult = await Promise.race([stageResult, wake]);
+          } finally {
+            runtimeAbortController.signal.removeEventListener("abort", abortWake);
+            options.shutdownSignal?.removeEventListener("abort", abortWakeAfterShutdown);
+            if (!wakeAbortController.signal.aborted) {
+              wakeAbortController.abort();
+            }
+          }
+
+          if (waitResult.kind === "external_wake") {
+            const latencySeed = createHostedRuntimeWakeLatencySeed(waitResult.notification);
+            if (!latencySeed) {
+              continue;
+            }
+            const classification = await classifyWake(latencySeed);
+            if (!classification.mayWaitForProjection) {
+              void stageWithAbort.catch(() => undefined);
+              return { kind: "preempted", wake: classification.wake };
+            }
+            rememberDeferredDeviceSyncWake(classification.wake);
+            continue;
+          }
+
+          const deliveredWakeResult = await wake;
+          if (deliveredWakeResult.kind === "external_wake") {
+            const latencySeed = createHostedRuntimeWakeLatencySeed(
+              deliveredWakeResult.notification,
+            );
+            if (latencySeed) {
+              const classification = await classifyWake(latencySeed);
+              if (!classification.mayWaitForProjection) {
+                return { kind: "preempted", wake: classification.wake };
+              }
+              rememberDeferredDeviceSyncWake(classification.wake);
+            }
+          }
+
+          if (waitResult.kind !== "stage") {
+            void stageWithAbort.catch(() => undefined);
+            return { kind: "preempted", wake: deferredDeviceSyncWake };
+          }
+          const pendingWake = await consumePendingProjectionWake();
+          return pendingWake
+            ? { kind: "preempted", wake: pendingWake }
+            : { kind: "completed", value: waitResult.value };
+        }
+      };
+
+      const pendingWake = await consumePendingProjectionWake();
+      if (pendingWake) {
+        return { outcome: "preempted", wake: pendingWake };
       }
       if (shutdownWasSignaled()) {
         return { outcome: "preempted", wake: deferredDeviceSyncWake };
       }
 
-      const offer = offerHostedVaultShareProjectionBestEffort({
-        sourceWorkspaceVersion:
-          committedWorkspace?.version ?? invocationWorkspaceVersion,
-        vaultRoot: restored.vaultRoot,
-        vaultSharePort,
-      });
-      const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
-      if (!runtimeWakeSignal) {
-        const offerSignal = options.shutdownSignal
-          ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
-          : runtimeAbortController.signal;
-        try {
-          const offerOutcome = await raceHostedRuntimeCancellation(offer, offerSignal);
-          logHostedVaultShareProjectionOfferOutcome(offerOutcome);
-          return { outcome: offerOutcome.outcome, wake: deferredDeviceSyncWake };
-        } catch (error) {
-          if (shutdownWasSignaled() && !runtimeAbortController.signal.aborted) {
-            return { outcome: "preempted", wake: deferredDeviceSyncWake };
-          }
-          throw error;
-        }
-      }
-
-      type VaultShareOfferWaitResult =
-        | { kind: "external_wake"; notification: RuntimeWakeNotification }
-        | { kind: "finished" }
-        | {
-          kind: "offer";
-          offer: Awaited<ReturnType<typeof offerHostedVaultShareProjectionBestEffort>>;
-        };
-
-      const offerWithAbort = raceHostedRuntimeCancellation(
-        offer,
-        runtimeAbortController.signal,
+      const scopeResolutionStage = await waitForDetachableProjectionStage(
+        resolveHostedVaultShareProjectionScopesBestEffort({ vaultSharePort }),
       );
-      const offerResult = offerWithAbort.then((vaultShareOffer) => ({
-        kind: "offer" as const,
-        offer: vaultShareOffer,
-      }));
-      while (true) {
-        if (shutdownWasSignaled()) {
-          void offerWithAbort.then(logHostedVaultShareProjectionOfferOutcome, () => undefined);
-          return { outcome: "preempted", wake: deferredDeviceSyncWake };
-        }
-
-        const wakeAbortController = new AbortController();
-        const abortWake = () => {
-          wakeAbortController.abort(readHostedRuntimeAbortReason(runtimeAbortController.signal));
-        };
-        const abortWakeAfterShutdown = () => {
-          wakeAbortController.abort(
-            options.shutdownSignal?.reason instanceof Error
-              ? options.shutdownSignal.reason
-              : new Error("Hosted vault-share projection offer skipped after shutdown."),
-          );
-        };
-        runtimeAbortController.signal.addEventListener("abort", abortWake, { once: true });
-        options.shutdownSignal?.addEventListener("abort", abortWakeAfterShutdown, { once: true });
-        if (shutdownWasSignaled()) {
-          abortWakeAfterShutdown();
-        }
-        let waitResult: VaultShareOfferWaitResult = { kind: "finished" };
-        let wake: Promise<VaultShareOfferWaitResult> = Promise.resolve({
-          kind: "finished",
-        });
-        try {
-          wake = runtimeWakeSignal.wait(wakeAbortController.signal)
-            .then((notification) => ({
-              kind: "external_wake" as const,
-              notification,
-            }))
-            .catch((error: unknown) => {
-              if (
-                wakeAbortController.signal.aborted
-                && !runtimeAbortController.signal.aborted
-              ) {
-                return { kind: "finished" as const };
-              }
-              throw error;
-            });
-          waitResult = await Promise.race([offerResult, wake]);
-        } finally {
-          runtimeAbortController.signal.removeEventListener("abort", abortWake);
-          options.shutdownSignal?.removeEventListener("abort", abortWakeAfterShutdown);
-          if (!wakeAbortController.signal.aborted) {
-            wakeAbortController.abort();
-          }
-        }
-
-        if (waitResult.kind === "external_wake") {
-          const latencySeed = createHostedRuntimeWakeLatencySeed(waitResult.notification);
-          if (!latencySeed) {
-            continue;
-          }
-          const classification = await classifyWake(latencySeed);
-          if (!classification.mayWaitForProjection) {
-            void offerWithAbort.then(logHostedVaultShareProjectionOfferOutcome, () => undefined);
-            return { outcome: "preempted", wake: classification.wake };
-          }
-          rememberDeferredDeviceSyncWake(classification.wake);
-          continue;
-        }
-
-        const deliveredWakeResult = await wake;
-        if (deliveredWakeResult.kind === "external_wake") {
-          const latencySeed = createHostedRuntimeWakeLatencySeed(
-            deliveredWakeResult.notification,
-          );
-          if (latencySeed) {
-            const classification = await classifyWake(latencySeed);
-            if (!classification.mayWaitForProjection) {
-              return { outcome: "preempted", wake: classification.wake };
-            }
-            rememberDeferredDeviceSyncWake(classification.wake);
-          }
-        }
-
-        if (waitResult.kind === "offer") {
-          logHostedVaultShareProjectionOfferOutcome(waitResult.offer);
-        } else {
-          void offerWithAbort.then(logHostedVaultShareProjectionOfferOutcome, () => undefined);
-          return { outcome: "preempted", wake: deferredDeviceSyncWake };
-        }
-
-        const finalWakeLatencySeed = consumePendingHostedRuntimeWake(
-          options.runtimeWakeSignal ?? null,
-          options.shutdownSignal ?? null,
-        );
-        if (finalWakeLatencySeed) {
-          const classification = await classifyWake(finalWakeLatencySeed);
-          if (!classification.mayWaitForProjection) {
-            return { outcome: "preempted", wake: classification.wake };
-          }
-          rememberDeferredDeviceSyncWake(classification.wake);
+      if (scopeResolutionStage.kind === "preempted") {
+        return { outcome: "preempted", wake: scopeResolutionStage.wake };
+      }
+      if (scopeResolutionStage.value.outcome !== "active-scopes") {
+        if (scopeResolutionStage.value.outcome === "error") {
+          logHostedVaultShareProjectionOfferOutcome({ outcome: "error" });
         }
         return {
-          outcome: waitResult.kind === "offer"
-            ? waitResult.offer.outcome
-            : "preempted",
+          outcome: scopeResolutionStage.value.outcome,
           wake: deferredDeviceSyncWake,
         };
       }
+
+      const capture = await captureHostedVaultShareProjectionBestEffort({
+        projectionScopes: scopeResolutionStage.value.projectionScopes,
+        sourceWorkspaceVersion:
+          committedWorkspace?.version ?? invocationWorkspaceVersion,
+        vaultRoot: restored.vaultRoot,
+      });
+      assertRuntimeNotAborted();
+      const captureWake = await consumePendingProjectionWake();
+      if (captureWake || shutdownWasSignaled()) {
+        return {
+          outcome: "preempted",
+          wake: captureWake ?? deferredDeviceSyncWake,
+        };
+      }
+      if (capture.outcome !== "captured") {
+        if (capture.outcome === "error") {
+          logHostedVaultShareProjectionOfferOutcome({ outcome: "error" });
+        }
+        return { outcome: capture.outcome, wake: deferredDeviceSyncWake };
+      }
+
+      const offerStage = await waitForDetachableProjectionStage(
+        offerCapturedHostedVaultShareProjectionBestEffort({
+          capture: capture.capture,
+          vaultSharePort,
+        }),
+      );
+      if (offerStage.kind === "preempted") {
+        return { outcome: "preempted", wake: offerStage.wake };
+      }
+      logHostedVaultShareProjectionOfferOutcome(offerStage.value);
+      return { outcome: offerStage.value.outcome, wake: deferredDeviceSyncWake };
     };
     const overlayPendingWakeOnCommittedWorkspace = (
       checkpointPendingBeforePass: boolean,

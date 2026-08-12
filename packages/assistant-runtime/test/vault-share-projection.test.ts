@@ -31,8 +31,9 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  captureHostedVaultShareProjectionBestEffort,
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
-  offerHostedVaultShareProjectionBestEffort as offerHostedVaultShareProjectionBestEffortContract,
+  offerCapturedHostedVaultShareProjectionBestEffort,
   readProjectableActivityDistanceDays,
   readProjectableActivityMinutesDays,
   readProjectableActivitySessionCountDays,
@@ -50,6 +51,7 @@ import {
   selectProjectableSleepNights,
   selectProjectableWorkoutDays,
   selectProjectableWorkoutsDays,
+  resolveHostedVaultShareProjectionScopesBestEffort,
   type ActivitySessionProjectionRow,
 } from "../src/hosted-runtime/vault-share-projection.ts";
 import {
@@ -71,15 +73,34 @@ function parseHostedVaultShareDeliverRequest(value: Record<string, unknown>) {
   });
 }
 
-function offerHostedVaultShareProjectionBestEffort(
-  input: Omit<
-    Parameters<typeof offerHostedVaultShareProjectionBestEffortContract>[0],
-    "sourceWorkspaceVersion"
-  >,
-) {
-  return offerHostedVaultShareProjectionBestEffortContract({
+async function offerHostedVaultShareProjectionBestEffort(input: {
+  vaultRoot: string;
+  vaultSharePort:
+    | Parameters<
+      typeof resolveHostedVaultShareProjectionScopesBestEffort
+    >[0]["vaultSharePort"]
+    | null;
+}) {
+  if (!input.vaultSharePort) {
+    return { outcome: "no-port" as const };
+  }
+  const scopeResolution = await resolveHostedVaultShareProjectionScopesBestEffort({
+    vaultSharePort: input.vaultSharePort,
+  });
+  if (scopeResolution.outcome !== "active-scopes") {
+    return scopeResolution;
+  }
+  const capture = await captureHostedVaultShareProjectionBestEffort({
+    projectionScopes: scopeResolution.projectionScopes,
     sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
-    ...input,
+    vaultRoot: input.vaultRoot,
+  });
+  if (capture.outcome !== "captured") {
+    return capture;
+  }
+  return await offerCapturedHostedVaultShareProjectionBestEffort({
+    capture: capture.capture,
+    vaultSharePort: input.vaultSharePort,
   });
 }
 
@@ -98,6 +119,7 @@ const RECORD = {
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const TIME_ZONE_SCOPE = hostedVaultShareProjectionKindToScope("time-zone.v0");
 const PROTEIN_SCOPE = hostedVaultShareProjectionKindToScope("protein-days.v0");
 const DEVICE_SYNC_STATUS_SCOPE = hostedVaultShareProjectionKindToScope(
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
@@ -352,6 +374,25 @@ async function createMemoryDisplayNameVault(displayName: string | null): Promise
   return vaultRoot;
 }
 
+async function createProfileAndTimeZoneVault(
+  displayName: string,
+  timeZone: string,
+): Promise<string> {
+  const vaultRoot = await createMemoryDisplayNameVault(displayName);
+  await writeFile(
+    join(vaultRoot, "vault.json"),
+    `${JSON.stringify({
+      createdAt: "2026-07-01T00:00:00.000Z",
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      timezone: timeZone,
+      title: "Projection capture test",
+      vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4F",
+    })}\n`,
+    "utf8",
+  );
+  return vaultRoot;
+}
+
 async function createLegacyMemoryDisplayNameVault(...texts: string[]): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-share-memory-name-"));
   let document = createEmptyMemoryDocument(new Date("2026-07-01T00:00:00.000Z"));
@@ -505,6 +546,42 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
         recordKey: "profile-name",
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }],
+      sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
+    });
+  });
+
+  it("captures every scope before delivery can mutate the shared vault root", async () => {
+    const vaultRoot = await createProfileAndTimeZoneVault("Theo", "UTC");
+    const deliveries: HostedVaultShareDeliverRequest[] = [];
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        async deliver(request) {
+          deliveries.push(request);
+          if (request.projectionKind === "profile-name.v0") {
+            await writeFile(
+              join(vaultRoot, "vault.json"),
+              `${JSON.stringify({
+                createdAt: "2026-07-01T00:00:00.000Z",
+                formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+                timezone: "America/Chicago",
+                title: "Successor projection capture test",
+                vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4F",
+              })}\n`,
+              "utf8",
+            );
+          }
+          return { status: "delivered" };
+        },
+        listActiveProjectionScopes: async () => [PROFILE_SCOPE, TIME_ZONE_SCOPE],
+      },
+    });
+
+    expect(result.outcome).toBe("delivered");
+    expect(deliveries).toHaveLength(2);
+    expect(deliveries[1]).toMatchObject({
+      projectionKind: "time-zone.v0",
+      records: [{ data: { timeZone: "UTC" } }],
       sourceWorkspaceVersion: TEST_SOURCE_WORKSPACE_VERSION,
     });
   });

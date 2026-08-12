@@ -344,13 +344,19 @@ acknowledgement owner: it reuses the bounded device-sync continuation while the
 already-committed personal import and conversation path remain available.
 
 Each replacement request carries the committed grantor workspace version that
-produced its complete snapshot. Web performs encryption before taking a short
-`hosted_workspace` row lock, then replaces the exact active share generation
-only when the locked version still matches. The workspace lock serializes the
-final replacement with checkpoint CAS: an older request either commits before
-the newer checkpoint or becomes a no-op after it. No projection watermark is
-stored on the share, and the group runtime is not woken; its next ordinary read
-continues to query the current Web-owned replacement snapshot.
+produced its complete snapshot. Before any wake-detachable delivery, the runtime
+resolves active scopes through the Web control plane and then captures every
+selected scope while it still owns the restored vault path. Scope resolution
+does not touch the vault and may be abandoned immediately. Capture performs only
+bounded local reads; a wake waits for the current capture to drain, discards it,
+and releases no lazy vault reader. Only a complete immutable capture may outlive
+the invocation. Web performs encryption before taking a short `hosted_workspace`
+row lock, then replaces the exact active share generation only when the locked
+version still matches. The workspace lock serializes the final replacement with
+checkpoint CAS: an older request either commits before the newer checkpoint or
+becomes a no-op after it. No projection watermark is stored on the share, and
+the group runtime is not woken; its next ordinary read continues to query the
+current Web-owned replacement snapshot.
 
 `murph.group action="read_shared"` accepts one to three unique exact selectable
 projection scopes. The signed Web handler captures the current group roster and
