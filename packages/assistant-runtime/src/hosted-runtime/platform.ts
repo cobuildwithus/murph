@@ -450,9 +450,11 @@ export interface HostedRuntimeDeviceSyncPort {
   fetchDirtyStates(input?: Omit<HostedExecutionDeviceSyncDirtyPendingRequest, "userId"> & {
     signal?: AbortSignal | null;
   }): Promise<HostedExecutionDeviceSyncDirtyPendingResponse>;
-  ackDirtyStateProcessed(input: Omit<HostedExecutionDeviceSyncDirtyAckRequest, "userId">): Promise<
-    HostedExecutionDeviceSyncDirtyAckResponse
-  >;
+  ackDirtyStateProcessed(
+    input: Omit<HostedExecutionDeviceSyncDirtyAckRequest, "userId"> & {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedExecutionDeviceSyncDirtyAckResponse>;
 }
 
 export interface HostedRuntimeClinicalRecordsPort {
@@ -566,7 +568,10 @@ export interface HostedRuntimePhysicalNotePort {
 }
 
 export interface HostedRuntimeMailboxPort {
-  fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
+  fetch(
+    request: HostedMailboxFetchRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
   ): Promise<HostedMailboxPayloadFetchResponse>;

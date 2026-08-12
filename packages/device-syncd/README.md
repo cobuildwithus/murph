@@ -34,9 +34,17 @@ Current providers:
 - Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`
   selects Link targets such as Garmin and Fitbit; recognized Junction SDK sources such
   as Apple Health participate independently of that Link-only filter.
-- Junction fetches the sparse `note` timeseries by default. Oura note tags become
-  completed intervention events for Personal Patterns. Free-text note values are
-  dropped before raw snapshot and compact evidence retention.
+- Junction fetches the sparse `note` timeseries by default. Normalized tags from
+  every admitted Junction source persist as neutral canonical notes. Personal
+  Patterns currently derives an action factor only from the exact Oura `sauna`
+  tag; other-source, symptom, context, outcome, and custom tags remain neutral.
+  Free-text note values are dropped before raw snapshot and compact evidence
+  retention. Note-history coverage version 2 reopens sources completed under
+  the legacy intervention normalizer for one bounded semantic reimport, then
+  records terminal source coverage again. The admitted resource-job payload
+  freezes that generation across durable continuations and retries. Persisted
+  unversioned work remains v1 after an upgrade and cannot certify or downgrade
+  v2 coverage.
 - Junction's established default summary and timeseries lists are unchanged. The
   code-owned `timeseriesResources` policy additionally admits five off-by-default
   opt-ins: `steps`, `distance`, `calories_active`, `heartrate`, and `weight`.
@@ -46,10 +54,11 @@ Current providers:
 - Opted-in `steps` and `distance` use provider/source-partitioned UTC-day aggregates.
   Opted-in `calories_active` and `heartrate` use provider/source-partitioned UTC-hour
   features. These identities match the complete closed-day import boundary instead
-  of treating provider-local day or session fragments as complete facts. The four dense resources retain the bounded
-  dense-timeseries fetch window and never persist raw sample arrays or full provider
-  snapshots. Opted-in `weight` uses sparse canonical measurements with compact
-  per-reading evidence and the existing long summary-history backfill window.
+  of treating provider-local day or session fragments as complete facts. The four
+  dense resources retain the bounded dense-timeseries fetch window and never persist
+  raw sample arrays or full provider snapshots. Opted-in `weight` uses sparse
+  canonical measurements with compact per-reading evidence and the existing long
+  summary-history backfill window.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   reconcile or backfill can prove the configured closed-day collection ran.

@@ -1521,7 +1521,7 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['wearables', 'body', 'list'],
-        description: 'List semantic daily body-state summaries with deduped weight, body-fat, BMI, temperature, and source-confidence details.',
+        description: 'List semantic daily body-state and body-composition summaries with source-confidence details.',
         output: wearablesBodyStateListResultSchema,
       },
       {

@@ -12,6 +12,9 @@ import {
   HABITAT_DECLINED_VALUE,
   normalizeHabitatCityOrRegion,
 } from "@murphai/contracts";
+import type {
+  HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/browser-vault";
 import Image from "next/image";
 import { ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react";
 
@@ -20,6 +23,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import { browserVaultReplicaRefsMatch } from "@/src/lib/browser-vault/ref";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import { deriveCategoryNote, overallGrade } from "./category-notes";
@@ -50,22 +54,37 @@ const EMPTY_HABITAT_VALUES: HabitatValues = {};
 const EMPTY_HABITAT_SCENE = resolveHabitatScene(EMPTY_HABITAT_VALUES);
 const VOICE_REFRESH_INTERVAL_MS = 2_000;
 const VOICE_REFRESH_DELAYED_INTERVAL_MS = 10_000;
+const VOICE_REFRESH_REPORT_DELAY_MS = 60_000;
 const VOICE_REFRESH_WINDOW_MS = 2 * 60 * 1_000;
 
 export type VoiceRefreshState =
   | { status: "idle" }
-  | {
-      baselineValues: string;
-      status: "processing";
-    }
-  | { baselineValues: string; status: "completed" }
+  | { status: "processing" }
+  | { status: "refreshing" }
   | { status: "updated"; factsChanged: boolean }
   | { status: "delayed" };
 
-type DisplayedVoiceRefreshState = Exclude<
-  VoiceRefreshState,
-  { status: "completed" }
->;
+interface EnvironmentVoiceRefreshBaseline {
+  baselineValues: string;
+}
+
+type EnvironmentVoiceRefreshProgress =
+  | { status: "idle" }
+  | (EnvironmentVoiceRefreshBaseline & {
+      status: "processing";
+    })
+  | (EnvironmentVoiceRefreshBaseline & {
+      status: "refreshing";
+    })
+  | (EnvironmentVoiceRefreshBaseline & {
+      phase: "processing";
+      status: "delayed";
+    })
+  | (EnvironmentVoiceRefreshBaseline & {
+      phase: "refreshing";
+      status: "delayed";
+    })
+  | { status: "updated"; factsChanged: boolean };
 
 const EMPTY_CATEGORY_SUMMARIES: Readonly<Record<string, string>> = {
   sleep: "Temperature, darkness, noise and bedroom air.",
@@ -83,15 +102,19 @@ export default function EnvironmentPageClient({
   const {
     client,
     error,
+    ref,
     refresh,
+    runtimeRefreshPending,
     status,
   } = useBrowserVault();
   const [voiceRefreshState, setVoiceRefreshState] =
-    useState<VoiceRefreshState>({ status: "idle" });
+    useState<EnvironmentVoiceRefreshProgress>({ status: "idle" });
   const checkedInitialVoiceProcessingRef = useRef(false);
   const initialVoiceProcessingCheckRef = useRef(0);
-  const voiceRefreshBaselineRef = useRef<string | null>(null);
   const voiceRefreshStartedAtRef = useRef<number | null>(null);
+  const voiceUploadBaselineValuesRef = useRef<string | null>(null);
+  const voiceRefreshCompletedReplicaRef =
+    useRef<HostedBrowserVaultReplicaRef | null>(null);
   const values = useMemo(
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
@@ -112,20 +135,23 @@ export default function EnvironmentPageClient({
   const conditions = useEnvironmentConditions(location);
   const hasEnvironmentData = hasKnownHabitatValue(values);
   const valuesSignature = JSON.stringify(values);
-  const displayedVoiceRefreshState = resolveDisplayedVoiceRefreshState({
-    currentValues: valuesSignature,
-    state: voiceRefreshState,
-  });
+  const displayedVoiceRefreshState = resolveDisplayedVoiceRefreshState(
+    voiceRefreshState,
+  );
   const voiceCaptureDisabled =
-    displayedVoiceRefreshState.status === "processing" ||
-    displayedVoiceRefreshState.status === "delayed";
+    voiceRefreshState.status === "processing"
+    || voiceRefreshState.status === "refreshing"
+    || voiceRefreshState.status === "delayed";
+  const onVoiceUploadStarted = useCallback(() => {
+    voiceUploadBaselineValuesRef.current = valuesSignature;
+  }, [valuesSignature]);
   const onVoiceAccepted = useCallback(() => {
-    voiceRefreshBaselineRef.current = valuesSignature;
     voiceRefreshStartedAtRef.current = Date.now();
     setVoiceRefreshState({
-      baselineValues: valuesSignature,
+      baselineValues: voiceUploadBaselineValuesRef.current ?? valuesSignature,
       status: "processing",
     });
+    voiceUploadBaselineValuesRef.current = null;
   }, [valuesSignature]);
 
   useEffect(() => {
@@ -143,7 +169,6 @@ export default function EnvironmentPageClient({
       }
       checkedInitialVoiceProcessingRef.current = true;
       if (processing === true) {
-        voiceRefreshBaselineRef.current = valuesSignature;
         voiceRefreshStartedAtRef.current = Date.now();
         setVoiceRefreshState((current) =>
           current.status === "idle"
@@ -160,12 +185,18 @@ export default function EnvironmentPageClient({
         initialVoiceProcessingCheckRef.current += 1;
       }
     };
-  }, [status, valuesSignature]);
+  }, [ref, status, valuesSignature]);
 
   useEffect(() => {
     if (
-      voiceRefreshState.status !== "processing"
-      && voiceRefreshState.status !== "delayed"
+      (
+        voiceRefreshState.status !== "processing"
+        && voiceRefreshState.status !== "delayed"
+      )
+      || (
+        voiceRefreshState.status === "delayed"
+        && voiceRefreshState.phase !== "processing"
+      )
     ) {
       return;
     }
@@ -176,23 +207,22 @@ export default function EnvironmentPageClient({
         return;
       }
       const processing = await readEnvironmentVoiceProcessingStatus();
-      await refresh({ background: true }).catch(() => undefined);
       if (cancelled) {
         return;
       }
       if (processing === false) {
         setVoiceRefreshState((current) =>
-          current.status === "processing"
+          (
+            current.status === "processing"
+            || (
+              current.status === "delayed"
+              && current.phase === "processing"
+            )
+            )
             ? {
                 baselineValues: current.baselineValues,
-                status: "completed",
+                status: "refreshing",
               }
-            : current.status === "delayed"
-              ? {
-                  baselineValues:
-                    voiceRefreshBaselineRef.current ?? valuesSignature,
-                  status: "completed",
-                }
             : current,
         );
         return;
@@ -203,8 +233,15 @@ export default function EnvironmentPageClient({
           voiceRefreshStartedAtRef.current ?? Date.now()
         ) >= VOICE_REFRESH_WINDOW_MS
       ) {
-        voiceRefreshBaselineRef.current = voiceRefreshState.baselineValues;
-        setVoiceRefreshState({ status: "delayed" });
+        setVoiceRefreshState((current) =>
+          current.status === "processing"
+            ? {
+                baselineValues: current.baselineValues,
+                phase: "processing",
+                status: "delayed",
+              }
+            : current,
+        );
         return;
       }
       timeoutId = setTimeout(
@@ -221,7 +258,65 @@ export default function EnvironmentPageClient({
         clearTimeout(timeoutId);
       }
     };
-  }, [refresh, valuesSignature, voiceRefreshState]);
+  }, [voiceRefreshState]);
+
+  useEffect(() => {
+    if (voiceRefreshState.status !== "refreshing") {
+      return;
+    }
+    voiceRefreshCompletedReplicaRef.current = null;
+    const delayedTimeoutId = setTimeout(() => {
+      setVoiceRefreshState((current) =>
+        current.status === "refreshing"
+          ? {
+              baselineValues: current.baselineValues,
+              phase: "refreshing",
+              status: "delayed",
+            }
+          : current,
+      );
+    }, VOICE_REFRESH_REPORT_DELAY_MS);
+    void refresh({
+      background: true,
+      requestRuntimeRefreshUntilAfterRequest: (_client, nextRef) => {
+        voiceRefreshCompletedReplicaRef.current = nextRef;
+        return true;
+      },
+    }).catch(() => undefined);
+    return () => clearTimeout(delayedTimeoutId);
+  }, [refresh, voiceRefreshState]);
+
+  useEffect(() => {
+    if (
+      (
+        voiceRefreshState.status !== "refreshing"
+        && voiceRefreshState.status !== "delayed"
+      )
+      || (
+        voiceRefreshState.status === "delayed"
+        && voiceRefreshState.phase !== "refreshing"
+      )
+    ) {
+      return;
+    }
+    if (browserVaultReplicaRefsMatch(
+      voiceRefreshCompletedReplicaRef.current,
+      ref,
+    )) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setVoiceRefreshState({
+            factsChanged: valuesSignature !== voiceRefreshState.baselineValues,
+            status: "updated",
+          });
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [ref, valuesSignature, voiceRefreshState]);
 
   if (status === "loading") {
     return (
@@ -277,15 +372,30 @@ export default function EnvironmentPageClient({
       <EnvironmentVoiceRefreshNotice
         state={displayedVoiceRefreshState}
         onCheckAgain={() => {
-          voiceRefreshBaselineRef.current = valuesSignature;
-          voiceRefreshStartedAtRef.current = Date.now();
-          setVoiceRefreshState({
-            baselineValues: valuesSignature,
-            status: "processing",
-          });
-          void requestEnvironmentVoiceProcessingRecheck().finally(() =>
-            refresh({ background: true }).catch(() => undefined)
-          );
+          if (voiceRefreshState.status !== "delayed") {
+            return;
+          }
+          if (voiceRefreshState.phase === "processing") {
+            voiceRefreshStartedAtRef.current = Date.now();
+            setVoiceRefreshState({
+              baselineValues: voiceRefreshState.baselineValues,
+              status: "processing",
+            });
+            void requestEnvironmentVoiceProcessingRecheck().catch(() => undefined);
+            return;
+          }
+          if (!runtimeRefreshPending) {
+            voiceRefreshCompletedReplicaRef.current = null;
+            setVoiceRefreshState({
+              baselineValues: voiceRefreshState.baselineValues,
+              status: "refreshing",
+            });
+            return;
+          }
+          void refresh({
+            background: true,
+            retryRuntimeRefreshAfterRequest: true,
+          }).catch(() => undefined);
         }}
       />
       {hasEnvironmentData ? (
@@ -298,12 +408,14 @@ export default function EnvironmentPageClient({
           contactOptions={contactOptions}
           conditions={conditions}
           onVoiceAccepted={onVoiceAccepted}
+          onVoiceUploadStarted={onVoiceUploadStarted}
           voiceCaptureDisabled={voiceCaptureDisabled}
         />
       ) : (
         <EnvironmentEmptyState
           contactOptions={contactOptions}
           onVoiceAccepted={onVoiceAccepted}
+          onVoiceUploadStarted={onVoiceUploadStarted}
           processing={voiceCaptureDisabled}
           script={voiceScript}
         />
@@ -312,20 +424,15 @@ export default function EnvironmentPageClient({
   );
 }
 
-function resolveDisplayedVoiceRefreshState({
-  currentValues,
-  state,
-}: {
-  currentValues: string;
-  state: VoiceRefreshState;
-}): DisplayedVoiceRefreshState {
-  if (state.status !== "completed") {
-    return state;
+function resolveDisplayedVoiceRefreshState(
+  state: EnvironmentVoiceRefreshProgress,
+): VoiceRefreshState {
+  if (state.status === "processing" || state.status === "refreshing") {
+    return { status: state.status };
   }
-  return {
-    factsChanged: currentValues !== state.baselineValues,
-    status: "updated",
-  };
+  return state.status === "delayed"
+    ? { status: "delayed" }
+    : state;
 }
 
 async function readEnvironmentVoiceProcessingStatus(): Promise<boolean | null> {
@@ -387,11 +494,13 @@ export function EnvironmentShell({
 export function EnvironmentEmptyState({
   contactOptions,
   onVoiceAccepted,
+  onVoiceUploadStarted,
   processing = false,
   script = buildEnvironmentVoiceScript(EMPTY_HABITAT_VALUES),
 }: {
   contactOptions: readonly MurphContactOption[];
   onVoiceAccepted?: () => void;
+  onVoiceUploadStarted?: () => void;
   processing?: boolean;
   script?: EnvironmentVoiceScript;
 }) {
@@ -424,6 +533,7 @@ export function EnvironmentEmptyState({
             <EnvironmentVoiceCapture
               disabled={processing}
               onAccepted={onVoiceAccepted}
+              onUploadStarted={onVoiceUploadStarted}
               script={script}
               triggerLabel={
                 processing
@@ -487,6 +597,7 @@ export function EnvironmentReport({
   contactOptions,
   conditions,
   onVoiceAccepted,
+  onVoiceUploadStarted,
   voiceCaptureDisabled,
 }: {
   values: HabitatValues;
@@ -497,6 +608,7 @@ export function EnvironmentReport({
   contactOptions: readonly MurphContactOption[];
   conditions: { outdoorAir: string; weather: string };
   onVoiceAccepted: () => void;
+  onVoiceUploadStarted: () => void;
   voiceCaptureDisabled: boolean;
 }) {
   const contactAction = contactOptions[0] ?? null;
@@ -526,6 +638,7 @@ export function EnvironmentReport({
         known={coverage.known}
         script={voiceScript}
         onVoiceAccepted={onVoiceAccepted}
+        onVoiceUploadStarted={onVoiceUploadStarted}
         processing={voiceCaptureDisabled}
       />
 
@@ -556,6 +669,7 @@ export function EnvironmentCaptureCard({
   known,
   script,
   onVoiceAccepted,
+  onVoiceUploadStarted,
   processing = false,
 }: {
   contactOptions: readonly MurphContactOption[];
@@ -563,6 +677,7 @@ export function EnvironmentCaptureCard({
   known: number;
   script: EnvironmentVoiceScript;
   onVoiceAccepted?: () => void;
+  onVoiceUploadStarted?: () => void;
   processing?: boolean;
 }) {
   const updating = script.flow === "update";
@@ -603,6 +718,7 @@ export function EnvironmentCaptureCard({
           triggerSize="default"
           disabled={processing}
           onAccepted={onVoiceAccepted}
+          onUploadStarted={onVoiceUploadStarted}
           script={script}
           triggerLabel={
             processing
@@ -704,7 +820,7 @@ export function EnvironmentVoiceRefreshNotice({
   state,
 }: {
   onCheckAgain: () => void;
-  state: DisplayedVoiceRefreshState;
+  state: VoiceRefreshState;
 }) {
   if (state.status === "idle") {
     return null;
@@ -721,6 +837,23 @@ export function EnvironmentVoiceRefreshNotice({
         </AlertTitle>
         <AlertDescription>
           This report will refresh automatically when the clear facts are ready.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  if (state.status === "refreshing") {
+    return (
+      <Alert aria-live="polite">
+        <AlertTitle className="flex items-center gap-2">
+          <LoaderCircle
+            aria-hidden="true"
+            className="size-4 animate-spin text-primary motion-reduce:animate-none"
+          />
+          Updating your environment report
+        </AlertTitle>
+        <AlertDescription>
+          Murph finished processing your recording. This page is waiting for
+          the newer private report.
         </AlertDescription>
       </Alert>
     );
@@ -752,10 +885,7 @@ export function EnvironmentVoiceRefreshNotice({
       </AlertTitle>
       <AlertDescription>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <span>
-            Your recording is still safe. Check again without recording it
-            another time.
-          </span>
+          <span>You do not need to record it again. Check again to continue.</span>
           <Button size="sm" variant="outline" onClick={onCheckAgain}>
             Check again
           </Button>

@@ -142,8 +142,12 @@ export interface CanonicalEventAvailabilitySummary {
 
 const CANONICAL_BODY_MEASUREMENT_METRIC_KEYS = new Set([
   "bmi",
+  "bodyWaterPercentage",
   "bodyFatPercentage",
+  "boneMassPercentage",
   "leanBodyMassKg",
+  "muscleMassPercentage",
+  "visceralFatIndex",
   "waistCircumference",
   "weightKg",
 ]);
