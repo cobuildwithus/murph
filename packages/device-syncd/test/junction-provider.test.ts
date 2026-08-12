@@ -7194,6 +7194,99 @@ test("Junction reconcile keeps same-time Oura notes with different tags", async 
   );
 });
 
+test("Junction reconcile keeps distinct same-time fidelity records while deduplicating exact repeats", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { glucose: true, water: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/glucose/grouped") {
+      const first = {
+        id: "glucose-record-1",
+        timestamp: "2026-04-02T08:05:00.000Z",
+        unit: "mmol/L",
+        value: 5,
+      };
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [first, { ...first }, { ...first, value: 7 }],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/water/grouped") {
+      const first = {
+        id: "water-record-1",
+        start: "2026-04-02T09:00:00.000Z",
+        end: "2026-04-02T09:05:00.000Z",
+        unit: "mL",
+        value: 250,
+      };
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [
+              first,
+              { ...first },
+              { ...first, start: "2026-04-02T09:02:00.000Z", value: 125 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    providerFilter: ["garmin"],
+    summaryResources: ["activity"],
+    timeseriesResources: ["glucose", "water"],
+  });
+  const importedSnapshots: unknown[] = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const recordsFor = (resource: "glucose" | "water") => importedSnapshots.flatMap((snapshot) => {
+    const timeseries = (snapshot as { timeseries?: Record<string, unknown[]> }).timeseries;
+    return timeseries?.[resource] ?? [];
+  });
+  const glucoseRecords = recordsFor("glucose") as Array<{ value?: number }>;
+  const waterRecords = recordsFor("water") as Array<{ start?: string; value?: number }>;
+
+  assert.deepEqual(glucoseRecords.map((record) => record.value).sort((left, right) =>
+    Number(left) - Number(right)
+  ), [5, 7]);
+  assert.deepEqual(waterRecords.map((record) => [record.start, record.value]).sort(), [
+    ["2026-04-02T09:00:00.000Z", 250],
+    ["2026-04-02T09:02:00.000Z", 125],
+  ]);
+});
+
 test("Junction historical reconcile jobs preserve their summary window", async () => {
   const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {

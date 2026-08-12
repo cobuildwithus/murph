@@ -6,12 +6,13 @@ import path from "node:path";
 import { test } from "vitest";
 
 import { CURRENT_VAULT_FORMAT_VERSION, type DeviceDataOrigin } from "@murphai/contracts";
-import { normalizeJunctionSnapshot } from "@murphai/importers";
+import * as coreRuntime from "@murphai/core";
+import { importDeviceProviderSnapshot, normalizeJunctionSnapshot } from "@murphai/importers";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { buildMetricProjection } from "../src/metrics/projection.ts";
 import { createVaultReadModel, listEntities, readVault } from "../src/model.ts";
-import { searchVaultRuntime } from "../src/query-projection.ts";
+import { listMetricPointsRuntime, searchVaultRuntime } from "../src/query-projection.ts";
 import { searchVault } from "../src/search.ts";
 import {
   explainWearableDrift,
@@ -605,6 +606,152 @@ test("Junction raw-only timeseries stay out of default query/search and wearable
 
   assert.equal(latest?.latestDate, "2026-05-20");
   assert.equal(latest?.activity?.steps.selection.value, 7200);
+});
+
+test("Junction timed and derived timeseries facts survive core replay and remain queryable", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-timeseries-fidelity-query-"));
+  const snapshot = {
+    accountId: "junction-account-timeseries-fidelity",
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      glucose: {
+        groups: {
+          dexcom: [{
+            data: [
+              { timestamp: "2026-04-22T00:00:00Z", unit: "mmol/L", value: 3.5 },
+              { timestamp: "2026-04-22T00:05:00Z", unit: "mmol/L", value: 7 },
+              { timestamp: "2026-04-22T00:10:00Z", unit: "mmol/L", value: 7 },
+              { timestamp: "2026-04-22T00:15:00Z", unit: "mmol/L", value: 10.5 },
+            ],
+            source: { provider: "dexcom", type: "cgm" },
+          }],
+        },
+      },
+      caffeine: {
+        groups: {
+          apple_health_kit: [{
+            data: [{
+              start: "2026-04-22T08:15:30-04:00",
+              end: "2026-04-22T08:18:00-04:00",
+              unit: "g",
+              value: 0.095,
+            }],
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
+    },
+  };
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "America/New_York",
+      vaultRoot,
+    });
+    const importInput = {
+      provider: "junction" as const,
+      vaultRoot,
+      snapshot,
+    };
+    const first = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      importInput,
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      importInput,
+      { corePort: coreRuntime },
+    );
+
+    const caffeinePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "caffeine",
+    });
+    const intervalPoint = caffeinePoints.find((point) => point.source.kind === "measurement");
+    const timeInRangePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-time-in-range-percent",
+    });
+    const riseRatePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-observed-max-rise-rate",
+    });
+    const belowRangePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-time-below-range-minutes",
+    });
+    const aboveRangePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-time-above-range-minutes",
+    });
+
+    assert.equal(first.events.some((event) => event.kind === "measurement"), true);
+    assert.equal(replay.applied, false);
+    assert.equal(intervalPoint?.observedAt, "2026-04-22T12:15:30.000Z");
+    assert.equal(intervalPoint?.effectiveDate, "2026-04-22");
+    assert.equal(intervalPoint?.value, 95);
+    assert.equal(intervalPoint?.unit, "mg");
+    assert.deepEqual(intervalPoint?.context.qualifiers, {
+      "interval-start-at": "2026-04-22T12:15:30.000Z",
+      "interval-end-at": "2026-04-22T12:18:00.000Z",
+      "interval-duration-seconds": 150,
+      "provider-unit": "g",
+    });
+    assert.deepEqual(intervalPoint?.provenance.rawRefs, []);
+    assert.equal(timeInRangePoints.length, 1);
+    assert.equal(timeInRangePoints[0]?.value, 66.67);
+    assert.equal(timeInRangePoints[0]?.unit, "%");
+    assert.equal(timeInRangePoints[0]?.source.kind, "measurement");
+    assert.equal(timeInRangePoints[0]?.grain, "event");
+    assert.deepEqual(timeInRangePoints[0]?.context.qualifiers, {
+      "feature-policy-version": "junction.glucose_feature_envelope.v1",
+    });
+    assert.deepEqual(timeInRangePoints[0]?.provenance.rawRefs, []);
+    assert.equal(riseRatePoints.length, 1);
+    assert.equal(riseRatePoints[0]?.value, 12.6127);
+    assert.equal(riseRatePoints[0]?.unit, "mg/dL/min");
+    assert.equal(riseRatePoints[0]?.source.kind, "measurement");
+    assert.equal(belowRangePoints[0]?.value, 5);
+    assert.equal(belowRangePoints[0]?.unit, "minutes");
+    assert.equal(aboveRangePoints[0]?.value, 0);
+    assert.equal(aboveRangePoints[0]?.unit, "minutes");
+
+    const correctedSnapshot = {
+      ...snapshot,
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        ...snapshot.timeseries,
+        glucose: {
+          groups: {
+            dexcom: [{
+              data: [
+                { timestamp: "2026-04-22T00:00:00Z", unit: "mmol/L", value: 5.5 },
+              ],
+              source: { provider: "dexcom", type: "cgm" },
+            }],
+          },
+        },
+      },
+    };
+    const correction = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { ...importInput, snapshot: correctedSnapshot },
+      { corePort: coreRuntime },
+    );
+    const correctedTimeInRangePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-estimated-time-in-range-percent",
+    });
+    const correctedRiseRatePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "glucose-observed-max-rise-rate",
+    });
+
+    assert.equal(correction.applied, true);
+    assert.deepEqual(correctedTimeInRangePoints, []);
+    assert.deepEqual(correctedRiseRatePoints, []);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("latest surface sees Junction Garmin object data envelopes as usable summaries", () => {

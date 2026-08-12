@@ -47,18 +47,18 @@ export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
 export type JunctionTimeseriesResource =
   (typeof JUNCTION_KNOWN_TIMESERIES_RESOURCES)[number];
 
-// Numeric default timeseries resources normalize through the compact
-// daily-aggregate path: one ~430-byte `junction.timeseries_daily_aggregate.v1` raw
-// artifact per day per resource (measured on a live member's blood_oxygen
-// artifacts), so each default costs roughly 160 KB of raw evidence per
-// member-year regardless of intraday sample density: glucose (CGM, up to
-// 288 samples/day, ~10-15 MB/yr raw) is the canonical example of a stream
-// that must only land through this aggregate seam. `blood_pressure` is the
-// paired-shape exception: readings are sparse (10s-100s/yr), so each reading
-// lands as one `measurement` event plus one compact ~350-byte
-// `junction.blood_pressure_reading.v1` artifact. `note` is another sparse
-// exception: each tag lands as a completed intervention, while free text is
-// dropped. Intraday `heartrate` and
+// Numeric default timeseries resources keep the compact daily-aggregate path.
+// glucose, blood_oxygen, and stress_level additionally retain one bounded,
+// versioned 24-hour feature envelope and one revisionable derived measurement
+// per source/day; raw point samples are never written. Sparse caffeine,
+// water, and mindfulness_minutes intervals additionally land as exact-start
+// `measurement` events with start/end qualifiers and one compact evidence part
+// per admitted record, while their existing daily sums remain unchanged.
+// Every one of those six paths has explicit response and source/day bounds.
+// `blood_pressure` is the paired-shape exception: readings are sparse
+// (10s-100s/yr), so each reading lands as one `measurement` event plus one
+// compact artifact. `note` is another sparse exception: each tag lands as a
+// completed intervention, while free text is dropped. Intraday `heartrate` and
 // `hypnogram` stay deliberately excluded from defaults: their raw sample
 // streams are unbounded (thousands of samples per day) and the vault must
 // not accumulate giant raw timeseries dumps. Sleep-grain heart rate and

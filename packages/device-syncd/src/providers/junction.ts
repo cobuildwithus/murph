@@ -5085,28 +5085,39 @@ function buildJunctionTimeseriesRecordKey(resource: string, record: unknown): st
   ]);
 }
 
-// Blood-pressure readings carry their paired values as part of identity
-// (the importer keeps distinct same-second readings as distinct events), so
-// the pre-import dedupe key must not collapse same-timestamp rows whose
-// values differ. A stable provider row id wins when present.
+// Resource-specific values participate whenever the importer preserves
+// intraday shape. This prevents fetch-side dedupe from collapsing distinct
+// same-timestamp point readings or sparse intervals that share an end time.
+// Stable provider row ids participate when present; fidelity rows still include
+// their temporal/value shape so only exact repeats collapse.
 function junctionTimeseriesRecordValueIdentity(
   resource: string,
   entry: Record<string, unknown>,
 ): string[] {
-  if (resource !== "blood_pressure" && resource !== "note") {
+  const fidelityPointResource = resource === "glucose"
+    || resource === "blood_oxygen"
+    || resource === "stress_level";
+  const fidelityIntervalResource = resource === "caffeine"
+    || resource === "water"
+    || resource === "mindfulness_minutes";
+  if (
+    resource !== "blood_pressure"
+    && resource !== "note"
+    && !fidelityPointResource
+    && !fidelityIntervalResource
+  ) {
     return [];
   }
 
-  // Same stable-id alias list as the importer's reading identity: rows
-  // distinguished only by a provider id must survive fetch-side dedupe.
-  for (const key of ["id", "resourceId", "resource_id", "externalId", "external_id"]) {
-    const rowId = normalizeString(entry[key]);
-    if (rowId) {
-      return [rowId];
-    }
-  }
+  // Same stable-id alias list as the importer's reading identity. Fidelity
+  // resources still include their shape/value fields so only exact repeats
+  // collapse before the importer deterministically reconciles same-id revisions.
+  const rowId = ["id", "resourceId", "resource_id", "externalId", "external_id"]
+    .map((key) => normalizeString(entry[key]))
+    .find((value): value is string => Boolean(value));
 
   if (resource === "note") {
+    if (rowId) return [rowId];
     return [
       ...(Array.isArray(entry.tags) ? entry.tags : [])
         .flatMap((tag) => {
@@ -5116,6 +5127,72 @@ function junctionTimeseriesRecordValueIdentity(
         .sort(),
     ];
   }
+
+  const timeZoneIdentity = [
+    String(entry.timeZone ?? entry.timezone ?? entry.time_zone ?? ""),
+    String(
+      entry.timeZoneOffsetMinutes
+        ?? entry.time_zone_offset_minutes
+        ?? entry.timezoneOffsetMinutes
+        ?? entry.timezone_offset_minutes
+        ?? entry.utcOffsetMinutes
+        ?? entry.utc_offset_minutes
+        ?? "",
+    ),
+    String(
+      entry.timezone_offset
+        ?? entry.timezoneOffset
+        ?? entry.timeZoneOffset
+        ?? entry.time_zone_offset
+        ?? entry.timezoneOffsetSeconds
+        ?? entry.timezone_offset_seconds
+        ?? entry.timeZoneOffsetSeconds
+        ?? entry.time_zone_offset_seconds
+        ?? entry.utcOffsetSeconds
+        ?? entry.utc_offset_seconds
+        ?? "",
+    ),
+  ];
+
+  if (fidelityIntervalResource) {
+    return [
+      rowId ?? "",
+      String(entry.start ?? entry.startAt ?? entry.start_at ?? entry.timeStart ?? entry.time_start ?? ""),
+      String(entry.end ?? entry.endAt ?? entry.end_at ?? entry.timeEnd ?? entry.time_end ?? ""),
+      String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
+      String(entry.value ?? entry[resource] ?? ""),
+      ...timeZoneIdentity,
+    ];
+  }
+
+  if (fidelityPointResource) {
+    return [
+      rowId ?? "",
+      String(
+        entry.observedAt
+          ?? entry.observed_at
+          ?? entry.observed_at_utc
+          ?? entry.timestamp
+          ?? entry.time
+          ?? entry.date
+          ?? entry.day
+          ?? "",
+      ),
+      String(
+        entry.value
+          ?? (resource === "glucose"
+            ? entry.glucose ?? entry.bloodGlucose ?? entry.blood_glucose
+            : resource === "blood_oxygen"
+              ? entry.spo2 ?? entry.spO2 ?? entry.bloodOxygen ?? entry.blood_oxygen
+              : entry.stressLevel ?? entry.stress_level ?? entry.score)
+          ?? "",
+      ),
+      String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
+      ...timeZoneIdentity,
+    ];
+  }
+
+  if (rowId) return [rowId];
 
   // Field names mirror the importer's blood-pressure value paths.
   return [String(entry.systolic ?? ""), String(entry.diastolic ?? "")];
