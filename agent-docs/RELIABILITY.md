@@ -32,6 +32,17 @@ Last verified: 2026-08-12
   credential, or provider body values. Transport ambiguity, timeouts, rate
   limits, and server failures remain failed delivery attempts and must not
   start a second send.
+- Newly authored ordinary assistant responses attach at most eight images,
+  below Linq's 40-public-media provider ceiling. This keeps full-motion
+  exercise sequences bounded without adding a second message or partial-send
+  lifecycle; Murph teaches fewer movements when the complete useful sequences
+  would exceed the budget. Linq text is rendered and checked against the
+  provider's 10,000-character limit before private media is loaded or uploaded
+  and before message-provider entry. A terminal direct-chat
+  image failure stays image work and cannot recover as text alone. Hosted
+  outbox logs retain metadata-only payload aggregates plus allowlisted request
+  shape, provider correlation tokens, and response-body signatures, never
+  member text, alternative text, URLs, routes, or provider prose.
 - Non-affirmative Linq group reactions retain their consumed-at-ingress durable
   mailbox semantics, deterministic dedupe identity, and post-commit runtime
   signal. Before `BEGIN`, the reaction owner reads one exact canonical route,
