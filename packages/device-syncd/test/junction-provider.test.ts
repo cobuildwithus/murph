@@ -3026,13 +3026,16 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      const data = new URL(url).searchParams.get("start_date") === "2026-04-02"
+        ? [{
+            start: "2026-04-02T12:00:00.000Z",
+            value: 97,
+          }]
+        : [];
       return createJsonResponse({
         groups: {
           garmin: [{
-            data: [{
-              start: "2026-04-02T12:00:00.000Z",
-              value: 97,
-            }],
+            data,
             source: { provider: "garmin", type: "watch" },
           }],
         },
@@ -3443,6 +3446,9 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
     }
 
     if (url.includes("/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse({
         groups: {
           garmin: [{
@@ -8920,6 +8926,9 @@ test("Junction polling updates source projection and imports bounded summary/tim
 
     const timeseriesResource = new URL(url).pathname.match(/\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
     if (timeseriesResource && timeseriesResource in groupedTimeseriesPayloads) {
+      if (new URL(url).searchParams.get("start_date") !== "2026-04-02") {
+        return createJsonResponse({ groups: {} });
+      }
       return createJsonResponse(groupedTimeseriesPayloads[timeseriesResource]);
     }
 

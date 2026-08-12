@@ -107,12 +107,14 @@ disturbance, caffeine, water, and mindfulness use the summary-history window,
 day at a time, serialize per account, and record terminal coverage in compact
 connection metadata; they do not add another queue or lifecycle. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
-semantics. Sparse aggregates fetch one complete provider calendar date at a
-time; a provider-bearing date with no canonical observation retries only that
+semantics. Every date-mode timeseries fetch preserves one complete provider
+calendar date during both migration and normal reconcile; a provider-bearing
+date with any row rejected by the canonical aggregate parser retries only that
 date on the existing bounded ladder. Historical-pull status is re-read before
 coverage, with supported connect-route aliases canonicalized on both sides:
-success permits terminal empty history, explicit `not_pulled` is no obligation,
-nonterminal state waits, explicit failure remains uncovered, and unavailable
+matching pulled state takes precedence, success permits terminal empty history,
+nonterminal state waits, and explicit failure remains uncovered. Explicit
+`not_pulled` is no obligation only without a pulled entry, while unavailable
 status requires canonical history evidence. Delayed work derives
 the live reconcile boundary after every completed segment and continues until
 no middle gap remains. An explicit timeseries backfill override still governs

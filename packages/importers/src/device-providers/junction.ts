@@ -1060,6 +1060,49 @@ export function identifyJunctionBloodPressureProviderRecords(
   };
 }
 
+/** Count provider rows accepted by the canonical daily-aggregate parser. */
+export function countAcceptedJunctionDailyTimeseriesProviderRecords(
+  snapshot: Pick<
+    JunctionSnapshotInput,
+    "connections" | "importedAt" | "timeseries" | "windowEnd" | "windowStart"
+  >,
+): number {
+  const connections = asArray(snapshot.connections).flatMap((connection) => {
+    const normalized = asPlainObject(connection);
+    return normalized ? [normalized] : [];
+  });
+  const context: NormalizationContext = {
+    importedAt: normalizeTimestamp(snapshot.importedAt),
+    windowStart: normalizeTimestamp(snapshot.windowStart),
+    windowEnd: normalizeTimestamp(snapshot.windowEnd),
+    connectionsByKey: buildConnectionsByKey(connections),
+    evidenceParts: [],
+    events: [],
+    samples: [],
+  };
+
+  let acceptedProviderRecordCount = 0;
+  for (const [resource, payload] of allowedResourceEntries(
+    snapshot.timeseries,
+    TIMESERIES_RESOURCE_ALLOWLIST,
+  )) {
+    const descriptor = JUNCTION_DAILY_TIMESERIES_DESCRIPTORS.get(resource);
+    if (!descriptor) {
+      continue;
+    }
+    acceptedProviderRecordCount += buildJunctionDailyTimeseriesAggregates({
+      context,
+      normalizeValue: descriptor.normalizeValue,
+      payload,
+      resource,
+      resourceSlug: slugify(resource, "timeseries"),
+      valuePaths: descriptor.valuePaths,
+    }).reduce((count, aggregate) => count + aggregate.sampleCount, 0);
+  }
+
+  return acceptedProviderRecordCount;
+}
+
 function isJunctionSummaryEvidenceEventInRange(
   event: Pick<DeviceEventPayload, "dayKey" | "occurredAt">,
   evidenceRange: { endMs: number; startMs: number },

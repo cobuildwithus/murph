@@ -195,15 +195,17 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    `heart_rate_recovery_one_minute`, body and basal temperature resources,
    `sleep_breathing_disturbance`, `caffeine`, `water`, and
    `mindfulness_minutes`) use the summary-history window, 180 days by default.
-   Each sparse aggregate request owns one complete provider calendar date, so
-   offset timestamps on opposite sides of UTC midnight reach the importer
-   together. A provider-bearing date that produces no canonical observation
-   retries only that date on the existing bounded ladder before it becomes
-   terminal. Historical-pull status is re-read at the first date and before
+   Every date-mode timeseries request owns one complete provider calendar date,
+   so offset timestamps on opposite sides of UTC midnight reach the importer
+   together during both migration and normal reconcile. A provider-bearing date
+   with any row rejected by the canonical aggregate parser retries only that
+   date on the existing bounded ladder before it becomes terminal.
+   Historical-pull status is re-read at the first date and before
    coverage. Source matching canonicalizes supported connect-route aliases on
    both the persisted and introspection sides before applying the status table:
-   `success` permits terminal empty history, explicit `not_pulled` remains no
-   obligation, nonterminal state waits, and explicit failure remains uncovered.
+   A matching pulled entry owns contradictory envelopes: `success` permits
+   terminal empty history, nonterminal state waits, and explicit failure remains
+   uncovered. Explicit `not_pulled` is no obligation only without a pulled entry.
    Unavailable, malformed, or unmatched introspection can close only after a
    canonical historical observation. Before coverage closes, the
    migration recomputes the live reconcile-window boundary and appends the

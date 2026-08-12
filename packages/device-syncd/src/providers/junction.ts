@@ -11,6 +11,7 @@ import {
 import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
+  countAcceptedJunctionDailyTimeseriesProviderRecords,
   identifyJunctionBloodPressureProviderRecords,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
@@ -163,6 +164,7 @@ interface JunctionTimeseriesImportResult {
 }
 
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
+  acceptedProviderRecordCount: number;
   canonicalProviderRecordIdentities: readonly string[];
   canonicalEventCount: number;
   fetchComplete: boolean;
@@ -176,7 +178,6 @@ interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImport
 interface JunctionPreciseTimeseriesImportOptions {
   dateQueryFormat?: JunctionDateQueryFormat;
   historicalProviderRecordsSeen?: boolean;
-  preserveDateResponseRecords?: boolean;
   preservePartialRetryableFailure?: boolean;
   sourceStatusRequirement?: JunctionImportSourceStatusRequirement;
 }
@@ -249,7 +250,6 @@ const JUNCTION_SDK_ISO_8601_DATE_PATTERN = /^([+-]?\d{4}(?!\d{2}\b))((-?)((0[1-9
 
 interface JunctionWindowFetchOptions {
   dateQueryFormat?: JunctionDateQueryFormat;
-  preserveDateResponseRecords?: boolean;
 }
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
@@ -2003,6 +2003,7 @@ export function createJunctionDeviceSyncProvider(
             return withJunctionExtendedTimeseriesBackfillFollowUp({
               context,
               importResult: {
+                acceptedProviderRecordCount: 0,
                 canonicalProviderRecordIdentities: [],
                 canonicalEventCount: 0,
                 fetchComplete: false,
@@ -2049,6 +2050,7 @@ export function createJunctionDeviceSyncProvider(
           return withJunctionExtendedTimeseriesBackfillFollowUp({
             context,
             importResult: {
+              acceptedProviderRecordCount: 0,
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
               fetchComplete: false,
@@ -2121,8 +2123,6 @@ export function createJunctionDeviceSyncProvider(
             historicalProviderRecordsSeen:
               job.payload.historicalProviderRecordsSeen === true,
             preservePartialRetryableFailure: extendedHistoricalBackfill,
-            preserveDateResponseRecords:
-              extendedHistoricalPolicy?.completion === "daily_aggregate",
             sourceStatusRequirement: extendedHistoricalBackfill
               ? "connected"
               : undefined,
@@ -2156,7 +2156,8 @@ export function createJunctionDeviceSyncProvider(
         const dailyAggregateNeedsRetry =
           extendedHistoricalPolicy?.completion === "daily_aggregate"
           && timeseriesImport.providerRecordCount > 0
-          && timeseriesImport.canonicalEventCount === 0
+          && timeseriesImport.acceptedProviderRecordCount
+            < timeseriesImport.providerRecordCount
           && (
             dailyAggregateRetryAttempts
               < EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length
@@ -2877,7 +2878,7 @@ export function createJunctionDeviceSyncProvider(
         records.push(...(
           // Date-mode responses own a provider calendar day. Reapplying UTC
           // timestamp clipping would split one importer aggregate identity.
-          options.preserveDateResponseRecords === true
+          options.dateQueryFormat === "date"
             ? chunkRecords
             : filterJunctionTimeseriesRecordsToWindow(
                 chunkRecords,
@@ -2926,6 +2927,7 @@ export function createJunctionDeviceSyncProvider(
     const accumulatedTimeseries: Record<string, unknown[]> = {};
     let executionWindowEnd: string | null = null;
     let executionWindowStart: string | null = null;
+    let acceptedProviderRecordCount = 0;
     let fetchComplete = true;
     let yieldedAt: string | null = null;
     let canonicalProviderRecordIdentities: readonly string[] = [];
@@ -2952,7 +2954,6 @@ export function createJunctionDeviceSyncProvider(
           sourceProviderSlug,
           {
             dateQueryFormat: options.dateQueryFormat ?? "datetime",
-            preserveDateResponseRecords: options.preserveDateResponseRecords,
           },
         );
       } catch (error) {
@@ -3044,6 +3045,7 @@ export function createJunctionDeviceSyncProvider(
           );
           if (postFetchSourceAdmission !== "admitted") {
             return {
+              acceptedProviderRecordCount: 0,
               canonicalProviderRecordIdentities: [],
               canonicalEventCount: 0,
               fetchComplete: false,
@@ -3063,6 +3065,14 @@ export function createJunctionDeviceSyncProvider(
           {},
           options.sourceStatusRequirement,
         );
+        acceptedProviderRecordCount =
+          countAcceptedJunctionDailyTimeseriesProviderRecords({
+            connections: preparedImport.connections,
+            importedAt: executionWindowEnd,
+            timeseries: preparedImport.snapshots,
+            windowEnd: executionWindowEnd,
+            windowStart: executionWindowStart,
+          });
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
           const receipt = await context.importSnapshot({
             provider: "junction",
@@ -3113,6 +3123,7 @@ export function createJunctionDeviceSyncProvider(
           )
         ) {
           return {
+            acceptedProviderRecordCount: 0,
             canonicalProviderRecordIdentities: [],
             canonicalEventCount: 0,
             fetchComplete: false,
@@ -3128,6 +3139,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return {
+      acceptedProviderRecordCount,
       canonicalProviderRecordIdentities,
       canonicalEventCount,
       fetchComplete,
@@ -5665,25 +5677,24 @@ function resolveJunctionHistoricalPullReadiness(input: {
   if (!source) {
     return "unavailable";
   }
-  if (source.notPulledResources.some((resource) =>
-    normalizeJunctionResourceName(resource) === input.resource
-  )) {
-    return "no_obligation";
-  }
   const pulled = source.pulledResources.find((entry) =>
     normalizeJunctionResourceName(entry.resource) === input.resource
   );
-  if (!pulled) {
-    return "unavailable";
+  if (pulled) {
+    if (pulled.status === "success") {
+      return "ready";
+    }
+    if (pulled.status === "failure") {
+      return "terminal_failure";
+    }
+    return ["in_progress", "retrying", "scheduled"].includes(pulled.status)
+      ? "pending"
+      : "unavailable";
   }
-  if (pulled.status === "success") {
-    return "ready";
-  }
-  if (pulled.status === "failure") {
-    return "terminal_failure";
-  }
-  return ["in_progress", "retrying", "scheduled"].includes(pulled.status)
-    ? "pending"
+  return source.notPulledResources.some((resource) =>
+      normalizeJunctionResourceName(resource) === input.resource
+    )
+    ? "no_obligation"
     : "unavailable";
 }
 

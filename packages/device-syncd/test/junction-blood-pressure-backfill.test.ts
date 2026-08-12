@@ -1059,14 +1059,15 @@ test("a sparse daily aggregate completes when several readings reduce to one eve
   );
 });
 
-test("a sparse daily aggregate retries a provider-bearing day with no canonical event", async () => {
+test("a sparse daily aggregate retries a date with a malformed sibling", async () => {
+  const importedSnapshots: unknown[] = [];
   const timeseriesRecords: Record<string, unknown>[] = [{
     end: "2026-06-09T08:05:00.000Z",
     start: "2026-06-09T08:00:00.000Z",
     unit: "g",
   }, {
-    end: "2026-06-10T08:05:00.000Z",
-    start: "2026-06-10T08:00:00.000Z",
+    end: "2026-06-09T14:05:00.000Z",
+    start: "2026-06-09T14:00:00.000Z",
     unit: "g",
     value: 0.08,
   }];
@@ -1092,7 +1093,7 @@ test("a sparse daily aggregate retries a provider-bearing day with no canonical 
   const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
   const caffeine = findResourceJob(scheduled.jobs, "caffeine");
   const firstPass = await executeImmediateResourceContinuations({
-    context: createJobContext(),
+    context: createJobContext({ importedSnapshots }),
     job: toJobRecord(caffeine, 1),
     provider,
     resource: "caffeine",
@@ -1112,7 +1113,10 @@ test("a sparse daily aggregate retries a provider-bearing day with no canonical 
     value: 0.04,
   };
   const repaired = await executeImmediateResourceContinuations({
-    context: createJobContext({ now: "2026-06-11T12:15:00.000Z" }),
+    context: createJobContext({
+      importedSnapshots,
+      now: "2026-06-11T12:15:00.000Z",
+    }),
     job: toJobRecord(delayedRetry, 3),
     provider,
     resource: "caffeine",
@@ -1133,60 +1137,96 @@ test("a sparse daily aggregate retries a provider-bearing day with no canonical 
     ),
     false,
   );
-});
-
-test("a sparse daily aggregate keeps one provider-local day atomic across UTC midnight", async () => {
-  const importedSnapshots: unknown[] = [];
-  const provider = createProvider({
-    providerState: {
-      resourceAvailability: { caffeine: true },
-      status: "connected",
-    },
-    requests: [],
-    summaryBackfillDays: 2,
-    timeseriesRecords: {
-      caffeine: [{
-        end: "2026-06-09T10:05:00-07:00",
-        start: "2026-06-09T10:00:00-07:00",
-        unit: "g",
-        value: 0.08,
-      }, {
-        end: "2026-06-09T20:05:00-07:00",
-        start: "2026-06-09T20:00:00-07:00",
-        unit: "g",
-        value: 0.04,
-      }],
-    },
-    timeseriesResources: ["caffeine"],
-  });
-  const createScheduledJobs = requireValue(
-    requireValue(provider.jobExecutor).createScheduledJobs,
-  );
-  const sources = [createSourceSummary(
-    "omron",
-    "2026-01-01T12:00:00.000Z",
-    "connected",
-    { caffeine: true },
-  )];
-  const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
-  const result = await executeImmediateResourceContinuations({
-    context: createJobContext({ importedSnapshots }),
-    job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
-    provider,
-    resource: "caffeine",
-  });
   const normalized = await Promise.all(importedSnapshots.map(async (snapshot) => {
     const parsed = requireValue(junctionProviderAdapter.parseSnapshot)(snapshot);
     return junctionProviderAdapter.normalizeSnapshot(parsed);
   }));
-  const caffeineEvents = normalized.flatMap((payload) =>
-    payload.events?.filter((event) => event.fields?.metric === "caffeine") ?? []
+  assert.deepEqual(
+    normalized.flatMap((payload) =>
+      payload.events
+        ?.filter((event) => event.fields?.metric === "caffeine")
+        .map((event) => event.fields?.value) ?? []
+    ),
+    [80, 120],
   );
+});
 
-  assert.equal(result.result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(caffeineEvents.length, 1);
-  assert.equal(caffeineEvents[0]?.dayKey, "2026-06-09");
-  assert.equal(caffeineEvents[0]?.fields?.value, 120);
+test("date-mode history and reconcile keep provider days atomic across UTC midnight", async () => {
+  const cases = [
+    [
+      "negative offset",
+      [
+        { end: "2026-06-09T10:05:00-07:00", start: "2026-06-09T10:00:00-07:00", unit: "g", value: 0.08 },
+        { end: "2026-06-09T20:05:00-07:00", start: "2026-06-09T20:00:00-07:00", unit: "g", value: 0.04 },
+      ],
+    ],
+    [
+      "positive offset",
+      [
+        { end: "2026-06-09T00:35:00+07:00", start: "2026-06-09T00:30:00+07:00", unit: "g", value: 0.08 },
+        { end: "2026-06-09T20:05:00+07:00", start: "2026-06-09T20:00:00+07:00", unit: "g", value: 0.04 },
+      ],
+    ],
+  ] as const;
+
+  for (const [label, records] of cases) {
+    const provider = createProvider({
+      providerState: {
+        resourceAvailability: { caffeine: true },
+        status: "connected",
+      },
+      requests: [],
+      summaryBackfillDays: 2,
+      timeseriesRecords: { caffeine: records },
+      timeseriesResources: ["caffeine"],
+    });
+    const executor = requireValue(provider.jobExecutor);
+    const createScheduledJobs = requireValue(executor.createScheduledJobs);
+    const sources = [createSourceSummary(
+      "omron",
+      "2026-01-01T12:00:00.000Z",
+      "connected",
+      { caffeine: true },
+    )];
+    const scheduled = createScheduledJobs(createStoredAccount({ sources }), NOW);
+    const historicalSnapshots: unknown[] = [];
+    const historical = await executeImmediateResourceContinuations({
+      context: createJobContext({ importedSnapshots: historicalSnapshots }),
+      job: toJobRecord(findResourceJob(scheduled.jobs, "caffeine"), 1),
+      provider,
+      resource: "caffeine",
+    });
+    const reconcileSnapshots: unknown[] = [];
+    await executor.executeJob(
+      createJobContext({ importedSnapshots: reconcileSnapshots }),
+      toJobRecord({
+        dedupeKey: `reconcile-${label}`,
+        kind: "reconcile",
+        payload: {
+          windowEnd: "2026-06-10T00:00:00.000Z",
+          windowStart: "2026-06-09T00:00:00.000Z",
+        },
+        priority: 40,
+      }, 2),
+    );
+
+    const externalRefs = [];
+    for (const snapshots of [historicalSnapshots, reconcileSnapshots]) {
+      const normalized = await Promise.all(snapshots.map(async (snapshot) => {
+        const parsed = requireValue(junctionProviderAdapter.parseSnapshot)(snapshot);
+        return junctionProviderAdapter.normalizeSnapshot(parsed);
+      }));
+      const caffeineEvents = normalized.flatMap((payload) =>
+        payload.events?.filter((event) => event.fields?.metric === "caffeine") ?? []
+      );
+      assert.equal(caffeineEvents.length, 1, label);
+      assert.equal(caffeineEvents[0]?.dayKey, "2026-06-09", label);
+      assert.equal(caffeineEvents[0]?.fields?.value, 120, label);
+      externalRefs.push(caffeineEvents[0]?.externalRef);
+    }
+    assert.deepEqual(externalRefs[0], externalRefs[1], label);
+    assert.equal(historical.result.scheduledJobs?.length ?? 0, 0, label);
+  }
 });
 
 test("sparse history waits for upstream pull success beyond the empty retry ladder", async () => {
@@ -1261,7 +1301,11 @@ test("sparse history completion resolves supported source aliases", async () => 
       expectedCoverage: undefined,
       expectedScheduledJobs: 1,
       expectedTimeseriesRequests: 0,
-      historicalPullState: { resource: "caffeine", status: "in_progress" },
+      historicalPullState: {
+        notPulled: true,
+        resource: "caffeine",
+        status: "in_progress",
+      },
       label: "in_progress",
     },
     {
@@ -1275,14 +1319,22 @@ test("sparse history completion resolves supported source aliases", async () => 
       expectedCoverage: undefined,
       expectedScheduledJobs: 0,
       expectedTimeseriesRequests: 0,
-      historicalPullState: { resource: "caffeine", status: "failure" },
+      historicalPullState: {
+        notPulled: true,
+        resource: "caffeine",
+        status: "failure",
+      },
       label: "failure",
     },
     {
       expectedCoverage: "v1|apple_health:16",
       expectedScheduledJobs: 0,
       expectedTimeseriesRequests: 2,
-      historicalPullState: { resource: "caffeine", status: "success" },
+      historicalPullState: {
+        notPulled: true,
+        resource: "caffeine",
+        status: "success",
+      },
       label: "success",
     },
   ] as const;
@@ -1304,6 +1356,14 @@ test("sparse history completion resolves supported source aliases", async () => 
       },
       requests,
       summaryBackfillDays: 2,
+      timeseriesRecords: {
+        caffeine: [{
+          end: "2026-06-09T08:05:00.000Z",
+          start: "2026-06-09T08:00:00.000Z",
+          unit: "g",
+          value: 0.08,
+        }],
+      },
       timeseriesResources: ["caffeine"],
     });
     const createScheduledJobs = requireValue(
@@ -1527,6 +1587,11 @@ test("a persistently malformed sparse day exhausts only its bounded day retry", 
         end: "2026-06-10T08:05:00.000Z",
         start: "2026-06-10T08:00:00.000Z",
         unit: "g",
+      }, {
+        end: "2026-06-10T14:05:00.000Z",
+        start: "2026-06-10T14:00:00.000Z",
+        unit: "g",
+        value: 0.08,
       }],
     },
     timeseriesResources: ["caffeine"],
