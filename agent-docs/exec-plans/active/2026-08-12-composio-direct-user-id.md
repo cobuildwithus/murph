@@ -99,11 +99,10 @@ Updated: 2026-08-12
 
 ## Verification log
 
-- Focused Composio client, fixed-email-write, and connected-app service tests:
-  passed, 52 tests.
-- `pnpm --dir apps/web typecheck`: passed.
+- Final focused Composio client, fixed-email-write, Google and Outlook calendar,
+  connected-app service, and changelog-fragment proof: passed, 60 tests.
+- `pnpm --dir apps/web typecheck`: passed after the final TypeScript change.
 - `pnpm logs:guard`: passed.
-- Focused changelog-fragment tests: passed, 7 tests.
 - A production-shaped synthetic direct scenario passed through the real Web
   service boundary and proved that the provider request binds both the
   authenticated member and selected account.

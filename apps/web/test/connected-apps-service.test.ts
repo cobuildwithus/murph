@@ -1026,7 +1026,66 @@ describe("connected-app service", () => {
     expect(executeFetch).not.toHaveBeenCalled();
   });
 
-  it("executes confirmed calendar creation through the direct tool endpoint", async () => {
+  it.each([
+    {
+      argumentsValue: {
+        event_duration_hour: 0,
+        event_duration_minutes: 30,
+        location: "123 Main St",
+        start_datetime: "2026-07-01T10:00:00-04:00",
+        summary: "Annual physical",
+        timezone: "America/New_York",
+      },
+      expectedArguments: {
+        calendar_id: "primary",
+        create_meeting_room: false,
+        event_duration_hour: 0,
+        event_duration_minutes: 30,
+        location: "123 Main St",
+        start_datetime: "2026-07-01T10:00:00-04:00",
+        summary: "Annual physical",
+        timezone: "America/New_York",
+      },
+      toolkit: "googlecalendar",
+      toolkitName: "Google Calendar",
+      toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+      version: "20260429_00",
+    },
+    {
+      argumentsValue: {
+        body: "Discuss annual physical results.",
+        end_datetime: "2026-07-01T10:30:00-04:00",
+        location: "123 Main St",
+        start_datetime: "2026-07-01T10:00:00-04:00",
+        subject: "Annual physical",
+        time_zone: "Eastern Standard Time",
+      },
+      expectedArguments: {
+        body: "Discuss annual physical results.",
+        end_datetime: "2026-07-01T10:30:00-04:00",
+        is_online_meeting: false,
+        location: "123 Main St",
+        start_datetime: "2026-07-01T10:00:00-04:00",
+        subject: "Annual physical",
+        time_zone: "Eastern Standard Time",
+      },
+      toolkit: "outlook",
+      toolkitName: "Microsoft Outlook",
+      toolSlug: "OUTLOOK_CALENDAR_CREATE_EVENT",
+      version: "20260508_00",
+    },
+  ] as const)("executes confirmed $toolSlug through the direct tool endpoint", async ({
+    argumentsValue,
+    expectedArguments,
+    toolkit,
+    toolkitName,
+    toolSlug,
+    version,
+  }) => {
+    vi.stubEnv(
+      "COMPOSIO_CONNECTED_APP_TOOLKITS",
+      "gmail,googlecalendar,outlook",
+    );
     installPrismaHarness();
     const requests: Array<{ body: unknown; url: URL }> = [];
     const executeFetch = vi.fn(async (
@@ -1046,13 +1105,13 @@ describe("connected-app service", () => {
               id: "ca_calendar",
               is_disabled: false,
               status: "ACTIVE",
-              toolkit: { name: "Google Calendar", slug: "googlecalendar" },
+              toolkit: { name: toolkitName, slug: toolkit },
               word_id: "quiet-calendar",
             },
           ],
         });
       }
-      if (parsed.pathname === "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT") {
+      if (parsed.pathname === `/api/v3.1/tools/execute/${toolSlug}`) {
         return jsonResponse({
           data: { eventId: "evt_123" },
           successful: true,
@@ -1070,16 +1129,9 @@ describe("connected-app service", () => {
       request: {
         input: {
           account: "calendar",
-          arguments: {
-            event_duration_hour: 0,
-            event_duration_minutes: 30,
-            location: "123 Main St",
-            start_datetime: "2026-07-01T10:00:00-04:00",
-            summary: "Annual physical",
-            timezone: "America/New_York",
-          },
+          arguments: argumentsValue,
           agentApproved: true as const,
-          toolSlug: "GOOGLECALENDAR_CREATE_EVENT",
+          toolSlug,
         },
         operation: "execute",
       },
@@ -1094,26 +1146,17 @@ describe("connected-app service", () => {
       {
         body: null,
         pathname: "/api/v3.1/connected_accounts",
-        toolkitSlugs: ["googlecalendar"],
+        toolkitSlugs: [toolkit],
         userIds: ["hbm_member"],
       },
       {
         body: {
-          arguments: {
-            calendar_id: "primary",
-            create_meeting_room: false,
-            event_duration_hour: 0,
-            event_duration_minutes: 30,
-            location: "123 Main St",
-            start_datetime: "2026-07-01T10:00:00-04:00",
-            summary: "Annual physical",
-            timezone: "America/New_York",
-          },
+          arguments: expectedArguments,
           connected_account_id: "ca_calendar",
           user_id: "hbm_member",
-          version: "20260429_00",
+          version,
         },
-        pathname: "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT",
+        pathname: `/api/v3.1/tools/execute/${toolSlug}`,
         toolkitSlugs: [],
         userIds: [],
       },
