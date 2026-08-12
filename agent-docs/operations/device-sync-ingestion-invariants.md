@@ -153,12 +153,15 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    episode facts, allowing a complete response to clear older temporal facts.
    Sparse `caffeine`, `water`, and `mindfulness_minutes` direct-resource jobs
    retain precise windows because each admitted interval has its own exact-start
-   identity, but those precise snapshots emit intervals only. The calendar-day
-   path is the sole writer of their daily sums, so a growing precise set cannot
+   identity, but those precise snapshots emit intervals only, then refresh the
+   intersecting globally closed dates through the calendar-day path. That path
+   is the sole writer of their daily sums, so a growing precise set cannot
    create an immutable partial aggregate or block a later interval. Every
-   scheduled reconcile enters the bounded calendar importer; closure filtering
-   stays inside that owner, and an account-global completion clock must not gate
-   the pull floor. Daily sums and dense feature envelopes describe a complete
+   scheduled reconcile refreshes the latest globally closed date for the six
+   fidelity resources. The account's existing UTC-day gate retains the broader
+   seven-day correction sweep across all configured resources without turning
+   the hourly floor into an all-resource fanout. Daily sums and dense feature
+   envelopes describe a complete
    resource/day collection, so a maximum child-row revision must not version or
    order that set. Serialized complete-calendar imports reconcile those
    unversioned facts through the canonical event spine, where exact replays are

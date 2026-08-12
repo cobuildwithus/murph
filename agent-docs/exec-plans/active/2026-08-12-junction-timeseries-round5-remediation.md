@@ -11,8 +11,10 @@ Updated: 2026-08-12
 
 ## Success criteria
 
-- Every scheduled reconcile reaches the bounded closed-calendar importer even
-  when earlier resource jobs have advanced the account completion clock.
+- Every scheduled reconcile refreshes the latest globally closed date for the
+  six fidelity resources without widening the hourly all-resource fanout.
+- Successful sparse fidelity resource jobs refresh daily totals for every
+  globally closed provider date intersecting their precise window.
 - Daily sums and dense feature envelopes reconcile non-empty complete-set
   growth and removal without treating a child-row revision as the collection
   revision.
@@ -45,14 +47,21 @@ Updated: 2026-08-12
    local proof, commit and push the exact candidate, then run required CI.
 7. [x] Record the hard-cap retrospective and obtain an explicit continuation
    decision before any eighth ReviewGPT round.
-8. [ ] Land the bounded PR-schema and runner-bundle budget corrections, obtain
-   exact-head green CI and a round-eight ReviewGPT PASS, then merge and retire
-   the task worktree.
+8. [x] Land the bounded PR-schema and runner-bundle budget corrections and run
+   round eight against the exact pushed head.
+9. [ ] Resolve round eight's sparse-correction and hourly-fanout findings,
+   obtain exact-head green CI and a ReviewGPT PASS, then merge and retire the
+   task worktree.
 
 ## Decisions
 
-- The scheduled pull floor is unconditional; closure belongs to the calendar
-  importer, not to an account-global completion timestamp.
+- The scheduled pull floor remains unconditional, but its timeseries work has
+  two bounded cadences: one latest-closed-day pass for the six fidelity
+  resources every reconcile, and the prior seven-day all-resource correction
+  sweep only after the account crosses a UTC day.
+- Successful sparse fidelity resource jobs reuse the calendar-day importer for
+  closed dates intersecting their precise window; no second aggregate owner or
+  correction queue is required.
 - A child-row timestamp cannot order the complete resource/day collection.
   Serialized canonical event-spine reconciliation is the existing owner for
   unversioned daily and dense feature facts.
@@ -91,6 +100,10 @@ Updated: 2026-08-12
   agent to make CI green and merge. The known CI corrections remain metadata
   schema completion plus measured bundle-budget ratchets; neither adds product
   behavior or a runtime owner.
+- Round eight's two review-induced findings are accepted. Restoring the prior
+  daily broad-sweep gate and reusing the existing calendar importer for hourly
+  fidelity catch-up and sparse correction adds no state owner, queue, cursor,
+  watermark, dependency, or service.
 
 ## Verification
 
@@ -119,5 +132,14 @@ Updated: 2026-08-12
   item. The runner bundle budget-policy suite passes 42 tests, and exact local
   production assembly passes at 9,952,950B total and 7,927,638B static closure
   with the existing narrow allowances retained.
-- Pending: commit/push, exact-head CI, round-eight ReviewGPT PASS, merge, and
-  worktree retirement.
+- Round eight found that precise sparse corrections could leave old daily sums
+  stale and that the unconditional calendar import had widened hourly work to
+  all configured resources across seven days. Focused tests reproduce both
+  mechanisms and now prove exact-interval plus daily correction, six-resource
+  one-day hourly work, and retention of the once-daily broad sweep.
+- Passed all 223 Junction provider, 105 device-sync service, 171 Junction
+  importer, and 21 normalized wearable query tests; the device-sync typecheck,
+  docs drift, scenario integrity, and production runner assembly also pass. The
+  final runner bundle is 9,955,082B against the 9,985,718B budget.
+- Pending: commit/push, exact-head CI, ReviewGPT PASS, merge, and worktree
+  retirement.

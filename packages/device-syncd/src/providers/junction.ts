@@ -1135,14 +1135,34 @@ export function createJunctionDeviceSyncProvider(
         : null,
       window,
     );
-    if (jobTimeseriesResources.length > 0) {
+    const shouldImportBroadClosedTimeseries = job.kind === "backfill"
+      || shouldImportClosedTimeseriesForReconcile(
+        context.account.lastSyncCompletedAt,
+        window.windowEnd,
+      );
+    const hourlyFidelityWindow = shouldImportBroadClosedTimeseries
+      ? null
+      : resolveLatestGloballyClosedProviderDayWindow(
+        timeseriesWindowStart,
+        window.windowEnd,
+        context.now,
+      );
+    const dailyTimeseriesResources = shouldImportBroadClosedTimeseries
+      ? jobTimeseriesResources
+      : jobTimeseriesResources.filter(
+        (resource) => JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource),
+      );
+    if (
+      dailyTimeseriesResources.length > 0
+      && (shouldImportBroadClosedTimeseries || hourlyFidelityWindow)
+    ) {
       const timeseriesImport = await importTimeseriesDailySnapshots(
         context,
         sourceProviders,
-        timeseriesWindowStart,
-        window.windowEnd,
+        hourlyFidelityWindow?.windowStart ?? timeseriesWindowStart,
+        hourlyFidelityWindow?.windowEnd ?? window.windowEnd,
         skippedOptionalResources,
-        jobTimeseriesResources,
+        dailyTimeseriesResources,
       );
       if (timeseriesImport.yieldedAt) {
         return withJunctionSkippedResourceMetadata(
@@ -2120,6 +2140,33 @@ export function createJunctionDeviceSyncProvider(
             }),
             skippedOptionalResources,
           );
+        }
+
+        if (
+          timeseriesImport.fetchComplete
+          && JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(effectiveResource)
+        ) {
+          const dailyImport = await importTimeseriesDailySnapshots(
+            context,
+            sourceProviders,
+            window.windowStart,
+            window.windowEnd,
+            skippedOptionalResources,
+            [effectiveResource],
+            sourceProviderSlug,
+          );
+          if (dailyImport.yieldedAt) {
+            return withJunctionSkippedResourceMetadata(
+              context,
+              buildYieldedJunctionJobResult({
+                context,
+                job,
+                windowEnd: window.windowEnd,
+                windowStart: window.windowStart,
+              }),
+              skippedOptionalResources,
+            );
+          }
         }
 
         const result = withJunctionSkippedResourceMetadata(
@@ -5498,6 +5545,40 @@ function isFullUtcDayWindow(window: { windowStart: string; windowEnd: string }):
   return Date.parse(window.windowStart) < Date.parse(window.windowEnd)
     && window.windowStart === floorUtcDayTimestamp(window.windowStart)
     && window.windowEnd === floorUtcDayTimestamp(window.windowEnd);
+}
+
+function shouldImportClosedTimeseriesForReconcile(
+  lastSyncCompletedAt: string | null | undefined,
+  windowEnd: string,
+): boolean {
+  if (!lastSyncCompletedAt) {
+    return true;
+  }
+  const lastCompletedClosedDayMs = Date.parse(floorUtcDayTimestamp(lastSyncCompletedAt));
+  const windowEndMs = Date.parse(windowEnd);
+  return !Number.isFinite(lastCompletedClosedDayMs)
+    || !Number.isFinite(windowEndMs)
+    || lastCompletedClosedDayMs < windowEndMs;
+}
+
+function resolveLatestGloballyClosedProviderDayWindow(
+  windowStart: string,
+  windowEnd: string,
+  asOf: string,
+): { windowStart: string; windowEnd: string } | null {
+  const flooredWindowStartMs = Date.parse(floorUtcDayTimestamp(windowStart));
+  const globallyClosedEndMs = resolveGloballyClosedProviderDayEnd(windowEnd, asOf);
+  if (
+    !Number.isFinite(flooredWindowStartMs)
+    || !Number.isFinite(globallyClosedEndMs)
+    || flooredWindowStartMs >= globallyClosedEndMs
+  ) {
+    return null;
+  }
+  return {
+    windowStart: new Date(globallyClosedEndMs - TIMESERIES_CHUNK_MS).toISOString(),
+    windowEnd: new Date(globallyClosedEndMs).toISOString(),
+  };
 }
 
 function buildClosedDailyWindows(

@@ -386,7 +386,7 @@ function createHistoricalActivityProvider(
   }, overrides, historicalPullFetchImpl);
 }
 
-test("Junction provider defaults fetch every default summary and closed-day timeseries resource", async () => {
+test("Junction provider keeps hourly fidelity catch-up narrow and daily correction broad", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -455,7 +455,7 @@ test("Junction provider defaults fetch every default summary and closed-day time
       },
     }),
     createJob("reconcile", {
-      windowStart: "2026-04-02T00:00:00.000Z",
+      windowStart: "2026-03-27T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
@@ -481,11 +481,54 @@ test("Junction provider defaults fetch every default summary and closed-day time
   assert.deepEqual(new Set(summaryResources), new Set([...JUNCTION_DEFAULT_SUMMARY_RESOURCES]));
   assert.deepEqual(
     new Set(timeseriesResources),
-    new Set([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]),
+    new Set([
+      "blood_oxygen",
+      "caffeine",
+      "glucose",
+      "mindfulness_minutes",
+      "stress_level",
+      "water",
+    ]),
+  );
+  assert.equal(
+    requests
+      .filter((url) => url.includes("/v2/timeseries/"))
+      .every((url) => new URL(url).searchParams.get("start_date") === "2026-04-02"),
+    true,
   );
   assert.equal(profileSearchParams.has("start_date"), false);
   assert.equal(profileSearchParams.has("end_date"), false);
   assert.equal(importedSnapshots.length, 1);
+
+  requests.length = 0;
+  importedSnapshots.length = 0;
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        lastSyncCompletedAt: "2026-04-02T23:59:00.000Z",
+      }),
+      now: "2026-04-03T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-03-27T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+  const correctionSweepRequests = requests.filter((url) => url.includes("/v2/timeseries/"));
+  assert.equal(correctionSweepRequests.length, JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length * 7);
+  assert.deepEqual(
+    new Set(correctionSweepRequests.map((url) =>
+      new URL(url).pathname.match(
+        /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+      )?.[1]
+    )),
+    new Set([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]),
+  );
 });
 
 test("Junction omitted timeseries config defaults to compact resources only", async () => {
@@ -7988,6 +8031,7 @@ test("Junction direct sparse fidelity jobs retain precise interval windows", asy
       return createJsonResponse({ providers: [] });
     }
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/caffeine/grouped")) {
+      const precise = new URL(url).searchParams.get("start_date")?.includes("T") === true;
       return createJsonResponse({
         groups: {
           apple_health_kit: [{
@@ -7996,7 +8040,7 @@ test("Junction direct sparse fidelity jobs retain precise interval windows", asy
               start: "2026-04-02T14:30:00.000Z",
               end: "2026-04-02T14:35:00.000Z",
               unit: "mg",
-              value: 95,
+              value: precise ? 95 : 105,
             }],
             source: { provider: "apple_health_kit", type: "phone" },
           }],
@@ -8010,6 +8054,7 @@ test("Junction direct sparse fidelity jobs retain precise interval windows", asy
   await executeJunctionJob(
     provider,
     createJunctionJobContext({
+      now: "2026-04-03T12:00:00.000Z",
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot);
         return { imported: true };
@@ -8030,15 +8075,25 @@ test("Junction direct sparse fidelity jobs retain precise interval windows", asy
       windowStart?: string;
     };
     return [entry.windowStart, entry.windowEnd, entry.timeseriesWindowKind];
-  }), [["2026-04-02T12:00:00.000Z", "2026-04-03T12:00:00.000Z", "precise"]]);
-  const request = requireValue(
-    requests.find((url) => url.includes("/v2/timeseries/")),
-    "Junction sparse resource job should issue a precise request.",
-  );
+  }), [
+    ["2026-04-02T12:00:00.000Z", "2026-04-03T12:00:00.000Z", "precise"],
+    ["2026-04-02T00:00:00.000Z", "2026-04-03T00:00:00.000Z", "calendar_day"],
+  ]);
+  assert.deepEqual(importedSnapshots.map((snapshot) =>
+    (snapshot as { timeseries?: { caffeine?: Array<{ value?: number }> } })
+      .timeseries?.caffeine?.[0]?.value
+  ), [95, 105]);
+  const [preciseRequest, dailyRequest] = requests.filter((url) => url.includes("/v2/timeseries/"));
+  const request = requireValue(preciseRequest, "Junction sparse resource job should issue a precise request.");
   assertJunctionWindowQuery(
     request,
     "2026-04-02T12:00:00.000Z",
     "2026-04-03T12:00:00.000Z",
+  );
+  assertJunctionWindowQuery(
+    requireValue(dailyRequest, "Junction sparse resource job should refresh its closed daily total."),
+    "2026-04-02",
+    "2026-04-02",
   );
 });
 
