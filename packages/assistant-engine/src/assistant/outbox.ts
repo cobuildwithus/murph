@@ -2407,6 +2407,8 @@ function maybeUpgradeAssistantOutboxIntentAnsweredMailboxItemIds(input: {
       input.intent.status !== 'pending'
       && input.intent.status !== 'retryable'
     )
+    || input.intent.delivery !== null
+    || input.intent.deliveryConfirmationPending
   ) {
     return input.intent
   }

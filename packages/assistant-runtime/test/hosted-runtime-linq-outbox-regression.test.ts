@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import {
   createAssistantOutboxIntent,
+  deliverAssistantOutboxReaction,
   listAssistantOutboxIntents,
   readAssistantOutboxIntent,
 } from "@murphai/assistant-engine/assistant-outbox";
@@ -39,10 +40,15 @@ afterEach(async () => {
   await Promise.all(cleanupTasks.splice(0).map((cleanup) => cleanup()));
 });
 
-it("sends a fresh exact-consume reaction once and retries only its Web confirmation", async () => {
+it("freezes an accepted reaction's exact-consume set across callback retry and replay", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
   const fixture = await createHostedLinqReactionFixture();
+  const lateMailboxItemId = "mailbox_item_reaction_after_acceptance";
+  const pendingMailboxItemIds = new Set([
+    fixture.mailboxItemId,
+    lateMailboxItemId,
+  ]);
   const providerFetch = vi.fn<typeof fetch>(async (request) => {
     const url = String(request);
     if (!url.endsWith(`/messages/${fixture.messageId}/reactions`)) {
@@ -61,9 +67,18 @@ it("sends a fresh exact-consume reaction once and retries only its Web confirmat
       fromPhoneNumber: null,
     }),
   }));
-  const recordLinqDeliveryOutcome = vi.fn()
-    .mockRejectedValueOnce(new Error("Web confirmation unavailable"))
-    .mockResolvedValueOnce(undefined);
+  let confirmationAttempt = 0;
+  const recordLinqDeliveryOutcome = vi.fn<
+    NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+  >(async (request) => {
+    confirmationAttempt += 1;
+    if (confirmationAttempt === 1) {
+      throw new Error("Web confirmation unavailable");
+    }
+    for (const mailboxItemId of request.answeredMailboxItemIds ?? []) {
+      pendingMailboxItemIds.delete(mailboxItemId);
+    }
+  });
   const effectsPort = createHostedRuntimeEffectsPortStub({
     assertLinqRecentInboundEngagement: assertRecentInboundEngagement,
     recordLinqDeliveryOutcome,
@@ -123,6 +138,43 @@ it("sends a fresh exact-consume reaction once and retries only its Web confirmat
     vaultRoot: fixture.vaultRoot,
   })).toBe(retained.nextAttemptAt);
 
+  const widenedReplay = await deliverAssistantOutboxReaction({
+    actorId: fixture.intent.actorId,
+    answeredMailboxItemIds: [fixture.mailboxItemId, lateMailboxItemId],
+    bindingDelivery: fixture.intent.bindingDelivery,
+    channel: "linq",
+    dedupeToken: "reaction-confirmation",
+    dispatchMode: "queue-only",
+    identityId: fixture.intent.identityId,
+    reaction: "heart",
+    sessionId: fixture.intent.sessionId,
+    targetMessageId: fixture.messageId,
+    threadId: fixture.intent.threadId,
+    threadIsDirect: fixture.intent.threadIsDirect,
+    turnId: fixture.intent.turnId,
+    vault: fixture.vaultRoot,
+  });
+
+  expect(widenedReplay.kind).toBe("failed");
+  expect(widenedReplay.deliveryError).toMatchObject({
+    code: "ASSISTANT_OUTBOX_ANSWERED_ITEMS_UNCOVERED",
+    diagnosticContext: { retryable: true },
+  });
+  expect(widenedReplay.intent).toMatchObject({
+    answeredMailboxItemIds: [fixture.mailboxItemId],
+    deliveryConfirmationPending: true,
+    status: "retryable",
+  });
+  await expect(readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  )).resolves.toMatchObject({
+    answeredMailboxItemIds: [fixture.mailboxItemId],
+    deliveryConfirmationPending: true,
+  });
+  expect(providerFetch).toHaveBeenCalledTimes(1);
+  expect(assertRecentInboundEngagement).toHaveBeenCalledTimes(2);
+
   vi.setSystemTime(new Date(retained.nextAttemptAt));
   const retryEffects = await collectHostedAssistantDeliverySideEffects({
     includeBackgroundDueIntents: true,
@@ -153,6 +205,7 @@ it("sends a fresh exact-consume reaction once and retries only its Web confirmat
   expect(providerFetch).toHaveBeenCalledTimes(1);
   expect(assertRecentInboundEngagement).toHaveBeenCalledTimes(2);
   expect(recordLinqDeliveryOutcome).toHaveBeenCalledTimes(2);
+  expect([...pendingMailboxItemIds]).toEqual([lateMailboxItemId]);
   await expect(readAssistantOutboxIntent(
     fixture.vaultRoot,
     fixture.intent.intentId,
@@ -160,6 +213,73 @@ it("sends a fresh exact-consume reaction once and retries only its Web confirmat
     deliveryConfirmationPending: false,
     status: "sent",
   });
+
+  const lateIntent = await createAssistantOutboxIntent({
+    actorId: fixture.intent.actorId,
+    answeredMailboxItemIds: [lateMailboxItemId],
+    bindingDelivery: fixture.intent.bindingDelivery,
+    channel: "linq",
+    dedupeToken: "reaction-after-acceptance",
+    identityId: fixture.intent.identityId,
+    message: "",
+    operation: { kind: "message-reaction", reaction: "laugh" },
+    replyToMessageId: fixture.messageId,
+    sessionId: fixture.intent.sessionId,
+    threadId: fixture.intent.threadId,
+    threadIsDirect: fixture.intent.threadIsDirect,
+    turnId: "turn_reaction_after_acceptance",
+    vault: fixture.vaultRoot,
+  });
+  const lateEffect = buildHostedAssistantDeliveryEffect({
+    dedupeKey: lateIntent.dedupeKey,
+    deliveryPhase: "background_retry",
+    effectId: lateIntent.intentId,
+    payload: {
+      actorId: lateIntent.actorId,
+      answeredMailboxItemIds: lateIntent.answeredMailboxItemIds,
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: fixture.linqDeliveryContext.target,
+      channel: "linq",
+      deliverySourceKey: null,
+      explicitTarget: null,
+      idempotencyKey:
+        lateIntent.deliveryIdempotencyKey
+          ?? `assistant-outbox:${lateIntent.intentId}`,
+      identityId: lateIntent.identityId,
+      media: [],
+      message: "",
+      replyToMessageId: fixture.messageId,
+      sessionId: lateIntent.sessionId,
+      subject: null,
+      threadId: lateIntent.threadId,
+      threadIsDirect: true,
+      transportIdempotent: lateIntent.deliveryTransportIdempotent,
+      turnId: lateIntent.turnId,
+    },
+  });
+
+  const lateOutcomes = await drainHostedPreparedAssistantDeliveries({
+    assistantDeliveryEffects: [lateEffect],
+    effectsPort,
+    forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+    linqDeliveryContext: fixture.linqDeliveryContext,
+    platformEnv: {},
+    providerFetch,
+    vaultRoot: fixture.vaultRoot,
+    wake: fixture.wake,
+  });
+
+  expect(lateOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryStatus: "sent",
+      effectId: lateIntent.intentId,
+      retryable: false,
+    }),
+  ]);
+  expect(providerFetch).toHaveBeenCalledTimes(2);
+  expect(assertRecentInboundEngagement).toHaveBeenCalledTimes(4);
+  expect(recordLinqDeliveryOutcome).toHaveBeenCalledTimes(3);
+  expect([...pendingMailboxItemIds]).toEqual([]);
 });
 
 it.each([
