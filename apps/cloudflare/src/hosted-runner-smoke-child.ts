@@ -7,7 +7,6 @@ import {
   mkdtemp,
   readFile,
   readdir,
-  realpath,
   rm,
   stat,
   writeFile,
@@ -1111,7 +1110,6 @@ async function runCodexMemberWorkspacePermissionProbe(input: {
   workspaceRoot: string;
 }): Promise<CodexMemberWorkspacePermissionProof> {
   const vaultCliCommand = (await resolveCommandPath("vault-cli")).trim();
-  const vaultCliEntryPath = await realpath(vaultCliCommand);
   const automationRoot = path.join(input.vaultRoot, "bank", "automations");
   const preloadPath = path.join(
     tmpdir(),
@@ -1241,7 +1239,7 @@ async function runCodexMemberWorkspacePermissionProbe(input: {
         ],
         seedSlug: CODEX_MEMBER_WORKSPACE_SMOKE_SEED_SLUG,
         tempWritePath,
-        vaultCliEntryPath,
+        vaultCliCommand,
         vaultRoot: input.vaultRoot,
         vaultWritePath,
       }),
@@ -1396,12 +1394,18 @@ fs.writeFileSync(input.preloadPath, [
   'fs.appendFileSync(' + JSON.stringify(input.preloadMarkerPath) + ', "1");',
 ].join("\\n") + "\\n", { mode: 0o600 });
 const run = (args) => spawnSync(
-  process.execPath,
-  ["--require", input.preloadPath, input.vaultCliEntryPath, ...args],
+  input.vaultCliCommand,
+  args,
   {
     cwd: input.vaultRoot,
     encoding: "utf8",
-    env: { ...process.env, VAULT: input.vaultRoot },
+    env: {
+      ...process.env,
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, "--require=" + input.preloadPath]
+        .filter(Boolean)
+        .join(" "),
+      VAULT: input.vaultRoot,
+    },
   },
 );
 const readResults = input.readArgs.map((args) => run(args));
