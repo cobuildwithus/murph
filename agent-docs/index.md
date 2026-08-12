@@ -61,7 +61,8 @@ binding, personal direct-route revalidation at every provider attempt, and
 terminal no-fallback failure, plus exact `aask_done_*` pre-checkpoint staging
 without generic-notification admission, canonical-sent exact-session
 continuity with queue-time causal binding across compatible model changes,
-legacy omission fail-closed behavior, and unresolved outbox retention,
+pre-sent first-attended binding without conversation mutation, legacy omission
+fail-closed behavior, and unresolved outbox retention,
 including bound-only repair before ordinary direct scheduled and Assistant Ask
 continuation turns while unbound ownership stays attended-only,
 are jointly specified by `ARCHITECTURE.md`,

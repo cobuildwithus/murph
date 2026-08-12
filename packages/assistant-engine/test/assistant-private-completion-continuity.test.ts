@@ -9,6 +9,7 @@ import {
   type AssistantOutboxIntent,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -82,10 +83,10 @@ afterEach(async () => {
 })
 
 describe('private completion continuity', () => {
-  it('leaves the ordinary session untouched when delivery authority rejects before provider entry', async () => {
+  it('claims pending unbound ownership without importing before delivery authority', async () => {
     const fixture = await createContinuityFixture('private-continuity-rejected-')
     const pending = await createPrivateCompletionIntent({
-      continuitySessionId: fixture.ordinarySession.sessionId,
+      continuitySessionId: null,
       deliverySession: fixture.ordinarySession,
       vault: fixture.vaultRoot,
     })
@@ -101,6 +102,13 @@ describe('private completion continuity', () => {
       fixture.ordinarySession.sessionId,
     )
     expect(pending.delivery).toBeNull()
+    await expect(readAssistantOutboxIntent(
+      fixture.vaultRoot,
+      pending.intentId,
+    )).resolves.toMatchObject({
+      privateCompletionContinuitySessionId: fixture.ordinarySession.sessionId,
+      status: 'pending',
+    })
     expect(session).toMatchObject({
       codexResume: fixture.nativeResume,
       resumeState: fixture.nativeResume,
@@ -110,6 +118,124 @@ describe('private completion continuity', () => {
       fixture.vaultRoot,
       fixture.ordinarySession.sessionId,
     )).resolves.toEqual([])
+  })
+
+  it.each([
+    'sent',
+    'retryable',
+  ] as const)('claims an unbound completion during active delivery without importing it early and preserves the binding at $expectedStatus', async (expectedStatus) => {
+    const fixture = await createContinuityFixture(
+      'private-continuity-active-delivery-claim-',
+    )
+    const pending = await createPrivateCompletionIntent({
+      completionId: 'aask_done_private_continuity_active_delivery',
+      continuitySessionId: null,
+      deliverySession: fixture.ordinarySession,
+      vault: fixture.vaultRoot,
+    })
+    let markProviderEntered: (() => void) | undefined
+    const providerEntered = new Promise<void>((resolve) => {
+      markProviderEntered = resolve
+    })
+    let releaseProvider: (() => void) | undefined
+    const providerReleased = new Promise<void>((resolve) => {
+      releaseProvider = resolve
+    })
+    const dispatch = dispatchAssistantOutboxIntent({
+      dependencies: {
+        sendLinq: async () => {
+          markProviderEntered?.()
+          await providerReleased
+          if (expectedStatus === 'retryable') {
+            throw new VaultCliError(
+              'ASSISTANT_TEST_RETRYABLE_DELIVERY',
+              'Retry the test delivery.',
+              { retryable: true },
+            )
+          }
+          return {
+            idempotencyKey: pending.deliveryIdempotencyKey,
+            providerMessageId: 'provider_private_continuity_active_delivery',
+            providerThreadId: locator.threadId,
+            target: locator.bindingDeliveryTarget,
+            targetKind: locator.deliveryKind,
+          }
+        },
+      },
+      force: true,
+      intentId: pending.intentId,
+      vault: fixture.vaultRoot,
+    })
+    await providerEntered
+
+    await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
+      sessionId: fixture.ordinarySession.sessionId,
+      vault: fixture.vaultRoot,
+    })
+
+    await expect(readAssistantOutboxIntent(
+      fixture.vaultRoot,
+      pending.intentId,
+    )).resolves.toMatchObject({
+      privateCompletionContinuitySessionId: fixture.ordinarySession.sessionId,
+      status: 'sending',
+    })
+    await expect(getAssistantSession(
+      fixture.vaultRoot,
+      fixture.ordinarySession.sessionId,
+    )).resolves.toMatchObject({
+      codexResume: fixture.nativeResume,
+      resumeState: fixture.nativeResume,
+      turnCount: 0,
+    })
+    await expect(listAssistantTranscriptEntries(
+      fixture.vaultRoot,
+      fixture.ordinarySession.sessionId,
+    )).resolves.toEqual([])
+
+    releaseProvider?.()
+    const delivered = await dispatch
+    expect(delivered.intent).toMatchObject({
+      privateCompletionContinuitySessionId: fixture.ordinarySession.sessionId,
+      status: expectedStatus,
+    })
+    if (expectedStatus === 'retryable') {
+      await expect(getAssistantSession(
+        fixture.vaultRoot,
+        fixture.ordinarySession.sessionId,
+      )).resolves.toMatchObject({
+        codexResume: fixture.nativeResume,
+        resumeState: fixture.nativeResume,
+        turnCount: 0,
+      })
+      await expect(listAssistantTranscriptEntries(
+        fixture.vaultRoot,
+        fixture.ordinarySession.sessionId,
+      )).resolves.toEqual([])
+      return
+    }
+    await persistAssistantPrivateCompletionContinuityAfterDelivery({
+      intent: delivered.intent,
+      vault: fixture.vaultRoot,
+    })
+    await expect(getAssistantSession(
+      fixture.vaultRoot,
+      fixture.ordinarySession.sessionId,
+    )).resolves.toMatchObject({
+      codexResume: null,
+      resumeState: null,
+      turnCount: 1,
+    })
+    await expect(listAssistantTranscriptEntries(
+      fixture.vaultRoot,
+      fixture.ordinarySession.sessionId,
+    )).resolves.toEqual([
+      expect.objectContaining({
+        sourceOutboxIntentId: pending.intentId,
+        text: pending.message,
+      }),
+    ])
   })
 
   it('imports a canonically sent completion exactly once and clears native resume', async () => {
@@ -447,6 +573,12 @@ describe('private completion continuity', () => {
       bound.intentId,
     )).resolves.toMatchObject({
       privateCompletionContinuity: { status: 'applied' },
+    })
+    await expect(readAssistantOutboxIntent(
+      fixture.vaultRoot,
+      unbound.intentId,
+    )).resolves.toMatchObject({
+      privateCompletionContinuitySessionId: null,
     })
     await expect(readAssistantOutboxIntent(
       fixture.vaultRoot,

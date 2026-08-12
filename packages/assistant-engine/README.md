@@ -71,9 +71,10 @@ import the exact reviewed assistant text into the exact ordinary direct session
 returned by the queue-time hosted-default continuity lookup. Compatible model
 or reasoning changes preserve that binding. If no ordinary session existed,
 the intent remains unbound until the first canonical attended direct turn;
-another same-route detached session is never inferred as the owner. The import
-advances that session once and clears its
-stale native provider-resume aliases. The outbox intent journals an interrupted
+another same-route detached session is never inferred as the owner. That turn
+may bind its exact session before delivery finishes, but transcript import,
+session advancement, and stale native provider-resume clearing remain gated on
+canonical delivery. The outbox intent journals an interrupted
 import, and nested hosted direct route plus accepted assistant-input authority
 repairs it before provider-resume selection even for text-only payloads.
 An ordinary direct scheduled occurrence also repairs an exact session-bound

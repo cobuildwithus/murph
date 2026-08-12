@@ -126,7 +126,7 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
       })
       return current
     }
-    const baseIntent = input.intent
+    const baseIntent = current ?? input.intent
     const pendingIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,
@@ -271,10 +271,17 @@ export async function markAssistantOutboxIntentSent(input: {
       return current
     }
 
-    const baseIntent =
-      input.preserveCurrentDispatchMetadata === false
-        ? input.intent
-        : current ?? input.intent
+    const baseIntent = input.preserveCurrentDispatchMetadata === false
+      ? {
+          ...input.intent,
+          ...(current?.privateCompletionContinuitySessionId === undefined
+            ? {}
+            : {
+                privateCompletionContinuitySessionId:
+                  current.privateCompletionContinuitySessionId,
+              }),
+        }
+      : current ?? input.intent
     const sentIntent = assistantOutboxIntentSchema.parse(
       sanitizeAssistantOutboxIntentForPersistence({
         ...baseIntent,

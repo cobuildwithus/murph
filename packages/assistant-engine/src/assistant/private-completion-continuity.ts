@@ -51,7 +51,26 @@ export async function reconcileAssistantPrivateCompletionContinuityForSession(
 
     const intents = await listAssistantOutboxIntentsLocal(input.vault)
     const initialSession = session
-    const candidates = intents
+    const boundIntents: AssistantOutboxIntent[] = []
+    for (const intent of intents) {
+      if (!assistantPrivateCompletionCanBindToSession({
+        allowUnbound: input.allowUnbound,
+        intent,
+        session: initialSession,
+      })) {
+        boundIntents.push(intent)
+        continue
+      }
+      boundIntents.push(await writeAssistantPrivateCompletionIntent({
+        intent: {
+          ...intent,
+          privateCompletionContinuitySessionId: initialSession.sessionId,
+          updatedAt: new Date().toISOString(),
+        },
+        paths,
+      }))
+    }
+    const candidates = boundIntents
       .flatMap((intent) => {
         if (
           !assistantPrivateCompletionCanJoinSession({
@@ -83,6 +102,23 @@ export async function reconcileAssistantPrivateCompletionContinuityForSession(
     }
     return session
   })
+}
+
+function assistantPrivateCompletionCanBindToSession(input: {
+  allowUnbound: boolean
+  intent: AssistantOutboxIntent
+  session: AssistantSession
+}): boolean {
+  return input.allowUnbound
+    && input.intent.privateCompletionContinuitySessionId === null
+    && input.intent.privateCompletionContinuity === undefined
+    && (
+      input.intent.status === 'pending'
+      || input.intent.status === 'sending'
+      || input.intent.status === 'retryable'
+    )
+    && isCurrentPrivateAssistantAskCompletion(input.intent)
+    && assistantPrivateCompletionRouteMatchesSession(input.intent, input.session)
 }
 
 /**
@@ -261,6 +297,9 @@ function assistantPrivateCompletionCanJoinSession(input: {
 function isDeliveredPrivateAssistantAskCompletion(
   intent: AssistantOutboxIntent,
 ): boolean {
+  if (!isCurrentPrivateAssistantAskCompletion(intent)) {
+    return false
+  }
   const completionId = intent.answeredMailboxItemIds.length === 1
     ? normalizeNullableString(intent.answeredMailboxItemIds[0])
     : null
@@ -268,12 +307,36 @@ function isDeliveredPrivateAssistantAskCompletion(
     ? createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(completionId)
     : null
   const delivery = intent.delivery
+  const bindingDelivery = intent.bindingDelivery
+  if (!bindingDelivery) {
+    return false
+  }
+  return (
+    intent.status === 'sent'
+    && delivery !== null
+    && delivery.kind !== 'message-reaction'
+    && delivery.idempotencyKey === deliveryKey
+    && delivery.channel === intent.channel
+    && delivery.messageLength === intent.message.length
+    && delivery.target === bindingDelivery.target
+    && delivery.targetKind === bindingDelivery.kind
+  )
+}
+
+function isCurrentPrivateAssistantAskCompletion(
+  intent: AssistantOutboxIntent,
+): boolean {
+  const completionId = intent.answeredMailboxItemIds.length === 1
+    ? normalizeNullableString(intent.answeredMailboxItemIds[0])
+    : null
+  const deliveryKey = completionId
+    ? createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(completionId)
+    : null
   const expiresAt = normalizeNullableString(
     intent.reviewedAssistantAskCompletionExpiresAt,
   )
   return (
     completionId !== null
-    && intent.status === 'sent'
     && intent.answeredMailboxItemIds[0] === completionId
     && [...completionId].length <= 256
     && deliveryKey !== null
@@ -291,13 +354,6 @@ function isDeliveredPrivateAssistantAskCompletion(
     && intent.subject === null
     && intent.externalThreadRouteAuthority == null
     && intent.automationAuthority == null
-    && delivery !== null
-    && delivery.kind !== 'message-reaction'
-    && delivery.idempotencyKey === deliveryKey
-    && delivery.channel === intent.channel
-    && delivery.messageLength === intent.message.length
-    && delivery.target === intent.bindingDelivery.target
-    && delivery.targetKind === intent.bindingDelivery.kind
   )
 }
 

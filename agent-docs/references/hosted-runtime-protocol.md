@@ -676,7 +676,10 @@ existing ordinary direct session, the intent binds the exact ID returned by the
 hosted-default continuity lookup before the notification target is projected
 read-only. Supported model or reasoning changes do not erase that causal
 binding; only fallback resolution without an ordinary session stays unbound
-until the first attended direct turn. An omitted binding identifies a
+until the first attended direct turn. If that turn starts before delivery
+finishes, it atomically binds the current intent to its exact session without
+importing text, advancing the turn count, or clearing resume state; those
+effects remain gated on canonical `sent`. An omitted binding identifies a
 pre-rollout intent and fails closed; only an explicit current-writer null may
 wait for that first session. No route-sibling heuristic may choose the owner.
 A canonically sent field-present obligation is exempt from ordinary terminal outbox
