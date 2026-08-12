@@ -3704,6 +3704,14 @@
           "minLength": 1,
           "maxLength": 120
         },
+        "reportedGender": {
+          "type": "string",
+          "enum": [
+            "female",
+            "male",
+            "other"
+          ]
+        },
         "authoredAt": {
           "type": "string",
           "format": "date-time"

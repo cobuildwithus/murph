@@ -49,6 +49,7 @@ import {
   JUNCTION_SLEEP_HRV_PATHS,
   JUNCTION_SLEEP_LIGHT_MINUTE_PATHS,
   JUNCTION_SLEEP_LIGHT_SECOND_PATHS,
+  JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
   JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,
   JUNCTION_SLEEP_PERFORMANCE_PATHS,
   JUNCTION_SLEEP_REM_MINUTE_PATHS,
@@ -190,6 +191,7 @@ interface MetricDescriptor {
   unit: string;
   title: string;
   paths: readonly string[];
+  nonnegative?: boolean;
   value?: (entry: PlainObject) => unknown;
   metersPaths?: readonly string[];
   percentRatioPaths?: readonly string[];
@@ -262,8 +264,14 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "percent-recorded", unit: "%", title: "Junction activity recording coverage", paths: [], percentRatioPaths: ["percentRecorded", "percent_recorded", "recordingCoverage", "recording_coverage", "recordedRatio", "recorded_ratio", "percentRecordedRatio", "percent_recorded_ratio"] },
   { metric: "workout-strain", unit: "score", title: "Junction workout strain", paths: ["workoutStrain", "workout_strain"] },
   { metric: "day-strain", unit: "score", title: "Junction day strain", paths: ["dayStrain", "day_strain", "strain"] },
-  { metric: "max-heart-rate", unit: "bpm", title: "Junction activity max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr", "heart_rate.max_bpm"] },
-  { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"] },
+  { metric: "average-heart-rate", unit: "bpm", title: "Junction activity average heart rate", paths: ["averageHeartRate", "average_heart_rate", "average_hr", "avg_hr", "heart_rate.avg_bpm"], nonnegative: true },
+  { metric: "walking-average-heart-rate", unit: "bpm", title: "Junction activity walking average heart rate", paths: ["walkingAverageHeartRate", "walking_average_heart_rate", "walking_average_hr", "heart_rate.avg_walking_bpm"], nonnegative: true },
+  { metric: "max-heart-rate", unit: "bpm", title: "Junction activity max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr", "heart_rate.max_bpm"], nonnegative: true },
+  { metric: "minimum-heart-rate", unit: "bpm", title: "Junction activity minimum heart rate", paths: ["minimumHeartRate", "minimum_heart_rate", "minimum_hr", "min_hr", "heart_rate.min_bpm"], nonnegative: true },
+  { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"], nonnegative: true },
+  { metric: "low-activity-minutes", unit: "minutes", title: "Junction low-intensity activity", paths: [], value: (entry) => resolveJunctionActivityBucketMinutes(entry, "low") },
+  { metric: "medium-activity-minutes", unit: "minutes", title: "Junction medium-intensity activity", paths: [], value: (entry) => resolveJunctionActivityBucketMinutes(entry, "medium") },
+  { metric: "high-activity-minutes", unit: "minutes", title: "Junction high-intensity activity", paths: [], value: (entry) => resolveJunctionActivityBucketMinutes(entry, "high") },
 ];
 
 const BODY_METRICS: readonly MetricDescriptor[] = [
@@ -289,6 +297,7 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "sleep-light-minutes", unit: "minutes", title: "Junction light sleep", paths: JUNCTION_SLEEP_LIGHT_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_LIGHT_SECOND_PATHS },
   { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: JUNCTION_SLEEP_AWAKE_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_AWAKE_SECOND_PATHS },
   { metric: "time-in-bed-minutes", unit: "minutes", title: "Junction time in bed", paths: JUNCTION_SLEEP_TIME_IN_BED_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS },
+  { metric: "sleep-latency-minutes", unit: "minutes", title: "Junction sleep latency", paths: [], secondsPaths: JUNCTION_SLEEP_LATENCY_SECOND_PATHS, nonnegative: true },
   { metric: "sleep-efficiency", unit: "%", title: "Junction sleep efficiency", paths: [], percentRatioPaths: JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS },
   { metric: "sleep-consistency", unit: "%", title: "Junction sleep consistency", paths: JUNCTION_SLEEP_CONSISTENCY_PATHS },
   { metric: "sleep-performance", unit: "%", title: "Junction sleep performance", paths: JUNCTION_SLEEP_PERFORMANCE_PATHS },
@@ -3651,9 +3660,10 @@ const JUNCTION_PROFILE_BIRTH_DATE_PATHS = [
   "date_of_birth",
   "dob",
 ] as const;
+const JUNCTION_PROFILE_GENDER_PATHS = ["gender"] as const;
 // `gender` is deliberately not a fallback: Junction documents it as a
-// distinct enum from biological sex and the note segment is labeled
-// "Biological sex", so a gender value here would be mislabeled.
+// distinct enum from biological sex, so each lands under its own label and
+// the reported gender also receives its own typed canonical field.
 const JUNCTION_PROFILE_SEX_PATHS = [
   "sex",
   "biologicalSex",
@@ -3701,10 +3711,12 @@ function pushProfileSummary(
   }
 
   const birthDate = firstIsoDateFromPaths(entry, JUNCTION_PROFILE_BIRTH_DATE_PATHS);
+  const reportedGender = readJunctionProfileGender(entry);
   const sex = readJunctionProfileSex(entry);
   const wheelchairUse = firstValueFromPaths(entry, ["wheelchairUse", "wheelchair_use"]);
   const segments = [
     birthDate ? `Birth date: ${birthDate}.` : undefined,
+    reportedGender ? `Reported gender: ${reportedGender}.` : undefined,
     sex ? `Biological sex: ${sex}.` : undefined,
     typeof wheelchairUse === "boolean" ? `Wheelchair use: ${wheelchairUse ? "yes" : "no"}.` : undefined,
   ].filter((segment): segment is string => segment !== undefined);
@@ -3724,7 +3736,15 @@ function pushProfileSummary(
     evidenceRoles: resourceContext.evidenceRoles,
     externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "profile-demographics"),
     dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+    fields: reportedGender ? { reportedGender } : undefined,
   }));
+}
+
+function readJunctionProfileGender(entry: PlainObject): "female" | "male" | "other" | undefined {
+  const value = firstStringFromPaths(entry, JUNCTION_PROFILE_GENDER_PATHS)?.trim().toLowerCase();
+  return value === "female" || value === "male" || value === "other"
+    ? value
+    : undefined;
 }
 
 function readJunctionProfileSex(entry: PlainObject): string | undefined {
@@ -3879,6 +3899,98 @@ function pushMenstrualCycleSummary(
     }
   }
 
+  for (const sub of junctionDatedSubEntries(entry, ["cervicalMucus", "cervical_mucus"])) {
+    const quality = boundedCycleLabel(firstStringFromPaths(sub.entry, ["quality"]));
+    if (!quality) {
+      continue;
+    }
+
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `cervical-mucus-${trimSlugToLength(slugify(quality, "quality"), 80)}-${sub.date}`,
+      measurement: {
+        metric: "cervical-mucus",
+        value: 1,
+        unit: "observation",
+        qualifiers: { quality },
+      },
+      title: "Junction cervical mucus",
+    });
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["intermenstrualBleeding", "intermenstrual_bleeding"])) {
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `intermenstrual-bleeding-${sub.date}`,
+      measurement: {
+        metric: "intermenstrual-bleeding",
+        value: 1,
+        unit: "event",
+        qualifiers: { bleeding: "intermenstrual" },
+      },
+      title: "Junction intermenstrual bleeding",
+    });
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["homeProgesteroneTest", "home_progesterone_test"])) {
+    const result = boundedCycleLabel(firstStringFromPaths(sub.entry, ["testResult", "test_result"]));
+    const value = result ? JUNCTION_FERTILITY_TEST_RESULT_VALUES[result] : undefined;
+    if (!result || value === undefined) {
+      continue;
+    }
+
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `progesterone-test-${trimSlugToLength(slugify(result, "result"), 80)}-${sub.date}`,
+      measurement: {
+        metric: "progesterone-test",
+        value,
+        unit: "result",
+        qualifiers: { result },
+      },
+      title: "Junction progesterone test",
+    });
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["contraceptive"])) {
+    const type = boundedCycleLabel(firstStringFromPaths(sub.entry, ["type"]));
+    if (!type || type === "unspecified") {
+      continue;
+    }
+
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `contraceptive-${trimSlugToLength(slugify(type, "type"), 80)}-${sub.date}`,
+      measurement: {
+        metric: "contraceptive-use",
+        value: 1,
+        unit: "event",
+        qualifiers: { type },
+      },
+      title: "Junction contraceptive use",
+    });
+  }
+
+  for (const sub of junctionDatedSubEntries(entry, ["sexualActivity", "sexual_activity"])) {
+    const protectionUsed = firstValueFromPaths(sub.entry, ["protectionUsed", "protection_used"]);
+    const protectionFacet = typeof protectionUsed === "boolean"
+      ? (protectionUsed ? "protected" : "unprotected")
+      : "unspecified";
+    pushJunctionCycleDailyMeasurement(entry, resourceContext, context, baseTimestamp, {
+      date: sub.date,
+      facet: `sexual-activity-${protectionFacet}-${sub.date}`,
+      measurement: {
+        metric: "sexual-activity",
+        value: 1,
+        unit: "event",
+        qualifiers: typeof protectionUsed === "boolean"
+          ? { "protection-used": protectionUsed }
+          : {},
+      },
+      title: "Junction sexual activity",
+    });
+  }
+
   for (const sub of junctionDatedSubEntries(entry, ["detectedDeviations", "detected_deviations"])) {
     const deviation = firstStringFromPaths(sub.entry, ["deviation"]);
     if (!deviation) {
@@ -3930,7 +4042,7 @@ function pushJunctionCycleDailyMeasurement(
       metric: string;
       value: number;
       unit: string;
-      qualifiers: Record<string, string>;
+      qualifiers: Record<string, string | boolean>;
     };
     title: string;
   },
@@ -3951,6 +4063,15 @@ function pushJunctionCycleDailyMeasurement(
       measurements: [input.measurement],
     },
   }));
+}
+
+function boundedCycleLabel(value: string | undefined): string | undefined {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || normalized === "unknown") {
+    return undefined;
+  }
+
+  return trimToLength(normalized, 80);
 }
 
 function junctionDateOnlyTimestamp(
@@ -4706,12 +4827,12 @@ function resolveMetricDescriptorValue(
   metric: MetricDescriptor,
 ): { value: number; unit: string } | null {
   const computedValue = metric.value ? finiteNumber(metric.value(entry)) : undefined;
-  if (computedValue !== undefined) {
+  if (computedValue !== undefined && (!metric.nonnegative || computedValue >= 0)) {
     return { value: computedValue, unit: metric.unit };
   }
 
   const directValue = firstNumberFromPaths(entry, metric.paths);
-  if (directValue !== undefined) {
+  if (directValue !== undefined && (!metric.nonnegative || directValue >= 0)) {
     return {
       value: directValue,
       unit: firstStringFromPaths(entry, ["unit"]) ?? metric.unit,
@@ -4719,7 +4840,7 @@ function resolveMetricDescriptorValue(
   }
 
   const secondsValue = secondsToMinutes(firstNumberFromPaths(entry, metric.secondsPaths ?? []));
-  if (secondsValue !== undefined) {
+  if (secondsValue !== undefined && (!metric.nonnegative || secondsValue >= 0)) {
     return { value: secondsValue, unit: metric.unit };
   }
 
@@ -4737,20 +4858,17 @@ function resolveMetricDescriptorValue(
 }
 
 function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undefined {
-  // Get Summary reports these buckets in minutes and `daily_movement` as
-  // deprecated equivalent-walking meters. Sense's `*_second` query columns
-  // are a separate normalized representation, not summary payload aliases.
-  const lowActivityMinutes = firstNumberFromPaths(entry, ["low"]);
-  const mediumActivityMinutes = firstNumberFromPaths(entry, ["medium"]);
-  const highActivityMinutes = firstNumberFromPaths(entry, ["high"]);
+  // Junction activity summary intensity buckets are seconds. Keeping the
+  // conversion here shared with the individual bucket metrics prevents the
+  // aggregate from silently inflating a day by 60x.
+  const lowActivityMinutes = resolveJunctionActivityBucketMinutes(entry, "low");
+  const mediumActivityMinutes = resolveJunctionActivityBucketMinutes(entry, "medium");
+  const highActivityMinutes = resolveJunctionActivityBucketMinutes(entry, "high");
 
   if (
     lowActivityMinutes === undefined
     || mediumActivityMinutes === undefined
     || highActivityMinutes === undefined
-    || lowActivityMinutes < 0
-    || mediumActivityMinutes < 0
-    || highActivityMinutes < 0
   ) {
     return undefined;
   }
@@ -4760,6 +4878,16 @@ function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undef
 
   return totalActivityMinutes <= 24 * 60
     ? totalActivityMinutes
+    : undefined;
+}
+
+function resolveJunctionActivityBucketMinutes(
+  entry: PlainObject,
+  bucket: "low" | "medium" | "high",
+): number | undefined {
+  const seconds = firstNumberFromPaths(entry, [bucket]);
+  return seconds !== undefined && seconds >= 0 && seconds <= 24 * 60 * 60
+    ? seconds / 60
     : undefined;
 }
 

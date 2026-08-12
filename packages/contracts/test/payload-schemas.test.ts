@@ -327,20 +327,26 @@ test("event JSONL row payload schemas match public write kinds and reject explic
     },
   };
   assert.equal(safeParseContract(symptomSchema, validSymptom).success, true);
+  const validNote = {
+    kind: "note",
+    occurredAt: "2026-03-12T11:15:00.000Z",
+    title: "Experiment context",
+    note: "Started evening protocol.",
+    experimentSlug: "evening-protocol",
+    externalRef: {
+      system: "manual-import",
+      resourceType: "note",
+      resourceId: "note-2026-03-12",
+    },
+  };
+  assert.equal(safeParseContract(noteSchema, validNote).success, true);
   assert.equal(
-    safeParseContract(noteSchema, {
-      kind: "note",
-      occurredAt: "2026-03-12T11:15:00.000Z",
-      title: "Experiment context",
-      note: "Started evening protocol.",
-      experimentSlug: "evening-protocol",
-      externalRef: {
-        system: "manual-import",
-        resourceType: "note",
-        resourceId: "note-2026-03-12",
-      },
-    }).success,
+    safeParseContract(noteSchema, { ...validNote, reportedGender: "other" }).success,
     true,
+  );
+  assert.equal(
+    safeParseContract(noteSchema, { ...validNote, reportedGender: "unknown" }).success,
+    false,
   );
   assert.equal(
     safeParseContract(clinicalAssertionSchema, {
