@@ -3366,6 +3366,7 @@ test("Junction normalizer compacts dense CGM glucose timeseries into daily mean/
 test("Junction normalizer preserves official point and interval timeseries shapes without raw samples", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-23T12:00:00.000Z",
+    timeseriesWindowKind: "calendar_day",
     timeseries: {
       glucose: {
         groups: {
@@ -3449,6 +3450,7 @@ test("Junction normalizer preserves official point and interval timeseries shape
     );
 
   assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(payload.provenance?.timeseriesWindowKind, "calendar_day");
   assert.equal(dailyValue("glucose"), 99.1001);
   assert.equal(dailyValue("spo2"), 97.5);
   assert.equal(dailyValue("stress-level"), 72);
@@ -3521,6 +3523,47 @@ test("Junction normalizer preserves official point and interval timeseries shape
   }
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
+});
+
+test("Junction precise sparse windows retain intervals without publishing partial daily sums", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T10:00:00.000Z",
+    timeseriesWindowKind: "precise",
+    windowStart: "2026-04-22T08:00:00.000Z",
+    windowEnd: "2026-04-22T10:00:00.000Z",
+    timeseries: {
+      water: {
+        groups: {
+          apple_health_kit: [{
+            data: [{
+              id: "water-record-precise-1",
+              start: "2026-04-22T09:00:00.000Z",
+              end: "2026-04-22T09:01:00.000Z",
+              unit: "mL",
+              value: 250,
+            }],
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
+    },
+  });
+
+  const waterEvents = (payload.events ?? []).filter((event) =>
+    readJunctionEventMeasurements(event).some((measurement) => measurement.metric === "water")
+  );
+  assert.equal(payload.provenance?.timeseriesWindowKind, "precise");
+  assert.equal(waterEvents.length, 1);
+  assert.equal(waterEvents[0]?.kind, "measurement");
+  assert.equal(
+    payload.events?.some((event) =>
+      event.kind === "observation" && event.fields?.metric === "water"
+    ),
+    false,
+  );
+  assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "water").length, 0);
+  assert.equal(findJunctionIntervalReadingArtifacts(payload, "water").length, 1);
+  assertNoFullJunctionTimeseriesArtifacts(payload);
 });
 
 test("Junction glucose fidelity distinguishes equal daily mean/min/max days with different shape", () => {

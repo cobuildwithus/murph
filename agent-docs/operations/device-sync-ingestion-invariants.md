@@ -145,9 +145,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    `glucose`, `blood_oxygen`, and `stress_level` reconcile and direct-resource
    jobs both use closed provider-calendar-date imports; a precise window must
    not publish a partial day under the daily fact or 24-hour feature identity.
+   A provider calendar date becomes publishable only after it has closed at
+   UTC-12, so UTC midnight cannot freeze a partial negative-offset source day.
    Sparse `caffeine`, `water`, and `mindfulness_minutes` direct-resource jobs
    retain precise windows because each admitted interval has its own exact-start
-   identity. For all six resources, an explicit provider revision belongs to
+   identity, but those precise snapshots emit intervals only. The calendar-day
+   path is the sole writer of their daily sums, so a growing precise set cannot
+   create an immutable partial aggregate or block a later interval. For all six
+   resources, an explicit provider revision belongs to
    both the existing daily fact and its feature or interval companion. One
    versioned record may supersede a pre-versioning baseline; after that, only a
    strictly newer revision may change either fact, while stale replay is a no-op

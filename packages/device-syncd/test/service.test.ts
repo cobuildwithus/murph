@@ -778,7 +778,7 @@ test("local shared-Junction target starts preserve established siblings through 
 });
 
 test("local Junction workers exclude a disconnected source from production-normalized evidence", async () => {
-  const now = new Date("2026-07-28T10:00:00.000Z");
+  const now = new Date("2026-07-28T12:00:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-source-admission");
   const importerInputs: unknown[] = [];
   const importerResults: unknown[] = [];

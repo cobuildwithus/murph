@@ -140,11 +140,14 @@ export interface JunctionSnapshotInput {
   importedAt?: string | number | Date;
   windowStart?: string | number | Date;
   windowEnd?: string | number | Date;
+  timeseriesWindowKind?: JunctionTimeseriesWindowKind;
   connections?: unknown[];
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
   companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry;
 }
+
+export type JunctionTimeseriesWindowKind = "calendar_day" | "precise";
 
 export type JunctionSummaryResource =
   (typeof JUNCTION_ALLOWED_SUMMARY_RESOURCES)[number];
@@ -187,6 +190,7 @@ interface NormalizationContext {
   importedAt?: string;
   windowStart?: string;
   windowEnd?: string;
+  timeseriesWindowKind?: JunctionTimeseriesWindowKind;
   connectionsByKey: ReadonlyMap<string, PlainObject>;
   evidenceParts: DeviceEvidencePartPayload[];
   events: DeviceEventPayload[];
@@ -219,6 +223,7 @@ const junctionSnapshotSchema = z.object({
   importedAt: z.union([z.string(), z.number(), z.date()]).optional(),
   windowStart: z.union([z.string(), z.number(), z.date()]).optional(),
   windowEnd: z.union([z.string(), z.number(), z.date()]).optional(),
+  timeseriesWindowKind: z.enum(["calendar_day", "precise"]).optional(),
   connections: z.array(z.unknown()).optional(),
   summaries: z.record(z.string(), z.unknown()).optional(),
   timeseries: z.record(z.string(), z.unknown()).optional(),
@@ -978,6 +983,7 @@ export function normalizeJunctionSnapshot(
     importedAt,
     windowStart,
     windowEnd,
+    timeseriesWindowKind: snapshot.timeseriesWindowKind,
     connectionsByKey: buildConnectionsByKey(connections),
     evidenceParts,
     events,
@@ -1004,6 +1010,7 @@ export function normalizeJunctionSnapshot(
       normalizerVersion: "junction-normalizer.v1",
       windowStart,
       windowEnd,
+      timeseriesWindowKind: snapshot.timeseriesWindowKind,
       connections: connections.length,
       summaryResources: listAllowedResourceKeys(snapshot.summaries, SUMMARY_RESOURCE_ALLOWLIST),
       timeseriesResources: listAllowedResourceKeys(snapshot.timeseries, TIMESERIES_RESOURCE_ALLOWLIST),
@@ -1664,14 +1671,19 @@ function normalizeTimeseries(
           descriptor,
         );
       }
-      pushJunctionDailyTimeseriesObservations(
-        payload,
-        resource,
-        slugify(resource, "timeseries"),
-        context,
-        descriptor,
-        selectedSparseRecords,
-      );
+      if (
+        !isJunctionSparseIntervalResource(resource)
+        || context.timeseriesWindowKind !== "precise"
+      ) {
+        pushJunctionDailyTimeseriesObservations(
+          payload,
+          resource,
+          slugify(resource, "timeseries"),
+          context,
+          descriptor,
+          selectedSparseRecords,
+        );
+      }
     }
   }
 }

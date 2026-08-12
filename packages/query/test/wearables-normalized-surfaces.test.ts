@@ -834,6 +834,124 @@ test("Junction timed and derived timeseries facts survive core replay and remain
   }
 });
 
+test("Junction sparse precise growth stays queryable before one closed-day sum is published", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-sparse-window-ownership-"));
+  const waterRecord = (id: string, start: string, value = 250) => ({
+    id,
+    start,
+    end: new Date(Date.parse(start) + 60_000).toISOString(),
+    unit: "mL",
+    value,
+  });
+  const firstRecord = waterRecord("water-record-a", "2026-04-22T09:00:00.000Z");
+  const secondRecord = waterRecord("water-record-b", "2026-04-22T10:00:00.000Z");
+  const snapshotFor = (
+    records: readonly ReturnType<typeof waterRecord>[],
+    timeseriesWindowKind: "calendar_day" | "precise",
+    importedAt: string,
+  ) => ({
+    accountId: "junction-account-sparse-window-ownership",
+    importedAt,
+    timeseriesWindowKind,
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: timeseriesWindowKind === "calendar_day"
+      ? "2026-04-23T00:00:00.000Z"
+      : importedAt,
+    timeseries: {
+      water: {
+        groups: {
+          apple_health_kit: [{
+            data: records,
+            source: { provider: "apple_health_kit", type: "phone" },
+          }],
+        },
+      },
+    },
+  });
+  const importSnapshot = (snapshot: ReturnType<typeof snapshotFor>) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", snapshot, vaultRoot },
+      { corePort: coreRuntime },
+    );
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-22T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+
+    await importSnapshot(snapshotFor([firstRecord], "precise", "2026-04-22T09:30:00.000Z"));
+    await importSnapshot(snapshotFor(
+      [firstRecord, secondRecord],
+      "precise",
+      "2026-04-22T10:30:00.000Z",
+    ));
+
+    const precisePoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "water",
+    });
+    assert.deepEqual(
+      precisePoints
+        .filter((point) => point.source.kind === "measurement")
+        .map((point) => point.observedAt)
+        .sort(),
+      ["2026-04-22T09:00:00.000Z", "2026-04-22T10:00:00.000Z"],
+    );
+    assert.equal(
+      precisePoints.some((point) => point.source.kind === "observation"),
+      false,
+    );
+
+    await importSnapshot(snapshotFor(
+      [firstRecord, secondRecord],
+      "calendar_day",
+      "2026-04-23T00:00:00.000Z",
+    ));
+    const closedDayPoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "water",
+    });
+    assert.equal(
+      closedDayPoints.filter((point) => point.source.kind === "measurement").length,
+      2,
+    );
+    assert.equal(
+      closedDayPoints.find((point) => point.source.kind === "observation")?.value,
+      500,
+    );
+
+    await assert.rejects(
+      () => importSnapshot(snapshotFor(
+        [waterRecord("water-record-b", "2026-04-22T10:00:00.000Z", 300)],
+        "precise",
+        "2026-04-22T11:00:00.000Z",
+      )),
+      (error: unknown) =>
+        coreRuntime.isVaultError(error)
+        && error.code === "EVENT_IMMUTABLE_EXTERNAL_REF_CONFLICT",
+    );
+    const afterConflictPoints = await listMetricPointsRuntime(vaultRoot, {
+      limit: null,
+      metricKey: "water",
+    });
+    assert.equal(
+      afterConflictPoints.find((point) =>
+        point.source.kind === "measurement"
+        && point.observedAt === "2026-04-22T10:00:00.000Z"
+      )?.value,
+      250,
+    );
+    assert.equal(
+      afterConflictPoints.find((point) => point.source.kind === "observation")?.value,
+      500,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("latest surface sees Junction Garmin object data envelopes as usable summaries", () => {
   const vault = makeVaultFromJunctionSnapshot({
     importedAt: "2026-05-20T12:00:00.000Z",

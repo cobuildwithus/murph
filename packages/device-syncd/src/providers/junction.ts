@@ -342,12 +342,22 @@ const JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET = new Set<string>(
 const JUNCTION_DENSE_FIDELITY_RESOURCE_SET = new Set<string>(
   JUNCTION_DENSE_FIDELITY_RESOURCES,
 );
+const JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET = new Set<string>([
+  ...JUNCTION_DENSE_FIDELITY_RESOURCES,
+  "caffeine",
+  "water",
+  "mindfulness_minutes",
+]);
 const DEFAULT_RECONCILE_DAYS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = JUNCTION_DEVICE_PROVIDER_DESCRIPTOR.sync.windows.reconcileIntervalMs;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_SETUP_TTL_MS = 30 * 60_000;
 const DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 const TIMESERIES_CHUNK_MS = 24 * 60 * 60_000;
+// A date-only provider query can contain source-local records from UTC-12.
+// Delay calendar-day ownership until that date has closed in every admitted
+// civil offset instead of treating UTC midnight as globally complete.
+const JUNCTION_PROVIDER_CALENDAR_DAY_CLOSE_LAG_MS = 12 * 60 * 60_000;
 const JUNCTION_MAX_DIAGNOSTIC_TIMESERIES_PROBE_DAYS = 14;
 const JUNCTION_DIAGNOSTIC_SHAPE_KEY_LIMIT = 24;
 const JUNCTION_DIAGNOSTIC_RESOURCE_NAME_LIMIT = 64;
@@ -1122,7 +1132,12 @@ export function createJunctionDeviceSyncProvider(
       jobTimeseriesResources.length > 0
       && (
         job.kind === "backfill"
-        || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, window.windowEnd)
+        || shouldImportClosedTimeseriesForReconcile(
+          context.account.lastSyncCompletedAt,
+          window.windowEnd,
+          context.now,
+          jobTimeseriesResources,
+        )
       )
     ) {
       const timeseriesImport = await importTimeseriesDailySnapshots(
@@ -2864,6 +2879,7 @@ export function createJunctionDeviceSyncProvider(
             importedAt: executionWindowEnd,
             windowStart: executionWindowStart,
             windowEnd: executionWindowEnd,
+            timeseriesWindowKind: "precise",
             connections: preparedImport.connections,
             summaries: {},
             timeseries: preparedImport.snapshots,
@@ -2944,18 +2960,28 @@ export function createJunctionDeviceSyncProvider(
     resources?: readonly string[],
     sourceProviderSlug?: string | null,
   ): Promise<JunctionTimeseriesImportResult> {
+    const requestedResources = resources ?? timeseriesResources;
+    const globallyClosedEndMs = resolveGloballyClosedProviderDayEnd(windowEnd, context.now);
     for (const window of buildClosedDailyWindows(windowStart, windowEnd)) {
       if (context.shouldYield?.()) {
         return {
           yieldedAt: window.windowStart,
         };
       }
+      const windowResources = Date.parse(window.windowEnd) <= globallyClosedEndMs
+        ? requestedResources
+        : requestedResources.filter(
+            (resource) => !JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource),
+          );
+      if (windowResources.length === 0) {
+        continue;
+      }
       const timeseries = await fetchTimeseriesSnapshots(
         context,
         window.windowStart,
         window.windowEnd,
         skippedOptionalResources,
-        resources,
+        windowResources,
         sourceProviderSlug,
         { dateQueryFormat: "date" },
       );
@@ -2976,6 +3002,7 @@ export function createJunctionDeviceSyncProvider(
           importedAt: window.windowEnd,
           windowStart: window.windowStart,
           windowEnd: window.windowEnd,
+          timeseriesWindowKind: "calendar_day",
           connections: preparedImport.connections,
           summaries: {},
           timeseries: preparedImport.snapshots,
@@ -5456,15 +5483,40 @@ function isFullUtcDayWindow(window: { windowStart: string; windowEnd: string }):
 function shouldImportClosedTimeseriesForReconcile(
   lastSyncCompletedAt: string | null | undefined,
   windowEnd: string,
+  now: string,
+  resources: readonly string[],
 ): boolean {
   if (!lastSyncCompletedAt) {
     return true;
   }
+  const hasOrdinaryDailyResources = resources.some(
+    (resource) => !JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource),
+  );
   const lastCompletedClosedDayMs = Date.parse(floorUtcDayTimestamp(lastSyncCompletedAt));
   const windowEndMs = Date.parse(windowEnd);
-  return !Number.isFinite(lastCompletedClosedDayMs)
-    || !Number.isFinite(windowEndMs)
-    || lastCompletedClosedDayMs < windowEndMs;
+  if (
+    hasOrdinaryDailyResources
+    && (
+      !Number.isFinite(lastCompletedClosedDayMs)
+      || !Number.isFinite(windowEndMs)
+      || lastCompletedClosedDayMs < windowEndMs
+    )
+  ) {
+    return true;
+  }
+  if (
+    !resources.some((resource) => JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource))
+  ) {
+    return false;
+  }
+  const previousClosedEndMs = resolveGloballyClosedProviderDayEnd(
+    windowEnd,
+    lastSyncCompletedAt,
+  );
+  const currentClosedEndMs = resolveGloballyClosedProviderDayEnd(windowEnd, now);
+  return !Number.isFinite(previousClosedEndMs)
+    || !Number.isFinite(currentClosedEndMs)
+    || previousClosedEndMs < currentClosedEndMs;
 }
 
 function buildClosedDailyWindows(
@@ -5504,6 +5556,21 @@ function buildClosedDailyWindows(
   }
 
   return windows;
+}
+
+function resolveGloballyClosedProviderDayEnd(windowEnd: string, asOf: string): number {
+  const requestedClosedEndMs = Date.parse(floorUtcDayTimestamp(windowEnd));
+  const asOfMs = Date.parse(asOf);
+  if (!Number.isFinite(requestedClosedEndMs) || !Number.isFinite(asOfMs)) {
+    return Number.NaN;
+  }
+
+  const globallyClosedEndMs = Date.parse(
+    floorUtcDayTimestamp(
+      new Date(asOfMs - JUNCTION_PROVIDER_CALENDAR_DAY_CLOSE_LAG_MS).toISOString(),
+    ),
+  );
+  return Math.min(requestedClosedEndMs, globallyClosedEndMs);
 }
 
 function buildPreciseTimeseriesWindows(
