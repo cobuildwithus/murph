@@ -232,7 +232,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // history and provider additions extend existing lazy outputs without adding a
 // forbidden boot input. Exact merged local assembly measured 9,808,583B total
 // on 2026-08-11, so ratchet the total only and retain the 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_808_583 + 32_768;
+// Stacking complete Junction summaries with bounded workout features extends
+// only the existing deferred device-sync, importer, and hosted dirty-handoff
+// chunks. Exact ubuntu CI assembly measured 9,873,230B total and exact macOS
+// assembly measured 9,920,711B total on 2026-08-12 with no forbidden subsystem
+// entering the boot graph. Ratchet the total to the higher cross-platform
+// measurement only and retain the 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_920_711 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
