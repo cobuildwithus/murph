@@ -4942,6 +4942,15 @@ test("listMetricPointsRuntime projects scalar observation metrics without catalo
       value: 96,
       unit: "mg/dL",
     },
+    {
+      id: "evt_metric_observation_stress_variation_01",
+      occurredAt: "2026-04-02T08:05:00Z",
+      source: "device",
+      title: "Junction stress mean absolute successive difference",
+      metric: "stress-mean-absolute-successive-difference",
+      value: 12.5,
+      unit: "score",
+    },
   ]);
 
   try {
@@ -4950,6 +4959,10 @@ test("listMetricPointsRuntime projects scalar observation metrics without catalo
     const caffeine = await listMetricPointsRuntime(vaultRoot, { metricKey: "caffeine", limit: null });
     const height = await listMetricPointsRuntime(vaultRoot, { metricKey: "height", limit: null });
     const glucose = await listMetricPointsRuntime(vaultRoot, { metricKey: "glucose", limit: null });
+    const stressVariation = await listMetricPointsRuntime(vaultRoot, {
+      metricKey: "stress-mean-absolute-successive-difference",
+      limit: null,
+    });
 
     assert.equal(caffeine.length, 1);
     assert.equal(caffeine[0]?.value, 120);
@@ -4968,6 +4981,10 @@ test("listMetricPointsRuntime projects scalar observation metrics without catalo
     assert.equal(glucose[0]?.canonicalValue, 96);
     assert.equal(glucose[0]?.canonicalUnit, "mg/dL");
     assert.equal(glucose[0]?.unit, "mg/dL");
+    assert.equal(stressVariation.length, 1);
+    assert.equal(stressVariation[0]?.value, 12.5);
+    assert.equal(stressVariation[0]?.unit, "score");
+    assert.equal(stressVariation[0]?.source.kind, "observation");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

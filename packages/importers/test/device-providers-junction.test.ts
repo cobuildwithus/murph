@@ -23,6 +23,10 @@ import {
   JUNCTION_OPT_IN_SUMMARY_RESOURCES,
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
+  JUNCTION_TEMPORAL_FEATURE_ENVELOPE_MAX_BYTES,
+  JUNCTION_TEMPORAL_FEATURE_MAX_OBSERVATIONS_PER_DAY,
+  JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY,
+  JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
   importDeviceProviderSnapshot,
@@ -642,13 +646,42 @@ test("Junction stress level aggregates pass the canonical device import contract
         corePort: coreRuntime,
       },
     );
-    const stressEvent = result.events.find((event) => event.kind === "observation");
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const observationEvents = result.events.filter((event) => event.kind === "observation");
+    const stressEvent = observationEvents.find((event) => event.metric === "stress-level");
+    const variationEvent = observationEvents.find(
+      (event) => event.metric === "stress-mean-absolute-successive-difference",
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...result.eventShardPaths, ...replay.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveVariationRecords = latestLiveRecords(records).filter(
+      (record) => record.kind === "observation"
+        && record.metric === "stress-mean-absolute-successive-difference",
+    );
 
     assert.equal(payload.samples?.length ?? 0, 0);
     assert.equal(stressEvent?.kind, "observation");
     assert.equal(stressEvent?.metric, "stress-level");
     assert.equal(stressEvent?.observationGrain, "summary");
     assert.equal(stressEvent?.value, 40);
+    assert.equal(variationEvent?.observationGrain, "summary");
+    assert.equal(variationEvent?.value, 30);
+    assert.equal(liveVariationRecords.length, 1);
+    assert.equal(storedObservationValue(liveVariationRecords[0]), 30);
     assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "stress-level").length, 1);
     assertNoFullJunctionTimeseriesArtifacts(payload);
     assertEventRawArtifactRolesExist(payload);
@@ -3559,6 +3592,8 @@ test("Junction normalizer derives display-grade blood oxygen facts from timeseri
     assert.equal(payload.samples?.length ?? 0, 0);
     assert.ok(compactArtifact);
     assert.equal(compactArtifactContent?.sampleCount, 1);
+    assert.equal(compactArtifactContent?.temporalFeatureStatus, "insufficient_samples");
+    assert.equal(Object.hasOwn(compactArtifactContent ?? {}, "temporalFeatures"), false);
     assert.equal(compactArtifactContent?.meanValue, 97.2);
     assert.equal(compactArtifactContent?.minValue, 97.2);
     assert.equal(Object.hasOwn(compactArtifactContent ?? {}, "data"), false);
@@ -3665,6 +3700,251 @@ test("Junction normalizer compacts blood oxygen timeseries into daily average an
   assert.equal(findJunctionCompactTimeseriesArtifacts(payload, "blood-oxygen").length, 2);
   assertNoFullJunctionTimeseriesArtifacts(payload);
   assertEventRawArtifactRolesExist(payload);
+});
+
+test("Junction blood oxygen features distinguish an isolated low sample from a sustained run", () => {
+  const buildPayload = (values: readonly number[]) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      blood_oxygen: {
+        groups: {
+          garmin: [{
+            data: values.map((value, index) => ({
+              timestamp: new Date(Date.UTC(2026, 3, 22, 7, index)).toISOString(),
+              unit: "percent",
+              value,
+            })),
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+  const isolated = buildPayload([88, 94, 94, 94, 94, 100]);
+  const sustained = buildPayload([88, 88, 88, 100, 100, 100]);
+  const featureValue = (payload: DeviceBatchImportPayload, metric: string) =>
+    payload.events?.find((event) => event.fields?.metric === metric)?.fields?.value;
+  const [isolatedArtifact] = findJunctionCompactTimeseriesArtifacts(isolated, "blood-oxygen");
+  const [sustainedArtifact] = findJunctionCompactTimeseriesArtifacts(sustained, "blood-oxygen");
+  const isolatedContent = isolatedArtifact?.content as Record<string, unknown>;
+  const sustainedContent = sustainedArtifact?.content as Record<string, unknown>;
+
+  // The existing daily facts are identical; only the bounded temporal shape differs.
+  assert.equal(featureValue(isolated, "spo2"), 94);
+  assert.equal(featureValue(sustained, "spo2"), 94);
+  assert.equal(featureValue(isolated, "lowest-spo2"), 88);
+  assert.equal(featureValue(sustained, "lowest-spo2"), 88);
+  assert.equal(featureValue(isolated, "spo2-samples-below-90-percent"), 16.6667);
+  assert.equal(featureValue(sustained, "spo2-samples-below-90-percent"), 50);
+  assert.equal(featureValue(isolated, "spo2-longest-below-90-sample-count"), 1);
+  assert.equal(featureValue(sustained, "spo2-longest-below-90-sample-count"), 3);
+  assert.equal(isolatedContent.schema, "junction.timeseries_daily_aggregate.v2");
+  assert.equal(sustainedContent.temporalFeatureStatus, "complete");
+  assert.ok(Buffer.byteLength(JSON.stringify(isolatedContent), "utf8") < 2_048);
+  assert.ok(Buffer.byteLength(JSON.stringify(sustainedContent), "utf8") < 2_048);
+  assert.equal(isolated.samples?.length ?? 0, 0);
+  assert.equal(sustained.samples?.length ?? 0, 0);
+  assert.doesNotMatch(JSON.stringify([isolatedContent, sustainedContent]), /"samples"|"timestamps"/u);
+});
+
+test("Junction stress features preserve local-day runs, variation, and daypart shape", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: [
+              { timestamp: "2026-04-22T11:00:00Z", timezone_offset: -18_000, value: 20 },
+              { timestamp: "2026-04-22T11:05:00Z", timezone_offset: -18_000, value: 80 },
+              { timestamp: "2026-04-22T17:00:00Z", timezone_offset: -18_000, value: 30 },
+              { timestamp: "2026-04-22T23:00:00Z", timezone_offset: -18_000, value: 70 },
+              { timestamp: "2026-04-22T23:05:00Z", timezone_offset: -18_000, value: 90 },
+            ],
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+  const featureEvents = (payload.events ?? []).filter((event) =>
+    String(event.fields?.metric).startsWith("stress-")
+    && event.fields?.metric !== "stress-level"
+  );
+  const featureValue = (metric: string) =>
+    featureEvents.find((event) => event.fields?.metric === metric)?.fields?.value;
+  const [artifact] = findJunctionCompactTimeseriesArtifacts(payload, "stress-level");
+  const artifactContent = artifact?.content as Record<string, unknown>;
+
+  assert.equal(payload.events?.find((event) => event.fields?.metric === "stress-level")?.fields?.value, 58);
+  assert.equal(featureEvents.length, 3);
+  assert.ok(featureEvents.every((event) => event.dayKey === "2026-04-22"));
+  assert.equal(featureValue("stress-above-daily-mean-run-count"), 2);
+  assert.equal(featureValue("stress-mean-absolute-successive-difference"), 42.5);
+  assert.equal(featureValue("stress-evening-minus-morning-score"), 30);
+  assert.equal(artifactContent.temporalFeatureStatus, "complete");
+  assert.ok(Buffer.byteLength(JSON.stringify(artifactContent), "utf8") < 2_048);
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(artifactContent.temporalFeatures), "utf8")
+      <= JUNCTION_TEMPORAL_FEATURE_ENVELOPE_MAX_BYTES,
+  );
+  assert.ok(featureEvents.every((event) => Buffer.byteLength(JSON.stringify(event), "utf8") < 2_048));
+  assert.equal(payload.samples?.length ?? 0, 0);
+});
+
+test("Junction stress features order floating provider-local timestamps without persisting them", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      stress_level: [{
+        sourceProviderSlug: "garmin",
+        timestamp: "2026-04-22 07:00:00",
+        timestampSemantics: "floating",
+        value: 20,
+      }, {
+        sourceProviderSlug: "garmin",
+        timestamp: "2026-04-22 19:00:00",
+        timestampSemantics: "floating",
+        value: 80,
+      }],
+    },
+  });
+  const [artifact] = findJunctionCompactTimeseriesArtifacts(payload, "stress-level");
+  const artifactContent = artifact?.content as Record<string, unknown>;
+
+  assert.equal(
+    payload.events?.find((event) => event.fields?.metric === "stress-evening-minus-morning-score")
+      ?.fields?.value,
+    60,
+  );
+  assert.equal(artifactContent.temporalFeatureStatus, "complete");
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.doesNotMatch(JSON.stringify(artifactContent.temporalFeatures), /2026-04-22|07:00|19:00/u);
+});
+
+test("Junction temporal feature import cap suppresses only features and preserves every base day", () => {
+  const samples = Array.from(
+    { length: JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT + 1 },
+    (_, index) => ({
+      timestamp: new Date(
+        Date.UTC(2026, 3, 1 + Math.floor(index / 5_000))
+        + (index % 5_000) * 10_000,
+      ).toISOString(),
+      value: index % 2 === 0 ? 20 : 80,
+    }),
+  );
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-08T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: samples,
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+  const baseEvents = payload.events?.filter((event) => event.fields?.metric === "stress-level") ?? [];
+  const featureEvents = payload.events?.filter((event) =>
+    String(event.fields?.metric).startsWith("stress-")
+    && event.fields?.metric !== "stress-level"
+  ) ?? [];
+  const artifacts = findJunctionCompactTimeseriesArtifacts(payload, "stress-level");
+
+  assert.equal(baseEvents.length, 6);
+  assert.equal(featureEvents.length, 0);
+  assert.equal(artifacts.length, 6);
+  assert.ok(artifacts.every((artifact) => {
+    const content = artifact.content as Record<string, unknown>;
+    return content.temporalFeatureStatus === "suppressed_input_cap"
+      && !Object.hasOwn(content, "temporalFeatures")
+      && Buffer.byteLength(JSON.stringify(content), "utf8") < 2_048;
+  }));
+  assert.equal(payload.samples?.length ?? 0, 0);
+});
+
+test("Junction temporal feature day cap suppresses only features for the oversized day", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: Array.from(
+              { length: JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY + 1 },
+              (_, index) => ({
+                timestamp: new Date(Date.UTC(2026, 3, 22) + index * 10_000).toISOString(),
+                value: index % 2 === 0 ? 20 : 80,
+              }),
+            ),
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  });
+  const [artifact] = findJunctionCompactTimeseriesArtifacts(payload, "stress-level");
+  const artifactContent = artifact?.content as Record<string, unknown>;
+
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "stress-level").length, 1);
+  assert.equal(
+    payload.events?.some((event) => event.fields?.metric === "stress-above-daily-mean-run-count"),
+    false,
+  );
+  assert.equal(artifactContent.sampleCount, JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY + 1);
+  assert.equal(artifactContent.temporalFeatureStatus, "suppressed_input_cap");
+  assert.equal(Object.hasOwn(artifactContent, "temporalFeatures"), false);
+  assert.equal(payload.samples?.length ?? 0, 0);
+});
+
+test("Junction temporal feature output cap is enforced across sources without adding artifacts", () => {
+  const buildPayload = (providers: readonly string[]) => normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: Object.fromEntries(
+          providers.map((provider) => [
+            provider,
+            [{
+              data: [
+                { timestamp: "2026-04-22T11:00:00Z", timezone_offset: -18_000, value: 20 },
+                { timestamp: "2026-04-22T23:00:00Z", timezone_offset: -18_000, value: 80 },
+              ],
+              source: { provider, type: "wearable" },
+            }],
+          ]),
+        ),
+      },
+    },
+  });
+  const payload = buildPayload(["fitbit", "garmin", "oura", "polar"]);
+  const reordered = buildPayload(["polar", "oura", "garmin", "fitbit"]);
+  const featureEvents = payload.events?.filter((event) =>
+    String(event.fields?.metric).startsWith("stress-")
+    && event.fields?.metric !== "stress-level"
+  ) ?? [];
+  const artifacts = findJunctionCompactTimeseriesArtifacts(payload, "stress-level");
+  const statuses = artifacts.map((artifact) =>
+    (artifact.content as Record<string, unknown>).temporalFeatureStatus
+  );
+  const featureSignatures = (value: DeviceBatchImportPayload) => (value.events ?? [])
+    .filter((event) =>
+      String(event.fields?.metric).startsWith("stress-")
+      && event.fields?.metric !== "stress-level"
+    )
+    .map((event) => `${event.dataOrigin?.sourceProviderSlug}:${String(event.fields?.metric)}`)
+    .sort();
+
+  assert.equal(payload.events?.filter((event) => event.fields?.metric === "stress-level").length, 4);
+  assert.equal(featureEvents.length, 9);
+  assert.ok(featureEvents.length <= JUNCTION_TEMPORAL_FEATURE_MAX_OBSERVATIONS_PER_DAY);
+  assert.equal(artifacts.length, 4);
+  assert.equal(statuses.filter((status) => status === "complete").length, 3);
+  assert.equal(statuses.filter((status) => status === "suppressed_output_cap").length, 1);
+  assert.deepEqual(featureSignatures(reordered), featureSignatures(payload));
+  assert.equal(payload.samples?.length ?? 0, 0);
 });
 
 test("Junction blood oxygen aggregates pass the canonical device import contract", async () => {
