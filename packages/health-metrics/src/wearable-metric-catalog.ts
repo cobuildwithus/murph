@@ -1,5 +1,6 @@
 export const wearableCanonicalMetricKeys = [
   "activeCalories",
+  "activityAverageHeartRate",
   "activityScore",
   "afibBurden",
   "altitudeChangeMeters",
@@ -18,15 +19,19 @@ export const wearableCanonicalMetricKeys = [
   "floorsClimbed",
   "glucose",
   "heartRateRecoveryOneMinute",
+  "highActivityMinutes",
   "highestGlucose",
   "hrv",
   "leanBodyMassKg",
   "lightMinutes",
+  "lowActivityMinutes",
   "lowestGlucose",
   "lowestHeartRate",
   "lowestSpo2",
   "maxHeartRate",
+  "mediumActivityMinutes",
   "mindfulnessMinutes",
+  "minimumHeartRate",
   "percentRecorded",
   "readinessScore",
   "recoveryScore",
@@ -54,6 +59,7 @@ export const wearableCanonicalMetricKeys = [
   "waistCircumference",
   "water",
   "workoutStrain",
+  "walkingAverageHeartRate",
   "weightKg",
 ] as const;
 
@@ -84,6 +90,7 @@ export const wearableMetricCatalog = Object.freeze({
     "active_calories",
     "calories_active",
   ]),
+  activityAverageHeartRate: defineMetric("activityAverageHeartRate", "bpm", "daily_observation", 1),
   activityScore: defineMetric("activityScore", "%", "daily_observation", 1, ["activity_score"]),
   afibBurden: defineMetric("afibBurden", "%", "daily_observation", 0.5, []),
   altitudeChangeMeters: defineMetric("altitudeChangeMeters", "meter", "session_observation", 5, [
@@ -126,6 +133,7 @@ export const wearableMetricCatalog = Object.freeze({
   glucose: defineMetric("glucose", "mg/dL", "daily_observation", 2, ["blood_glucose"]),
   heartRateRecoveryOneMinute: defineMetric("heartRateRecoveryOneMinute", "bpm", "daily_observation", 1, ["heart_rate_recovery"]),
   highestGlucose: defineMetric("highestGlucose", "mg/dL", "daily_observation", 2, ["max_glucose", "glucose_max"]),
+  highActivityMinutes: defineMetric("highActivityMinutes", "minutes", "daily_observation", 5),
   hrv: defineMetric("hrv", "ms", "daily_observation", 3, ["hrv_rmssd", "rmssd"]),
   leanBodyMassKg: defineMetric("leanBodyMassKg", "kg", "daily_observation", 0.2, [
     "lean_body_mass",
@@ -135,6 +143,7 @@ export const wearableMetricCatalog = Object.freeze({
     "lean_mass_kg",
   ]),
   lightMinutes: defineMetric("lightMinutes", "minutes", "session_observation", 5, ["light", "light_minutes"]),
+  lowActivityMinutes: defineMetric("lowActivityMinutes", "minutes", "daily_observation", 5),
   lowestGlucose: defineMetric("lowestGlucose", "mg/dL", "daily_observation", 2, ["min_glucose", "glucose_min"]),
   lowestHeartRate: defineMetric("lowestHeartRate", "bpm", "session_observation", 1, ["lowest_heart_rate", "min_hr"]),
   lowestSpo2: defineMetric("lowestSpo2", "%", "daily_observation", 1, [
@@ -146,7 +155,9 @@ export const wearableMetricCatalog = Object.freeze({
     "spo2_min",
   ]),
   maxHeartRate: defineMetric("maxHeartRate", "bpm", "session_observation", 1, ["max_heart_rate", "max_hr"]),
+  mediumActivityMinutes: defineMetric("mediumActivityMinutes", "minutes", "daily_observation", 5),
   mindfulnessMinutes: defineMetric("mindfulnessMinutes", "minutes", "daily_observation", 2, ["mindful_minutes"]),
+  minimumHeartRate: defineMetric("minimumHeartRate", "bpm", "daily_observation", 1),
   percentRecorded: defineMetric("percentRecorded", "%", "session_observation", 1, ["percent_recorded"]),
   readinessScore: defineMetric("readinessScore", "%", "daily_observation", 1, ["readiness", "readiness_score"]),
   recoveryScore: defineMetric("recoveryScore", "%", "daily_observation", 1, ["recovery", "recovery_score"]),
@@ -196,6 +207,7 @@ export const wearableMetricCatalog = Object.freeze({
   ]),
   water: defineMetric("water", "ml", "daily_observation", 50, ["dietary_water", "water_ml"]),
   workoutStrain: defineMetric("workoutStrain", "whoop_strain", "session_observation", 0.5, ["workout_strain"]),
+  walkingAverageHeartRate: defineMetric("walkingAverageHeartRate", "bpm", "daily_observation", 1),
   weightKg: defineMetric("weightKg", "kg", "daily_observation", 0.2, ["body_weight", "weight"]),
 } satisfies Record<WearableCanonicalMetricKey, WearableMetricCatalogEntry>);
 

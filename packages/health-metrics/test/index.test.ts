@@ -335,6 +335,18 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   );
   assert.equal(resolveWearableCanonicalMetricKey("sleep-latency-minutes"), "sleepLatencyMinutes");
   assert.equal(resolveWearableCanonicalMetricKey("sleep_latency_minutes"), "sleepLatencyMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("activity-average-heart-rate"), "activityAverageHeartRate");
+  assert.equal(resolveWearableCanonicalMetricKey("walking-average-heart-rate"), "walkingAverageHeartRate");
+  assert.equal(resolveWearableCanonicalMetricKey("minimum-heart-rate"), "minimumHeartRate");
+  assert.equal(resolveWearableCanonicalMetricKey("low-activity-minutes"), "lowActivityMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("medium-activity-minutes"), "mediumActivityMinutes");
+  assert.equal(resolveWearableCanonicalMetricKey("high-activity-minutes"), "highActivityMinutes");
+  assert.equal(resolveMetricDefinition("activity-average-heart-rate")?.category, "activity");
+  assert.equal(resolveMetricDefinition("walking-average-heart-rate")?.category, "activity");
+  assert.equal(resolveMetricDefinition("minimum-heart-rate")?.category, "activity");
+  assert.equal(resolveMetricDefinition("low-activity-minutes")?.category, "activity");
+  assert.equal(resolveMetricDefinition("medium-activity-minutes")?.category, "activity");
+  assert.equal(resolveMetricDefinition("high-activity-minutes")?.category, "activity");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:unknown"), null);
   assert.deepEqual(createCustomMetricDefinition("hydration score", "%"), {
     aliases: [],

@@ -1512,7 +1512,7 @@ test("prepareDeviceProviderSnapshotImport strips direct Junction identities from
   }
   assert.match(rawArtifactText, /breakfast/u);
   assert.match(rawArtifactText, /Greek yogurt bowl/u);
-  assert.match(rawArtifactText, /cycleDay/u);
+  assert.match(rawArtifactText, /legacyCycleDay/u);
 });
 
 test("importDeviceProviderSnapshot keeps new Junction timeseries imports out of dense retention", async () => {
