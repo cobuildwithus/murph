@@ -7,9 +7,10 @@ Updated: 2026-08-11
 ## Goal
 
 - Replace the two competing current-sender personal-runtime actions with one
-  composable request path. The exact accepted group input remains the authority
-  source, while an explicit response destination determines whether the result
-  returns to the group caller or is delivered directly to the sender.
+  composable, destination-free request path. The exact accepted group input
+  remains the authority source, while the personal runtime's existing fresh
+  outgoing reviewer determines whether the result returns to the group caller
+  or is delivered directly to the sender.
 - Prevent stale conversational context from changing the destination of a fresh
   group request while preserving the existing privacy and route-binding gates.
 
@@ -18,7 +19,7 @@ Updated: 2026-08-11
 - The model-facing group tool exposes one current-sender personal-runtime action,
   not separate read and private-message actions.
 - One shared Web admission path validates the exact accepted message, sender,
-  route, and requested destination before dispatch.
+  and route before dispatch, with one origin-level request identity.
 - Group-return and direct-recipient completions remain target-bound and cannot
   cross recipients or routes.
 - Focused tests cover both destinations and a fresh non-private request following
@@ -37,8 +38,8 @@ Updated: 2026-08-11
 ## Constraints
 
 - Technical constraints: deletion-first architecture; one authority resolver;
-  no model-supplied sender, route, or destination outside the exact accepted
-  input; no new service or storage owner; preserve deployed-runtime skew safety.
+  no model-supplied sender, route, or destination; no new service, classifier,
+  provider turn, or storage owner; preserve deployed-runtime skew safety.
 - Product/process constraints: confidential incident evidence must not enter the
   repository or PR; use synthetic tests; obtain a ReviewGPT implementation patch
   as advisory input; run the mandatory preliminary and final PR review gates.
@@ -46,8 +47,9 @@ Updated: 2026-08-11
 ## Risks and mitigations
 
 1. Risk: collapsing the surface accidentally broadens private delivery.
-   Mitigation: keep private delivery gated by an explicit destination value on
-   the exact input-bound request and reuse the existing sender/route authority.
+   Mitigation: make the fresh exact question the reviewer's sole audience
+   evidence, require explicit private wording for direct delivery, and reuse the
+   existing sender/route authority.
 2. Risk: Web, hosted contracts, and warm runtime bundles deploy out of sync.
    Mitigation: prefer a backward-compatible consumer-first transition or record
    an explicit tandem deployment requirement with direct parser tests.
@@ -60,7 +62,8 @@ Updated: 2026-08-11
 1. Ask ReviewGPT Pro for a scoped deletion-first implementation patch and inspect
    its assumptions before applying any hunk.
 2. Trace and collapse the model, Web authority, hosted contract, and runtime
-   paths into one current-sender request with explicit destination semantics.
+   paths into one destination-free current-sender request whose existing final
+   reviewer returns the terminal audience.
 3. Add focused regression coverage and update the live architecture/security/
    reliability contracts plus member-visible changelog.
 4. Run focused tests, typechecks, static stale-symbol checks, and direct scenario
@@ -71,17 +74,19 @@ Updated: 2026-08-11
 
 ## Decisions
 
-- Use the existing exact accepted-message reference as the only sender and route
-  authority. The consolidation must not introduce a second intent classifier.
+- Use the existing exact accepted-message reference as the only sender, route,
+  and audience-evidence source. The consolidation must not introduce a second
+  intent classifier or provider turn.
 - Treat the ReviewGPT patch as untrusted design input: inspect it fully and adapt
   only the smallest maintainable change that preserves repository invariants.
-- Keep one canonical model/runtime action with a required response destination.
-  The group destination returns the reviewed personal-runtime answer to the
-  caller; the current-sender destination may deliver directly only when the
-  selected fresh input itself requests that behavior.
+- Keep one canonical model/runtime action with no response destination. Extend
+  the existing fresh outgoing reviewer so the exact selected message alone can
+  authorize private delivery; otherwise a valid request returns read-only to
+  the group caller.
 - Retain the two old wire spellings only as a bounded rolling-deploy seam. The
   parser immediately canonicalizes them, while in-process ownership and all new
-  model output use the single action.
+  model output use the single destination-free action. Lock canonical and legacy
+  request aliases together so one origin can admit only one personal read.
 
 ## Progress
 
@@ -90,7 +95,12 @@ Updated: 2026-08-11
   unrelated group-tool safeguards.
 - The assistant tool catalog, strict hosted contract, Web admission owner, warm
   runtime mapping, and Cloudflare port now use one canonical current-sender
-  request with explicit destination semantics.
+  action, but ReviewGPT's first final audit proved that its required destination
+  still left terminal audience authority model-owned and origin admission split.
+- ReviewGPT Pro returned a second complete patch that removes the model-authored
+  destination, establishes one origin-level request identity, reuses the
+  existing fresh outgoing reviewer to select terminal audience, serializes all
+  rollout aliases, and fails mixed-version traffic closed.
 - Synthetic coverage proves both destinations, exact message/sender/route
   authority, rollback wire compatibility, and the stale-context regression.
 - Focused suites pass across hosted execution, assistant engine, assistant
@@ -105,7 +115,8 @@ Updated: 2026-08-11
   hosted current-sender asks, assistant-runtime, and Cloudflare contract ports;
   affected package typechecks; `git diff --check`; stale-symbol searches;
   exact-head GitHub Actions; ReviewGPT specialist/final presets; `git merge-tree`.
-- Expected outcomes: both destinations remain functional through the one tool,
-  only explicit direct-recipient requests can message the sender, no old action
-  remains model-visible, all required checks are green, and the PR is reviewable
-  without confidential production evidence.
+- Expected outcomes: both terminal audiences remain functional through the one
+  destination-free tool, only explicit private/direct wording can message the
+  sender, ordinary requests return read-only to the group, no old action remains
+  model-visible, all required checks are green, and the PR is reviewable without
+  confidential production evidence.

@@ -1,6 +1,8 @@
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -102,6 +104,7 @@ describe("hosted group tool route", () => {
       request: body,
       // Anchored before the signed-callback read above, so the verification and
       // nonce work it covers is charged to whatever budget the tool derives.
+      currentSenderLegacyResponseDestination: null,
       requestStartedAtMs: expect.any(Number),
       scheduleMailboxWake: expect.any(Function),
     });
@@ -150,6 +153,7 @@ describe("hosted group tool route", () => {
     expect(mocks.handleTool).toHaveBeenCalledWith({
       memberId: "member_group_runtime",
       request: body,
+      currentSenderLegacyResponseDestination: null,
       requestStartedAtMs: expect.any(Number),
       scheduleMailboxWake: expect.any(Function),
     });
@@ -292,7 +296,49 @@ describe("hosted group tool route", () => {
 
   it.each([
     {
-      label: "canonical group destination",
+      expectedLegacyDestination: null,
+      expectedRequest: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      expectedResponse: {
+        action: "ask_current_sender",
+        result: { status: "accepted" },
+      },
+      label: "neutral audience-review transport",
+      query: `?${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER}=${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      expectedLegacyDestination: "group",
+      expectedRequest: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"c".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      expectedResponse: {
+        action: "ask_current_sender",
+        responseDestination: "group",
+        result: { status: "accepted" },
+      },
+      label: "destination-bearing legacy group transport",
+      query: "",
       requestBody: {
         action: "ask_current_sender",
         origin: {
@@ -302,28 +348,24 @@ describe("hosted group tool route", () => {
         },
         responseDestination: "group",
       },
+    },
+    {
+      expectedLegacyDestination: "current_sender",
       expectedRequest: {
         action: "ask_current_sender",
         origin: {
-          assistantInputId: `ain_${"c".repeat(32)}`,
+          assistantInputId: `ain_${"d".repeat(32)}`,
           kind: "accepted_input",
           sessionId: "session_group",
         },
-        responseDestination: "group",
-      },
-      toolResponse: {
-        action: "ask_current_sender",
-        responseDestination: "group",
-        result: { status: "accepted" },
       },
       expectedResponse: {
         action: "ask_current_sender",
-        responseDestination: "group",
+        responseDestination: "current_sender",
         result: { status: "accepted" },
       },
-    },
-    {
-      label: "canonical direct destination",
+      label: "destination-bearing legacy direct transport",
+      query: "",
       requestBody: {
         action: "ask_current_sender",
         origin: {
@@ -333,28 +375,23 @@ describe("hosted group tool route", () => {
         },
         responseDestination: "current_sender",
       },
+    },
+    {
+      expectedLegacyDestination: "group",
       expectedRequest: {
         action: "ask_current_sender",
         origin: {
-          assistantInputId: `ain_${"d".repeat(32)}`,
+          assistantInputId: `ain_${"e".repeat(32)}`,
           kind: "accepted_input",
           sessionId: "session_group",
         },
-        responseDestination: "current_sender",
-      },
-      toolResponse: {
-        action: "ask_current_sender",
-        responseDestination: "current_sender",
-        result: { status: "accepted" },
       },
       expectedResponse: {
         action: "ask_current_sender",
-        responseDestination: "current_sender",
         result: { status: "accepted" },
       },
-    },
-    {
-      label: "legacy group transport",
+      label: "destination-free legacy group transport",
+      query: "",
       requestBody: {
         action: "ask_current_sender",
         origin: {
@@ -363,27 +400,23 @@ describe("hosted group tool route", () => {
           sessionId: "session_group",
         },
       },
+    },
+    {
+      expectedLegacyDestination: "current_sender",
       expectedRequest: {
         action: "ask_current_sender",
         origin: {
-          assistantInputId: `ain_${"e".repeat(32)}`,
+          assistantInputId: `ain_${"f".repeat(32)}`,
           kind: "accepted_input",
           sessionId: "session_group",
         },
-        responseDestination: "group",
-      },
-      toolResponse: {
-        action: "ask_current_sender",
-        responseDestination: "group",
-        result: { status: "accepted" },
       },
       expectedResponse: {
-        action: "ask_current_sender",
+        action: "message_current_sender",
         result: { status: "accepted" },
       },
-    },
-    {
-      label: "legacy direct transport",
+      label: "legacy direct action",
+      query: "",
       requestBody: {
         action: "message_current_sender",
         origin: {
@@ -391,37 +424,23 @@ describe("hosted group tool route", () => {
           kind: "accepted_input",
           sessionId: "session_group",
         },
-      },
-      expectedRequest: {
-        action: "ask_current_sender",
-        origin: {
-          assistantInputId: `ain_${"f".repeat(32)}`,
-          kind: "accepted_input",
-          sessionId: "session_group",
-        },
-        responseDestination: "current_sender",
-      },
-      toolResponse: {
-        action: "ask_current_sender",
-        responseDestination: "current_sender",
-        result: { status: "accepted" },
-      },
-      expectedResponse: {
-        action: "message_current_sender",
-        result: { status: "accepted" },
       },
     },
   ])(
     "keeps $label compatible while canonicalizing Web admission",
     async ({
+      expectedLegacyDestination,
       expectedRequest,
       expectedResponse,
+      query,
       requestBody,
-      toolResponse,
     }) => {
-      mocks.handleTool.mockResolvedValueOnce(toolResponse);
+      mocks.handleTool.mockResolvedValueOnce({
+        action: "ask_current_sender",
+        result: { status: "accepted" },
+      });
       const request = new Request(
-        `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+        `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}${query}`,
         {
           body: JSON.stringify(requestBody),
           headers: { "content-type": "application/json" },
@@ -433,6 +452,7 @@ describe("hosted group tool route", () => {
 
       expect(response.status).toBe(200);
       expect(mocks.handleTool).toHaveBeenCalledWith({
+        currentSenderLegacyResponseDestination: expectedLegacyDestination,
         memberId: "member_group_runtime",
         request: expectedRequest,
         requestStartedAtMs: expect.any(Number),
@@ -441,6 +461,140 @@ describe("hosted group tool route", () => {
       await expect(response.json()).resolves.toEqual(expectedResponse);
     },
   );
+
+  it.each([
+    {
+      label: "the legacy direct action",
+      query: `?${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER}=${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
+      requestBody: {
+        action: "message_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+        origin: {
+          assistantInputId: `ain_${"a".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      label: "a model-authored destination",
+      query: `?${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER}=${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+        origin: {
+          assistantInputId: `ain_${"b".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        responseDestination: "group",
+      },
+    },
+    {
+      label: "an unknown URL marker version",
+      query: `?${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER}=v2`,
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+        origin: {
+          assistantInputId: `ain_${"c".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      label: "an unknown body marker version",
+      query: `?${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER}=${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]: "v2",
+        origin: {
+          assistantInputId: `ain_${"d".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      label: "duplicate URL marker values",
+      query: `?${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER}=${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE}&${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER}=${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+        origin: {
+          assistantInputId: `ain_${"e".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      label: "a missing body marker",
+      query: `?${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER}=${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
+      requestBody: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"f".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      label: "a missing URL marker",
+      query: "",
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+        origin: {
+          assistantInputId: `ain_${"1".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+    },
+    {
+      label: "an extra field after the transport marker",
+      query: `?${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER}=${HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE}`,
+      requestBody: {
+        action: "ask_current_sender",
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+        origin: {
+          assistantInputId: `ain_${"2".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        unexpected: true,
+      },
+    },
+  ])("rejects neutral protocol marker paired with $label", async ({ query, requestBody }) => {
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}${query}`,
+      {
+        body: JSON.stringify(requestBody),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(400);
+    expect(mocks.handleTool).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Invalid request.",
+      },
+    });
+  });
 
   it.each([
     {
@@ -475,7 +629,6 @@ describe("hosted group tool route", () => {
       mailboxItemId: "aask_req_current_sender",
       toolResponse: {
         action: "ask_current_sender",
-        responseDestination: "group",
         result: { status: "accepted" },
       },
     },
@@ -493,7 +646,6 @@ describe("hosted group tool route", () => {
       mailboxItemId: "aask_req_private_sender",
       toolResponse: {
         action: "ask_current_sender",
-        responseDestination: "current_sender",
         result: { status: "accepted" },
       },
     },

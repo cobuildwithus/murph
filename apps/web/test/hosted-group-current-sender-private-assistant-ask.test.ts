@@ -35,6 +35,7 @@ import {
   appendHostedGroupCurrentSenderPrivateCompletionTx,
   buildHostedGroupCurrentSenderPrivateResponseText,
   createHostedGroupCurrentSenderAssistantAskRequestId,
+  createHostedGroupCurrentSenderLegacyAssistantAskRequestId,
   readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx,
   type HostedGroupCurrentSenderPrivateCompletionAuthority,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
@@ -62,10 +63,14 @@ const AUTHORITY: HostedGroupCurrentSenderPrivateCompletionAuthority = {
     kind: "accepted_input",
     sessionId: "session_group",
   },
+  mode: "reviewer_selected",
   permissionDigest: "d".repeat(64),
-  permissionText: "One private owner-only answer.",
+  permissionText: "One reviewed owner-only answer.",
   question: "Murph text me individually about today's workout",
-  responseDestination: "current_sender",
+  requestId: createHostedGroupCurrentSenderAssistantAskRequestId({
+    groupRuntimeMemberId: "member_group_runtime",
+    originAssistantInputId: INPUT_ID,
+  }),
   sourceChannel: "linq",
   targetMemberId: "member_sender",
 };
@@ -86,16 +91,27 @@ describe("hosted private current-sender Assistant Ask completion", () => {
     );
   });
 
-  it("uses the direct destination's stable request identity", () => {
+  it("uses one neutral origin-level request identity", () => {
     const input = {
       groupRuntimeMemberId: AUTHORITY.groupRuntimeMemberId,
       originAssistantInputId: INPUT_ID,
-      responseDestination: "current_sender" as const,
     };
-    const requestId =
-      createHostedGroupCurrentSenderAssistantAskRequestId(input);
+    const requestId = createHostedGroupCurrentSenderAssistantAskRequestId(input);
+
     expect(requestId).toBe(
       createHostedGroupCurrentSenderAssistantAskRequestId(input),
+    );
+    expect(requestId).not.toBe(
+      createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+        ...input,
+        responseDestination: "group",
+      }),
+    );
+    expect(requestId).not.toBe(
+      createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+        ...input,
+        responseDestination: "current_sender",
+      }),
     );
     expect(requestId).toMatch(/^aask_req_[a-f0-9]{64}$/u);
   });
@@ -135,12 +151,7 @@ describe("hosted private current-sender Assistant Ask completion", () => {
           externalThreadRouteAuthority: null,
           privateAssistantAskCompletion: {
             expiresAt: AUTHORITY.expiresAt,
-            requestId:
-              createHostedGroupCurrentSenderAssistantAskRequestId({
-                groupRuntimeMemberId: AUTHORITY.groupRuntimeMemberId,
-                originAssistantInputId: INPUT_ID,
-                responseDestination: "current_sender",
-              }),
+            requestId: AUTHORITY.requestId,
           },
           responsePolicy: {
             kind: "require_send_exact_text",
@@ -174,6 +185,30 @@ describe("hosted private current-sender Assistant Ask completion", () => {
       result: { answer: null, outcome: "cannot_answer" },
       tx: {} as never,
     })).resolves.toBeNull();
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects fixed-group legacy authority before private routing", async () => {
+    const authority = {
+      ...AUTHORITY,
+      mode: "legacy_group" as const,
+      requestId: createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+        groupRuntimeMemberId: AUTHORITY.groupRuntimeMemberId,
+        originAssistantInputId: INPUT_ID,
+        responseDestination: "group",
+      }),
+    };
+
+    await expect(appendHostedGroupCurrentSenderPrivateCompletionTx({
+      authority,
+      completionId: COMPLETION_ID,
+      now: NOW,
+      result: { answer: "Synthetic answer.", outcome: "answered" },
+      tx: {} as never,
+    })).resolves.toBeNull();
+    expect(
+      mocks.resolveHostedAssistantNotificationDestination,
+    ).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 

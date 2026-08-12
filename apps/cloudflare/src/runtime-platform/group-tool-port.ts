@@ -6,6 +6,10 @@ import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
 } from "@murphai/hosted-execution/vault-share";
@@ -56,11 +60,11 @@ export function createHostedRuntimeGroupToolPort(input: {
           : timeoutSignal;
       }
       const payload = await fetchHostedWebControlPlaneJson({
-        body: encodeHostedRuntimeGroupToolWireRequest(request),
+        body: encodeHostedRuntimeGroupToolRequest(request),
         boundUserId: input.boundUserId,
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
-        path: buildHostedRuntimeGroupToolPath(),
+        path: buildHostedRuntimeGroupToolPath(request),
         replayOnceOnRetryableFailure: isHostedReplaySafeGroupToolRequest(request),
         ...(isParticipantDisplayNameRead
           ? {
@@ -84,6 +88,20 @@ export function createHostedRuntimeGroupToolPort(input: {
   };
 }
 
+function encodeHostedRuntimeGroupToolRequest(
+  request: Parameters<
+    NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
+  >[0],
+): unknown {
+  return request.action === "ask_current_sender"
+    ? {
+        ...request,
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+      }
+    : request;
+}
+
 function isHostedReplaySafeGroupToolRequest(
   request: Parameters<
     NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
@@ -94,32 +112,18 @@ function isHostedReplaySafeGroupToolRequest(
     || request.action === "ask_member";
 }
 
-/**
- * Preserve rollback compatibility while old Web deploys and warm hosted
- * runtimes may still speak the former two-action wire contract. Canonical
- * callers above this seam always use one destination-bearing request.
- */
-function encodeHostedRuntimeGroupToolWireRequest(
+function buildHostedRuntimeGroupToolPath(
   request: Parameters<
     NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
   >[0],
-): unknown {
-  if (request.action !== "ask_current_sender") {
-    return request;
-  }
-  return request.responseDestination === "group"
-    ? {
-        action: "ask_current_sender",
-        origin: request.origin,
-      }
-    : {
-        action: "message_current_sender",
-        origin: request.origin,
-      };
-}
-
-function buildHostedRuntimeGroupToolPath(): string {
+): string {
   const params = new URLSearchParams();
+  if (request.action === "ask_current_sender") {
+    params.set(
+      HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
+      HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+    );
+  }
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
     params.append(
       HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,

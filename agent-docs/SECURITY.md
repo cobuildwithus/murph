@@ -755,44 +755,63 @@ Last verified: 2026-08-11
 - Inbound message content written by the retention-capable owners has one receipt-anchored 14-day maximum across hosted mailbox ciphertext, vault capture text/raw fields, out-of-line text, parser bundles, SQLite/FTS projections, assistant input events, and user transcript entries. The deadline is inclusive and active or retryable work cannot extend it. Every new user transcript entry carries `contentReceivedAt`; retention must never infer a missing legacy receipt from transcript `createdAt`, an accepted-turn journal, or an input event because normal settled-snapshot cleanup may already have discarded that join. The phase-one rollout therefore preserves unstamped legacy transcript entries while re-arming existing snapshots once to queue cleanup of every carrier with trustworthy receipt evidence; the rollout remains incomplete until that queue drains. Only after both 14 complete days from verified stamping-capable runner convergence and phase-one drain completion may a separate phase-two migration re-arm those snapshots again and retire every remaining unstamped user entry. Postgres cleanup deletes sidecar payload ciphertext, clears inline payload fields, and retains only structural mailbox metadata. If a conversation message reaches the deadline without terminal handling, the existing mailbox row becomes a durable `policy_non_reply.content_expired` tombstone and the runtime records its existing suppression evidence before local content retirement; neither owner may silently delete accepted work or later resurrect it as replyable. Promoted canonical health facts, explicit user saves/pins, Murph replies, delivery evidence, and content-free structural/audit metadata are outside this inbound-message-content policy and retain their owning lifecycle.
 - The Cloudflare `runtime/ensure-processing` route accepts exactly two credentials: the Temporal orchestrator's web-callback signature and web's Vercel OIDC identity (the same identity already used by the browser-vault/status/deletion control routes). Authorization dispatches on the credential the caller presented and never falls through a failed signature to OIDC or vice versa. The web direct wake is a post-Temporal latency hint for eligible Linq and Assistant Ask request/completion mailbox appends, carries no message payload, mints diagnostics-only `web-ingress-` attempt ids, and grants web no authority it did not already exercise through the accepted Temporal signal; the `triggeredByWebDirect` diagnostic is derived from the authorizing credential, never from caller-supplied fields. Hosted R2 reads, writes, restores, presigns, and account deletion use one environment-selected ENAM bucket; authenticated callers cannot select a bucket, region, or presign target. The Assistant Ask child receives only the server-bound requester membership `participantId` as immutable identity context: first-person references require an exact `read_shared` participant match, while display names, handles, member order, and the opaque id itself are forbidden output authority.
 - One-time current-sender personal-runtime access has one model action:
-  `ask_current_sender`. The model supplies only an opaque accepted-input id from
-  the current authenticated group turn and a required closed
-  `response_destination`. `group` returns the reviewed read-only answer to the
-  caller. `current_sender` is allowed only when that same fresh accepted input
-  explicitly requests a direct private answer; older transcript context is not
-  destination authority. The model cannot supply a sender, member, route,
-  question rewrite, or delivery target. Web must reopen the exact encrypted
-  conversation wake under the synthetic group runtime, require a non-direct
-  Linq or Telegram message with current route authority, resolve the author
-  through the channel's canonical identity index, and derive the exact
-  untruncated authored text plus the destination-specific fixed permission. The
+  `ask_current_sender`. The model supplies only one opaque accepted-input id
+  from the current authenticated group turn. It cannot supply an audience,
+  sender, member, route, question rewrite, or delivery target. Web must reopen
+  the exact encrypted conversation wake under the synthetic group runtime,
+  require a non-direct Linq or Telegram message with current route authority,
+  resolve the author through the channel's canonical identity index, and derive
+  the exact untruncated authored text plus one neutral fixed permission. The
   wake's optional `senderMemberId`, visible sender labels, model-supplied
   handles, and roster position are never target authority. The resolved author
   must own an active personal runtime and must not be another thread container.
   Admission, personal-read preparation, completion, and terminal routing must
   revalidate the same group runtime, accepted input, route, author, question,
-  destination, permission digest, target, expiry, and deterministic request
-  identity. Textless, oversized, direct, email, stale-route, cross-runtime,
-  scheduled, unresolved, or replay-conflicting requests disclose nothing and
-  create no reusable grant.
-- The `group` destination carries no reusable grant. Linq and Telegram must
-  carry the exact completion proof into their existing Web-owned provider-entry
-  authority transaction; route authority alone is insufficient. Stale
-  disclosure authority must replace the reviewed answer with the fixed
-  text-only fallback before provider dispatch. The `current_sender` destination
-  carries no grant or group-return authority. Completion may create only one
-  deterministic queue-only notification for the exact sender's current
-  same-channel `direct-member` route, with `threadIsDirect: true` and no external
-  group-thread authority. It contains the exact reviewed text, authorizes no
-  second model turn or action, cannot post to the group, and cannot be
-  redirected by retry. At provider entry, Web reopens the original completion
-  proof and revalidates its expiry, the exact reviewed-text digest, the same
-  personal member, and the member's current same-channel `direct-member` route.
-  Expired, revoked, text-mismatched, or route-drifted proof is terminal and has
-  no group or alternate-route fallback. The retained `group_sender` and
-  `group_sender_private` mailbox kinds and legacy transport action exist only
-  for rolling-deployment wire compatibility; they confer no authority and must
-  not re-enter the model-facing catalog.
+  permission digest, target, expiry, and deterministic origin-level request
+  identity. Admission locks the canonical id and both retained legacy aliases;
+  more than one stored alias is an authority conflict. Textless, oversized,
+  direct, email, stale-route, cross-runtime, scheduled, unresolved, or
+  replay-conflicting requests disclose nothing and create no reusable grant.
+- The personal runtime's existing fresh outgoing reviewer is the sole terminal
+  audience selector for a neutral current-sender request. It runs after the
+  personal candidate read and receives only the immutable permission, exact
+  incoming question, and candidate. The exact question is the sole audience
+  authority: an explicit private or direct request may select `current_sender`;
+  otherwise the result returns to the originating group. Conflicting group and
+  private requests, or privacy intent that depends on omitted context, must
+  select ambiguity and authorize no completion. The model-facing action and
+  group-tool request never contain a destination. This rule must not be
+  reimplemented as a classifier, extra provider turn, orchestration state, or
+  transport-supplied audience.
+- A successful current-sender completion persists exactly one audience in the
+  existing mailbox kind. `assistant.ask.completed` is the group-only path and
+  remains bound to the exact origin request and synthetic group runtime. Linq
+  and Telegram must carry its exact completion proof into their existing
+  Web-owned provider-entry authority transaction; route authority alone is
+  insufficient, and stale disclosure authority must replace the reviewed answer
+  with fixed non-disclosing text before provider dispatch.
+  `assistant.notification.requested` is the private-only path and may target
+  only the exact sender's current same-channel `direct-member` route, with
+  `threadIsDirect: true`, queue-only dispatch, and no external group-thread
+  authority. It contains the exact reviewed text, authorizes no second model
+  turn or action, cannot post to the group, and cannot be redirected by retry.
+  At provider entry, Web reopens the original completion proof and revalidates
+  its expiry, exact reviewed-text digest, same personal member, and current
+  same-channel `direct-member` route. Expired, revoked, text-mismatched, or
+  route-drifted proof is terminal and has no group or alternate-route fallback.
+  Replay must match the already-persisted completion kind; conflicting request
+  or completion aliases disclose nothing.
+- The retained `group_sender` and `group_sender_private` mailbox kinds, former
+  request-id namespaces, destination-bearing `ask_current_sender`, and
+  `message_current_sender` exist only for rolling-deployment drain. Legacy
+  unmarked calls keep their original fixed audience. The neutral protocol is
+  transport-authenticated with the same version marker in the signed URL and
+  strict JSON body; new Web strips that marker only after callback
+  authentication, and old Web rejects the unknown body field rather than
+  defaulting the call to group delivery. Compatibility metadata confers no
+  authority and must never re-enter the model-facing catalog or neutral request
+  identity.
+
 - The hosted assistant-configuration tool may reach only the bounded signed `POST /api/internal/hosted-execution/assistant-configuration/tool` web callback through `web-control.worker` under the exact active runtime write fence. The callback binds the operation to the runtime-authenticated member, accepts only the closed Luna/Terra/Sol model set and common `low`/`medium`/`high`/`xhigh` reasoning set, and re-derives active personal access plus Sol's paid-Edge entitlement from web-owned Postgres state. Reads need no member decision. Assistant-driven updates require an explicit request in eligible accepted user input for that turn. The runtime forwards only the terminal input id from a locally revalidated, bounded exact-successor provider batch; inside the mutation transaction, web binds it to the callback member and exactly one live conversation-lane mailbox row before the matching field-level preference write. Missing, legacy, mismatched, or ambiguous input authority fails closed. Never trust a model-provided member id, plan, availability list, current preference, causal sequence, or configuration claim as authority. A successful mutation changes only nullable web-owned next-turn preference fields; it must not mutate the running turn, mint a wake, or return billing records, credentials, or other member data to the runtime. The control request accepts only the input-bound update shape and rejects approval or resolved-target fields before the handler runs. The authenticated Settings form remains a separate direct member-action boundary protected by the normal app session and CSRF controls.
 - Only an authoritative assistant-configuration web response with `updated` or `unchanged` status may refresh the ephemeral target for later provider turns in that invocation. Failure statuses leave it unchanged, the current turn remains immutable, and web remains the sole durable preference owner. A model or reasoning change must preserve the provider-native Codex thread and apply both settings on the next separately accepted `turn/start`; it must not bootstrap a replacement thread merely because those preferences changed. Idle compaction must attribute usage from the model actually bound to the warm thread rather than the future preference and skip provider work when that bound model cannot be priced.
 - The hosted plan-usage tool may reach only the bounded signed `POST /api/internal/hosted-execution/plan-usage/tool` web callback through `web-control.worker` under the exact active runtime write fence. It accepts no model-provided member id or arguments: web binds the read to the runtime-authenticated member and returns the same bounded usage projection used by Settings. Web alone derives access, plan labels, percentages, forecast, and any recommended billing action from current Postgres state. The tool has no Stripe read or mutation authority, cannot create or lock an allowance period, and must return `group_not_supported` for synthetic thread containers rather than exposing personal billing facts in a group runtime.

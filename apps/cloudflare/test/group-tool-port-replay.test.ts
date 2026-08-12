@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type {
-  HostedRuntimeGroupToolRequest,
-  HostedRuntimeGroupToolResponse,
+import {
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+  type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeGroupToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { createHostedRuntimeGroupToolPort } from "../src/runtime-platform/group-tool-port.ts";
@@ -47,7 +49,7 @@ const replaySafeRequests = [
     wireResponse: undefined,
   },
   {
-    action: "ask_current_sender:group",
+    action: "ask_current_sender",
     request: {
       action: "ask_current_sender",
       origin: {
@@ -55,54 +57,22 @@ const replaySafeRequests = [
         kind: "accepted_input",
         sessionId: "session_group",
       },
-      responseDestination: "group",
     },
     response: {
       action: "ask_current_sender",
-      responseDestination: "group",
       result: { status: "accepted" },
     },
     wireRequest: {
       action: "ask_current_sender",
+      [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
+        HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
       origin: {
         assistantInputId: `ain_${"c".repeat(32)}`,
         kind: "accepted_input",
         sessionId: "session_group",
       },
     },
-    wireResponse: {
-      action: "ask_current_sender",
-      result: { status: "accepted" },
-    },
-  },
-  {
-    action: "ask_current_sender:current_sender",
-    request: {
-      action: "ask_current_sender",
-      origin: {
-        assistantInputId: `ain_${"d".repeat(32)}`,
-        kind: "accepted_input",
-        sessionId: "session_group",
-      },
-      responseDestination: "current_sender",
-    },
-    response: {
-      action: "ask_current_sender",
-      responseDestination: "current_sender",
-      result: { status: "accepted" },
-    },
-    wireRequest: {
-      action: "message_current_sender",
-      origin: {
-        assistantInputId: `ain_${"d".repeat(32)}`,
-        kind: "accepted_input",
-        sessionId: "session_group",
-      },
-    },
-    wireResponse: {
-      action: "message_current_sender",
-      result: { status: "accepted" },
-    },
+    wireResponse: undefined,
   },
 ] as const satisfies readonly {
   action: string;
@@ -122,7 +92,9 @@ describe("hosted group tool exact replay", () => {
       wireResponse,
     }: (typeof replaySafeRequests)[number]) => {
       const requestBodies: BodyInit[] = [];
-      const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
+      const requestUrls: string[] = [];
+      const fetchImpl = vi.fn<typeof fetch>(async (fetchRequest, init) => {
+        requestUrls.push(readFetchRequestUrl(fetchRequest));
         if (init?.body) {
           requestBodies.push(init.body);
         }
@@ -139,10 +111,20 @@ describe("hosted group tool exact replay", () => {
 
       await expect(port.request(request)).resolves.toEqual(response);
       expect(fetchImpl).toHaveBeenCalledTimes(2);
-      expect(requestBodies).toEqual([
-        JSON.stringify(wireRequest ?? request),
-        JSON.stringify(wireRequest ?? request),
+      expect(requestBodies.map((body) => JSON.parse(String(body)))).toEqual([
+        wireRequest ?? request,
+        wireRequest ?? request,
       ]);
+      for (const requestUrl of requestUrls) {
+        const marker = new URL(requestUrl).searchParams.get(
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
+        );
+        expect(marker).toBe(
+          request.action === "ask_current_sender"
+            ? HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE
+            : null,
+        );
+      }
     },
   );
 
@@ -279,6 +261,13 @@ function createJsonResponse(payload: unknown, status = 200): Response {
     headers: { "content-type": "application/json" },
     status,
   });
+}
+
+function readFetchRequestUrl(request: RequestInfo | URL): string {
+  if (typeof request === "string") {
+    return request;
+  }
+  return request instanceof URL ? request.href : request.url;
 }
 
 function createLostBodyResponse(

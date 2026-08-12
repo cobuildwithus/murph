@@ -49,42 +49,36 @@ function buildEmailDeliveryContext(
 }
 
 describe("createHostedGroupToolWithCurrentTurnContext", () => {
-  it.each(["group", "current_sender"] as const)(
-    "forwards current-turn cancellation through the %s destination",
-    async (responseDestination: "current_sender" | "group") => {
-      const request = vi.fn().mockResolvedValue({
-        action: "ask_current_sender",
-        responseDestination,
-        result: { status: "accepted" },
-      });
-      const groupTool = createHostedGroupToolWithCurrentTurnContext({
-        groupToolPort: { request },
-        linqDeliveryContexts: [],
-      });
-      const signal = new AbortController().signal;
-      const currentSenderRequest = {
-        action: "ask_current_sender" as const,
-        origin: {
-          assistantInputId: `ain_${"a".repeat(32)}`,
-          kind: "accepted_input" as const,
-          sessionId: "session_group",
-        },
-        responseDestination,
-      };
+  it("forwards current-turn cancellation through the neutral current-sender request", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "ask_current_sender",
+      result: { status: "accepted" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+    });
+    const signal = new AbortController().signal;
+    const currentSenderRequest = {
+      action: "ask_current_sender" as const,
+      origin: {
+        assistantInputId: `ain_${"a".repeat(32)}`,
+        kind: "accepted_input" as const,
+        sessionId: "session_group",
+      },
+    };
 
-      await expect(
-        groupTool.request(currentSenderRequest, { signal }),
-      ).resolves.toEqual({
-        action: "ask_current_sender",
-        responseDestination,
-        result: { status: "accepted" },
-      });
-      expect(request).toHaveBeenCalledExactlyOnceWith(
-        currentSenderRequest,
-        { signal },
-      );
-    },
-  );
+    await expect(
+      groupTool.request(currentSenderRequest, { signal }),
+    ).resolves.toEqual({
+      action: "ask_current_sender",
+      result: { status: "accepted" },
+    });
+    expect(request).toHaveBeenCalledExactlyOnceWith(
+      currentSenderRequest,
+      { signal },
+    );
+  });
 
   it("injects the exact current sender into referral actions", async () => {
     const request = vi.fn().mockResolvedValue({
@@ -245,10 +239,8 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
         kind: "accepted_input",
         sessionId: "session_group",
       },
-      responseDestination: "current_sender",
     })).resolves.toEqual({
       action: "ask_current_sender",
-      responseDestination: "current_sender",
       result: {
         status: "unavailable",
         unavailableReason: "authenticated_sender_required",
@@ -1204,7 +1196,6 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           kind: "accepted_input" as const,
           sessionId: "session_group",
         },
-        responseDestination: "group" as const,
       },
       {
         action: "ask_member" as const,

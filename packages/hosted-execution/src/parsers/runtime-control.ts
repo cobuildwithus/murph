@@ -984,14 +984,29 @@ export function parseHostedRuntimeAssistantAskControlRequest(
     return { action, requestId };
   }
   if (action === "complete") {
+    const hasResponseDestination = Object.hasOwn(
+      record,
+      "responseDestination",
+    );
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "requestId", "result"]),
+      hasResponseDestination
+        ? new Set(["action", "requestId", "responseDestination", "result"])
+        : new Set(["action", "requestId", "result"]),
       "Hosted runtime assistant ask complete control request",
     );
     return {
       action,
       requestId,
+      ...(hasResponseDestination
+        ? {
+            responseDestination:
+              parseHostedRuntimeGroupCurrentSenderResponseDestination(
+                record.responseDestination,
+                "Hosted runtime assistant ask completion responseDestination",
+              ),
+          }
+        : {}),
       result: parseHostedExecutionAssistantAskResult(
         record.result,
         "Hosted runtime assistant ask result",
@@ -1146,16 +1161,15 @@ export function parseHostedRuntimeGroupToolRequest(
     if (origin.kind !== "accepted_input") {
       throw new TypeError(`${label} origin must be an accepted input.`);
     }
-    return {
-      action,
-      origin,
-      responseDestination: hasResponseDestination
-        ? parseHostedRuntimeGroupCurrentSenderResponseDestination(
-            record.responseDestination,
-            `${label} responseDestination`,
-          )
-        : "group",
-    };
+    if (hasResponseDestination) {
+      // Parse legacy transport metadata for rollback compatibility, but never
+      // carry it into the canonical in-process request.
+      parseHostedRuntimeGroupCurrentSenderResponseDestination(
+        record.responseDestination,
+        `${label} responseDestination`,
+      );
+    }
+    return { action, origin };
   }
   if (action === "message_current_sender") {
     const label = "Hosted runtime group tool legacy message_current_sender request";
@@ -1167,11 +1181,7 @@ export function parseHostedRuntimeGroupToolRequest(
     if (origin.kind !== "accepted_input") {
       throw new TypeError(`${label} origin must be an accepted input.`);
     }
-    return {
-      action: "ask_current_sender",
-      origin,
-      responseDestination: "current_sender",
-    };
+    return { action: "ask_current_sender", origin };
   }
   if (action === "ask_member") {
     const label = "Hosted runtime group tool ask_member request";
@@ -2642,22 +2652,14 @@ export function parseHostedRuntimeGroupToolResponse(
         : new Set(["action", "result"]),
       label,
     );
-    const responseDestination = hasResponseDestination
-      ? parseHostedRuntimeGroupCurrentSenderResponseDestination(
-          record.responseDestination,
-          `${label} responseDestination`,
-        )
-      : "group";
-    if (responseDestination === "group") {
-      return {
-        action,
-        responseDestination,
-        result: parseHostedRuntimeGroupMemberAskResult(record.result, action),
-      };
+    if (hasResponseDestination) {
+      parseHostedRuntimeGroupCurrentSenderResponseDestination(
+        record.responseDestination,
+        `${label} responseDestination`,
+      );
     }
     return {
       action,
-      responseDestination,
       result: parseHostedRuntimeGroupCurrentSenderDirectResult(record.result),
     };
   }
@@ -2669,7 +2671,6 @@ export function parseHostedRuntimeGroupToolResponse(
     );
     return {
       action: "ask_current_sender",
-      responseDestination: "current_sender",
       result: parseHostedRuntimeGroupCurrentSenderDirectResult(record.result),
     };
   }

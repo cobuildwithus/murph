@@ -3,6 +3,7 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
+  HostedExecutionAssistantAskGroupSenderResponseDestination,
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
@@ -23,7 +24,6 @@ import {
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
-  HostedVaultShareProjectionKind,
   HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
@@ -220,6 +220,9 @@ export async function handleHostedRuntimeGroupTool(input: {
    * budget as the work below. Direct unit callers may omit it.
    */
   requestStartedAtMs?: number;
+  /** Trusted transport-only fixed audience for draining old callers. */
+  currentSenderLegacyResponseDestination?:
+    HostedExecutionAssistantAskGroupSenderResponseDestination | null;
   scheduleMailboxWake?: (input: {
     expectedUserId: string;
     mailboxItemId: string;
@@ -242,23 +245,14 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "ask_current_sender") {
     const admission = await requestHostedGroupCurrentSenderAssistantAsk({
       groupRuntimeMemberId: input.memberId,
+      legacyResponseDestination:
+        input.currentSenderLegacyResponseDestination ?? null,
       origin: input.request.origin,
-      responseDestination: input.request.responseDestination,
     });
     if (admission.mailboxWake) {
       await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
-    return input.request.responseDestination === "group"
-      ? {
-          action: "ask_current_sender",
-          responseDestination: "group",
-          result: admission.result,
-        }
-      : {
-          action: "ask_current_sender",
-          responseDestination: "current_sender",
-          result: admission.result,
-        };
+    return { action: "ask_current_sender", result: admission.result };
   }
 
   if (input.request.action === "ask_member") {

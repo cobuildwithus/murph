@@ -661,17 +661,10 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         result: { status: "unavailable", unavailableReason },
       };
     case "ask_current_sender":
-      return request.responseDestination === "group"
-        ? {
-            action: "ask_current_sender",
-            responseDestination: "group",
-            result: { status: "unavailable", unavailableReason },
-          }
-        : {
-            action: "ask_current_sender",
-            responseDestination: "current_sender",
-            result: { status: "unavailable", unavailableReason },
-          };
+      return {
+        action: "ask_current_sender",
+        result: { status: "unavailable", unavailableReason },
+      };
     case "list_memberships":
       return {
         action: request.action,

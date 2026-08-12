@@ -154,24 +154,19 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].required).toEqual(["action"]);
     expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[0]).toMatchObject({
       properties: {
-        action: { enum: ["ask_current_sender"] },
-        message_ref: {},
-        response_destination: {
-          enum: ["group", "current_sender"],
+        action: {
+          enum: ["ask_current_sender", "revoke_own_email_share"],
         },
-      },
-      required: ["action", "message_ref", "response_destination"],
-    });
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
-      properties: {
-        action: { enum: ["revoke_own_email_share"] },
         message_ref: {},
       },
       required: ["action", "message_ref"],
     });
     expect(
-      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[2].properties.action.enum,
+      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1].properties.action.enum,
     ).not.toContain("ask_current_sender");
+    expect(GROUP_TOOL_INPUT_PROPERTIES).not.toHaveProperty(
+      "response_destination",
+    );
     expect(GROUP_TOOL_INPUT_PROPERTIES.question.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS);
     expect(GROUP_TOOL_INPUT_PROPERTIES.policyCode.description)
@@ -270,11 +265,11 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("changed questions conflict");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('ask_current_sender: "group" returns here');
+      .toContain("ask_current_sender submits the exact selected message");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('"current_sender" only if the exact selected message asks for a private reply');
+      .toContain("fresh review defaults here and sends direct only on an explicit private request");
     expect(MURPH_GROUP_TOOL.description)
-      .toContain("never use older context");
+      .toContain("conflicts authorize no delivery");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("accepted starts processing, not delivery");
     expect(MURPH_GROUP_TOOL.description)
@@ -525,24 +520,23 @@ describe("murph.group dynamic tool", () => {
       .not.toHaveProperty("messageRef");
     expect(GROUP_TOOL_INPUT_PROPERTIES.message_ref)
       .toMatchObject({ pattern: "^ain_[0-9a-f]{32}$" });
-    expect(GROUP_TOOL_INPUT_PROPERTIES.response_destination)
-      .toMatchObject({ enum: ["group", "current_sender"] });
+    expect(GROUP_TOOL_INPUT_PROPERTIES)
+      .not.toHaveProperty("response_destination");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "ask_current_sender",
       message_ref: FRESH_ASSISTANT_INPUT_ID,
-      response_destination: "group",
     }))).toMatchObject({
       kind: "group",
       request: {
         action: "ask_current_sender",
         messageRef: FRESH_ASSISTANT_INPUT_ID,
-        responseDestination: "group",
       },
     });
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "ask_current_sender",
       message_ref: FRESH_ASSISTANT_INPUT_ID,
+      response_destination: "group",
     }))).toMatchObject({ kind: "invalid-group-arguments" });
 
     for (const action of [

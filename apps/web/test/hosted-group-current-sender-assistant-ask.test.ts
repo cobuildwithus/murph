@@ -3,8 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 
 import {
+  HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
+} from "@murphai/hosted-execution/contracts";
+import {
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+  buildHostedExecutionAssistantAskCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionTelegramConversationMessageWake,
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
@@ -104,10 +108,10 @@ import {
   handleHostedRuntimeAssistantAskControl,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
-  HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
   HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
   assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx,
   createHostedGroupCurrentSenderAssistantAskRequestId,
+  createHostedGroupCurrentSenderLegacyAssistantAskRequestId,
   requestHostedGroupCurrentSenderAssistantAsk,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
 
@@ -223,13 +227,11 @@ async function createCurrentSenderRequestFixture(
         : null,
   );
   const admission = await requestHostedGroupCurrentSenderAssistantAsk({
-    responseDestination: "group",
     groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
     now: NOW,
     origin: CURRENT_SENDER_ORIGIN,
   });
   const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
-    responseDestination: "group",
     groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
     originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
   });
@@ -299,14 +301,12 @@ describe("hosted current-sender Assistant Ask authority", () => {
       sessionId: "session_group",
     };
     const admission = await requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin,
     });
 
     const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     });
@@ -374,14 +374,24 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin,
     })).resolves.toEqual(admission);
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      legacyResponseDestination: "group",
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "request_conflict",
+      },
+    });
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: { ...origin, sessionId: "different_session" },
@@ -402,13 +412,34 @@ describe("hosted current-sender Assistant Ask authority", () => {
       response: {
         action: "prepare",
         disclosure: {
-          permissionText: HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
+          permissionText: HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
         },
         question: "Murph tell them about my sleep",
         status: "ready",
         targetLabel: null,
       },
     });
+
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: SENDER_MEMBER_ID,
+      now: NOW,
+      request: {
+        action: "complete",
+        requestId,
+        result: {
+          answer: "This must not be delivered without a reviewed audience.",
+          outcome: "answered",
+        },
+      },
+    })).resolves.toEqual({
+      mailboxWake: null,
+      response: {
+        action: "complete",
+        status: "terminal",
+        terminalReason: "unavailable",
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
 
     const completionId = createHostedAssistantAskCompletionId(requestId);
     await expect(handleHostedRuntimeAssistantAskControl({
@@ -417,6 +448,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
       request: {
         action: "complete",
         requestId,
+        responseDestination: "group",
         result: {
           answer: "Your recent sleep has been inconsistent.",
           outcome: "answered",
@@ -459,6 +491,144 @@ describe("hosted current-sender Assistant Ask authority", () => {
             ? completionWake
             : null,
     );
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: SENDER_MEMBER_ID,
+      now: NOW,
+      request: {
+        action: "complete",
+        requestId,
+        responseDestination: "current_sender",
+        result: {
+          answer: "A replay must not switch the terminal audience.",
+          outcome: "answered",
+        },
+      },
+    })).resolves.toEqual({
+      mailboxWake: null,
+      response: {
+        action: "complete",
+        status: "terminal",
+        terminalReason: "unavailable",
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(2);
+
+    const groupDeliveryAuthority = {
+      answeredMailboxItemIds: [completionId],
+      boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      idempotencyKey:
+        createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+          completionId,
+        ),
+      now: NOW,
+      tx: fakeTx as never,
+    };
+    await expect(
+      assertHostedAssistantAskCompletionDeliveryAuthorityTx(
+        groupDeliveryAuthority,
+      ),
+    ).resolves.toBeUndefined();
+
+    const legacyGroupRequestId =
+      createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        responseDestination: "group",
+      });
+    mocks.readHostedMailboxItemById.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        mailboxItemId === requestId || mailboxItemId === legacyGroupRequestId
+          ? {
+              dedupeKey: mailboxItemId,
+              expiresAt: requestWake.ask.expiresAt,
+              id: mailboxItemId,
+              kind: "assistant.ask.requested",
+              userId: SENDER_MEMBER_ID,
+            }
+          : mailboxItemId === completionId
+            ? {
+                dedupeKey: completionId,
+                expiresAt: requestWake.ask.expiresAt,
+                id: completionId,
+                kind: "assistant.ask.completed",
+                userId: GROUP_RUNTIME_MEMBER_ID,
+              }
+            : null,
+    );
+    await expect(
+      assertHostedAssistantAskCompletionDeliveryAuthorityTx(
+        groupDeliveryAuthority,
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+    });
+  });
+
+  it("rejects fixed-private legacy authority at group provider entry", async () => {
+    const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      legacyResponseDestination: "current_sender",
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    });
+    const requestId =
+      createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        responseDestination: "current_sender",
+      });
+    expect(admission).toMatchObject({
+      mailboxWake: { mailboxItemId: requestId },
+      result: { status: "accepted" },
+    });
+    const requestWake =
+      mocks.appendHostedMailboxEnvelopeWithIdentityTx.mock.calls[0]?.[0].envelope;
+    if (!requestWake) {
+      throw new Error("Expected fixed-private legacy request append.");
+    }
+    const completionId = createHostedAssistantAskCompletionId(requestId);
+    const completionWake = buildHostedExecutionAssistantAskCompletedWake({
+      ask: {
+        expiresAt: requestWake.ask.expiresAt,
+        origin: requestWake.ask.origin,
+        question: requestWake.ask.question,
+        requestId,
+        result: { answer: "Synthetic forged group answer.", outcome: "answered" },
+        targetLabel: null,
+      },
+      eventId: completionId,
+      memberId: GROUP_RUNTIME_MEMBER_ID,
+      occurredAt: NOW.toISOString(),
+    });
+    mocks.readHostedMailboxItemById.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        mailboxItemId === requestId
+          ? {
+              dedupeKey: requestId,
+              expiresAt: requestWake.ask.expiresAt,
+              id: requestId,
+              kind: "assistant.ask.requested",
+              userId: SENDER_MEMBER_ID,
+            }
+          : mailboxItemId === completionId
+            ? {
+                dedupeKey: completionId,
+                expiresAt: requestWake.ask.expiresAt,
+                id: completionId,
+                kind: "assistant.ask.completed",
+                userId: GROUP_RUNTIME_MEMBER_ID,
+              }
+            : null,
+    );
+    mocks.readHostedMailboxWakeByItemId.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        mailboxItemId === requestId
+          ? requestWake
+          : mailboxItemId === completionId
+            ? completionWake
+            : null,
+    );
+
     await expect(assertHostedAssistantAskCompletionDeliveryAuthorityTx({
       answeredMailboxItemIds: [completionId],
       boundRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
@@ -468,7 +638,193 @@ describe("hosted current-sender Assistant Ask authority", () => {
         ),
       now: NOW,
       tx: fakeTx as never,
-    })).resolves.toBeUndefined();
+    })).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+    });
+  });
+
+  it("fails closed when more than one legacy or canonical request alias exists", async () => {
+    const canonicalRequestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+    });
+    const legacyGroupRequestId =
+      createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        responseDestination: "group",
+      });
+    mocks.readHostedMailboxItemById.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        mailboxItemId === canonicalRequestId
+        || mailboxItemId === legacyGroupRequestId
+          ? {
+              dedupeKey: mailboxItemId,
+              expiresAt: "2026-07-27T20:10:00.000Z",
+              id: mailboxItemId,
+              kind: "assistant.ask.requested",
+              userId: SENDER_MEMBER_ID,
+            }
+          : null,
+    );
+
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "request_conflict",
+      },
+    });
+    expect(
+      mocks.readHostedMailboxConversationWakeByAssistantInputId,
+    ).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects prepare and completion when an admitted origin has duplicate request aliases", async () => {
+    const requested = await createCurrentSenderRequestFixture(createSourceWake());
+    const legacyGroupRequestId =
+      createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        responseDestination: "group",
+      });
+    mocks.readHostedMailboxItemById.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) => {
+        if (mailboxItemId === requested.requestId) {
+          return {
+            dedupeKey: requested.requestId,
+            expiresAt: requested.requestWake.ask.expiresAt,
+            id: requested.requestId,
+            kind: "assistant.ask.requested",
+            userId: SENDER_MEMBER_ID,
+          };
+        }
+        return mailboxItemId === legacyGroupRequestId
+          ? {
+              dedupeKey: legacyGroupRequestId,
+              expiresAt: requested.requestWake.ask.expiresAt,
+              id: legacyGroupRequestId,
+              kind: "assistant.ask.requested",
+              userId: SENDER_MEMBER_ID,
+            }
+          : null;
+      },
+    );
+
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: SENDER_MEMBER_ID,
+      now: NOW,
+      request: { action: "prepare", requestId: requested.requestId },
+    })).resolves.toEqual({
+      mailboxWake: null,
+      response: {
+        action: "prepare",
+        status: "terminal",
+        terminalReason: "unavailable",
+      },
+    });
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: SENDER_MEMBER_ID,
+      now: NOW,
+      request: {
+        action: "complete",
+        requestId: requested.requestId,
+        responseDestination: "group",
+        result: { answer: "Synthetic answer.", outcome: "answered" },
+      },
+    })).resolves.toEqual({
+      mailboxWake: null,
+      response: {
+        action: "complete",
+        status: "terminal",
+        terminalReason: "unavailable",
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fall back to the group when a reviewed private route is unavailable", async () => {
+    const question = "Murph, send me a private update about my sleep.";
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
+      createSourceWake({ text: question }),
+    );
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(null);
+
+    const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    });
+    const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+    });
+    expect(admission).toEqual({
+      mailboxWake: {
+        expectedUserId: SENDER_MEMBER_ID,
+        mailboxItemId: requestId,
+      },
+      result: { status: "accepted" },
+    });
+    expect(
+      mocks.resolveHostedAssistantNotificationDestination,
+    ).not.toHaveBeenCalled();
+
+    const requestWake =
+      mocks.appendHostedMailboxEnvelopeWithIdentityTx.mock.calls[0]?.[0].envelope;
+    if (!requestWake) {
+      throw new Error("Expected neutral current-sender request append.");
+    }
+    mocks.readHostedMailboxItemById.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        mailboxItemId === requestId
+          ? {
+              dedupeKey: requestId,
+              expiresAt: requestWake.ask.expiresAt,
+              id: requestId,
+              kind: "assistant.ask.requested",
+              userId: SENDER_MEMBER_ID,
+            }
+          : null,
+    );
+    mocks.readHostedMailboxWakeByItemId.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        mailboxItemId === requestId ? requestWake : null,
+    );
+
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: SENDER_MEMBER_ID,
+      now: NOW,
+      request: {
+        action: "complete",
+        requestId,
+        responseDestination: "current_sender",
+        result: {
+          answer: "Your recent sleep has been inconsistent.",
+          outcome: "answered",
+        },
+      },
+    })).resolves.toEqual({
+      mailboxWake: null,
+      response: {
+        action: "complete",
+        status: "terminal",
+        terminalReason: "unavailable",
+      },
+    });
+    expect(
+      mocks.resolveHostedAssistantNotificationDestination,
+    ).toHaveBeenCalledWith({
+      directChannel: "linq",
+      memberId: SENDER_MEMBER_ID,
+      prisma: fakeTx,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
   });
 
   it(
@@ -498,7 +854,6 @@ describe("hosted current-sender Assistant Ask authority", () => {
       );
 
       await expect(requestHostedGroupCurrentSenderAssistantAsk({
-        responseDestination: "group",
         groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
         now: NOW,
         origin: CURRENT_SENDER_ORIGIN,
@@ -536,18 +891,18 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
 
     const admission = await requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "current_sender",
+      legacyResponseDestination: "current_sender",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
     });
     const requestId =
-      createHostedGroupCurrentSenderAssistantAskRequestId({
+      createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
         responseDestination: "current_sender",
         groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
         originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       });
-    expect(requestId).not.toBe(createHostedGroupCurrentSenderAssistantAskRequestId({
+    expect(requestId).not.toBe(createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
       responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -598,7 +953,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "current_sender",
+      legacyResponseDestination: "current_sender",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
@@ -611,7 +966,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
       route: LINQ_PARTICIPANT_ROUTE,
     });
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "current_sender",
+      legacyResponseDestination: "current_sender",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
@@ -825,6 +1180,44 @@ describe("hosted current-sender Assistant Ask authority", () => {
       },
     });
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(2);
+
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue({
+      conversationShape: "direct-member",
+      externalThreadRouteAuthority: null,
+      route: DIRECT_ROUTE,
+    });
+    const canonicalRequestId =
+      createHostedGroupCurrentSenderAssistantAskRequestId({
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      });
+    mocks.readHostedMailboxItemById.mockImplementation(
+      async ({ mailboxItemId }: { mailboxItemId: string }) =>
+        mailboxItemId === requestId || mailboxItemId === canonicalRequestId
+          ? {
+              dedupeKey: mailboxItemId,
+              expiresAt: requestWake.ask.expiresAt,
+              id: mailboxItemId,
+              kind: "assistant.ask.requested",
+              userId: SENDER_MEMBER_ID,
+            }
+          : mailboxItemId === completionId
+            ? {
+                dedupeKey: completionId,
+                expiresAt: requestWake.ask.expiresAt,
+                id: completionId,
+                kind: "assistant.notification.requested",
+                userId: SENDER_MEMBER_ID,
+              }
+            : null,
+    );
+    await expect(
+      assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx(
+        privateDeliveryAuthority,
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_ASK_DELIVERY_AUTHORITY_MISMATCH",
+    });
   });
 
   it("rejects a Linq participant fallback before personal work", async () => {
@@ -835,7 +1228,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     });
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "current_sender",
+      legacyResponseDestination: "current_sender",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
@@ -864,7 +1257,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(null);
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "current_sender",
+      legacyResponseDestination: "current_sender",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
@@ -900,7 +1293,6 @@ describe("hosted current-sender Assistant Ask authority", () => {
     mocks.lookupHostedGroupParticipantMemberByHandle.mockClear();
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: new Date(requested.requestWake.ask.expiresAt),
       origin: CURRENT_SENDER_ORIGIN,
@@ -945,7 +1337,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
       response: {
         action: "prepare",
         disclosure: {
-          permissionText: HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
+          permissionText: HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
         },
         question: "Murph tell them about my recovery",
         status: "ready",
@@ -962,6 +1354,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
       request: {
         action: "complete",
         requestId: requested.requestId,
+        responseDestination: "group",
         result: {
           answer: "Your recent recovery has been inconsistent.",
           outcome: "answered",
@@ -1070,7 +1463,6 @@ describe("hosted current-sender Assistant Ask authority", () => {
   it("fails closed when the provider sender cannot be resolved or text is absent", async () => {
     mocks.lookupHostedGroupParticipantMemberByHandle.mockResolvedValueOnce(null);
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: {
@@ -1090,7 +1482,6 @@ describe("hosted current-sender Assistant Ask authority", () => {
       createSourceWake({ text: "   " }),
     );
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: {
@@ -1114,7 +1505,6 @@ describe("hosted current-sender Assistant Ask authority", () => {
       createTelegramSourceWake(),
     );
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: {
@@ -1152,7 +1542,6 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: {
@@ -1187,8 +1576,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
         wake,
       );
       await expect(requestHostedGroupCurrentSenderAssistantAsk({
-        responseDestination: "group",
-        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+          groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
         now: NOW,
         origin,
       })).resolves.toMatchObject({
@@ -1201,7 +1589,6 @@ describe("hosted current-sender Assistant Ask authority", () => {
       memberId: GROUP_RUNTIME_MEMBER_ID,
     });
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin,
@@ -1220,7 +1607,6 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
-      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: {

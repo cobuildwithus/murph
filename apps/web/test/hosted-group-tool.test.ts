@@ -869,7 +869,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     })).rejects.toBe(signalError);
   });
 
-  it("dispatches an exact current-sender ask and schedules only its personal wake", async () => {
+  it("dispatches one neutral current-sender ask and schedules only its personal wake", async () => {
     const scheduleMailboxWake = vi.fn();
     const origin = {
       assistantInputId: `ain_${"c".repeat(32)}`,
@@ -889,12 +889,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       request: {
         action: "ask_current_sender",
         origin,
-        responseDestination: "group",
       },
       scheduleMailboxWake,
     })).resolves.toEqual({
       action: "ask_current_sender",
-      responseDestination: "group",
       result: { status: "accepted" },
     });
 
@@ -902,8 +900,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       mocks.requestHostedGroupCurrentSenderAssistantAsk,
     ).toHaveBeenCalledWith({
       groupRuntimeMemberId: "member_group_runtime",
+      legacyResponseDestination: null,
       origin,
-      responseDestination: "group",
     });
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_sender",
@@ -932,7 +930,6 @@ describe("handleHostedRuntimeGroupTool", () => {
       request: {
         action: "ask_current_sender",
         origin,
-        responseDestination: "group",
       },
       scheduleMailboxWake,
     })).rejects.toBe(signalError);
@@ -943,7 +940,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
-  it("dispatches a current-sender private continuation and schedules its personal wake", async () => {
+  it("drains a transport-authenticated legacy private continuation", async () => {
     const scheduleMailboxWake = vi.fn();
     const origin = {
       assistantInputId: `ain_${"d".repeat(32)}`,
@@ -959,16 +956,15 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     await expect(handleHostedRuntimeGroupTool({
+      currentSenderLegacyResponseDestination: "current_sender",
       memberId: "member_group_runtime",
       request: {
         action: "ask_current_sender",
         origin,
-        responseDestination: "current_sender",
       },
       scheduleMailboxWake,
     })).resolves.toEqual({
       action: "ask_current_sender",
-      responseDestination: "current_sender",
       result: { status: "accepted" },
     });
 
@@ -976,8 +972,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       mocks.requestHostedGroupCurrentSenderAssistantAsk,
     ).toHaveBeenCalledWith({
       groupRuntimeMemberId: "member_group_runtime",
+      legacyResponseDestination: "current_sender",
       origin,
-      responseDestination: "current_sender",
     });
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_sender",

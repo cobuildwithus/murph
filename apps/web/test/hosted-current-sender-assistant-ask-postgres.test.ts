@@ -1,5 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 import {
+  HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
+} from "@murphai/hosted-execution/contracts";
+import {
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   isHostedExecutionAssistantAskCompletedWake,
   isHostedExecutionAssistantAskRequestedWake,
@@ -12,8 +15,8 @@ import {
   handleHostedRuntimeAssistantAskControl,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
-  HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
   createHostedGroupCurrentSenderAssistantAskRequestId,
+  readHostedGroupCurrentSenderAssistantAskRequestIds,
   requestHostedGroupCurrentSenderAssistantAsk,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
 import {
@@ -60,7 +63,6 @@ describe.skipIf(!runPostgresProof)(
 
         const requestId =
           createHostedGroupCurrentSenderAssistantAskRequestId({
-            responseDestination: "group",
             groupRuntimeMemberId: fixture.groupRuntimeMemberId,
             originAssistantInputId: fixture.assistantInputId,
           });
@@ -72,7 +74,6 @@ describe.skipIf(!runPostgresProof)(
           result: { status: "accepted" as const },
         };
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
-          responseDestination: "group",
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
           now,
           origin: fixture.origin,
@@ -109,14 +110,12 @@ describe.skipIf(!runPostgresProof)(
         expect(requestWake.ask.target.permissionDigest).toMatch(/^[a-f0-9]{64}$/u);
 
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
-          responseDestination: "group",
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
           now,
           origin: fixture.origin,
           prisma,
         })).resolves.toEqual(expectedAdmission);
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
-          responseDestination: "group",
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
           now,
           origin: {
@@ -143,7 +142,7 @@ describe.skipIf(!runPostgresProof)(
             action: "prepare",
             disclosure: {
               permissionText:
-                HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
+                HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
             },
             question: fixture.question,
             status: "ready",
@@ -164,6 +163,7 @@ describe.skipIf(!runPostgresProof)(
           request: {
             action: "complete",
             requestId,
+            responseDestination: "group",
             result: {
               answer,
               outcome: "answered",
@@ -204,6 +204,7 @@ describe.skipIf(!runPostgresProof)(
           request: {
             action: "complete",
             requestId,
+            responseDestination: "group",
             result: {
               answer,
               outcome: "answered",
@@ -274,6 +275,172 @@ describe.skipIf(!runPostgresProof)(
             fixture,
             prisma,
           });
+        }
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("serializes canonical and legacy audience admissions to one origin row", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const now = new Date();
+      let fixture: HostedCurrentSenderAssistantAskFixture | null = null;
+
+      try {
+        fixture = await seedHostedCurrentSenderAssistantAskFixture({
+          now,
+          prisma,
+          question: "Murph, send this synthetic answer to the group.",
+        });
+        const requestIds = readHostedGroupCurrentSenderAssistantAskRequestIds({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          originAssistantInputId: fixture.assistantInputId,
+        });
+        const admissions = await Promise.all([
+          requestHostedGroupCurrentSenderAssistantAsk({
+            groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+            now,
+            origin: fixture.origin,
+            prisma,
+          }),
+          requestHostedGroupCurrentSenderAssistantAsk({
+            groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+            legacyResponseDestination: "group",
+            now,
+            origin: fixture.origin,
+            prisma,
+          }),
+          requestHostedGroupCurrentSenderAssistantAsk({
+            groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+            legacyResponseDestination: "current_sender",
+            now,
+            origin: fixture.origin,
+            prisma,
+          }),
+        ]);
+        const acceptedAdmissions = admissions.filter(
+          (admission) => admission.result.status === "accepted",
+        );
+        const rejectedAdmissions = admissions.filter(
+          (admission) => admission.result.status === "unavailable",
+        );
+        expect(acceptedAdmissions).toHaveLength(1);
+        expect(rejectedAdmissions).toHaveLength(2);
+        for (const admission of rejectedAdmissions) {
+          expect(admission).toEqual({
+            mailboxWake: null,
+            result: {
+              status: "unavailable",
+              unavailableReason: "request_conflict",
+            },
+          });
+        }
+        const admittedRequestId = acceptedAdmissions[0]?.mailboxWake?.mailboxItemId;
+        expect(acceptedAdmissions[0]?.mailboxWake?.expectedUserId).toBe(
+          fixture.senderMemberId,
+        );
+        expect(admittedRequestId).toBeTypeOf("string");
+        expect(requestIds).toContain(admittedRequestId);
+        await expect(prisma.hostedMailboxItem.count({
+          where: { id: { in: [...requestIds] } },
+        })).resolves.toBe(1);
+      } finally {
+        if (fixture) {
+          await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });
+        }
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("persists exactly one terminal audience under competing completions", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const now = new Date();
+      let fixture: HostedCurrentSenderAssistantAskFixture | null = null;
+
+      try {
+        fixture = await seedHostedCurrentSenderAssistantAskFixture({
+          now,
+          prisma,
+          question: "Murph, send a synthetic response to exactly one audience.",
+        });
+        const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          originAssistantInputId: fixture.assistantInputId,
+        });
+        await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          now,
+          origin: fixture.origin,
+          prisma,
+        })).resolves.toMatchObject({
+          mailboxWake: { mailboxItemId: requestId },
+          result: { status: "accepted" },
+        });
+
+        const answer = "Synthetic reviewed answer.";
+        const completions = await Promise.all([
+          handleHostedRuntimeAssistantAskControl({
+            boundRuntimeMemberId: fixture.senderMemberId,
+            now,
+            prisma,
+            request: {
+              action: "complete",
+              requestId,
+              responseDestination: "group",
+              result: { answer, outcome: "answered" },
+            },
+          }),
+          handleHostedRuntimeAssistantAskControl({
+            boundRuntimeMemberId: fixture.senderMemberId,
+            now,
+            prisma,
+            request: {
+              action: "complete",
+              requestId,
+              responseDestination: "current_sender",
+              result: { answer, outcome: "answered" },
+            },
+          }),
+        ]);
+        expect(
+          completions.map((completion) => completion.response.status).sort(),
+        ).toEqual(["completed", "terminal"]);
+        const completed = completions.find(
+          (completion) => completion.response.status === "completed",
+        );
+        const rejected = completions.find(
+          (completion) => completion.response.status === "terminal",
+        );
+        expect(completed?.mailboxWake).not.toBeNull();
+        expect(rejected).toEqual({
+          mailboxWake: null,
+          response: {
+            action: "complete",
+            status: "terminal",
+            terminalReason: "unavailable",
+          },
+        });
+
+        const completionIds = readHostedGroupCurrentSenderAssistantAskRequestIds({
+          groupRuntimeMemberId: fixture.groupRuntimeMemberId,
+          originAssistantInputId: fixture.assistantInputId,
+        }).map((requestId) => createHostedAssistantAskCompletionId(requestId));
+        await expect(prisma.hostedMailboxItem.count({
+          where: { id: { in: completionIds } },
+        })).resolves.toBe(1);
+        const persistedCompletion = await prisma.hostedMailboxItem.findFirst({
+          select: { kind: true, userId: true },
+          where: { id: { in: completionIds } },
+        });
+        expect(persistedCompletion?.kind).toMatch(
+          /^assistant\.(ask\.completed|notification\.requested)$/u,
+        );
+        expect([
+          fixture.groupRuntimeMemberId,
+          fixture.senderMemberId,
+        ]).toContain(persistedCompletion?.userId);
+      } finally {
+        if (fixture) {
+          await deleteHostedCurrentSenderAssistantAskFixture({ fixture, prisma });
         }
         await prisma.$disconnect();
       }

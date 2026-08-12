@@ -54,6 +54,7 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
   const senderMemberId = `hbm_current_sender_person_${suffix}`;
   const groupRuntimeMemberId = `hbm_current_sender_group_${suffix}`;
   const telegramUserId = `tg_current_sender_${suffix}`;
+  const telegramDirectThreadId = `telegram_direct_current_sender_${suffix}`;
   const threadId = `telegram_group_current_sender_${suffix}`;
   const sourceEventId = `telegram.message.received:current-sender:${suffix}`;
   const sourceMessageId = `telegram_message_current_sender_${suffix}`;
@@ -121,7 +122,7 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: senderMemberId,
       prisma: tx,
-      telegramThreadId: null,
+      telegramThreadId: telegramDirectThreadId,
       telegramUserId,
     });
   });

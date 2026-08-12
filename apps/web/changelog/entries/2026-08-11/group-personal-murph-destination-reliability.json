@@ -6,9 +6,15 @@
     "kind": "improvement",
     "priority": 4,
     "title": "Group requests stay with the intended audience",
-    "summary": "When a group asks someone's personal Murph for help, the same request now determines whether the reviewed answer returns to the group or goes directly to that sender.",
-    "details": "A direct reply still requires the selected group message itself to ask for one, and a missing direct route fails without falling back to the group.",
-    "relevanceTags": ["groups", "privacy", "reliability"],
-    "sourcePullRequests": [1705]
+    "summary": "When a group message asks someone's personal Murph for help, the result returns to the group unless that exact message explicitly requests a private reply.",
+    "details": "Conflicting audience intent shares nothing. Private replies still require a current same-channel direct route and never fall back to the group.",
+    "relevanceTags": [
+      "groups",
+      "privacy",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      1705
+    ]
   }
 }

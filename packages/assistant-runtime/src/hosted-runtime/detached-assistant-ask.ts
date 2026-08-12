@@ -2,6 +2,7 @@ import {
   executeConsentedReadOnlyAssistantAsk,
   executeReadOnlyAssistantAsk,
   type ConsentedReadOnlyAssistantAskInput,
+  type ConsentedReadOnlyAssistantAskResult,
   type ReadOnlyAssistantAskProviderUsageEvent,
   type ReadOnlyAssistantAskInput,
   type ReadOnlyAssistantAskResult,
@@ -19,7 +20,7 @@ import type {
   AssistantHostedGroupSharedReader,
 } from "@murphai/assistant-engine";
 import {
-  readHostedExecutionAssistantAskGroupSenderResponseDestination,
+  HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
   type HostedExecutionAssistantAskResult,
 } from "@murphai/hosted-execution/contracts";
 
@@ -63,7 +64,7 @@ export interface HostedDetachedAssistantAskControllerInput {
   ) => Promise<ReadOnlyAssistantAskResult>;
   executeConsentedAsk?: (
     input: ConsentedReadOnlyAssistantAskInput,
-  ) => Promise<ReadOnlyAssistantAskResult>;
+  ) => Promise<ConsentedReadOnlyAssistantAskResult>;
   deferUsageUntilAfterDurableCheckpoint?: (
     effect: HostedWorkspaceDurableCheckpointEffect,
   ) => void;
@@ -218,7 +219,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
   ) => Promise<ReadOnlyAssistantAskResult>;
   executeConsentedAsk: (
     input: ConsentedReadOnlyAssistantAskInput,
-  ) => Promise<ReadOnlyAssistantAskResult>;
+  ) => Promise<ConsentedReadOnlyAssistantAskResult>;
   deferUsageUntilAfterDurableCheckpoint: ((
     effect: HostedWorkspaceDurableCheckpointEffect,
   ) => void) | null;
@@ -318,25 +319,24 @@ async function runOneHostedDetachedAssistantAsk(input: {
     };
     const reviewedPersonalAsk =
       claimed.wake.ask.target.kind !== "joined_group";
-    let answer: ReadOnlyAssistantAskResult;
+    let answer: ConsentedReadOnlyAssistantAskResult | ReadOnlyAssistantAskResult;
     if (claimed.wake.ask.target.kind !== "joined_group") {
       if (prepared.disclosure === undefined) {
         throw new TypeError(
           "Reviewed personal ask prepare omitted its disclosure context.",
         );
       }
-      const currentSenderResponseDestination =
+      const currentSenderReview =
         claimed.wake.ask.target.kind === "group_sender"
-        || claimed.wake.ask.target.kind === "group_sender_private"
-          ? readHostedExecutionAssistantAskGroupSenderResponseDestination(
-              claimed.wake.ask.target,
-            )
-          : null;
+        && prepared.disclosure.permissionText
+          === HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT;
       answer = await input.executeConsentedAsk({
         ...executionInput,
-        answerMode: currentSenderResponseDestination === "current_sender"
+        answerMode: claimed.wake.ask.target.kind === "group_sender_private"
           ? "direct_recipient"
-          : "caller_handoff",
+          : currentSenderReview
+            ? "reviewer_selected_audience"
+            : "caller_handoff",
         permissionText: prepared.disclosure.permissionText,
       });
     } else {
@@ -356,10 +356,14 @@ async function runOneHostedDetachedAssistantAsk(input: {
     const result = reviewedPersonalAsk && answer.outcome === "cannot_answer"
       ? { answer: null, outcome: "cannot_answer" as const }
       : normalizeHostedDetachedAssistantAskResult(answer);
+    const responseDestination = "responseDestination" in answer
+      ? answer.responseDestination
+      : undefined;
     const completed = await input.assistantAskPort.request(
       {
         action: "complete",
         requestId,
+        ...(responseDestination ? { responseDestination } : {}),
         result,
       },
       { signal: input.abortSignal },
@@ -528,7 +532,10 @@ function normalizeHostedDetachedAssistantAskResult(
   result: ReadOnlyAssistantAskResult,
 ): HostedExecutionAssistantAskResult {
   if (result.outcome === "answered") {
-    return result;
+    return {
+      answer: result.answer,
+      outcome: "answered",
+    };
   }
   return {
     answer: result.answer ?? null,

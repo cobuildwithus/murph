@@ -1084,14 +1084,17 @@ Last verified: 2026-08-11
 - Cloudflare may exact-replay one Assistant Ask control request within the
   original request deadline after a replay-safe transport ambiguity or HTTP
   `5xx`. This applies only to group `ask`, `ask_member`, the single canonical
-  destination-bearing `ask_current_sender`, and the dedicated `prepare` /
-  `complete` control requests, whose stable identities make identical replay
-  idempotent. During rolling deployment, Cloudflare encodes the two current-
-  sender destinations into the former wire shapes and Web canonicalizes both
-  before admission; response parsing restores the canonical destination. This
-  compatibility seam is transport-only and does not restore a second model
-  action. Caller cancellation, exhausted deadlines, authority failures, and
-  other `4xx` responses do not replay.
+  destination-free `ask_current_sender`, and the dedicated `prepare` / `complete`
+  control requests, whose stable identities make identical replay idempotent.
+  The neutral current-sender call carries the same version marker in the signed
+  URL and strict JSON body. New Web validates both and strips only the body
+  marker before canonical parsing; old strict Web rejects the unknown body field
+  instead of misreading the call as legacy group-only. Unmarked destination-less,
+  destination-bearing, and `message_current_sender` calls retain their fixed
+  legacy audience while old callers drain. This compatibility seam is
+  transport-only and does not restore a second model action or audience owner.
+  Caller cancellation, exhausted deadlines, authority failures, and other `4xx`
+  responses do not replay.
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct
@@ -1107,35 +1110,48 @@ Last verified: 2026-08-11
   runtime and preview buckets to be ENAM Standard. Runtime code has no fallback
   bucket, migration phase, or storage-specific admission gate; ordinary retry
   and mailbox durability remain the failure boundary.
-- One-time current-sender Assistant Ask has one destination-bearing request,
-  one Web admission owner, one mailbox lifecycle, deterministic destination-
-  preserving request identity, ten-minute expiry, isolated reviewed personal
-  read, and completion identity. The `group` destination retains exact-origin
-  caller delivery. The `current_sender` destination creates one deterministic
+- One-time current-sender Assistant Ask has one neutral origin-level request,
+  one Web admission owner, one mailbox lifecycle, one audience-independent
+  deterministic request identity, ten-minute expiry, isolated personal read,
+  existing fresh reviewer, and completion identity. The reviewer selects the
+  terminal audience solely from the exact incoming question after the personal
+  read: explicit private/direct requests select `current_sender`; every other
+  valid request selects the originating group; conflicting or context-dependent
+  audience intent supplies no destination and completes nothing. The `group`
+  result persists as `assistant.ask.completed` and retains exact-origin caller
+  delivery. The `current_sender` result persists as one deterministic
   `assistant.notification.requested` for the same personal member: queue-only,
   exact-text, idempotent, same source channel, current `direct-member` route
   only, and no external group-route authority. The personal runtime's existing
   notification consumer creates the delivery intent while retaining the
   original completion expiry and proof anchor. Each provider-entry attempt asks
-  Web to revalidate that expiry, the exact reviewed-text digest, the same
-  personal member, and the current same-channel `direct-member` route. Expired,
-  revoked, text-mismatched, or route-drifted proof is terminal with no group or
-  alternate-route fallback. Exact replay reopens and revalidates the stored
-  group input; changed identity, question, destination, permission, target,
-  route, or expiry becomes unavailable, and route drift cannot redirect
-  existing work. Neither destination adds a scheduler, callback wait, status or
-  grant row, retry owner, delivery ledger, or second generation.
-- Mixed Web, Cloudflare, and warm-runtime deployment keeps the established
-  `group_sender` and `group_sender_private` mailbox target discriminants and the
-  former request-id namespaces so already-admitted work retains identity and
-  old runtimes can finish it. New canonical in-process contracts always carry
-  `responseDestination`; parsers accept the old destination-less group request
-  and private transport action only at the wire boundary, and Web returns the
-  corresponding legacy response shape to legacy callers. Remove that seam only
-  after the minimum runtime bundle is verified converged and all pre-convergence
-  mailbox work has expired or drained. Rollback before then remains safe because
-  new admission still writes target kinds and identities understood by the old
-  runtime.
+  Web to revalidate that expiry, exact reviewed-text digest, same personal
+  member, and current same-channel `direct-member` route. Expired, revoked,
+  text-mismatched, or route-drifted proof is terminal with no group or
+  alternate-route fallback. Exact replay must match the persisted completion
+  kind; changed identity, question, permission, target, route, or expiry becomes
+  unavailable. Neither audience adds a scheduler, callback wait, status or grant
+  row, retry owner, delivery ledger, classifier, or second generation.
+- Admission and completion serialize the canonical neutral request id together
+  with both former destination-specific ids and their completion ids. Exactly
+  one request alias and at most one completion alias may exist for an origin;
+  duplicate or conflicting aliases fail closed before either audience can win a
+  race. Legacy work is revalidated against its own stored request id, target
+  kind, and permission digest. Canonical work accepts an audience only from the
+  personal runtime completion and never hashes that audience into request
+  identity.
+- Deploy the rolling transition in authority order: Web/shared parser support
+  first; then the assistant-engine and personal-runtime bundle that can process
+  both neutral and legacy requests; then Cloudflare and the destination-free
+  model catalog. The dual authenticated transport marker makes a premature new
+  Cloudflare caller fail closed against old Web, but runtime convergence is
+  still required for availability because old warm runtimes cannot return the
+  reviewer-selected audience. Roll back Cloudflare/catalog first. Keep Web,
+  runtime, `group_sender` / `group_sender_private`, former request namespaces,
+  and legacy wire parsing until the minimum runtime bundle is verified converged
+  and every pre-convergence request and completion has expired or drained; only
+  then remove the compatibility seam.
+
 - The same dirty-runtime prefix admits only three server-identified,
   replay-safe external-completion notification families:
   `assistant.notification.requested:phone-call-result:*` and

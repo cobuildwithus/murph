@@ -1000,6 +1000,15 @@ export const HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER =
   "x-murph-assistant-ask-diagnostic-code";
 export const HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER =
   "x-murph-assistant-ask-request-id";
+/**
+ * Transport-only marker for the neutral current-sender audience-review
+ * protocol. New callers place the same value in the signed URL and JSON body
+ * so old strict Web parsers fail closed instead of treating the request as a
+ * legacy group-only request.
+ */
+export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER =
+  "currentSenderAudienceReview";
+export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE = "v1";
 
 export function isHostedRuntimeAssistantAskDiagnosticCode(
   value: unknown,
@@ -1021,6 +1030,7 @@ export type HostedRuntimeAssistantAskControlRequest =
   | {
       action: "complete";
       requestId: string;
+      responseDestination?: HostedExecutionAssistantAskGroupSenderResponseDestination;
       result: HostedExecutionAssistantAskResult;
     };
 
@@ -1455,7 +1465,6 @@ export type HostedRuntimeGroupToolRequest =
         HostedExecutionAssistantAskOrigin,
         { kind: "accepted_input" }
       >;
-      responseDestination: HostedExecutionAssistantAskGroupSenderResponseDestination;
     }
   | {
       action: "ask_member";
@@ -1594,12 +1603,6 @@ export type HostedRuntimeGroupToolResponse =
     }
   | {
       action: "ask_current_sender";
-      responseDestination: "group";
-      result: HostedRuntimeGroupMemberAskResult;
-    }
-  | {
-      action: "ask_current_sender";
-      responseDestination: "current_sender";
       result: HostedRuntimeGroupCurrentSenderDirectResult;
     }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }

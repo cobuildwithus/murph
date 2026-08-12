@@ -18,9 +18,9 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   isHostedExecutionAssistantAskCompletedWake,
   isHostedExecutionAssistantAskRequestedWake,
-  readHostedExecutionAssistantAskGroupSenderResponseDestination,
   type HostedExecutionAssistantAskCompletedPayload,
   type HostedExecutionAssistantAskCompletedWake,
+  type HostedExecutionAssistantAskGroupSenderResponseDestination,
   type HostedExecutionAssistantAskOrigin,
   type HostedExecutionAssistantAskRequestedPayload,
   type HostedExecutionConversationMessageWake,
@@ -57,8 +57,9 @@ import {
   appendHostedGroupCurrentSenderPrivateCompletionTx,
   createHostedGroupCurrentSenderAssistantAskRequestId,
   readHostedGroupCurrentSenderAssistantAskAuthorityTx,
+  readHostedGroupCurrentSenderAssistantAskRequestIds,
   readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx,
-  type HostedGroupCurrentSenderPrivateCompletionAuthority,
+  type HostedGroupCurrentSenderCompletionAuthority,
 } from "./group-current-sender-assistant-ask";
 
 const HOSTED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
@@ -123,15 +124,15 @@ type HostedAssistantAskConsentedAuthority = {
   targetLabel: null;
 };
 
-type HostedAssistantAskPrivateCurrentSenderAuthority =
+type HostedAssistantAskCurrentSenderAuthority =
   HostedAssistantAskConsentedAuthority & {
-    privateCurrentSender: HostedGroupCurrentSenderPrivateCompletionAuthority;
+    currentSender: HostedGroupCurrentSenderCompletionAuthority;
   };
 
 type HostedAssistantAskAuthority =
   | HostedAssistantAskLegacyAuthority
   | HostedAssistantAskConsentedAuthority
-  | HostedAssistantAskPrivateCurrentSenderAuthority;
+  | HostedAssistantAskCurrentSenderAuthority;
 
 interface HostedAssistantAskRequestReadResult {
   authority: HostedAssistantAskAuthority | null;
@@ -460,64 +461,92 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
       tx,
     });
     if (!requestRead.authority) {
-      return {
-        mailboxWake: null,
-        response: {
-          action: input.request.action,
-          status: "terminal",
-          terminalReason: requestRead.terminalReason ?? "unavailable",
-        },
-      };
+      return terminalHostedAssistantAskControlResult(
+        input.request.action,
+        requestRead.terminalReason ?? "unavailable",
+      );
     }
     const authority = requestRead.authority;
-    const completionId = createHostedAssistantAskCompletionId(
-      input.request.requestId,
-    );
-    const existingCompletion = await readHostedMailboxItemById({
-      mailboxItemId: completionId,
-      prisma: tx,
-    });
-    const privateCurrentSenderAuthority =
-      isHostedAssistantAskPrivateCurrentSenderAuthority(authority)
-        ? authority
-        : null;
-    const existingPrivateCompletionMailboxWake =
-      existingCompletion && privateCurrentSenderAuthority
-        ? await readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx({
-            authority: privateCurrentSenderAuthority.privateCurrentSender,
-            completionId,
-            existingCompletion: {
-              dedupeKey: existingCompletion.dedupeKey,
-              expiresAt: existingCompletion.expiresAt ?? null,
-              kind: existingCompletion.kind,
-              userId: existingCompletion.userId,
-            },
+    const currentSenderAuthority = isHostedAssistantAskCurrentSenderAuthority(
+      authority,
+    )
+      ? authority
+      : null;
+    if (
+      currentSenderAuthority
+      && !await hasExactlyOneHostedCurrentSenderRequestAliasTx({
+        currentAuthority: currentSenderAuthority,
+        requestId: input.request.requestId,
+        tx,
+      })
+    ) {
+      return terminalHostedAssistantAskControlResult(
+        input.request.action,
+        "unavailable",
+      );
+    }
+    const completionCandidates = currentSenderAuthority
+      ? readHostedGroupCurrentSenderAssistantAskRequestIds({
+          groupRuntimeMemberId:
+            currentSenderAuthority.currentSender.groupRuntimeMemberId,
+          originAssistantInputId:
+            currentSenderAuthority.currentSender.origin.assistantInputId,
+        }).map((requestId) => ({
+          completionId: createHostedAssistantAskCompletionId(requestId),
+          requestId,
+        }))
+      : [{
+          completionId: createHostedAssistantAskCompletionId(
+            input.request.requestId,
+          ),
+          requestId: input.request.requestId,
+        }];
+    if (currentSenderAuthority) {
+      await acquireHostedAssistantAskLocksTx(
+        tx,
+        completionCandidates.map((candidate) => candidate.completionId),
+      );
+    }
+    const existingCompletions: Array<
+      (typeof completionCandidates)[number] & {
+        item: NonNullable<Awaited<ReturnType<typeof readHostedMailboxItemById>>>;
+      }
+    > = [];
+    for (const candidate of completionCandidates) {
+      const item = await readHostedMailboxItemById({
+        mailboxItemId: candidate.completionId,
+        prisma: tx,
+      });
+      if (item) {
+        existingCompletions.push({ ...candidate, item });
+      }
+    }
+    if (existingCompletions.length > 1) {
+      return terminalHostedAssistantAskControlResult(
+        input.request.action,
+        "unavailable",
+      );
+    }
+    const existingCompletion = existingCompletions[0] ?? null;
+    const existingCompletionMailboxWake = existingCompletion
+      ? currentSenderAuthority
+        ? await readHostedCurrentSenderExistingCompletionMailboxWakeTx({
+            candidate: existingCompletion,
+            currentAuthority: currentSenderAuthority,
             now,
             tx,
           })
-        : null;
-    const existingCompletionIsValid = existingCompletion
-      ? privateCurrentSenderAuthority
-        ? existingPrivateCompletionMailboxWake !== null
-        : await isMatchingHostedAssistantAskCompletionTx({
-            completionId,
-            existingDedupeKey: existingCompletion.dedupeKey,
-            existingExpiresAt: existingCompletion.expiresAt ?? null,
-            existingKind: existingCompletion.kind,
-            existingUserId: existingCompletion.userId,
-            expectedAuthority: authority,
+        : await readHostedAssistantAskExistingCompletionMailboxWakeTx({
+            authority,
+            completionId: existingCompletion.completionId,
+            existingCompletion: existingCompletion.item,
             expectedRequestId: input.request.requestId,
             now,
             tx,
           })
-      : false;
-    const existingCompletionMailboxWake = existingCompletionIsValid
-      ? existingPrivateCompletionMailboxWake
-        ?? resolveHostedAssistantAskCompletionMailboxWake({
-          authority,
-          completionId,
-        })
       : null;
+    const existingCompletionIsValid = existingCompletion !== null
+      && existingCompletionMailboxWake !== null;
 
     if (input.request.action === "prepare") {
       if (existingCompletion) {
@@ -553,7 +582,39 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
       };
     }
 
+    const responseDestination = currentSenderAuthority
+      ? resolveHostedCurrentSenderCompletionDestination({
+          authority: currentSenderAuthority.currentSender,
+          requestedDestination: input.request.responseDestination ?? null,
+        })
+      : null;
+    if (
+      (currentSenderAuthority && responseDestination === null)
+      || (!currentSenderAuthority
+        && input.request.responseDestination !== undefined)
+    ) {
+      return terminalHostedAssistantAskControlResult(
+        "complete",
+        "unavailable",
+      );
+    }
+
     if (existingCompletion) {
+      const persistedDestination =
+        existingCompletion.item.kind === "assistant.ask.completed"
+          ? "group"
+          : existingCompletion.item.kind === "assistant.notification.requested"
+            ? "current_sender"
+            : null;
+      if (
+        currentSenderAuthority
+        && persistedDestination !== responseDestination
+      ) {
+        return terminalHostedAssistantAskControlResult(
+          "complete",
+          "unavailable",
+        );
+      }
       return {
         mailboxWake: existingCompletionMailboxWake,
         response: existingCompletionIsValid
@@ -566,25 +627,30 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
       };
     }
 
-    if (privateCurrentSenderAuthority) {
+    const completionId = createHostedAssistantAskCompletionId(
+      input.request.requestId,
+    );
+    if (
+      currentSenderAuthority
+      && responseDestination === "current_sender"
+    ) {
       const mailboxWake =
         await appendHostedGroupCurrentSenderPrivateCompletionTx({
-          authority: privateCurrentSenderAuthority.privateCurrentSender,
+          authority: currentSenderAuthority.currentSender,
           completionId,
           now,
           result: input.request.result,
           tx,
         });
-      return {
-        mailboxWake,
-        response: mailboxWake
-          ? { action: "complete", status: "completed" }
-          : {
-              action: "complete",
-              status: "terminal",
-              terminalReason: "unavailable",
-            },
-      };
+      return mailboxWake
+        ? {
+            mailboxWake,
+            response: { action: "complete", status: "completed" },
+          }
+        : terminalHostedAssistantAskControlResult(
+            "complete",
+            "unavailable",
+          );
     }
 
     const occurredAt = now.toISOString();
@@ -605,14 +671,10 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
       tx,
     });
     if (append.dedupeConflict || append.item.id !== completionId) {
-      return {
-        mailboxWake: null,
-        response: {
-          action: "complete",
-          status: "terminal",
-          terminalReason: "unavailable",
-        },
-      };
+      return terminalHostedAssistantAskControlResult(
+        "complete",
+        "unavailable",
+      );
     }
 
     return {
@@ -625,22 +687,175 @@ export async function handleHostedRuntimeAssistantAskControl(input: {
   });
 }
 
-function isHostedAssistantAskPrivateCurrentSenderAuthority(
+function isHostedAssistantAskCurrentSenderAuthority(
   authority: HostedAssistantAskAuthority,
-): authority is HostedAssistantAskPrivateCurrentSenderAuthority {
-  return "privateCurrentSender" in authority;
+): authority is HostedAssistantAskCurrentSenderAuthority {
+  return "currentSender" in authority;
+}
+
+async function hasExactlyOneHostedCurrentSenderRequestAliasTx(input: {
+  currentAuthority: HostedAssistantAskCurrentSenderAuthority;
+  requestId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const requestIds = readHostedGroupCurrentSenderAssistantAskRequestIds({
+    groupRuntimeMemberId:
+      input.currentAuthority.currentSender.groupRuntimeMemberId,
+    originAssistantInputId:
+      input.currentAuthority.currentSender.origin.assistantInputId,
+  });
+  if (!requestIds.includes(input.requestId)) {
+    return false;
+  }
+  const existingRequestIds: string[] = [];
+  for (const requestId of requestIds) {
+    if (await readHostedMailboxItemById({
+      mailboxItemId: requestId,
+      prisma: input.tx,
+    })) {
+      existingRequestIds.push(requestId);
+    }
+  }
+  return existingRequestIds.length === 1
+    && existingRequestIds[0] === input.requestId;
+}
+
+function resolveHostedCurrentSenderCompletionDestination(input: {
+  authority: HostedGroupCurrentSenderCompletionAuthority;
+  requestedDestination:
+    HostedExecutionAssistantAskGroupSenderResponseDestination | null;
+}): HostedExecutionAssistantAskGroupSenderResponseDestination | null {
+  if (input.authority.mode === "reviewer_selected") {
+    return input.requestedDestination;
+  }
+  const legacyDestination = input.authority.mode === "legacy_current_sender"
+    ? "current_sender"
+    : "group";
+  return input.requestedDestination === null
+      || input.requestedDestination === legacyDestination
+    ? legacyDestination
+    : null;
+}
+
+async function readHostedCurrentSenderExistingCompletionMailboxWakeTx(input: {
+  candidate: {
+    completionId: string;
+    item: {
+      dedupeKey: string;
+      expiresAt?: Date | string | null;
+      kind: string;
+      userId: string;
+    };
+    requestId: string;
+  };
+  currentAuthority: HostedAssistantAskCurrentSenderAuthority;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAssistantAskMailboxWake | null> {
+  const aliasRequestRead = await readHostedAssistantAskAuthorityTx({
+    boundRuntimeMemberId: input.currentAuthority.currentSender.targetMemberId,
+    now: input.now,
+    requestId: input.candidate.requestId,
+    tx: input.tx,
+  });
+  const aliasAuthority = aliasRequestRead.authority;
+  if (
+    !aliasAuthority
+    || !isHostedAssistantAskCurrentSenderAuthority(aliasAuthority)
+    || createHostedGroupCurrentSenderAssistantAskRequestId({
+      groupRuntimeMemberId:
+        aliasAuthority.currentSender.groupRuntimeMemberId,
+      originAssistantInputId:
+        aliasAuthority.currentSender.origin.assistantInputId,
+    }) !== createHostedGroupCurrentSenderAssistantAskRequestId({
+      groupRuntimeMemberId:
+        input.currentAuthority.currentSender.groupRuntimeMemberId,
+      originAssistantInputId:
+        input.currentAuthority.currentSender.origin.assistantInputId,
+    })
+  ) {
+    return null;
+  }
+  if (input.candidate.item.kind === "assistant.notification.requested") {
+    return readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx({
+      authority: aliasAuthority.currentSender,
+      completionId: input.candidate.completionId,
+      existingCompletion: {
+        dedupeKey: input.candidate.item.dedupeKey,
+        expiresAt: readHostedAssistantAskItemExpiresAt(
+          input.candidate.item.expiresAt,
+        ),
+        kind: input.candidate.item.kind,
+        userId: input.candidate.item.userId,
+      },
+      now: input.now,
+      tx: input.tx,
+    });
+  }
+  return readHostedAssistantAskExistingCompletionMailboxWakeTx({
+    authority: aliasAuthority,
+    completionId: input.candidate.completionId,
+    existingCompletion: input.candidate.item,
+    expectedRequestId: input.candidate.requestId,
+    now: input.now,
+    tx: input.tx,
+  });
+}
+
+async function readHostedAssistantAskExistingCompletionMailboxWakeTx(input: {
+  authority: HostedAssistantAskAuthority;
+  completionId: string;
+  existingCompletion: {
+    dedupeKey: string;
+    expiresAt?: Date | string | null;
+    kind: string;
+    userId: string;
+  };
+  expectedRequestId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAssistantAskMailboxWake | null> {
+  const valid = await isMatchingHostedAssistantAskCompletionTx({
+    completionId: input.completionId,
+    existingDedupeKey: input.existingCompletion.dedupeKey,
+    existingExpiresAt: readHostedAssistantAskItemExpiresAt(
+      input.existingCompletion.expiresAt,
+    ),
+    existingKind: input.existingCompletion.kind,
+    existingUserId: input.existingCompletion.userId,
+    expectedAuthority: input.authority,
+    expectedRequestId: input.expectedRequestId,
+    now: input.now,
+    tx: input.tx,
+  });
+  return valid
+    ? resolveHostedAssistantAskCompletionMailboxWake({
+        authority: input.authority,
+        completionId: input.completionId,
+      })
+    : null;
+}
+
+function readHostedAssistantAskItemExpiresAt(
+  value: Date | string | null | undefined,
+): string | null {
+  return value instanceof Date ? value.toISOString() : value ?? null;
+}
+
+function terminalHostedAssistantAskControlResult(
+  action: HostedRuntimeAssistantAskControlRequest["action"],
+  terminalReason: "expired" | "unavailable",
+): HostedAssistantAskControlResult {
+  return {
+    mailboxWake: null,
+    response: { action, status: "terminal", terminalReason },
+  };
 }
 
 function resolveHostedAssistantAskCompletionMailboxWake(input: {
   authority: HostedAssistantAskAuthority;
   completionId: string;
 }): HostedAssistantAskMailboxWake | null {
-  if (isHostedAssistantAskPrivateCurrentSenderAuthority(input.authority)) {
-    return {
-      expectedUserId: input.authority.privateCurrentSender.targetMemberId,
-      mailboxItemId: input.completionId,
-    };
-  }
   if (
     "origin" in input.authority
     && input.authority.origin.kind === "automation_occurrence"
@@ -791,6 +1006,27 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     tx: input.tx,
   });
   const authority = requestRead.authority;
+  if (authority && isHostedAssistantAskCurrentSenderAuthority(authority)) {
+    const currentSenderRequestIds =
+      readHostedGroupCurrentSenderAssistantAskRequestIds({
+        groupRuntimeMemberId: authority.currentSender.groupRuntimeMemberId,
+        originAssistantInputId:
+          authority.currentSender.origin.assistantInputId,
+      });
+    await acquireHostedAssistantAskLocksTx(input.tx, currentSenderRequestIds);
+    if (
+      authority.currentSender.mode === "legacy_current_sender"
+      || !await hasExactlyOneHostedCurrentSenderRequestAliasTx({
+        currentAuthority: authority,
+        requestId: completionWake.ask.requestId,
+        tx: input.tx,
+      })
+    ) {
+      // A fixed-private legacy request can never authorize group delivery, and
+      // duplicate origin aliases mean the terminal audience is not singular.
+      throwHostedAssistantAskDeliveryAuthorityMismatch();
+    }
+  }
   if (
     !authority
     || !("origin" in authority)
@@ -1078,10 +1314,6 @@ async function readHostedAssistantAskAuthorityTx(input: {
     if (wake.ask.origin.kind !== "accepted_input") {
       return { authority: null, terminalReason: "unavailable" };
     }
-    const responseDestination =
-      readHostedExecutionAssistantAskGroupSenderResponseDestination(
-        wake.ask.target,
-      );
     const currentSenderAuthority =
       await readHostedGroupCurrentSenderAssistantAskAuthorityTx({
         expectedGroupRuntimeMemberId:
@@ -1089,44 +1321,25 @@ async function readHostedAssistantAskAuthorityTx(input: {
         expectedTargetMemberId: item.userId,
         now: input.now,
         origin: wake.ask.origin,
-        responseDestination,
+        permissionDigest: wake.ask.target.permissionDigest,
+        requestId: input.requestId,
+        targetKind: wake.ask.target.kind,
         tx: input.tx,
       });
     if (
       !currentSenderAuthority
       || currentSenderAuthority.question !== wake.ask.question
-      || currentSenderAuthority.permissionDigest
-        !== wake.ask.target.permissionDigest
-      || createHostedGroupCurrentSenderAssistantAskRequestId({
-        groupRuntimeMemberId: currentSenderAuthority.groupRuntimeMemberId,
-        originAssistantInputId: wake.ask.origin.assistantInputId,
-        responseDestination,
-      }) !== input.requestId
     ) {
       return { authority: null, terminalReason: "unavailable" };
     }
-    if (responseDestination === "current_sender") {
-      const privateCurrentSender = {
-        ...currentSenderAuthority,
-        expiresAt: wake.ask.expiresAt,
-        origin: wake.ask.origin,
-        responseDestination: "current_sender",
-      } satisfies HostedGroupCurrentSenderPrivateCompletionAuthority;
-      return {
-        authority: {
-          expiresAt: wake.ask.expiresAt,
-          origin: wake.ask.origin,
-          originMemberId: currentSenderAuthority.groupRuntimeMemberId,
-          permissionText: currentSenderAuthority.permissionText,
-          privateCurrentSender,
-          question: currentSenderAuthority.question,
-          targetLabel: null,
-        },
-        terminalReason: null,
-      };
-    }
+    const currentSender = {
+      ...currentSenderAuthority,
+      expiresAt: wake.ask.expiresAt,
+      origin: wake.ask.origin,
+    } satisfies HostedGroupCurrentSenderCompletionAuthority;
     return {
       authority: {
+        currentSender,
         expiresAt: wake.ask.expiresAt,
         origin: wake.ask.origin,
         originMemberId: currentSenderAuthority.groupRuntimeMemberId,
@@ -1774,6 +1987,15 @@ function throwHostedAssistantAskDeliveryAuthorityMismatch(): never {
     message: "Hosted Assistant Ask delivery authority is no longer valid.",
     retryable: false,
   });
+}
+
+async function acquireHostedAssistantAskLocksTx(
+  tx: Prisma.TransactionClient,
+  requestIds: readonly string[],
+): Promise<void> {
+  for (const requestId of [...new Set(requestIds)].sort()) {
+    await acquireHostedAssistantAskLockTx(tx, requestId);
+  }
 }
 
 async function acquireHostedAssistantAskLockTx(

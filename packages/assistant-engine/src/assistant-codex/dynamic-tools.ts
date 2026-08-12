@@ -5,10 +5,8 @@ import {
   type HostedRuntimeAssistantPersonalizationToolAuthority,
 } from '@murphai/hosted-execution/assistant-personalization'
 import {
-  HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS,
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-  type HostedExecutionAssistantAskGroupSenderResponseDestination,
 } from '@murphai/hosted-execution/contracts'
 import {
   hostedRuntimePendingGroupSetupInputSchema,
@@ -421,9 +419,6 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       action: z.literal('ask_current_sender'),
       message_ref: z.string().regex(
         new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
-      ),
-      response_destination: z.enum(
-        HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS,
       ),
     })
     .strict(),
@@ -1015,8 +1010,6 @@ type MurphGroupToolRequest =
   | {
       action: 'ask_current_sender'
       messageRef: string
-      responseDestination:
-        HostedExecutionAssistantAskGroupSenderResponseDestination
     }
   | {
       action: 'ask_member'
@@ -3895,22 +3888,6 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
-    response.action === 'ask_current_sender'
-    && response.responseDestination === 'current_sender'
-    && response.result.status === 'unavailable'
-    && response.result.unavailableReason
-      === 'same_channel_direct_route_unavailable'
-  ) {
-    return {
-      ...response,
-      result: {
-        ...response.result,
-        recovery:
-          'Ask the sender to open a direct Murph chat on the same channel, then retry.',
-      },
-    }
-  }
-  if (
     response.action === 'read_chat_participants'
     && response.result.status === 'ok'
   ) {
@@ -4386,7 +4363,6 @@ async function executeGroupTool(input: {
         kind: 'accepted_input',
         sessionId: userActionScope.originSessionId,
       },
-      responseDestination: input.request.responseDestination,
     }
   } else if (input.request.action === 'ask_member') {
     if (!invocationScope) {
@@ -6274,7 +6250,7 @@ function parseGroupArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.group.input',
-        schemaRootKeys: ['action', 'message_ref', 'response_destination'],
+        schemaRootKeys: ['action', 'message_ref'],
         toolName: 'murph.group',
       }),
     }
@@ -6295,7 +6271,6 @@ function parseGroupArguments(
       request: {
         action: 'ask_current_sender',
         messageRef: parsed.data.message_ref,
-        responseDestination: parsed.data.response_destination,
       },
     }
   }
