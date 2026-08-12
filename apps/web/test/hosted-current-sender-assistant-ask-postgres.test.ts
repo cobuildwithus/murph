@@ -118,9 +118,12 @@ describe.skipIf(!runPostgresProof)(
           userId: fixture.senderMemberId,
         });
 
+        const completedAt = new Date(
+          Date.parse(requestWake.ask.expiresAt) - 1,
+        );
         await expect(handleHostedRuntimeAssistantAskControl({
           boundRuntimeMemberId: fixture.senderMemberId,
-          now,
+          now: completedAt,
           prisma,
           request: { action: "prepare", requestId },
         })).resolves.toMatchObject({
@@ -139,7 +142,7 @@ describe.skipIf(!runPostgresProof)(
         const completionId = createHostedAssistantAskCompletionId(requestId);
         await expect(handleHostedRuntimeAssistantAskControl({
           boundRuntimeMemberId: fixture.senderMemberId,
-          now,
+          now: completedAt,
           prisma,
           request: { action: "complete", requestId, result },
         })).resolves.toEqual({
@@ -151,7 +154,7 @@ describe.skipIf(!runPostgresProof)(
         });
         await expect(handleHostedRuntimeAssistantAskControl({
           boundRuntimeMemberId: fixture.senderMemberId,
-          now,
+          now: completedAt,
           prisma,
           request: { action: "complete", requestId, result },
         })).resolves.toMatchObject({
@@ -159,7 +162,7 @@ describe.skipIf(!runPostgresProof)(
         });
         await expect(handleHostedRuntimeAssistantAskControl({
           boundRuntimeMemberId: fixture.senderMemberId,
-          now: new Date(now.getTime() + 10 * 60 * 1_000),
+          now: new Date(Date.parse(requestWake.ask.expiresAt) + 1),
           prisma,
           request: { action: "prepare", requestId },
         })).resolves.toEqual({
@@ -170,8 +173,11 @@ describe.skipIf(!runPostgresProof)(
           response: { action: "prepare", status: "already_completed" },
         });
 
+        const delayedFetchAt = new Date(
+          Date.parse(requestWake.ask.expiresAt) + 1,
+        );
         const completionWake = await readHostedMailboxWakeByItemId({
-          availableAt: now,
+          availableAt: delayedFetchAt,
           mailboxItemId: completionId,
           prisma,
         });
@@ -179,6 +185,9 @@ describe.skipIf(!runPostgresProof)(
           throw new Error("Expected one persisted group completion.");
         }
         expect(completionWake.ask.result).toEqual(result);
+        expect(Date.parse(completionWake.ask.expiresAt)).toBe(
+          completedAt.getTime() + 10 * 60 * 1_000,
+        );
         await expect(prisma.$transaction((tx) =>
           assertHostedAssistantAskCompletionDeliveryAuthorityTx({
             answeredMailboxItemIds: [completionId],
@@ -189,10 +198,10 @@ describe.skipIf(!runPostgresProof)(
               createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
                 completionId,
               ),
-            now,
+            now: delayedFetchAt,
             tx,
           })
-        )).resolves.toBeUndefined();
+        )).resolves.toEqual({ assistantAskFallbackRequired: true });
         await expect(prisma.hostedMailboxItem.count({
           where: { id: { in: [requestId, completionId] } },
         })).resolves.toBe(2);

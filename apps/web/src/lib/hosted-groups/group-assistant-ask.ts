@@ -977,9 +977,19 @@ async function appendHostedAssistantAskGroupCompletionTx(input: {
   result: HostedExecutionAssistantAskCompletedPayload["result"];
   tx: Prisma.TransactionClient;
 }): Promise<HostedAssistantAskControlResult> {
+  const completionAuthority = isHostedAssistantAskCurrentSenderAuthority(
+    input.authority,
+  )
+    ? {
+        ...input.authority,
+        expiresAt: new Date(
+          input.now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+        ).toISOString(),
+      }
+    : input.authority;
   const wake = buildHostedExecutionAssistantAskCompletedWake({
     ask: buildHostedAssistantAskCompletedPayload({
-      authority: input.authority,
+      authority: completionAuthority,
       requestId: input.requestId,
       result: input.result,
     }),
@@ -989,7 +999,7 @@ async function appendHostedAssistantAskGroupCompletionTx(input: {
   });
   const append = await appendHostedMailboxEnvelopeWithIdentityTx({
     envelope: wake,
-    expiresAt: input.authority.expiresAt,
+    expiresAt: completionAuthority.expiresAt,
     itemId: input.completionId,
     tx: input.tx,
   });
@@ -1048,12 +1058,6 @@ async function readHostedCurrentSenderExistingCompletionMailboxWakeTx(input: {
       now: input.now,
       tx: input.tx,
     });
-    if (
-      completion
-      && !isHostedCurrentSenderGroupFallbackResult(completion.ask.result)
-    ) {
-      return null;
-    }
   }
   if (
     !completion
@@ -1284,30 +1288,40 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     tx: input.tx,
   });
   const authority = requestRead.authority;
-  if (authority && isHostedAssistantAskCurrentSenderAuthority(authority)) {
+  const currentSenderAuthority = authority
+    && isHostedAssistantAskCurrentSenderAuthority(authority)
+    ? authority
+    : null;
+  if (currentSenderAuthority) {
     const currentSenderRequestIds =
       readHostedGroupCurrentSenderAssistantAskRequestIds({
-        groupRuntimeMemberId: authority.currentSender.groupRuntimeMemberId,
+        groupRuntimeMemberId:
+          currentSenderAuthority.currentSender.groupRuntimeMemberId,
         originAssistantInputId:
-          authority.currentSender.origin.assistantInputId,
+          currentSenderAuthority.currentSender.origin.assistantInputId,
       });
     await acquireHostedAssistantAskLocksTx(input.tx, currentSenderRequestIds);
     if (
       (
         (
-          authority.currentSender.audience === "current_sender"
-          || !authority.currentSender.personalReadAllowed
+          currentSenderAuthority.currentSender.audience === "current_sender"
+          || !currentSenderAuthority.currentSender.personalReadAllowed
         )
         && !isHostedCurrentSenderGroupFallbackResult(
           completionWake.ask.result,
         )
       )
       || !await hasExactlyOneHostedCurrentSenderRequestAliasTx({
-        groupRuntimeMemberId: authority.currentSender.groupRuntimeMemberId,
+        groupRuntimeMemberId:
+          currentSenderAuthority.currentSender.groupRuntimeMemberId,
         originAssistantInputId:
-          authority.currentSender.origin.assistantInputId,
+          currentSenderAuthority.currentSender.origin.assistantInputId,
         requestId: completionWake.ask.requestId,
         tx: input.tx,
+      })
+      || !isHostedCurrentSenderGroupCompletionEnvelopeValid({
+        authority: currentSenderAuthority,
+        wake: completionWake,
       })
     ) {
       // Private authority can return to the group only as the fixed,
@@ -1320,7 +1334,10 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     || !("origin" in authority)
     || authority.origin.kind !== "accepted_input"
     || authority.originMemberId !== input.boundRuntimeMemberId
-    || authority.expiresAt !== completionWake.ask.expiresAt
+    || (
+      !currentSenderAuthority
+      && authority.expiresAt !== completionWake.ask.expiresAt
+    )
     || !hostedAssistantAskOriginsEqual(
       authority.origin,
       completionWake.ask.origin,
@@ -1332,6 +1349,28 @@ export async function assertHostedAssistantAskCompletionDeliveryAuthorityTx(
     }
     throwHostedAssistantAskDeliveryAuthorityMismatch();
   }
+}
+
+function isHostedCurrentSenderGroupCompletionEnvelopeValid(input: {
+  authority: HostedAssistantAskCurrentSenderAuthority;
+  wake: HostedExecutionAssistantAskCompletedWake;
+}): boolean {
+  const expiresAtMs = Date.parse(input.wake.ask.expiresAt);
+  const occurredAtMs = Date.parse(input.wake.occurredAt);
+  const freshEnvelope = Number.isFinite(expiresAtMs)
+    && Number.isFinite(occurredAtMs)
+    && expiresAtMs
+      === occurredAtMs + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS;
+  if (freshEnvelope) {
+    return true;
+  }
+  const currentSender = input.authority.currentSender;
+  return currentSender.requestId
+      !== createHostedGroupCurrentSenderAssistantAskRequestId({
+        groupRuntimeMemberId: currentSender.groupRuntimeMemberId,
+        originAssistantInputId: currentSender.origin.assistantInputId,
+      })
+    && input.wake.ask.expiresAt === input.authority.expiresAt;
 }
 
 async function replayHostedGroupAssistantAskTx(input: {

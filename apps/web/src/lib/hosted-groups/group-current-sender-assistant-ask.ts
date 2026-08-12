@@ -84,24 +84,16 @@ const HOSTED_CURRENT_SENDER_CONTEXT_DEPENDENT_PATTERN =
   /\b(?:(?:about|answer(?:ing)?|regarding|reply(?:ing)?\s+to|based\s+on|using)\s+(?:it|that|this|those|these)|(?:about|based\s+on|from|using)\s+(?:the|our|this|that)\s+(?:chat|conversation|discussion|message|reply|thread)|same\s+(?:answer|question|thing)|(?:the\s+)?(?:above|earlier|last|previous|prior)\s+(?:chat|conversation|discussion|message|reply|thread)|(?:message|reply)\s+(?:above|earlier)|what\s+(?:(?:he|she|they|someone|the\s+other\s+person)\s+said|(?:was\s+)?(?:just\s+)?(?:asked|discussed|said))|(?:the|our|this|that)\s+(?:chat|conversation|discussion|thread))\b|\b(?:it|that|this|those|these)\s*[?.!]*$|\b(?:again|too)\s*[?.!]*$/iu;
 const HOSTED_CURRENT_SENDER_NEGATED_REQUEST_PATTERN =
   /^(?:do\s+not|don['’]?t|never|not)\b|\b(?:do\s+not|don['’]?t|never|not)\s+(?:ask|answer|share|post|reply|respond|send|message|dm|tell|show|disclose)\b/iu;
-const HOSTED_CURRENT_SENDER_DELIVERY_BOUNDARY =
-  String.raw`(?:^|[,;.!?—-]\s*|\s+(?:and|then)\s+)`;
-const HOSTED_CURRENT_SENDER_PRIVATE_DELIVERY_CLAUSE_PATTERN = new RegExp(
-  String.raw`${HOSTED_CURRENT_SENDER_DELIVERY_BOUNDARY}(?:please\s+)?(?:privately|confidentially|in\s+(?:a\s+)?(?:private\s+(?:message|reply|response)|direct\s+message|dm)|directly\s+to\s+me|only\s+to\s+me|just\s+between\s+us|not\s+for\s+(?:the\s+)?group(?:\s+chat)?|keep\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|(?:reply|respond|answer)(?:\s+(?:to\s+)?me)?\s+(?:privately|in\s+private|in\s+(?:a\s+)?(?:direct\s+message|dm))|(?:reply|respond|answer)\s+me|(?:send|message|text|dm|direct\s+message)\s+me(?:\s+(?:the\s+)?answer|\s+it|\s+(?:a\s+)?direct\s+message)?(?:\s+(?:privately|directly|in\s+private))?|(?:send|reply|respond|answer)\s+(?:the\s+answer|it)\s+(?:only\s+)?to\s+me(?:\s+privately)?)[.!?]*$`,
-  "iu",
-);
-const HOSTED_CURRENT_SENDER_GROUP_DELIVERY_CLAUSE_PATTERN = new RegExp(
-  String.raw`${HOSTED_CURRENT_SENDER_DELIVERY_BOUNDARY}(?:please\s+)?(?:(?:in|to)\s+(?:the\s+)?group(?:\s+chat)?|in\s+this\s+(?:chat|thread)|(?:reply|respond|answer|post|share|send)(?:\s+(?:it|the\s+answer))?\s+(?:here|in\s+(?:the\s+)?group(?:\s+chat)?|to\s+(?:the\s+)?group)|tell\s+(?:the\s+)?group|(?:tell|share\s+with)\s+everyone)[.!?]*$`,
-  "iu",
-);
-const HOSTED_CURRENT_SENDER_DELIVERY_CLAUSE_PATTERN = new RegExp(
-  String.raw`${HOSTED_CURRENT_SENDER_DELIVERY_BOUNDARY}(?:please\s+)?(?:privately|in\s+private|directly|only\s+to\s+me|reply|respond|answer|send|share|post|message|text|dm|tell|deliver)\b[\s\S]{0,120}[.!?]*$`,
-  "iu",
-);
-const HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_MENTION_PATTERN =
-  /\b(?:privately|confidentially|in\s+private|direct\s+message|dm\s+me|text\s+me|send\s+me|answer\s+me|only\s+to\s+me|directly\s+to\s+me|just\s+between\s+us|not\s+for\s+(?:the\s+)?group(?:\s+chat)?|keep\s+(?:this|it|the\s+answer)\s+(?:private|confidential))\b/iu;
-const HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_MENTION_PATTERN =
-  /\b(?:(?:in|to)\s+(?:the\s+)?group(?:\s+chat)?|in\s+this\s+(?:chat|thread)|(?:reply|respond|answer|post|share|send)(?:\s+(?:it|the\s+answer))?\s+here|tell\s+(?:the\s+)?group|(?:tell|share\s+with)\s+everyone)\b/iu;
+const HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN =
+  /(?:[,;.!?](?:\s+|$)|—\s*|\s+-\s+|(?<!between\s+you)\s+(?:and|then)\s+)/iu;
+const HOSTED_CURRENT_SENDER_PRIVATE_TERMINAL_CLAUSE_PATTERN =
+  /^(?:please\s+)?(?:privately|confidentially|in\s+confidence|in\s+(?:a\s+)?(?:private\s+(?:message|reply|response)|direct\s+message|dm)|directly\s+to\s+me|only\s+to\s+me|for\s+(?:my\s+eyes|me)\s+only|just\s+between\s+us|between\s+you\s+and\s+me|not\s+for\s+(?:the\s+)?group(?:\s+chat)?|keep\s+it\s+between\s+us|keep\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|make\s+(?:this|it|the\s+answer)\s+(?:private|confidential)|(?:reply|respond|answer)(?:\s+(?:to\s+)?me)?\s+(?:privately|in\s+private|in\s+(?:a\s+)?(?:direct\s+message|dm))|(?:reply|respond|answer)\s+me|(?:send|message|text|dm|direct\s+message)\s+me(?:\s+(?:the\s+)?answer|\s+it|\s+(?:a\s+)?direct\s+message)?(?:\s+(?:privately|directly|in\s+private))?|(?:send|reply|respond|answer)\s+(?:the\s+answer|it)\s+(?:only\s+)?to\s+me(?:\s+privately)?)$/iu;
+const HOSTED_CURRENT_SENDER_GROUP_TERMINAL_CLAUSE_PATTERN =
+  /^(?:please\s+)?(?:(?:in|to)\s+(?:the\s+)?group(?:\s+chat)?|in\s+this\s+(?:chat|thread)|(?:reply|respond|answer|post|share|send)(?:\s+(?:it|the\s+answer))?\s+(?:here|in\s+(?:the\s+)?group(?:\s+chat)?|to\s+(?:the\s+)?group)|tell\s+(?:the\s+)?group|(?:tell|share\s+with)\s+everyone)$/iu;
+const HOSTED_CURRENT_SENDER_AUDIENCE_SIGNAL_PATTERN =
+  /\b(?:private|privately|confidential|confidentially|confidence|direct|dm|group|chat|thread|everyone|here|only|between|eyes|secret|public|publicly|record|me|us)\b/iu;
+const HOSTED_CURRENT_SENDER_AUDIENCE_CLAUSE_START_PATTERN =
+  /^(?:please\s+)?(?:let|reply|respond|answer|send|share|post|message|text|dm|tell|deliver|show|keep|make|for|to|between|in|off|not|only|just|no)\b/iu;
 
 for (const [label, permissionText] of [
   ["Hosted current-sender group permission", HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT],
@@ -179,27 +171,76 @@ export function classifyHostedGroupCurrentSenderRequest(input: {
   ) {
     return { unavailableReason: HOSTED_GROUP_CURRENT_SENDER_FLAT_REQUEST_GUIDANCE };
   }
-  const privateAudienceMention =
-    HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_MENTION_PATTERN.test(text);
-  const groupAudienceMention =
-    HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_MENTION_PATTERN.test(text);
-  if (privateAudienceMention && groupAudienceMention) {
+  const audience = readHostedCurrentSenderTerminalAudience(command[1] ?? "");
+  if (audience === "ambiguous") {
     return { unavailableReason: HOSTED_GROUP_CURRENT_SENDER_AMBIGUOUS_AUDIENCE_GUIDANCE };
   }
-  if (HOSTED_CURRENT_SENDER_PRIVATE_DELIVERY_CLAUSE_PATTERN.test(text)) {
-    return { audience: "current_sender" };
+  return { audience: audience ?? "group" };
+}
+
+function readHostedCurrentSenderTerminalAudience(
+  question: string,
+): HostedGroupCurrentSenderAudience | "ambiguous" | null {
+  const clauses = question
+    .split(HOSTED_CURRENT_SENDER_TERMINAL_CLAUSE_BOUNDARY_PATTERN)
+    .map((clause) => clause
+      .trim()
+      .replace(/^(?:and|then)\s+/iu, "")
+      .replace(/[.!?]+$/u, "")
+      .trim())
+    .filter(Boolean);
+  const audiences = new Set<HostedGroupCurrentSenderAudience>();
+  for (let index = clauses.length - 1; index >= 0; index -= 1) {
+    const clause = clauses[index];
+    if (clause === undefined) {
+      continue;
+    }
+    const audienceClause = readHostedCurrentSenderAudienceClause({
+      clause,
+      separatedFromQuestion: index > 0,
+    });
+    if (audienceClause === "ambiguous") {
+      return "ambiguous";
+    }
+    if (audienceClause) {
+      audiences.add(audienceClause);
+      continue;
+    }
+    break;
   }
-  if (HOSTED_CURRENT_SENDER_GROUP_DELIVERY_CLAUSE_PATTERN.test(text)) {
-    return { audience: "group" };
+  return audiences.size > 1
+    ? "ambiguous"
+    : audiences.values().next().value ?? null;
+}
+
+function readHostedCurrentSenderAudienceClause(input: {
+  clause: string;
+  separatedFromQuestion: boolean;
+}): HostedGroupCurrentSenderAudience | "ambiguous" | null {
+  const suffixIndexes = [0];
+  for (const match of input.clause.matchAll(/\b(?:but|please)\s+/giu)) {
+    suffixIndexes.push(match.index + match[0].length);
   }
-  if (
-    privateAudienceMention
-    || groupAudienceMention
-    || HOSTED_CURRENT_SENDER_DELIVERY_CLAUSE_PATTERN.test(text)
-  ) {
-    return { unavailableReason: HOSTED_GROUP_CURRENT_SENDER_AMBIGUOUS_AUDIENCE_GUIDANCE };
+  for (const index of suffixIndexes) {
+    const suffix = input.clause.slice(index);
+    if (HOSTED_CURRENT_SENDER_PRIVATE_TERMINAL_CLAUSE_PATTERN.test(suffix)) {
+      return "current_sender";
+    }
+    if (HOSTED_CURRENT_SENDER_GROUP_TERMINAL_CLAUSE_PATTERN.test(suffix)) {
+      return "group";
+    }
+    if (
+      HOSTED_CURRENT_SENDER_AUDIENCE_SIGNAL_PATTERN.test(suffix)
+      && (
+        input.separatedFromQuestion
+        || index > 0
+        || HOSTED_CURRENT_SENDER_AUDIENCE_CLAUSE_START_PATTERN.test(suffix)
+      )
+    ) {
+      return "ambiguous";
+    }
   }
-  return { audience: "group" };
+  return null;
 }
 
 export function createHostedGroupCurrentSenderAssistantAskRequestId(input: {
@@ -707,7 +748,6 @@ export async function readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx
       )
     )
     || input.existingPrivateDelivery.dedupeKey !== input.privateDeliveryId
-    || input.existingPrivateDelivery.expiresAt !== input.authority.expiresAt
     || input.existingPrivateDelivery.kind !== "assistant.notification.requested"
     || input.existingPrivateDelivery.userId !== input.authority.targetMemberId
   ) {
@@ -756,6 +796,17 @@ export async function readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx
     || (notification.notificationPromptProfile ?? null) !== null
     || !privateCompletion
     || privateCompletion.expiresAt !== input.authority.expiresAt
+    || !isHostedCurrentSenderPrivateCompletionEnvelopeValid({
+      completionExpiresAt: privateCompletion.expiresAt,
+      deliveryId: input.privateDeliveryId,
+      envelopeExpiresAt: input.existingPrivateDelivery.expiresAt,
+      occurredAt: wake.occurredAt,
+      requestId,
+    })
+    || isHostedCurrentSenderAssistantAskExpired(
+      input.existingPrivateDelivery.expiresAt,
+      input.now,
+    )
     || privateCompletion.requestId !== requestId
     || responsePolicy?.kind !== "require_send_exact_text"
     || responseText.length === 0
@@ -806,6 +857,9 @@ export async function appendHostedGroupCurrentSenderPrivateCompletionTx(input: {
   const responseText = buildHostedGroupCurrentSenderPrivateResponseText(
     input.result,
   );
+  const deliveryExpiresAt = new Date(
+    input.now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+  ).toISOString();
   const wake = buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: privateDeliveryId,
     memberId: input.authority.targetMemberId,
@@ -830,7 +884,7 @@ export async function appendHostedGroupCurrentSenderPrivateCompletionTx(input: {
   });
   const append = await appendHostedMailboxEnvelopeWithIdentityTx({
     envelope: wake,
-    expiresAt: input.authority.expiresAt,
+    expiresAt: deliveryExpiresAt,
     itemId: privateDeliveryId,
     tx: input.tx,
   });
@@ -1012,7 +1066,6 @@ export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAut
   if (
     !completionItem
     || completionItem.dedupeKey !== privateDeliveryId
-    || completionItem.expiresAt !== input.assistantAskCompletionExpiresAt
     || completionItem.kind !== "assistant.notification.requested"
     || completionItem.userId !== input.boundRuntimeMemberId
   ) {
@@ -1050,6 +1103,13 @@ export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAut
     || !privateCompletion
     || privateCompletion.expiresAt
       !== input.assistantAskCompletionExpiresAt
+    || !isHostedCurrentSenderPrivateCompletionEnvelopeValid({
+      completionExpiresAt: privateCompletion.expiresAt,
+      deliveryId: privateDeliveryId,
+      envelopeExpiresAt: completionItem.expiresAt ?? null,
+      occurredAt: completionWake.occurredAt,
+      requestId: privateCompletion.requestId,
+    })
     || responsePolicy?.kind !== "require_send_exact_text"
     || responseText === null
     || responseText.trim().length === 0
@@ -1439,6 +1499,32 @@ function isHostedCurrentSenderAssistantAskExpired(
   }
   const expiresAtMs = Date.parse(expiresAt);
   return !Number.isFinite(expiresAtMs) || expiresAtMs <= now.getTime();
+}
+
+function isHostedCurrentSenderPrivateCompletionEnvelopeValid(input: {
+  completionExpiresAt: string;
+  deliveryId: string;
+  envelopeExpiresAt: string | null;
+  occurredAt: string;
+  requestId: string;
+}): boolean {
+  if (!input.envelopeExpiresAt) {
+    return false;
+  }
+  const expiresAtMs = Date.parse(input.envelopeExpiresAt);
+  const occurredAtMs = Date.parse(input.occurredAt);
+  const freshEnvelope = Number.isFinite(expiresAtMs)
+    && Number.isFinite(occurredAtMs)
+    && new Date(expiresAtMs).toISOString() === input.envelopeExpiresAt
+    && new Date(occurredAtMs).toISOString() === input.occurredAt
+    && expiresAtMs
+      === occurredAtMs + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS;
+  if (freshEnvelope) {
+    return true;
+  }
+  return input.deliveryId
+      === createHostedExecutionAssistantAskCompletionId(input.requestId)
+    && input.envelopeExpiresAt === input.completionExpiresAt;
 }
 
 function unavailableHostedCurrentSenderAdmission(

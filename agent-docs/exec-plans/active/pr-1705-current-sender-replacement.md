@@ -51,6 +51,8 @@ No service, dependency, schema, queue, classifier turn, reconciliation path, or 
 - [x] ReviewGPT round 3 findings remediated: common private wording, expiry/route-loss terminal convergence, and undeployed compatibility deletion.
 - [x] Remediation proof includes fresh provider-entry expiry/route-loss fallbacks, duplicate-terminal suppression, legacy/current private-ID dirty-checkpoint dispatch on Linq and Telegram, and a 572-test affected runtime pass.
 - [x] ReviewGPT round 4 findings remediated: explicit confidentiality wording cannot default to the group, an exact retained terminal is replayed after request expiry and a lost response so the next queued ask can advance, and the obsolete runtime expiry assertion now follows the live Web fallback handshake.
+- [x] ReviewGPT round 5 findings remediated: a bounded terminal-clause parser recognizes explicit confidentiality or fails closed, and newly persisted group/private terminals retain one fresh import window while private provider authority remains bound to the original request deadline.
+- [x] Round 5 remediation proof covers late answered/cannot-answer group terminals, delayed PostgreSQL import after the request deadline, and late private provider entry producing only a fresh non-disclosing fallback.
 - [ ] Exact pushed-head GitHub Actions and final ReviewGPT gate.
 
 ## Rollout And Removal

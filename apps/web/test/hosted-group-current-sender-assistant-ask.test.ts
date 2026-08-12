@@ -381,11 +381,19 @@ describe("hosted current-sender Assistant Ask authority", () => {
       "Murph, ask my Murph how my synthetic activity changed, not for the group.",
       "Murph, ask my Murph how my synthetic activity changed, just between us.",
       "Murph, ask my Murph how my synthetic activity changed, confidentially.",
+      "Murph, ask my Murph how my synthetic activity changed, for my eyes only.",
+      "Murph, ask my Murph how my synthetic activity changed, keep it between us.",
+      "Murph, ask my Murph how my synthetic activity changed, between you and me.",
+      "Murph, ask my Murph how my synthetic activity changed, in confidence.",
+      "Murph, ask my Murph how my synthetic activity changed, make this private.",
+      "Murph, ask my Murph how my synthetic activity changed, for me only.",
+      "Murph, ask my Murph how my synthetic activity changed but keep it between us.",
+      "Murph, ask my Murph how my synthetic activity changed; please in confidence.",
     ]) {
       expect(classifyHostedGroupCurrentSenderRequest({
         hasNativeReplyContext: false,
         text,
-      })).toEqual({ audience: "current_sender" });
+      }), text).toEqual({ audience: "current_sender" });
     }
 
     expect(classifyHostedGroupCurrentSenderRequest({
@@ -396,6 +404,9 @@ describe("hosted current-sender Assistant Ask authority", () => {
     for (const text of [
       "Murph, ask my Murph what synthetic medications I take and let me know privately.",
       "Murph, ask my Murph what synthetic medications I take and deliver the answer to the chat owner.",
+      "Murph, ask my Murph what synthetic medications I take, off the record.",
+      "Murph, ask my Murph what synthetic medications I take, don't make it public.",
+      "Murph, ask my Murph what synthetic medications I take, this is a secret.",
     ]) {
       expect(classifyHostedGroupCurrentSenderRequest({
         hasNativeReplyContext: false,
@@ -717,6 +728,50 @@ describe("hosted current-sender Assistant Ask authority", () => {
     expect(storedItems.size).toBe(2);
   });
 
+  it.each([
+    {
+      label: "answered",
+      result: { answer: "Synthetic late answer.", outcome: "answered" as const },
+    },
+    {
+      label: "cannot-answer",
+      result: { answer: null, outcome: "cannot_answer" as const },
+    },
+  ])("keeps a late $label group terminal visible for one fresh window", async ({ result }) => {
+    const { requestId } = await admit({
+      text: "Murph, ask my Murph how my synthetic activity has changed?",
+    });
+    const requestWake = requireRequestedWake(requestId);
+    const requestExpiresAtMs = Date.parse(requestWake.ask.expiresAt);
+    const completedAt = new Date(requestExpiresAtMs - 1);
+    const completionId = createHostedAssistantAskCompletionId(requestId);
+
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      now: completedAt,
+      request: { action: "complete", requestId, result },
+    })).resolves.toMatchObject({
+      mailboxWake: { mailboxItemId: completionId },
+      response: { status: "completed" },
+    });
+
+    const completionWake = requireCompletedWake(completionId);
+    expect(Date.parse(completionWake.ask.expiresAt)).toBe(
+      completedAt.getTime() + 10 * 60 * 1_000,
+    );
+    expect(storedItems.get(completionId)?.expiresAt).toBe(
+      completionWake.ask.expiresAt,
+    );
+    await expect(handleHostedRuntimeAssistantAskControl({
+      boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
+      now: new Date(requestExpiresAtMs + 1),
+      request: { action: "prepare", requestId },
+    })).resolves.toMatchObject({
+      mailboxWake: { mailboxItemId: completionId },
+      response: { status: "already_completed" },
+    });
+  });
+
   it("delivers a fixed private answer as exact text on the admitted channel", async () => {
     const { requestId } = await admit({
       text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
@@ -948,9 +1003,11 @@ describe("hosted current-sender Assistant Ask authority", () => {
       text: "Murph, ask my Murph how my synthetic activity changed and DM me.",
     });
     const answer = "Synthetic expired private answer that must stay private.";
+    const requestWake = requireRequestedWake(requestId);
+    const completedAt = new Date(Date.parse(requestWake.ask.expiresAt) - 1);
     await handleHostedRuntimeAssistantAskControl({
       boundRuntimeMemberId: CURRENT_SENDER_MEMBER_ID,
-      now: NOW,
+      now: completedAt,
       request: {
         action: "complete",
         requestId,
@@ -959,8 +1016,19 @@ describe("hosted current-sender Assistant Ask authority", () => {
     });
     const privateDeliveryId =
       createHostedGroupCurrentSenderPrivateDeliveryId(requestId);
-    const requestWake = requireRequestedWake(requestId);
-    const providerEntryAt = new Date(requestWake.ask.expiresAt);
+    const privateDeliveryWake = storedWakes.get(privateDeliveryId);
+    expect(privateDeliveryWake).toMatchObject({
+      notification: {
+        privateAssistantAskCompletion: {
+          expiresAt: requestWake.ask.expiresAt,
+          requestId,
+        },
+      },
+    });
+    expect(Date.parse(storedItems.get(privateDeliveryId)?.expiresAt ?? "")).toBe(
+      completedAt.getTime() + 10 * 60 * 1_000,
+    );
+    const providerEntryAt = new Date(Date.parse(requestWake.ask.expiresAt) + 1);
 
     await expect(
       assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx({

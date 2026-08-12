@@ -120,6 +120,14 @@ Updated: 2026-08-11
   queue regression proves that replay releases the following ask; and the stale
   runtime expiry integration now exercises the live Web-persisted fallback
   handshake.
+- ReviewGPT round five found that several explicit confidentiality clauses
+  could still default to the group and that a completion committed near the
+  request deadline could expire before the destination runtime imported it.
+  Web now parses a bounded terminal audience clause, rejects unsupported
+  audience language, preserves substantive phrases such as private insurance,
+  and gives new group/private terminal envelopes a fresh bounded import window
+  without extending the original private-send authority. Focused Web,
+  typecheck, and four-case PostgreSQL proof pass.
 - Remaining work is the new exact-head final ReviewGPT round, CI, plan closure,
   and merge-tree proof.
 
