@@ -1917,9 +1917,14 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths), entry);
     const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
-    const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp);
+    const sampleAt = resolveJunctionDailyAggregateSampleAt(
+      timestamp,
+      input.requireExplicitTimestamp,
+    );
     const dayKey = input.requireExplicitTimestamp
-      ? extractIsoDatePrefix(sampleAt) ?? undefined
+      ? timestamp.timestampSemantics === "floating" && timestamp.dayKey
+        ? timestamp.dayKey
+        : extractIsoDatePrefix(sampleAt) ?? undefined
       : resolveJunctionTimeseriesAggregateDayKey(
           entry,
           timestamp,
@@ -6171,7 +6176,16 @@ function hasValidJunctionExplicitTimeseriesTimestamp(
 
 function resolveJunctionDailyAggregateSampleAt(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  preserveFloatingDay: boolean,
 ): string | undefined {
+  if (
+    preserveFloatingDay
+    && timestamp.timestampSemantics === "floating"
+    && timestamp.dayKey
+  ) {
+    return `${timestamp.dayKey}T23:59:59.999Z`;
+  }
+
   return timestamp.occurredAt ?? timestamp.recordedAt ?? (
     timestamp.timestampSemantics === "floating" && timestamp.dayKey
       ? `${timestamp.dayKey}T00:00:00.000Z`

@@ -2937,6 +2937,110 @@ test("Junction dense opt-ins keep adjacent UTC import buckets complete and repla
   );
 });
 
+test("Junction daily opt-ins preserve floating provider days at closed UTC boundaries", () => {
+  const firstSnapshot = {
+    importedAt: "2026-04-23T00:00:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+    windowStart: "2026-04-22T00:00:00.000Z",
+    timeseries: {
+      steps: [
+        { day: "2026-04-22", sourceProviderSlug: "oura", unit: "count", value: 10 },
+        { timestamp: "2026-04-22T18:30:00", sourceProviderSlug: "oura", unit: "count", value: 20 },
+        { timestamp: "2026-04-22T22:00:00Z", sourceProviderSlug: "oura", unit: "count", value: 30 },
+      ],
+      distance: [
+        { day: "2026-04-22", sourceProviderSlug: "oura", unit: "m", value: 1000 },
+        { timestamp: "2026-04-22T18:30:00", sourceProviderSlug: "oura", unit: "m", value: 2000 },
+        { timestamp: "2026-04-22T22:00:00Z", sourceProviderSlug: "oura", unit: "m", value: 3000 },
+      ],
+    },
+  };
+  const secondSnapshot = {
+    importedAt: "2026-04-24T00:00:00.000Z",
+    windowEnd: "2026-04-24T00:00:00.000Z",
+    windowStart: "2026-04-23T00:00:00.000Z",
+    timeseries: {
+      steps: [{
+        timestamp: "2026-04-22T23:30:00-02:00",
+        sourceProviderSlug: "oura",
+        unit: "count",
+        value: 40,
+      }],
+      distance: [{
+        timestamp: "2026-04-22T23:30:00-02:00",
+        sourceProviderSlug: "oura",
+        unit: "m",
+        value: 4000,
+      }],
+    },
+  };
+  const first = normalizeJunctionSnapshot(firstSnapshot);
+  const firstReplay = normalizeJunctionSnapshot(firstSnapshot);
+  const second = normalizeJunctionSnapshot(secondSnapshot);
+  const selectedEvents = (payload: ReturnType<typeof normalizeJunctionSnapshot>) =>
+    (payload.events ?? []).filter((event) =>
+      event.fields?.metric === "daily-steps"
+      || event.fields?.metric === "distance-km"
+    );
+  const firstEvents = selectedEvents(first);
+  const secondEvents = selectedEvents(second);
+  const eventIdentity = (event: (typeof firstEvents)[number]) =>
+    JSON.stringify(event.externalRef);
+
+  assert.deepEqual(
+    firstEvents.map((event) => ({
+      dayKey: event.dayKey,
+      metric: event.fields?.metric,
+      occurredAt: event.occurredAt,
+      timeZone: event.timeZone,
+      value: event.fields?.value,
+    })),
+    [
+      {
+        dayKey: "2026-04-22",
+        metric: "daily-steps",
+        occurredAt: "2026-04-22T23:59:59.999Z",
+        timeZone: "UTC",
+        value: 60,
+      },
+      {
+        dayKey: "2026-04-22",
+        metric: "distance-km",
+        occurredAt: "2026-04-22T23:59:59.999Z",
+        timeZone: "UTC",
+        value: 6,
+      },
+    ],
+  );
+  assert.deepEqual(
+    secondEvents.map((event) => ({
+      dayKey: event.dayKey,
+      metric: event.fields?.metric,
+      occurredAt: event.occurredAt,
+      value: event.fields?.value,
+    })),
+    [
+      {
+        dayKey: "2026-04-23",
+        metric: "daily-steps",
+        occurredAt: "2026-04-23T01:30:00.000Z",
+        value: 40,
+      },
+      {
+        dayKey: "2026-04-23",
+        metric: "distance-km",
+        occurredAt: "2026-04-23T01:30:00.000Z",
+        value: 4,
+      },
+    ],
+  );
+  assert.deepEqual(firstEvents.map(eventIdentity), selectedEvents(firstReplay).map(eventIdentity));
+  assert.equal(
+    new Set([...firstEvents, ...secondEvents].map(eventIdentity)).size,
+    4,
+  );
+});
+
 test("Junction opt-in weight readings are compact, replay-stable, distinct, and canonically queryable", async () => {
   const garminReadings = [
     { id: "reading-a", timestamp: "2026-04-22T08:05:00Z", unit: "kg", value: 80, rawSecret: "RAW_WEIGHT_SENTINEL" },
