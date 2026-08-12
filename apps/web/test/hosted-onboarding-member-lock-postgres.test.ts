@@ -266,10 +266,42 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
+vi.mock("@murphai/runtime-state", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/runtime-state")>(
+    "@murphai/runtime-state",
+  );
+  return {
+    ...actual,
+    verifyHostedDomainRootEnvelopeSignatureWithPublicKey: vi.fn(async () => true),
+  };
+});
+
 vi.mock("@/src/lib/hosted-crypto/env", () => ({
   getHostedWebCryptoConfig: () => ({
+    authoritySignKeyVersionName:
+      "projects/test/locations/global/keyRings/test/cryptoKeys/sign/cryptoKeyVersions/1",
+    authoritySignPublicKeyPem:
+      "test-authority-public-key",
+    authorityVerifyKeyring: {
+      "projects/test/locations/global/keyRings/test/cryptoKeys/sign/cryptoKeyVersions/1": {
+        keyVersionName:
+          "projects/test/locations/global/keyRings/test/cryptoKeys/sign/cryptoKeyVersions/1",
+        publicKeyPem:
+          "test-authority-public-key",
+        status: "active",
+      },
+    },
     env: "test",
     gcpKms: {
+      asymmetricSign: async ({
+        keyVersionName,
+      }: {
+        keyVersionName: string;
+        message: Uint8Array;
+      }) => ({
+        keyVersionName,
+        signature: Buffer.from("test-signature").toString("base64"),
+      }),
       decrypt: async ({ ciphertext }: { ciphertext: string }) => ({
         plaintext: new Uint8Array(Buffer.from(ciphertext, "base64")),
       }),
