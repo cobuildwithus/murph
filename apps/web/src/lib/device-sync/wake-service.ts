@@ -330,6 +330,11 @@ export async function completeHostedGoogleHealthFitbitMigration(input: {
   userId: string;
 }): Promise<{ connectionId: string; status: "complete" | "pending" }> {
   try {
+    const recovery = await recoverHostedGoogleHealthFitbitMigrationCutover(input);
+    if (recovery === "complete" || recovery === "pending") {
+      return { connectionId: input.connectionId, status: recovery };
+    }
+
     await disconnectHostedDeviceSyncConnectionSource({
       ...input,
       requireGoogleHealthFitbitMigrationReady: true,
@@ -349,6 +354,153 @@ export async function completeHostedGoogleHealthFitbitMigration(input: {
     await markHostedGoogleHealthFitbitMigrationCutoverFailed(input);
     throw error;
   }
+}
+
+/**
+ * Recovers the narrow crash window after Junction accepted Fitbit revocation
+ * but before Murph finalized the fenced source row. Provider state is probed
+ * outside the database lock and the exact captured claim is revalidated before
+ * the local lifecycle transition.
+ */
+async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
+  connectionId: string;
+  registry: DeviceSyncRegistry;
+  store: PrismaDeviceSyncControlPlaneStore;
+  userId: string;
+}): Promise<"complete" | "not_claimed" | "pending"> {
+  const target = await input.store.withConnectionMutationLock(
+    input.connectionId,
+    async (tx) => {
+      const connection = await input.store.getConnectionForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      const source = await findHostedConnectionSource({
+        connectionId: input.connectionId,
+        sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+        store: input.store,
+        tx,
+      });
+      if (
+        !connection
+        || connection.provider !== "junction"
+        || connection.status !== "active"
+        || !source
+      ) {
+        return { state: "not_claimed" as const };
+      }
+      if (
+        source.status === "disconnected"
+        && source.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
+      ) {
+        return { state: "complete" as const };
+      }
+      if (source.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE) {
+        return { state: "not_claimed" as const };
+      }
+
+      const storedAccount = await input.store.getStoredConnectionAccountForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      const isSourceAccessActive = input.registry.get("junction")
+        ?.connectionHandler?.isSourceAccessActive;
+      if (!storedAccount || !isSourceAccessActive) {
+        return { state: "pending" as const };
+      }
+
+      return {
+        claimAt: source.lastSeenAt,
+        connection,
+        isSourceAccessActive,
+        source,
+        state: "probe" as const,
+        storedAccount,
+      };
+    },
+  );
+
+  if (target.state !== "probe") {
+    return target.state;
+  }
+
+  let sourceAccessActive: boolean;
+  try {
+    sourceAccessActive = await target.isSourceAccessActive(
+      target.storedAccount,
+      JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+    );
+  } catch {
+    return "pending";
+  }
+  if (sourceAccessActive) {
+    return "pending";
+  }
+
+  return input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+    const connection = await input.store.getConnectionForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    const storedAccount = await input.store.getStoredConnectionAccountForUser(
+      input.userId,
+      input.connectionId,
+      tx,
+    );
+    const source = await findHostedConnectionSource({
+      connectionId: input.connectionId,
+      sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+      store: input.store,
+      tx,
+    });
+    if (
+      !connection
+      || !publicAccountMatchesDisconnectTarget(target.connection, connection)
+      || !storedAccountMatchesDisconnectTarget(target.storedAccount, storedAccount)
+      || !source
+      || source.id !== target.source.id
+    ) {
+      return "pending";
+    }
+    if (
+      source.status === "disconnected"
+      && source.lastErrorCode === HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE
+    ) {
+      return "complete";
+    }
+    if (
+      source.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+      || source.lastSeenAt !== target.claimAt
+    ) {
+      return "pending";
+    }
+
+    const disconnectedAt = nextHostedSourceLifecycleAt(source.lastSeenAt);
+    await writeHostedConnectionSourceLifecycle({
+      errorCode: HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+      errorMessage: null,
+      now: disconnectedAt,
+      source,
+      status: "disconnected",
+      store: input.store,
+      tx,
+    });
+    await input.store.createSignal({
+      userId: input.userId,
+      connectionId: input.connectionId,
+      provider: connection.provider,
+      kind: "source_disconnected",
+      occurredAt: disconnectedAt,
+      sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+      reason: "user_disconnect",
+      createdAt: disconnectedAt,
+      tx,
+    });
+    return "complete";
+  });
 }
 
 async function markHostedGoogleHealthFitbitMigrationCutoverFailed(input: {

@@ -107,9 +107,13 @@ Updated: 2026-08-12
     advancing from raw retention rather than exact canonical receipt identity,
     the browser retry passed a projected connection ID into a raw-ID owner, and
     completed cutover left a migration-owned notice mounted.
-11. In progress: push the round-three remediation, run final ReviewGPT round 4,
-    and inspect current-base mergeability without spending a second base-update
-    attempt.
+11. Completed: pushed the round-three remediation and ran final ReviewGPT round
+    4. It accepted four findings: importer-owned canonical local-day coverage,
+    strict availability semantics with sparse-resource obligations, recovery of
+    the post-revoke/pre-finalize crash window, and stale retry UI state.
+12. In progress: push the round-four remediation, rerun final ReviewGPT against
+    the exact head with all rendered evidence attached, and inspect current-base
+    mergeability without spending a second base-update attempt.
 
 ## Decisions
 
@@ -162,12 +166,20 @@ Updated: 2026-08-12
   records represented by an exact canonical receipt identity; projected browser
   IDs resolve through the existing ownership boundary; completed cutover clears
   only migration-owned notices before and after polling backoff.
+- Final round-four remediation proof: all 390 importer tests, all 981 device-sync
+  tests, and 250 affected Web tests pass. Importer, device-sync, and Web
+  typechecks pass. Canonical coverage now comes from committed vault records and
+  uses the vault-resolved local-day boundary; availability accepts only explicit
+  supported values; an absent Fitbit registration recovers the exact fenced
+  cutover without a second revoke; and successful retry removes its stale error.
 
 ## Remaining handoff
 
 - Keep the pull request draft.
-- Push the round-three remediation and run final ReviewGPT round 4 against its
-  exact head; resolve every accepted finding before archiving this plan.
+- Push the round-four remediation and rerun final ReviewGPT against its exact
+  head with the eight authorization, verification, cutover, and retry captures
+  packaged as rendered evidence; resolve every accepted finding before
+  archiving this plan.
 - Recheck the current base with `git merge-tree`. The one permitted base update
   is already consumed, so retain the draft PR and report a moving-base conflict
   if the reviewed patch no longer merges cleanly.

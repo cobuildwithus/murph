@@ -30,6 +30,7 @@ import {
   prepareDeviceProviderSnapshotImport,
   resolveJunctionOrigin,
   type DeviceBatchImportPayload,
+  type JunctionCanonicalCoverageEvidence,
   type WearableRawIngestReceipt,
 } from "../src/index.ts";
 
@@ -3088,6 +3089,57 @@ test("Junction normalizer uses vault timezone for UTC-only daily aggregate days"
   assert.equal(hrvEvent?.legacyExternalRefs?.length, 1);
   assert.notEqual(hrvEvent?.legacyExternalRefs?.[0]?.resourceId, hrvEvent?.externalRef?.resourceId);
   assert.deepEqual(artifact?.legacyDayKeys, ["2026-06-25"]);
+});
+
+test("Junction importer reports committed Fitbit daily coverage at the vault-local day boundary", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-fitbit-canonical-coverage");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-06-25T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    const input = {
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-account-hash-fitbit-coverage",
+        importedAt: "2026-06-25T12:00:00.000Z",
+        timeseries: {
+          hrv: {
+            groups: {
+              fitbit: [{
+                data: [{ timestamp: "2026-06-25T02:30:00.000Z", value: 70 }],
+                source: { provider: "fitbit", type: "wearable" },
+              }],
+            },
+          },
+        },
+      },
+    };
+    type JunctionImportResult = Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>> & {
+      junctionCanonicalCoverage: readonly JunctionCanonicalCoverageEvidence[];
+    };
+
+    const first = await importDeviceProviderSnapshot<JunctionImportResult>(input, {
+      corePort: coreRuntime,
+    });
+    const replay = await importDeviceProviderSnapshot<JunctionImportResult>(input, {
+      corePort: coreRuntime,
+    });
+
+    assert.equal(first.events[0]?.dayKey, "2026-06-24");
+    assert.equal(first.events[0]?.timeZone, "America/New_York");
+    assert.deepEqual(first.junctionCanonicalCoverage, [{
+      coverageThrough: "2026-06-25T04:00:00.000Z",
+      resource: "hrv",
+      sourceProviderSlug: "fitbit",
+    }]);
+    assert.equal(replay.applied, false);
+    assert.deepEqual(replay.junctionCanonicalCoverage, first.junctionCanonicalCoverage);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction normalizer compacts VO2 max interval timeseries into daily facts", () => {

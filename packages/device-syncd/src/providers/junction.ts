@@ -12,7 +12,6 @@ import {
   canNormalizeJunctionSleepCycleRecordToCompactStages,
   classifyJunctionSummaryNormalizationEvidence,
   identifyJunctionBloodPressureProviderRecords,
-  normalizeJunctionSnapshot,
   type JunctionSnapshotInput,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
@@ -1122,7 +1121,6 @@ export function createJunctionDeviceSyncProvider(
       const receipt = await context.importSnapshot(snapshot);
       await recordAcceptedJunctionFitbitCoverage(
         context,
-        snapshot,
         receipt,
       );
     }
@@ -2175,7 +2173,6 @@ export function createJunctionDeviceSyncProvider(
     const receipt = await context.importSnapshot(snapshot);
     await recordAcceptedJunctionFitbitCoverage(
       context,
-      snapshot,
       receipt,
     );
 
@@ -2880,7 +2877,6 @@ export function createJunctionDeviceSyncProvider(
           const receipt = await context.importSnapshot(snapshot);
           await recordAcceptedJunctionFitbitCoverage(
             context,
-            snapshot,
             receipt,
           );
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
@@ -2998,7 +2994,6 @@ export function createJunctionDeviceSyncProvider(
         const receipt = await context.importSnapshot(snapshot);
         await recordAcceptedJunctionFitbitCoverage(
           context,
-          snapshot,
           receipt,
         );
       }
@@ -3057,7 +3052,6 @@ export function createJunctionDeviceSyncProvider(
     const receipt = await context.importSnapshot(snapshot);
     await recordAcceptedJunctionFitbitCoverage(
       context,
-      snapshot,
       receipt,
     );
     return {
@@ -4840,77 +4834,33 @@ function filterJunctionImportSnapshots(
 
 async function recordAcceptedJunctionFitbitCoverage(
   context: ProviderJobContext,
-  snapshot: JunctionSnapshotInput,
   receipt: unknown,
 ): Promise<void> {
-  const canonicalEventExternalRefResourceIds =
-    readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt);
+  const canonicalCoverage = readProviderSnapshotJunctionCanonicalCoverage(receipt);
   if (
     !readProviderSnapshotDurableDeliveryAccepted(receipt)
-    || canonicalEventExternalRefResourceIds === null
-    || canonicalEventExternalRefResourceIds.length === 0
+    || canonicalCoverage.length === 0
     || !context.upsertConnectionSource
   ) {
     return;
   }
 
-  const canonicalEventIdentitySet = new Set(canonicalEventExternalRefResourceIds);
   const coverageByResource = new Map<string, string>();
-  for (const category of ["summaries", "timeseries"] as const) {
-    for (const [resource, values] of Object.entries(snapshot[category] ?? {})) {
-      if (
-        !Array.isArray(values)
-        || !buildDeviceSyncSourceCanonicalCoverageThroughKey(resource)
-      ) {
-        continue;
-      }
-
-      for (const value of values) {
-        const record = readPlainObject(value);
-        if (
-          !record
-          || normalizeProviderSlug(
-            resolveJunctionOrigin(record, {}).sourceProviderSlug,
-          ) !== JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-        ) {
-          continue;
-        }
-
-        const normalized = normalizeJunctionSnapshot({
-          accountId: snapshot.accountId,
-          connections: snapshot.connections,
-          importedAt: snapshot.importedAt,
-          [category]: { [resource]: [value] },
-          windowEnd: snapshot.windowEnd,
-          windowStart: snapshot.windowStart,
-        });
-        const normalizedEvents = normalized.events ?? [];
-        const canonicalRecordIdentities = normalizedEvents.flatMap((event) =>
-          event.externalRef ? [event.externalRef.resourceId] : []
-        );
-        // Full-batch normalization can deliberately assign duplicate metrics to
-        // one summary owner. One matching receipt identity still proves this
-        // raw record has a canonical representative; no match leaves it raw-only.
-        if (
-          normalizedEvents.length === 0
-          || !canonicalRecordIdentities.some(
-            (identity) => canonicalEventIdentitySet.has(identity),
-          )
-        ) {
-          continue;
-        }
-
-        const coverageThrough = resolveJunctionRecordCoverageThrough(record);
-        if (!coverageThrough) {
-          continue;
-        }
-        const existing = coverageByResource.get(resource);
-        coverageByResource.set(
-          resource,
-          existing ? maxIsoTimestamp(existing, coverageThrough) : coverageThrough,
-        );
-      }
+  for (const evidence of canonicalCoverage) {
+    if (
+      normalizeProviderSlug(evidence.sourceProviderSlug)
+        !== JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      || !buildDeviceSyncSourceCanonicalCoverageThroughKey(evidence.resource)
+    ) {
+      continue;
     }
+    const existing = coverageByResource.get(evidence.resource);
+    coverageByResource.set(
+      evidence.resource,
+      existing
+        ? maxIsoTimestamp(existing, evidence.coverageThrough)
+        : evidence.coverageThrough,
+    );
   }
 
   if (coverageByResource.size === 0) {
@@ -7570,16 +7520,13 @@ function resolveJunctionGoogleHealthLegacyCoverageThrough(
       return null;
     }
 
-    const resourceAvailability = source.resourceAvailabilitySummary?.[resource];
-    if (
-      resourceAvailability === false
-      || resourceAvailability === null
-      || resourceAvailability === undefined
-    ) {
+    const coverageKey = buildDeviceSyncSourceCanonicalCoverageThroughKey(resource);
+    const summary = source.resourceAvailabilitySummary;
+    if (!coverageKey || !summary || !(coverageKey in summary)) {
       continue;
     }
     const coverageThrough = readDeviceSyncSourceCanonicalCoverageThrough(
-      source.resourceAvailabilitySummary,
+      summary,
       resource,
     );
     const coverageThroughMs = coverageThrough
@@ -8131,6 +8078,35 @@ function readProviderSnapshotCanonicalEventExternalRefResourceIds(
       && resourceIds.every((resourceId) => typeof resourceId === "string")
     ? resourceIds
     : null;
+}
+
+function readProviderSnapshotJunctionCanonicalCoverage(value: unknown): readonly {
+  coverageThrough: string;
+  resource: string;
+  sourceProviderSlug: string;
+}[] {
+  const entries = readPlainObject(value)?.junctionCanonicalCoverage;
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+
+  return entries.flatMap((entry) => {
+    const evidence = readPlainObject(entry);
+    const coverageThrough = toIsoTimestampIfValid(evidence?.coverageThrough);
+    if (
+      !evidence
+      || !coverageThrough
+      || typeof evidence.resource !== "string"
+      || typeof evidence.sourceProviderSlug !== "string"
+    ) {
+      return [];
+    }
+    return [{
+      coverageThrough,
+      resource: evidence.resource,
+      sourceProviderSlug: evidence.sourceProviderSlug,
+    }];
+  });
 }
 
 function uniqueJunctionProviderRecordIdentities(

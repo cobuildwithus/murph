@@ -985,11 +985,16 @@ class DeviceSyncServiceController {
             snapshot,
             vaultRoot: this.vaultRoot,
           });
+          const junctionCanonicalCoverage =
+            readCanonicalDeviceImportJunctionCoverage(importResult);
           const receipt: ProviderSnapshotImportReceipt = {
             canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
             canonicalEventExternalRefResourceIds:
               readCanonicalDeviceImportEventExternalRefResourceIds(importResult),
             durableDeliveryAccepted: true,
+            ...(junctionCanonicalCoverage === undefined
+              ? {}
+              : { junctionCanonicalCoverage }),
           };
           return receipt;
         },
@@ -2124,6 +2129,33 @@ function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): s
     return typeof externalRef?.resourceId === "string"
       ? [externalRef.resourceId]
       : [];
+  });
+}
+
+function readCanonicalDeviceImportJunctionCoverage(
+  value: unknown,
+): ProviderSnapshotImportReceipt["junctionCanonicalCoverage"] {
+  const result = toPlainRecord(value);
+  if (!result || !Array.isArray(result.junctionCanonicalCoverage)) {
+    return undefined;
+  }
+
+  return result.junctionCanonicalCoverage.flatMap((entry) => {
+    const evidence = toPlainRecord(entry);
+    if (
+      !evidence
+      || typeof evidence.coverageThrough !== "string"
+      || !Number.isFinite(Date.parse(evidence.coverageThrough))
+      || typeof evidence.resource !== "string"
+      || typeof evidence.sourceProviderSlug !== "string"
+    ) {
+      return [];
+    }
+    return [{
+      coverageThrough: new Date(Date.parse(evidence.coverageThrough)).toISOString(),
+      resource: evidence.resource,
+      sourceProviderSlug: evidence.sourceProviderSlug,
+    }];
   });
 }
 

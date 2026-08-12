@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import {
+  deriveJunctionCanonicalCoverageEvidence,
   normalizeJunctionSnapshot,
   type JunctionSnapshotInput,
 } from "@murphai/importers/device-providers/junction";
@@ -287,6 +288,14 @@ function createCanonicalImportReceipt(
       event.externalRef ? [event.externalRef.resourceId] : []
     ),
     durableDeliveryAccepted,
+    junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(
+      events.map((event) => ({
+        ...event,
+        ...event.fields,
+        dayKey: event.dayKey ?? event.occurredAt?.slice(0, 10) ?? "2000-01-01",
+        timeZone: event.timeZone ?? "UTC",
+      })),
+    ),
   };
 }
 
@@ -11687,6 +11696,34 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
     cutoverSources,
     "2026-08-11T11:00:00.000Z",
     { date: "2026-08-11" },
+  );
+  assert.equal(importedSnapshots.length, 1);
+
+  importedSnapshots.length = 0;
+  const localDayBoundary = "2026-08-12T04:00:00.000Z";
+  const localDayCutoverSources = cutoverSources.map((source) =>
+    source.sourceProviderSlug === "fitbit"
+      ? {
+          ...source,
+          lastSeenAt: localDayBoundary,
+          resourceAvailabilitySummary: {
+            activity: false,
+            canonicalCoverageThrough_activity: localDayBoundary,
+          },
+        }
+      : source
+  );
+  await executeWithSources(
+    localDayCutoverSources,
+    "2026-08-12T03:00:00.000Z",
+    { date: "2026-08-11" },
+  );
+  assert.equal(importedSnapshots.length, 0);
+
+  await executeWithSources(
+    localDayCutoverSources,
+    "2026-08-12T05:00:00.000Z",
+    { date: "2026-08-12" },
   );
   assert.equal(importedSnapshots.length, 1);
 });

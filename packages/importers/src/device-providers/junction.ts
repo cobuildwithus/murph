@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 
 import {
+  addDaysToIsoDate,
   extractIsoDatePrefix,
+  formatTimeZoneDateTimeParts,
   ID_PREFIXES,
   MEAL_MICRONUTRIENT_KEYS,
   parseCompanionHrvRmssdAdmissionId,
@@ -147,6 +149,23 @@ export interface JunctionBloodPressureProviderRecordIdentityEvidence {
   readonly repairStableExternalRefResourceIds: readonly (string | null)[];
 }
 
+export interface JunctionCanonicalCoverageEvidence {
+  readonly coverageThrough: string;
+  readonly resource: string;
+  readonly sourceProviderSlug: string;
+}
+
+export interface JunctionCanonicalCoverageEvent {
+  readonly dataOrigin?: { readonly sourceProviderSlug?: string };
+  readonly dayKey: string;
+  readonly endAt?: string;
+  readonly externalRef?: { readonly resourceType: string };
+  readonly kind: string;
+  readonly occurredAt: string;
+  readonly timeZone?: string;
+  readonly workout?: { readonly endedAt?: string };
+}
+
 type TimestampSemantics = NonNullable<DeviceDataOrigin["timestampSemantics"]>;
 type MealNutritionTotals = NonNullable<MealNutrition["totals"]>;
 type MealNutritionTotalKey = keyof MealNutritionTotals;
@@ -232,6 +251,19 @@ const RAW_SOURCE_NAME_KEYS = new Set([
   "displayname",
   "name",
 ]);
+
+const JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES: ReadonlySet<string> = new Set([
+  "activity",
+  "body",
+  "menstrual_cycle",
+  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES.filter((resource) =>
+    resource !== "blood_pressure" && resource !== "note"
+  ),
+]);
+const JUNCTION_CANONICAL_COVERAGE_RESOURCES: readonly string[] = [
+  ...JUNCTION_ALLOWED_SUMMARY_RESOURCES.filter((resource) => resource !== "profile"),
+  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+];
 const RAW_SOURCE_LINKAGE_KEY_PARTS = [
   "connectionid",
   "providerconnectionid",
@@ -961,6 +993,108 @@ export function normalizeJunctionSnapshot(
       companionHrvRmssdObservations: companionHrvRmssd ? 1 : 0,
     }),
   });
+}
+
+/**
+ * Derives provider cutover coverage only from the canonical events returned by
+ * the committed vault import. This deliberately does not replay raw Junction
+ * normalization: the stored event owns the resolved day and vault timezone.
+ */
+export function deriveJunctionCanonicalCoverageEvidence(
+  events: readonly JunctionCanonicalCoverageEvent[],
+): readonly JunctionCanonicalCoverageEvidence[] {
+  const coverageBySourceAndResource = new Map<string, JunctionCanonicalCoverageEvidence>();
+
+  for (const event of events) {
+    const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
+      event.dataOrigin?.sourceProviderSlug,
+    );
+    const externalRefResourceType = event.externalRef?.resourceType;
+    if (!sourceProviderSlug || !externalRefResourceType) {
+      continue;
+    }
+
+    const resource = JUNCTION_CANONICAL_COVERAGE_RESOURCES.find((candidate) =>
+      externalRefResourceType
+        === `junction-${slugify(sourceProviderSlug, "source")}-${slugify(candidate, "resource")}`
+    );
+    if (!resource) {
+      continue;
+    }
+
+    const coverageThrough = JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES.has(resource)
+      ? resolveCanonicalLocalDayEnd(event.dayKey, event.timeZone)
+      : resolveCanonicalEventIntervalEnd(event);
+    if (!coverageThrough) {
+      continue;
+    }
+
+    const key = `${sourceProviderSlug}\u0000${resource}`;
+    const existing = coverageBySourceAndResource.get(key);
+    if (
+      !existing
+      || Date.parse(coverageThrough) > Date.parse(existing.coverageThrough)
+    ) {
+      coverageBySourceAndResource.set(key, {
+        coverageThrough,
+        resource,
+        sourceProviderSlug,
+      });
+    }
+  }
+
+  return [...coverageBySourceAndResource.values()].sort((left, right) =>
+    left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+    || left.resource.localeCompare(right.resource)
+  );
+}
+
+function resolveCanonicalEventIntervalEnd(
+  event: JunctionCanonicalCoverageEvent,
+): string | null {
+  if (event.kind === "sleep_session") {
+    return normalizeTimestamp(event.endAt) ?? null;
+  }
+  if (event.kind === "activity_session") {
+    return normalizeTimestamp(event.workout?.endedAt)
+      ?? normalizeTimestamp(event.occurredAt)
+      ?? null;
+  }
+  return normalizeTimestamp(event.occurredAt) ?? null;
+}
+
+function resolveCanonicalLocalDayEnd(
+  dayKey: string,
+  timeZone: string | undefined,
+): string | null {
+  if (!timeZone) {
+    return null;
+  }
+
+  let targetDayKey: string;
+  try {
+    targetDayKey = addDaysToIsoDate(dayKey, 1);
+  } catch {
+    return null;
+  }
+
+  const targetUtcMidnightMs = Date.parse(`${targetDayKey}T00:00:00.000Z`);
+  let lowMs = targetUtcMidnightMs - 36 * 60 * 60_000;
+  let highMs = targetUtcMidnightMs + 36 * 60 * 60_000;
+  try {
+    while (lowMs < highMs) {
+      const midpointMs = lowMs + Math.floor((highMs - lowMs) / 2);
+      const localDayKey = formatTimeZoneDateTimeParts(midpointMs, timeZone).dayKey;
+      if (localDayKey < targetDayKey) {
+        lowMs = midpointMs + 1;
+      } else {
+        highMs = midpointMs;
+      }
+    }
+    return new Date(lowMs).toISOString();
+  } catch {
+    return null;
+  }
 }
 
 export function classifyJunctionSummaryNormalizationEvidence(

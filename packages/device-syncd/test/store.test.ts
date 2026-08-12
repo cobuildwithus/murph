@@ -1331,7 +1331,7 @@ test("device sync store keeps source instances distinct and lists them determini
       store.listAccounts({ sourceProviderSlug: "garmin" }),
       [],
     );
-    assert.equal(store.getAccountById(connection.id)?.sources?.[0]?.resourceCount, 1);
+    assert.equal(store.getAccountById(connection.id)?.sources?.[0]?.resourceCount, 0);
     assert.deepEqual(
       store.getAccountById(connection.id)?.sources?.find(
         (source) => source.sourceProviderSlug === "dexcom",

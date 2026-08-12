@@ -4780,6 +4780,14 @@ test("ConnectSourcesGrid offers a direct retry after durable automatic cutover f
   await vi.waitFor(() => {
     assert.match(rendered.container.textContent ?? "", /Fitbit migration complete/u);
     assert.match(rendered.container.textContent ?? "", /Fitbit connected/u);
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /could not stop the legacy Fitbit connection/u,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Fitbit keeps syncing until you retry/u,
+    );
   });
   assert.equal(fetch.mock.calls.length, 1);
   assert.equal(
@@ -6320,6 +6328,7 @@ test("Automatic Fitbit cutover keeps the successor card connected locally", asyn
       disconnectSourceProviderSlug: "fitbit",
       id: "fitbit",
       logo,
+      migrationRetryRequired: true,
       migrationState: "cutover_ready",
       name: "Fitbit",
     }],

@@ -135,25 +135,17 @@ export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
   legacySummary: Record<string, unknown> | null | undefined;
   successorSummary: Record<string, unknown> | null | undefined;
 }): boolean {
-  const overlappingResources = Object.entries(input.successorSummary ?? {})
-    .filter(([key, value]) =>
-      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_RESOURCES.has(key)
-      && isAvailableDeviceSyncSourceResource(key, value)
-    )
-    .map(([key]) => key)
-    .filter((key) =>
-      isAvailableDeviceSyncSourceResource(
-        key,
-        input.legacySummary?.[key],
-      )
+  const producedLegacyResources = [...DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_RESOURCES]
+    .filter((resource) =>
+      readDeviceSyncSourceCanonicalCoverageThrough(input.legacySummary, resource) !== null
     );
 
-  return overlappingResources.length > 0
-    && overlappingResources.every((resource) =>
-      readDeviceSyncSourceCanonicalCoverageThrough(
-        input.legacySummary,
+  return producedLegacyResources.length > 0
+    && producedLegacyResources.every((resource) =>
+      isAvailableDeviceSyncSourceResource(
         resource,
-      ) !== null
+        input.successorSummary?.[resource],
+      )
     );
 }
 
@@ -169,10 +161,25 @@ export function isAvailableDeviceSyncSourceResource(
   key: string,
   value: unknown,
 ): boolean {
-  return !isDeviceSyncSourceResourceAvailabilityMetadataKey(key)
-    && value !== false
-    && value !== null
-    && value !== undefined;
+  if (isDeviceSyncSourceResourceAvailabilityMetadataKey(key)) {
+    return false;
+  }
+  if (value === true) {
+    return true;
+  }
+  if (typeof value === "string") {
+    return value.trim().toLowerCase() === "available";
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const availability = value as { available?: unknown; status?: unknown };
+  if (Object.hasOwn(availability, "available")) {
+    return availability.available === true;
+  }
+  return typeof availability.status === "string"
+    && availability.status.trim().toLowerCase() === "available";
 }
 
 export function isGoogleHealthFitbitMigrationSuccessorReady(input: {

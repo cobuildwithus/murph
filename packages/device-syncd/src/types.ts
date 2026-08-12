@@ -739,6 +739,13 @@ export interface ProviderSnapshotImportReceipt {
   canonicalEventCount: number;
   canonicalEventExternalRefResourceIds?: readonly string[];
   durableDeliveryAccepted: boolean;
+  junctionCanonicalCoverage?: readonly ProviderSnapshotCanonicalCoverageEvidence[];
+}
+
+export interface ProviderSnapshotCanonicalCoverageEvidence {
+  coverageThrough: string;
+  resource: string;
+  sourceProviderSlug: string;
 }
 
 export interface ProviderJobConnectionSource {

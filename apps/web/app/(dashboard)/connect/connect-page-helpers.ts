@@ -112,7 +112,8 @@ export function markLocallyCompletedFitbitMigrations(
       return source;
     }
 
-    const { migrationState, ...completedSource } = source;
+    const { migrationRetryRequired, migrationState, ...completedSource } = source;
+    void migrationRetryRequired;
     void migrationState;
 
     return {

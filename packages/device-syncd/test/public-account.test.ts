@@ -183,7 +183,7 @@ test("Google Health Fitbit cutover requires verified history, resources, and a f
   }), false);
 });
 
-test("Google Health Fitbit cutover requires accepted legacy coverage for every overlapping resource", () => {
+test("Google Health Fitbit cutover requires strict successor availability for each produced legacy resource", () => {
   const coverageKey = buildDeviceSyncSourceCanonicalCoverageThroughKey("sleep");
   assert.equal(coverageKey, "canonicalCoverageThrough_sleep");
   assert.ok(coverageKey);
@@ -215,7 +215,7 @@ test("Google Health Fitbit cutover requires accepted legacy coverage for every o
       canonicalCoverageThrough_activity: "2026-08-11T11:00:00.000Z",
     },
     successorSummary,
-  }), false);
+  }), true);
   assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
     legacySummary: { activity: false },
     successorSummary,
@@ -237,6 +237,20 @@ test("Google Health Fitbit cutover requires accepted legacy coverage for every o
     legacySummary: { profile: true },
     successorSummary: { profile: true },
   }), false);
+  assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
+    legacySummary: {
+      activity: "unavailable",
+      canonicalCoverageThrough_activity: "2026-08-11T11:00:00.000Z",
+    },
+    successorSummary: { activity: "unavailable" },
+  }), false);
+  assert.equal(isGoogleHealthFitbitMigrationLegacyCoverageReady({
+    legacySummary: {
+      activity: false,
+      canonicalCoverageThrough_activity: "2026-08-11T11:00:00.000Z",
+    },
+    successorSummary: { activity: { status: "available" }, sleep: false },
+  }), true);
 });
 
 test("available source resource counts exclude lifecycle metadata and unavailable values", () => {
@@ -245,9 +259,12 @@ test("available source resource counts exclude lifecycle metadata and unavailabl
     [DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY]:
       "2026-08-11T12:00:00.000Z",
     heartrate: null,
+    note: "unavailable",
     sleep: true,
+    stress: { status: "unavailable" },
     steps: false,
     workouts: { available: true },
+    weight: 1,
   }), 2);
   assert.equal(countAvailableDeviceSyncSourceResources(null), 0);
 });

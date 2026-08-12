@@ -1306,7 +1306,14 @@ test("device sync service reports canonical counts separately from durable deliv
       async importDeviceProviderSnapshot() {
         importAttempt += 1;
         return importAttempt === 1
-          ? { events: [{ kind: "activity" }, { kind: "sleep" }] }
+          ? {
+              events: [{ kind: "activity" }, { kind: "sleep" }],
+              junctionCanonicalCoverage: [{
+                coverageThrough: "2026-08-11T04:00:00.000Z",
+                resource: "activity",
+                sourceProviderSlug: "fitbit",
+              }],
+            }
           : { applied: false, events: [] };
       },
     },
@@ -1334,6 +1341,11 @@ test("device sync service reports canonical counts separately from durable deliv
         canonicalEventCount: 2,
         canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
+        junctionCanonicalCoverage: [{
+          coverageThrough: "2026-08-11T04:00:00.000Z",
+          resource: "activity",
+          sourceProviderSlug: "fitbit",
+        }],
       },
       {
         canonicalEventCount: 0,
