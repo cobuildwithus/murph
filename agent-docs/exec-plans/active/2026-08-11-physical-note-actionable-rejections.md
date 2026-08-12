@@ -289,3 +289,12 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   proves a later new request remains blocked. This separates recovery authority
   from admission ordering inside the existing row, member lock, lookup, and
   usage owners, without another state machine or continuation mechanism.
+- Round 17 found that production called Web only once, so safe exact replay was
+  reachable in tests but not after a committed response was lost or Web returned
+  a retryable 5xx. Opt the stable-key physical-note POST into the existing
+  one-replay control transport. Both attempts reuse the identical request body
+  and key inside the original deadline; HTTP 408 and caller cancellation remain
+  single-attempt pending paths. Port proof covers recovered categorized failure,
+  recovered acceptance after a lost body, 408, and cancellation. This connects
+  the initiating conversation to the existing row-scoped Web recovery without
+  a queue, scheduler, notification, or additional continuation owner.

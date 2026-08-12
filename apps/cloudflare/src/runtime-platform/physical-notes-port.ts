@@ -29,6 +29,7 @@ export function createHostedWebPhysicalNotePort(input: {
           fetchImpl: input.fetchImpl,
           method: "POST",
           path: HOSTED_PHYSICAL_NOTES_PATH,
+          replayOnceOnRetryableFailure: true,
           signal: options?.signal ?? null,
           timeoutMs: Math.max(
             input.timeoutMs,

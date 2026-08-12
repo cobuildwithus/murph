@@ -246,8 +246,14 @@ The Cloudflare physical-note Web-control port preserves HTTP 408 as uncertainty
 instead of translating it into a definite failed response. A gateway or caller
 timeout can occur after Web consumed the POST and Lob accepted the note, so only
 Web's categorized JSON response can authorize “nothing was sent” recovery copy.
-Control-plane 408, transport failure, 5xx, and response-parse failure all throw
-into the assistant's existing `pending` result with no retry invitation.
+For replay-safe transport loss or 5xx, the existing control transport performs
+at most one immediate exact Web replay with the identical body and request key
+inside the original overall deadline. It never replays HTTP 408 or caller
+cancellation. This bounded transport replay may recover the stored failure or
+acceptance before the assistant answers; “do not retry” still forbids another
+provider effect or any later model/user retry. A second replay failure and every
+still-indeterminate Web result throw into the assistant's existing `pending`
+result with no retry invitation.
 
 The original physical-note deployment order remains: deploy the Prisma migration
 and Web route/service first, with live sending off.

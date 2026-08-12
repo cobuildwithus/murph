@@ -135,28 +135,71 @@ describe("createHostedWebPhysicalNotePort", () => {
     });
   });
 
-  it("preserves uncertain server failures for the no-retry boundary", async () => {
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
-      error: {
-        code: "HOSTED_PHYSICAL_NOTE_UNAVAILABLE",
-        message: "Physical-note state is unavailable.",
-        retryable: true,
-      },
-    }), {
-      headers: { "content-type": "application/json; charset=utf-8" },
-      status: 503,
-    }));
+  it("exact-replays the same request after a committed 5xx response", async () => {
+    const bodies: BodyInit[] = [];
+    const responses = [
+      new Response(JSON.stringify({
+        error: {
+          code: "HOSTED_PHYSICAL_NOTE_UNAVAILABLE",
+          message: "Physical-note state is unavailable.",
+          retryable: true,
+        },
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 503,
+      }),
+      Response.json({
+        complimentary: false,
+        costUsdMicros: "250000",
+        failureReason: "artwork",
+        physicalNoteId: "physical_note_replayed",
+        status: "failed",
+      }),
+    ];
+    const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
+      if (init?.body) bodies.push(init.body);
+      return responses.shift()!;
+    });
     const port = createHostedWebPhysicalNotePort({
       boundUserId: "member_physical_note",
-      fetchImpl: fetchImpl as typeof fetch,
-      timeoutMs: 1_000,
+      fetchImpl,
+      timeoutMs: 5_000,
       transport: { mode: "proxy" },
     });
 
-    await expect(port.send(REQUEST)).rejects.toMatchObject({
-      code: "HOSTED_PHYSICAL_NOTE_UNAVAILABLE",
-      status: 503,
+    await expect(port.send(REQUEST)).resolves.toMatchObject({
+      failureReason: "artwork",
+      physicalNoteId: "physical_note_replayed",
+      status: "failed",
     });
+    expect(bodies).toEqual([JSON.stringify(REQUEST), JSON.stringify(REQUEST)]);
+  });
+
+  it("exact-replays the same request after a successful response body is lost", async () => {
+    const bodies: BodyInit[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
+      if (init?.body) bodies.push(init.body);
+      return bodies.length === 1
+        ? createLostBodyResponse()
+        : Response.json({
+            complimentary: false,
+            costUsdMicros: "250000",
+            physicalNoteId: "physical_note_accepted",
+            status: "accepted",
+          });
+    });
+    const port = createHostedWebPhysicalNotePort({
+      boundUserId: "member_physical_note",
+      fetchImpl,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.send(REQUEST)).resolves.toMatchObject({
+      physicalNoteId: "physical_note_accepted",
+      status: "accepted",
+    });
+    expect(bodies).toEqual([JSON.stringify(REQUEST), JSON.stringify(REQUEST)]);
   });
 
   it("preserves an HTTP 408 as uncertain after Web may have accepted the note", async () => {
@@ -171,6 +214,26 @@ describe("createHostedWebPhysicalNotePort", () => {
     await expect(port.send(REQUEST)).rejects.toMatchObject({
       status: 408,
     });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("does not exact-replay after the initiating turn is canceled", async () => {
+    const abortController = new AbortController();
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      abortController.abort(new DOMException("turn cancelled", "AbortError"));
+      return new Response(null, { status: 503 });
+    });
+    const port = createHostedWebPhysicalNotePort({
+      boundUserId: "member_physical_note",
+      fetchImpl,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.send(REQUEST, {
+      signal: abortController.signal,
+    })).rejects.toMatchObject({ status: 503 });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("forwards physical notes with their longer deadline and keeps other operations on the default", async () => {
@@ -219,3 +282,11 @@ describe("createHostedWebPhysicalNotePort", () => {
     ]);
   });
 });
+
+function createLostBodyResponse(): Response {
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.error(new TypeError("Response body lost."));
+    },
+  }), { status: 200 });
+}
