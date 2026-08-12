@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Current Repo Checks
 
@@ -738,24 +738,26 @@ keep the one-second presentation-only deadline and late-result rejection.
 
 - Assistant Ask has focused contract, parser, Web authority/idempotency,
   assistant-tool policy, runtime mailbox routing, detached-process lifecycle,
-  one-time current-sender group-disclosure coverage, private-current-sender
-  admission/completion/replay coverage, and Cloudflare runner-image confinement
-  coverage. The private path proves exact accepted-message attribution,
-  personal-runtime targeting, same-channel `direct-member` routing, queue-only
-  exact-text notification, absence of group-route authority, and retry
-  non-redirection. Provider-entry coverage binds the original private Assistant
-  Ask expiry, exact reviewed-text digest, same personal member, and current
-  same-channel direct route, then proves expiry, revocation, text mismatch, or
-  route drift fails terminally without group fallback. The production-like Linux
-  proof must show committed group reads succeed while writes, `.runtime/**`,
-  `.codex/**`, environment files, other roots, inherited shell secrets, and tool network are
-  denied, and it must show child failure or cancellation cannot interrupt the
-  resident foreground App Server. Routine CI uses scripted provider responses;
-  it does not send a real private-to-group ask, an accepted-input
-  grant-bound group-to-member ask, one-time current-sender self-disclosure,
-  private-current-sender continuation, or a scheduled same-turn ask/replay
-  through deployed Web, Temporal, Cloudflare, a live model provider, and the
-  applicable messaging or no-delivery destination.
+  and Cloudflare runner-image confinement coverage. Current-sender synthetic
+  regressions prove the argument-free action binds the newest accepted input;
+  an earlier native reply cannot be selected from a mixed-sender batch; exact flat group and private commands are admitted; native
+  replies, conflicting audience wording, and unclear or context-dependent text
+  are rejected; a missing direct route prevents private admission; and a route
+  lost after admission produces one non-disclosing group terminal rather than
+  leaking or silently consuming work. Replay/restart and concurrent
+  admission/completion proofs assert one canonical request per source and
+  exactly one authorized terminal experience, including private exact-text
+  delivery and no cross-audience completion. The opt-in PostgreSQL cases run the
+  same transaction and lock owners against a real database. The production-like
+  Linux proof must still show committed group reads succeed while writes,
+  `.runtime/**`, `.codex/**`, environment files, other roots, inherited shell
+  secrets, and tool network are denied, and it must show child failure or
+  cancellation cannot interrupt the resident foreground App Server. Routine CI
+  uses scripted provider responses; it does not send a real private-to-group
+  ask, an accepted-input grant-bound group-to-member ask, one-time
+  current-sender self-disclosure, private current-sender continuation, or a
+  scheduled same-turn ask/replay through deployed Web, Temporal, Cloudflare, a
+  live model provider, and the applicable messaging or no-delivery destination.
 
 - Clinical Records has focused hosted-web proof for the committed Epic
   directory v2 and acquisition policy (including v2-only schema admission, exact

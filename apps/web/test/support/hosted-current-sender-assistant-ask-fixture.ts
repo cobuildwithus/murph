@@ -34,6 +34,8 @@ export interface HostedCurrentSenderAssistantAskFixture {
   ownerMemberId: string;
   priorAssistantInputId: string | null;
   priorQuestion: string | null;
+  priorSenderMemberId: string | null;
+  priorTelegramUserId: string | null;
   question: string;
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   senderMemberId: string;
@@ -46,14 +48,23 @@ export interface HostedCurrentSenderAssistantAskFixture {
 export async function seedHostedCurrentSenderAssistantAskFixture(input: {
   now: Date;
   prisma: PrismaClient;
+  priorFromDifferentSender?: boolean;
   priorQuestion?: string;
+  priorReplyContextPreview?: string | null;
   question?: string;
+  replyContextPreview?: string | null;
 }): Promise<HostedCurrentSenderAssistantAskFixture> {
   const suffix = randomUUID().replaceAll("-", "");
   const ownerMemberId = `hbm_current_sender_owner_${suffix}`;
   const senderMemberId = `hbm_current_sender_person_${suffix}`;
   const groupRuntimeMemberId = `hbm_current_sender_group_${suffix}`;
+  const priorSenderMemberId = input.priorFromDifferentSender
+    ? `hbm_current_sender_prior_${suffix}`
+    : null;
   const telegramUserId = `tg_current_sender_${suffix}`;
+  const priorTelegramUserId = priorSenderMemberId
+    ? `tg_current_sender_prior_${suffix}`
+    : null;
   const telegramDirectThreadId = `telegram_direct_current_sender_${suffix}`;
   const threadId = `telegram_group_current_sender_${suffix}`;
   const sourceEventId = `telegram.message.received:current-sender:${suffix}`;
@@ -65,7 +76,7 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
     ? null
     : `telegram_message_current_sender_prior_${suffix}`;
   const question = input.question
-    ?? "Murph, answer this synthetic request for the group.";
+    ?? "Murph, ask my Murph how my synthetic activity has changed?";
   const routeAuthority = {
     channel: "telegram" as const,
     containerMemberId: groupRuntimeMemberId,
@@ -95,6 +106,12 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
         billingStatus: HostedBillingStatus.active,
         id: senderMemberId,
       },
+      ...(priorSenderMemberId
+        ? [{
+            billingStatus: HostedBillingStatus.active,
+            id: priorSenderMemberId,
+          }]
+        : []),
       {
         billingStatus: HostedBillingStatus.not_started,
         id: groupRuntimeMemberId,
@@ -125,6 +142,14 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
       telegramThreadId: telegramDirectThreadId,
       telegramUserId,
     });
+    if (priorSenderMemberId && priorTelegramUserId) {
+      await upsertHostedMemberTelegramRoutingBindingTx({
+        memberId: priorSenderMemberId,
+        prisma: tx,
+        telegramThreadId: `telegram_direct_current_sender_prior_${suffix}`,
+        telegramUserId: priorTelegramUserId,
+      });
+    }
   });
 
   const currentWake = buildHostedExecutionTelegramConversationMessageWake({
@@ -135,6 +160,9 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
       from: telegramUserId,
       messageId: sourceMessageId,
       schema: "murph.hosted-telegram-message.v1",
+      ...(input.replyContextPreview === undefined
+        ? {}
+        : { replyContextPreview: input.replyContextPreview }),
       text: question,
       threadId,
       threadIsDirect: false,
@@ -147,8 +175,11 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
         occurredAt: new Date(input.now.getTime() - 1_000).toISOString(),
         routeAuthority,
         telegramMessage: {
-          from: telegramUserId,
+          from: priorTelegramUserId ?? telegramUserId,
           messageId: priorSourceMessageId,
+          ...(input.priorReplyContextPreview === undefined
+            ? {}
+            : { replyContextPreview: input.priorReplyContextPreview }),
           schema: "murph.hosted-telegram-message.v1",
           text: input.priorQuestion ?? "",
           threadId,
@@ -207,6 +238,8 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
     ownerMemberId,
     priorAssistantInputId,
     priorQuestion: input.priorQuestion ?? null,
+    priorSenderMemberId,
+    priorTelegramUserId,
     question,
     routeAuthority,
     senderMemberId,
@@ -225,6 +258,9 @@ export async function deleteHostedCurrentSenderAssistantAskFixture(input: {
     input.fixture.groupRuntimeMemberId,
     input.fixture.ownerMemberId,
     input.fixture.senderMemberId,
+    ...(input.fixture.priorSenderMemberId
+      ? [input.fixture.priorSenderMemberId]
+      : []),
   ];
   await input.prisma.hostedThreadRoute.deleteMany({
     where: {

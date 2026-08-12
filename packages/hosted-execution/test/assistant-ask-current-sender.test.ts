@@ -5,7 +5,8 @@ import {
 } from "../src/builders.ts";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-  HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
+  HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+  HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
   readHostedExecutionConversationMessageText,
 } from "../src/contracts.ts";
@@ -13,6 +14,7 @@ import {
   parseHostedExecutionAssistantAskRequestedPayload,
   parseHostedExecutionWake,
   parseHostedRuntimeAssistantAskControlRequest,
+  parseHostedRuntimeAssistantAskControlResponse,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
 } from "../src/parsers.ts";
@@ -30,7 +32,7 @@ const CURRENT_SENDER_ASK = {
     kind: "accepted_input" as const,
     sessionId: "session_group",
   },
-  question: "Murph, share this synthetic answer in this group.",
+  question: "Murph, ask my Murph how my synthetic activity changed?",
   target: {
     groupRuntimeMemberId: "member_group_runtime",
     kind: "group_sender" as const,
@@ -39,11 +41,8 @@ const CURRENT_SENDER_ASK = {
 };
 
 describe("hosted current-sender Assistant Ask contracts", () => {
-  it("round-trips the neutral target and retained legacy private target", () => {
-    for (const kind of [
-      "group_sender",
-      "group_sender_private",
-    ] as const) {
+  it("round-trips the fixed group and private target kinds", () => {
+    for (const kind of ["group_sender", "group_sender_private"] as const) {
       const ask = {
         ...CURRENT_SENDER_ASK,
         target: { ...CURRENT_SENDER_ASK.target, kind },
@@ -57,12 +56,16 @@ describe("hosted current-sender Assistant Ask contracts", () => {
       });
       expect(parseHostedExecutionWake(wake)).toEqual(wake);
     }
-    expect(HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT).toMatch(
-      /Return to the current group unless the question explicitly asks for a private or direct reply/u,
+
+    expect(HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT).toMatch(
+      /one answer to that same group/u,
+    );
+    expect(HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT).toMatch(
+      /one direct private message/u,
     );
   });
 
-  it("rejects scheduled or model-selected current-sender authority", () => {
+  it("rejects scheduled or model-selected target authority", () => {
     expect(() => parseHostedExecutionAssistantAskRequestedPayload({
       ...CURRENT_SENDER_ASK,
       origin: {
@@ -81,16 +84,15 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     })).toThrow(/unsupported field/u);
   });
 
-  it("parses one destination-free canonical request and drops legacy metadata", () => {
+  it("canonicalizes bounded legacy group-tool calls without carrying audience", () => {
     const canonical = {
       action: "ask_current_sender",
       origin: CURRENT_SENDER_ASK.origin,
     } as const;
     expect(parseHostedRuntimeGroupToolRequest(canonical)).toEqual(canonical);
-
     expect(parseHostedRuntimeGroupToolRequest({
       ...canonical,
-      responseDestination: "group",
+      responseDestination: "current_sender",
     })).toEqual(canonical);
     expect(parseHostedRuntimeGroupToolRequest({
       action: "message_current_sender",
@@ -107,7 +109,7 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     })).toThrow(/invalid/u);
   });
 
-  it("parses one destination-free response and canonicalizes legacy aliases", () => {
+  it("canonicalizes bounded legacy responses without carrying audience", () => {
     const canonical = {
       action: "ask_current_sender",
       result: { status: "accepted" as const },
@@ -115,46 +117,38 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     expect(parseHostedRuntimeGroupToolResponse(canonical)).toEqual(canonical);
     expect(parseHostedRuntimeGroupToolResponse({
       ...canonical,
-      responseDestination: "current_sender",
+      responseDestination: "group",
     })).toEqual(canonical);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "message_current_sender",
       result: { status: "accepted" },
     })).toEqual(canonical);
-    expect(() => parseHostedRuntimeGroupToolResponse({
-      action: "ask_current_sender",
-      result: {
-        answer: "not an admission result",
-        outcome: "answered",
-        status: "completed",
-      },
-    })).toThrow(/status is invalid/u);
   });
 
-  it("allows only the personal runtime completion to carry the reviewed audience", () => {
+  it("drops legacy completion audience metadata and parses persisted completion replay", () => {
+    const requestId = `aask_req_${"e".repeat(64)}`;
     const result = {
       answer: "Synthetic reviewed answer.",
       outcome: "answered" as const,
     };
     expect(parseHostedRuntimeAssistantAskControlRequest({
       action: "complete",
-      requestId: `aask_req_${"e".repeat(64)}`,
+      requestId,
       responseDestination: "current_sender",
       result,
-    })).toEqual({
-      action: "complete",
-      requestId: `aask_req_${"e".repeat(64)}`,
-      responseDestination: "current_sender",
-      result,
-    });
+    })).toEqual({ action: "complete", requestId, result });
+    expect(parseHostedRuntimeAssistantAskControlResponse({
+      action: "prepare",
+      status: "already_completed",
+    })).toEqual({ action: "prepare", status: "already_completed" });
     expect(() => parseHostedRuntimeAssistantAskControlRequest({
       action: "prepare",
-      requestId: `aask_req_${"e".repeat(64)}`,
+      requestId,
       responseDestination: "group",
     })).toThrow(/not allowed/u);
   });
 
-  it("reads exactly the authored Linq or Telegram text and never email text", () => {
+  it("reads exact Linq or Telegram text while preserving reply evidence elsewhere", () => {
     expect(readHostedExecutionConversationMessageText({
       channel: "linq",
       linqMessage: {
@@ -163,31 +157,33 @@ describe("hosted current-sender Assistant Ask contracts", () => {
         isFromMe: false,
         messageId: "message_1",
         parts: [
-          { type: "text", value: "  Murph tell them  " },
+          { type: "text", value: "  Murph, ask my Murph  " },
           { type: "link", value: "https://example.test/ignored" },
-          { type: "text", value: "about my sleep  " },
+          { type: "text", value: "about my synthetic activity  " },
         ],
+        replyToMessageId: "message_0",
         threadIsDirect: false,
       },
       phoneLookupKey: "hplk_sender",
-    })).toBe("Murph tell them  \nabout my sleep");
+    })).toBe("Murph, ask my Murph  \nabout my synthetic activity");
 
     expect(readHostedExecutionConversationMessageText({
       channel: "telegram",
       telegramMessage: {
         messageId: "12",
+        replyContextPreview: "Synthetic prior message",
         schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
-        text: "  Tell them about my recovery  ",
+        text: "  Ask my Murph about my synthetic recovery  ",
         threadId: "123",
         threadIsDirect: false,
       },
-    })).toBe("Tell them about my recovery");
+    })).toBe("Ask my Murph about my synthetic recovery");
 
     expect(readHostedExecutionConversationMessageText({
       channel: "email",
       identityId: "email_identity",
       rawMessageKey: "raw_email_1",
-      textPreview: "Do not use group email as current-sender authority.",
+      textPreview: "Not group authority.",
     })).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Accepted-Message Targeting
 
@@ -353,64 +353,59 @@ hosted usage ledger with deterministic request, attempt, stage, and provider
 ordinal identity; usage recording is best-effort and never controls disclosure.
 
 The current-sender Assistant Ask adapter is a single first-party, one-time
-personal-runtime request path, not a grant shortcut. The group model exposes only
-`ask_current_sender`, with one opaque Message ref from the accepted inputs in the
-current group turn. It cannot supply an audience, sender, member, route, question
-rewrite, or delivery target. Web reopens that exact encrypted conversation wake
-under the synthetic group runtime, revalidates its live non-direct route, resolves
-its author through the channel's canonical identity index, and derives the exact
-untruncated authored text plus one neutral fixed permission. The transport's
-optional `senderMemberId` remains attribution metadata and is never runtime
-authority. The target must be an active personal runtime rather than another
-thread container.
+personal-runtime request path, not a grant shortcut. The group model exposes
+exactly one argument-free action, `ask_current_sender`. Trusted runtime code
+binds it to the newest accepted input in the current non-direct group turn and
+sends only that server-owned origin. The model cannot supply a message ref,
+sender, member, question, audience, destination, privacy flag, or route.
 
-One Web admission owner derives the target, neutral permission, origin-level
-request identity, and mailbox wake. The canonical deterministic request id binds
-the group runtime, exact accepted input, and neutral permission, never an
-audience. Admission locks that id together with both former destination-specific
-ids and admits or replays exactly one representation; multiple aliases fail
-closed. The stable `group_sender` and `group_sender_private` mailbox kinds, former
-request-id namespaces, destination-bearing `ask_current_sender`, and
-`message_current_sender` remain only to drain already-admitted legacy work.
-Canonical model and in-process group-tool requests are destination-free. Only the
-personal runtime's completion may carry the audience selected by the existing
-fresh outgoing reviewer. New Cloudflare callers mark the neutral protocol in both
-the authenticated URL and strict JSON body; new Web strips only that marker after
-authentication, while an old strict Web parser rejects the unknown body field
-instead of treating the call as legacy group-only. Textless, oversized, direct,
-email, stale-route, unresolved-sender, cross-runtime, scheduled, alias-conflicting,
-or replay-conflicting requests fail closed. This path creates no group,
-membership, permission, grant, queue, workflow, or table and grants no future
-disclosure authority.
+Web is the sole admission owner. In one transaction it reopens the exact
+encrypted source wake, preserves native reply evidence, revalidates the live
+group route, resolves the source author through the canonical channel identity
+index, and applies a small deterministic command-family predicate to the exact
+untruncated text. Admission accepts only a flat message that explicitly asks
+Murph to ask the author's personal Murph. Native replies, quoted or
+context-dependent wording, negative requests, unclear addressing, and
+conflicting group/private wording fail before personal-model work. Explicit
+private/direct/DM wording fixes `current_sender`; otherwise the group is the
+fixed default. A private request must also resolve a current same-channel
+direct-member route before enqueue or it returns immediate recovery guidance.
 
-After the personal read, the same fresh reviewer already used for outgoing
-consent checks receives only the exact incoming question, immutable permission,
-and candidate. It selects `current_sender` only when that question explicitly
-requests a private/direct reply to its author; otherwise the result returns to
-the originating group. It returns ambiguity when group and private audiences
-conflict or deciding whether the request is private depends on omitted context.
-Ambiguity authorizes no completion. This extends the existing
-candidate-plus-reviewer boundary; it adds no classifier, provider turn, state
-owner, service, or dependency.
+The canonical deterministic request id binds the group runtime and exact
+accepted input, while the existing target kind and permission digest persist
+the fixed audience: `group_sender` plus the fixed group permission, or
+`group_sender_private` plus the fixed private permission. Admission locks the
+canonical id with the bounded former request ids and admits or replays at most
+one representation. The personal candidate pass and outgoing reviewer receive
+the already-fixed permission; the reviewer returns only `allow` or `deny` and
+cannot choose a member, route, or audience.
 
-A successful completion persists exactly one terminal audience through the
-existing mailbox kind. Group delivery uses `assistant.ask.completed`, remains
-bound to the exact origin request and synthetic group runtime, and repeats the
-Linq or Telegram disclosure check at the existing provider-entry authority
-boundary; stale authority durably replaces the reviewed answer with the fixed
-non-disclosing fallback before any provider call. Private delivery uses one
-deterministic queue-only `assistant.notification.requested` for the exact
-sender's current same-channel `direct-member` route, with `threadIsDirect: true`,
-no external group-thread authority, and the exact reviewed text. The personal
-runtime consumes that notification through the existing delivery primitive while
-retaining the original completion expiry and proof anchor. Immediately before
-provider entry, Web reopens that proof and revalidates the unexpired Assistant
-Ask, exact reviewed-text digest, same personal member, and current same-channel
-`direct-member` route. Expired, revoked, text-mismatched, or route-drifted proof
-fails terminally with no group or alternate-route fallback. Completion replay
-must match the already-persisted mailbox kind, and conflicting canonical or
-legacy aliases disclose nothing. This adds no second model turn, group wake for a
-private answer, route selector, queue, or table.
+Group completion remains `assistant.ask.completed` for the originating group.
+Private completion remains one deterministic queue-only
+`assistant.notification.requested` containing the exact reviewed text for the
+same sender's current same-channel direct route, with no external group-route
+authority. Completion revalidates the persisted request, exact source, fixed
+audience, expiry, runtime fences, and route. If a private route is lost after
+admission, Web discards the private answer and persists the existing fixed
+`cannot_answer` completion to the already-authorized originating group. Exact
+replay returns that persisted terminal experience; a terminal or unavailable
+control response without a valid persisted completion is never successful
+consumption.
+
+Rolling-deploy compatibility is transport-only. New Cloudflare callers send one
+strict body marker, which old Web rejects as an unknown field. New Web also
+drains exact-head callers that still present the former dual URL/body marker,
+and accepts unmarked old `ask_current_sender` and `message_current_sender`
+calls. It strips compatibility metadata before admission, validates the exact
+source with the same deterministic rules, and ignores any legacy destination as
+authority. Already-accepted canonical and former
+`group_sender` / `group_sender_private` mailbox work drains under its stored
+request id, target kind, and permission digest. After all old runners are
+recycled, wait the ten-minute request TTL plus the one-minute detached-queue
+retry margin (eleven minutes total), then remove the old action/destination
+wire parsing and echo, former request-id readers, and neutral-permission drain
+branch together. This path adds no model turn, classifier, service, queue,
+workflow, table, grant, route selector, or reconciliation owner.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
@@ -432,25 +427,18 @@ owned child before releasing the workspace. Further asks remain pending in the
 same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
 
-For a consented member or the neutral current-sender request, the private
-read-only child receives the exact permission context and produces a candidate
-from the member workspace. One separate fresh-context outgoing reviewer receives
-only that immutable permission, the exact question, and the candidate; it has no
-member workspace, history, application tools, network, or delivery authority.
-For ordinary consented-member requests it returns only `allow` or `deny`. For the
-current-sender request the same result boundary is extended with audience-specific
-allow/deny decisions plus `ambiguous`, and the exact question is its sole audience
-authority. There is no incoming reviewer, classifier, or rewrite loop. An allowed
-answer enters only its target-bound completion adapter. Consented-member and
-reviewer-selected group completions retain the caller group's isolated
-output-only continuation and provider-entry authority recheck. A reviewer-selected
-private completion instead seals the exact reviewed text into the personal
-queue-only notification above; no group continuation or second generation runs.
-A deny decision preserves the selected audience but uses fixed non-disclosing
-copy. Ambiguity, invalid review output, provider failure, or stale authority
-discloses nothing and follows the existing retry, expiry, or terminal lifecycle.
-A denied candidate never becomes durable operation state. This adds no fan-out,
-scheduler, policy engine, result table, or second service.
+For a consented member or a fixed-audience current-sender request, the
+private read-only child receives the exact permission context and produces a
+candidate from the member workspace. One separate fresh-context outgoing
+reviewer receives only that immutable permission, the exact question, and the
+candidate; it has no member workspace, history, application tools, network, or
+delivery authority. It returns only `allow` or `deny` and cannot rewrite,
+redact, select an audience, or select a recipient. A candidate `cannot_answer`
+returns directly without another model turn. An allowed answer enters only the
+target-bound completion adapter. A denied, invalid, failed, or stale result
+uses the existing non-disclosing terminal behavior and never changes the
+persisted audience. This adds no fan-out, scheduler, policy engine, result
+table, or second service.
 
 ## Hosted Connected Apps
 

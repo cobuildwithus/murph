@@ -1,14 +1,11 @@
-import type {
-  HostedExecutionAssistantAskGroupSenderResponseDestination,
-} from "@murphai/hosted-execution/contracts";
 import {
   parseHostedRuntimeGroupToolRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
-  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
-  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   isHostedRuntimeAssistantAskDiagnosticCode,
   type HostedRuntimeGroupCurrentSenderDirectResult,
@@ -61,8 +58,6 @@ export const POST = withJsonError(async (request: Request) => {
       memberId,
       request: body,
       requestStartedAtMs,
-      currentSenderLegacyResponseDestination:
-        currentSenderWire.compatibility?.responseDestination ?? null,
       scheduleMailboxWake: (wake) =>
         handoffHostedMailboxWake({
           ...wake,
@@ -115,14 +110,20 @@ function readHostedAssistantAskDiagnosticCode(error: unknown): string | undefine
 }
 
 // Temporary transport-only compatibility for old Cloudflare/runtime bundles.
-// The authenticated URL-and-body marker is the only way to opt into the
-// neutral reviewer-owned audience protocol. Requiring both makes a new caller
-// fail closed against an old strict Web parser instead of becoming a legacy
-// group-only request.
+// New runners send one strict body marker so they fail closed against old Web.
+// Exact-head runners may still send the former dual URL/body marker during a
+// rolling deploy; it is parsed here only, then discarded before admission.
+// Remove the dual-marker branch with the other legacy action/shape parsing
+// after every old runner is recycled plus the request TTL and queue margin
+// (currently eleven minutes).
+const LEGACY_CURRENT_SENDER_REVIEW_MARKER = "currentSenderAudienceReview";
+const LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE = "v1";
+
+type HostedCurrentSenderLegacyAudience = "group" | "current_sender";
+
 type HostedCurrentSenderWireCompatibility = {
   action: "ask_current_sender" | "message_current_sender";
-  includeResponseDestination: boolean;
-  responseDestination: HostedExecutionAssistantAskGroupSenderResponseDestination;
+  responseDestination: HostedCurrentSenderLegacyAudience | null;
 };
 
 type HostedCurrentSenderWire = {
@@ -133,7 +134,7 @@ type HostedCurrentSenderWire = {
 type HostedCurrentSenderLegacyWireResponse =
   | {
       action: "ask_current_sender";
-      responseDestination?: HostedExecutionAssistantAskGroupSenderResponseDestination;
+      responseDestination?: HostedCurrentSenderLegacyAudience;
       result: HostedRuntimeGroupCurrentSenderDirectResult;
     }
   | {
@@ -145,133 +146,125 @@ function readHostedCurrentSenderWire(
   request: Request,
   payload: unknown,
 ): HostedCurrentSenderWire {
-  const url = new URL(request.url);
-  const markerValues = url.searchParams.getAll(
-    HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
+  const legacyUrlMarkerValues = new URL(request.url).searchParams.getAll(
+    LEGACY_CURRENT_SENDER_REVIEW_MARKER,
   );
-  const hasBodyMarker = hasHostedCurrentSenderReviewMarker(payload);
-  if (markerValues.length > 0 || hasBodyMarker) {
+  const hasProtocolMarker = hasHostedWireProperty(
+    payload,
+    HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+  );
+  const hasLegacyBodyMarker = hasHostedWireProperty(
+    payload,
+    LEGACY_CURRENT_SENDER_REVIEW_MARKER,
+  );
+  const hasLegacyMarker = legacyUrlMarkerValues.length > 0 || hasLegacyBodyMarker;
+
+  if (hasProtocolMarker) {
     if (
-      markerValues.length !== 1
-      || markerValues[0] !== HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE
-      || readHostedCurrentSenderReviewMarker(payload)
-        !== HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE
+      hasLegacyMarker
+      || readHostedWireProperty(
+        payload,
+        HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+      ) !== HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE
       || readHostedCurrentSenderWireAction(payload) !== "ask_current_sender"
       || hasHostedCurrentSenderResponseDestination(payload)
     ) {
-      throw new TypeError(
-        "Hosted current-sender audience-review protocol is invalid.",
-      );
+      throw new TypeError("Hosted current-sender protocol is invalid.");
     }
     return {
       compatibility: null,
-      payload: removeHostedCurrentSenderReviewMarker(payload),
+      payload: removeHostedWireProperty(
+        payload,
+        HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+      ),
+    };
+  }
+
+  if (hasLegacyMarker) {
+    if (
+      legacyUrlMarkerValues.length !== 1
+      || legacyUrlMarkerValues[0] !== LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE
+      || readHostedWireProperty(payload, LEGACY_CURRENT_SENDER_REVIEW_MARKER)
+        !== LEGACY_CURRENT_SENDER_REVIEW_MARKER_VALUE
+      || readHostedCurrentSenderWireAction(payload) !== "ask_current_sender"
+      || hasHostedCurrentSenderResponseDestination(payload)
+    ) {
+      throw new TypeError("Hosted legacy current-sender protocol is invalid.");
+    }
+    return {
+      compatibility: null,
+      payload: removeHostedWireProperty(
+        payload,
+        LEGACY_CURRENT_SENDER_REVIEW_MARKER,
+      ),
     };
   }
 
   const action = readHostedCurrentSenderWireAction(payload);
   if (action === "message_current_sender") {
     return {
-      compatibility: {
-        action,
-        includeResponseDestination: false,
-        responseDestination: "current_sender",
-      },
+      compatibility: { action, responseDestination: null },
       payload,
     };
   }
   if (action !== "ask_current_sender") {
     return { compatibility: null, payload };
   }
-  const responseDestination = readHostedCurrentSenderResponseDestination(
-    payload,
-  );
   return {
     compatibility: {
       action,
-      includeResponseDestination: responseDestination !== null,
-      responseDestination: responseDestination ?? "group",
+      responseDestination: readHostedCurrentSenderResponseDestination(payload),
     },
     payload,
   };
 }
 
-function hasHostedCurrentSenderReviewMarker(payload: unknown): payload is object {
+function hasHostedWireProperty(
+  payload: unknown,
+  key: string,
+): payload is object {
   return (typeof payload === "object" || typeof payload === "function")
     && payload !== null
-    && Object.hasOwn(
-      payload,
-      HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
-    );
+    && Object.hasOwn(payload, key);
 }
 
-function readHostedCurrentSenderReviewMarker(payload: unknown): unknown {
-  if (!hasHostedCurrentSenderReviewMarker(payload)) {
+function readHostedWireProperty(payload: unknown, key: string): unknown {
+  if (!hasHostedWireProperty(payload, key)) {
     return undefined;
   }
   try {
-    return Reflect.get(
-      payload,
-      HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
-    );
+    return Reflect.get(payload, key);
   } catch {
     return undefined;
   }
 }
 
-function removeHostedCurrentSenderReviewMarker(payload: unknown): unknown {
-  const canonicalPayload = {
-    ...(payload as Record<string, unknown>),
-  };
-  delete canonicalPayload[HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER];
+function removeHostedWireProperty(payload: unknown, key: string): unknown {
+  const canonicalPayload = { ...(payload as Record<string, unknown>) };
+  delete canonicalPayload[key];
   return canonicalPayload;
 }
 
 function readHostedCurrentSenderWireAction(
   payload: unknown,
 ): "ask_current_sender" | "message_current_sender" | null {
-  if (
-    (typeof payload !== "object" && typeof payload !== "function")
-    || payload === null
-  ) {
-    return null;
-  }
-  try {
-    const action = Reflect.get(payload, "action");
-    return action === "ask_current_sender" || action === "message_current_sender"
-      ? action
-      : null;
-  } catch {
-    return null;
-  }
+  const action = readHostedWireProperty(payload, "action");
+  return action === "ask_current_sender" || action === "message_current_sender"
+    ? action
+    : null;
 }
 
 function hasHostedCurrentSenderResponseDestination(
   payload: unknown,
 ): payload is object {
-  return (typeof payload === "object" || typeof payload === "function")
-    && payload !== null
-    && Object.hasOwn(payload, "responseDestination");
+  return hasHostedWireProperty(payload, "responseDestination");
 }
 
 function readHostedCurrentSenderResponseDestination(
   payload: unknown,
-): HostedExecutionAssistantAskGroupSenderResponseDestination | null {
-  if (!hasHostedCurrentSenderResponseDestination(payload)) {
-    return null;
-  }
-  let value: unknown;
-  try {
-    value = Reflect.get(payload, "responseDestination");
-  } catch {
-    return null;
-  }
-  if (value === "group" || value === "current_sender") {
-    return value;
-  }
-  // The shared parser will produce the canonical schema error. This branch
-  // only avoids accidentally treating malformed legacy metadata as neutral.
-  return null;
+): HostedCurrentSenderLegacyAudience | null {
+  const value = readHostedWireProperty(payload, "responseDestination");
+  return value === "group" || value === "current_sender" ? value : null;
 }
 
 function encodeHostedCurrentSenderLegacyWireResponse(
@@ -286,9 +279,9 @@ function encodeHostedCurrentSenderLegacyWireResponse(
   }
   return {
     action: compatibility.action,
-    ...(compatibility.includeResponseDestination
-      ? { responseDestination: compatibility.responseDestination }
-      : {}),
+    ...(compatibility.responseDestination === null
+      ? {}
+      : { responseDestination: compatibility.responseDestination }),
     result: response.result,
   };
 }

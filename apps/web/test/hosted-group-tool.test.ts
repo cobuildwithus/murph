@@ -869,7 +869,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     })).rejects.toBe(signalError);
   });
 
-  it("dispatches one neutral current-sender ask and schedules only its personal wake", async () => {
+  it("dispatches one current-sender ask and schedules only its personal wake", async () => {
     const scheduleMailboxWake = vi.fn();
     const origin = {
       assistantInputId: `ain_${"c".repeat(32)}`,
@@ -900,7 +900,6 @@ describe("handleHostedRuntimeGroupTool", () => {
       mocks.requestHostedGroupCurrentSenderAssistantAsk,
     ).toHaveBeenCalledWith({
       groupRuntimeMemberId: "member_group_runtime",
-      legacyResponseDestination: null,
       origin,
     });
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
@@ -937,47 +936,6 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_sender",
       mailboxItemId: "aask_req_current_sender",
-    });
-  });
-
-  it("drains a transport-authenticated legacy private continuation", async () => {
-    const scheduleMailboxWake = vi.fn();
-    const origin = {
-      assistantInputId: `ain_${"d".repeat(32)}`,
-      kind: "accepted_input" as const,
-      sessionId: "session_group",
-    };
-    mocks.requestHostedGroupCurrentSenderAssistantAsk.mockResolvedValue({
-      mailboxWake: {
-        expectedUserId: "member_sender",
-        mailboxItemId: "aask_req_private_sender",
-      },
-      result: { status: "accepted" },
-    });
-
-    await expect(handleHostedRuntimeGroupTool({
-      currentSenderLegacyResponseDestination: "current_sender",
-      memberId: "member_group_runtime",
-      request: {
-        action: "ask_current_sender",
-        origin,
-      },
-      scheduleMailboxWake,
-    })).resolves.toEqual({
-      action: "ask_current_sender",
-      result: { status: "accepted" },
-    });
-
-    expect(
-      mocks.requestHostedGroupCurrentSenderAssistantAsk,
-    ).toHaveBeenCalledWith({
-      groupRuntimeMemberId: "member_group_runtime",
-      legacyResponseDestination: "current_sender",
-      origin,
-    });
-    expect(scheduleMailboxWake).toHaveBeenCalledWith({
-      expectedUserId: "member_sender",
-      mailboxItemId: "aask_req_private_sender",
     });
   });
 

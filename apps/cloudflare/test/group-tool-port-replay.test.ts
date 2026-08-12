@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
-  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -64,8 +64,8 @@ const replaySafeRequests = [
     },
     wireRequest: {
       action: "ask_current_sender",
-      [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
-        HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+      [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+        HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
       origin: {
         assistantInputId: `ain_${"c".repeat(32)}`,
         kind: "accepted_input",
@@ -116,14 +116,9 @@ describe("hosted group tool exact replay", () => {
         wireRequest ?? request,
       ]);
       for (const requestUrl of requestUrls) {
-        const marker = new URL(requestUrl).searchParams.get(
-          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
-        );
-        expect(marker).toBe(
-          request.action === "ask_current_sender"
-            ? HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE
-            : null,
-        );
+        expect(new URL(requestUrl).searchParams.has(
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+        )).toBe(false);
       }
     },
   );

@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-29
+Last verified: 2026-08-12
 
 ## Decision
 
@@ -35,15 +35,26 @@ vault. Deterministic Web authorization establishes who may ask, which member
 may answer, and which immutable permission applies. The models only produce and
 review the candidate disclosure inside that boundary.
 
-A separate one-time first-party path uses an exact authenticated group message
-as its authority. The model selects only that accepted input's opaque Message
-ref. Web reopens the stored wake, derives the sender, route, exact question, and
-fixed self-only permission, then reuses the same isolated Assistant Ask and
-outgoing reviewer. It creates no group, membership, permission, or grant row and
-grants no future or scheduled access. Group ownership confers no additional
-disclosure authority. Linq and Telegram repeat the exact completion and
-one-time sender authority check at provider entry; stale authority durably
-replaces the reviewed answer with fixed non-disclosing text before delivery.
+A separate one-time first-party path uses the newest accepted input in the
+current group turn as its sole source authority. `ask_current_sender` has no
+model-facing arguments. Trusted runtime code binds that exact input, and Web
+reopens its stored wake, preserves native reply evidence, resolves its author,
+and accepts only a flat message that explicitly asks Murph to consult that
+author's personal Murph. Web also fixes the audience before personal-model work:
+explicit private/direct/DM wording requires a current same-channel direct route;
+otherwise the originating group is the default. Conflicting audience wording,
+native replies, quotations, negative requests, unclear addressing, or
+context-dependent wording create no personal read.
+
+The existing requested-wake target kind and permission digest persist that fixed
+audience. The private candidate and fresh outgoing reviewer may only allow or
+deny the answer under the fixed permission; no model output may select a member,
+route, or audience. Group answers use the existing group completion. Private
+answers use the existing exact-text notification on the admitted channel. If a
+private route disappears after admission, the private answer is discarded and
+the originating group receives only the existing non-disclosing cannot-answer
+completion. This path creates no group, membership, permission, or grant row and
+grants no future or scheduled access.
 
 ## Product flow
 
@@ -120,6 +131,13 @@ group.
 - The scheduled initial-turn group port comes from the existing scheduled
   group-tool factory, not the base runtime context. Ordinary notifications and
   manual, direct, unknown-audience, or local cron runs must not receive it.
+- For the one-time current-sender path, the model supplies only the
+  argument-free action. Runtime code binds the newest accepted group input, and
+  Web owns exact-source admission, sender derivation, fixed audience, fixed
+  permission, private-route admission, replay identity, and completion route.
+  An accepted origin can produce at most one request and one authorized terminal
+  experience. Legacy action names, origins, and destination fields are drain
+  inputs only and never audience authority.
 - The model never supplies invocation, delivery mode, member, membership,
   runtime, mailbox, session, callback, or return-route identity. It may use only
   a current server-issued `grantId` from the live group read.

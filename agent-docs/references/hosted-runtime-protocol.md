@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-10
+Last verified: 2026-08-12
 
 ## Decision
 
@@ -751,22 +751,59 @@ the request identity. Exact retries reuse that mailbox item, a changed question
 for the same grant conflicts, and another current grant in the same invocation
 is independent.
 
-The one-time `group_sender` adapter instead derives the target and fixed
-self-only permission from one exact authenticated current-sender group input.
-Every request requires fresh exact-message authority and grants no standing
-access.
+The one-time current-sender adapter exposes exactly one model-facing action,
+`ask_current_sender`, with no message, member, question, audience, destination,
+or privacy argument. Trusted group-turn state binds that action to the newest
+accepted input in the current turn. Web reloads that exact source item and is
+the sole admission owner: it accepts only a flat, non-reply message whose exact
+text directly asks Murph to consult the author's personal Murph. Native Linq
+reply metadata and Telegram reply-context metadata remain authority evidence.
+Quoted, context-dependent, negative, unclearly addressed, or conflicting-
+audience requests fail before any personal read.
 
-Prepare revalidates the same authority immediately before private context is
-read and returns the exact immutable permission to the runtime. The personal
-read-only child proposes one candidate under that permission. There is no
-incoming model reviewer. One separate fresh one-shot outgoing reviewer has no
-personal workspace, history, application tools, network, or delivery route and
-receives only the permission, question, and candidate. It returns only `allow`
-or `deny`; it cannot rewrite or redact. Invalid output, refusal, timeout, provider
-failure, or ambiguity fails closed, and denied candidate bytes do not enter a
-Murph mailbox, vault, assistant state, operational log, or error.
+The same short Web transaction derives the source member and fixed audience
+from that exact item, locks every canonical and bounded legacy request alias,
+and appends at most one request. Explicit private/direct/DM wording selects
+`group_sender_private`; otherwise `group_sender` is the default. A private
+request must already have a current same-channel direct route. Missing routing
+returns immediate concise recovery guidance without enqueuing personal work.
+The mailbox item persists the fixed target kind and its fixed self-only
+permission text before the personal runtime starts. Neither the group model nor
+the personal model can choose the target member or audience.
 
-On an allow, the completion control path revalidates the group, personal
+Prepare reloads the same source and revalidates membership, group routing,
+permission, fixed audience, and any required private route immediately before
+private context is read. The personal read-only child proposes one candidate
+under that immutable permission. There is no incoming model reviewer. One fresh
+one-shot outgoing reviewer has no personal workspace, history, application
+tools, network, audience choice, or delivery route. It receives only the fixed
+permission, question, and candidate and returns only `allow` or `deny`; it
+cannot rewrite or redact. Invalid output, refusal, timeout, provider failure, or
+ambiguity fails closed, and denied candidate bytes do not enter a Murph mailbox,
+vault, assistant state, operational log, or error.
+
+Completion cannot change audience. `group_sender` uses the existing authorized
+group completion. `group_sender_private` uses the existing same-channel private
+notification with exact reviewed text. If that direct route disappears after
+admission, Web persists the existing non-disclosing `cannot_answer` completion
+to the already-authorized originating group; the private answer never falls
+back. Replay, restart, and concurrent prepare or completion observe that one
+persisted terminal result. A detached runner must requeue rather than consume a
+terminal or unavailable response that has no persisted completion.
+
+New callers identify the strict protocol with the single
+`currentSenderProtocol: "v2"` body field. During the bounded drain, Web also
+parses the exact-head dual URL/body marker, accepts old `ask_current_sender` or
+`message_current_sender` bodies, and drains already-accepted `group_sender` or
+`group_sender_private` mailbox work. Marker and destination compatibility data
+is stripped before admission; Web reapplies exact-source rules and ignores every
+legacy model-selected origin or destination as audience authority. Remove the alias parsing and legacy
+request-id lookup eleven minutes after all old runners are recycled: the
+existing ten-minute request TTL plus a one-minute queue margin.
+
+
+For `consented_member` requests, on an allow the completion control path
+revalidates the group, personal
 runtime, membership generation, grant generation, permission digest, origin,
 expiry, and active fences again. It appends one deterministic
 `assistant.ask.completed` item to the bound group runtime. The trusted `origin`

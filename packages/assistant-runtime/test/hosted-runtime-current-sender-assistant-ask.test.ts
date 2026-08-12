@@ -5,12 +5,12 @@ import path from "node:path";
 
 import type {
   ConsentedReadOnlyAssistantAskInput,
-  ConsentedReadOnlyAssistantAskResult,
   ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
 import { initializeVault } from "@murphai/core";
 import {
-  HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
+  HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+  HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
 } from "@murphai/hosted-execution/contracts";
 import { describe, test, vi } from "vitest";
 
@@ -60,7 +60,7 @@ function createPendingCurrentSenderAsk(
           kind: "accepted_input",
           sessionId: "session_group",
         },
-        question: "Murph, tell the group about my sleep.",
+        question: "Murph, ask my Murph about my synthetic activity.",
         target: {
           groupRuntimeMemberId: "member_group_runtime",
           kind: targetKind,
@@ -75,282 +75,234 @@ function createPendingCurrentSenderAsk(
   };
 }
 
+async function runFixedAudienceAsk(input: {
+  permissionText: string;
+  targetKind: "group_sender" | "group_sender_private";
+}) {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-fixed-current-sender-assistant-ask-"),
+  );
+  let completedRequest: unknown;
+  const executeConsentedAsk = vi.fn(async (
+    askInput: ConsentedReadOnlyAssistantAskInput,
+  ): Promise<ReadOnlyAssistantAskResult> => ({
+    answer: `Reviewed: ${askInput.question}`,
+    outcome: "answered",
+  }));
+
+  await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+  await updateHostedSystemMailboxState(vaultRoot, () => ({
+    pending: [createPendingCurrentSenderAsk(input.targetKind)],
+  }));
+  const controller = createHostedDetachedAssistantAskController({
+    assistantAskPort: {
+      async request(request) {
+        if (request.action === "prepare") {
+          return {
+            action: "prepare",
+            disclosure: { permissionText: input.permissionText },
+            question: "Murph, ask my Murph about my synthetic activity.",
+            status: "ready",
+            targetLabel: null,
+          };
+        }
+        completedRequest = request;
+        return { action: "complete", status: "completed" };
+      },
+    },
+    codexHome: null,
+    env: {},
+    executeAsk: vi.fn(),
+    executeConsentedAsk,
+    now: () => TEST_NOW,
+    onStateMutation() {},
+    vaultRoot,
+  });
+
+  controller.kick();
+  await waitUntil(async () => {
+    assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+  });
+  await controller.closeAndRequeue();
+  return { completedRequest, controller, executeConsentedAsk, vaultRoot };
+}
+
 describe("hosted current-sender Assistant Ask execution", () => {
-  test("uses the existing fresh reviewer to select the group audience and forwards it on completion", async () => {
-    const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), "murph-current-sender-assistant-ask-"),
-    );
-    let completedRequest: unknown;
-    const executeAsk = vi.fn();
-    const executeConsentedAsk = vi.fn(async (
-      input: ConsentedReadOnlyAssistantAskInput,
-    ): Promise<ConsentedReadOnlyAssistantAskResult> => ({
-      answer: `Reviewed: ${input.question}`,
-      outcome: "answered",
-      responseDestination: "group",
-    }));
-
+  test("uses caller handoff for a Web-fixed group audience despite a legacy private target", async () => {
+    const run = await runFixedAudienceAsk({
+      permissionText: HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+      targetKind: "group_sender_private",
+    });
     try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [createPendingCurrentSenderAsk()],
-      }));
-
-      const controller = createHostedDetachedAssistantAskController({
-        assistantAskPort: {
-          async request(request) {
-            if (request.action === "prepare") {
-              return {
-                action: "prepare",
-                disclosure: {
-                  permissionText:
-                    HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
-                },
-                question: "Murph, tell the group about my sleep.",
-                status: "ready",
-                targetLabel: null,
-              };
-            }
-            completedRequest = request;
-            return { action: "complete", status: "completed" };
-          },
-        },
-        codexHome: null,
-        env: {},
-        executeAsk,
-        executeConsentedAsk,
-        now: () => TEST_NOW,
-        onStateMutation() {},
-        vaultRoot,
-      });
-
-      controller.kick();
-      await waitUntil(async () => {
-        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
-      });
-      await controller.closeAndRequeue();
-
-      assert.equal(executeAsk.mock.calls.length, 0);
-      assert.equal(executeConsentedAsk.mock.calls.length, 1);
-      const reviewedInput = executeConsentedAsk.mock.calls[0]?.[0];
-      assert.ok(reviewedInput);
-      assert.equal(reviewedInput.answerMode, "reviewer_selected_audience");
       assert.equal(
-        reviewedInput.permissionText,
-        HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
+        run.executeConsentedAsk.mock.calls[0]?.[0].answerMode,
+        "caller_handoff",
       );
-      assert.deepEqual(completedRequest, {
+      assert.deepEqual(run.completedRequest, {
         action: "complete",
         requestId: "ask_current_sender_request",
-        responseDestination: "group",
         result: {
-          answer: "Reviewed: Murph, tell the group about my sleep.",
+          answer: "Reviewed: Murph, ask my Murph about my synthetic activity.",
           outcome: "answered",
         },
       });
     } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
+      await rm(run.vaultRoot, { force: true, recursive: true });
     }
   });
 
-  test("persists the reviewer-selected private audience even when disclosure is denied", async () => {
-    const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), "murph-current-sender-denied-assistant-ask-"),
-    );
-    let completedRequest: unknown;
-    const executeConsentedAsk = vi.fn(async (
-      _input: ConsentedReadOnlyAssistantAskInput,
-    ): Promise<ConsentedReadOnlyAssistantAskResult> => ({
-        outcome: "cannot_answer",
-        responseDestination: "current_sender",
-      }));
-
+  test("uses direct recipient for a Web-fixed private audience despite a legacy group target", async () => {
+    const run = await runFixedAudienceAsk({
+      permissionText: HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+      targetKind: "group_sender",
+    });
     try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [createPendingCurrentSenderAsk()],
-      }));
-
-      const controller = createHostedDetachedAssistantAskController({
-        assistantAskPort: {
-          async request(request) {
-            if (request.action === "prepare") {
-              return {
-                action: "prepare",
-                disclosure: {
-                  permissionText:
-                    HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
-                },
-                question: "Murph, message me privately about my sleep.",
-                status: "ready",
-                targetLabel: null,
-              };
-            }
-            completedRequest = request;
-            return { action: "complete", status: "completed" };
-          },
-        },
-        codexHome: null,
-        env: {},
-        executeAsk: vi.fn(),
-        executeConsentedAsk,
-        now: () => TEST_NOW,
-        onStateMutation() {},
-        vaultRoot,
-      });
-
-      controller.kick();
-      await waitUntil(async () => {
-        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
-      });
-      await controller.closeAndRequeue();
-
       assert.equal(
-        executeConsentedAsk.mock.calls[0]?.[0].answerMode,
-        "reviewer_selected_audience",
-      );
-      assert.deepEqual(completedRequest, {
-        action: "complete",
-        requestId: "ask_current_sender_request",
-        responseDestination: "current_sender",
-        result: { answer: null, outcome: "cannot_answer" },
-      });
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  test("keeps fixed legacy group work on caller handoff while it drains", async () => {
-    const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), "murph-legacy-group-current-sender-assistant-ask-"),
-    );
-    let completedRequest: unknown;
-    const executeConsentedAsk = vi.fn(async (
-      input: ConsentedReadOnlyAssistantAskInput,
-    ): Promise<ReadOnlyAssistantAskResult> => ({
-      answer: `Legacy reviewed: ${input.question}`,
-      outcome: "answered",
-    }));
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [createPendingCurrentSenderAsk()],
-      }));
-
-      const controller = createHostedDetachedAssistantAskController({
-        assistantAskPort: {
-          async request(request) {
-            if (request.action === "prepare") {
-              return {
-                action: "prepare",
-                disclosure: {
-                  permissionText: "Legacy fixed group disclosure.",
-                },
-                question: "Murph, tell the group about my sleep.",
-                status: "ready",
-                targetLabel: null,
-              };
-            }
-            completedRequest = request;
-            return { action: "complete", status: "completed" };
-          },
-        },
-        codexHome: null,
-        env: {},
-        executeAsk: vi.fn(),
-        executeConsentedAsk,
-        now: () => TEST_NOW,
-        onStateMutation() {},
-        vaultRoot,
-      });
-
-      controller.kick();
-      await waitUntil(async () => {
-        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
-      });
-      await controller.closeAndRequeue();
-
-      assert.equal(executeConsentedAsk.mock.calls[0]?.[0].answerMode, "caller_handoff");
-      assert.deepEqual(completedRequest, {
-        action: "complete",
-        requestId: "ask_current_sender_request",
-        result: {
-          answer: "Legacy reviewed: Murph, tell the group about my sleep.",
-          outcome: "answered",
-        },
-      });
-    } finally {
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
-  test("keeps fixed legacy private work on direct-recipient review", async () => {
-    const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), "murph-private-current-sender-assistant-ask-"),
-    );
-    let completedRequest: unknown;
-    const executeAsk = vi.fn();
-    const executeConsentedAsk = vi.fn(async (
-      input: ConsentedReadOnlyAssistantAskInput,
-    ): Promise<ReadOnlyAssistantAskResult> => ({
-      answer: `Privately reviewed: ${input.question}`,
-      outcome: "answered",
-    }));
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await updateHostedSystemMailboxState(vaultRoot, () => ({
-        pending: [createPendingCurrentSenderAsk("group_sender_private")],
-      }));
-
-      const controller = createHostedDetachedAssistantAskController({
-        assistantAskPort: {
-          async request(request) {
-            if (request.action === "prepare") {
-              return {
-                action: "prepare",
-                disclosure: {
-                  permissionText: "One-time private owner-only answer.",
-                },
-                question: "Murph, message me privately about my sleep.",
-                status: "ready",
-                targetLabel: null,
-              };
-            }
-            completedRequest = request;
-            return { action: "complete", status: "completed" };
-          },
-        },
-        codexHome: null,
-        env: {},
-        executeAsk,
-        executeConsentedAsk,
-        now: () => TEST_NOW,
-        onStateMutation() {},
-        vaultRoot,
-      });
-
-      controller.kick();
-      await waitUntil(async () => {
-        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
-      });
-      await controller.closeAndRequeue();
-
-      assert.equal(executeAsk.mock.calls.length, 0);
-      assert.equal(executeConsentedAsk.mock.calls.length, 1);
-      assert.equal(
-        executeConsentedAsk.mock.calls[0]?.[0].answerMode,
+        run.executeConsentedAsk.mock.calls[0]?.[0].answerMode,
         "direct_recipient",
       );
-      assert.deepEqual(completedRequest, {
+      assert.deepEqual(run.completedRequest, {
         action: "complete",
         requestId: "ask_current_sender_request",
         result: {
-          answer: "Privately reviewed: Murph, message me privately about my sleep.",
+          answer: "Reviewed: Murph, ask my Murph about my synthetic activity.",
           outcome: "answered",
         },
       });
+    } finally {
+      await rm(run.vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("settles an already-persisted completion without another model turn", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-current-sender-replay-"),
+    );
+    const executeConsentedAsk = vi.fn();
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [createPendingCurrentSenderAsk()],
+      }));
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request() {
+            return { action: "prepare", status: "already_completed" };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        executeConsentedAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      });
+      await controller.closeAndRequeue();
+      assert.equal(executeConsentedAsk.mock.calls.length, 0);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("does not consume current-sender work when Web returns terminal without a completion", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-current-sender-terminal-requeue-"),
+    );
+    const executeConsentedAsk = vi.fn();
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [createPendingCurrentSenderAsk()],
+      }));
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request() {
+            return {
+              action: "prepare",
+              status: "terminal",
+              terminalReason: "unavailable",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        executeConsentedAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+      controller.kick();
+      await waitUntil(async () => {
+        const [pending] = (await readHostedSystemMailboxState(vaultRoot)).pending;
+        assert.equal(pending?.attemptCount, 1);
+        assert.equal(pending?.status, "pending");
+      });
+      await controller.closeAndRequeue();
+      assert.equal(executeConsentedAsk.mock.calls.length, 0);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("does not consume current-sender work when completion is terminal without persistence", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-current-sender-completion-requeue-"),
+    );
+    const executeConsentedAsk = vi.fn(async (
+      askInput: ConsentedReadOnlyAssistantAskInput,
+    ): Promise<ReadOnlyAssistantAskResult> => ({
+      answer: `Reviewed: ${askInput.question}`,
+      outcome: "answered",
+    }));
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [createPendingCurrentSenderAsk()],
+      }));
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "prepare") {
+              return {
+                action: "prepare",
+                disclosure: {
+                  permissionText:
+                    HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+                },
+                question: "Murph, ask my Murph about my synthetic activity.",
+                status: "ready",
+                targetLabel: null,
+              };
+            }
+            return {
+              action: "complete",
+              status: "terminal",
+              terminalReason: "unavailable",
+            };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk: vi.fn(),
+        executeConsentedAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+      controller.kick();
+      await waitUntil(async () => {
+        const [pending] = (await readHostedSystemMailboxState(vaultRoot)).pending;
+        assert.equal(pending?.attemptCount, 1);
+        assert.equal(pending?.status, "pending");
+      });
+      await controller.closeAndRequeue();
+      assert.equal(executeConsentedAsk.mock.calls.length, 1);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

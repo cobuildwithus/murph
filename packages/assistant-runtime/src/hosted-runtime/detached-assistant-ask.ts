@@ -20,7 +20,7 @@ import type {
   AssistantHostedGroupSharedReader,
 } from "@murphai/assistant-engine";
 import {
-  HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
+  HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
   type HostedExecutionAssistantAskResult,
 } from "@murphai/hosted-execution/contracts";
 
@@ -274,7 +274,19 @@ async function runOneHostedDetachedAssistantAsk(input: {
     if (prepared.action !== "prepare") {
       throw new TypeError("Detached assistant ask prepare returned the wrong action.");
     }
+    if (prepared.status === "already_completed") {
+      await removeHostedDetachedAssistantAsk({ claimed, input });
+      return "settled";
+    }
     if (prepared.status === "terminal") {
+      if (
+        claimed.wake.ask.target.kind === "group_sender"
+        || claimed.wake.ask.target.kind === "group_sender_private"
+      ) {
+        throw new TypeError(
+          "Current-sender assistant ask has no persisted terminal completion.",
+        );
+      }
       await removeHostedDetachedAssistantAsk({ claimed, input });
       return "settled";
     }
@@ -326,16 +338,19 @@ async function runOneHostedDetachedAssistantAsk(input: {
           "Reviewed personal ask prepare omitted its disclosure context.",
         );
       }
-      const currentSenderReview =
-        claimed.wake.ask.target.kind === "group_sender"
-        && prepared.disclosure.permissionText
-          === HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT;
       answer = await input.executeConsentedAsk({
         ...executionInput,
-        answerMode: claimed.wake.ask.target.kind === "group_sender_private"
-          ? "direct_recipient"
-          : currentSenderReview
-            ? "reviewer_selected_audience"
+        // Web has already fixed and persisted the audience. Legacy mailbox
+        // target kinds are only drain-compatible storage shapes and cannot
+        // override that authority.
+        answerMode:
+          (
+            claimed.wake.ask.target.kind === "group_sender"
+            || claimed.wake.ask.target.kind === "group_sender_private"
+          )
+          && prepared.disclosure.permissionText
+            === HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT
+            ? "direct_recipient"
             : "caller_handoff",
         permissionText: prepared.disclosure.permissionText,
       });
@@ -356,20 +371,27 @@ async function runOneHostedDetachedAssistantAsk(input: {
     const result = reviewedPersonalAsk && answer.outcome === "cannot_answer"
       ? { answer: null, outcome: "cannot_answer" as const }
       : normalizeHostedDetachedAssistantAskResult(answer);
-    const responseDestination = "responseDestination" in answer
-      ? answer.responseDestination
-      : undefined;
     const completed = await input.assistantAskPort.request(
       {
         action: "complete",
         requestId,
-        ...(responseDestination ? { responseDestination } : {}),
         result,
       },
       { signal: input.abortSignal },
     );
     if (completed.action !== "complete") {
       throw new TypeError("Detached assistant ask completion returned the wrong action.");
+    }
+    if (
+      completed.status === "terminal"
+      && (
+        claimed.wake.ask.target.kind === "group_sender"
+        || claimed.wake.ask.target.kind === "group_sender_private"
+      )
+    ) {
+      throw new TypeError(
+        "Current-sender assistant ask completion was not persisted.",
+      );
     }
     await removeHostedDetachedAssistantAsk({ claimed, input });
     return "settled";

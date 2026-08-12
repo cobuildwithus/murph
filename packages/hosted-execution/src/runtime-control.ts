@@ -26,7 +26,6 @@ import type {
 } from "./assistant-model.ts";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
-  HostedExecutionAssistantAskGroupSenderResponseDestination,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
   HostedBrowserVaultReplicaCursorRef,
@@ -1001,14 +1000,13 @@ export const HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER =
 export const HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER =
   "x-murph-assistant-ask-request-id";
 /**
- * Transport-only marker for the neutral current-sender audience-review
- * protocol. New callers place the same value in the signed URL and JSON body
- * so old strict Web parsers fail closed instead of treating the request as a
- * legacy group-only request.
+ * Body-only protocol marker. An old strict Web parser rejects this unknown
+ * field, so a new caller cannot silently enter the retired destination-bearing
+ * protocol during an ordered rollout.
  */
-export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER =
-  "currentSenderAudienceReview";
-export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE = "v1";
+export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER =
+  "currentSenderProtocol";
+export const HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE = "v2";
 
 export function isHostedRuntimeAssistantAskDiagnosticCode(
   value: unknown,
@@ -1030,7 +1028,6 @@ export type HostedRuntimeAssistantAskControlRequest =
   | {
       action: "complete";
       requestId: string;
-      responseDestination?: HostedExecutionAssistantAskGroupSenderResponseDestination;
       result: HostedExecutionAssistantAskResult;
     };
 
@@ -1054,6 +1051,10 @@ export type HostedRuntimeAssistantAskControlResponse =
       action: "prepare" | "complete";
       status: "terminal";
       terminalReason: HostedRuntimeAssistantAskTerminalReason;
+    }
+  | {
+      action: "prepare";
+      status: "already_completed";
     }
   | {
       action: "complete";

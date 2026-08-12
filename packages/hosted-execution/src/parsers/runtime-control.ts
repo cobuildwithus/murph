@@ -28,11 +28,9 @@ import {
   parseAssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
-  HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS,
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   type HostedExecutionAcceptedGroupMessageParticipant,
-  type HostedExecutionAssistantAskGroupSenderResponseDestination,
 } from "../contracts.ts";
 import {
   parseHostedRuntimePendingGroupSetupInput,
@@ -995,18 +993,18 @@ export function parseHostedRuntimeAssistantAskControlRequest(
         : new Set(["action", "requestId", "result"]),
       "Hosted runtime assistant ask complete control request",
     );
+    if (hasResponseDestination) {
+      // Bounded rolling-deploy compatibility only. Web derives the audience
+      // from the persisted request and never treats this legacy value as
+      // completion authority.
+      parseHostedRuntimeGroupCurrentSenderResponseDestination(
+        record.responseDestination,
+        "Hosted runtime assistant ask completion responseDestination",
+      );
+    }
     return {
       action,
       requestId,
-      ...(hasResponseDestination
-        ? {
-            responseDestination:
-              parseHostedRuntimeGroupCurrentSenderResponseDestination(
-                record.responseDestination,
-                "Hosted runtime assistant ask completion responseDestination",
-              ),
-          }
-        : {}),
       result: parseHostedExecutionAssistantAskResult(
         record.result,
         "Hosted runtime assistant ask result",
@@ -1091,6 +1089,14 @@ export function parseHostedRuntimeAssistantAskControlResponse(
       throw new TypeError("Hosted runtime assistant ask terminalReason is invalid.");
     }
     return { action, status, terminalReason };
+  }
+  if (action === "prepare" && status === "already_completed") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "status"]),
+      "Hosted runtime assistant ask prepare completed control response",
+    );
+    return { action, status };
   }
   if (
     action === "complete"
@@ -2553,11 +2559,11 @@ function parseHostedRuntimeGroupCanonicalTimestamp(
 function parseHostedRuntimeGroupCurrentSenderResponseDestination(
   value: unknown,
   label: string,
-): HostedExecutionAssistantAskGroupSenderResponseDestination {
+): "group" | "current_sender" {
   const responseDestination = requireString(value, label);
   for (
     const candidate
-    of HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS
+    of ["group", "current_sender"] as const
   ) {
     if (responseDestination === candidate) {
       return candidate;

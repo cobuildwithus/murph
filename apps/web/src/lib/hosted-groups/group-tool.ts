@@ -3,7 +3,6 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
-  HostedExecutionAssistantAskGroupSenderResponseDestination,
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH,
@@ -220,9 +219,6 @@ export async function handleHostedRuntimeGroupTool(input: {
    * budget as the work below. Direct unit callers may omit it.
    */
   requestStartedAtMs?: number;
-  /** Trusted transport-only fixed audience for draining old callers. */
-  currentSenderLegacyResponseDestination?:
-    HostedExecutionAssistantAskGroupSenderResponseDestination | null;
   scheduleMailboxWake?: (input: {
     expectedUserId: string;
     mailboxItemId: string;
@@ -245,8 +241,6 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "ask_current_sender") {
     const admission = await requestHostedGroupCurrentSenderAssistantAsk({
       groupRuntimeMemberId: input.memberId,
-      legacyResponseDestination:
-        input.currentSenderLegacyResponseDestination ?? null,
       origin: input.request.origin,
     });
     if (admission.mailboxWake) {

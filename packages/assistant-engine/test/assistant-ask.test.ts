@@ -622,153 +622,39 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
     )
   })
 
-  it('lets the existing fresh reviewer select one audience solely from the exact current-sender question', async () => {
-    const workspaceRoot = await createTempRoot('murph-current-sender-reviewed-ask-')
-    const question = 'Murph, tell the group that my synthetic recovery score improved.'
-    const answer = 'Your synthetic recovery score improved.'
-    askMocks.buildEvidence.mockResolvedValue(
-      '## Conversation evidence\n\nSynthetic recovery score: improved.',
-    )
+  it('keeps the outgoing reviewer limited to allow or deny for the fixed audience', async () => {
+    const workspaceRoot = await createTempRoot('murph-fixed-audience-ask-')
+    const answer = 'Your synthetic activity increased.'
+    askMocks.buildEvidence.mockResolvedValue('Synthetic activity evidence.')
     askMocks.executeTurn
       .mockResolvedValueOnce({
         finalMessage: JSON.stringify({ answer, outcome: 'answered' }),
       })
       .mockResolvedValueOnce({
-        finalMessage: JSON.stringify({ decision: 'allow_group' }),
+        finalMessage: JSON.stringify({ decision: 'allow' }),
       })
 
     await expect(executeConsentedReadOnlyAssistantAsk({
-      answerMode: 'reviewer_selected_audience',
-      permissionText: 'Share only the owner information directly requested by this exact question.',
-      question,
+      answerMode: 'caller_handoff',
+      permissionText: 'Share only the fixed group-authorized synthetic activity answer.',
+      question: 'How has my synthetic activity changed?',
       workspaceRoot,
-    })).resolves.toEqual({
-      answer,
-      outcome: 'answered',
-      responseDestination: 'group',
-    })
+    })).resolves.toEqual({ answer, outcome: 'answered' })
 
-    expect(askMocks.executeTurn).toHaveBeenCalledTimes(2)
-    const answerInput = askMocks.executeTurn.mock.calls[0]?.[0]
     const reviewInput = askMocks.executeTurn.mock.calls[1]?.[0]
-    expect(answerInput.baseInstructions).toContain(
-      'Do not choose, mention, or imply a delivery audience; the separate fresh reviewer owns that decision.',
-    )
-    expect(reviewInput.baseInstructions).toContain(
-      'Choose the audience solely from the exact incoming question.',
-    )
-    expect(reviewInput.baseInstructions).toContain(
-      'Otherwise choose group. A current-sender request originates in the current group',
-    )
-    expect(reviewInput.baseInstructions).toContain(
-      'Choose ambiguous when both group and private audiences are explicitly requested',
-    )
-    expect(reviewInput.prompt).toContain([
-      '<incoming_question>',
-      question,
-      '</incoming_question>',
-    ].join('\n'))
     expect(reviewInput.outputSchema).toEqual({
       additionalProperties: false,
       properties: {
         decision: {
-          enum: [
-            'allow_group',
-            'deny_group',
-            'allow_current_sender',
-            'deny_current_sender',
-            'ambiguous',
-          ],
+          enum: ['allow', 'deny'],
           type: 'string',
         },
       },
       required: ['decision'],
       type: 'object',
     })
-  })
-
-  it('fails closed without an audience when the exact question requests conflicting audiences', async () => {
-    const workspaceRoot = await createTempRoot('murph-current-sender-ambiguous-ask-')
-    askMocks.buildEvidence.mockResolvedValue('Synthetic evidence.')
-    askMocks.executeTurn
-      .mockResolvedValueOnce({
-        finalMessage: JSON.stringify({
-          answer: 'Synthetic answer.',
-          outcome: 'answered',
-        }),
-      })
-      .mockResolvedValueOnce({
-        finalMessage: JSON.stringify({ decision: 'ambiguous' }),
-      })
-
-    await expect(executeConsentedReadOnlyAssistantAsk({
-      answerMode: 'reviewer_selected_audience',
-      permissionText: 'Share only synthetic owner data requested by this exact question.',
-      question: 'Murph, answer this in the group and also message me privately.',
-      workspaceRoot,
-    })).resolves.toEqual({ outcome: 'cannot_answer' })
-
-    expect(askMocks.executeTurn).toHaveBeenCalledTimes(2)
-  })
-
-  it('uses the group return path when the exact question does not request privacy', async () => {
-    const workspaceRoot = await createTempRoot('murph-current-sender-default-group-ask-')
-    const question = 'Can you ask my Murph how my synthetic activity has changed?'
-    askMocks.buildEvidence.mockResolvedValue('Synthetic activity evidence.')
-    askMocks.executeTurn
-      .mockResolvedValueOnce({
-        finalMessage: JSON.stringify({
-          answer: 'Your synthetic activity increased.',
-          outcome: 'answered',
-        }),
-      })
-      .mockResolvedValueOnce({
-        finalMessage: JSON.stringify({ decision: 'allow_group' }),
-      })
-
-    await expect(executeConsentedReadOnlyAssistantAsk({
-      answerMode: 'reviewer_selected_audience',
-      permissionText: 'Share only synthetic owner data requested by this exact question.',
-      question,
-      workspaceRoot,
-    })).resolves.toEqual({
-      answer: 'Your synthetic activity increased.',
-      outcome: 'answered',
-      responseDestination: 'group',
-    })
-
-    const reviewInput = askMocks.executeTurn.mock.calls[1]?.[0]
-    expect(reviewInput.prompt).toContain(question)
-    expect(reviewInput.baseInstructions).toContain(
-      'group is the default return path when the exact question does not explicitly request a private reply',
-    )
-  })
-
-  it('still selects one terminal audience when the candidate cannot answer', async () => {
-    const workspaceRoot = await createTempRoot('murph-current-sender-denied-ask-')
-    askMocks.buildEvidence.mockResolvedValue('Synthetic evidence is insufficient.')
-    askMocks.executeTurn
-      .mockResolvedValueOnce({
-        finalMessage: JSON.stringify({ answer: null, outcome: 'cannot_answer' }),
-      })
-      .mockResolvedValueOnce({
-        finalMessage: JSON.stringify({ decision: 'deny_current_sender' }),
-      })
-
-    await expect(executeConsentedReadOnlyAssistantAsk({
-      answerMode: 'reviewer_selected_audience',
-      permissionText: 'Share only synthetic owner data requested by this exact question.',
-      question: 'Murph, message me privately with the answer.',
-      workspaceRoot,
-    })).resolves.toEqual({
-      outcome: 'cannot_answer',
-      responseDestination: 'current_sender',
-    })
-
-    expect(askMocks.executeTurn).toHaveBeenCalledTimes(2)
-    expect(askMocks.executeTurn.mock.calls[1]?.[0].prompt).toContain(
-      '<proposed_answer outcome="cannot_answer">\n[no answer proposed]\n</proposed_answer>',
-    )
+    expect(reviewInput.baseInstructions).not.toMatch(/audience|destination/u)
+    expect(reviewInput.prompt).not.toContain('responseDestination')
   })
 
   it('rechecks provider authority before the disclosure reviewer', async () => {

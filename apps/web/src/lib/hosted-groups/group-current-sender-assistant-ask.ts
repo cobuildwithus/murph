@@ -13,11 +13,11 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-  HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
+  HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+  HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
   isHostedExecutionAssistantAskRequestedWake,
   readHostedExecutionConversationMessageText,
   type HostedExecutionAssistantAskAcceptedInputOrigin,
-  type HostedExecutionAssistantAskGroupSenderResponseDestination,
   type HostedExecutionAssistantAskResult,
   type HostedExecutionAssistantNotificationRoute,
   type HostedExecutionConversationMessageWake,
@@ -53,6 +53,8 @@ import {
 } from "./group-message-sender";
 
 const HOSTED_GROUP_CURRENT_SENDER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
+  "murph.hosted-group-current-sender-assistant-ask.request.v3";
+const HOSTED_GROUP_CURRENT_SENDER_LEGACY_REVIEWED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-current-sender-assistant-ask.request.v2";
 const HOSTED_GROUP_CURRENT_SENDER_LEGACY_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
   "murph.hosted-group-current-sender-assistant-ask.request.v1";
@@ -62,99 +64,73 @@ const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_NOTIFICATION_INSTRUCTIONS =
   "Private current-sender Assistant Ask completion; exact reviewed text is in responsePolicy.";
 const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_UNAVAILABLE_TEXT =
   "I don't have enough context to answer that privately yet.";
+/**
+ * Bounded drain compatibility for the failed neutral-audience request shape.
+ * Remove this string, its v2 request-id namespace, and the associated alias
+ * reader after the 10-minute request TTL plus a 1-minute queue margin once every
+ * old runner is recycled. The v3 origin-only request identity remains.
+ */
+const HOSTED_GROUP_CURRENT_SENDER_LEGACY_NEUTRAL_PERMISSION_TEXT =
+  "The owner of this personal Murph authored the exact incoming group question and authorizes one reviewed answer to exactly one audience selected solely from that question. Return to the current group unless the question explicitly asks for a private or direct reply to its author. Conflicting or context-dependent audience intent authorizes no disclosure. Treat first-person references as the owner, use only the owner's information needed for the exact request, disclose nothing about anyone else, perform no actions, and grant no future, scheduled, or broader access.";
+const HOSTED_GROUP_CURRENT_SENDER_FLAT_REQUEST_GUIDANCE =
+  "Ask the sender for a new flat message that explicitly says to ask their Murph.";
+const HOSTED_GROUP_CURRENT_SENDER_AMBIGUOUS_AUDIENCE_GUIDANCE =
+  "Ask the sender to choose either the group or a private reply in a new message.";
+const HOSTED_GROUP_CURRENT_SENDER_DIRECT_ROUTE_GUIDANCE =
+  "Ask the sender to open a direct chat with Murph on this channel, then send a new request.";
 const HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE = "hosted-assistant-ask";
 const HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS = 256;
 const HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u;
-
-/** Legacy fixed-group permission retained only while admitted v1 work drains. */
-export const HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT =
-  "The owner of this personal Murph authored the exact incoming group question and may authorize one answer to that same group. Answer only when that question clearly asks Murph to share information about the owner. Treat first-person references as the owner, disclose only the owner's information directly requested by the question, and disclose nothing about anyone else. This authorization applies once to this question and grants no future, scheduled, or broader access.";
-
-/** Legacy fixed-private permission retained only while admitted v1 work drains. */
-export const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT =
-  "The owner of this personal Murph authored the exact incoming group request and explicitly asked Murph to answer them privately. Answer as one direct private message to the owner. You may use only the owner's personal Murph context needed for this request. Do not disclose anyone else's private information, do not post anything back to the group, and do not perform actions. This authorization applies once to this request and grants no future, scheduled, or broader access.";
+const HOSTED_CURRENT_SENDER_COMMAND_PATTERN =
+  /^(?:murph\s*[,!:;\-]\s*)?(?:(?:can|could|would|will)\s+you\s+|please\s+)?ask\s+my\s+murph(?:\s*[,;:\-—]\s*|\s+)(\S[\s\S]*)$/iu;
+const HOSTED_CURRENT_SENDER_CONTEXT_DEPENDENT_PATTERN =
+  /\b(?:(?:about|answer(?:ing)?|regarding|reply(?:ing)?\s+to|based\s+on|using)\s+(?:it|that|this|those|these)|(?:about|based\s+on|from|using)\s+(?:the|our|this|that)\s+(?:chat|conversation|discussion|message|reply|thread)|same\s+(?:answer|question|thing)|(?:the\s+)?(?:above|earlier|last|previous|prior)\s+(?:chat|conversation|discussion|message|reply|thread)|(?:message|reply)\s+(?:above|earlier)|what\s+(?:(?:he|she|they|someone|the\s+other\s+person)\s+said|(?:was\s+)?(?:just\s+)?(?:asked|discussed|said))|(?:the|our|this|that)\s+(?:chat|conversation|discussion|thread))\b|\b(?:it|that|this|those|these)\s*[?.!]*$|\b(?:again|too)\s*[?.!]*$/iu;
+const HOSTED_CURRENT_SENDER_NEGATED_REQUEST_PATTERN =
+  /^(?:do\s+not|don['’]?t|never|not)\b|\b(?:do\s+not|don['’]?t|never|not)\s+(?:ask|answer|share|post|reply|respond|send|message|dm|tell|show|disclose)\b/iu;
+const HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_PATTERN =
+  /\b(?:privately|in\s+(?:a\s+)?(?:direct\s+message|dm)|dm\s+me|direct\s+message\s+me|send\s+me\s+(?:a\s+)?direct\s+message|directly\s+to\s+me|private\s+(?:reply|response|message)|(?:answer|reply|respond|send)\s+(?:it\s+|the\s+answer\s+)?(?:only\s+)?to\s+me|(?:answer|message|reply\s+to|respond\s+to)\s+(?:only\s+)?me\s+privately|message\s+(?:only\s+)?me|only\s+to\s+me)\b/iu;
+const HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_PATTERN =
+  /\b(?:(?:in|to)\s+(?:the\s+)?group|group\s+chat|(?:reply|respond|post|share|send)\s+(?:it\s+|the\s+answer\s+)?(?:here|to\s+(?:the\s+)?group)|tell\s+(?:the\s+)?group|(?:tell|share\s+with)\s+everyone)\b/iu;
 
 for (const [label, permissionText] of [
-  [
-    "Hosted current-sender reviewed permission",
-    HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
-  ],
-  [
-    "Hosted current-sender legacy disclosure permission",
-    HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
-  ],
-  [
-    "Hosted current-sender legacy private permission",
-    HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
-  ],
+  ["Hosted current-sender group permission", HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT],
+  ["Hosted current-sender private permission", HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT],
+  ["Hosted current-sender legacy neutral permission", HOSTED_GROUP_CURRENT_SENDER_LEGACY_NEUTRAL_PERMISSION_TEXT],
 ] as const) {
-  if (
-    [...permissionText].length
-      > HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS
-  ) {
+  if ([...permissionText].length > HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS) {
     throw new TypeError(`${label} is too long.`);
   }
 }
 
 type HostedCurrentSenderAssistantAskPrismaClient = Pick<PrismaClient, "$transaction">;
-type HostedGroupCurrentSenderAssistantAskMode =
-  | "reviewer_selected"
-  | "legacy_group"
-  | "legacy_current_sender";
-type HostedGroupCurrentSenderAssistantAskTargetKind =
+export type HostedGroupCurrentSenderAudience = "group" | "current_sender";
+export type HostedGroupCurrentSenderAssistantAskTargetKind =
   | "group_sender"
   | "group_sender_private";
+type HostedGroupCurrentSenderAdmissionDecision =
+  | { audience: HostedGroupCurrentSenderAudience }
+  | { unavailableReason: string };
 
-type HostedGroupCurrentSenderAssistantAskConfig = {
-  mode: HostedGroupCurrentSenderAssistantAskMode;
-  permissionText: string;
-  requestIdNamespace: string;
-  targetKind: HostedGroupCurrentSenderAssistantAskTargetKind;
-};
-
-const HOSTED_GROUP_CURRENT_SENDER_REVIEWED_CONFIG = {
-  mode: "reviewer_selected",
-  permissionText: HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT,
-  requestIdNamespace:
-    HOSTED_GROUP_CURRENT_SENDER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE,
-  targetKind: "group_sender",
-} as const satisfies HostedGroupCurrentSenderAssistantAskConfig;
-const HOSTED_GROUP_CURRENT_SENDER_LEGACY_GROUP_CONFIG = {
-  mode: "legacy_group",
-  permissionText: HOSTED_GROUP_CURRENT_SENDER_DISCLOSURE_PERMISSION_TEXT,
-  requestIdNamespace:
-    HOSTED_GROUP_CURRENT_SENDER_LEGACY_ASSISTANT_ASK_REQUEST_ID_NAMESPACE,
-  targetKind: "group_sender",
-} as const satisfies HostedGroupCurrentSenderAssistantAskConfig;
-const HOSTED_GROUP_CURRENT_SENDER_LEGACY_PRIVATE_CONFIG = {
-  mode: "legacy_current_sender",
-  permissionText: HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
-  requestIdNamespace:
-    HOSTED_GROUP_CURRENT_SENDER_LEGACY_PRIVATE_ASSISTANT_ASK_REQUEST_ID_NAMESPACE,
-  targetKind: "group_sender_private",
-} as const satisfies HostedGroupCurrentSenderAssistantAskConfig;
-const HOSTED_GROUP_CURRENT_SENDER_CONFIGS = [
-  HOSTED_GROUP_CURRENT_SENDER_REVIEWED_CONFIG,
-  HOSTED_GROUP_CURRENT_SENDER_LEGACY_GROUP_CONFIG,
-  HOSTED_GROUP_CURRENT_SENDER_LEGACY_PRIVATE_CONFIG,
-] as const;
-
-export type HostedGroupCurrentSenderSourceChannel = "linq" | "telegram";
-
-export interface HostedGroupCurrentSenderAuthority {
+interface HostedGroupCurrentSenderSourceAuthority {
+  admission: HostedGroupCurrentSenderAdmissionDecision;
   groupRuntimeMemberId: string;
   occurredAt: string;
   question: string;
-  sourceChannel: HostedGroupCurrentSenderSourceChannel;
+  sourceChannel: "linq" | "telegram";
   targetMemberId: string;
 }
 
-export interface HostedGroupCurrentSenderAssistantAskAuthority
-  extends HostedGroupCurrentSenderAuthority {
-  mode: HostedGroupCurrentSenderAssistantAskMode;
+export interface HostedGroupCurrentSenderAssistantAskAuthority {
+  audience: HostedGroupCurrentSenderAudience;
+  groupRuntimeMemberId: string;
+  occurredAt: string;
   permissionDigest: string;
   permissionText: string;
+  personalReadAllowed: boolean;
+  question: string;
   requestId: string;
+  sourceChannel: "linq" | "telegram" | null;
+  targetMemberId: string;
 }
 
 export type HostedGroupCurrentSenderCompletionAuthority =
@@ -162,45 +138,91 @@ export type HostedGroupCurrentSenderCompletionAuthority =
     expiresAt: string;
     origin: HostedExecutionAssistantAskAcceptedInputOrigin;
   };
-
 export type HostedGroupCurrentSenderPrivateCompletionAuthority =
   HostedGroupCurrentSenderCompletionAuthority;
 
 export interface HostedGroupCurrentSenderAssistantAskAdmission {
-  mailboxWake: {
-    expectedUserId: string;
-    mailboxItemId: string;
-  } | null;
+  mailboxWake: { expectedUserId: string; mailboxItemId: string } | null;
   result: HostedRuntimeGroupCurrentSenderDirectResult;
+}
+
+export function classifyHostedGroupCurrentSenderRequest(input: {
+  hasNativeReplyContext: boolean;
+  text: string;
+}): HostedGroupCurrentSenderAdmissionDecision {
+  const text = input.text.trim();
+  if (
+    input.hasNativeReplyContext
+    || !text
+    || /[\r\n]/u.test(text)
+    || /[>«»“”"]/u.test(text)
+    || /^['‘]|['’]$/u.test(text)
+    || /(?:^|\s)'[^'\r\n]+'(?:\s|$)/u.test(text)
+  ) {
+    return { unavailableReason: HOSTED_GROUP_CURRENT_SENDER_FLAT_REQUEST_GUIDANCE };
+  }
+  const command = HOSTED_CURRENT_SENDER_COMMAND_PATTERN.exec(text);
+  if (
+    !command
+    || HOSTED_CURRENT_SENDER_CONTEXT_DEPENDENT_PATTERN.test(command[1] ?? "")
+    || HOSTED_CURRENT_SENDER_NEGATED_REQUEST_PATTERN.test(command[1] ?? "")
+  ) {
+    return { unavailableReason: HOSTED_GROUP_CURRENT_SENDER_FLAT_REQUEST_GUIDANCE };
+  }
+  const privateAudience = HOSTED_CURRENT_SENDER_PRIVATE_AUDIENCE_PATTERN.test(text);
+  const groupAudience = HOSTED_CURRENT_SENDER_GROUP_AUDIENCE_PATTERN.test(text);
+  if (privateAudience && groupAudience) {
+    return { unavailableReason: HOSTED_GROUP_CURRENT_SENDER_AMBIGUOUS_AUDIENCE_GUIDANCE };
+  }
+  return { audience: privateAudience ? "current_sender" : "group" };
 }
 
 export function createHostedGroupCurrentSenderAssistantAskRequestId(input: {
   groupRuntimeMemberId: string;
   originAssistantInputId: string;
 }): string {
-  return createHostedGroupCurrentSenderRequestId(
-    input,
-    HOSTED_GROUP_CURRENT_SENDER_REVIEWED_CONFIG,
-  );
+  return createHostedGroupCurrentSenderRequestId(input, {
+    namespace: HOSTED_GROUP_CURRENT_SENDER_ASSISTANT_ASK_REQUEST_ID_NAMESPACE,
+  });
+}
+
+function createHostedGroupCurrentSenderReviewedLegacyAssistantAskRequestId(input: {
+  groupRuntimeMemberId: string;
+  originAssistantInputId: string;
+}): string {
+  return createHostedGroupCurrentSenderRequestId(input, {
+    namespace:
+      HOSTED_GROUP_CURRENT_SENDER_LEGACY_REVIEWED_ASSISTANT_ASK_REQUEST_ID_NAMESPACE,
+    permissionText: HOSTED_GROUP_CURRENT_SENDER_LEGACY_NEUTRAL_PERMISSION_TEXT,
+  });
 }
 
 export function createHostedGroupCurrentSenderLegacyAssistantAskRequestId(input: {
   groupRuntimeMemberId: string;
   originAssistantInputId: string;
-  responseDestination: HostedExecutionAssistantAskGroupSenderResponseDestination;
+  responseDestination: HostedGroupCurrentSenderAudience;
 }): string {
   return createHostedGroupCurrentSenderRequestId(
     input,
-    readHostedGroupCurrentSenderLegacyConfig(input.responseDestination),
+    input.responseDestination === "current_sender"
+      ? {
+          namespace: HOSTED_GROUP_CURRENT_SENDER_LEGACY_PRIVATE_ASSISTANT_ASK_REQUEST_ID_NAMESPACE,
+          permissionText: HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
+        }
+      : {
+          namespace: HOSTED_GROUP_CURRENT_SENDER_LEGACY_ASSISTANT_ASK_REQUEST_ID_NAMESPACE,
+          permissionText: HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT,
+        },
   );
 }
 
 export function readHostedGroupCurrentSenderAssistantAskRequestIds(input: {
   groupRuntimeMemberId: string;
   originAssistantInputId: string;
-}): readonly [string, string, string] {
+}): readonly [string, string, string, string] {
   return [
     createHostedGroupCurrentSenderAssistantAskRequestId(input),
+    createHostedGroupCurrentSenderReviewedLegacyAssistantAskRequestId(input),
     createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
       ...input,
       responseDestination: "group",
@@ -213,11 +235,8 @@ export function readHostedGroupCurrentSenderAssistantAskRequestIds(input: {
 }
 
 function createHostedGroupCurrentSenderRequestId(
-  input: {
-    groupRuntimeMemberId: string;
-    originAssistantInputId: string;
-  },
-  config: HostedGroupCurrentSenderAssistantAskConfig,
+  input: { groupRuntimeMemberId: string; originAssistantInputId: string },
+  config: { namespace: string; permissionText?: string },
 ): string {
   const groupRuntimeMemberId = normalizeHostedCurrentSenderOpaqueId(
     input.groupRuntimeMemberId,
@@ -226,21 +245,22 @@ function createHostedGroupCurrentSenderRequestId(
   const originAssistantInputId = normalizeHostedCurrentSenderAssistantInputId(
     input.originAssistantInputId,
   );
-  return `aask_req_${createHash("sha256")
-    .update(config.requestIdNamespace)
+  const hash = createHash("sha256")
+    .update(config.namespace)
     .update("\0")
     .update(groupRuntimeMemberId)
     .update("\0")
-    .update(originAssistantInputId)
-    .update("\0")
-    .update(createHostedGroupCurrentSenderPermissionDigest(config.permissionText))
-    .digest("hex")}`;
+    .update(originAssistantInputId);
+  if (config.permissionText !== undefined) {
+    hash.update("\0").update(
+      createHostedGroupCurrentSenderPermissionDigest(config.permissionText),
+    );
+  }
+  return `aask_req_${hash.digest("hex")}`;
 }
 
 export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
   groupRuntimeMemberId: string;
-  legacyResponseDestination?:
-    HostedExecutionAssistantAskGroupSenderResponseDestination | null;
   now?: Date;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
   prisma?: HostedCurrentSenderAssistantAskPrismaClient;
@@ -252,22 +272,11 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
     "Hosted current-sender group runtime member ID",
   );
   const origin = normalizeHostedCurrentSenderOrigin(input.origin);
-  const selectedConfig = input.legacyResponseDestination == null
-    ? HOSTED_GROUP_CURRENT_SENDER_REVIEWED_CONFIG
-    : readHostedGroupCurrentSenderLegacyConfig(
-        input.legacyResponseDestination,
-      );
   const requestIds = readHostedGroupCurrentSenderAssistantAskRequestIds({
     groupRuntimeMemberId,
     originAssistantInputId: origin.assistantInputId,
   });
-  const requestId = createHostedGroupCurrentSenderRequestId(
-    {
-      groupRuntimeMemberId,
-      originAssistantInputId: origin.assistantInputId,
-    },
-    selectedConfig,
-  );
+  const requestId = requestIds[0];
 
   return prisma.$transaction(async (tx) => {
     await acquireHostedCurrentSenderAssistantAskLocksTx(tx, requestIds);
@@ -276,13 +285,8 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
       requestId: string;
     }> = [];
     for (const candidateId of requestIds) {
-      const item = await readHostedMailboxItemById({
-        mailboxItemId: candidateId,
-        prisma: tx,
-      });
-      if (item) {
-        existingItems.push({ item, requestId: candidateId });
-      }
+      const item = await readHostedMailboxItemById({ mailboxItemId: candidateId, prisma: tx });
+      if (item) existingItems.push({ item, requestId: candidateId });
     }
     if (existingItems.length > 1) {
       return unavailableHostedCurrentSenderAdmission("request_conflict");
@@ -293,7 +297,6 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
         existingDedupeKey: existing.item.dedupeKey,
         existingKind: existing.item.kind,
         existingUserId: existing.item.userId,
-        expectedMode: selectedConfig.mode,
         expiresAt: existing.item.expiresAt ?? null,
         groupRuntimeMemberId,
         now,
@@ -303,40 +306,42 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
       });
     }
 
-    const authority = await readHostedGroupCurrentSenderAuthorityTx({
+    const sourceAuthority = await readHostedGroupCurrentSenderSourceAuthorityTx({
       expectedGroupRuntimeMemberId: groupRuntimeMemberId,
       now,
       origin,
       tx,
     });
-    if (!authority) {
+    if (!sourceAuthority) {
       return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
     }
-    const assistantAskAuthority = {
-      ...authority,
-      mode: selectedConfig.mode,
-      permissionDigest: createHostedGroupCurrentSenderPermissionDigest(
-        selectedConfig.permissionText,
-      ),
-      permissionText: selectedConfig.permissionText,
+    if ("unavailableReason" in sourceAuthority.admission) {
+      return unavailableHostedCurrentSenderAdmission(sourceAuthority.admission.unavailableReason);
+    }
+    const audience = sourceAuthority.admission.audience;
+    const targetKind = targetKindForHostedCurrentSenderAudience(audience);
+    const permissionText = permissionTextForHostedCurrentSenderAudience(audience);
+    const authority = {
+      audience,
+      groupRuntimeMemberId,
+      occurredAt: sourceAuthority.occurredAt,
+      permissionDigest: createHostedGroupCurrentSenderPermissionDigest(permissionText),
+      permissionText,
+      personalReadAllowed: true,
+      question: sourceAuthority.question,
       requestId,
+      sourceChannel: sourceAuthority.sourceChannel,
+      targetMemberId: sourceAuthority.targetMemberId,
     } satisfies HostedGroupCurrentSenderAssistantAskAuthority;
     if (
-      selectedConfig.mode === "legacy_current_sender"
-      && !await resolveHostedGroupCurrentSenderPrivateDestination({
-        authority: assistantAskAuthority,
-        tx,
-      })
+      audience === "current_sender"
+      && !await resolveHostedGroupCurrentSenderPrivateDestination({ authority, tx })
     ) {
-      return unavailableHostedCurrentSenderAdmission(
-        "same_channel_direct_route_unavailable",
-      );
+      return unavailableHostedCurrentSenderAdmission(HOSTED_GROUP_CURRENT_SENDER_DIRECT_ROUTE_GUIDANCE);
     }
 
     const occurredAt = now.toISOString();
-    const expiresAt = new Date(
-      now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-    ).toISOString();
+    const expiresAt = new Date(now.getTime() + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS).toISOString();
     const wake = buildHostedExecutionAssistantAskRequestedWake({
       ask: {
         expiresAt,
@@ -344,8 +349,8 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
         question: authority.question,
         target: {
           groupRuntimeMemberId,
-          kind: selectedConfig.targetKind,
-          permissionDigest: assistantAskAuthority.permissionDigest,
+          kind: targetKind,
+          permissionDigest: authority.permissionDigest,
         },
       },
       eventId: requestId,
@@ -362,10 +367,7 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
       return unavailableHostedCurrentSenderAdmission("request_conflict");
     }
     return {
-      mailboxWake: {
-        expectedUserId: authority.targetMemberId,
-        mailboxItemId: requestId,
-      },
+      mailboxWake: { expectedUserId: authority.targetMemberId, mailboxItemId: requestId },
       result: { status: "accepted" },
     };
   });
@@ -376,12 +378,14 @@ type HostedGroupCurrentSenderAuthorityReadInput = {
   expectedTargetMemberId?: string | null;
   now: Date;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  persistedOccurredAt?: string | null;
+  persistedQuestion?: string | null;
   tx: Prisma.TransactionClient;
 };
 
-export async function readHostedGroupCurrentSenderAuthorityTx(
+async function readHostedGroupCurrentSenderSourceAuthorityTx(
   input: HostedGroupCurrentSenderAuthorityReadInput,
-): Promise<HostedGroupCurrentSenderAuthority | null> {
+): Promise<HostedGroupCurrentSenderSourceAuthority | null> {
   const groupRuntimeMemberId = normalizeHostedCurrentSenderOpaqueId(
     input.expectedGroupRuntimeMemberId,
     "Hosted current-sender group runtime member ID",
@@ -391,13 +395,7 @@ export async function readHostedGroupCurrentSenderAuthorityTx(
     select: { memberId: true },
     where: { memberId: groupRuntimeMemberId },
   });
-  if (
-    !groupContainer
-    || !await hasHostedCurrentSenderRuntimeAccessForUpdateTx({
-      memberId: groupRuntimeMemberId,
-      tx: input.tx,
-    })
-  ) {
+  if (!groupContainer || !await hasHostedCurrentSenderRuntimeAccessForUpdateTx({ memberId: groupRuntimeMemberId, tx: input.tx })) {
     return null;
   }
 
@@ -407,23 +405,12 @@ export async function readHostedGroupCurrentSenderAuthorityTx(
     memberId: groupRuntimeMemberId,
     prisma: input.tx,
   });
-  const source = sourceWake
-    ? readHostedCurrentSenderSource(sourceWake, groupRuntimeMemberId)
-    : null;
-  if (!source || !sourceWake) {
-    return null;
-  }
+  const source = sourceWake ? readHostedCurrentSenderSource(sourceWake, groupRuntimeMemberId) : null;
+  if (!source || !sourceWake) return null;
   try {
-    await assertHostedThreadRouteEgressAuthority({
-      authority: source.routeAuthority,
-      prisma: input.tx,
-    });
+    await assertHostedThreadRouteEgressAuthority({ authority: source.routeAuthority, prisma: input.tx });
   } catch (error) {
-    if (
-      isHostedOnboardingError(error)
-      && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
-      && !error.retryable
-    ) {
+    if (isHostedOnboardingError(error) && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED" && !error.retryable) {
       return null;
     }
     throw error;
@@ -434,36 +421,24 @@ export async function readHostedGroupCurrentSenderAuthorityTx(
     routeAuthority: source.routeAuthority,
     wake: sourceWake,
   });
-  if (!senderMemberId) {
-    return null;
-  }
+  if (!senderMemberId) return null;
   const expectedTargetMemberId = input.expectedTargetMemberId == null
     ? null
-    : normalizeHostedCurrentSenderOpaqueId(
-        input.expectedTargetMemberId,
-        "Hosted current-sender target member ID",
-      );
-  if (
-    expectedTargetMemberId !== null
-    && senderMemberId !== expectedTargetMemberId
-  ) {
-    return null;
-  }
+    : normalizeHostedCurrentSenderOpaqueId(input.expectedTargetMemberId, "Hosted current-sender target member ID");
+  if (expectedTargetMemberId !== null && senderMemberId !== expectedTargetMemberId) return null;
   const targetContainer = await input.tx.hostedThreadContainer.findUnique({
     select: { memberId: true },
     where: { memberId: senderMemberId },
   });
-  if (
-    targetContainer
-    || !await hasHostedCurrentSenderRuntimeAccessForUpdateTx({
-      memberId: senderMemberId,
-      tx: input.tx,
-    })
-  ) {
+  if (targetContainer || !await hasHostedCurrentSenderRuntimeAccessForUpdateTx({ memberId: senderMemberId, tx: input.tx })) {
     return null;
   }
 
   return {
+    admission: classifyHostedGroupCurrentSenderRequest({
+      hasNativeReplyContext: source.hasNativeReplyContext,
+      text: source.question,
+    }),
     groupRuntimeMemberId,
     occurredAt: sourceWake.occurredAt,
     question: source.question,
@@ -479,35 +454,88 @@ export async function readHostedGroupCurrentSenderAssistantAskAuthorityTx(
     targetKind: HostedGroupCurrentSenderAssistantAskTargetKind;
   },
 ): Promise<HostedGroupCurrentSenderAssistantAskAuthority | null> {
-  const config = readHostedGroupCurrentSenderStoredConfig({
+  const storedRequest = readHostedGroupCurrentSenderStoredRequest({
     groupRuntimeMemberId: input.expectedGroupRuntimeMemberId,
     originAssistantInputId: input.origin.assistantInputId,
     permissionDigest: input.permissionDigest,
     requestId: input.requestId,
     targetKind: input.targetKind,
   });
-  if (!config) {
+  if (!storedRequest) {
     return null;
   }
-  const authority = await readHostedGroupCurrentSenderAuthorityTx(input);
-  return authority
-    ? {
-        ...authority,
-        mode: config.mode,
-        permissionDigest: createHostedGroupCurrentSenderPermissionDigest(
-          config.permissionText,
-        ),
-        permissionText: config.permissionText,
-        requestId: input.requestId,
-      }
+  const sourceAuthority = await readHostedGroupCurrentSenderSourceAuthorityTx(
+    input,
+  );
+  if (!sourceAuthority) {
+    const targetMemberId = input.expectedTargetMemberId == null
+      ? null
+      : normalizeHostedCurrentSenderOpaqueId(
+          input.expectedTargetMemberId,
+          "Hosted current-sender target member ID",
+        );
+    const question = readHostedCurrentSenderPersistedQuestion(
+      input.persistedQuestion,
+    );
+    if (!targetMemberId || !question) {
+      return null;
+    }
+    const audience = storedRequest.fixedAudience ?? "group";
+    return {
+      audience,
+      groupRuntimeMemberId: normalizeHostedCurrentSenderOpaqueId(
+        input.expectedGroupRuntimeMemberId,
+        "Hosted current-sender group runtime member ID",
+      ),
+      occurredAt: input.persistedOccurredAt ?? input.now.toISOString(),
+      permissionDigest: input.permissionDigest,
+      permissionText: permissionTextForHostedCurrentSenderAudience(audience),
+      personalReadAllowed: false,
+      question,
+      requestId: input.requestId,
+      sourceChannel: null,
+      targetMemberId,
+    };
+  }
+
+  const admittedAudience = "audience" in sourceAuthority.admission
+    ? sourceAuthority.admission.audience
     : null;
+  const audience = storedRequest.fixedAudience ?? admittedAudience ?? "group";
+  const permissionText = permissionTextForHostedCurrentSenderAudience(audience);
+  const authority = {
+    audience,
+    groupRuntimeMemberId: sourceAuthority.groupRuntimeMemberId,
+    occurredAt: sourceAuthority.occurredAt,
+    permissionDigest: input.permissionDigest,
+    permissionText,
+    personalReadAllowed: admittedAudience !== null
+      && (
+        storedRequest.fixedAudience === null
+        || storedRequest.fixedAudience === admittedAudience
+      ),
+    question: sourceAuthority.question,
+    requestId: input.requestId,
+    sourceChannel: sourceAuthority.sourceChannel,
+    targetMemberId: sourceAuthority.targetMemberId,
+  } satisfies HostedGroupCurrentSenderAssistantAskAuthority;
+  if (
+    authority.personalReadAllowed
+    && authority.audience === "current_sender"
+    && !await resolveHostedGroupCurrentSenderPrivateDestination({
+      authority,
+      tx: input.tx,
+    })
+  ) {
+    return { ...authority, personalReadAllowed: false };
+  }
+  return authority;
 }
 
 async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
   existingDedupeKey: string;
   existingKind: string;
   existingUserId: string;
-  expectedMode: HostedGroupCurrentSenderAssistantAskMode;
   expiresAt: string | null;
   groupRuntimeMemberId: string;
   now: Date;
@@ -518,10 +546,7 @@ async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
   if (isHostedCurrentSenderAssistantAskExpired(input.expiresAt, input.now)) {
     return unavailableHostedCurrentSenderAdmission("request_expired");
   }
-  if (
-    input.existingDedupeKey !== input.requestId
-    || input.existingKind !== "assistant.ask.requested"
-  ) {
+  if (input.existingDedupeKey !== input.requestId || input.existingKind !== "assistant.ask.requested") {
     return unavailableHostedCurrentSenderAdmission("request_conflict");
   }
   const wake = await readHostedMailboxWakeByItemId({
@@ -537,10 +562,7 @@ async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
     || wake.ask.expiresAt !== input.expiresAt
     || !("origin" in wake.ask)
     || wake.ask.origin.kind !== "accepted_input"
-    || (
-      wake.ask.target.kind !== "group_sender"
-      && wake.ask.target.kind !== "group_sender_private"
-    )
+    || (wake.ask.target.kind !== "group_sender" && wake.ask.target.kind !== "group_sender_private")
     || wake.ask.target.groupRuntimeMemberId !== input.groupRuntimeMemberId
     || !hostedCurrentSenderOriginsEqual(wake.ask.origin, input.origin)
   ) {
@@ -552,6 +574,8 @@ async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
     now: input.now,
     origin: input.origin,
     permissionDigest: wake.ask.target.permissionDigest,
+    persistedOccurredAt: wake.occurredAt,
+    persistedQuestion: wake.ask.question,
     requestId: input.requestId,
     targetKind: wake.ask.target.kind,
     tx: input.tx,
@@ -559,59 +583,87 @@ async function replayHostedGroupCurrentSenderAssistantAskTx(input: {
   if (!authority || authority.question !== wake.ask.question) {
     return unavailableHostedCurrentSenderAdmission("current_sender_unavailable");
   }
-  if (authority.mode !== input.expectedMode) {
-    return unavailableHostedCurrentSenderAdmission("request_conflict");
-  }
-  if (
-    authority.mode === "legacy_current_sender"
-    && !await resolveHostedGroupCurrentSenderPrivateDestination({
-      authority,
-      tx: input.tx,
-    })
-  ) {
-    return unavailableHostedCurrentSenderAdmission(
-      "same_channel_direct_route_unavailable",
-    );
-  }
   return {
-    mailboxWake: {
-      expectedUserId: input.existingUserId,
-      mailboxItemId: input.requestId,
-    },
+    mailboxWake: { expectedUserId: input.existingUserId, mailboxItemId: input.requestId },
     result: { status: "accepted" },
   };
 }
 
-function readHostedGroupCurrentSenderLegacyConfig(
-  responseDestination: HostedExecutionAssistantAskGroupSenderResponseDestination,
-): HostedGroupCurrentSenderAssistantAskConfig {
-  if (responseDestination === "group") {
-    return HOSTED_GROUP_CURRENT_SENDER_LEGACY_GROUP_CONFIG;
-  }
-  if (responseDestination === "current_sender") {
-    return HOSTED_GROUP_CURRENT_SENDER_LEGACY_PRIVATE_CONFIG;
-  }
-  throw new TypeError("Hosted current-sender response destination is invalid.");
-}
+type HostedGroupCurrentSenderStoredRequest = {
+  fixedAudience: HostedGroupCurrentSenderAudience | null;
+};
 
-function readHostedGroupCurrentSenderStoredConfig(input: {
+function readHostedGroupCurrentSenderStoredRequest(input: {
   groupRuntimeMemberId: string;
   originAssistantInputId: string;
   permissionDigest: string;
   requestId: string;
   targetKind: HostedGroupCurrentSenderAssistantAskTargetKind;
-}): HostedGroupCurrentSenderAssistantAskConfig | null {
-  for (const config of HOSTED_GROUP_CURRENT_SENDER_CONFIGS) {
+}): HostedGroupCurrentSenderStoredRequest | null {
+  const targetAudience = audienceForHostedCurrentSenderTargetKind(
+    input.targetKind,
+  );
+  const fixedPermissionText = permissionTextForHostedCurrentSenderAudience(
+    targetAudience,
+  );
+  if (
+    input.requestId === createHostedGroupCurrentSenderAssistantAskRequestId(input)
+  ) {
+    return input.permissionDigest
+        === createHostedGroupCurrentSenderPermissionDigest(fixedPermissionText)
+      ? { fixedAudience: targetAudience }
+      : null;
+  }
+  if (
+    input.requestId
+      === createHostedGroupCurrentSenderReviewedLegacyAssistantAskRequestId(input)
+    && input.targetKind === "group_sender"
+    && input.permissionDigest
+      === createHostedGroupCurrentSenderPermissionDigest(
+        HOSTED_GROUP_CURRENT_SENDER_LEGACY_NEUTRAL_PERMISSION_TEXT,
+      )
+  ) {
+    return { fixedAudience: null };
+  }
+  for (const legacyAudience of ["group", "current_sender"] as const) {
     if (
-      config.targetKind === input.targetKind
-      && createHostedGroupCurrentSenderPermissionDigest(config.permissionText)
-        === input.permissionDigest
-      && createHostedGroupCurrentSenderRequestId(input, config) === input.requestId
+      targetAudience === legacyAudience
+      && input.requestId
+        === createHostedGroupCurrentSenderLegacyAssistantAskRequestId({
+          ...input,
+          responseDestination: legacyAudience,
+        })
+      && input.permissionDigest
+        === createHostedGroupCurrentSenderPermissionDigest(
+          permissionTextForHostedCurrentSenderAudience(legacyAudience),
+        )
     ) {
-      return config;
+      // Already-accepted v1 work keeps its persisted audience. Exact-source
+      // classification must agree before personal-model work can continue.
+      return { fixedAudience: legacyAudience };
     }
   }
   return null;
+}
+
+function targetKindForHostedCurrentSenderAudience(
+  audience: HostedGroupCurrentSenderAudience,
+): HostedGroupCurrentSenderAssistantAskTargetKind {
+  return audience === "current_sender" ? "group_sender_private" : "group_sender";
+}
+
+function audienceForHostedCurrentSenderTargetKind(
+  targetKind: HostedGroupCurrentSenderAssistantAskTargetKind,
+): HostedGroupCurrentSenderAudience {
+  return targetKind === "group_sender_private" ? "current_sender" : "group";
+}
+
+function permissionTextForHostedCurrentSenderAudience(
+  audience: HostedGroupCurrentSenderAudience,
+): string {
+  return audience === "current_sender"
+    ? HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT
+    : HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT;
 }
 
 export async function readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx(
@@ -632,7 +684,8 @@ export async function readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx
   mailboxItemId: string;
 } | null> {
   if (
-    input.authority.mode === "legacy_group"
+    input.authority.audience !== "current_sender"
+    || !input.authority.personalReadAllowed
     || input.existingCompletion.dedupeKey !== input.completionId
     || input.existingCompletion.expiresAt !== input.authority.expiresAt
     || input.existingCompletion.kind !== "assistant.notification.requested"
@@ -711,7 +764,10 @@ export async function appendHostedGroupCurrentSenderPrivateCompletionTx(input: {
   expectedUserId: string;
   mailboxItemId: string;
 } | null> {
-  if (input.authority.mode === "legacy_group") {
+  if (
+    input.authority.audience !== "current_sender"
+    || !input.authority.personalReadAllowed
+  ) {
     return null;
   }
   const destination = await resolveHostedGroupCurrentSenderPrivateDestination({
@@ -920,13 +976,16 @@ export async function assertHostedGroupCurrentSenderPrivateCompletionDeliveryAut
       now,
       origin: requestWake.ask.origin,
       permissionDigest: requestWake.ask.target.permissionDigest,
+      persistedOccurredAt: requestWake.occurredAt,
+      persistedQuestion: requestWake.ask.question,
       requestId: privateCompletion.requestId,
       targetKind: requestWake.ask.target.kind,
       tx: input.tx,
     });
   if (
     !authority
-    || authority.mode === "legacy_group"
+    || authority.audience !== "current_sender"
+    || !authority.personalReadAllowed
     || authority.permissionDigest !== requestWake.ask.target.permissionDigest
     || authority.question !== requestWake.ask.question
   ) {
@@ -978,6 +1037,9 @@ async function resolveHostedGroupCurrentSenderPrivateDestination(input: {
 }): Promise<{
   route: HostedExecutionAssistantNotificationRoute;
 } | null> {
+  if (input.authority.sourceChannel === null) {
+    return null;
+  }
   const destination = await resolveHostedAssistantNotificationDestination({
     directChannel: input.authority.sourceChannel,
     memberId: input.authority.targetMemberId,
@@ -1036,16 +1098,18 @@ function readHostedCurrentSenderSource(
   wake: HostedExecutionConversationMessageWake,
   groupRuntimeMemberId: string,
 ): {
+  hasNativeReplyContext: boolean;
   question: string;
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
-  sourceChannel: HostedGroupCurrentSenderSourceChannel;
+  sourceChannel: "linq" | "telegram";
 } | null {
   if (wake.userId !== groupRuntimeMemberId) {
     return null;
   }
   const message = wake.message;
+  let hasNativeReplyContext: boolean;
   let routeAuthority: HostedExecutionExternalThreadRouteAuthority;
-  let sourceChannel: HostedGroupCurrentSenderSourceChannel;
+  let sourceChannel: "linq" | "telegram";
   if (message.channel === "linq") {
     const authority = message.routeAuthority;
     if (
@@ -1058,6 +1122,8 @@ function readHostedCurrentSenderSource(
     ) {
       return null;
     }
+    hasNativeReplyContext = message.linqMessage.replyToMessageId != null
+      || message.linqMessage.replyToPartIndex != null;
     routeAuthority = authority;
     sourceChannel = "linq";
   } else if (message.channel === "telegram") {
@@ -1071,6 +1137,7 @@ function readHostedCurrentSenderSource(
     ) {
       return null;
     }
+    hasNativeReplyContext = message.telegramMessage.replyContextPreview != null;
     routeAuthority = authority;
     sourceChannel = "telegram";
   } else {
@@ -1083,7 +1150,7 @@ function readHostedCurrentSenderSource(
   ) {
     return null;
   }
-  return { question, routeAuthority, sourceChannel };
+  return { hasNativeReplyContext, question, routeAuthority, sourceChannel };
 }
 
 async function hasHostedCurrentSenderRuntimeAccessForUpdateTx(input: {
@@ -1107,6 +1174,16 @@ async function hasHostedCurrentSenderRuntimeAccessForUpdateTx(input: {
     }
     throw error;
   }
+}
+
+function readHostedCurrentSenderPersistedQuestion(
+  value: string | null | undefined,
+): string | null {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && [...value].length <= HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS
+    ? value
+    : null;
 }
 
 function createHostedGroupCurrentSenderPermissionDigest(

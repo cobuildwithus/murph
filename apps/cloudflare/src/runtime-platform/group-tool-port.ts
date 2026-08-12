@@ -6,8 +6,8 @@ import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
-  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
-  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
+  HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -64,7 +64,7 @@ export function createHostedRuntimeGroupToolPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
-        path: buildHostedRuntimeGroupToolPath(request),
+        path: buildHostedRuntimeGroupToolPath(),
         replayOnceOnRetryableFailure: isHostedReplaySafeGroupToolRequest(request),
         ...(isParticipantDisplayNameRead
           ? {
@@ -96,8 +96,8 @@ function encodeHostedRuntimeGroupToolRequest(
   return request.action === "ask_current_sender"
     ? {
         ...request,
-        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER]:
-          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
+        [HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER]:
+          HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
       }
     : request;
 }
@@ -112,18 +112,8 @@ function isHostedReplaySafeGroupToolRequest(
     || request.action === "ask_member";
 }
 
-function buildHostedRuntimeGroupToolPath(
-  request: Parameters<
-    NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
-  >[0],
-): string {
+function buildHostedRuntimeGroupToolPath(): string {
   const params = new URLSearchParams();
-  if (request.action === "ask_current_sender") {
-    params.set(
-      HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER,
-      HOSTED_RUNTIME_GROUP_CURRENT_SENDER_REVIEW_MARKER_VALUE,
-    );
-  }
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
     params.append(
       HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,

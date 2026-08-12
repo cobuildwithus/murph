@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "Group requests stay with the intended audience",
     "summary": "When a group message asks someone's personal Murph for help, the result returns to the group unless that exact message explicitly requests a private reply.",
-    "details": "Conflicting audience intent shares nothing. Private replies still require a current same-channel direct route and never fall back to the group.",
+    "details": "Conflicting audience intent shares nothing. A private request needs a current same-channel direct route before personal work starts. If that route later disappears, the group receives only a non-disclosing unavailable result; the private answer never falls back.",
     "relevanceTags": [
       "groups",
       "privacy",

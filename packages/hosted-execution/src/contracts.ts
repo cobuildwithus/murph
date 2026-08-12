@@ -305,27 +305,18 @@ export interface HostedExecutionAssistantAskConsentedMemberTarget {
   permissionDigest: string;
 }
 
-export const HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS = [
-  "group",
-  "current_sender",
-] as const;
-
-export type HostedExecutionAssistantAskGroupSenderResponseDestination =
-  (typeof HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS)[number];
-
 /**
- * The single canonical current-sender disclosure boundary. The personal
- * runtime's existing fresh outgoing reviewer chooses the terminal audience
- * from the exact incoming question after the personal read.
+ * Fixed one-time permissions selected by Web from the exact source message
+ * before personal-model work. The outgoing reviewer may only allow or deny the
+ * answer for this already-persisted audience.
  */
-export const HOSTED_EXECUTION_CURRENT_SENDER_REVIEWED_PERMISSION_TEXT =
-  "The owner of this personal Murph authored the exact incoming group question and authorizes one reviewed answer to exactly one audience selected solely from that question. Return to the current group unless the question explicitly asks for a private or direct reply to its author. Conflicting or context-dependent audience intent authorizes no disclosure. Treat first-person references as the owner, use only the owner's information needed for the exact request, disclose nothing about anyone else, perform no actions, and grant no future, scheduled, or broader access.";
+export const HOSTED_EXECUTION_CURRENT_SENDER_GROUP_PERMISSION_TEXT =
+  "The owner of this personal Murph authored the exact incoming group question and may authorize one answer to that same group. Answer only when that question clearly asks Murph to share information about the owner. Treat first-person references as the owner, disclose only the owner's information directly requested by the question, and disclose nothing about anyone else. This authorization applies once to this question and grants no future, scheduled, or broader access.";
 
-/**
- * One logical current-sender target. `group_sender` is the canonical neutral
- * target. `group_sender_private` remains only so already-admitted legacy work
- * can drain during the ordered rollout.
- */
+export const HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT =
+  "The owner of this personal Murph authored the exact incoming group request and explicitly asked Murph to answer them privately. Answer as one direct private message to the owner. You may use only the owner's personal Murph context needed for this request. Do not disclose anyone else's private information, do not post anything back to the group, and do not perform actions. This authorization applies once to this request and grants no future, scheduled, or broader access.";
+
+/** One persisted audience: group or same-channel direct to the source sender. */
 export type HostedExecutionAssistantAskGroupSenderTarget = {
   groupRuntimeMemberId: string;
   permissionDigest: string;

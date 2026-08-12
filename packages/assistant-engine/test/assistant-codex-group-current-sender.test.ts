@@ -9,8 +9,8 @@ import {
   readMurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
 
-const FRESH_SELECTED_INPUT_ID = `ain_${"a".repeat(32)}`;
-const OLDER_INPUT_ID = `ain_${"b".repeat(32)}`;
+const NEWEST_SENDER_INPUT_ID = `ain_${"a".repeat(32)}`;
+const OLDER_REPLY_INPUT_ID = `ain_${"b".repeat(32)}`;
 
 function groupToolCall(argumentsValue: unknown): Record<string, unknown> {
   return {
@@ -30,17 +30,16 @@ function groupToolCall(argumentsValue: unknown): Record<string, unknown> {
 function createHostedToolContext(input: {
   acceptedInputIds?: readonly string[];
   conversationScope?: "direct" | "group";
-  currentInvocationScope?: AssistantHostedToolContext["currentInvocationScope"];
   request?: NonNullable<AssistantHostedToolContext["groupTool"]>["request"];
 } = {}): AssistantHostedToolContext {
   return {
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    currentInvocationScope: input.currentInvocationScope ?? (() => null),
+    currentInvocationScope: () => null,
     currentUserActionScope: () => ({
       acceptedInputIds: [
-        ...(input.acceptedInputIds ?? [FRESH_SELECTED_INPUT_ID]),
+        ...(input.acceptedInputIds ?? [NEWEST_SENDER_INPUT_ID]),
       ],
       conversationId: "conversation_group",
       conversationScope: input.conversationScope ?? "group",
@@ -61,12 +60,9 @@ function createHostedToolContext(input: {
   };
 }
 
-function parseCurrentSenderRequest(input: {
-  messageRef?: string;
-} = {}) {
+function parseCurrentSenderRequest() {
   const request = readMurphDynamicToolRequest(groupToolCall({
     action: "ask_current_sender",
-    message_ref: input.messageRef ?? FRESH_SELECTED_INPUT_ID,
   }));
   if (!request || request.kind !== "group") {
     throw new Error("Expected a parsed murph.group request.");
@@ -75,44 +71,32 @@ function parseCurrentSenderRequest(input: {
 }
 
 describe("murph.group ask_current_sender", () => {
-  it("accepts only one exact fresh Message ref with no model-authored destination", () => {
+  it("exposes exactly one argument-free model action", () => {
     expect(parseCurrentSenderRequest().request).toEqual({
       action: "ask_current_sender",
-      messageRef: FRESH_SELECTED_INPUT_ID,
     });
 
     for (const argumentsValue of [
-      { action: "ask_current_sender" },
-      {
-        action: "message_current_sender",
-        message_ref: FRESH_SELECTED_INPUT_ID,
-      },
-      {
-        action: "ask_current_sender",
-        message_ref: FRESH_SELECTED_INPUT_ID,
-        question: "model paraphrase",
-      },
-      {
-        action: "ask_current_sender",
-        memberId: "model_selected_member",
-        message_ref: FRESH_SELECTED_INPUT_ID,
-      },
-      {
-        action: "ask_current_sender",
-        messageRef: FRESH_SELECTED_INPUT_ID,
-      },
-      {
-        action: "ask_current_sender",
-        message_ref: FRESH_SELECTED_INPUT_ID,
-        response_destination: "group",
-      },
+      { action: "message_current_sender" },
+      { action: "ask_current_sender", message_ref: NEWEST_SENDER_INPUT_ID },
+      { action: "ask_current_sender", member: "model-selected" },
+      { action: "ask_current_sender", question: "model paraphrase" },
+      { action: "ask_current_sender", audience: "group" },
+      { action: "ask_current_sender", destination: "current_sender" },
+      { action: "ask_current_sender", privacy: true },
     ]) {
       expect(readMurphDynamicToolRequest(groupToolCall(argumentsValue)))
         .toMatchObject({ kind: "invalid-group-arguments" });
     }
+
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
+      maxProperties: 1,
+      properties: { action: { enum: ["ask_current_sender"] } },
+      required: ["action"],
+    });
   });
 
-  it("binds the neutral request to the exact trusted accepted-input origin", async () => {
+  it("binds the newest accepted group input and cannot select an earlier accepted input", async () => {
     const groupRequest = vi.fn(async () => ({
       action: "ask_current_sender" as const,
       result: { status: "accepted" as const },
@@ -120,7 +104,12 @@ describe("murph.group ask_current_sender", () => {
     const result = await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({ request: groupRequest }),
+      hostedToolContext: createHostedToolContext({
+        // The earlier input is a native reply. The later command can only bind
+        // itself, never the earlier accepted id.
+        acceptedInputIds: [OLDER_REPLY_INPUT_ID, NEWEST_SENDER_INPUT_ID],
+        request: groupRequest,
+      }),
       nextUsageOrdinal: () => 1,
       progressDelivery: null,
       request: parseCurrentSenderRequest(),
@@ -129,87 +118,21 @@ describe("murph.group ask_current_sender", () => {
     expect(groupRequest).toHaveBeenCalledWith({
       action: "ask_current_sender",
       origin: {
-        assistantInputId: FRESH_SELECTED_INPUT_ID,
+        assistantInputId: NEWEST_SENDER_INPUT_ID,
         kind: "accepted_input",
         sessionId: "session_group",
       },
     });
     expect(result.rpcResult.success).toBe(true);
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      '"action":"ask_current_sender"',
-    );
     expect(result.rpcResult.contentItems[0]?.text).not.toContain(
       "responseDestination",
     );
   });
 
-  it("does not substitute an older accepted message for the selected fresh ref", async () => {
-    const groupRequest = vi.fn(async () => ({
-      action: "ask_current_sender" as const,
-      result: { status: "accepted" as const },
-    }));
-    await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({
-        acceptedInputIds: [OLDER_INPUT_ID, FRESH_SELECTED_INPUT_ID],
-        request: groupRequest,
-      }),
-      nextUsageOrdinal: () => 1,
-      progressDelivery: null,
-      request: parseCurrentSenderRequest({
-        messageRef: FRESH_SELECTED_INPUT_ID,
-      }),
-    });
-
-    expect(groupRequest).toHaveBeenCalledWith({
-      action: "ask_current_sender",
-      origin: {
-        assistantInputId: FRESH_SELECTED_INPUT_ID,
-        kind: "accepted_input",
-        sessionId: "session_group",
-      },
-    });
-  });
-
-  it("returns host unavailability without inventing a destination-specific recovery path", async () => {
-    const groupRequest = vi.fn(async () => ({
-      action: "ask_current_sender" as const,
-      result: {
-        status: "unavailable" as const,
-        unavailableReason: "current_sender_unavailable",
-      },
-    }));
-    const result = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createHostedToolContext({ request: groupRequest }),
-      nextUsageOrdinal: () => 1,
-      progressDelivery: null,
-      request: parseCurrentSenderRequest(),
-    });
-
-    expect(result.rpcResult.success).toBe(true);
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      '"unavailableReason":"current_sender_unavailable"',
-    );
-    expect(result.rpcResult.contentItems[0]?.text).not.toContain("recovery");
-  });
-
-  it("fails closed for a foreign ref, direct chat, or scheduled invocation", async () => {
+  it("fails closed outside a fresh group turn", async () => {
     for (const hostedToolContext of [
-      createHostedToolContext({ acceptedInputIds: [OLDER_INPUT_ID] }),
+      createHostedToolContext({ acceptedInputIds: [] }),
       createHostedToolContext({ conversationScope: "direct" }),
-      createHostedToolContext({
-        currentInvocationScope: () => ({
-          conversationScope: null,
-          origin: {
-            automationId: "automation_group",
-            kind: "automation_occurrence",
-            occurrenceAt: "2026-07-27T20:00:00.000Z",
-          },
-        }),
-      }),
     ]) {
       const groupRequest = hostedToolContext.groupTool?.request;
       const result = await executeMurphDynamicToolRequest({
@@ -221,8 +144,8 @@ describe("murph.group ask_current_sender", () => {
         request: parseCurrentSenderRequest(),
       });
       expect(result.rpcResult.success).toBe(false);
-      expect(result.rpcResult.contentItems[0]?.text).toMatch(
-        /selected accepted message|scheduled group invocations/u,
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        "newest accepted message in this group turn",
       );
       expect(groupRequest).not.toHaveBeenCalled();
     }
