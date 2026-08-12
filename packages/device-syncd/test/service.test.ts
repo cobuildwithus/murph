@@ -6,6 +6,7 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
@@ -24,6 +25,11 @@ import {
   createJunctionDeviceSyncProvider,
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
 } from "../src/providers/junction.ts";
+import { JUNCTION_CONNECT_SOURCE_TARGETS } from "../src/config/junction-connect-sources.ts";
+import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
+  hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
+} from "../src/junction-historical-backfill-progress.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
@@ -1343,6 +1349,104 @@ test("device sync service reports canonical counts separately from durable deliv
     ]);
   } finally {
     close();
+  }
+});
+
+test("Junction compact history coverage survives SQLite reload and suppresses all completed jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-history-coverage");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  const store = new SqliteDeviceSyncStore(databasePath);
+  const availability = Object.fromEntries(
+    JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.map((resource) => [resource, true]),
+  );
+  const account = store.upsertAccount({
+    provider: "junction",
+    externalAccountId: "junction-user-history-coverage",
+    displayName: "Junction",
+    scopes: [],
+    status: "active",
+    credential: {
+      kind: "provider_config",
+      providerConfigKey: "junction",
+      credentialMetadata: {},
+    },
+    connectedAt: "2026-08-11T00:00:00.000Z",
+    nextReconcileAt: null,
+  });
+  for (const source of JUNCTION_CONNECT_SOURCE_TARGETS) {
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: source.providerSlug,
+      sourceProviderSlug: source.providerSlug,
+      status: "connected",
+      resourceAvailabilitySummary: availability,
+      lastSeenAt: "2026-08-11T00:00:00.000Z",
+    });
+  }
+  let metadata: Record<string, unknown> = {
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillEmptyAttempts: 0,
+    junctionHistoricalBackfillLastEmptyAt: null,
+    junctionHistoricalBackfillWindowStart: "2026-02-12T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-08-11T00:00:00.000Z",
+    junctionHistoricalBackfillEvidence:
+      "e2|2026-02-12T00:00:00.000Z|2026-08-11T00:00:00.000Z|garmin:7",
+    profileRevision: 1,
+    diagnosticState: "healthy",
+  };
+  for (const resource of JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES) {
+    for (const source of JUNCTION_CONNECT_SOURCE_TARGETS) {
+      const patch = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+        existingMetadata: metadata,
+        providerSlug: source.providerSlug,
+        resource,
+        version: 1,
+      });
+      assert.ok(patch);
+      metadata = { ...metadata, ...patch };
+    }
+  }
+  assert.equal(store.markSyncSucceeded(account.id, "2026-08-11T01:00:00.000Z", null, {
+    metadataPatch: metadata,
+  }), true);
+  store.close();
+
+  const reopenedStore = new SqliteDeviceSyncStore(databasePath);
+  try {
+    const reloaded = reopenedStore.getAccountById(account.id);
+    assert.ok(reloaded);
+    assert.ok(Object.keys(reloaded.metadata).length < 16);
+    assert.equal(reloaded.metadata.profileRevision, 1);
+    assert.equal(reloaded.metadata.diagnosticState, "healthy");
+    for (const resource of JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES) {
+      for (const source of JUNCTION_CONNECT_SOURCE_TARGETS) {
+        assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+          reloaded.metadata,
+          source.providerSlug,
+          resource,
+          1,
+        ), true);
+      }
+    }
+
+    const provider = createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: ["activity"],
+      timeseriesResources: [...JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES],
+      fetchImpl: async (input) => {
+        throw new Error(`Unexpected request after completed coverage: ${readUrl(input)}`);
+      },
+    });
+    const scheduledHistoryJobs = provider.jobExecutor?.createScheduledJobs?.(
+      reloaded,
+      "2026-08-12T00:00:00.000Z",
+    ).jobs.filter((job) => job.payload?.historicalBackfill === true);
+    assert.deepEqual(scheduledHistoryJobs, []);
+  } finally {
+    reopenedStore.close();
   }
 });
 
