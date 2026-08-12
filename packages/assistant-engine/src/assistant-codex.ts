@@ -690,6 +690,13 @@ interface RequiredAutomationLocalAtClarification {
   targetLabel: string
 }
 
+function buildRequiredAutomationLocalAtClarificationKey(input: {
+  resolvedLocalDate: string
+  targetKey: string
+}): string {
+  return `${input.targetKey}:${input.resolvedLocalDate}`
+}
+
 function buildRequiredAutomationLocalAtClarification(
   requirement: RequiredAutomationLocalAtClarification,
 ): string {
@@ -3196,7 +3203,6 @@ async function runCodexAppServerTurnOnProcess(
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
     new Map<string, RequiredAutomationLocalAtClarification>()
-  const automationTargetAliases = new Map<string, Set<string>>()
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -3308,24 +3314,6 @@ async function runCodexAppServerTurnOnProcess(
     computerToolsLockedAfterUserPause ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
-
-  const recordAutomationTargetAliases = (
-    targetKeys: readonly string[],
-  ): ReadonlySet<string> => {
-    const aliases = new Set(targetKeys)
-    for (const targetKey of targetKeys) {
-      const existingAliases = automationTargetAliases.get(targetKey)
-      if (existingAliases) {
-        for (const alias of existingAliases) {
-          aliases.add(alias)
-        }
-      }
-    }
-    for (const alias of aliases) {
-      automationTargetAliases.set(alias, aliases)
-    }
-    return aliases
-  }
 
   const settleNoReplyFinalActions = async (): Promise<void> => {
     if (hasRequiredUserVisibleOutput() || noReplySettlementStarted) {
@@ -4257,7 +4245,7 @@ async function runCodexAppServerTurnOnProcess(
           targetLabel: dynamicToolRequest.localAtTargetLabel,
         }
         requiredAutomationLocalAtClarifications.set(
-          `${requirement.targetKey}:${requirement.resolvedLocalDate}`,
+          buildRequiredAutomationLocalAtClarificationKey(requirement),
           requirement,
         )
       }
@@ -4655,26 +4643,18 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolDeliveryContextOrdinal ?? 0,
         )
       }
-      const successfulAutomationTargetAliases =
-        dynamicToolRequest.kind === 'automation' &&
-        result.rpcResult.success &&
-        result.automationTargetKeys
-          ? recordAutomationTargetAliases(result.automationTargetKeys)
-          : null
       if (
         dynamicToolRequest.kind === 'automation' &&
         result.rpcResult.success &&
-        dynamicToolRequest.localAtRecovery &&
-        successfulAutomationTargetAliases
+        dynamicToolRequest.localAtRecovery
       ) {
-        for (const [key, requirement] of requiredAutomationLocalAtClarifications) {
-          if (
-            requirement.resolvedLocalDate ===
-              dynamicToolRequest.localAtRecovery.resolvedLocalDate &&
-            successfulAutomationTargetAliases.has(requirement.targetKey)
-          ) {
-            requiredAutomationLocalAtClarifications.delete(key)
-          }
+        const recoveryKey = buildRequiredAutomationLocalAtClarificationKey({
+          resolvedLocalDate:
+            dynamicToolRequest.localAtRecovery.resolvedLocalDate,
+          targetKey: dynamicToolRequest.localAtRecovery.recoveryKey,
+        })
+        if (requiredAutomationLocalAtClarifications.has(recoveryKey)) {
+          requiredAutomationLocalAtClarifications.delete(recoveryKey)
         }
       }
       const writeFailure = tryWriteRpcMessage({

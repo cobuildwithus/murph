@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -96,6 +97,12 @@ const SCRIPTED_MODEL = 'gpt-5.6-terra'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
+
+function buildTestAutomationLocalAtRecoveryKey(identity: string): string {
+  return createHash('sha256')
+    .update(JSON.stringify(identity))
+    .digest('hex')
+}
 
 const GROUP_CHALLENGE_DEFINITION = {
   format: {
@@ -1993,7 +2000,10 @@ text(JSON.stringify(result));
       expectedAt: '2026-03-08T07:30:00.000Z',
       failedTime: '02:30',
       finalMessage: 'Done — your reminder is set for 3:30 AM on March 8.',
+      initialSlug: null,
       kind: 'gap',
+      retrySlug: 'morning-meds',
+      retryTitle: 'Morning meds',
       referenceAt: '2026-03-08T04:59:00.000Z',
       retryLocalAt: {
         date: '2026-03-08',
@@ -2011,7 +2021,10 @@ text(JSON.stringify(result));
       failedTime: '01:30',
       finalMessage:
         'Done — your reminder is set for the earlier 1:30 AM on November 1.',
+      initialSlug: 'fall-reminder',
       kind: 'fold',
+      retrySlug: null,
+      retryTitle: 'Evening meds',
       referenceAt: '2026-11-01T03:59:00.000Z',
       retryLocalAt: {
         date: '2026-11-01',
@@ -2020,19 +2033,22 @@ text(JSON.stringify(result));
         timeZone: 'America/New_York',
       },
       staleClarification:
-        'For reminder "Fall reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+        'For reminder "Fall reminder (fall-reminder)", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
       steerAt: '2026-11-01T04:01:00.000Z',
       steerPrompt: 'Use the earlier occurrence.',
       title: 'Fall reminder',
     },
-  ])('clears a matching $kind clarification after a successful live-steered retry', {
+  ])('clears a $kind clarification after a renamed live-steered save retry', {
     timeout: TURN_TIMEOUT_MS,
   }, async ({
     expectedAt,
     failedTime,
     finalMessage,
+    initialSlug,
     referenceAt,
     retryLocalAt,
+    retrySlug,
+    retryTitle,
     staleClarification,
     steerAt,
     steerPrompt,
@@ -2052,16 +2068,21 @@ text(JSON.stringify(result));
           timeZone: 'America/New_York',
         },
       },
+      ...(initialSlug ? { slug: initialSlug } : {}),
       title,
     }
     const retryRequest = {
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
+        initialSlug ?? title.toLowerCase().replace(/\s+/gu, '-'),
+      ),
       schedule: {
         kind: 'at',
         localAt: retryLocalAt,
       },
-      title,
+      ...(retrySlug ? { slug: retrySlug } : {}),
+      title: retryTitle,
     }
     scenario.stub.queue(
       {
@@ -2105,10 +2126,12 @@ text(JSON.stringify(result));
             automationRequests.push(request)
             return {
               action: 'save',
-              automationId: `automation-${title.toLowerCase().replace(/\s+/gu, '-')}`,
+              automationId:
+                `automation-${retryTitle.toLowerCase().replace(/\s+/gu, '-')}`,
               created: true,
               effectiveTimeZone: null,
-              lookupId: title.toLowerCase().replace(/\s+/gu, '-'),
+              lookupId: retrySlug
+                ?? retryTitle.toLowerCase().replace(/\s+/gu, '-'),
               nextOccurrenceAt: expectedAt,
               routeBinding: 'current_conversation',
               schedule: request.schedule,
@@ -2145,7 +2168,8 @@ text(JSON.stringify(result));
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
       schedule: { at: expectedAt, kind: 'at' },
-      title,
+      ...(retrySlug ? { slug: retrySlug } : {}),
+      title: retryTitle,
     }])
     expect(result.finalMessage).toBe(finalMessage)
     expect(result.transcriptMessage).toBe(finalMessage)
@@ -2250,6 +2274,7 @@ text(JSON.stringify(result));
     const retryRequest = {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(failedLookup),
       lookup: retryLookup,
       ...(requestedSlug ? { slug: requestedSlug } : {}),
       schedule: {
@@ -2536,6 +2561,82 @@ text(JSON.stringify(result));
     expect(result.transcriptMessage).toBe(result.finalMessage)
   })
 
+  it('keeps a correlated DST clarification pending after create conflict', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const slug = 'medication-reminder'
+    const failedRequest = {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      slug,
+      title: 'Medication reminder',
+    }
+    const retryRequest = {
+      ...failedRequest,
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+    }
+    for (const request of [failedRequest, retryRequest]) {
+      scenario.stub.queue({
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(request)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      })
+    }
+    scenario.stub.queue({ text: 'I found an existing reminder.' })
+
+    const automationRequest = vi.fn(async () => {
+      throw Object.assign(new Error('automation already exists'), {
+        code: 'VAULT_AUTOMATION_CONFLICT' as const,
+      })
+    })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Set my medication reminder for tomorrow.',
+    })
+
+    const question =
+      'For reminder "Medication reminder (medication-reminder)", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+    expect(automationRequest).toHaveBeenCalledTimes(1)
+    expect(result.finalMessage).toContain(question)
+    expect(result.transcriptMessage).toContain(question)
+  })
+
   it.each([
     {
       date: '2026-03-08',
@@ -2617,10 +2718,14 @@ text(JSON.stringify(result));
     }
     const successA = {
       ...failureA,
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
+        'medication-reminder',
+      ),
       schedule: { kind: 'at', localAt: recoveryA },
     }
     const successB = {
       ...failureB,
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey('call-reminder'),
       schedule: { kind: 'at', localAt: recoveryB },
     }
     const responseCard = {
@@ -2653,6 +2758,8 @@ text(JSON.stringify(result));
       'second-resolved',
       'both-resolved',
       'unrelated-and-date-mismatch',
+      'matching-without-correlation',
+      'unknown-correlation',
     ] as const) {
       const scenario = await prepareScriptedTurnScenario()
       const automationRequests: Array<Extract<
@@ -2717,6 +2824,9 @@ text(JSON.stringify(result));
         }
         const mismatchedA = {
           ...failureA,
+          localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(
+            'medication-reminder',
+          ),
           schedule: {
             kind: 'at',
             localAt: {
@@ -2746,6 +2856,46 @@ text(JSON.stringify(result));
             },
           },
         )
+      }
+      if (mode === 'unknown-correlation') {
+        const unknownCorrelation = {
+          action: 'save',
+          instructions: 'Send an unrelated breakfast reminder.',
+          localAtRecoveryKey: 'f'.repeat(64),
+          schedule: {
+            kind: 'at',
+            localAt: {
+              date,
+              time: '05:00',
+              timeZone: 'America/New_York',
+            },
+          },
+          title: 'Breakfast reminder',
+        }
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(unknownCorrelation)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'matching-without-correlation') {
+        const matchingWithoutCorrelation = {
+          ...failureA,
+          schedule: { kind: 'at', localAt: recoveryA },
+        }
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(matchingWithoutCorrelation)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
       }
       if (mode === 'second-resolved' || mode === 'both-resolved') {
         scenario.stub.queue({
@@ -2857,6 +3007,11 @@ text(JSON.stringify(result));
         )
         if (mode === 'both-pending') {
           expect(automationRequests).toHaveLength(0)
+        } else if (
+          mode === 'matching-without-correlation'
+          || mode === 'unknown-correlation'
+        ) {
+          expect(automationRequests).toHaveLength(1)
         } else {
           expect(automationRequests).toHaveLength(2)
         }
@@ -2948,12 +3103,14 @@ text(JSON.stringify(result));
     }
     const retrySave = {
       ...failedSave,
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
       schedule: { kind: 'at', localAt: recoveryLocalAt },
     }
     const inspect = { action: 'inspect', lookup: slug }
     const patch = {
       action: 'patch',
       expectedUpdatedAt: updatedAt,
+      localAtRecoveryKey: buildTestAutomationLocalAtRecoveryKey(slug),
       lookup: patchLookup,
       ...(newSlug ? { slug: newSlug } : {}),
       schedule: { kind: 'at', localAt: recoveryLocalAt },
@@ -3097,6 +3254,9 @@ text(JSON.stringify(result));
       'inspect',
       'patch',
     ])
+    for (const request of ownerRequests) {
+      expect(request).not.toHaveProperty('localAtRecoveryKey')
+    }
     expect(ownerRequests[2]).toMatchObject({
       action: 'patch',
       expectedUpdatedAt: updatedAt,

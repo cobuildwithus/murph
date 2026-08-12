@@ -42,6 +42,12 @@ describe('hosted domain dynamic tools', () => {
       'state the explicit host-resolved date returned by the tool while asking for another time',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'echo the exact returned localAtRecoveryKey',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'omitting it leaves that clarification pending and treats the call as an independent reminder',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'raw exact ISO schedule.at is not accepted on generic save or patch',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
@@ -183,11 +189,12 @@ describe('hosted domain dynamic tools', () => {
       request: gapRequest,
     })
     expect(gapResult.rpcResult.contentItems[0]?.text).toContain(
-      'schedule.localAt.date=2026-03-08 instead of relativeDay',
+      `schedule.localAt.date=2026-03-08 instead of relativeDay and localAtRecoveryKey=${gapRequest.localAtTargetKey}`,
     )
     const gapRecoveryRequest = readToolRequest('automation', {
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
+      localAtRecoveryKey: gapRequest.localAtTargetKey,
       schedule: {
         kind: 'at',
         localAt: {
@@ -205,12 +212,38 @@ describe('hosted domain dynamic tools', () => {
     expect(gapRecoveryRequest).toMatchObject({
       kind: 'automation',
       localAtRecovery: {
+        recoveryKey: gapRequest.localAtTargetKey,
         resolvedLocalDate: '2026-03-08',
-        targetKey: gapRequest.localAtTargetKey,
       },
       request: {
+        action: 'save',
         schedule: { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
       },
+    })
+    expect(gapRecoveryRequest).not.toHaveProperty(
+      'request.localAtRecoveryKey',
+    )
+    const repeatedGapRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the renamed reminder tomorrow.',
+      localAtRecoveryKey: gapRequest.localAtTargetKey,
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      slug: 'morning-meds',
+      title: 'Morning meds',
+    })
+    expect(repeatedGapRequest).toMatchObject({
+      kind: 'invalid-automation-arguments',
+      localAtTargetKey: gapRequest.localAtTargetKey,
+      localAtTargetLabel: 'Morning meds (morning-meds)',
+      resolvedLocalDate: '2026-03-08',
+      safeFailureCode: 'local_at_gap',
     })
 
     const foldRequest = readToolRequest('automation', {
@@ -244,11 +277,12 @@ describe('hosted domain dynamic tools', () => {
       request: foldRequest,
     })
     expect(foldResult.rpcResult.contentItems[0]?.text).toContain(
-      'schedule.localAt.date=2026-11-01 and schedule.localAt.fold instead of relativeDay',
+      `schedule.localAt.date=2026-11-01, schedule.localAt.fold, and localAtRecoveryKey=${foldRequest.localAtTargetKey} instead of relativeDay`,
     )
     const foldRecoveryRequest = readToolRequest('automation', {
       action: 'save',
       instructions: 'Send the reminder tomorrow.',
+      localAtRecoveryKey: foldRequest.localAtTargetKey,
       schedule: {
         kind: 'at',
         localAt: {
@@ -266,16 +300,20 @@ describe('hosted domain dynamic tools', () => {
     expect(foldRecoveryRequest).toMatchObject({
       kind: 'automation',
       localAtRecovery: {
+        recoveryKey: foldRequest.localAtTargetKey,
         resolvedLocalDate: '2026-11-01',
-        targetKey: foldRequest.localAtTargetKey,
       },
       request: {
+        action: 'save',
         schedule: { at: '2026-11-01T06:30:00.000Z', kind: 'at' },
       },
     })
+    expect(foldRecoveryRequest).not.toHaveProperty(
+      'request.localAtRecoveryKey',
+    )
   })
 
-  it('binds patch DST recovery to the stored automation lookup', () => {
+  it('binds DST recovery only to the echoed root-turn correlation', () => {
     const failedPatch = readToolRequest('automation', {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
@@ -297,6 +335,7 @@ describe('hosted domain dynamic tools', () => {
     const matchingRecovery = readToolRequest('automation', {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      localAtRecoveryKey: failedPatch.localAtTargetKey,
       lookup: 'medication-reminder',
       schedule: {
         kind: 'at',
@@ -324,15 +363,12 @@ describe('hosted domain dynamic tools', () => {
     expect(matchingRecovery).toMatchObject({
       kind: 'automation',
       localAtRecovery: {
+        recoveryKey: failedPatch.localAtTargetKey,
         resolvedLocalDate: '2026-03-08',
-        targetKey: failedPatch.localAtTargetKey,
       },
     })
     expect(unrelatedRecovery).toMatchObject({
       kind: 'automation',
-      localAtRecovery: {
-        resolvedLocalDate: '2026-03-08',
-      },
     })
     if (
       matchingRecovery?.kind !== 'automation' ||
@@ -340,9 +376,21 @@ describe('hosted domain dynamic tools', () => {
     ) {
       throw new TypeError('Expected explicit-date automation recoveries.')
     }
-    expect(unrelatedRecovery.localAtRecovery?.targetKey).not.toBe(
-      matchingRecovery.localAtRecovery?.targetKey,
-    )
+    expect(unrelatedRecovery.localAtRecovery).toBeUndefined()
+    expect(readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      localAtRecoveryKey: failedPatch.localAtTargetKey,
+      lookup: 'medication-reminder',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
   })
 
   it.each([
@@ -354,7 +402,7 @@ describe('hosted domain dynamic tools', () => {
       failedLookup: 'automation-medication-reminder',
       recoveryLookup: 'medication-reminder',
     },
-  ])('binds patch DST recovery across canonical lookup aliases', async ({
+  ])('carries patch DST correlation across mutable canonical lookups', async ({
     failedLookup,
     recoveryLookup,
   }) => {
@@ -374,6 +422,9 @@ describe('hosted domain dynamic tools', () => {
     const recovery = readToolRequest('automation', {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      localAtRecoveryKey: failedPatch?.kind === 'invalid-automation-arguments'
+        ? failedPatch.localAtTargetKey
+        : undefined,
       lookup: recoveryLookup,
       schedule: {
         kind: 'at',
@@ -390,7 +441,7 @@ describe('hosted domain dynamic tools', () => {
     ) {
       throw new TypeError('Expected a failed patch and explicit-date recovery.')
     }
-    expect(recovery.localAtRecovery?.targetKey).not.toBe(
+    expect(recovery.localAtRecovery?.recoveryKey).toBe(
       failedPatch.localAtTargetKey,
     )
 
@@ -422,12 +473,9 @@ describe('hosted domain dynamic tools', () => {
     })
 
     expect(result.rpcResult.success).toBe(true)
-    expect(result.automationTargetKeys).toContain(
-      failedPatch.localAtTargetKey,
-    )
   })
 
-  it('certifies the successful pre-rename patch lookup as a recovery alias', async () => {
+  it('keeps recovery correlation private while patching and renaming', async () => {
     const failedPatch = readToolRequest('automation', {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
@@ -445,6 +493,9 @@ describe('hosted domain dynamic tools', () => {
     const recovery = readToolRequest('automation', {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      localAtRecoveryKey: failedPatch?.kind === 'invalid-automation-arguments'
+        ? failedPatch.localAtTargetKey
+        : undefined,
       lookup: 'medication-reminder',
       schedule: {
         kind: 'at',
@@ -491,12 +542,12 @@ describe('hosted domain dynamic tools', () => {
     })
 
     expect(result.rpcResult.success).toBe(true)
-    expect(result.automationTargetKeys).toContain(
+    expect(recovery.localAtRecovery?.recoveryKey).toBe(
       failedPatch.localAtTargetKey,
     )
   })
 
-  it('keeps DST target identity stable from create-only save to patch', async () => {
+  it('carries save recovery correlation into a later versioned patch', async () => {
     const failedSave = readToolRequest('automation', {
       action: 'save',
       instructions: 'Send the medication reminder tomorrow.',
@@ -514,6 +565,9 @@ describe('hosted domain dynamic tools', () => {
     const recoveryPatch = readToolRequest('automation', {
       action: 'patch',
       expectedUpdatedAt: '2026-03-07T20:00:00.000Z',
+      localAtRecoveryKey: failedSave?.kind === 'invalid-automation-arguments'
+        ? failedSave.localAtTargetKey
+        : undefined,
       lookup: 'medication-reminder',
       schedule: {
         kind: 'at',
@@ -530,7 +584,7 @@ describe('hosted domain dynamic tools', () => {
     ) {
       throw new TypeError('Expected a failed save and explicit-date patch.')
     }
-    expect(recoveryPatch.localAtRecovery?.targetKey).toBe(
+    expect(recoveryPatch.localAtRecovery?.recoveryKey).toBe(
       failedSave.localAtTargetKey,
     )
 
@@ -560,9 +614,7 @@ describe('hosted domain dynamic tools', () => {
       progressDelivery: null,
       request: recoveryPatch,
     })
-    expect(result.automationTargetKeys).toContain(
-      failedSave.localAtTargetKey,
-    )
+    expect(result.rpcResult.success).toBe(true)
   })
 
   it('contains local one-shot slug derivation failures for a recoverable retry', async () => {
@@ -1082,8 +1134,6 @@ describe('hosted domain dynamic tools', () => {
       timingVerified: true,
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
-    expect(result.automationTargetKeys).toHaveLength(2)
-    expect(new Set(result.automationTargetKeys)).toHaveLength(2)
   })
 
   it('returns safe recovery instructions for local-time and write-conflict failures', async () => {
@@ -1174,7 +1224,6 @@ describe('hosted domain dynamic tools', () => {
       request: patchRequest,
     })
     expect(conflictResult.rpcResult).toMatchObject({ success: false })
-    expect(conflictResult.automationTargetKeys).toBeUndefined()
     expect(conflictResult.rpcResult.contentItems[0]?.text).toContain(
       'inspect it again and decide from the current stored schedule',
     )

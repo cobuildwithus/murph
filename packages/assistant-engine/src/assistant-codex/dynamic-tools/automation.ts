@@ -99,6 +99,7 @@ const hostedAutomationAssistantTargetOverrideSchema = z
   )
 
 const automationLocalAtDatePattern = /^\d{4}-\d{2}-\d{2}$/u
+const automationLocalAtRecoveryKeyPattern = /^[a-f0-9]{64}$/u
 const automationLocalAtTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u
 const automationLocalAtFoldValues = ['earlier', 'later'] as const
 const automationLocalAtRelativeDayValues = ['today', 'tomorrow'] as const
@@ -167,6 +168,16 @@ const automationLocalAtScheduleSchema = z
   })
   .strict()
 
+const automationLocalAtRecoveryKeySchema = z
+  .string()
+  .regex(
+    automationLocalAtRecoveryKeyPattern,
+    'Expected the exact 64-character localAtRecoveryKey returned by the failed automation call.',
+  )
+  .describe(
+    'Opaque root-turn correlation returned by a daylight-saving gap or fold failure. Echo it only on the explicit-date retry that answers that failure.',
+  )
+
 const automationDynamicToolScheduleSchema = z.union([
   automationScheduleEverySchema,
   automationScheduleCronSchema,
@@ -183,6 +194,7 @@ const saveAutomationArgumentsSchema = z.object({
     .optional(),
   continuityPolicy: z.enum(automationContinuityPolicyValues).optional(),
   instructions: automationInstructionsSchema,
+  localAtRecoveryKey: automationLocalAtRecoveryKeySchema.optional(),
   schedule: automationDynamicToolScheduleSchema,
   slug: automationSlugSchema.optional(),
   status: z.enum(automationStatusValues).optional(),
@@ -191,7 +203,22 @@ const saveAutomationArgumentsSchema = z.object({
   supportSeriesId: automationSupportSeriesIdSchema.optional(),
   tags: automationTagsSchema.optional(),
   title: automationTitleSchema,
-}).strict()
+}).strict().superRefine((value, context) => {
+  if (
+    value.localAtRecoveryKey !== undefined
+    && (
+      !('localAt' in value.schedule)
+      || value.schedule.localAt.date === undefined
+    )
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'localAtRecoveryKey is valid only with an explicit schedule.localAt.date retry.',
+      path: ['localAtRecoveryKey'],
+    })
+  }
+})
 
 const saveOnboardingFirstPersonalReadArgumentsSchema = z.object({
   action: z.literal(MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION),
@@ -215,6 +242,7 @@ const patchAutomationArgumentsSchema = z.object({
     'Required current automation updatedAt value from the most recent readback before changing an existing automation.',
   ),
   instructions: automationInstructionsSchema.optional(),
+  localAtRecoveryKey: automationLocalAtRecoveryKeySchema.optional(),
   lookup: automationIdentifierSchema,
   retargetToCurrentConversation: z.literal(true).optional(),
   schedule: automationDynamicToolScheduleSchema.optional(),
@@ -273,6 +301,22 @@ const patchAutomationArgumentsSchema = z.object({
       path: [],
     })
   }
+
+  if (
+    value.localAtRecoveryKey !== undefined
+    && (
+      value.schedule === undefined
+      || !('localAt' in value.schedule)
+      || value.schedule.localAt.date === undefined
+    )
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'localAtRecoveryKey is valid only with an explicit schedule.localAt.date retry.',
+      path: ['localAtRecoveryKey'],
+    })
+  }
 })
 
 const reconcileAutomationArgumentsSchema = z.object({
@@ -296,6 +340,7 @@ const AUTOMATION_ARGUMENT_ROOT_KEYS = [
   'continuityPolicy',
   'expectedUpdatedAt',
   'instructions',
+  'localAtRecoveryKey',
   'lookup',
   'retargetToCurrentConversation',
   'schedule',
@@ -314,7 +359,7 @@ export const MURPH_AUTOMATION_TOOL = {
   name: 'automation',
   deferLoading: true,
   description:
-    'Create, inspect, update, or reconcile durable Murph automations for the current authenticated conversation. Generic save is create-only; use action=inspect and then a versioned patch for every existing automation. Inspect is read-only and returns the authoritative stored version plus scheduler timing projection. For every model-authored one-shot, pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay; raw exact ISO schedule.at is not accepted on generic save or patch. When the request says today, tonight, or tomorrow, preserve that wording as relativeDay (today for tonight) so the host resolves it against the named timezone; never calculate a calendar date from a relative word in the model. Use date only for an explicit calendar date from the request or established context. If localAt is nonexistent because of a daylight-saving gap, state the explicit host-resolved date returned by the tool while asking for another time, then retry with that date instead of relativeDay. If it is ambiguous because of a daylight-saving fold, state the explicit host-resolved date returned by the tool while asking whether the earlier or later occurrence is intended, then retry with that date and schedule.localAt.fold instead of relativeDay. Recurring cron and dailyLocal values are wall-clock fields: when the user names a timezone, preserve the requested clock time and pass its IANA name in schedule.timeZone; never convert that clock time to UTC inside the cron or localTime field. On save, omit schedule.timeZone only when the recurrence should follow the vault timezone. On patch, inspect the current stored automation first and pass expectedUpdatedAt from that readback; if the automation changed, inspect it again and decide from the new stored state; a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone, so do not ask the user to repeat it or guess it from current conversation context. After save or patch, inspect the stored schedule, status, updatedAt, timingVerified, effectiveTimeZone, and nextOccurrenceAt from this result. For an active deviceActivity schedule, confirm the persisted event trigger directly: a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, verify any user-facing timing confirmation against timingVerified, schedule, effectiveTimeZone, and nextOccurrenceAt from the tool result; a verified null nextOccurrenceAt means no later deliverable occurrence, not a retry or cutoff wake. For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it. For ordinary save or patch, choose assistantTargetOverride deliberately: use Luna for self-contained cues and reminders with all needed context in the instructions and no reads or tools; use Terra for bounded contextual judgment or a few targeted reads; inherit the conversation-selected model for broad conversation history, research, complex or sensitive reasoning, or whenever that model materially matters. On save, omit assistantTargetOverride to inherit. On patch, assistantTargetOverride replaces the whole stored override: omit the field only to preserve it, use null to return to conversation inheritance, or send the complete replacement. Explicit model selections use high reasoning for Luna and low for Terra or Sol at execution unless reasoningEffort is supplied. The override applies only to the automation turn; a later reply returns to the saved conversation model with the automation message retained through compatible provider-thread continuity or committed history replay. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, model-provider ids, or generic commands.',
+    'Create, inspect, update, or reconcile durable Murph automations for the current authenticated conversation. Generic save is create-only; use action=inspect and then a versioned patch for every existing automation. Inspect is read-only and returns the authoritative stored version plus scheduler timing projection. For every model-authored one-shot, pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay; raw exact ISO schedule.at is not accepted on generic save or patch. When the request says today, tonight, or tomorrow, preserve that wording as relativeDay (today for tonight) so the host resolves it against the named timezone; never calculate a calendar date from a relative word in the model. Use date only for an explicit calendar date from the request or established context. If localAt is nonexistent because of a daylight-saving gap, state the explicit host-resolved date returned by the tool while asking for another time, then retry with that date instead of relativeDay and echo the exact returned localAtRecoveryKey. If it is ambiguous because of a daylight-saving fold, state the explicit host-resolved date returned by the tool while asking whether the earlier or later occurrence is intended, then retry with that date, schedule.localAt.fold, and the exact returned localAtRecoveryKey instead of relativeDay. The recovery key is root-turn-only correlation: include it only on the explicit-date retry that answers that failure; omitting it leaves that clarification pending and treats the call as an independent reminder. Recurring cron and dailyLocal values are wall-clock fields: when the user names a timezone, preserve the requested clock time and pass its IANA name in schedule.timeZone; never convert that clock time to UTC inside the cron or localTime field. On save, omit schedule.timeZone only when the recurrence should follow the vault timezone. On patch, inspect the current stored automation first and pass expectedUpdatedAt from that readback; if the automation changed, inspect it again and decide from the new stored state; a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone, so do not ask the user to repeat it or guess it from current conversation context. After save or patch, inspect the stored schedule, status, updatedAt, timingVerified, effectiveTimeZone, and nextOccurrenceAt from this result. For an active deviceActivity schedule, confirm the persisted event trigger directly: a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, verify any user-facing timing confirmation against timingVerified, schedule, effectiveTimeZone, and nextOccurrenceAt from the tool result; a verified null nextOccurrenceAt means no later deliverable occurrence, not a retry or cutoff wake. For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it. For ordinary save or patch, choose assistantTargetOverride deliberately: use Luna for self-contained cues and reminders with all needed context in the instructions and no reads or tools; use Terra for bounded contextual judgment or a few targeted reads; inherit the conversation-selected model for broad conversation history, research, complex or sensitive reasoning, or whenever that model materially matters. On save, omit assistantTargetOverride to inherit. On patch, assistantTargetOverride replaces the whole stored override: omit the field only to preserve it, use null to return to conversation inheritance, or send the complete replacement. Explicit model selections use high reasoning for Luna and low for Terra or Sol at execution unless reasoningEffort is supplied. The override applies only to the automation turn; a later reply returns to the saved conversation model with the automation message retained through compatible provider-thread continuity or committed history replay. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, model-provider ids, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -322,8 +367,8 @@ export type AutomationDynamicToolRequest =
   | {
       kind: 'automation'
       localAtRecovery?: {
+        recoveryKey: string
         resolvedLocalDate: string
-        targetKey: string
       }
       onboardingFirstReadCompletionRequested?: true
       request: AssistantHostedAutomationToolRequest
@@ -365,11 +410,11 @@ export function readAutomationDynamicToolRequest(input: {
     localAtAttempt = readAutomationLocalAtAttempt(parsed.args)
     return {
       kind: 'automation',
-      ...(localAtAttempt?.explicitLocalDate
+      ...(localAtAttempt?.explicitLocalDate && localAtAttempt.recoveryKey
         ? {
             localAtRecovery: {
+              recoveryKey: localAtAttempt.recoveryKey,
               resolvedLocalDate: localAtAttempt.explicitLocalDate,
-              targetKey: localAtAttempt.targetKey,
             },
           }
         : {}),
@@ -421,6 +466,7 @@ function readAutomationLocalAtAttempt(
   args: z.infer<typeof automationArgumentsSchema>,
 ): {
   explicitLocalDate: string | null
+  recoveryKey: string | null
   targetKey: string
   targetLabel: string
 } | null {
@@ -432,15 +478,19 @@ function readAutomationLocalAtAttempt(
     return null
   }
 
-  const targetIdentity = args.action === 'patch'
-    ? args.lookup
-    : resolveAutomationUpsertSlug({
-        slug: args.slug,
-        title: args.title,
-      })
+  const targetKey = args.localAtRecoveryKey
+    ?? buildAutomationLocalAtTargetKey(
+      args.action === 'patch'
+        ? args.lookup
+        : resolveAutomationUpsertSlug({
+            slug: args.slug,
+            title: args.title,
+          }),
+    )
   return {
     explicitLocalDate: schedule.localAt.date ?? null,
-    targetKey: buildAutomationLocalAtTargetKey(targetIdentity),
+    recoveryKey: args.localAtRecoveryKey ?? null,
+    targetKey,
     targetLabel: args.action === 'patch'
       ? args.lookup
       : args.slug
@@ -467,16 +517,21 @@ function resolveAutomationDynamicToolRequest(
     return buildOnboardingFirstPersonalReadAutomationSaveRequest()
   }
   if (args.action === 'save') {
+    const { localAtRecoveryKey: _localAtRecoveryKey, schedule, ...rest } = args
     return {
-      ...args,
+      ...rest,
       schedule: resolveDynamicAutomationSchedule(
-        args.schedule,
+        schedule,
         relativeDateReferenceWindow,
       ),
     }
   }
   if (args.action === 'patch') {
-    const { schedule, ...rest } = args
+    const {
+      localAtRecoveryKey: _localAtRecoveryKey,
+      schedule,
+      ...rest
+    } = args
     return {
       ...rest,
       ...(schedule === undefined
@@ -696,7 +751,6 @@ export async function executeAutomationDynamicTool(input: {
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   request: Extract<AutomationDynamicToolRequest, { kind: 'automation' }>
 }): Promise<{
-  automationTargetKeys?: readonly string[]
   rpcResult: {
     contentItems: Array<{ text: string; type: 'inputText' }>
     success: boolean
@@ -730,44 +784,7 @@ export async function executeAutomationDynamicTool(input: {
     if (!text) {
       return automationTextResult(false, 'automation result is too large')
     }
-    const result = automationTextResult(true, text)
-    if (response.action === 'save') {
-      return {
-        ...result,
-        automationTargetKeys: [
-          buildAutomationLocalAtTargetKey(response.lookupId),
-        ],
-      }
-    }
-    if (
-      response.action === 'inspect' &&
-      input.request.request.action === 'inspect'
-    ) {
-      return {
-        ...result,
-        automationTargetKeys: [...new Set([
-          buildAutomationLocalAtTargetKey(input.request.request.lookup),
-          buildAutomationLocalAtTargetKey(response.automationId),
-          buildAutomationLocalAtTargetKey(response.lookupId),
-        ])],
-      }
-    }
-    if (
-      response.action === 'patch' &&
-      input.request.request.action === 'patch'
-    ) {
-      return {
-        ...result,
-        automationTargetKeys: [...new Set([
-          buildAutomationLocalAtTargetKey(
-            input.request.request.lookup,
-          ),
-          buildAutomationLocalAtTargetKey(response.automationId),
-          buildAutomationLocalAtTargetKey(response.lookupId),
-        ])],
-      }
-    }
-    return result
+    return automationTextResult(true, text)
   } catch (error) {
     if (isAutomationConflictError(error)) {
       return automationTextResult(
