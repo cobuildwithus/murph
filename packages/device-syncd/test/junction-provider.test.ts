@@ -13689,9 +13689,13 @@ test("Junction provider rejects unsupported configured resources", () => {
   );
   assert.throws(
     () => createJunctionProvider(async () => createJsonResponse({}), {
-      timeseriesResources: ["electrocardiogram_voltage"],
+      timeseriesResources: [
+        "electrocardiogram_voltage",
+        "workout_distance",
+        "workout_swimming_stroke",
+      ],
     }),
-    /Junction timeseries resources include unsupported resource\(s\): electrocardiogram_voltage\./u,
+    /Junction timeseries resources include unsupported resource\(s\): electrocardiogram_voltage, workout_distance, workout_swimming_stroke\./u,
   );
 });
 
@@ -13889,6 +13893,8 @@ test("Junction client fetches an exact workout stream with bounded bytes and thr
 test("Junction shallow workout stream webhook imports only a bounded feature envelope", async () => {
   const requests: string[] = [];
   const importedSnapshots: Array<Record<string, unknown>> = [];
+  const localAuthorityCheckPhases: string[] = [];
+  let streamFetched = false;
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
     requests.push(url);
@@ -13904,6 +13910,7 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
       });
     }
     if (url === "https://api.sandbox.us.junction.com/v2/timeseries/workouts/workout-stream-1/stream") {
+      streamFetched = true;
       return createJsonResponse({
         altitude: [10, 11, 12],
         cadence: [80, 82, 84],
@@ -13960,6 +13967,10 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
     provider,
     createJunctionJobContext({
       account,
+      listConnectionSources: async () => {
+        localAuthorityCheckPhases.push(streamFetched ? "after-fetch" : "before-fetch");
+        return account.sources ?? [];
+      },
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot as Record<string, unknown>);
         return { imported: true };
@@ -13970,6 +13981,8 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
 
   assert.equal(jobPayload.objectId, "workout-stream-1");
   assert.equal(jobPayload.resource, "workout_stream");
+  assert.equal(jobPayload.resourceCategory, "timeseries");
+  assert.equal(job.maxAttempts, 1);
   assert.equal(jobPayload.sourceInstanceId, "source-774aa2ab0133069118cf5c1e");
   assert.equal(jobPayload.sourceType, "watch");
   assert.equal(jobPayload.sport, "running");
@@ -13980,6 +13993,8 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
   );
   assert.equal(requests.some((url) => url.includes("/v2/summary/workout_stream/")), false);
   assert.equal(importedSnapshots.length, 1);
+  assert.ok(localAuthorityCheckPhases.includes("before-fetch"));
+  assert.ok(localAuthorityCheckPhases.includes("after-fetch"));
   const importedConnections = importedSnapshots[0]?.connections as Array<Record<string, unknown>> | undefined;
   const importedWorkoutFeatures = importedSnapshots[0]?.workoutFeatures as Array<Record<string, unknown>> | undefined;
   assert.equal(importedWorkoutFeatures?.[0]?.sourceInstanceId, importedConnections?.[0]?.sourceInstanceId);
@@ -13987,6 +14002,243 @@ test("Junction shallow workout stream webhook imports only a bounded feature env
   const importedText = JSON.stringify(importedSnapshots[0]);
   assert.match(importedText, /junction\.workout_features\.v1/u);
   assert.doesNotMatch(importedText, /"lat"|"lng"|"time"\s*:\s*\[|"cadence"\s*:\s*\[/u);
+
+  const updatedWebhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.workout_stream.updated",
+      user_id: "junction-user-1",
+      data: {
+        workout_id: "workout-stream-1",
+        source: { provider: "garmin", type: "watch" },
+        sport: { slug: "running" },
+      },
+    },
+    messageId: "msg_workout_stream_1_updated",
+    timestamp: "1775174401",
+  });
+  const parsedUpdate = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: updatedWebhook.headers,
+    rawBody: updatedWebhook.rawBody,
+    now: "2026-04-03T00:00:01.000Z",
+  });
+  assert.equal(parsedUpdate.jobs[0]?.maxAttempts, 1);
+  assert.notEqual(parsedUpdate.jobs[0]?.dedupeKey, job.dedupeKey);
+});
+
+test("Junction workout stream rejects shallow-source mismatch before import", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    if (url.endsWith("/v2/user/providers/junction-user-1")) {
+      return createJsonResponse({ providers: [{
+        id: "provider-garmin-mismatch",
+        slug: "garmin",
+        status: "connected",
+        resource_availability: { workouts: true },
+      }] });
+    }
+    if (url.endsWith("/v2/timeseries/workouts/workout-source-mismatch/stream")) {
+      return createJsonResponse({
+        distance: [0, 1_000],
+        source: { provider: "fitbit", type: "watch" },
+        time: [1_776_859_200, 1_776_859_260],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const account = createAccount({ sources: [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    resourceCount: 1,
+    resourceAvailabilitySummary: { workouts: true },
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }] });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account,
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+      }),
+      createJob("resource", {
+        objectId: "workout-source-mismatch",
+        resource: "workout_stream",
+        resourceCategory: "timeseries",
+        sourceProviderSlug: "garmin",
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
+    ),
+    (error: unknown) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_WORKOUT_STREAM_SOURCE_MISMATCH"
+      && error.retryable === false,
+  );
+  assert.deepEqual(requests.map((url) => new URL(url).pathname), [
+    "/v2/user/providers/junction-user-1",
+    "/v2/timeseries/workouts/workout-source-mismatch/stream",
+  ]);
+  assert.equal(importedSnapshots.length, 0);
+});
+
+test("Junction workout stream fences an import when its source disconnects after fetch", async () => {
+  const requests: string[] = [];
+  const projectedStatuses: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  let providerListCount = 0;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    if (url.endsWith("/v2/user/providers/junction-user-1")) {
+      providerListCount += 1;
+      return createJsonResponse({ providers: [{
+        id: "provider-garmin-revoked",
+        slug: "garmin",
+        status: providerListCount === 1 ? "connected" : "disconnected",
+        resource_availability: { workouts: true },
+      }] });
+    }
+    if (url.endsWith("/v2/timeseries/workouts/workout-post-fetch-revoked/stream")) {
+      return createJsonResponse({
+        distance: [0, 1_000],
+        time: [1_776_859_200, 1_776_859_260],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const account = createAccount({ sources: [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    resourceCount: 1,
+    resourceAvailabilitySummary: { workouts: true },
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }] });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      upsertConnectionSource: (input) => {
+        projectedStatuses.push(input.status);
+        return createConnectionSource({
+          status: input.status,
+          lastSeenAt: input.lastSeenAt,
+        });
+      },
+    }),
+    createJob("resource", {
+      objectId: "workout-post-fetch-revoked",
+      resource: "workout_stream",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(result, {});
+  assert.deepEqual(requests.map((url) => new URL(url).pathname), [
+    "/v2/user/providers/junction-user-1",
+    "/v2/timeseries/workouts/workout-post-fetch-revoked/stream",
+    "/v2/user/providers/junction-user-1",
+  ]);
+  assert.deepEqual(projectedStatuses, ["connected", "disconnected"]);
+  assert.equal(importedSnapshots.length, 0);
+});
+
+test("Junction workout stream rechecks live local source authority after fetch", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const localAuthorityCheckPhases: string[] = [];
+  let streamFetched = false;
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    if (url.endsWith("/v2/user/providers/junction-user-1")) {
+      return createJsonResponse({ providers: [{
+        id: "provider-garmin-locally-revoked",
+        slug: "garmin",
+        status: "connected",
+        resource_availability: { workouts: true },
+      }] });
+    }
+    if (url.endsWith("/v2/timeseries/workouts/workout-locally-revoked/stream")) {
+      streamFetched = true;
+      return createJsonResponse({
+        distance: [0, 1_000],
+        time: [1_776_859_200, 1_776_859_260],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  const account = createAccount({ sources: [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    resourceCount: 1,
+    resourceAvailabilitySummary: { workouts: true },
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }] });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account,
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      listConnectionSources: async () => {
+        localAuthorityCheckPhases.push(streamFetched ? "after-fetch" : "before-fetch");
+        return [createConnectionSource({
+          sourceProviderSlug: "garmin",
+          status: streamFetched ? "disconnected" : "connected",
+          lastErrorCode: streamFetched ? DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE : null,
+        })];
+      },
+    }),
+    createJob("resource", {
+      objectId: "workout-locally-revoked",
+      resource: "workout_stream",
+      resourceCategory: "timeseries",
+      sourceProviderSlug: "garmin",
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.deepEqual(result, {});
+  assert.ok(localAuthorityCheckPhases.includes("before-fetch"));
+  assert.ok(localAuthorityCheckPhases.includes("after-fetch"));
+  assert.deepEqual(requests.map((url) => new URL(url).pathname), [
+    "/v2/user/providers/junction-user-1",
+    "/v2/timeseries/workouts/workout-locally-revoked/stream",
+    "/v2/user/providers/junction-user-1",
+  ]);
+  assert.equal(importedSnapshots.length, 0);
 });
 
 test("Junction rejects a shallow workout stream webhook without workout_id before any fetch", async () => {

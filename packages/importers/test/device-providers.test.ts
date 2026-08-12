@@ -1612,10 +1612,10 @@ test("importDeviceProviderSnapshot persists bounded Junction workout features th
   });
   const feature = reduceJunctionWorkoutStream({
     cadence: [80, 82, 84],
-    distance: [0, 500, 1_000],
+    distance: [0, 1_500, 2_000],
     heartrate: [120, 130, 140],
     power: [180, 200, 220],
-    time: [1_776_859_200, 1_776_859_210, 1_776_859_220],
+    time: [1_776_859_200, 1_776_859_260, 1_776_859_270],
   }, {
     workoutId: "workout-core-roundtrip-1",
     sourceProviderSlug: "garmin",
@@ -1624,6 +1624,7 @@ test("importDeviceProviderSnapshot persists bounded Junction workout features th
     sport: "running",
   });
   assert.ok(feature);
+  assert.deepEqual(feature.splits.map((split) => split.durationSeconds), [40, 30]);
 
   const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
     {
@@ -1661,13 +1662,157 @@ test("importDeviceProviderSnapshot persists bounded Junction workout features th
     record.kind === "measurement"
     && storedExternalRefResourceId(record) === storedExternalRefResourceId(session)
   );
+  const storedSplitDurations = workoutFeatureFacts.flatMap((record) =>
+    "measurements" in record && Array.isArray(record.measurements)
+      ? record.measurements.flatMap((measurement) =>
+          measurement
+            && typeof measurement === "object"
+            && !Array.isArray(measurement)
+            && measurement.metric === "workout-split-duration"
+            && typeof measurement.value === "number"
+            ? [measurement.value]
+            : []
+        )
+      : []
+  );
   const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
   const evidenceText = JSON.stringify(ingest.parts);
 
   assert.ok(session);
   assert.ok(workoutFeatureFacts.length >= 2);
+  assert.deepEqual(storedSplitDurations.sort((left, right) => left - right), [30, 40]);
   assert.equal(result.sampleShardPaths.length, 0);
   assert.doesNotMatch(evidenceText, /"lat"|"lng"|"time"\s*:\s*\[/u);
+});
+
+test("excluded Junction workout row feeds stay below core bounds at 25,000 provider records", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-excluded-workout-rows");
+  await coreRuntime.initializeVault({
+    createdAt: "2026-04-22T00:00:00.000Z",
+    vaultRoot,
+  });
+  const providerRows = Array.from({ length: 25_000 }, (_, index) => ({
+    start: new Date(Date.parse("2026-04-22T12:00:00.000Z") + index * 1000).toISOString(),
+    unit: "meter",
+    value: index,
+    workout_id: "workout-excluded-rows",
+  }));
+
+  const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-excluded-workout-row-user",
+        importedAt: "2026-04-22T13:00:00.000Z",
+        summaries: {
+          workouts: [{
+            id: "workout-excluded-rows",
+            time_start: "2026-04-22T12:00:00.000Z",
+            time_end: "2026-04-22T12:30:00.000Z",
+            source: { provider: "garmin", type: "watch" },
+            sport: { slug: "running" },
+          }],
+        },
+        timeseries: {
+          workout_distance: {
+            groups: {
+              garmin: [{
+                data: providerRows,
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          },
+          workout_swimming_stroke: {
+            groups: {
+              garmin: [{
+                data: providerRows,
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          },
+        },
+      },
+    },
+    { corePort: coreRuntime },
+  );
+
+  assert.ok(result.applied);
+  const records = (
+    await Promise.all(result.eventShardPaths.map((relativePath) =>
+      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+    ))
+  ).flat();
+  const ingest = await readRequiredIntegrationIngest(vaultRoot, result.ingestId);
+  const retainedText = JSON.stringify({ parts: ingest.parts, records });
+  assert.equal(latestLiveRecords(records).filter((record) => record.kind === "activity_session").length, 1);
+  assert.ok(records.length < 10);
+  assert.ok(ingest.parts.length < 10);
+  assert.equal(result.sampleShardPaths.length, 0);
+  assert.doesNotMatch(retainedText, /workout_distance|workout_swimming_stroke|2026-04-22T12:00:01\.000Z/u);
+});
+
+test("Junction workout-duration corrections supersede by immutable interval identity", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-workout-duration-correction");
+  await coreRuntime.initializeVault({
+    createdAt: "2026-04-22T00:00:00.000Z",
+    vaultRoot,
+  });
+  const importDuration = (value: number, sourceType: string, sport: string) =>
+    importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          accountId: "junction-workout-duration-user",
+          importedAt: "2026-04-22T13:00:00.000Z",
+          timeseries: {
+            workout_duration: [{
+              workout_id: "workout-duration-correction",
+              start: "2026-04-22T12:00:00.000Z",
+              end: "2026-04-22T12:30:00.000Z",
+              source: { device_id: `device-${sourceType}`, provider: "garmin", type: sourceType },
+              sport,
+              unit: "minutes",
+              value,
+            }],
+          },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+
+  await importDuration(30, "watch", "Running");
+  const correction = await importDuration(31, "tracker", "Run");
+  const records = (
+    await Promise.all(correction.eventShardPaths.map((relativePath) =>
+      coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+    ))
+  ).flat();
+  const liveDurations = latestLiveRecords(records).filter((record) =>
+    record.kind === "measurement"
+    && "measurements" in record
+    && Array.isArray(record.measurements)
+    && record.measurements.some((measurement) =>
+      measurement
+      && typeof measurement === "object"
+      && !Array.isArray(measurement)
+      && measurement.metric === "workout-duration"
+    )
+  );
+
+  assert.equal(liveDurations.length, 1);
+  const durationMeasurements = "measurements" in liveDurations[0]!
+    && Array.isArray(liveDurations[0].measurements)
+    ? liveDurations[0].measurements
+    : [];
+  assert.equal(durationMeasurements.length, 1);
+  assert.deepEqual(durationMeasurements[0], {
+    metric: "workout-duration",
+    qualifiers: { sport: "run" },
+    unit: "minutes",
+    value: 31,
+  });
 });
 
 test("importDeviceProviderSnapshot rejects ambiguous Junction daily aggregate legacy aliases", async () => {

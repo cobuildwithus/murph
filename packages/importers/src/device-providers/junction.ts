@@ -358,16 +358,24 @@ const WORKOUT_SESSION_METRICS: readonly {
   { key: "weightedAveragePowerWatts", nonnegative: true, paths: ["weightedAveragePowerWatts", "weighted_average_power_watts", "weightedAveragePower", "weighted_average_power", "weightedAverageWatts", "weighted_average_watts", "power.weighted_average_watts"] },
   { key: "kilojoules", nonnegative: true, paths: ["kilojoules", "kilojoule", "kj", "power.kilojoules"] },
 ];
-const JUNCTION_WORKOUT_ID_PATHS = [
+// Junction's exact stream endpoint and shallow webhook use the Junction/Vital
+// workout id. The upstream provider id remains source-facing metadata only.
+const JUNCTION_WORKOUT_PROVIDER_ID_PATHS = [
   "providerWorkoutId",
   "provider_workout_id",
   "providerId",
   "provider_id",
   "activityId",
   "activity_id",
+] as const;
+const JUNCTION_WORKOUT_JUNCTION_ID_PATHS = [
   "id",
   "workoutId",
   "workout_id",
+] as const;
+const JUNCTION_WORKOUT_SOURCE_ID_PATHS = [
+  ...JUNCTION_WORKOUT_PROVIDER_ID_PATHS,
+  ...JUNCTION_WORKOUT_JUNCTION_ID_PATHS,
 ] as const;
 const JUNCTION_GENERIC_SUMMARY_ID_PATHS = [
   "id",
@@ -608,8 +616,8 @@ const JUNCTION_MEAL_NUTRITION_TOTAL_KEYS = [
   "fiberGrams",
   "waterGrams",
 ] as const satisfies readonly MealNutritionTotalKey[];
-const JUNCTION_WORKOUT_STABLE_ID_PATHS = [
-  ...JUNCTION_WORKOUT_ID_PATHS,
+const JUNCTION_WORKOUT_FALLBACK_STABLE_ID_PATHS = [
+  ...JUNCTION_WORKOUT_PROVIDER_ID_PATHS,
   ...JUNCTION_GENERIC_SUMMARY_ID_PATHS,
 ] as const;
 const JUNCTION_BLOOD_OXYGEN_VALUE_PATHS = [
@@ -1575,13 +1583,6 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTi
 const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
 const JUNCTION_NOTE_RESOURCE = "note";
 const JUNCTION_WORKOUT_DURATION_RESOURCE = "workout_duration";
-const JUNCTION_WORKOUT_DISTANCE_RESOURCE = "workout_distance";
-const JUNCTION_WORKOUT_SWIMMING_STROKE_RESOURCE = "workout_swimming_stroke";
-const JUNCTION_SPARSE_WORKOUT_RESOURCES = new Set([
-  JUNCTION_WORKOUT_DURATION_RESOURCE,
-  JUNCTION_WORKOUT_DISTANCE_RESOURCE,
-  JUNCTION_WORKOUT_SWIMMING_STROKE_RESOURCE,
-]);
 
 // Derived from the descriptor entries (plus the sparse paired blood-pressure
 // resource) so the raw-snapshot sanitization allowlist cannot drift from the
@@ -1590,7 +1591,7 @@ const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set([
   ...JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
   JUNCTION_BLOOD_PRESSURE_RESOURCE,
   JUNCTION_NOTE_RESOURCE,
-  ...JUNCTION_SPARSE_WORKOUT_RESOURCES,
+  JUNCTION_WORKOUT_DURATION_RESOURCE,
 ]);
 
 function normalizeTimeseries(
@@ -1608,8 +1609,8 @@ function normalizeTimeseries(
       continue;
     }
 
-    if (JUNCTION_SPARSE_WORKOUT_RESOURCES.has(resource)) {
-      pushJunctionSparseWorkoutFacts(payload, resource, slugify(resource, "timeseries"), context);
+    if (resource === JUNCTION_WORKOUT_DURATION_RESOURCE) {
+      pushJunctionSparseWorkoutDurationFacts(payload, slugify(resource, "timeseries"), context);
       continue;
     }
 
@@ -1620,16 +1621,19 @@ function normalizeTimeseries(
   }
 }
 
-function pushJunctionSparseWorkoutFacts(
+function pushJunctionSparseWorkoutDurationFacts(
   payload: unknown,
-  resource: string,
   resourceSlug: string,
   context: NormalizationContext,
 ): void {
+  const resource = JUNCTION_WORKOUT_DURATION_RESOURCE;
   const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
   const seenFacts = new Set<string>();
+  const selectedEvidenceParts: DeviceEvidencePartPayload[] = [];
+  const selectedEvents: DeviceEventPayload[] = [];
 
-  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+  const entries = timeseriesResourceEntries(payload);
+  for (const [index, { entry, originFallback }] of [...entries.entries()].reverse()) {
     const workoutId = trimOptionalToLength(firstStringFromPaths(entry, [
       "workoutId",
       "workout_id",
@@ -1638,7 +1642,7 @@ function pushJunctionSparseWorkoutFacts(
       "source.workoutId",
       "source.workout_id",
     ]), 200);
-    const sport = trimOptionalToLength(firstStringFromPaths(entry, [
+    const rawSport = firstStringFromPaths(entry, [
       "sport.slug",
       "sport.name",
       "sport",
@@ -1648,12 +1652,10 @@ function pushJunctionSparseWorkoutFacts(
       "source.sport.slug",
       "source.sport.name",
       "source.sport",
-    ]), 80);
-    const requiresWorkoutAttribution = resource !== JUNCTION_WORKOUT_DURATION_RESOURCE;
-    if (requiresWorkoutAttribution && (!workoutId || !sport)) {
-      continue;
-    }
-
+    ]);
+    const sport = rawSport
+      ? trimSlugToLength(slugify(rawSport, "workout"), 80)
+      : undefined;
     const linkedEntry = workoutId ? { ...entry, id: workoutId } : entry;
     // Grouped timeseries entries already contain the merged group envelope.
     // Retain only the group-key provider fallback so the same source device is
@@ -1688,29 +1690,32 @@ function pushJunctionSparseWorkoutFacts(
     const dayKey = occurredAt
       ? resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, occurredAt, context.defaultTimeZone)
       : undefined;
-    const measurementValue = normalizeJunctionSparseWorkoutValue(resource, entry, startAt, endAt);
+    const measurementValue = normalizeJunctionSparseWorkoutDurationValue(entry, startAt, endAt);
     if (!occurredAt || !dayKey || measurementValue === null) {
       continue;
     }
 
-    const factHash = shortHash([
+    const factIdentityHash = shortHash([
       resource,
       resourceContext.sourceProviderSlug,
-      resourceContext.origin.sourceType,
-      resourceContext.origin.sourceInstanceId,
+      ...(workoutId
+        ? []
+        : [resourceContext.origin.sourceType, resourceContext.origin.sourceInstanceId, sport]),
       workoutId,
-      sport,
-      startAt,
+      startAt ?? occurredAt,
       endAt,
+    ]);
+    if (seenFacts.has(factIdentityHash)) {
+      continue;
+    }
+    seenFacts.add(factIdentityHash);
+
+    const factContentHash = shortHash([
+      factIdentityHash,
       measurementValue.value,
       measurementValue.unit,
     ]);
-    if (seenFacts.has(factHash)) {
-      continue;
-    }
-    seenFacts.add(factHash);
-
-    const role = `${baseArtifactRole}:${dayKey}:${factHash}`;
+    const role = `${baseArtifactRole}:${dayKey}:${factContentHash}`;
     const workoutTimestamp = withTimestampOverride(timestamp, {
       occurredAt,
       dayKey,
@@ -1720,37 +1725,37 @@ function pushJunctionSparseWorkoutFacts(
       resourceContext,
       linkedEntry,
       workoutTimestamp,
-      `${resourceSlug}-${factHash}`,
+      `${resourceSlug}-${factIdentityHash}`,
     );
     const qualifiers = stripUndefined({ sport });
 
-    pushEvidencePart(
-      context.evidenceParts,
-      withJunctionCompactTimeseriesMetadata(
-        resource,
-        createEvidencePart(
-          role,
-          `${role}.json`,
-          stripUndefined({
-            schema: "junction.workout_timeseries_fact.v1",
-            provider: "junction",
-            resource,
-            sourceProviderSlug: resourceContext.sourceProviderSlug,
-            sourceType: resourceContext.origin.sourceType,
-            sourceInstanceId: resourceContext.origin.sourceInstanceId,
-            workoutId,
-            sport,
-            startAt,
-            endAt,
-            value: measurementValue.value,
-            unit: measurementValue.unit,
-          }),
-        ),
-        "timeseries_reading",
+    const evidencePart = withJunctionCompactTimeseriesMetadata(
+      resource,
+      createEvidencePart(
+        role,
+        `${role}.json`,
+        stripUndefined({
+          schema: "junction.workout_timeseries_fact.v1",
+          provider: "junction",
+          resource,
+          sourceProviderSlug: resourceContext.sourceProviderSlug,
+          sourceType: resourceContext.origin.sourceType,
+          sourceInstanceId: resourceContext.origin.sourceInstanceId,
+          workoutId,
+          sport,
+          startAt,
+          endAt,
+          value: measurementValue.value,
+          unit: measurementValue.unit,
+        }),
       ),
+      "timeseries_reading",
     );
+    if (evidencePart) {
+      selectedEvidenceParts.push(evidencePart);
+    }
 
-    context.events.push(stripUndefined({
+    selectedEvents.push(stripUndefined({
       kind: "measurement",
       occurredAt,
       recordedAt: timestamp.recordedAt,
@@ -1772,10 +1777,14 @@ function pushJunctionSparseWorkoutFacts(
       },
     }));
   }
+
+  for (const evidencePart of selectedEvidenceParts.reverse()) {
+    pushEvidencePart(context.evidenceParts, evidencePart);
+  }
+  context.events.push(...selectedEvents.reverse());
 }
 
-function normalizeJunctionSparseWorkoutValue(
-  resource: string,
+function normalizeJunctionSparseWorkoutDurationValue(
   entry: PlainObject,
   startAt: string | undefined,
   endAt: string | undefined,
@@ -1783,26 +1792,10 @@ function normalizeJunctionSparseWorkoutValue(
   const rawValue = firstNumberFromPaths(entry, ["value"]);
   const rawUnit = firstStringFromPaths(entry, ["unit"]);
 
-  if (resource === JUNCTION_WORKOUT_DURATION_RESOURCE) {
-    const intervalMinutes = startAt && endAt ? minutesBetween(startAt, endAt) : undefined;
-    const minutes = normalizeWorkoutDurationMinutes(rawValue, rawUnit) ?? intervalMinutes;
-    return minutes !== undefined && minutes > 0 && minutes <= 7 * 24 * 60
-      ? { metric: "workout-duration", title: "Junction workout duration", unit: "minutes", value: roundJunctionDailyAggregateValue(minutes) }
-      : null;
-  }
-
-  if (resource === JUNCTION_WORKOUT_DISTANCE_RESOURCE) {
-    const meters = normalizeWorkoutDistanceMeters(rawValue, rawUnit);
-    return meters !== undefined && meters > 0 && meters <= 1_000_000
-      ? { metric: "workout-distance", title: "Junction workout distance", unit: "meter", value: roundJunctionDailyAggregateValue(meters) }
-      : null;
-  }
-
-  const strokes = rawValue !== undefined && rawValue >= 0 && rawValue <= 1_000_000
-    ? rawValue
-    : undefined;
-  return strokes !== undefined
-    ? { metric: "workout-swimming-strokes", title: "Junction workout swimming strokes", unit: "count", value: roundJunctionDailyAggregateValue(strokes) }
+  const intervalMinutes = startAt && endAt ? minutesBetween(startAt, endAt) : undefined;
+  const minutes = normalizeWorkoutDurationMinutes(rawValue, rawUnit) ?? intervalMinutes;
+  return minutes !== undefined && minutes > 0 && minutes <= 7 * 24 * 60
+    ? { metric: "workout-duration", title: "Junction workout duration", unit: "minutes", value: roundJunctionDailyAggregateValue(minutes) }
     : null;
 }
 
@@ -1822,26 +1815,6 @@ function normalizeWorkoutDurationMinutes(value: number | undefined, unit: string
   }
   if (["h", "hr", "hrs", "hour", "hours"].includes(normalizedUnit)) {
     return value * 60;
-  }
-  return undefined;
-}
-
-function normalizeWorkoutDistanceMeters(value: number | undefined, unit: string | undefined): number | undefined {
-  if (value === undefined || value < 0) {
-    return undefined;
-  }
-  const normalizedUnit = unit?.trim().toLowerCase();
-  if (!normalizedUnit || ["m", "meter", "meters", "metre", "metres"].includes(normalizedUnit)) {
-    return value;
-  }
-  if (["km", "kilometer", "kilometers", "kilometre", "kilometres"].includes(normalizedUnit)) {
-    return value * 1000;
-  }
-  if (["mi", "mile", "miles"].includes(normalizedUnit)) {
-    return value * 1609.344;
-  }
-  if (["ft", "foot", "feet"].includes(normalizedUnit)) {
-    return value * 0.3048;
   }
   return undefined;
 }
@@ -1950,7 +1923,7 @@ function normalizeJunctionWorkoutFeatures(
           resourceContext,
           entry,
           timestamp,
-          `stream-split-${split.index}-${feature.splitDistanceMeters ?? split.distanceMeters}`,
+          `stream-split-${split.index}`,
         ),
         dataOrigin: buildDataOrigin(entry, resourceContext, splitTimestamp, {
           normalizerVersion: "junction-workout-features.v1",
@@ -3909,7 +3882,7 @@ function pushWorkoutSummary(
     160,
   );
   const sourceWorkoutId = trimOptionalToLength(
-    firstStringFromPaths(entry, JUNCTION_WORKOUT_ID_PATHS),
+    firstStringFromPaths(entry, JUNCTION_WORKOUT_SOURCE_ID_PATHS),
     200,
   );
   const distanceKm =
@@ -5312,8 +5285,18 @@ function buildStableSummaryResourceId(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string {
+  const exactJunctionWorkoutId = resourceContext.resource === "workouts"
+    ? firstStringFromPaths(entry, JUNCTION_WORKOUT_JUNCTION_ID_PATHS)
+    : undefined;
+  if (exactJunctionWorkoutId) {
+    return `${resourceContext.resourceSlug}-${shortHash([
+      "junction-workout-id",
+      exactJunctionWorkoutId,
+    ])}`;
+  }
+
   const explicitId = resourceContext.resource === "workouts"
-    ? firstStringFromPaths(entry, JUNCTION_WORKOUT_STABLE_ID_PATHS)
+    ? firstStringFromPaths(entry, JUNCTION_WORKOUT_FALLBACK_STABLE_ID_PATHS)
     : resourceContext.resource === "meal"
       ? firstStringFromPaths(entry, JUNCTION_MEAL_STABLE_ID_PATHS)
     : firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);

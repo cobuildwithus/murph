@@ -37,10 +37,10 @@ Current providers:
 - Junction fetches the sparse `note` timeseries by default. Oura note tags become
   completed intervention events for Personal Patterns. Free-text note values are
   dropped before raw snapshot and compact evidence retention.
-- Junction also fetches bounded `workout_duration`, `workout_distance`, and
-  `workout_swimming_stroke` resources. Distance and stroke facts require the
-  provider's explicit workout ID and sport attribution; duration is never
-  linked by time overlap. Shallow `workout_stream` webhooks use one exact
+- Junction fetches sparse `workout_duration` facts with stable interval
+  identity; duration is never linked by time overlap. The high-frequency
+  `workout_distance` and `workout_swimming_stroke` row feeds remain excluded.
+  Shallow `workout_stream` webhooks use one exact
   `/v2/timeseries/workouts/{workout_id}/stream` request, then discard the raw
   response after reducing it to a capped feature envelope and at most 64
   fixed-distance splits. The request is capped at 8 MiB/50,000 points and raw

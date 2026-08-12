@@ -13,6 +13,7 @@ export const JUNCTION_WORKOUT_STREAM_MAX_POINTS = 50_000;
 export const JUNCTION_WORKOUT_FEATURE_MAX_SPLITS = 64;
 export const JUNCTION_WORKOUT_FEATURE_MAX_MEASUREMENTS = 20;
 export const JUNCTION_WORKOUT_FEATURE_MAX_SPLIT_MEASUREMENTS = 5;
+const JUNCTION_WORKOUT_FEATURE_MAX_SPLIT_INDEX = 10_000;
 
 export interface JunctionWorkoutFeatureMeasurement {
   metric: string;
@@ -93,7 +94,7 @@ const METRIC_SERIES = Object.freeze([
     max: 400,
     maxMetric: "max-workout-cadence",
     secondHalfMetric: "second-half-average-workout-cadence",
-    unit: "rpm",
+    unit: null,
   },
   {
     arrayKeys: ["power"] as const,
@@ -157,7 +158,7 @@ export function reduceJunctionWorkoutStream(
   }
 
   const sport = normalizeSport(input.sport) ?? readWorkoutStreamSport(record);
-  const measurements = buildWorkoutStreamMeasurements(record, points);
+  const measurements = buildWorkoutStreamMeasurements(record, points, sport);
   const splitResult = buildWorkoutStreamSplits(record, points, sport);
   if (measurements.length === 0 && splitResult.splits.length === 0) {
     return null;
@@ -172,7 +173,7 @@ export function reduceJunctionWorkoutStream(
     sport,
     startedAt,
     endedAt: endedAt ?? undefined,
-    pointCount: timeValues.length,
+    pointCount: points.length,
     measurements: measurements.slice(0, JUNCTION_WORKOUT_FEATURE_MAX_MEASUREMENTS),
     splitDistanceMeters: splitResult.splitDistanceMeters,
     splits: splitResult.splits,
@@ -216,7 +217,12 @@ export function parseJunctionWorkoutFeatureEnvelope(
     throw new JunctionWorkoutStreamLimitError("Junction workout feature split count exceeded the configured limit.");
   }
 
-  const splits = rawSplits.map((split, index) => parseWorkoutFeatureSplit(split, index + 1));
+  const splits = rawSplits.map(parseWorkoutFeatureSplit);
+  for (let index = 1; index < splits.length; index += 1) {
+    if ((splits[index]?.index ?? 0) <= (splits[index - 1]?.index ?? 0)) {
+      throw new TypeError("Junction workout feature split indexes were not strictly increasing.");
+    }
+  }
   if (measurements.length === 0 && splits.length === 0) {
     throw new TypeError("Junction workout feature envelope did not contain any facts.");
   }
@@ -292,6 +298,7 @@ function buildWorkoutStreamPoints(
 function buildWorkoutStreamMeasurements(
   record: PlainObject,
   points: readonly WorkoutStreamPoint[],
+  sport: string | undefined,
 ): JunctionWorkoutFeatureMeasurement[] {
   const firstTimeMs = points[0]?.timeMs;
   const lastTimeMs = points.at(-1)?.timeMs;
@@ -313,7 +320,8 @@ function buildWorkoutStreamMeasurements(
   const midpointMs = firstTimeMs + (lastTimeMs - firstTimeMs) / 2;
   for (const descriptor of METRIC_SERIES) {
     const values = firstArray(record, descriptor.arrayKeys);
-    if (!values) {
+    const unit = descriptor.unit ?? resolveWorkoutCadenceUnit(sport);
+    if (!values || !unit) {
       continue;
     }
 
@@ -322,18 +330,18 @@ function buildWorkoutStreamMeasurements(
       continue;
     }
     measurements.push(
-      measurement(descriptor.averageMetric, mean(valid.map((entry) => entry.value)), descriptor.unit),
-      measurement(descriptor.maxMetric, Math.max(...valid.map((entry) => entry.value)), descriptor.unit),
+      measurement(descriptor.averageMetric, mean(valid.map((entry) => entry.value)), unit),
+      measurement(descriptor.maxMetric, Math.max(...valid.map((entry) => entry.value)), unit),
     );
 
     if (descriptor.firstHalfMetric && descriptor.secondHalfMetric && lastTimeMs > firstTimeMs) {
       const firstHalf = valid.filter((entry) => entry.timeMs < midpointMs).map((entry) => entry.value);
       const secondHalf = valid.filter((entry) => entry.timeMs >= midpointMs).map((entry) => entry.value);
       if (firstHalf.length > 0) {
-        measurements.push(measurement(descriptor.firstHalfMetric, mean(firstHalf), descriptor.unit));
+        measurements.push(measurement(descriptor.firstHalfMetric, mean(firstHalf), unit));
       }
       if (secondHalf.length > 0) {
-        measurements.push(measurement(descriptor.secondHalfMetric, mean(secondHalf), descriptor.unit));
+        measurements.push(measurement(descriptor.secondHalfMetric, mean(secondHalf), unit));
       }
     }
   }
@@ -349,57 +357,75 @@ function buildWorkoutStreamSplits(
   const distancePoints = points.filter(
     (point): point is WorkoutStreamPoint & { distanceMeters: number } => point.distanceMeters !== undefined,
   );
-  const totalDistance = distancePoints.at(-1)?.distanceMeters;
-  if (!totalDistance || distancePoints.length < 2) {
+  const firstDistancePoint = distancePoints[0];
+  const finalDistancePoint = distancePoints.at(-1);
+  if (!firstDistancePoint || !finalDistancePoint || distancePoints.length < 2) {
     return { splits: [] };
   }
 
-  const baseDistance = sport?.includes("swim") ? 100 : 1_000;
-  const splitDistanceMeters = baseDistance * Math.max(
-    1,
-    Math.ceil(totalDistance / (baseDistance * JUNCTION_WORKOUT_FEATURE_MAX_SPLITS)),
+  const splitDistanceMeters = sport?.includes("swim") ? 100 : 1_000;
+  // Split indexes are absolute cumulative-distance boundary ordinals. This
+  // keeps surviving facets stable across corrections and never labels the
+  // partial remainder after a nonzero stream start as a complete split.
+  const firstBoundaryIndex = Math.ceil(
+    firstDistancePoint.distanceMeters / splitDistanceMeters,
   );
-  const splitCount = Math.min(
-    Math.floor(totalDistance / splitDistanceMeters),
-    JUNCTION_WORKOUT_FEATURE_MAX_SPLITS,
+  const firstSplitIndex = firstBoundaryIndex + 1;
+  const lastSplitIndex = Math.floor(
+    finalDistancePoint.distanceMeters / splitDistanceMeters,
   );
-  if (splitCount === 0) {
+  if (firstSplitIndex > lastSplitIndex) {
     return { splits: [] };
   }
 
   const splits: JunctionWorkoutFeatureSplit[] = [];
-  let previousPoint = distancePoints[0];
   let searchIndex = 1;
-  for (let splitIndex = 1; splitIndex <= splitCount; splitIndex += 1) {
-    const targetDistance = splitIndex * splitDistanceMeters;
-    while (
-      searchIndex < distancePoints.length
-      && (distancePoints[searchIndex]?.distanceMeters ?? Number.NEGATIVE_INFINITY) < targetDistance
-    ) {
-      searchIndex += 1;
-    }
-    const crossingPoint = distancePoints[searchIndex];
-    if (!crossingPoint) {
+  const firstBoundary = findWorkoutSplitBoundary(
+    distancePoints,
+    firstBoundaryIndex * splitDistanceMeters,
+    searchIndex,
+  );
+  if (!firstBoundary) {
+    return { splits: [] };
+  }
+  let previousBoundaryTimeMs = firstBoundary.timeMs;
+  searchIndex = firstBoundary.searchIndex;
+
+  for (
+    let splitIndex = firstSplitIndex;
+    splitIndex <= lastSplitIndex && splits.length < JUNCTION_WORKOUT_FEATURE_MAX_SPLITS;
+    splitIndex += 1
+  ) {
+    const boundary = findWorkoutSplitBoundary(
+      distancePoints,
+      splitIndex * splitDistanceMeters,
+      searchIndex,
+    );
+    if (!boundary) {
       break;
     }
+    const boundaryTimeMs = boundary.timeMs;
+    searchIndex = boundary.searchIndex;
 
     const measurements = buildSplitMeasurements(
       record,
       points,
-      previousPoint.index,
-      crossingPoint.index,
+      previousBoundaryTimeMs,
+      boundaryTimeMs,
+      splits.length === 0,
+      sport,
     );
-    const durationSeconds = (crossingPoint.timeMs - previousPoint.timeMs) / 1000;
+    const durationSeconds = (boundaryTimeMs - previousBoundaryTimeMs) / 1000;
     if (durationSeconds > 0) {
       splits.push({
         distanceMeters: splitDistanceMeters,
         durationSeconds: roundMetric(durationSeconds),
-        endedAt: new Date(crossingPoint.timeMs).toISOString(),
+        endedAt: new Date(boundaryTimeMs).toISOString(),
         index: splitIndex,
         measurements,
       });
     }
-    previousPoint = crossingPoint;
+    previousBoundaryTimeMs = boundaryTimeMs;
   }
 
   return splits.length > 0 ? { splitDistanceMeters, splits } : { splits: [] };
@@ -408,21 +434,26 @@ function buildWorkoutStreamSplits(
 function buildSplitMeasurements(
   record: PlainObject,
   points: readonly WorkoutStreamPoint[],
-  startIndex: number,
-  endIndex: number,
+  startTimeMs: number,
+  endTimeMs: number,
+  includeStart: boolean,
+  sport: string | undefined,
 ): JunctionWorkoutFeatureMeasurement[] {
   const measurements: JunctionWorkoutFeatureMeasurement[] = [];
   const splitDescriptors = [
     { arrayKeys: ["heartrate", "heart_rate"] as const, max: 300, metric: "average-workout-split-heart-rate", unit: "bpm" },
-    { arrayKeys: ["cadence"] as const, max: 400, metric: "average-workout-split-cadence", unit: "rpm" },
+    { arrayKeys: ["cadence"] as const, max: 400, metric: "average-workout-split-cadence", unit: resolveWorkoutCadenceUnit(sport) },
     { arrayKeys: ["power"] as const, max: 5_000, metric: "average-workout-split-power", unit: "watt" },
   ] as const;
 
   for (const descriptor of splitDescriptors) {
     const values = firstArray(record, descriptor.arrayKeys);
-    if (!values) continue;
+    if (!values || !descriptor.unit) continue;
     const inSplit = points
-      .filter((point) => point.index >= startIndex && point.index <= endIndex)
+      .filter((point) =>
+        (includeStart ? point.timeMs >= startTimeMs : point.timeMs > startTimeMs)
+        && point.timeMs <= endTimeMs
+      )
       .flatMap((point) => {
         const value = normalizeBoundedMetric(values[point.index], descriptor.max);
         return value === undefined ? [] : [value];
@@ -433,6 +464,52 @@ function buildSplitMeasurements(
   }
 
   return measurements.slice(0, JUNCTION_WORKOUT_FEATURE_MAX_SPLIT_MEASUREMENTS);
+}
+
+function findWorkoutSplitBoundary(
+  distancePoints: readonly (WorkoutStreamPoint & { distanceMeters: number })[],
+  targetDistance: number,
+  initialSearchIndex: number,
+): { searchIndex: number; timeMs: number } | null {
+  let searchIndex = Math.max(1, initialSearchIndex);
+  while (
+    searchIndex < distancePoints.length
+    && (distancePoints[searchIndex]?.distanceMeters ?? Number.NEGATIVE_INFINITY) < targetDistance
+  ) {
+    searchIndex += 1;
+  }
+  const upperPoint = distancePoints[searchIndex];
+  const lowerPoint = distancePoints[Math.max(0, searchIndex - 1)];
+  if (
+    !lowerPoint
+    || !upperPoint
+    || upperPoint.distanceMeters < targetDistance
+    || lowerPoint.distanceMeters > targetDistance
+  ) {
+    return null;
+  }
+  return {
+    searchIndex,
+    timeMs: interpolateWorkoutSplitBoundaryTimeMs(lowerPoint, upperPoint, targetDistance),
+  };
+}
+
+function interpolateWorkoutSplitBoundaryTimeMs(
+  lowerPoint: WorkoutStreamPoint & { distanceMeters: number },
+  upperPoint: WorkoutStreamPoint & { distanceMeters: number },
+  targetDistance: number,
+): number {
+  if (lowerPoint.distanceMeters === targetDistance) {
+    return lowerPoint.timeMs;
+  }
+  const distanceSpan = upperPoint.distanceMeters - lowerPoint.distanceMeters;
+  if (distanceSpan <= 0) {
+    return upperPoint.timeMs;
+  }
+  const ratio = Math.max(0, Math.min(1,
+    (targetDistance - lowerPoint.distanceMeters) / distanceSpan,
+  ));
+  return lowerPoint.timeMs + (upperPoint.timeMs - lowerPoint.timeMs) * ratio;
 }
 
 function workoutMetricValues(
@@ -446,9 +523,22 @@ function workoutMetricValues(
   });
 }
 
-function parseWorkoutFeatureSplit(value: unknown, expectedIndex: number): JunctionWorkoutFeatureSplit {
+const RUNNING_CADENCE_SPORT_PATTERN = /(?:^|-)(?:hike|hiking|run|running|walk|walking)(?:-|$)/u;
+const CYCLING_CADENCE_SPORT_PATTERN = /(?:^|-)(?:bike|biking|cycle|cycling|ride|riding|spin|spinning)(?:-|$)/u;
+
+function resolveWorkoutCadenceUnit(sport: string | undefined): string | undefined {
+  if (!sport) {
+    return undefined;
+  }
+  if (RUNNING_CADENCE_SPORT_PATTERN.test(sport)) {
+    return "steps-per-minute";
+  }
+  return CYCLING_CADENCE_SPORT_PATTERN.test(sport) ? "rpm" : undefined;
+}
+
+function parseWorkoutFeatureSplit(value: unknown): JunctionWorkoutFeatureSplit {
   const record = asPlainObject(value);
-  const index = record ? parseBoundedInteger(record.index, 1, JUNCTION_WORKOUT_FEATURE_MAX_SPLITS) : null;
+  const index = record ? parseBoundedInteger(record.index, 1, JUNCTION_WORKOUT_FEATURE_MAX_SPLIT_INDEX) : null;
   const distanceMeters = record ? parsePositiveNumber(record.distanceMeters, 1_000_000) : null;
   const durationSeconds = record ? parsePositiveNumber(record.durationSeconds, 7 * 24 * 60 * 60) : null;
   const endedAt = record ? parseIsoTimestamp(record.endedAt) : null;
@@ -456,7 +546,7 @@ function parseWorkoutFeatureSplit(value: unknown, expectedIndex: number): Juncti
     ? parseMeasurements(record.measurements, JUNCTION_WORKOUT_FEATURE_MAX_SPLIT_MEASUREMENTS)
     : [];
 
-  if (!record || index !== expectedIndex || distanceMeters === null || durationSeconds === null || !endedAt) {
+  if (!record || index === null || distanceMeters === null || durationSeconds === null || !endedAt) {
     throw new TypeError("Junction workout feature split was invalid.");
   }
 

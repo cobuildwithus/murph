@@ -4984,6 +4984,230 @@ test("Junction connection webhooks share the initial connect backfill identity",
   }
 });
 
+test("device sync service terminalizes a persistently unavailable workout stream after three client attempts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-workout-stream-retry-terminal");
+  const now = new Date().toISOString();
+  let streamRequests = 0;
+  const importSnapshot = vi.fn(async () => ({ imported: true }));
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: { warn() {} },
+    },
+    importer: { importDeviceProviderSnapshot: importSnapshot },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: [],
+        timeseriesResources: [],
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+          if (url.endsWith("/v2/user/providers/junction-workout-terminal")) {
+            return createJsonResponse({ providers: [{
+              id: "provider-garmin-terminal",
+              slug: "garmin",
+              status: "connected",
+              resource_availability: { workouts: true },
+            }] });
+          }
+          if (url.endsWith("/v2/timeseries/workouts/workout-terminal/stream")) {
+            streamRequests += 1;
+            return new Response(JSON.stringify({ detail: "temporary" }), {
+              status: 503,
+              headers: { "content-type": "application/json", "retry-after": "0" },
+            });
+          }
+          throw new Error(`Unexpected Junction request during workout terminal retry test: ${url}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-workout-terminal",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: now,
+      nextReconcileAt: null,
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      lastSeenAt: now,
+    });
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.workout_stream.created",
+        user_id: account.externalAccountId,
+        data: {
+          workout_id: "workout-terminal",
+          source: { provider: "garmin", type: "watch" },
+          sport: { slug: "running" },
+        },
+      },
+      messageId: "msg_workout_stream_terminal",
+    });
+
+    const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+    const queuedRow = readJobsForAccountForTesting(store, account.id).find((job) => job.kind === "resource");
+    const queued = queuedRow ? store.getJobById(queuedRow.id) : null;
+    assert.equal(accepted.accepted, true);
+    assert.equal(queued?.maxAttempts, 1);
+
+    await service.runWorkerOnce();
+
+    const terminal = queued ? store.getJobById(queued.id) : null;
+    assert.equal(streamRequests, 3);
+    assert.equal(terminal?.status, "dead");
+    assert.equal(terminal?.attempts, 1);
+    assert.equal(terminal?.lastErrorCode, "JUNCTION_API_REQUEST_FAILED");
+    assert.equal(importSnapshot.mock.calls.length, 0);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service imports a workout stream that recovers on the third client attempt", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-workout-stream-third-recovery");
+  const now = new Date().toISOString();
+  let streamRequests = 0;
+  const importedSnapshots: unknown[] = [];
+  const preparedImports: Awaited<ReturnType<typeof prepareDeviceProviderSnapshotImport>>[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        importedSnapshots.push(input.snapshot);
+        const prepared = await prepareDeviceProviderSnapshotImport(input);
+        preparedImports.push(prepared);
+        return { events: prepared.events ?? [] };
+      },
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: [],
+        timeseriesResources: [],
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+          if (url.endsWith("/v2/user/providers/junction-workout-recovery")) {
+            return createJsonResponse({ providers: [{
+              id: "provider-garmin-recovery",
+              slug: "garmin",
+              status: "connected",
+              resource_availability: { workouts: true },
+            }] });
+          }
+          if (url.endsWith("/v2/timeseries/workouts/workout-recovery/stream")) {
+            streamRequests += 1;
+            if (streamRequests < 3) {
+              return new Response(JSON.stringify({ detail: "temporary" }), {
+                status: 503,
+                headers: { "content-type": "application/json", "retry-after": "0" },
+              });
+            }
+            return createJsonResponse({
+              distance: [0, 1_000],
+              heartrate: [120, 130],
+              time: [1_775_174_400, 1_775_174_460],
+            });
+          }
+          throw new Error(`Unexpected Junction request during workout recovery retry test: ${url}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-workout-recovery",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: now,
+      nextReconcileAt: null,
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      lastSeenAt: now,
+    });
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.workout_stream.created",
+        user_id: account.externalAccountId,
+        data: {
+          workout_id: "workout-recovery",
+          source: { provider: "garmin", type: "watch" },
+          sport: { slug: "running" },
+        },
+      },
+      messageId: "msg_workout_stream_recovery",
+    });
+
+    await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+    const queuedRow = readJobsForAccountForTesting(store, account.id).find((job) => job.kind === "resource");
+    const queued = queuedRow ? store.getJobById(queuedRow.id) : null;
+    assert.equal(queued?.maxAttempts, 1);
+
+    await service.runWorkerOnce();
+
+    assert.equal(streamRequests, 3);
+    assert.equal(queued ? store.getJobById(queued.id)?.status : null, "succeeded");
+    assert.equal(importedSnapshots.length, 1);
+    assert.equal(preparedImports.length, 1);
+    const retainedSnapshot = importedSnapshots[0];
+    const retainedText = JSON.stringify(retainedSnapshot);
+    assert.match(retainedText, /junction\.workout_features\.v1/u);
+    assert.doesNotMatch(retainedText, /"distance"\s*:\s*\[|"heartrate"\s*:\s*\[|"time"\s*:\s*\[/u);
+    assert.ok((preparedImports[0]?.events?.length ?? 0) > 0);
+    assert.equal(
+      preparedImports[0]?.evidenceParts?.some((part) => part.role === "provider-snapshot"),
+      false,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(preparedImports[0]?.evidenceParts),
+      /"distance"\s*:\s*\[|"heartrate"\s*:\s*\[|"time"\s*:\s*\[/u,
+    );
+  } finally {
+    close();
+  }
+});
+
 test("manual reconcile boosts Junction reconcile priority without promoting historical backfill", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-junction-backfill-priority");
   const { service, store, close } = createServiceFixture({

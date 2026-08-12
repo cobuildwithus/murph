@@ -239,7 +239,7 @@ function findJunctionCompactTimeseriesArtifacts(
 function assertNoFullJunctionTimeseriesArtifacts(payload: DeviceBatchImportPayload): void {
   assert.equal(
     (payload.evidenceParts ?? []).some((artifact) =>
-      /^junction-timeseries-(?!daily-|reading-(?:blood-pressure|note|workout-duration|workout-distance|workout-swimming-stroke):)/u
+      /^junction-timeseries-(?!daily-|reading-(?:blood-pressure|note|workout-duration):)/u
         .test(artifact.role)
     ),
     false,
@@ -4195,9 +4195,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "glucose",
     "blood_pressure",
     "note",
-    "workout_distance",
     "workout_duration",
-    "workout_swimming_stroke",
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
@@ -4751,7 +4749,7 @@ test("Junction partial profiles land height-only and reject non-boolean wheelcha
   assert.equal(demographics?.note, "Birth date: 1990-05-14.");
 });
 
-test("Junction normalizer ignores raw workout stream summaries and unattributed workout facts", () => {
+test("Junction normalizer ignores raw workout streams and excluded high-frequency workout row feeds", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
@@ -4774,10 +4772,7 @@ test("Junction normalizer ignores raw workout stream summaries and unattributed 
   });
 
   assert.deepEqual(payload.provenance?.summaryResources, []);
-  assert.deepEqual(payload.provenance?.timeseriesResources, [
-    "workout_distance",
-    "workout_swimming_stroke",
-  ]);
+  assert.deepEqual(payload.provenance?.timeseriesResources, []);
   assert.deepEqual(payload.events, []);
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-workout-stream"), false);
@@ -4785,7 +4780,7 @@ test("Junction normalizer ignores raw workout stream summaries and unattributed 
   assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "junction-timeseries-workout-swimming-stroke"), false);
 });
 
-test("Junction sparse workout facts require exact linkage and never infer duration from overlap", () => {
+test("Junction sparse workout duration keeps explicit linkage and never infers it from overlap", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-04-22T13:00:00.000Z",
     summaries: {
@@ -4807,44 +4802,11 @@ test("Junction sparse workout facts require exact linkage and never infer durati
               end: "2026-04-22T12:30:00.000Z",
               unit: "min",
               value: 30,
-            }],
-          }],
-        },
-      },
-      workout_distance: {
-        groups: {
-          apple_health_kit: [{
-            source: {
-              device_id: "device-synthetic-1",
-              provider: "apple_health_kit",
-              sport: "pool_swimming",
-              type: "watch",
-              workout_id: "workout-linked-1",
-            },
-            data: [{
+            }, {
               start: "2026-04-22T12:00:00.000Z",
-              end: "2026-04-22T12:10:00.000Z",
-              unit: "m",
-              value: 400,
-            }],
-          }],
-        },
-      },
-      workout_swimming_stroke: {
-        groups: {
-          apple_health_kit: [{
-            source: {
-              device_id: "device-synthetic-1",
-              provider: "apple_health_kit",
-              sport: "pool_swimming",
-              type: "watch",
-              workout_id: "workout-linked-1",
-            },
-            data: [{
-              start: "2026-04-22T12:00:00.000Z",
-              end: "2026-04-22T12:10:00.000Z",
-              unit: "count",
-              value: 180,
+              end: "2026-04-22T12:30:00.000Z",
+              unit: "min",
+              value: 31,
             }],
           }],
         },
@@ -4854,20 +4816,16 @@ test("Junction sparse workout facts require exact linkage and never infer durati
 
   const session = payload.events?.find((event) => event.kind === "activity_session");
   const measurements = payload.events?.filter((event) => event.kind === "measurement") ?? [];
-  const distance = measurements.find((event) =>
-    (event.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0]?.metric === "workout-distance"
-  );
-  const strokes = measurements.find((event) =>
-    (event.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0]?.metric === "workout-swimming-strokes"
-  );
   const duration = measurements.find((event) =>
     (event.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0]?.metric === "workout-duration"
   );
 
   assert.ok(session?.externalRef);
-  assert.equal(distance?.externalRef?.resourceType, session?.externalRef?.resourceType);
-  assert.equal(distance?.externalRef?.resourceId, session?.externalRef?.resourceId);
-  assert.equal(strokes?.externalRef?.resourceId, session?.externalRef?.resourceId);
+  assert.equal(measurements.length, 1);
+  assert.equal(
+    (duration?.fields?.measurements as Array<Record<string, unknown>> | undefined)?.[0]?.value,
+    31,
+  );
   assert.equal(duration?.externalRef?.resourceType, "junction-apple-health-kit-workout-duration");
   assert.notEqual(duration?.externalRef?.resourceId, session?.externalRef?.resourceId);
   assert.equal(payload.samples?.length ?? 0, 0);
@@ -4900,6 +4858,10 @@ test("Junction workout stream reduction emits only capped derived features and f
   assert.ok(feature.splits.length <= JUNCTION_WORKOUT_FEATURE_MAX_SPLITS);
   assert.equal(feature.splits[0]?.durationSeconds, 20);
   assert.equal(feature.splits[1]?.durationSeconds, 20);
+  assert.equal(
+    feature.measurements.find((measurement) => measurement.metric === "average-workout-cadence")?.unit,
+    "steps-per-minute",
+  );
   assert.doesNotMatch(JSON.stringify(feature), /altitude|cadence"\s*:|distance"\s*:|heartrate|lat|lng|power"\s*:|time"\s*:|velocity_smooth/u);
 
   assert.throws(
@@ -4911,9 +4873,179 @@ test("Junction workout stream reduction emits only capped derived features and f
     }),
     JunctionWorkoutStreamLimitError,
   );
+  assert.throws(
+    () => reduceJunctionWorkoutStream({
+      lat: Array.from({ length: JUNCTION_WORKOUT_STREAM_MAX_POINTS + 1 }, () => 40),
+      time: [1_776_859_200],
+    }, {
+      workoutId: "workout-coordinate-over-limit",
+      sourceProviderSlug: "garmin",
+    }),
+    JunctionWorkoutStreamLimitError,
+  );
+
+  const longFeature = reduceJunctionWorkoutStream({
+    distance: [0, 100_000],
+    time: [1_776_859_200, 1_776_860_200],
+  }, {
+    workoutId: "workout-fixed-split-cap",
+    sourceProviderSlug: "garmin",
+    sport: "running",
+  });
+  assert.ok(longFeature);
+  assert.equal(longFeature.splitDistanceMeters, 1_000);
+  assert.equal(longFeature.splits.length, JUNCTION_WORKOUT_FEATURE_MAX_SPLITS);
+  assert.deepEqual([longFeature.splits[0]?.index, longFeature.splits.at(-1)?.index], [1, 64]);
+
+  const partialStart = reduceJunctionWorkoutStream({
+    distance: [12, 1_012],
+    time: [1_776_859_200, 1_776_859_300],
+  }, {
+    workoutId: "workout-partial-split",
+    sourceProviderSlug: "garmin",
+    sport: "running",
+  });
+  assert.ok(partialStart);
+  assert.equal(partialStart.splits.length, 0);
+  assert.equal(
+    partialStart.measurements.find((measurement) => measurement.metric === "workout-stream-distance")?.value,
+    1_012,
+  );
+
+  const startingBoundaryPlateau = reduceJunctionWorkoutStream({
+    distance: [0, 0, 1_000],
+    time: [1_776_859_200, 1_776_859_210, 1_776_859_220],
+  }, {
+    workoutId: "workout-starting-boundary-plateau",
+    sourceProviderSlug: "garmin",
+    sport: "running",
+  });
+  assert.ok(startingBoundaryPlateau);
+  assert.equal(startingBoundaryPlateau.splits.length, 1);
+  assert.equal(startingBoundaryPlateau.splits[0]?.durationSeconds, 20);
+
+  const cycling = reduceJunctionWorkoutStream({
+    cadence: [80, 90],
+    time: [1_776_859_200, 1_776_859_210],
+  }, {
+    workoutId: "workout-cycling-cadence",
+    sourceProviderSlug: "garmin",
+    sport: "cycling",
+  });
+  assert.ok(cycling);
+  assert.equal(
+    cycling.measurements.find((measurement) => measurement.metric === "average-workout-cadence")?.unit,
+    "rpm",
+  );
+
+  const unknownSport = reduceJunctionWorkoutStream({
+    cadence: [80, 90],
+    time: [1_776_859_200, 1_776_859_210],
+  }, {
+    workoutId: "workout-unknown-cadence",
+    sourceProviderSlug: "garmin",
+    sport: "other",
+  });
+  assert.ok(unknownSport);
+  assert.equal(
+    unknownSport.measurements.some((measurement) => measurement.metric.includes("cadence")),
+    false,
+  );
 });
 
-test("Junction workout feature envelopes persist as siblings of the existing activity session", () => {
+test("Junction workout splits interpolate irregular cumulative distance without sharing metric samples", () => {
+  const startedAtSeconds = 1_776_859_200;
+  const feature = reduceJunctionWorkoutStream({
+    distance: [0, undefined, 2_000],
+    heartrate: [100, 200, 300],
+    power: [undefined, 200, undefined],
+    time: [startedAtSeconds, startedAtSeconds + 30, startedAtSeconds + 90],
+  }, {
+    workoutId: "workout-irregular-splits",
+    sourceProviderSlug: "garmin",
+    sport: "running",
+  });
+
+  assert.ok(feature);
+  assert.deepEqual(
+    feature.measurements.find((measurement) => measurement.metric === "workout-stream-distance"),
+    { metric: "workout-stream-distance", unit: "meter", value: 2_000 },
+  );
+  assert.equal(feature.splits.length, 2);
+  assert.deepEqual(feature.splits.map((split) => split.durationSeconds), [45, 45]);
+  assert.deepEqual(feature.splits.map((split) => split.endedAt), [
+    new Date((startedAtSeconds + 45) * 1000).toISOString(),
+    new Date((startedAtSeconds + 90) * 1000).toISOString(),
+  ]);
+  assert.deepEqual(feature.splits[0]?.measurements, [
+    { metric: "average-workout-split-heart-rate", unit: "bpm", value: 150 },
+    { metric: "average-workout-split-power", unit: "watt", value: 200 },
+  ]);
+  assert.deepEqual(feature.splits[1]?.measurements, [
+    { metric: "average-workout-split-heart-rate", unit: "bpm", value: 300 },
+  ]);
+
+  const nonzeroStart = reduceJunctionWorkoutStream({
+    distance: [100, 2_100],
+    time: [startedAtSeconds, startedAtSeconds + 90],
+  }, {
+    workoutId: "workout-nonzero-distance-start",
+    sourceProviderSlug: "garmin",
+    sport: "running",
+  });
+  assert.ok(nonzeroStart);
+  assert.equal(nonzeroStart.splits.length, 1);
+  assert.equal(nonzeroStart.splits[0]?.index, 2);
+  assert.equal(nonzeroStart.splits[0]?.durationSeconds, 45);
+  assert.equal(nonzeroStart.splits[0]?.endedAt, new Date((startedAtSeconds + 85.5) * 1000).toISOString());
+
+  const irregularJump = reduceJunctionWorkoutStream({
+    distance: [0, 1_500, 2_000],
+    time: [startedAtSeconds, startedAtSeconds + 60, startedAtSeconds + 70],
+  }, {
+    workoutId: "workout-irregular-jump",
+    sourceProviderSlug: "garmin",
+    sport: "running",
+  });
+  assert.ok(irregularJump);
+  assert.deepEqual(irregularJump.splits.map((split) => split.durationSeconds), [40, 30]);
+});
+
+test("Junction workout splits omit an unsupported zero-time crossing without renumbering later splits", () => {
+  const feature = reduceJunctionWorkoutStream({
+    distance: [0, 1_000, 2_000],
+    heartrate: [120, 130, 140],
+    time: [1_776_859_200, 1_776_859_200, 1_776_859_260],
+  }, {
+    workoutId: "workout-duplicate-timestamps",
+    sourceProviderSlug: "garmin",
+    sport: "running",
+  });
+
+  assert.ok(feature);
+  assert.equal(feature.splits.length, 1);
+  assert.equal(feature.splits[0]?.index, 2);
+  assert.equal(feature.splits[0]?.durationSeconds, 60);
+});
+
+test("Junction workout feature point counts include only accepted ordered timestamps", () => {
+  const feature = reduceJunctionWorkoutStream({
+    cadence: [80, 82, 84, 86],
+    distance: [0, 500, 1_000, 1_500],
+    time: [1_776_859_200, "invalid", 1_776_859_210, 1_776_859_205],
+  }, {
+    workoutId: "workout-accepted-point-count",
+    sourceProviderSlug: "garmin",
+    sport: "running",
+  });
+
+  assert.ok(feature);
+  assert.equal(feature.pointCount, 2);
+  assert.equal(feature.splits.length, 1);
+  assert.equal(feature.splits[0]?.durationSeconds, 10);
+});
+
+test("Junction exact workout IDs join stream features despite a distinct provider workout ID", () => {
   const feature = reduceJunctionWorkoutStream({
     cadence: [80, 82, 84],
     distance: [0, 500, 1_000],
@@ -4933,12 +5065,24 @@ test("Junction workout feature envelopes persist as siblings of the existing act
     summaries: {
       workouts: [{
         id: "workout-stream-sibling-1",
+        provider_id: "provider-workout-sibling-1",
         time_start: "2026-04-22T12:00:00.000Z",
         time_end: "2026-04-22T12:30:00.000Z",
         sourceInstanceId: "source-0123456789abcdef01234567",
         sourceProviderSlug: "garmin",
         sourceType: "watch",
         sport: { slug: "running" },
+      }],
+    },
+    timeseries: {
+      workout_duration: [{
+        workout_id: "workout-stream-sibling-1",
+        start: "2026-04-22T12:00:00.000Z",
+        end: "2026-04-22T12:30:00.000Z",
+        source: { provider: "garmin", type: "watch" },
+        sport: { name: "Running" },
+        unit: "minutes",
+        value: 30,
       }],
     },
     workoutFeatures: [feature],
@@ -4948,12 +5092,16 @@ test("Junction workout feature envelopes persist as siblings of the existing act
 
   const sessionExternalRef = session?.externalRef;
   assert.ok(sessionExternalRef);
-  assert.ok(featureEvents.length >= 2);
+  assert.ok(featureEvents.length >= 3);
   assert.ok(featureEvents.every((event) =>
     event.externalRef?.resourceType === sessionExternalRef.resourceType
     && event.externalRef?.resourceId === sessionExternalRef.resourceId
     && event.externalRef?.facet !== sessionExternalRef.facet
   ));
+  assert.equal(
+    workoutSessionSchema.parse(session?.fields?.workout).sourceWorkoutId,
+    "provider-workout-sibling-1",
+  );
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /"lat"|"lng"|"time"\s*:\s*\[/u);
 });

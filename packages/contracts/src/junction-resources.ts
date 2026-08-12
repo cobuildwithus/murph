@@ -208,13 +208,9 @@ export const JUNCTION_RESOURCE_POLICIES = Object.freeze({
   uv_exposure: excluded("sparse", "No current product use justifies canonical retention."),
   waist_circumference: excluded("sparse", "No canonical per-reading importer is registered yet.", "canonical_per_record"),
   wheelchair_push: excluded("sparse", "No accessibility-aware aggregate importer is registered yet.", "feature_envelope"),
-  workout_distance: policy(
-    "timeseries",
+  workout_distance: excluded(
     "high",
-    "default",
-    "feature_envelope",
-    JUNCTION_DEFAULT_TIMESERIES_HISTORY_DAYS,
-    1,
+    "Dedicated workout-stream reduction owns bounded distance context; the row feed is intentionally excluded.",
   ),
   workout_duration: policy(
     "timeseries",
@@ -224,13 +220,9 @@ export const JUNCTION_RESOURCE_POLICIES = Object.freeze({
     JUNCTION_LONG_HISTORY_DAYS,
     JUNCTION_SPARSE_HISTORY_CHUNK_DAYS,
   ),
-  workout_swimming_stroke: policy(
-    "timeseries",
+  workout_swimming_stroke: excluded(
     "high",
-    "default",
-    "feature_envelope",
-    JUNCTION_DEFAULT_TIMESERIES_HISTORY_DAYS,
-    1,
+    "Dedicated workout-stream reduction owns bounded swimming context; the row feed is intentionally excluded.",
   ),
 } as const satisfies Record<JunctionResourceName, JunctionResourcePolicy>);
 

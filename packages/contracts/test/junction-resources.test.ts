@@ -44,11 +44,11 @@ describe("Junction wearable resource policy", () => {
       "electrocardiogram",
     ]);
     expect(JUNCTION_ALLOWED_SUMMARY_RESOURCES).toEqual(JUNCTION_DEFAULT_SUMMARY_RESOURCES);
-    expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toHaveLength(20);
+    expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toHaveLength(18);
     expect(JUNCTION_ALLOWED_TIMESERIES_RESOURCES).toEqual(
       JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
     );
-    expect(JUNCTION_KNOWN_TIMESERIES_RESOURCES).toHaveLength(25);
+    expect(JUNCTION_KNOWN_TIMESERIES_RESOURCES).toHaveLength(23);
   });
 
   it("keeps dedicated and waveform resources out of generic fetch paths", () => {
@@ -76,11 +76,14 @@ describe("Junction wearable resource policy", () => {
     });
     for (const resource of ["workout_distance", "workout_swimming_stroke"] as const) {
       expect(JUNCTION_RESOURCE_POLICIES[resource]).toMatchObject({
-        admission: "default",
+        admission: "excluded",
         frequency: "high",
-        initialHistoryDays: 14,
-        retention: "feature_envelope",
+        retention: "excluded",
       });
+      expect(JUNCTION_RESOURCE_POLICIES[resource].exclusionReason).toMatch(
+        /Dedicated workout-stream reduction owns bounded/u,
+      );
+      expect(JUNCTION_ALLOWED_TIMESERIES_RESOURCES).not.toContain(resource);
     }
   });
 

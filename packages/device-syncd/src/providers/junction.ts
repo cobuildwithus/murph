@@ -1845,6 +1845,12 @@ export function createJunctionDeviceSyncProvider(
           retryable: false,
         });
       }
+      if (
+        sourceProviderSlug
+        && await resolveJunctionCurrentSourceAdmission(context, sourceProviderSlug) !== "admitted"
+      ) {
+        return {};
+      }
 
       const sourceProviders = await loadAndProjectSourceProviders();
       const matchingProviders = sourceProviderSlug
@@ -1929,6 +1935,12 @@ export function createJunctionDeviceSyncProvider(
         && provider.status.trim().toLowerCase() === "connected"
       );
       if (!sourceStillConnected) {
+        return {};
+      }
+      if (
+        sourceProviderSlug
+        && await resolveJunctionCurrentSourceAdmission(context, sourceProviderSlug) !== "admitted"
+      ) {
         return {};
       }
 
@@ -6389,6 +6401,7 @@ function buildJunctionWebhookJobs(input: {
     const directPayloads = input.webhookDataJsons.length > 0 ? input.webhookDataJsons : [null];
     return directPayloads.map((webhookDataJson, index) => ({
       kind: "resource",
+      ...(input.resource?.name === JUNCTION_WORKOUT_STREAM_RESOURCE ? { maxAttempts: 1 } : {}),
       payload: {
         eventType: input.eventType,
         objectId: input.objectId ?? "",
@@ -6423,7 +6436,7 @@ function buildJunctionWebhookJobs(input: {
             input.resource?.category,
             input.resource?.name,
             ...(input.resource?.name === JUNCTION_WORKOUT_STREAM_RESOURCE
-              ? [input.objectId ?? ""]
+              ? [input.objectId ?? "", input.eventType, input.occurredAt]
               : [input.window.windowStart, input.window.windowEnd]),
           ])),
     }));
@@ -6760,7 +6773,8 @@ function inferJunctionResourceCategory(
     return normalizedCategory;
   }
 
-  return JUNCTION_TIMESERIES_RESOURCE_NAMES.has(resource)
+  return resource === JUNCTION_WORKOUT_STREAM_RESOURCE
+    || JUNCTION_TIMESERIES_RESOURCE_NAMES.has(resource)
     ? "timeseries"
     : "summary";
 }
