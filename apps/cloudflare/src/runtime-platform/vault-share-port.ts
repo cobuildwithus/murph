@@ -1,6 +1,8 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverResponse,
@@ -58,6 +60,10 @@ function buildHostedVaultShareActiveKindsPath(): string {
       buildHostedVaultShareProjectionScopeKey(projectionScope),
     );
   }
+  params.set(
+    HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+    HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+  );
 
   return `${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}?${params.toString()}`;
 }

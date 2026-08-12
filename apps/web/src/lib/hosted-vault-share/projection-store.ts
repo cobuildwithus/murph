@@ -5,8 +5,8 @@ import { createHash } from "node:crypto";
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX,
-  HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
+  isHostedVaultShareRuntimeProjectedKind,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
@@ -95,13 +95,19 @@ export async function findActiveHostedVaultShares(input: {
   });
 }
 
+export interface DeliverableHostedVaultShareProjectionScopeGenerations {
+  generations: Array<{
+    generationToken: string;
+    hasUnmaterializedShare: boolean;
+    projectionScope: HostedVaultShareProjectionScope;
+  }>;
+  hasDeferredProjectionWork: boolean;
+}
+
 export async function readDeliverableHostedVaultShareProjectionScopeGenerations(input: {
   grantorMemberId: string;
   prisma?: PrismaClient;
-}): Promise<Array<{
-  projectionScope: HostedVaultShareProjectionScope;
-  generationToken: string;
-}>> {
+}): Promise<DeliverableHostedVaultShareProjectionScopeGenerations> {
   const prisma = input.prisma ?? getPrisma();
   const shares = await prisma.hostedVaultShare.findMany({
     orderBy: [{ projectionScopeKey: "asc" }, { id: "asc" }],
@@ -109,6 +115,7 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
       destinationMemberId: true,
       id: true,
       projectionKind: true,
+      projectionSnapshotCiphertext: true,
       projectionScopeJson: true,
       projectionScopeKey: true,
     },
@@ -127,36 +134,63 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
     prisma,
   });
   const generations = new Map<string, {
+    hasUnmaterializedShare: boolean;
     projectionScope: HostedVaultShareProjectionScope;
     shareIds: string[];
   }>();
+  let hasDeferredProjectionWork = false;
   for (const share of shares) {
-    if (!activeDestinationMemberIds.has(share.destinationMemberId)) {
-      continue;
-    }
     const projectionScope = parseHostedVaultShareRowProjectionScope(share);
     if (
       !projectionScope
-      || projectionScope.projectionKind
-        === HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND
+      || !isHostedVaultShareRuntimeProjectedKind(projectionScope.projectionKind)
     ) {
+      continue;
+    }
+    const hasUnmaterializedShare = share.projectionSnapshotCiphertext === null;
+    if (!activeDestinationMemberIds.has(share.destinationMemberId)) {
+      hasDeferredProjectionWork ||= hasUnmaterializedShare;
       continue;
     }
     const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
     const current = generations.get(projectionScopeKey);
     if (current) {
       current.shareIds.push(share.id);
+      current.hasUnmaterializedShare ||= hasUnmaterializedShare;
     } else {
       generations.set(projectionScopeKey, {
+        hasUnmaterializedShare,
         projectionScope,
         shareIds: [share.id],
       });
     }
   }
-  return [...generations.values()].map((generation) => ({
-    generationToken: buildHostedVaultShareGenerationToken(generation.shareIds),
-    projectionScope: generation.projectionScope,
-  }));
+  return {
+    generations: [...generations.values()].map((generation) => ({
+      generationToken: buildHostedVaultShareGenerationToken(generation.shareIds),
+      hasUnmaterializedShare: generation.hasUnmaterializedShare,
+      projectionScope: generation.projectionScope,
+    })),
+    hasDeferredProjectionWork,
+  };
+}
+
+export async function hasUnmaterializedHostedVaultShareProjectionGeneration(input: {
+  grantorMemberId: string;
+  prisma?: PrismaClient;
+  projectionScope: HostedVaultShareProjectionScope;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const share = await prisma.hostedVaultShare.findFirst({
+    select: { id: true },
+    where: {
+      grantorMemberId: input.grantorMemberId,
+      projectionScopeKey: buildHostedVaultShareProjectionScopeKey(input.projectionScope),
+      projectionSnapshotCiphertext: null,
+      status: "granted",
+    },
+  });
+  return share !== null;
 }
 
 export function buildHostedVaultShareGenerationToken(

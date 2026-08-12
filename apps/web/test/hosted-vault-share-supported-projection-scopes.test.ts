@@ -77,4 +77,21 @@ describe("hosted vault-share supported projection scopes", () => {
 
     expect([...supported]).toEqual(["protein-days.v0"]);
   });
+
+  it("requires the exact deferred-work capability version", async () => {
+    const supportedProjectionScopes = await import(
+      "../src/lib/hosted-vault-share/supported-projection-scopes"
+    );
+
+    expect(supportedProjectionScopes.supportsHostedVaultShareDeferredProjectionWork(
+      new Request(
+        "https://worker.example.test/internal/vault-share/active-kinds?deferredProjectionWork=v1",
+      ),
+    )).toBe(true);
+    expect(supportedProjectionScopes.supportsHostedVaultShareDeferredProjectionWork(
+      new Request(
+        "https://worker.example.test/internal/vault-share/active-kinds?deferredProjectionWork=v2",
+      ),
+    )).toBe(false);
+  });
 });

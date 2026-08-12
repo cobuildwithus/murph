@@ -15,8 +15,12 @@ import {
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
+  hostedOnboardingError,
+} from "@/src/lib/hosted-onboarding/errors";
+import {
   filterHostedVaultShareProjectionScopesBySupportedKeys,
   readHostedVaultShareSupportedProjectionScopeKeysFromRequest,
+  supportsHostedVaultShareDeferredProjectionWork,
 } from "@/src/lib/hosted-vault-share/supported-projection-scopes";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -33,6 +37,7 @@ export const GET = withJsonError(async (request: Request) => {
   } catch (error) {
     if (isHostedRuntimeInactiveAccessError(error)) {
       return jsonOk({
+        hasDeferredProjectionWork: false,
         projectionKinds: [],
         projectionScopes: [],
       } satisfies HostedVaultShareActiveProjectionKindsResponse);
@@ -42,10 +47,11 @@ export const GET = withJsonError(async (request: Request) => {
 
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
-  const generations = await readDeliverableHostedVaultShareProjectionScopeGenerations({
-      grantorMemberId,
-      prisma,
-    });
+  const projectionWork = await readDeliverableHostedVaultShareProjectionScopeGenerations({
+    grantorMemberId,
+    prisma,
+  });
+  const generations = projectionWork.generations;
   const projectionScopes = filterHostedVaultShareProjectionScopesBySupportedKeys(
     generations.map((generation) => generation.projectionScope),
     supportedProjectionScopeKeys,
@@ -53,8 +59,27 @@ export const GET = withJsonError(async (request: Request) => {
   const supportedScopeKeys = new Set(
     projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
   );
+  const hasDeferredProjectionWork = projectionWork.hasDeferredProjectionWork
+    || generations.some((generation) =>
+      generation.hasUnmaterializedShare
+      && !supportedScopeKeys.has(
+        buildHostedVaultShareProjectionScopeKey(generation.projectionScope),
+      )
+    );
+  if (
+    hasDeferredProjectionWork
+    && !supportsHostedVaultShareDeferredProjectionWork(request)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted vault-share projection work requires a compatible runtime. Retry the request.",
+      retryable: true,
+    });
+  }
 
   return jsonOk({
+    hasDeferredProjectionWork,
     projectionKinds: [...new Set(projectionScopes.map((scope) => scope.projectionKind))],
     projectionScopes: projectionScopes.sort((left, right) =>
       buildHostedVaultShareProjectionScopeKey(left)

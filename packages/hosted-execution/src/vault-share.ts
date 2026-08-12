@@ -65,6 +65,9 @@ const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
 const HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS = 1_000_000;
 const HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS = 100;
 const HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM =
+  "deferredProjectionWork";
+export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
 
 export type HostedVaultShareDailyMetricProjectionKind =
   (typeof HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS)[number];
@@ -330,6 +333,13 @@ export function isHostedVaultShareRecentDateProjectionKind(
   return kind !== "profile-name.v0"
     && kind !== "time-zone.v0"
     && kind !== "group-email.v0"
+    && kind !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND;
+}
+
+export function isHostedVaultShareRuntimeProjectedKind(
+  kind: HostedVaultShareProjectionKind,
+): boolean {
+  return kind !== "group-email.v0"
     && kind !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND;
 }
 
@@ -654,6 +664,12 @@ export interface HostedVaultShareDeliverResponse {
 }
 
 export interface HostedVaultShareActiveProjectionKindsResponse {
+  /**
+   * Fixed-width control-plane signal that at least one approved runtime projection
+   * is not currently deliverable and still lacks its first snapshot. Older Web
+   * deployments omit the field, which runners interpret as false.
+   */
+  hasDeferredProjectionWork?: boolean;
   projectionKinds: HostedVaultShareProjectionKind[];
   projectionScopes: HostedVaultShareProjectionScope[];
   generationTokensByProjectionScopeKey?: Record<string, string>;
@@ -2151,6 +2167,12 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
   value: unknown,
 ): HostedVaultShareActiveProjectionKindsResponse {
   const record = requireObject(value, "Vault share active projection kinds response");
+  const hasDeferredProjectionWork = record.hasDeferredProjectionWork === undefined
+    ? false
+    : requireBoolean(
+        record.hasDeferredProjectionWork,
+        "Vault share active projection kinds response hasDeferredProjectionWork",
+      );
   const projectionKinds = record.projectionKinds === undefined
     ? []
     : requireArray(
@@ -2204,6 +2226,7 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
       );
 
   return {
+    hasDeferredProjectionWork,
     projectionKinds: uniqueProjectionKinds,
     projectionScopes: uniqueProjectionScopes,
     ...(generationTokensByProjectionScopeKey

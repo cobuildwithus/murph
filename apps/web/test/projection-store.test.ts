@@ -30,6 +30,7 @@ import {
 import {
   buildHostedVaultShareGenerationToken,
   findActiveHostedVaultShares,
+  hasUnmaterializedHostedVaultShareProjectionGeneration,
   readDeliverableHostedVaultShareProjectionScopeGenerations,
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
@@ -252,6 +253,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         destinationMemberId: "member_participant_backed",
         id: "share_sleep_2",
         projectionKind: SLEEP_SCOPE.projectionKind,
+        projectionSnapshotCiphertext: null,
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
@@ -259,6 +261,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         destinationMemberId: "member_owner_backed",
         id: "share_invalid",
         projectionKind: "unknown.v0",
+        projectionSnapshotCiphertext: null,
         projectionScopeJson: { projectionKind: "unknown.v0" },
         projectionScopeKey: "unknown.v0",
       },
@@ -266,6 +269,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         destinationMemberId: "member_owner_backed",
         id: "share_device",
         projectionKind: deviceScope.projectionKind,
+        projectionSnapshotCiphertext: null,
         projectionScopeJson: deviceScope,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(deviceScope),
       },
@@ -273,6 +277,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         destinationMemberId: "member_inactive",
         id: "share_inactive",
         projectionKind: SLEEP_SCOPE.projectionKind,
+        projectionSnapshotCiphertext: null,
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
@@ -280,6 +285,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         destinationMemberId: "member_owner_backed",
         id: "share_profile",
         projectionKind: profileScope.projectionKind,
+        projectionSnapshotCiphertext: "sealed:profile",
         projectionScopeJson: profileScope,
         projectionScopeKey: buildHostedVaultShareProjectionScopeKey(profileScope),
       },
@@ -287,6 +293,7 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         destinationMemberId: "member_owner_backed",
         id: "share_sleep_1",
         projectionKind: SLEEP_SCOPE.projectionKind,
+        projectionSnapshotCiphertext: "sealed:sleep",
         projectionScopeJson: SLEEP_SCOPE,
         projectionScopeKey: SLEEP_SCOPE_KEY,
       },
@@ -300,19 +307,24 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
     await expect(readDeliverableHostedVaultShareProjectionScopeGenerations({
       grantorMemberId: SHARE.grantorMemberId,
       prisma,
-    })).resolves.toEqual([
-      {
-        generationToken: buildHostedVaultShareGenerationToken([
-          "share_sleep_2",
-          "share_sleep_1",
-        ]),
-        projectionScope: SLEEP_SCOPE,
-      },
-      {
-        generationToken: buildHostedVaultShareGenerationToken(["share_profile"]),
-        projectionScope: profileScope,
-      },
-    ]);
+    })).resolves.toEqual({
+      generations: [
+        {
+          generationToken: buildHostedVaultShareGenerationToken([
+            "share_sleep_2",
+            "share_sleep_1",
+          ]),
+          hasUnmaterializedShare: true,
+          projectionScope: SLEEP_SCOPE,
+        },
+        {
+          generationToken: buildHostedVaultShareGenerationToken(["share_profile"]),
+          hasUnmaterializedShare: false,
+          projectionScope: profileScope,
+        },
+      ],
+      hasDeferredProjectionWork: true,
+    });
     expect(buildHostedVaultShareGenerationToken(["share_b", "share_a"]))
       .toBe(buildHostedVaultShareGenerationToken(["share_a", "share_b"]));
     expect(mocks.readActiveHostedMemberAccessIds).toHaveBeenCalledWith({
@@ -333,6 +345,30 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         status: "granted",
       },
     }));
+  });
+});
+
+describe("hasUnmaterializedHostedVaultShareProjectionGeneration", () => {
+  it("checks only the exact granted null-snapshot generation", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: "share_pending" });
+    const prisma = createPrismaClientTestDouble({
+      hostedVaultShare: { findFirst },
+    });
+
+    await expect(hasUnmaterializedHostedVaultShareProjectionGeneration({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionScope: SLEEP_SCOPE,
+    })).resolves.toBe(true);
+    expect(findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        grantorMemberId: SHARE.grantorMemberId,
+        projectionScopeKey: SLEEP_SCOPE_KEY,
+        projectionSnapshotCiphertext: null,
+        status: "granted",
+      },
+    });
   });
 });
 

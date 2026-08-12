@@ -656,6 +656,7 @@ describe("vault-share contracts", () => {
         runningScope,
       ],
     })).toEqual({
+      hasDeferredProjectionWork: false,
       projectionKinds: ["profile-name.v0", "activity-days.v0"],
       projectionScopes: [PROFILE_SCOPE, runningScope],
     });
@@ -685,6 +686,7 @@ describe("vault-share contracts", () => {
       projectionScopes: [SLEEP_SCOPE],
     })).toEqual({
       generationTokensByProjectionScopeKey: { [scopeKey]: generationToken },
+      hasDeferredProjectionWork: false,
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     });
@@ -701,6 +703,23 @@ describe("vault-share contracts", () => {
       projectionKinds: ["sleep-times.v0"],
       projectionScopes: [SLEEP_SCOPE],
     })).toThrow(/SHA-256 base64url digest/u);
+  });
+
+  it("parses the fixed-width deferred-work signal and rejects non-booleans", () => {
+    expect(parseHostedVaultShareActiveProjectionKindsResponse({
+      hasDeferredProjectionWork: true,
+      projectionKinds: [],
+      projectionScopes: [],
+    })).toEqual({
+      hasDeferredProjectionWork: true,
+      projectionKinds: [],
+      projectionScopes: [],
+    });
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      hasDeferredProjectionWork: "yes",
+      projectionKinds: [],
+      projectionScopes: [],
+    })).toThrow(/boolean/u);
   });
 
   it("parses exact projection scope keys for capability negotiation", () => {

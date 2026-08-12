@@ -170,6 +170,7 @@ type ProjectableMemoryProfileNameRead =
 
 export interface HostedVaultShareProjectionOfferResult {
   outcome:
+    | "deferred"
     | "delivered"
     | "error"
     | "no-active-share"
@@ -212,7 +213,11 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
 
   const projectionScopes = activeProjections.projectionScopes;
   if (projectionScopes.length === 0) {
-    return { outcome: "no-active-share" };
+    return {
+      outcome: activeProjections.hasDeferredProjectionWork === true
+        ? "deferred"
+        : "no-active-share",
+    };
   }
 
   const outcomes: HostedVaultShareOfferOutcome[] = [];
@@ -240,10 +245,18 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
     }));
   }
 
-  return { outcome: combineHostedVaultShareOfferOutcomes(outcomes) };
+  const outcome = combineHostedVaultShareOfferOutcomes(outcomes);
+  return {
+    outcome: outcome !== "error" && activeProjections.hasDeferredProjectionWork === true
+      ? "deferred"
+      : outcome,
+  };
 }
 
-type HostedVaultShareOfferOutcome = HostedVaultShareProjectionOfferResult["outcome"];
+type HostedVaultShareOfferOutcome = Exclude<
+  HostedVaultShareProjectionOfferResult["outcome"],
+  "deferred"
+>;
 
 export interface HostedVaultShareProjectionReadContext {
   activityRowsByVaultAndCutoff?: Map<
@@ -364,8 +377,9 @@ function isMissingFileError(error: unknown): boolean {
 }
 
 /**
- * Kind outcomes collapse to one summary for the existing single-outcome logging seam:
- * any error is worth the warn log, otherwise any delivery counts as delivered.
+ * Scope outcomes collapse to one summary for the existing single-outcome logging seam:
+ * any error is worth the warn log, otherwise any delivery counts as delivered. The
+ * control-plane deferred bit is applied only after this scope-local summary.
  */
 function combineHostedVaultShareOfferOutcomes(
   outcomes: readonly HostedVaultShareOfferOutcome[],

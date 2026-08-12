@@ -483,9 +483,15 @@ snapshot remains visible as `pending` until the member runtime materializes it.
 The runtime does not mark that maintenance row handled when it first imports
 the control wake. It retains a `vault-share.projection` post-checkpoint record,
 runs the existing projection offer only after the source checkpoint, and removes
-the mailbox obligation only after delivery or a terminal no-active/no-projectable
-result. Missing ports and projection errors retain the same recording item with
-the existing bounded retry delay. Projection work has its own serialization key:
+the mailbox obligation only when every current granted runtime-projectable
+generation is materialized or revoked. Web returns a single fixed-width
+`hasDeferredProjectionWork` bit when any approved null-snapshot generation is
+temporarily omitted by destination access or runner capability; it exposes no
+destination identity, count, or fan-out cardinality. The runtime may deliver
+currently active scopes in the same offer, but a true deferred bit retains the
+recording item on a five-minute retry. Missing ports, delivery races, and
+projection errors retain that item on the existing one-minute retry. Projection
+work has its own serialization key:
 its FIFO and watermark remain ordered, while a not-yet-due projection retry
 cannot block independent runtime controls such as account disconnect. The next
 mailbox wake is always recomputed from the retained state after failure, so due
@@ -503,13 +509,19 @@ with one bounded member query plus at most one bounded current-participant
 query, with no per-destination reads. Exact-scope delivery admits at most the
 existing 25 grantor destinations; all-scope discovery composes that limit with
 the finite known projection registry and fails closed if the bound is exceeded.
-A mismatch returns the ordinary `no-active-share` result, retains no stale
-records, and lets the durable maintenance obligation retry from a fresh active
-scope read. Raw share IDs and destination cardinality never cross into the
-member runtime. A projectable active scope without a digest fails before any
-private vault read, and Web rejects a tokenless delivery as retryable before
-resolving or replacing a share. The converged token-capable runner bundle is
-therefore the hard rollback floor before Web promotion.
+A mismatch or mid-delivery access change returns a generic retryable failure
+while any exact granted generation still has a null snapshot; after revocation
+or materialization, absence remains the terminal ordinary `no-active-share`
+result. A partial fan-out may replace currently active destinations, but one
+access-change result keeps the obligation so the omitted approved destination
+can complete after renewed access. Raw share IDs and destination cardinality
+never cross into the member runtime. A projectable active scope without a digest
+fails before any private vault read, and Web rejects a tokenless delivery as
+retryable before resolving or replacing a share. The active-scope request also
+declares exact deferred-work capability; while an older runner is draining, Web
+turns deferred discovery into the same generic retryable failure instead of
+letting that runner consume the row. The converged token- and deferred-capable
+runner bundle is therefore the hard rollback floor before Web promotion.
 
 The rollout is consumer-first and reader-before-backfill. First deploy the
 runtime/Worker parser, bounded projection owner, retry consumer, and generation

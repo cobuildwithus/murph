@@ -1,5 +1,7 @@
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   parseHostedVaultShareProjectionScopeKey,
   type HostedVaultShareFixedProjectionKind,
   type HostedVaultShareProjectionScope,
@@ -7,6 +9,14 @@ import {
 
 const SUPPORTED_PROJECTION_SCOPE_PARAM = "supportedProjectionScope";
 const LEGACY_SUPPORTED_PROJECTION_KIND_PARAM = "supportedProjectionKind";
+
+export function supportsHostedVaultShareDeferredProjectionWork(
+  request: Request,
+): boolean {
+  return new URL(request.url).searchParams.get(
+    HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+  ) === HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION;
+}
 
 // Temporary omitted-capability fallback for runner bundles that predate exact
 // supportedProjectionScope negotiation. Keep this frozen so future registry

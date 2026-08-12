@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
 	buildHostedVaultShareGenerationToken: vi.fn(),
 	replaceHostedVaultShareProjectionSnapshot: vi.fn(),
 	findActiveHostedVaultShares: vi.fn(),
+	hasUnmaterializedHostedVaultShareProjectionGeneration: vi.fn(),
 	requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
@@ -15,6 +16,8 @@ vi.mock("@/src/lib/hosted-vault-share/projection-store", () => ({
 	buildHostedVaultShareGenerationToken: mocks.buildHostedVaultShareGenerationToken,
 	replaceHostedVaultShareProjectionSnapshot: mocks.replaceHostedVaultShareProjectionSnapshot,
 	findActiveHostedVaultShares: mocks.findActiveHostedVaultShares,
+	hasUnmaterializedHostedVaultShareProjectionGeneration:
+		mocks.hasUnmaterializedHostedVaultShareProjectionGeneration,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({}));
@@ -251,6 +254,7 @@ describe("vault-share deliver route", () => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_grantor");
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
+		mocks.hasUnmaterializedHostedVaultShareProjectionGeneration.mockResolvedValue(false);
 		mocks.buildHostedVaultShareGenerationToken.mockReturnValue(CURRENT_GENERATION_TOKEN);
 		mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("replaced");
   });
@@ -405,6 +409,27 @@ describe("vault-share deliver route", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "no-active-share" });
+    expect(mocks.hasUnmaterializedHostedVaultShareProjectionGeneration)
+      .toHaveBeenCalledWith({
+        grantorMemberId: "member_grantor",
+        projectionScope: SLEEP_SCOPE,
+      });
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("returns retryable deferred when only inactive approved work remains", async () => {
+    mocks.findActiveHostedVaultShares.mockResolvedValue([]);
+    mocks.hasUnmaterializedHostedVaultShareProjectionGeneration.mockResolvedValue(true);
+
+    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: expect.objectContaining({
+        code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
+        retryable: true,
+      }),
+    });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
@@ -434,6 +459,24 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
+  it("retries a stale generation while its replacement still needs a snapshot", async () => {
+    mocks.hasUnmaterializedHostedVaultShareProjectionGeneration.mockResolvedValue(true);
+
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY,
+      expectedGenerationToken: STALE_GENERATION_TOKEN,
+    }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: expect.objectContaining({
+        code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
+        retryable: true,
+      }),
+    });
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
   it("rejects records when participant access changes the active destination set", async () => {
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
     mocks.buildHostedVaultShareGenerationToken.mockReturnValue(
@@ -452,28 +495,38 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
-	it("treats an inactive destination runtime exactly like a missing grant", async () => {
+	it("retries when a destination becomes inactive during replacement", async () => {
 		mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("no-active-share");
 
 		const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
-		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({ status: "no-active-share" });
+		expect(response.status).toBe(503);
+		expect(await response.json()).toEqual({
+			error: expect.objectContaining({
+				code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
+				retryable: true,
+			}),
+		});
 		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
 	});
 
-	it("treats an inactive grantor runtime exactly like a missing grant", async () => {
+	it("retries when the grantor becomes inactive during replacement", async () => {
 		mocks.replaceHostedVaultShareProjectionSnapshot.mockResolvedValue("no-active-share");
 
 		const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
-		expect(response.status).toBe(200);
-		expect(await response.json()).toEqual({ status: "no-active-share" });
+		expect(response.status).toBe(503);
+		expect(await response.json()).toEqual({
+			error: expect.objectContaining({
+				code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
+				retryable: true,
+			}),
+		});
 		expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledTimes(1);
 		expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(1);
 	});
 
-  it("returns delivered when at least one exact share generation is replaced", async () => {
+  it("retries after replacing active destinations when another becomes inactive", async () => {
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE, SECOND_SHARE]);
     mocks.replaceHostedVaultShareProjectionSnapshot
       .mockResolvedValueOnce("no-active-share")
@@ -481,8 +534,13 @@ describe("vault-share deliver route", () => {
 
     const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: expect.objectContaining({
+        code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
+        retryable: true,
+      }),
+    });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(2);
   });
 
@@ -514,8 +572,13 @@ describe("vault-share deliver route", () => {
       }),
     );
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "no-active-share" });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: expect.objectContaining({
+        code: "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED",
+        retryable: true,
+      }),
+    });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       records: [],
       share: ACTIVE_SHARE,

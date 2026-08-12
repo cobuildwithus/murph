@@ -49,6 +49,8 @@ import {
 } from "@murphai/hosted-execution/routes";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
+  HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -69,9 +71,10 @@ function buildExpectedSupportedProjectionScopePath(path: string): string {
 }
 
 function buildExpectedVaultShareActiveKindsPath(): string {
-  return buildExpectedSupportedProjectionScopePath(
+  const path = buildExpectedSupportedProjectionScopePath(
     HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   );
+  return `${path}&${HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM}=${HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION}`;
 }
 
 function buildExpectedGroupToolPath(): string {
@@ -4632,6 +4635,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         result: { group: null, status: "none" },
       });
     await expect(platform.vaultSharePort!.listActiveProjectionScopes()).resolves.toEqual({
+      hasDeferredProjectionWork: false,
       projectionKinds: ["activity-days.v0"],
       projectionScopes: [{ projectionKind: "activity-days.v0" }],
     });

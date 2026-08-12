@@ -2217,7 +2217,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("lets later runtime controls proceed while vault-share projection is backing off", async () => {
+  it("lets later runtime controls proceed while approved vault-share work is deferred", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const projectionWake = buildHostedExecutionRuntimeControlWake({
       eventId: "runtime-control:group-share-projection:generation_1",
@@ -2232,19 +2232,15 @@ describe("hosted system mailbox notification execution context", () => {
       occurredAt: FIXED_NOW,
       userId: "member_123",
     });
-    const deliver = vi.fn(async () => {
-      throw new Error("synthetic projection failure");
-    });
+    const deliver = vi.fn();
     const runtime = createRuntime({
       vaultSharePort: {
         deliver,
         async listActiveProjectionScopes() {
           return {
-            generationTokensByProjectionScopeKey: {
-              "sleep-times.v0": "a".repeat(43),
-            },
-            projectionKinds: ["sleep-times.v0" as const],
-            projectionScopes: [hostedVaultShareProjectionKindToScope("sleep-times.v0")],
+            hasDeferredProjectionWork: true,
+            projectionKinds: [],
+            projectionScopes: [],
           };
         },
       },
@@ -2316,12 +2312,19 @@ describe("hosted system mailbox notification execution context", () => {
         itemId: "mailbox_item_system_codex_auth",
         status: "processed",
       }));
-      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([
+      const deferredState = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(deferredState.pending).toEqual([
         expect.objectContaining({
           itemId: "mailbox_item_vault_share_projection",
+          lastErrorCode: "HOSTED_VAULT_SHARE_PROJECTION_DEFERRED",
+          nextAttemptAt: expect.any(String),
           status: "recording",
         }),
       ]);
+      const deferredRetryAt = deferredState.pending[0]?.nextAttemptAt;
+      expect(Date.parse(deferredRetryAt ?? "") - Date.now())
+        .toBeGreaterThan(4 * 60_000);
+      expect(deliver).not.toHaveBeenCalled();
       expect(resolveHostedSystemMailboxHandledThroughSeq({
         importedSeq: "2",
         state: await readHostedSystemMailboxState(workspace.vaultRoot),

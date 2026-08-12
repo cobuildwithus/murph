@@ -57,6 +57,9 @@ import {
 
 const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
+const HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_ERROR_CODE =
+  "HOSTED_VAULT_SHARE_PROJECTION_DEFERRED";
+const HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_RETRY_MS = 5 * 60_000;
 
 export {
   resolveHostedSystemMailboxNextWakeAt,
@@ -543,7 +546,11 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     };
   } catch (error) {
     const normalized = normalizeHostedSystemMailboxError(error);
-    const projectionRetryAt = new Date(Date.now() + 60_000).toISOString();
+    const projectionRetryMs = normalized.code
+      === HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_ERROR_CODE
+      ? HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_RETRY_MS
+      : 60_000;
+    const projectionRetryAt = new Date(Date.now() + projectionRetryMs).toISOString();
     await updateHostedSystemMailboxPendingItem({
       item: {
         ...input.item,
@@ -759,6 +766,13 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         vaultRoot: input.vaultRoot,
         vaultSharePort: input.runtime.platform.vaultSharePort,
       });
+      if (result.outcome === "deferred") {
+        throw Object.assign(new Error(
+          "Hosted vault-share projection checkpoint has deferred approved work.",
+        ), {
+          code: HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_ERROR_CODE,
+        });
+      }
       if (result.outcome === "error" || result.outcome === "no-port") {
         throw new Error(
           "Hosted vault-share projection checkpoint did not complete.",

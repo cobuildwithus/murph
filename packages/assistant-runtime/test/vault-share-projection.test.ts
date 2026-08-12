@@ -541,6 +541,41 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     expect(deliver).not.toHaveBeenCalled();
   });
 
+  it("defers without reading when only temporarily inactive approved work remains", async () => {
+    const deliver = vi.fn();
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot: "/must-not-read",
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(),
+          hasDeferredProjectionWork: true,
+        }),
+      },
+    });
+
+    expect(result.outcome).toBe("deferred");
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("delivers active scopes but retains the obligation for deferred work", async () => {
+    const vaultRoot = await createMemoryDisplayNameVault("Theo");
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot,
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => ({
+          ...activeProjectionResponse(PROFILE_SCOPE),
+          hasDeferredProjectionWork: true,
+        }),
+      },
+    });
+
+    expect(result.outcome).toBe("deferred");
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
   it("does not read or deliver when old Web omits active-generation proof", async () => {
     const deliver = vi.fn();
     const result = await offerHostedVaultShareProjectionBestEffort({

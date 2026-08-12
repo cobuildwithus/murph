@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-11
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 ## Goal
 
@@ -217,3 +217,20 @@ Updated: 2026-08-11
 - Round-6 remediation proof passes 137 focused Web tests, 9 Hosted Execution
   contract tests, and Web plus Hosted Execution typechecks. The required final
   ReviewGPT remediation round remains pending.
+- Final ReviewGPT round 7 found that temporarily inactive destinations could
+  consume the only durable projection obligation: active-scope discovery
+  omitted them, `no-active-share` was terminal after checkpoint, and renewed
+  participant access later exposed a permanently null pending snapshot. The
+  remediation keeps access filtering authoritative while Web returns only one
+  opaque deferred-work bit. Active destinations still materialize immediately;
+  any omitted null-snapshot generation retains the existing mailbox item on a
+  five-minute deferred retry. Exact generation mismatches and mid-fan-out access
+  changes are retryable while approved null work remains. Older runners declare
+  no deferred-work capability and receive a retryable discovery failure during
+  convergence, preventing mixed-version row consumption without a new state
+  owner.
+- Round-7 remediation proof passes 441 focused tests across Hosted Execution,
+  Assistant Runtime, Web, and Cloudflare, plus all four package typechecks. The
+  seven-round cap is reached; repository policy requires an explicit
+  continuation decision before a round-8 ReviewGPT audit. Exact-head CI and
+  current-base mergeability also remain unresolved.
