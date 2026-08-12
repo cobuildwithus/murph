@@ -5855,24 +5855,29 @@ function makeJunctionLegacyWorkoutExternalRef(
     return undefined;
   }
 
-  const junctionWorkoutId = firstStringFromPaths(entry, JUNCTION_WORKOUT_JUNCTION_ID_PATHS);
-  const providerWorkoutId = firstStringFromPaths(entry, JUNCTION_WORKOUT_PROVIDER_ID_PATHS);
-  if (!junctionWorkoutId || !providerWorkoutId || junctionWorkoutId === providerWorkoutId) {
+  // Reconstruct the exact pre-canonical selector: provider identifiers won,
+  // then Junction identifiers filled the fallback. Even the same raw ID has
+  // a different historical key because that key was source-scoped.
+  const historicalExplicitId = firstStringFromPaths(entry, JUNCTION_WORKOUT_SOURCE_ID_PATHS);
+  if (!historicalExplicitId) {
     return undefined;
   }
 
-  return makeProviderExternalRef(
+  const historicalExternalRef = makeProviderExternalRef(
     "junction",
     resourceContext.externalRefResourceType,
     `${resourceContext.resourceSlug}-${shortHash([
       resourceContext.sourceProviderSlug,
       resourceContext.origin.sourceType,
       resourceContext.origin.sourceInstanceId,
-      providerWorkoutId,
+      historicalExplicitId,
     ])}`,
     undefined,
     canonicalExternalRef.facet ?? "session",
   );
+  return historicalExternalRef.resourceId === canonicalExternalRef.resourceId
+    ? undefined
+    : historicalExternalRef;
 }
 
 function junctionExternalRefVersion(

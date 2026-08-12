@@ -6064,6 +6064,84 @@ test("Junction exact workout IDs join stream features despite a distinct provide
   assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /"lat"|"lng"|"time"\s*:\s*\[/u);
 });
 
+test.each([
+  {
+    label: "Junction ID only",
+    junctionWorkoutId: "workout-shape-junction-only",
+    providerWorkoutId: undefined,
+    historicalExplicitId: "workout-shape-junction-only",
+    expectsAlias: true,
+  },
+  {
+    label: "equal Junction and provider IDs",
+    junctionWorkoutId: "workout-shape-equal",
+    providerWorkoutId: "workout-shape-equal",
+    historicalExplicitId: "workout-shape-equal",
+    expectsAlias: true,
+  },
+  {
+    label: "distinct Junction and provider IDs",
+    junctionWorkoutId: "workout-shape-junction-distinct",
+    providerWorkoutId: "workout-shape-provider-distinct",
+    historicalExplicitId: "workout-shape-provider-distinct",
+    expectsAlias: true,
+  },
+  {
+    label: "provider ID only",
+    junctionWorkoutId: undefined,
+    providerWorkoutId: "workout-shape-provider-only",
+    historicalExplicitId: "workout-shape-provider-only",
+    expectsAlias: false,
+  },
+])("Junction workout alias reconstructs the pre-PR selector for $label", ({
+  expectsAlias,
+  historicalExplicitId,
+  junctionWorkoutId,
+  providerWorkoutId,
+}) => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T13:00:00.000Z",
+    summaries: {
+      workouts: [{
+        ...(junctionWorkoutId ? { id: junctionWorkoutId } : {}),
+        ...(providerWorkoutId ? { provider_id: providerWorkoutId } : {}),
+        time_start: "2026-04-22T12:00:00.000Z",
+        time_end: "2026-04-22T12:30:00.000Z",
+        sourceInstanceId: "source-0123456789abcdef01234567",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        sport: { slug: "running" },
+      }],
+    },
+  });
+  const session = payload.events?.find((event) => event.kind === "activity_session");
+  const historicalResourceId = `workouts-${createHash("sha256")
+    .update(JSON.stringify([
+      "garmin",
+      "watch",
+      "source-0123456789abcdef01234567",
+      historicalExplicitId,
+    ]))
+    .digest("hex")
+    .slice(0, 16)}`;
+
+  assert.ok(session?.externalRef);
+  assert.equal(session.externalRef.resourceId, junctionWorkoutId
+    ? `workouts-${createHash("sha256")
+      .update(JSON.stringify(["junction-workout-id", junctionWorkoutId]))
+      .digest("hex")
+      .slice(0, 16)}`
+    : historicalResourceId);
+  assert.deepEqual(session.legacyExternalRefs, expectsAlias
+    ? [{
+        system: session.externalRef.system,
+        resourceType: session.externalRef.resourceType,
+        resourceId: historicalResourceId,
+        facet: "session",
+      }]
+    : undefined);
+});
+
 test("Junction import receipt does not retain unsupported-only clinical summaries", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",

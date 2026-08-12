@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -138,6 +139,17 @@ function workoutMetricsFromCoreEvent(
 
 async function makeTempDirectory(name: string): Promise<string> {
   return mkdtemp(join(tmpdir(), `${name}-`));
+}
+
+async function snapshotTestDirectoryFiles(root: string): Promise<Map<string, Buffer>> {
+  const snapshot = new Map<string, Buffer>();
+  for (const relativePath of await readdir(root, { recursive: true })) {
+    const absolutePath = join(root, relativePath);
+    if ((await stat(absolutePath)).isFile()) {
+      snapshot.set(relativePath, await readFile(absolutePath));
+    }
+  }
+  return snapshot;
 }
 
 function latestLiveRecords(records: readonly StoredJsonlRecord[]): StoredJsonlRecord[] {
@@ -1767,9 +1779,40 @@ test("importDeviceProviderSnapshot persists bounded Junction workout features th
   assert.equal(replay.sampleShardPaths.length, 0);
 });
 
-test("Junction workout identity migration aliases pre-canonical sessions through the real core port", async () => {
-  const vaultRoot = await makeTempDirectory("murph-junction-workout-identity-migration");
-  const conflictVaultRoot = await makeTempDirectory("murph-junction-workout-identity-conflict");
+test.each([
+  {
+    expectsAlias: true,
+    junctionWorkoutId: "junction-workout-only-1",
+    label: "Junction ID only",
+    providerWorkoutId: undefined,
+  },
+  {
+    expectsAlias: true,
+    junctionWorkoutId: "junction-workout-equal-1",
+    label: "equal Junction and provider IDs",
+    providerWorkoutId: "junction-workout-equal-1",
+  },
+  {
+    expectsAlias: true,
+    junctionWorkoutId: "junction-workout-canonical-1",
+    label: "distinct Junction and provider IDs",
+    providerWorkoutId: "provider-workout-legacy-1",
+  },
+  {
+    expectsAlias: false,
+    junctionWorkoutId: undefined,
+    label: "provider ID only",
+    providerWorkoutId: "provider-workout-only-1",
+  },
+])("Junction workout identity migration preserves the pre-PR session for $label", async ({
+  expectsAlias,
+  junctionWorkoutId,
+  label,
+  providerWorkoutId,
+}) => {
+  const fixtureSlug = label.toLowerCase().replaceAll(/[^a-z0-9]+/gu, "-");
+  const vaultRoot = await makeTempDirectory(`murph-junction-workout-identity-${fixtureSlug}`);
+  const conflictVaultRoot = await makeTempDirectory(`murph-junction-workout-conflict-${fixtureSlug}`);
   try {
     await Promise.all([
       coreRuntime.initializeVault({
@@ -1781,6 +1824,8 @@ test("Junction workout identity migration aliases pre-canonical sessions through
         vaultRoot: conflictVaultRoot,
       }),
     ]);
+    const exactWorkoutId = junctionWorkoutId ?? providerWorkoutId;
+    assert.ok(exactWorkoutId);
     const feature = reduceJunctionWorkoutStream({
       cadence: [80, 82, 84],
       distance: [0, 500, 1_000],
@@ -1788,7 +1833,7 @@ test("Junction workout identity migration aliases pre-canonical sessions through
       power: [180, 200, 220],
       time: [1_776_859_200, 1_776_859_210, 1_776_859_220],
     }, {
-      workoutId: "junction-workout-canonical-1",
+      workoutId: exactWorkoutId,
       sourceUpdatedAt: "2026-04-22T13:00:00.000Z",
       sourceProviderSlug: "garmin",
       sourceInstanceId: "source-0123456789abcdef01234567",
@@ -1801,9 +1846,8 @@ test("Junction workout identity migration aliases pre-canonical sessions through
       importedAt: "2026-04-22T13:00:00.000Z",
       summaries: {
         workouts: [{
-          id: "junction-workout-canonical-1",
-          provider_id: "provider-workout-legacy-1",
-          authoritativeVersion: "2026-04-22T13:00:00.000Z",
+          ...(junctionWorkoutId ? { id: junctionWorkoutId } : {}),
+          ...(providerWorkoutId ? { provider_id: providerWorkoutId } : {}),
           time_start: "2026-04-22T12:00:00.000Z",
           time_end: "2026-04-22T12:30:00.000Z",
           sourceInstanceId: "source-0123456789abcdef01234567",
@@ -1813,8 +1857,8 @@ test("Junction workout identity migration aliases pre-canonical sessions through
         }],
       },
       timeseries: {
-        workout_duration: [{
-          workout_id: "junction-workout-canonical-1",
+        workout_duration: junctionWorkoutId ? [{
+          workout_id: junctionWorkoutId,
           start: "2026-04-22T12:00:00.000Z",
           end: "2026-04-22T12:30:00.000Z",
           source: {
@@ -1825,9 +1869,9 @@ test("Junction workout identity migration aliases pre-canonical sessions through
           sport: { name: "Running" },
           unit: "minutes",
           value: 30,
-        }],
+        }] : [],
       },
-      workoutFeatures: [feature],
+      workoutFeatures: junctionWorkoutId ? [feature] : [],
     };
     const prepared = await prepareDeviceProviderSnapshotImport({
       provider: "junction",
@@ -1839,7 +1883,26 @@ test("Junction workout identity migration aliases pre-canonical sessions through
     const legacyExternalRef = currentSession?.legacyExternalRefs?.[0];
     assert.ok(currentSession);
     assert.ok(canonicalExternalRef);
-    assert.ok(legacyExternalRef);
+    const historicalExplicitId = providerWorkoutId ?? junctionWorkoutId;
+    assert.ok(historicalExplicitId);
+    const historicalExternalRef = {
+      system: canonicalExternalRef.system,
+      resourceType: canonicalExternalRef.resourceType,
+      resourceId: `workouts-${createHash("sha256")
+        .update(JSON.stringify([
+          "garmin",
+          "watch",
+          "source-0123456789abcdef01234567",
+          historicalExplicitId,
+        ]))
+        .digest("hex")
+        .slice(0, 16)}`,
+      facet: "session",
+    };
+    assert.deepEqual(legacyExternalRef, expectsAlias ? historicalExternalRef : undefined);
+    if (!expectsAlias) {
+      assert.equal(canonicalExternalRef.resourceId, historicalExternalRef.resourceId);
+    }
     const evidenceParts = (prepared.evidenceParts ?? []).map((part) => ({
       role: part.role,
       fileName: part.fileName,
@@ -1848,7 +1911,7 @@ test("Junction workout identity migration aliases pre-canonical sessions through
     }));
     const preCanonicalSession = {
       ...currentSession,
-      externalRef: legacyExternalRef,
+      externalRef: historicalExternalRef,
       legacyExternalRefs: undefined,
     };
     const legacyImport = await coreRuntime.importDeviceBatch({
@@ -1891,7 +1954,7 @@ test("Junction workout identity migration aliases pre-canonical sessions through
     const session = sessions[0];
     assert.equal(sessions.length, 1);
     assert.equal(session?.id, legacySession.id);
-    assert.equal(eventRevisionFromLifecycle(session?.lifecycle), 4);
+    assert.equal(eventRevisionFromLifecycle(session?.lifecycle), expectsAlias ? 4 : 2);
     assert.equal(storedExternalRefResourceId(session), canonicalExternalRef.resourceId);
     assert.equal(session?.note, "member-owned workout context");
     assert.equal(session?.source, "manual");
@@ -1901,18 +1964,22 @@ test("Junction workout identity migration aliases pre-canonical sessions through
       record.kind === "measurement"
       && storedExternalRefResourceId(record) === storedExternalRefResourceId(session)
     );
-    assert.ok(joinedWorkoutFacts.some((record) =>
-      "measurements" in record
-      && Array.isArray(record.measurements)
-      && record.measurements.some((measurement) =>
-        measurement
-        && typeof measurement === "object"
-        && !Array.isArray(measurement)
-        && measurement.metric === "workout-duration"
-      )
-    ));
-    assert.ok(joinedWorkoutFacts.some((record) => storedExternalRefFacet(record) === "stream-features"));
-    assert.ok(joinedWorkoutFacts.some((record) => storedExternalRefFacet(record) === "stream-split-1"));
+    if (junctionWorkoutId) {
+      assert.ok(joinedWorkoutFacts.some((record) =>
+        "measurements" in record
+        && Array.isArray(record.measurements)
+        && record.measurements.some((measurement) =>
+          measurement
+          && typeof measurement === "object"
+          && !Array.isArray(measurement)
+          && measurement.metric === "workout-duration"
+        )
+      ));
+      assert.ok(joinedWorkoutFacts.some((record) => storedExternalRefFacet(record) === "stream-features"));
+      assert.ok(joinedWorkoutFacts.some((record) => storedExternalRefFacet(record) === "stream-split-1"));
+    } else {
+      assert.deepEqual(joinedWorkoutFacts, []);
+    }
 
     const watchedPaths = [...new Set([...legacyImport.eventShardPaths, ...currentImport.eventShardPaths])];
     const beforeReplay = await Promise.all(
@@ -1944,21 +2011,25 @@ test("Junction workout identity migration aliases pre-canonical sessions through
         }],
         evidenceParts,
       });
-    await importConflictSeed(canonicalExternalRef);
-    await importConflictSeed(legacyExternalRef);
-    await assert.rejects(
-      importDeviceProviderSnapshot(
-        {
-          provider: "junction",
-          snapshot,
-          vaultRoot: conflictVaultRoot,
-        },
-        { corePort: coreRuntime },
-      ),
-      (error) =>
-        error instanceof coreRuntime.VaultError
-        && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-    );
+    if (expectsAlias) {
+      await importConflictSeed(canonicalExternalRef);
+      await importConflictSeed(historicalExternalRef);
+      const beforeConflict = await snapshotTestDirectoryFiles(conflictVaultRoot);
+      await assert.rejects(
+        importDeviceProviderSnapshot(
+          {
+            provider: "junction",
+            snapshot,
+            vaultRoot: conflictVaultRoot,
+          },
+          { corePort: coreRuntime },
+        ),
+        (error) =>
+          error instanceof coreRuntime.VaultError
+          && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+      );
+      assert.deepEqual(await snapshotTestDirectoryFiles(conflictVaultRoot), beforeConflict);
+    }
   } finally {
     await Promise.all([
       rm(vaultRoot, { recursive: true, force: true }),
