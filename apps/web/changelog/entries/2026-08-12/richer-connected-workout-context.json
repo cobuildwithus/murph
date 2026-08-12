@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 600,
+  "item": {
+    "id": "richer-connected-workout-context",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Richer context for connected workouts",
+    "summary": "Murph can now retain bounded cadence, power, heart-rate, split, interval, distance, duration, and swimming features from supported workouts.",
+    "details": "Murph reduces each exact workout stream into compact features and does not retain coordinates, raw points, complete curves, or provider response arrays.",
+    "relevanceTags": ["wearables", "workouts", "running", "cycling", "swimming", "privacy"],
+    "sourcePullRequests": [1699]
+  }
+}
