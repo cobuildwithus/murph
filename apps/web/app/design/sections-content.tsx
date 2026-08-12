@@ -96,7 +96,38 @@ function StudySection({
   );
 }
 
-export function SectionsContent() {
+function ConnectSourceActionsStudySection() {
+  return (
+    <StudySection title="Connect source actions and disconnect lifecycle">
+      <ConnectSourceCardStudy
+        androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
+      />
+    </StudySection>
+  );
+}
+
+export function SectionsContent({
+  sectionFocus,
+}: {
+  sectionFocus?: string;
+} = {}) {
+  if (sectionFocus === "connect-source-card") {
+    return (
+      <div
+        className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12"
+        data-design-section="catalog-navigation"
+      >
+        <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
+          Sections
+        </h1>
+
+        <Separator />
+
+        <ConnectSourceActionsStudySection />
+      </div>
+    );
+  }
+
   return (
     <div
       className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12"
@@ -572,11 +603,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Connect source actions and disconnect lifecycle">
-        <ConnectSourceCardStudy
-          androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
-        />
-      </StudySection>
+      <ConnectSourceActionsStudySection />
 
       <Separator />
 

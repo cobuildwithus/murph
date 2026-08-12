@@ -14,7 +14,13 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-export function DesignPage({ activeTab = "brand" }: { activeTab?: string }) {
+export function DesignPage({
+  activeTab = "brand",
+  designFocus,
+}: {
+  activeTab?: string;
+  designFocus?: string;
+}) {
   const selectedTab: TabId =
     TABS.find((tab) => tab.id === activeTab)?.id ?? "brand";
 
@@ -51,7 +57,7 @@ export function DesignPage({ activeTab = "brand" }: { activeTab?: string }) {
       {selectedTab === "brand" ? (
         <BrandContent />
       ) : selectedTab === "sections" ? (
-        <SectionsContent />
+        <SectionsContent sectionFocus={designFocus} />
       ) : selectedTab === "consent" ? (
         <ConsentContent />
       ) : (

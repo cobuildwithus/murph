@@ -6424,6 +6424,68 @@ test("ConnectSourcesGrid refreshes while Fitbit migration verification is pendin
   }
 });
 
+test("ConnectSourcesGrid replaces Fitbit authorization success after prolonged verification", async () => {
+  vi.useFakeTimers();
+
+  try {
+    const { ConnectSourcesGrid } = await import(
+      "../app/(dashboard)/connect/connect-page-client"
+    );
+    const rendered = await renderClientComponent(
+      createElement(ConnectSourcesGrid, {
+        initialCallback: {
+          connectSource: "fitbit",
+          connectTarget: "fitbit",
+          errorCode: null,
+          provider: "junction",
+          status: "connected",
+        },
+        sources: [{
+          connectTarget: "fitbit",
+          description: "Fitbit data through Google authorization.",
+          id: "fitbit",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/fitbit.svg",
+            width: 44,
+          },
+          migrationState: "authorization_required",
+          name: "Fitbit",
+        }],
+      }),
+      { requireButton: false },
+    );
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Google Health authorized/u,
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000 * 12);
+    });
+
+    assert.equal(mocks.routerRefresh.mock.calls.length, 12);
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Google Health authorized/u,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Fitbit migration is still verifying/u,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Keep legacy Fitbit connected/u,
+    );
+
+    await rendered.cleanup();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("ConnectSourcesGrid explains Junction before a Junction-backed authorization", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {

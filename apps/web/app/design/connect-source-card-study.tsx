@@ -3,9 +3,11 @@
 import { useSearchParams } from "next/navigation";
 
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
+import { ConnectSourcesGrid } from "@/app/(dashboard)/connect/connect-page-client";
 import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-dialogs";
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import {
+  FITBIT_MIGRATION_STILL_VERIFYING_NOTICE,
   markLocallyCompletedFitbitMigrations,
   markLocallyDisconnectedSources,
 } from "@/app/(dashboard)/connect/connect-page-helpers";
@@ -14,9 +16,13 @@ import {
   listAppleHealthRelayConnectSources,
 } from "@/app/(dashboard)/connect/apple-health-relay-connect-sources";
 import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/app/(dashboard)/connect/health-connect-relay-connect-sources";
-import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
+import type {
+  ConnectCallbackInput,
+  ConnectSource,
+} from "@/app/(dashboard)/connect/connect-page-types";
 import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
+import { PageHeader } from "@/src/components/ui/page-header";
 
 type ConnectSourceCardStudyCase = {
   authenticated: boolean;
@@ -55,6 +61,31 @@ const FITBIT_COMPLETED_MIGRATION_SOURCE =
     disconnectSourceProviderSlug: "google_health",
     id: "fitbit",
   };
+
+const FITBIT_MIGRATION_CALLBACK_SOURCE: ConnectSource = {
+  connectProvider: "junction",
+  connectTarget: "fitbit",
+  description:
+    "Fitbit and Pixel Watch sleep, activity, heart rate, exercise, and workout trends through Google authorization.",
+  id: "fitbit",
+  logo: {
+    className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+    height: 36,
+    src: "/brand-logos/connect/fitbit.svg",
+    width: 128,
+  },
+  migrationState: "authorization_required",
+  name: "Fitbit",
+  requiresJunctionDisclosure: true,
+};
+
+const FITBIT_MIGRATION_CALLBACK_INPUT: NonNullable<ConnectCallbackInput> = {
+  connectSource: "fitbit",
+  connectTarget: "fitbit",
+  errorCode: null,
+  provider: "junction",
+  status: "connected",
+};
 
 const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
@@ -287,6 +318,7 @@ export function ConnectSourceCardStudy({
 }) {
   const searchParams = useSearchParams();
   const studyState = searchParams?.get("connectDisconnectStudy") ?? null;
+  const connectPageStudy = searchParams?.get("connectPageStudy") ?? null;
   const disconnectDialogSource = studyState === "source"
     ? DESIGN_CONNECT_SOURCE_CASES[0]?.source ?? null
     : studyState === "fitbit-migration-dialog" ||
@@ -294,6 +326,38 @@ export function ConnectSourceCardStudy({
         studyState === "fitbit-migration-error"
       ? FITBIT_MIGRATION_SOURCE
       : null;
+
+  if (
+    connectPageStudy === "fitbit-migration-callback" ||
+    connectPageStudy === "fitbit-migration-callback-success" ||
+    connectPageStudy === "fitbit-migration-callback-timeout"
+  ) {
+    return (
+      <div
+        className="flex w-full min-w-0 flex-col gap-8"
+        data-design-study="fitbit-migration-callback-page"
+        id="fitbit-migration-callback-page"
+        inert
+      >
+        <PageHeader
+          eyebrow="Live Well"
+          title="Sync your biomarkers"
+          description="Bring in sleep, activity, recovery, glucose, and device context from the tools you already use."
+        />
+        <ConnectSourcesGrid
+          authenticated
+          initialCallback={FITBIT_MIGRATION_CALLBACK_INPUT}
+          initialNoticeOverride={
+            connectPageStudy === "fitbit-migration-callback-timeout"
+              ? FITBIT_MIGRATION_STILL_VERIFYING_NOTICE
+              : null
+          }
+          sources={[FITBIT_MIGRATION_CALLBACK_SOURCE]}
+        />
+      </div>
+    );
+  }
+
   const defaultStudyCases = androidAppAvailable
     ? DESIGN_CONNECT_SOURCE_CASES
     : DESIGN_CONNECT_SOURCE_CASES.filter(

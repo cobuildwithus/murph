@@ -26,6 +26,8 @@ import {
   JunctionConnectionDialog,
 } from "./connect-page-dialogs";
 import {
+  FITBIT_MIGRATION_AUTHORIZED_NOTICE,
+  FITBIT_MIGRATION_STILL_VERIFYING_NOTICE,
   createConnectCallbackNotice,
   filterConnectSourcesForSearch,
   isHostedDeviceConnectIntentUnavailableError,
@@ -85,6 +87,7 @@ export function ConnectSourcesGrid({
   initialCallback = null,
   initialConnectIntent = null,
   initialLoadError = null,
+  initialNoticeOverride = null,
   sources,
   whoopSyncContactAction = null,
   whoopSyncVoiceMemoSrc = null,
@@ -102,13 +105,14 @@ export function ConnectSourcesGrid({
   initialCallback?: ConnectCallbackInput;
   initialConnectIntent?: InitialDeviceConnectIntent;
   initialLoadError?: ConnectPageInitialLoadError | null;
+  initialNoticeOverride?: ConnectCallbackNotice;
   sources: readonly ConnectSource[];
   whoopSyncContactAction?: DeviceSyncCompletionContactAction | null;
   whoopSyncVoiceMemoSrc?: string | null;
   zeppSyncContactAction?: DeviceSyncCompletionContactAction | null;
 }) {
   const [notice, setNotice] = useState<ConnectCallbackNotice>(() =>
-    createConnectCallbackNotice(initialCallback, sources),
+    initialNoticeOverride ?? createConnectCallbackNotice(initialCallback, sources),
   );
   const [search, setSearch] = useState("");
   const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
@@ -263,12 +267,11 @@ export function ConnectSourcesGrid({
       if (nextAttempt >= FITBIT_MIGRATION_REFRESH_ATTEMPT_LIMIT) {
         window.clearInterval(intervalId);
         setNotice((current) =>
-          current ?? {
-            kind: "warning",
-            title: "Fitbit migration is still verifying",
-            message:
-              "Google Health is authorized, but Murph has not seen a fresh supported update yet. Keep legacy Fitbit connected and check back after your next Fitbit or Pixel Watch sync.",
-          },
+          current === null ||
+          (current.kind === FITBIT_MIGRATION_AUTHORIZED_NOTICE.kind &&
+            current.title === FITBIT_MIGRATION_AUTHORIZED_NOTICE.title)
+            ? FITBIT_MIGRATION_STILL_VERIFYING_NOTICE
+            : current,
         );
       }
     }, FITBIT_MIGRATION_REFRESH_INTERVAL_MS);

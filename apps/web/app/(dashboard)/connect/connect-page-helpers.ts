@@ -21,6 +21,20 @@ interface HostedDeviceSyncConnectResponse {
 
 const DEVICE_CONNECT_INTENT_CLAIM_PATTERN = /^dc_[A-Za-z0-9_-]{32}$/u;
 
+export const FITBIT_MIGRATION_AUTHORIZED_NOTICE = {
+  kind: "success",
+  title: "Google Health authorized",
+  message:
+    "Murph is verifying Fitbit history before you finish the migration. The legacy Fitbit connection stays active for now.",
+} satisfies NonNullable<ConnectCallbackNotice>;
+
+export const FITBIT_MIGRATION_STILL_VERIFYING_NOTICE = {
+  kind: "warning",
+  title: "Fitbit migration is still verifying",
+  message:
+    "Google Health is authorized, but Murph has not seen a fresh supported update yet. Keep legacy Fitbit connected and check back after your next Fitbit or Pixel Watch sync.",
+} satisfies NonNullable<ConnectCallbackNotice>;
+
 export function filterConnectSourcesForSearch(
   sources: readonly ConnectSource[],
   search: string,
@@ -178,12 +192,7 @@ export function createConnectCallbackNotice(
       (catalogSource.migrationState === "authorization_required" ||
         catalogSource.migrationState === "verifying_successor")
     ) {
-      return {
-        kind: "success",
-        title: "Google Health authorized",
-        message:
-          "Murph is verifying Fitbit history before you finish the migration. The legacy Fitbit connection stays active for now.",
-      };
+      return FITBIT_MIGRATION_AUTHORIZED_NOTICE;
     }
 
     return {
