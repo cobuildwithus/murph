@@ -1,6 +1,6 @@
 # PR 1732 vault-share complexity collapse
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -42,8 +42,8 @@ Updated: 2026-08-12
 2. [x] Centralize atomic cap admission and collapse delivery to one 26-row read.
 3. [x] Delete continuation/index machinery and replace it with focused proofs.
 4. [x] Complete local verification and exact diff/privacy review.
-5. [ ] Commit and push the corrected head, correct the PR body, and run exact-head CI and ReviewGPT.
-6. [ ] Resolve any new actionable finding, close this plan, and leave the PR draft.
+5. [x] Commit and push the corrected head, correct the PR body, and run exact-head CI and ReviewGPT.
+6. [x] Resolve any new actionable finding, close this plan, and leave the PR draft.
 
 ## Verification log
 
@@ -58,3 +58,10 @@ Updated: 2026-08-12
 - Final focused units: Web 165, Cloudflare 2, and hosted-execution 9 passed.
 - Scoped Web ESLint, docs drift, dependency policy, diff check, and direct
   identifier privacy scan passed.
+- The corrected behavior head was pushed to draft PR #1732 with an updated
+  intent contract and no schema rollout.
+- Exact behavior-head CI completed with 13 passing checks, one expected skip,
+  and no failures.
+- Exact behavior-head ReviewGPT round 2 reverified every accepted correction,
+  returned `ROUND_OUTCOME: PASS`, and reported no actionable finding.
+Completed: 2026-08-12
