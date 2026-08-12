@@ -32,6 +32,7 @@ import {
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from '@murphai/hosted-execution/assistant-model'
 import { HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES } from '@murphai/hosted-execution/plan-usage'
+import { ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS } from '../assistant/response-media.js'
 import {
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
@@ -162,16 +163,16 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   namespace: 'murph',
   name: 'attach_response_media',
   description:
-    'Attach image media to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly.',
+    `Attach up to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       media: {
         type: 'array',
-        maxItems: 40,
+        maxItems: ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
         description:
-          'The complete image batch for the final assistant reply. Passing an empty array clears the current reply media batch.',
+          `The complete image batch for the final assistant reply, limited to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images. Passing an empty array clears the current reply media batch.`,
         items: {
           oneOf: [
             {

@@ -696,4 +696,25 @@ describe('murph.generate_image dynamic tool schema', () => {
       media: [media],
     })
   })
+
+  it('publishes and enforces the eight-image authored response limit', () => {
+    expect(MURPH_ATTACH_RESPONSE_MEDIA_TOOL.inputSchema.properties.media.maxItems).toBe(8)
+    const media = Array.from({ length: 9 }, (_, index) => ({
+      alt: `Frame ${index + 1}`,
+      kind: 'image',
+      source: `exercise_catalog:movement:${index + 1}`,
+      url: `https://cdn.example.test/exercises/frame-${index + 1}.png`,
+    }))
+
+    expect(readTestMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: { media },
+        namespace: 'murph',
+        tool: MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
+      },
+    })).toMatchObject({
+      kind: 'invalid-response-media-arguments',
+    })
+  })
 })

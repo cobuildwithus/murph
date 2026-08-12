@@ -4035,7 +4035,7 @@ describe('assistant codex runtime', () => {
         headers: { 'content-type': 'application/json' },
         status: 200,
       }))
-    const attachedMedia = Array.from({ length: 40 }, (_, index) => ({
+    const attachedMedia = Array.from({ length: 8 }, (_, index) => ({
       kind: 'image' as const,
       url: `https://cdn.example.test/assistant/full-${index}.png`,
       alt: `Image ${index}`,
@@ -4158,7 +4158,7 @@ describe('assistant codex runtime', () => {
     })
 
     expect(result.finalMessage).toBe('Media limit handled')
-    expect(result.responseMedia).toHaveLength(40)
+    expect(result.responseMedia).toHaveLength(8)
     // The image was generated and paid for, so its usage is still recorded.
     expect(result.additionalUsages).toMatchObject([
       { provider: 'openai-images' },
