@@ -2372,23 +2372,22 @@ function sanitizeProfilePayload(payload: unknown, connection?: PlainObject): Pla
   const gender = firstStringFromPaths(profile, JUNCTION_PROFILE_GENDER_PATHS);
   const sourceProviderSlug = readJunctionSourceProviderSlug(profile, connection)
     ?? origin.sourceProviderSlug;
-  const explicitId = firstStringFromPaths(profile, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+  const updatedAt = resolveSafeTimestamp(
+    firstValueFromPaths(profile, ["updatedAt", "updated_at", "createdAt", "created_at"]),
+    origin.sourceProviderSlug,
+  );
   const sanitized = stripUndefined({
     gender: gender ? trimToLength(gender, 80) : undefined,
-    stableResourceId: explicitId
-      ? `profile-${shortHash([
-          sourceProviderSlug,
-          origin.sourceType,
-          origin.sourceInstanceId,
-          explicitId,
-        ])}`
-      : undefined,
+    stableResourceId: buildStableProfileResourceId(
+      profile,
+      sourceProviderSlug,
+      origin.sourceType,
+      origin.sourceInstanceId,
+      updatedAt,
+    ),
     sourceProviderSlug,
     sourceType: origin.sourceType,
-    updatedAt: resolveSafeTimestamp(
-      firstValueFromPaths(profile, ["updatedAt", "updated_at", "createdAt", "created_at"]),
-      origin.sourceProviderSlug,
-    ),
+    updatedAt,
   });
 
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
@@ -5056,11 +5055,17 @@ function buildStableSummaryResourceId(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
 ): string {
-  const retainedProfileResourceId = resourceContext.resource === "profile"
-    ? firstStringFromPaths(entry, ["stableResourceId"])
-    : undefined;
-  if (retainedProfileResourceId && /^profile-[a-f0-9]{16}$/u.test(retainedProfileResourceId)) {
-    return retainedProfileResourceId;
+  if (resourceContext.resource === "profile") {
+    const profileResourceId = buildStableProfileResourceId(
+      entry,
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      timestamp.occurredAt,
+    );
+    if (profileResourceId) {
+      return profileResourceId;
+    }
   }
 
   const explicitId = resourceContext.resource === "workouts"
@@ -5089,6 +5094,39 @@ function buildStableSummaryResourceId(
       ...(resourceContext.fallbackIdentityDisambiguator ? [resourceContext.fallbackIdentityDisambiguator] : []),
     ] : []),
   ])}`;
+}
+
+function buildStableProfileResourceId(
+  entry: PlainObject,
+  sourceProviderSlug: string | null | undefined,
+  sourceType: string | null | undefined,
+  sourceInstanceId: string | null | undefined,
+  updatedAt: string | undefined,
+): string | undefined {
+  const retainedResourceId = firstStringFromPaths(entry, ["stableResourceId"]);
+  if (retainedResourceId && /^profile-[a-f0-9]{16}$/u.test(retainedResourceId)) {
+    return retainedResourceId;
+  }
+
+  const explicitId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+  if (explicitId) {
+    return `profile-${shortHash([
+      sourceProviderSlug,
+      sourceType,
+      sourceInstanceId,
+      explicitId,
+    ])}`;
+  }
+
+  return updatedAt
+    ? `profile-${shortHash([
+        "profile",
+        sourceProviderSlug,
+        sourceType,
+        sourceInstanceId,
+        updatedAt,
+      ])}`
+    : undefined;
 }
 
 function buildStableTimeseriesResourceId(

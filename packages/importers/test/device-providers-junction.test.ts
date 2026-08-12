@@ -4750,8 +4750,8 @@ test("Junction profile gender is bounded and never substituted for biological se
     importedAt: "2026-04-22T12:00:00.000Z",
     summaries: {
       profile: {
-        id: "profile-gender-only",
         gender: oversizedGender,
+        source_device_id: "profile-source-instance-proof",
         updated_at: "2026-04-20T09:00:00Z",
         source: { provider: "oura", type: "ring" },
       },
@@ -4788,6 +4788,16 @@ test("Junction profile gender is bounded and never substituted for biological se
   });
   assert.deepEqual(replayPayload.events?.[0]?.externalRef, genderEvent?.externalRef);
   assert.equal(replayPayload.events?.[0]?.occurredAt, genderEvent?.occurredAt);
+  const replayArtifact = replayPayload.evidenceParts?.find(
+    (artifact) => artifact.role === "junction-summary-profile",
+  );
+  const secondReplayPayload = normalizeJunctionSnapshot({
+    summaries: { profile: replayArtifact?.content },
+    importedAt: "2026-06-22T12:00:00.000Z",
+  });
+  assert.deepEqual(replayArtifact?.content, genderArtifact?.content);
+  assert.deepEqual(secondReplayPayload.events?.[0]?.externalRef, genderEvent?.externalRef);
+  assert.equal(secondReplayPayload.events?.[0]?.occurredAt, genderEvent?.occurredAt);
 });
 
 test("Junction oversized menstrual deviation strings land with capped facet and qualifier", () => {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { importDeviceBatch } from '@murphai/core'
 import { normalizeJunctionSnapshot } from '@murphai/importers'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
@@ -744,7 +745,6 @@ test('normalized Junction categorical facts survive canonical import and query',
     importedAt: '2026-07-13T12:00:00.000Z',
     summaries: {
       profile: {
-        id: 'profile-2026-07',
         gender: 'other',
         updated_at: '2026-07-09T08:30:00Z',
         source: { provider: 'apple_health', type: 'phone' },
@@ -769,31 +769,58 @@ test('normalized Junction categorical facts survive canonical import and query',
     normalized.events?.find((event) => event.title === 'Junction home progesterone test'),
     normalized.events?.find((event) => event.title === 'Junction sexual activity'),
   ]
-  const importedEventIds = new Map<string, string>()
-
-  for (const [index, event] of normalizedEvents.entries()) {
-    assert.ok(event)
-    assert.equal(event.kind, 'measurement')
-    assert.ok(event.occurredAt)
-    assert.ok(event.fields)
-    const title = event.title
-    assert.ok(title)
-    const imported = await importEventPayload({
-      cli,
-      parentRoot,
-      vaultRoot,
-      fileName: `junction-categorical-${index}.json`,
-      payload: {
-        kind: event.kind,
-        occurredAt: event.occurredAt,
-        source: event.source,
-        title,
-        ...event.fields,
-        externalRef: event.externalRef,
-      },
-    })
-    importedEventIds.set(title, imported.eventId)
-  }
+  const profileArtifact = normalized.evidenceParts?.find(
+    (artifact) => artifact.role === 'junction-summary-profile',
+  )
+  const firstReplay = normalizeJunctionSnapshot({
+    importedAt: '2026-08-13T12:00:00.000Z',
+    summaries: { profile: profileArtifact?.content },
+  })
+  const firstReplayArtifact = firstReplay.evidenceParts?.find(
+    (artifact) => artifact.role === 'junction-summary-profile',
+  )
+  const secondReplay = normalizeJunctionSnapshot({
+    importedAt: '2026-09-13T12:00:00.000Z',
+    summaries: { profile: firstReplayArtifact?.content },
+  })
+  const genderReplayEvents = [
+    normalizedEvents[0],
+    firstReplay.events?.find((event) => event.title === 'Junction gender'),
+    secondReplay.events?.find((event) => event.title === 'Junction gender'),
+  ]
+  assert.ok(profileArtifact)
+  assert.deepEqual(firstReplayArtifact?.content, profileArtifact.content)
+  assert.deepEqual(
+    genderReplayEvents.map((event) => event?.externalRef),
+    genderReplayEvents.map(() => genderReplayEvents[0]?.externalRef),
+  )
+  assert.equal(new Set(genderReplayEvents.map((event) => event?.occurredAt)).size, 1)
+  const accountId = 'junction-profile-replay-proof'
+  const initialImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-07-13T12:00:00.000Z',
+    events: normalized.events?.map((event) => ({ ...event })),
+    evidenceParts: normalized.evidenceParts?.map((part) => ({ ...part })),
+  })
+  const firstReplayImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-08-13T12:00:00.000Z',
+    events: firstReplay.events?.map((event) => ({ ...event })),
+    evidenceParts: firstReplay.evidenceParts?.map((part) => ({ ...part })),
+  })
+  const secondReplayImport = await importDeviceBatch({
+    vaultRoot,
+    provider: 'junction',
+    accountId,
+    importedAt: '2026-09-13T12:00:00.000Z',
+    events: secondReplay.events?.map((event) => ({ ...event })),
+    evidenceParts: secondReplay.evidenceParts?.map((part) => ({ ...part })),
+  })
+  const importedEventIds = new Map(initialImport.events.map((event) => [event.title, event.id]))
 
   const genderEventId = importedEventIds.get('Junction gender')
   const progesteroneEventId = importedEventIds.get('Junction home progesterone test')
@@ -801,6 +828,8 @@ test('normalized Junction categorical facts survive canonical import and query',
   assert.ok(genderEventId)
   assert.ok(progesteroneEventId)
   assert.ok(sexualActivityEventId)
+  assert.equal(firstReplayImport.events[0]?.id, genderEventId)
+  assert.equal(secondReplayImport.events[0]?.id, genderEventId)
 
   const entries = requireData(
     (
