@@ -354,6 +354,11 @@ test("device sync store commits source admission with initial jobs atomically", 
       "disconnected",
     );
     assert.equal(
+      store.listConnectionSources({ connectionId: account.id })[0]?.lifecycleEpoch,
+      1,
+    );
+    assert.equal(store.getAccountById(account.id)?.localConnectionRevision, account.localConnectionRevision);
+    assert.equal(
       store.claimDueJob("worker-a", "2026-07-28T10:02:00.000Z", 60_000),
       null,
     );
@@ -376,6 +381,14 @@ test("device sync store commits source admission with initial jobs atomically", 
     assert.equal(
       store.listConnectionSources({ connectionId: account.id })[0]?.status,
       "connected",
+    );
+    assert.equal(
+      store.listConnectionSources({ connectionId: account.id })[0]?.lifecycleEpoch,
+      2,
+    );
+    assert.equal(
+      store.getAccountById(account.id)?.localConnectionRevision,
+      account.localConnectionRevision + 1,
     );
     assert.equal(
       store.claimDueJob("worker-a", "2026-07-28T10:04:00.000Z", 60_000)?.id,

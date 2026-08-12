@@ -6,6 +6,8 @@ import {
   withImmediateTransaction,
 } from "@murphai/runtime-state/node";
 
+import { clearJunctionScheduleTimeExtendedHistoryCoverageForProvider } from "./junction-historical-backfill-progress.ts";
+import { stringifyJson } from "./shared.ts";
 import {
   decodeDeviceSyncSummaryRow,
   disconnectAccount as disconnectStoredAccount,
@@ -422,7 +424,47 @@ export class SqliteDeviceSyncStore {
   }): DeviceSyncJobRecord[] {
     return withImmediateTransaction(this.database, () => {
       if (input.source) {
-        upsertStoredConnectionSourceInTransaction(this.database, input.source);
+        const existingSource = input.provider === "junction" && input.source.status === "connected"
+          ? listStoredConnectionSources(this.database, {
+              connectionId: input.source.connectionId,
+              sourceProviderSlug: input.source.sourceProviderSlug,
+            }).find((source) => source.sourceInstanceKey === input.source?.sourceInstanceKey)
+          : null;
+        const reconnectsJunctionSource = existingSource?.status === "disconnected";
+        if (reconnectsJunctionSource) {
+          // Local and tunneled callbacks own the same exact-source lifecycle
+          // transition as hosted admission. Keep its coverage clear, epoch
+          // advance, connected source, and initial work in this transaction.
+          const account = getStoredAccountById(this.database, input.accountId);
+          if (!account) {
+            throw new TypeError(`Unknown account ${input.accountId}`);
+          }
+          const metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+            metadata: account.metadata,
+            providerSlug: input.source.sourceProviderSlug,
+          });
+          this.database.prepare(`
+            update device_connection
+            set metadata_json = ?, updated_at = ?
+            where id = ?
+          `).run(
+            stringifyJson(metadata),
+            input.source.lastSeenAt,
+            input.accountId,
+          );
+          this.database.prepare(`
+            update device_observation_state
+            set local_connection_revision = local_connection_revision + 1,
+                updated_at = ?
+            where account_id = ?
+          `).run(input.source.lastSeenAt, input.accountId);
+        }
+        upsertStoredConnectionSourceInTransaction(this.database, {
+          ...input.source,
+          ...(reconnectsJunctionSource
+            ? { lifecycleEpoch: existingSource.lifecycleEpoch + 1 }
+            : {}),
+        });
       }
 
       return input.jobs.map((job) =>

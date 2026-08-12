@@ -15,10 +15,12 @@ import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murph
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
 import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
+import { buildJunctionProviderSourceInstanceKey } from "../src/config/junction-connect-sources.ts";
 import { DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE } from "../src/public-account.ts";
 import { mergeHostedDeviceSyncConnectionMetadata } from "../src/hosted-runtime.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "../src/local-secret-codec.ts";
 import { DeviceSyncError, deviceSyncError } from "../src/errors.ts";
+import { startDeviceSyncHttpServer } from "../src/http.ts";
 import {
   createDeviceSyncService,
   resolveDeviceSyncStoreNextWakeAt,
@@ -28,6 +30,7 @@ import {
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
 } from "../src/providers/junction.ts";
 import {
+  addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
 } from "../src/junction-historical-backfill-progress.ts";
@@ -759,7 +762,7 @@ test("local shared-Junction target starts preserve established siblings through 
     assert.equal(afterFitbitCompletion.connectedAt, baseline.connectedAt);
     assert.equal(
       afterFitbitCompletion.localConnectionRevision,
-      afterFitbitRetry.localConnectionRevision,
+      afterFitbitRetry.localConnectionRevision + 1,
     );
     assert.equal(afterFitbitCompletion.localTokenRevision, afterFitbitRetry.localTokenRevision);
     assert.equal(
@@ -782,6 +785,381 @@ test("local shared-Junction target starts preserve established siblings through 
   } finally {
     close();
     vi.useRealTimers();
+  }
+});
+
+test("local Junction HTTP reconnect atomically reopens exact-source sparse history", async () => {
+  const now = new Date();
+  now.setMilliseconds(0);
+  const closedDayMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const dayMs = 24 * 60 * 60_000;
+  const factAt = new Date(closedDayMs - 20 * dayMs + 8 * 60 * 60_000).toISOString();
+  const initialHistoryStart = new Date(closedDayMs - 180 * dayMs).toISOString();
+  const initialHistoryEnd = new Date(closedDayMs).toISOString();
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-local-junction-reconnect");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  await initializeVault({ vaultRoot });
+  const canonicalImporter = createImporters();
+  let extendedCaffeineFetches = 0;
+  let importedGapFacts = 0;
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    pushSourceRecoveryEnabled: false,
+    reconcileDays: 7,
+    reconcileIntervalMs: 60 * 60_000,
+    summaryResources: [],
+    timeseriesResources: ["caffeine"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname.startsWith("/v2/user/resolve/")) {
+        return createJsonResponse({ id: "junction-user-local-reconnect" });
+      }
+      if (url.pathname === "/v2/link/token") {
+        return createJsonResponse({
+          link_web_url: "https://link.junction.com/session/local-reconnect",
+        });
+      }
+      if (url.pathname === "/v2/user/providers/junction-user-local-reconnect") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-local-reconnect",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { caffeine: true },
+        }] });
+      }
+      if (
+        url.pathname.startsWith("/v2/summary/")
+        && url.pathname.endsWith("/junction-user-local-reconnect")
+      ) {
+        return createJsonResponse({ data: [] });
+      }
+      if (
+        url.pathname
+          === "/v2/timeseries/junction-user-local-reconnect/caffeine/grouped"
+      ) {
+        const windowStart = url.searchParams.get("start_date");
+        const windowEnd = url.searchParams.get("end_date");
+        assert.ok(windowStart);
+        assert.ok(windowEnd);
+        if (Date.parse(windowEnd) - Date.parse(windowStart) > 14 * dayMs) {
+          extendedCaffeineFetches += 1;
+        }
+        const includesGapFact =
+          Date.parse(windowStart) <= Date.parse(factAt)
+          && Date.parse(windowEnd) > Date.parse(factAt);
+        return createJsonResponse({
+          groups: includesGapFact
+            ? { garmin: [{
+                data: [{ start: factAt, value: 0.095 }],
+                source: { provider: "garmin", type: "watch" },
+              }] }
+            : {},
+        });
+      }
+      throw new Error(`Unexpected local Junction reconnect request: ${url.pathname}`);
+    },
+  });
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      log: {
+        error() {},
+        warn() {},
+      },
+      vaultRoot,
+      publicBaseUrl: "http://127.0.0.1:43199/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(snapshot) {
+        if (JSON.stringify(snapshot).includes(factAt)) {
+          importedGapFacts += 1;
+        }
+        return canonicalImporter.importDeviceProviderSnapshot(snapshot);
+      },
+    },
+    providers: [provider],
+  });
+  let server: Awaited<ReturnType<typeof startDeviceSyncHttpServer>> | null = null;
+
+  try {
+    let metadata: Record<string, unknown> = {
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillWindowEnd: initialHistoryEnd,
+      junctionHistoricalBackfillWindowStart: initialHistoryStart,
+    };
+    for (const [sourceProviderSlug, resource] of [
+      ["garmin", "caffeine"],
+      ["garmin", "vo2_max"],
+      ["garmin", "blood_pressure"],
+      ["oura", "caffeine"],
+    ] as const) {
+      const patch = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+        existingMetadata: metadata,
+        providerSlug: sourceProviderSlug,
+        resource,
+        version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+      });
+      assert.ok(patch);
+      metadata = { ...metadata, ...patch };
+    }
+    const account = store.upsertAccount({
+      connectedAt: new Date(closedDayMs - 240 * dayMs).toISOString(),
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-user-local-reconnect",
+      metadata,
+      nextReconcileAt: null,
+      provider: "junction",
+      scopes: [],
+      setupPhase: "source_confirmed",
+      status: "active",
+    });
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      account.metadata,
+      "garmin",
+      "blood_pressure",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), true);
+    const garminSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: account.id,
+      sourceProviderSlug: "garmin",
+    });
+    assert.ok(garminSourceInstanceKey);
+    const ouraSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+      connectionId: account.id,
+      sourceProviderSlug: "oura",
+    });
+    assert.ok(ouraSourceInstanceKey);
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      firstSeenAt: new Date(closedDayMs - 240 * dayMs).toISOString(),
+      lastSeenAt: new Date(closedDayMs - 30 * dayMs).toISOString(),
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { caffeine: true },
+      sourceInstanceKey: garminSourceInstanceKey,
+      sourceProviderSlug: "garmin",
+      status: "disconnected",
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      firstSeenAt: new Date(closedDayMs - 240 * dayMs).toISOString(),
+      lastSeenAt: now.toISOString(),
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { caffeine: true },
+      sourceInstanceKey: ouraSourceInstanceKey,
+      sourceProviderSlug: "oura",
+      status: "connected",
+    });
+    const stalePayload = {
+      historicalBackfill: true,
+      historicalWindowStart: initialHistoryStart,
+      resource: "caffeine",
+      resourceCategory: "timeseries",
+      sourceLifecycleEpoch: 1,
+      sourceProviderSlug: "garmin",
+      windowEnd: initialHistoryEnd,
+      windowStart: new Date(closedDayMs - 30 * dayMs).toISOString(),
+    };
+    const runningEpochOne = store.enqueueJob({
+      accountId: account.id,
+      availableAt: now.toISOString(),
+      dedupeKey: "local-reconnect-running-epoch-one",
+      kind: "resource",
+      payload: stalePayload,
+      priority: 200,
+      provider: "junction",
+    });
+    const queuedEpochOne = store.enqueueJob({
+      accountId: account.id,
+      availableAt: now.toISOString(),
+      dedupeKey: "local-reconnect-queued-epoch-one",
+      kind: "resource",
+      payload: stalePayload,
+      priority: 190,
+      provider: "junction",
+    });
+    assert.equal(
+      store.claimDueJob("local-reconnect-seeded-worker", now.toISOString(), 60_000)?.id,
+      runningEpochOne.id,
+    );
+
+    server = await startDeviceSyncHttpServer({
+      service,
+      config: {
+        controlToken: "local-reconnect-control-token",
+        host: "127.0.0.1",
+        port: 0,
+      },
+    });
+    const baseUrl = `http://${server.control.host}:${server.control.port}/device-sync`;
+    const startResponse = await fetch(`${baseUrl}/providers/junction/connect`, {
+      body: JSON.stringify({
+        ownerId: "<REDACTED_OWNER_ID>",
+        sourceProviderSlug: "garmin",
+      }),
+      headers: {
+        authorization: "Bearer local-reconnect-control-token",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    });
+    const startResponseBody = await startResponse.text();
+    assert.equal(startResponse.status, 200, startResponseBody);
+    const startResult = JSON.parse(startResponseBody) as { state?: unknown };
+    assert.equal(typeof startResult.state, "string");
+    const callbackResponse = await fetch(
+      `${baseUrl}/connect/junction/callback?murph_state=${encodeURIComponent(String(startResult.state))}&state=success`,
+      { redirect: "manual" },
+    );
+    assert.equal(callbackResponse.status, 200);
+
+    const admittedGarmin = store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "garmin",
+    })[0];
+    assert.equal(admittedGarmin?.status, "connected");
+    assert.equal(admittedGarmin?.lifecycleEpoch, 2);
+    const reopened = store.getAccountById(account.id);
+    assert.ok(reopened);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      reopened.metadata,
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), false);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      reopened.metadata,
+      "garmin",
+      "vo2_max",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), false);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      reopened.metadata,
+      "garmin",
+      "blood_pressure",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), true, "source-first-seen coverage must survive reconnect");
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      reopened.metadata,
+      "oura",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), true, "sibling schedule-time coverage must survive reconnect");
+
+    expireJobLeaseForTesting(
+      store,
+      runningEpochOne.id,
+      new Date(now.getTime() - 1_000).toISOString(),
+    );
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (
+        store.getJobById(runningEpochOne.id)?.status === "succeeded"
+        && store.getJobById(queuedEpochOne.id)?.status === "succeeded"
+      ) {
+        break;
+      }
+      await service.runWorkerOnce();
+    }
+    assert.equal(store.getJobById(runningEpochOne.id)?.status, "succeeded");
+    assert.equal(store.getJobById(queuedEpochOne.id)?.status, "succeeded");
+    assert.equal(extendedCaffeineFetches, 0);
+    assert.equal(importedGapFacts, 0);
+    assert.equal(readJobsForAccountForTesting(store, account.id).filter((row) => {
+      const job = store.getJobById(row.id);
+      return job?.payload.sourceLifecycleEpoch === 1
+        && job.payload.historicalBackfill === true;
+    }).length, 2, "stale lifecycle jobs must not continue");
+
+    store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await service.runSchedulerOnce();
+    const epochTwoHistoryJobs = () => readJobsForAccountForTesting(store, account.id)
+      .flatMap((row) => {
+        const job = store.getJobById(row.id);
+        return job
+          && job.kind === "resource"
+          && job.payload.historicalBackfill === true
+          && job.payload.resource === "caffeine"
+          && job.payload.sourceLifecycleEpoch === 2
+          ? [job]
+          : [];
+      });
+    assert.equal(
+      epochTwoHistoryJobs().filter((job) =>
+        job.status === "queued" || job.status === "running"
+      ).length,
+      1,
+      "reconnect must offer exactly one current repair root",
+    );
+    let workerRuns = 0;
+    while (epochTwoHistoryJobs().some((job) =>
+      job.status === "queued" || job.status === "running"
+    )) {
+      assert.ok(workerRuns < 30);
+      const processed = await service.runWorkerOnce();
+      workerRuns += 1;
+      if (!processed) {
+        const nextAvailableAt = readJobsForAccountForTesting(store, account.id)
+          .flatMap((row) => {
+            const job = store.getJobById(row.id);
+            return job?.status === "queued" ? [Date.parse(job.availableAt)] : [];
+          })
+          .filter((timestamp) => timestamp > now.getTime())
+          .sort((left, right) => left - right)[0];
+        assert.ok(Number.isFinite(nextAvailableAt));
+        now.setTime(nextAvailableAt);
+      }
+    }
+    assert.equal(extendedCaffeineFetches, 6);
+    assert.equal(importedGapFacts, 1);
+    assert.equal(new Set(epochTwoHistoryJobs().map((job) => job.dedupeKey)).size, 1);
+    assert.equal(epochTwoHistoryJobs().length, 6);
+    const completed = store.getAccountById(account.id);
+    assert.ok(completed);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      completed.metadata,
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), true);
+
+    const historyRowsAfterRepair = epochTwoHistoryJobs().length;
+    store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await service.runSchedulerOnce();
+    assert.equal(epochTwoHistoryJobs().length, historyRowsAfterRepair);
+    const replayResponse = await fetch(
+      `${baseUrl}/connect/junction/callback?murph_state=${encodeURIComponent(String(startResult.state))}&state=success`,
+      { redirect: "manual" },
+    );
+    assert.equal(replayResponse.status, 409);
+    assert.equal(store.listConnectionSources({
+      connectionId: account.id,
+      sourceProviderSlug: "garmin",
+    })[0]?.lifecycleEpoch, 2);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      store.getAccountById(account.id)?.metadata ?? {},
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), true, "callback replay must not clear renewed terminal coverage");
+  } finally {
+    await server?.close();
+    close();
   }
 });
 
