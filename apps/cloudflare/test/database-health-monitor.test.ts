@@ -996,6 +996,8 @@ describe("database health monitor", () => {
       outcome: "healthy",
       sampleStatus: "failed",
     });
+    expect(harness.planetScaleRequests).toHaveLength(2);
+    expect(harness.retryWaits).toEqual([1_000]);
     await expect(
       harness.runScheduledCheck(FIVE_MINUTES_MS * 2),
     ).resolves.toMatchObject({
@@ -1022,6 +1024,8 @@ describe("database health monitor", () => {
       failureCode: "service_discovery_failed",
       scrapeStatus: "failed",
     });
+    expect(harness.planetScaleRequests).toHaveLength(4);
+    expect(harness.retryWaits).toEqual([1_000, 1_000]);
   });
 
   it("retries transient telemetry failure before counting a failed check", async () => {
@@ -1039,6 +1043,7 @@ describe("database health monitor", () => {
     });
 
     expect(harness.planetScaleRequests).toHaveLength(3);
+    expect(harness.retryWaits).toEqual([1_000]);
     expect(harness.monitor.readRecentSamples()).toEqual([
       expect.objectContaining({
         failureCode: null,
@@ -1068,6 +1073,7 @@ describe("database health monitor", () => {
       });
 
     expect(harness.primaryLinqRequests).toHaveLength(1);
+    expect(harness.retryWaits).toEqual([1_000]);
   });
 
   it("summarizes a partial-then-unavailable telemetry window across retry", async () => {
@@ -1299,6 +1305,8 @@ describe("database health monitor", () => {
       });
 
     expect(harness.primaryLinqRequests).toHaveLength(1);
+    expect(harness.planetScaleRequests).toHaveLength(2);
+    expect(harness.retryWaits).toEqual([]);
     const alert = await readLinqRequestBody(harness.primaryLinqRequests[0]);
     expect(alert.message.parts[0]?.value).toContain("PgBouncer wait 8s");
     expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
@@ -3107,6 +3115,7 @@ function createMonitorHarness(input: {
   const primaryLinqHealthRequests: Request[] = [];
   const primaryLinqRequests: Request[] = [];
   const planetScaleRequests: Request[] = [];
+  const retryWaits: number[] = [];
   let linqPhoneNumbersRequestCount = 0;
   let nowMs = FIVE_MINUTES_MS;
   const linqHealthResponses = [...(input.linqHealthResponses ?? [])];
@@ -3217,7 +3226,9 @@ function createMonitorHarness(input: {
       environment,
       fetchImplementation,
       () => nowMs,
-      async () => {},
+      async (delayMs) => {
+        retryWaits.push(delayMs);
+      },
     );
   let monitor = createMonitor();
 
@@ -3229,6 +3240,7 @@ function createMonitorHarness(input: {
     fetchImplementation,
     primaryLinqHealthRequests,
     primaryLinqRequests,
+    retryWaits,
     get monitor() {
       return monitor;
     },

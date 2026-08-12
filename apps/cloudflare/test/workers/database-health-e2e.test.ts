@@ -16,8 +16,10 @@ import worker, {
 } from "./worker-entry.ts";
 import {
   readDatabaseHealthMessageRequests,
+  readDatabaseHealthPlanetScaleRequestCounts,
   resetDatabaseHealthMessageRequests,
   setDatabaseHealthClientWaitSeconds,
+  setDatabaseHealthDiscoveryFailuresRemaining,
   setDatabaseHealthNowMs,
 } from "./database-health-fetch.ts";
 
@@ -25,6 +27,41 @@ const FIVE_MINUTES_MS = 5 * 60 * 1_000;
 const ONE_HOUR_MS = 60 * 60 * 1_000;
 
 describe("database health scheduled Worker path", () => {
+  it("retries one unavailable collection inside the scheduled Durable Object run", async () => {
+    resetDatabaseHealthMessageRequests();
+    const scheduledAtMs = Date.now();
+    setDatabaseHealthNowMs(scheduledAtMs);
+    setDatabaseHealthClientWaitSeconds(0);
+    setDatabaseHealthDiscoveryFailuresRemaining(1);
+
+    const namespace = readDatabaseHealthNamespace();
+    const monitor = namespace.getByName("transient-retry");
+    await monitor.runScheduledCheck({ scheduledAtMs });
+
+    await expect(
+      monitor.readRecentSamples({ limit: 10 }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        failureCode: null,
+        observedAtMs: scheduledAtMs,
+        scrapeStatus: "ok",
+      }),
+    ]);
+    await expect(
+      monitor.readAlertState(),
+    ).resolves.toMatchObject({
+      consecutiveScrapeFailures: 0,
+      incidentOpen: false,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
+    expect(readDatabaseHealthPlanetScaleRequestCounts()).toEqual({
+      discovery: 2,
+      metrics: 1,
+    });
+    expect(readDatabaseHealthMessageRequests()).toEqual([]);
+  });
+
   it("retains a truthful page through recovery and the hourly fence", async () => {
     resetDatabaseHealthMessageRequests();
     const scheduledAtMs = Date.now();

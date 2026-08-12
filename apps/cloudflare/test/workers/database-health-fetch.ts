@@ -12,6 +12,9 @@ interface RecordedDatabaseHealthMessageRequest {
 const recordedDatabaseHealthMessageRequests:
   RecordedDatabaseHealthMessageRequest[] = [];
 let databaseHealthClientWaitSeconds = 8;
+let databaseHealthDiscoveryFailuresRemaining = 0;
+let databaseHealthDiscoveryRequestCount = 0;
+let databaseHealthMetricsRequestCount = 0;
 let databaseHealthNowMs = Date.now();
 
 export function readDatabaseHealthMessageRequests():
@@ -22,9 +25,22 @@ export function readDatabaseHealthMessageRequests():
   }));
 }
 
+export function readDatabaseHealthPlanetScaleRequestCounts(): {
+  discovery: number;
+  metrics: number;
+} {
+  return {
+    discovery: databaseHealthDiscoveryRequestCount,
+    metrics: databaseHealthMetricsRequestCount,
+  };
+}
+
 export function resetDatabaseHealthMessageRequests(): void {
   recordedDatabaseHealthMessageRequests.length = 0;
   databaseHealthClientWaitSeconds = 8;
+  databaseHealthDiscoveryFailuresRemaining = 0;
+  databaseHealthDiscoveryRequestCount = 0;
+  databaseHealthMetricsRequestCount = 0;
   databaseHealthNowMs = Date.now();
 }
 
@@ -34,6 +50,12 @@ export function readDatabaseHealthNowMs(): number {
 
 export function setDatabaseHealthClientWaitSeconds(value: number): void {
   databaseHealthClientWaitSeconds = value;
+}
+
+export function setDatabaseHealthDiscoveryFailuresRemaining(
+  value: number,
+): void {
+  databaseHealthDiscoveryFailuresRemaining = value;
 }
 
 export function setDatabaseHealthNowMs(value: number): void {
@@ -61,6 +83,11 @@ export async function handleDatabaseHealthEgress(
     && headers.get("authorization")
       === "service-token-id:service-token"
   ) {
+    databaseHealthDiscoveryRequestCount += 1;
+    if (databaseHealthDiscoveryFailuresRemaining > 0) {
+      databaseHealthDiscoveryFailuresRemaining -= 1;
+      return new Response(null, { status: 503 });
+    }
     return Response.json([
       {
         labels: {
@@ -84,6 +111,7 @@ export async function handleDatabaseHealthEgress(
     && url.searchParams.get("sig") === "signed-scrape-token"
     && headers.get("authorization") === null
   ) {
+    databaseHealthMetricsRequestCount += 1;
     return new Response(buildMetricsBody({
       branchId: "branch_worker_test",
       clientWaitSeconds: databaseHealthClientWaitSeconds,
