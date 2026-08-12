@@ -21,6 +21,7 @@ vi.mock("../src/lib/hosted-execution/usage-allowance", async () => {
 });
 
 import {
+  HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
   HostedOpsMemberUsageResetNotFoundError,
   HostedOpsMemberUsageResetNoticeInFlightError,
   HostedOpsMemberUsageResetStaleError,
@@ -54,7 +55,26 @@ describe("hosted ops member usage", () => {
     );
   });
 
+  test("rejects ambiguous cursor directions before database work", async () => {
+    const findMembers = vi.fn();
+    const prisma = asPrismaClientForHostedOpsTest({
+      hostedMember: { findMany: findMembers },
+    });
+
+    await expect(readHostedOpsMemberUsage({
+      after: "hbm_025",
+      before: "hbm_051",
+      now: NOW,
+      prisma,
+    })).rejects.toThrow(
+      "Hosted ops usage pagination cannot specify both after and before cursors.",
+    );
+
+    expect(findMembers).not.toHaveBeenCalled();
+  });
+
   test("reports members and containers from canonical retained and immutable rows", async () => {
+    const readSummary = vi.fn(async () => makeSummaryRows());
     const groupMessages = vi.fn()
       .mockResolvedValueOnce([{
         _count: { _all: 18 },
@@ -80,7 +100,7 @@ describe("hosted ops member usage", () => {
       _sum: { allowanceCostUsdMicros: 1_250_000n },
       memberId: "hbm_person",
     }]);
-    const findMembers = vi.fn(async () => [
+    const memberDetails = [
       makeMember({
         id: "hbm_container",
         identity: null,
@@ -92,7 +112,8 @@ describe("hosted ops member usage", () => {
         usageCreditLedgerVersion: 3n,
       }),
       makeMember({ id: "hbm_person" }),
-    ]);
+    ];
+    const findMembers = createPagedMemberFindManyMock(memberDetails);
     usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValue(
       new Map([
         ["hbm_container", {
@@ -112,6 +133,7 @@ describe("hosted ops member usage", () => {
       ]),
     );
     const prisma = asPrismaClientForHostedOpsTest({
+      $queryRaw: readSummary,
       hostedAiUsage: {
         groupBy: groupUsage,
       },
@@ -124,7 +146,7 @@ describe("hosted ops member usage", () => {
       },
     });
 
-    const dashboard = await readHostedOpsMemberUsage(NOW, prisma);
+    const dashboard = await readHostedOpsMemberUsage({ now: NOW, prisma });
 
     expect(dashboard.rows.map((row) => row.memberId)).toEqual([
       "hbm_container",
@@ -163,6 +185,11 @@ describe("hosted ops member usage", () => {
       members: 1,
       totalAllTimeUsageUsdMicros: "8500000",
     });
+    expect(dashboard.pagination).toEqual({
+      nextCursor: null,
+      pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+      previousCursor: null,
+    });
     expect(groupMessages).toHaveBeenNthCalledWith(1, {
       by: ["userId"],
       _count: { _all: true },
@@ -172,6 +199,7 @@ describe("hosted ops member usage", () => {
           gte: new Date("2026-06-22T18:00:00.000Z"),
           lt: NOW,
         },
+        userId: { in: ["hbm_container", "hbm_person"] },
       },
     });
     expect(groupMessages).toHaveBeenNthCalledWith(2, {
@@ -183,29 +211,57 @@ describe("hosted ops member usage", () => {
           gte: new Date("2026-07-15T18:00:00.000Z"),
           lt: NOW,
         },
+        userId: { in: ["hbm_container", "hbm_person"] },
       },
     });
     expect(groupUsage).toHaveBeenCalledWith({
       by: ["memberId"],
       _sum: { allowanceCostUsdMicros: true },
-      where: { allowanceCounted: true },
+      where: {
+        allowanceCounted: true,
+        memberId: { in: ["hbm_container", "hbm_person"] },
+      },
     });
-    expect(findMembers).toHaveBeenCalledWith(expect.objectContaining({
-      select: expect.objectContaining({
-        threadContainer: {
-          select: {
-            ownerMemberId: true,
-            _count: {
-              select: {
-                participants: {
-                  where: { removedAt: null },
+    expect(findMembers).toHaveBeenNthCalledWith(1, {
+      orderBy: { id: "asc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        orderBy: { id: "asc" },
+        select: expect.objectContaining({
+          threadContainer: {
+            select: {
+              ownerMemberId: true,
+              _count: {
+                select: {
+                  participants: {
+                    where: { removedAt: null },
+                  },
                 },
               },
             },
           },
+        }),
+        where: {
+          id: { in: ["hbm_container", "hbm_person"] },
         },
       }),
-    }));
+    );
+    expect(findMembers).toHaveBeenCalledTimes(2);
+    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+      .toHaveBeenCalledWith({
+        memberIds: ["hbm_container", "hbm_person"],
+        now: NOW,
+        prisma,
+      });
+    expect(readSummary).toHaveBeenCalledTimes(1);
+    const summarySql = readSqlText(readSummary.mock.calls[0]);
+    expect(summarySql).toContain('COUNT(DISTINCT "mailbox_item"."user_id")');
+    expect(summarySql).toContain('SUM("usage"."allowance_cost_usd_micros")');
+    expect(summarySql).not.toContain("GROUP BY");
     expect(findDeliveries).toHaveBeenCalledTimes(1);
   });
 
@@ -217,19 +273,225 @@ describe("hosted ops member usage", () => {
       }]]),
     );
     const prisma = asPrismaClientForHostedOpsTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
       hostedAiUsage: { groupBy: vi.fn(async () => []) },
       hostedLinqDelivery: { findMany: vi.fn(async () => []) },
       hostedMailboxItem: { groupBy: vi.fn(async () => []) },
       hostedMember: {
-        findMany: vi.fn(async () => [makeMember({ id: "hbm_person" })]),
+        findMany: createPagedMemberFindManyMock([
+          makeMember({ id: "hbm_person" }),
+        ]),
       },
     });
 
-    const dashboard = await readHostedOpsMemberUsage(NOW, prisma);
+    const dashboard = await readHostedOpsMemberUsage({ now: NOW, prisma });
 
     expect(dashboard.rows[0]?.currentPeriod).toMatchObject({
       blocked: true,
     });
+  });
+
+  test("caps one render at 25 members and scopes every row-level read to that page", async () => {
+    const memberCandidates = makeMemberCandidates({ count: 26, start: 1 });
+    const admittedIds = memberCandidates
+      .slice(0, HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE)
+      .map((member) => member.id);
+    const offPageMemberId = memberCandidates.at(-1)?.id;
+    const readSummary = vi.fn(async () => makeSummaryRows({
+      activeEntitiesLast7Days: 312n,
+      groupContainers: 204n,
+      members: 1_024n,
+      totalAllTimeUsageUsdMicros: 9_223_372_036_854_775_808n,
+    }));
+    const groupMessages = vi.fn(async (_input: unknown) => []);
+    const groupUsage = vi.fn(async (_input: unknown) => []);
+    const findDeliveries = vi.fn(async () => []);
+    const findMembers = createPagedMemberFindManyMock(memberCandidates);
+    const prisma = asPrismaClientForHostedOpsTest({
+      $queryRaw: readSummary,
+      hostedAiUsage: { groupBy: groupUsage },
+      hostedLinqDelivery: { findMany: findDeliveries },
+      hostedMailboxItem: { groupBy: groupMessages },
+      hostedMember: { findMany: findMembers },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage({ now: NOW, prisma });
+
+    expect(dashboard.rows.map((row) => row.memberId)).toEqual(admittedIds);
+    expect(dashboard.rows).toHaveLength(HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE);
+    expect(dashboard.pagination).toEqual({
+      nextCursor: admittedIds.at(-1),
+      pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+      previousCursor: null,
+    });
+    expect(dashboard.summary).toEqual({
+      activeEntitiesLast7Days: 312,
+      groupContainers: 204,
+      members: 1_024,
+      totalAllTimeUsageUsdMicros: "9223372036854775808",
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(1, {
+      orderBy: { id: "asc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        orderBy: { id: "asc" },
+        where: { id: { in: admittedIds } },
+      }),
+    );
+    expect(findMembers).toHaveBeenCalledTimes(2);
+    expect(groupMessages).toHaveBeenCalledTimes(2);
+    for (const [query] of groupMessages.mock.calls) {
+      expect(query).toEqual(expect.objectContaining({
+        where: expect.objectContaining({
+          userId: { in: admittedIds },
+        }),
+      }));
+    }
+    expect(groupUsage).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        allowanceCounted: true,
+        memberId: { in: admittedIds },
+      },
+    }));
+    expect(groupUsage).toHaveBeenCalledTimes(1);
+    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+      .toHaveBeenCalledWith({
+        memberIds: admittedIds,
+        now: NOW,
+        prisma,
+      });
+    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+      .toHaveBeenCalledTimes(1);
+    expect(admittedIds).not.toContain(offPageMemberId);
+    expect(readSummary).toHaveBeenCalledTimes(1);
+    expect(findDeliveries).not.toHaveBeenCalled();
+  });
+
+  test("keeps a previous-page recovery cursor when a forward page becomes empty", async () => {
+    const findMembers = vi.fn(async () => []);
+    const groupMessages = vi.fn();
+    const groupUsage = vi.fn();
+    const prisma = asPrismaClientForHostedOpsTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      hostedAiUsage: { groupBy: groupUsage },
+      hostedLinqDelivery: { findMany: vi.fn() },
+      hostedMailboxItem: { groupBy: groupMessages },
+      hostedMember: { findMany: findMembers },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage({
+      after: "hbm_999",
+      now: NOW,
+      prisma,
+    });
+
+    expect(dashboard.rows).toEqual([]);
+    expect(dashboard.pagination).toEqual({
+      nextCursor: null,
+      pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+      previousCursor: "hbm_999",
+    });
+    expect(findMembers).toHaveBeenCalledTimes(1);
+    expect(groupMessages).not.toHaveBeenCalled();
+    expect(groupUsage).not.toHaveBeenCalled();
+    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+      .not.toHaveBeenCalled();
+  });
+
+  test("uses primary-key cap-plus-one cursors for forward and previous-page traversal", async () => {
+    const forwardCandidates = makeMemberCandidates({ count: 26, start: 26 });
+    const backwardCandidates = makeMemberCandidates({
+      count: 26,
+      descending: true,
+      start: 25,
+    });
+    const expectedPageDetails = makeMemberCandidates({ count: 25, start: 26 });
+    const expectedPageIds = expectedPageDetails.map((member) => member.id);
+    const findMembers = vi.fn()
+      .mockResolvedValueOnce(forwardCandidates.map(({ id }) => ({ id })))
+      .mockResolvedValueOnce(expectedPageDetails)
+      .mockResolvedValueOnce(backwardCandidates.map(({ id }) => ({ id })))
+      .mockResolvedValueOnce(expectedPageDetails);
+    const prisma = asPrismaClientForHostedOpsTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      hostedAiUsage: { groupBy: vi.fn(async () => []) },
+      hostedLinqDelivery: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { groupBy: vi.fn(async () => []) },
+      hostedMember: { findMany: findMembers },
+    });
+
+    const forward = await readHostedOpsMemberUsage({
+      after: "hbm_025",
+      now: NOW,
+      prisma,
+    });
+    const previous = await readHostedOpsMemberUsage({
+      before: "hbm_051",
+      now: NOW,
+      prisma,
+    });
+
+    expect(forward.rows.map((row) => row.memberId)).toEqual(expectedPageIds);
+    expect(previous.rows.map((row) => row.memberId)).toEqual(expectedPageIds);
+    expect(forward.pagination).toEqual({
+      nextCursor: "hbm_050",
+      pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+      previousCursor: "hbm_026",
+    });
+    expect(previous.pagination).toEqual({
+      nextCursor: "hbm_050",
+      pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+      previousCursor: "hbm_026",
+    });
+    expect(findMembers).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        orderBy: { id: "asc" },
+        select: { id: true },
+        take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+        where: { id: { gt: "hbm_025" } },
+      }),
+    );
+    expect(findMembers).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        orderBy: { id: "asc" },
+        where: { id: { in: expectedPageIds } },
+      }),
+    );
+    expect(findMembers).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        orderBy: { id: "desc" },
+        select: { id: true },
+        take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+        where: { id: { lt: "hbm_051" } },
+      }),
+    );
+    expect(findMembers).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({
+        orderBy: { id: "asc" },
+        where: { id: { in: expectedPageIds } },
+      }),
+    );
+    expect(findMembers).toHaveBeenCalledTimes(4);
+    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+      .toHaveBeenNthCalledWith(1, {
+        memberIds: expectedPageIds,
+        now: NOW,
+        prisma,
+      });
+    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+      .toHaveBeenNthCalledWith(2, {
+        memberIds: expectedPageIds,
+        now: NOW,
+        prisma,
+      });
   });
 
   test("atomically clears included spend and releases only the current notice claim", async () => {
@@ -442,6 +704,51 @@ function makeMember(overrides: Record<string, unknown> = {}) {
     usageCreditLedgerVersion: 0n,
     ...overrides,
   };
+}
+
+function createPagedMemberFindManyMock(
+  memberCandidates: ReturnType<typeof makeMember>[],
+) {
+  const admittedMembers = memberCandidates.slice(
+    0,
+    HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+  );
+  return vi.fn()
+    .mockResolvedValueOnce(memberCandidates.map(({ id }) => ({ id })))
+    .mockResolvedValueOnce(admittedMembers);
+}
+
+function makeMemberCandidates(input: {
+  count: number;
+  descending?: boolean;
+  start: number;
+}) {
+  const candidates = Array.from({ length: input.count }, (_, index) =>
+    makeMember({
+      id: `hbm_${String(input.start + index).padStart(3, "0")}`,
+    })
+  );
+  return input.descending ? candidates.reverse() : candidates;
+}
+
+function makeSummaryRows(input: Partial<{
+  activeEntitiesLast7Days: bigint;
+  groupContainers: bigint;
+  members: bigint;
+  totalAllTimeUsageUsdMicros: bigint;
+}> = {}) {
+  return [{
+    activeEntitiesLast7Days: (input.activeEntitiesLast7Days ?? 1n).toString(),
+    groupContainers: (input.groupContainers ?? 1n).toString(),
+    members: (input.members ?? 1n).toString(),
+    totalAllTimeUsageUsdMicros:
+      (input.totalAllTimeUsageUsdMicros ?? 8_500_000n).toString(),
+  }];
+}
+
+function readSqlText(call: readonly unknown[] | undefined): string {
+  const template = call?.[0];
+  return Array.isArray(template) ? template.join("?") : "";
 }
 
 function makeUsageGateDecision(overrides: Record<string, unknown> = {}) {

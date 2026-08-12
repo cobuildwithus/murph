@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
+  type HostedAiUsageGateSnapshot,
   readHostedAiUsageGate,
   readHostedAiUsageGateSnapshots,
 } from "../hosted-execution/usage-allowance";
@@ -21,6 +22,7 @@ import { getPrisma } from "../prisma";
 const HOSTED_CONVERSATION_MESSAGE_KIND = "conversation.message";
 const HOSTED_MESSAGE_RETENTION_DAYS = 30;
 const HOSTED_USAGE_REPORTING_WINDOW_DAYS = 7;
+export const HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE = 25;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface HostedOpsMemberUsageRow {
@@ -56,6 +58,11 @@ export interface HostedOpsMemberUsagePeriod {
 export interface HostedOpsMemberUsageDashboard {
   capturedAt: string;
   messageRetentionDays: number;
+  pagination: {
+    nextCursor: string | null;
+    pageSize: number;
+    previousCursor: string | null;
+  };
   rows: HostedOpsMemberUsageRow[];
   summary: {
     activeEntitiesLast7Days: number;
@@ -63,6 +70,20 @@ export interface HostedOpsMemberUsageDashboard {
     members: number;
     totalAllTimeUsageUsdMicros: string;
   };
+}
+
+export interface HostedOpsMemberUsageReadInput {
+  after?: string | null;
+  before?: string | null;
+  now?: Date;
+  prisma?: PrismaClient;
+}
+
+interface HostedOpsMemberUsageSummaryRow {
+  activeEntitiesLast7Days: string;
+  groupContainers: string;
+  members: string;
+  totalAllTimeUsageUsdMicros: string;
 }
 
 export interface HostedOpsMemberUsageResetInput {
@@ -113,82 +134,163 @@ export class HostedOpsMemberUsageResetNoticeInFlightError extends Error {
 }
 
 export async function readHostedOpsMemberUsage(
-  now = new Date(),
-  prisma: PrismaClient = getPrisma(),
+  input: HostedOpsMemberUsageReadInput = {},
 ): Promise<HostedOpsMemberUsageDashboard> {
+  const now = input.now ?? new Date();
+  const prisma = input.prisma ?? getPrisma();
   assertValidDate(now, "Hosted ops usage reporting timestamp is invalid.");
+  const after = normalizeHostedOpsMemberUsageCursor(input.after);
+  const before = normalizeHostedOpsMemberUsageCursor(input.before);
+  if (after && before) {
+    throw new TypeError(
+      "Hosted ops usage pagination cannot specify both after and before cursors.",
+    );
+  }
   const last7DaysStart = new Date(
     now.getTime() - HOSTED_USAGE_REPORTING_WINDOW_DAYS * DAY_MS,
   );
   const retentionWindowStart = new Date(
     now.getTime() - HOSTED_MESSAGE_RETENTION_DAYS * DAY_MS,
   );
+  const descending = before !== null;
+  const cursor = before ?? after;
 
-  const members = await prisma.hostedMember.findMany({
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: {
-      billingStatus: true,
-      createdAt: true,
-      hostedGroupRuntime: {
-        select: {
-          ownerMemberId: true,
-          _count: {
-            select: { members: true },
+  const memberKeyCandidates = await prisma.hostedMember.findMany({
+    ...(cursor
+      ? {
+          where: {
+            id: descending ? { lt: cursor } : { gt: cursor },
           },
-        },
-      },
-      id: true,
-      identity: {
-        select: { maskedPhoneNumberHint: true },
-      },
-      suspendedAt: true,
-      threadContainer: {
+        }
+      : {}),
+    orderBy: { id: descending ? "desc" : "asc" },
+    select: { id: true },
+    take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+  });
+  const hasMoreInReadDirection =
+    memberKeyCandidates.length > HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE;
+  const selectedMemberKeys = memberKeyCandidates.slice(
+    0,
+    HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+  );
+  const pageMemberIds = (
+    descending ? selectedMemberKeys.reverse() : selectedMemberKeys
+  ).map((member) => member.id);
+  const members = pageMemberIds.length > 0
+    ? await prisma.hostedMember.findMany({
+        orderBy: { id: "asc" },
         select: {
-          ownerMemberId: true,
-          _count: {
+          billingStatus: true,
+          createdAt: true,
+          hostedGroupRuntime: {
             select: {
-              participants: {
-                where: { removedAt: null },
+              ownerMemberId: true,
+              _count: {
+                select: { members: true },
+              },
+            },
+          },
+          id: true,
+          identity: {
+            select: { maskedPhoneNumberHint: true },
+          },
+          suspendedAt: true,
+          threadContainer: {
+            select: {
+              ownerMemberId: true,
+              _count: {
+                select: {
+                  participants: {
+                    where: { removedAt: null },
+                  },
+                },
               },
             },
           },
         },
-      },
-    },
-  });
-  const [
-    retainedMessageCounts,
-    last7DayMessageCounts,
-    usageTotals,
-    usageGateSnapshots,
-  ] = await Promise.all([
-      prisma.hostedMailboxItem.groupBy({
+        where: { id: { in: pageMemberIds } },
+      })
+    : [];
+  const memberIds = members.map((member) => member.id);
+
+  const summaryRows = await prisma.$queryRaw<HostedOpsMemberUsageSummaryRow[]>`
+    WITH "member_counts" AS (
+      SELECT
+        COUNT(*) FILTER (
+          WHERE "thread_container"."member_id" IS NULL
+            AND "legacy_group"."runtime_member_id" IS NULL
+        )::text AS "members",
+        COUNT(*) FILTER (
+          WHERE "thread_container"."member_id" IS NOT NULL
+            OR "legacy_group"."runtime_member_id" IS NOT NULL
+        )::text AS "groupContainers"
+      FROM "hosted_member" AS "hosted_member"
+      LEFT JOIN "hosted_thread_container" AS "thread_container"
+        ON "thread_container"."member_id" = "hosted_member"."id"
+      LEFT JOIN "hosted_group" AS "legacy_group"
+        ON "legacy_group"."runtime_member_id" = "hosted_member"."id"
+    )
+    SELECT
+      "member_counts"."members",
+      "member_counts"."groupContainers",
+      (
+        SELECT COUNT(DISTINCT "mailbox_item"."user_id")::text
+        FROM "hosted_mailbox_item" AS "mailbox_item"
+        WHERE "mailbox_item"."kind" = ${HOSTED_CONVERSATION_MESSAGE_KIND}
+          AND "mailbox_item"."occurred_at" >= ${last7DaysStart}
+          AND "mailbox_item"."occurred_at" < ${now}
+      ) AS "activeEntitiesLast7Days",
+      (
+        SELECT COALESCE(
+          SUM("usage"."allowance_cost_usd_micros"),
+          0
+        )::text
+        FROM "hosted_ai_usage" AS "usage"
+        WHERE "usage"."allowance_counted" = TRUE
+      ) AS "totalAllTimeUsageUsdMicros"
+    FROM "member_counts"
+  `;
+  const summary = normalizeHostedOpsMemberUsageSummary(summaryRows[0]);
+
+  const retainedMessageCounts = memberIds.length > 0
+    ? await prisma.hostedMailboxItem.groupBy({
         by: ["userId"],
         _count: { _all: true },
         where: {
           kind: HOSTED_CONVERSATION_MESSAGE_KIND,
           occurredAt: { gte: retentionWindowStart, lt: now },
+          userId: { in: memberIds },
         },
-      }),
-      prisma.hostedMailboxItem.groupBy({
+      })
+    : [];
+  const last7DayMessageCounts = memberIds.length > 0
+    ? await prisma.hostedMailboxItem.groupBy({
         by: ["userId"],
         _count: { _all: true },
         where: {
           kind: HOSTED_CONVERSATION_MESSAGE_KIND,
           occurredAt: { gte: last7DaysStart, lt: now },
+          userId: { in: memberIds },
         },
-      }),
-      prisma.hostedAiUsage.groupBy({
+      })
+    : [];
+  const usageTotals = memberIds.length > 0
+    ? await prisma.hostedAiUsage.groupBy({
         by: ["memberId"],
         _sum: { allowanceCostUsdMicros: true },
-        where: { allowanceCounted: true },
-      }),
-      readHostedAiUsageGateSnapshots({
-        memberIds: members.map((member) => member.id),
+        where: {
+          allowanceCounted: true,
+          memberId: { in: memberIds },
+        },
+      })
+    : [];
+  const usageGateSnapshots = memberIds.length > 0
+    ? await readHostedAiUsageGateSnapshots({
+        memberIds,
         now,
         prisma,
-      }),
-    ]);
+      })
+    : new Map<string, HostedAiUsageGateSnapshot>();
 
   const retainedByMember = new Map(
     retainedMessageCounts.map((row) => [row.userId, row._count._all]),
@@ -298,25 +400,31 @@ export async function readHostedOpsMemberUsage(
         ?? null,
       suspended: member.suspendedAt !== null,
     };
-  }).sort(compareHostedOpsUsageRows);
+  });
 
-  const totalAllTimeUsageUsdMicros = rows.reduce(
-    (total, row) => total + BigInt(row.allTimeUsageUsdMicros),
-    0n,
-  );
+  const firstMemberId = pageMemberIds[0] ?? null;
+  const lastMemberId = pageMemberIds.at(-1) ?? null;
 
   return {
     capturedAt: now.toISOString(),
     messageRetentionDays: HOSTED_MESSAGE_RETENTION_DAYS,
-    rows,
-    summary: {
-      activeEntitiesLast7Days: rows.filter((row) => row.messagesLast7Days > 0)
-        .length,
-      groupContainers: rows.filter((row) => row.memberKind === "group_container")
-        .length,
-      members: rows.filter((row) => row.memberKind === "member").length,
-      totalAllTimeUsageUsdMicros: totalAllTimeUsageUsdMicros.toString(),
+    pagination: {
+      nextCursor: descending
+        ? lastMemberId ?? before
+        : hasMoreInReadDirection
+          ? lastMemberId
+          : null,
+      pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+      previousCursor: descending
+        ? hasMoreInReadDirection
+          ? firstMemberId
+          : null
+        : after
+          ? firstMemberId ?? after
+          : null,
     },
+    rows,
+    summary,
   };
 }
 
@@ -511,17 +619,50 @@ function normalizeNonNegativeBigInt(value: bigint | null): bigint {
   return normalized;
 }
 
-function compareHostedOpsUsageRows(
-  left: HostedOpsMemberUsageRow,
-  right: HostedOpsMemberUsageRow,
-): number {
-  if (left.memberKind !== right.memberKind) {
-    return left.memberKind === "group_container" ? -1 : 1;
+function normalizeHostedOpsMemberUsageCursor(
+  value: string | null | undefined,
+): string | null {
+  if (value == null) {
+    return null;
   }
-  if (left.messagesLast7Days !== right.messagesLast7Days) {
-    return right.messagesLast7Days - left.messagesLast7Days;
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new TypeError("Hosted ops usage pagination cursor is invalid.");
   }
-  return left.memberId.localeCompare(right.memberId);
+  return normalized;
+}
+
+function normalizeHostedOpsMemberUsageSummary(
+  row: HostedOpsMemberUsageSummaryRow | undefined,
+): HostedOpsMemberUsageDashboard["summary"] {
+  if (!row) {
+    throw new TypeError("Hosted ops usage summary query returned no row.");
+  }
+  return {
+    activeEntitiesLast7Days: normalizeHostedOpsMemberUsageCount(
+      row.activeEntitiesLast7Days,
+    ),
+    groupContainers: normalizeHostedOpsMemberUsageCount(row.groupContainers),
+    members: normalizeHostedOpsMemberUsageCount(row.members),
+    totalAllTimeUsageUsdMicros: parseHostedOpsMemberUsageSummaryBigInt(
+      row.totalAllTimeUsageUsdMicros,
+    ).toString(),
+  };
+}
+
+function normalizeHostedOpsMemberUsageCount(value: string): number {
+  const normalized = parseHostedOpsMemberUsageSummaryBigInt(value);
+  if (normalized > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new TypeError("Hosted ops usage summary count exceeds safe range.");
+  }
+  return Number(normalized);
+}
+
+function parseHostedOpsMemberUsageSummaryBigInt(value: string): bigint {
+  if (!/^(?:0|[1-9]\d*)$/.test(value)) {
+    throw new TypeError("Hosted ops usage summary value is invalid.");
+  }
+  return BigInt(value);
 }
 
 function isHostedUsageNoticeDispatchInFlight(input: {

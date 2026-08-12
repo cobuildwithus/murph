@@ -4131,22 +4131,12 @@ describe("readHostedAiUsageGateSnapshots", () => {
         periodEnd,
         periodStart,
         spentUsdMicros: 10_000_000n,
+        updatedAt: periodUpdatedAt,
       },
       periodEnd,
       periodStart,
       spentUsdMicros: 10_000_000n,
     });
-    const findPeriods = vi.fn(async () => [{
-      billingPlanCode: "launch_monthly",
-      blockedAt: new Date("2026-07-22T16:55:00.000Z"),
-      limitUsdMicros: 10_000_000n,
-      memberId: "member_123",
-      periodEnd,
-      periodStart,
-      spentUsdMicros: 10_000_000n,
-      updatedAt: periodUpdatedAt,
-    }]);
-    Object.assign(prisma.hostedAiUsagePeriod, { findMany: findPeriods });
     const transaction = vi.fn(async (
       run: (tx: typeof prisma) => Promise<unknown>,
       _options?: { isolationLevel?: string },
@@ -4169,17 +4159,13 @@ describe("readHostedAiUsageGateSnapshots", () => {
       },
       periodPersistedAt: periodUpdatedAt,
     });
-    expect(findPeriods).toHaveBeenCalledWith({
-      select: {
-        memberId: true,
-        periodStart: true,
-        updatedAt: true,
-      },
+    expect(prisma.hostedAiUsagePeriod.findUnique).toHaveBeenCalledWith({
+      select: { updatedAt: true },
       where: {
-        OR: [{
+        memberId_periodStart: {
           memberId: "member_123",
           periodStart,
-        }],
+        },
       },
     });
     expect(transaction).toHaveBeenCalledWith(
@@ -4204,17 +4190,11 @@ describe("readHostedAiUsageGateSnapshots", () => {
         periodEnd,
         periodStart,
         spentUsdMicros: 10_000_000n,
+        updatedAt: periodUpdatedAt,
       },
       periodEnd,
       periodStart,
       spentUsdMicros: 10_000_000n,
-    });
-    Object.assign(increasedPlan.hostedAiUsagePeriod, {
-      findMany: vi.fn(async () => [{
-        memberId: "member_123",
-        periodStart,
-        updatedAt: periodUpdatedAt,
-      }]),
     });
     const increasedTransaction = vi.fn(async (
       run: (tx: typeof increasedPlan) => Promise<unknown>,
@@ -4246,17 +4226,11 @@ describe("readHostedAiUsageGateSnapshots", () => {
         periodEnd,
         periodStart,
         spentUsdMicros: 11_000_000n,
+        updatedAt: periodUpdatedAt,
       },
       periodEnd,
       periodStart,
       spentUsdMicros: 11_000_000n,
-    });
-    Object.assign(decreasedPlan.hostedAiUsagePeriod, {
-      findMany: vi.fn(async () => [{
-        memberId: "member_123",
-        periodStart,
-        updatedAt: periodUpdatedAt,
-      }]),
     });
     const decreasedTransaction = vi.fn(async (
       run: (tx: typeof decreasedPlan) => Promise<unknown>,
@@ -4278,6 +4252,74 @@ describe("readHostedAiUsageGateSnapshots", () => {
       },
       periodPersistedAt: periodUpdatedAt,
     });
+  });
+
+  it("uses one sequential short transaction per admitted dashboard member", async () => {
+    const now = new Date("2026-07-22T18:00:00.000Z");
+    const periodStart = new Date("2026-07-05T00:00:00.000Z");
+    const periodEnd = new Date("2026-08-05T00:00:00.000Z");
+    const periodUpdatedAt = new Date("2026-07-22T17:00:00.000Z");
+    const memberIds = Array.from(
+      { length: 25 },
+      (_, index) => `member_${String(index + 1).padStart(2, "0")}`,
+    );
+    const prisma = createGatePrisma({
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: null,
+        limitUsdMicros: 10_000_000n,
+        periodEnd,
+        periodStart,
+        spentUsdMicros: 1_000_000n,
+        updatedAt: periodUpdatedAt,
+      },
+      periodEnd,
+      periodStart,
+      spentUsdMicros: 1_000_000n,
+    });
+    let activeTransactions = 0;
+    let maximumActiveTransactions = 0;
+    const transaction = vi.fn(async (
+      run: (tx: typeof prisma) => Promise<unknown>,
+      options?: { isolationLevel?: string },
+    ) => {
+      expect(options).toEqual({ isolationLevel: "RepeatableRead" });
+      activeTransactions += 1;
+      maximumActiveTransactions = Math.max(
+        maximumActiveTransactions,
+        activeTransactions,
+      );
+      try {
+        return await run(prisma);
+      } finally {
+        activeTransactions -= 1;
+      }
+    });
+
+    const snapshots = await readHostedAiUsageGateSnapshots({
+      memberIds,
+      now,
+      prisma: { $transaction: transaction } as never,
+    });
+
+    expect([...snapshots.keys()]).toEqual(memberIds);
+    expect(transaction).toHaveBeenCalledTimes(memberIds.length);
+    expect(maximumActiveTransactions).toBe(1);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(
+      memberIds.length,
+    );
+    expect(prisma.hostedAiUsagePeriod.findUnique).toHaveBeenCalledTimes(
+      memberIds.length * 2,
+    );
+    for (const memberId of memberIds) {
+      expect(prisma.hostedAiUsagePeriod.findUnique).toHaveBeenCalledWith({
+        select: { updatedAt: true },
+        where: {
+          memberId_periodStart: { memberId, periodStart },
+        },
+      });
+    }
+    expect(prisma.hostedAiUsagePeriod).not.toHaveProperty("findMany");
   });
 });
 
@@ -4640,6 +4682,7 @@ function createGatePrisma(input: {
     periodStart: Date;
     planResetAt?: Date | null;
     spentUsdMicros: bigint;
+    updatedAt?: Date;
   } | null;
   limitUsdMicros?: bigint;
   periodEnd?: Date;
@@ -4708,6 +4751,7 @@ function createGatePrisma(input: {
     periodStart,
     planResetAt: input.planResetAt ?? null,
     spentUsdMicros: input.spentUsdMicros,
+    updatedAt: input.findUniquePeriod?.updatedAt ?? periodStart,
   };
 
   return {

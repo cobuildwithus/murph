@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-11
+Last verified: 2026-08-12
 
 ## Current Guardrails
 
@@ -99,6 +99,13 @@ Last verified: 2026-08-11
   input, cache-read, cache-write, and output rates and records the provider
   model and pricing source in the snapshot; unknown non-Venice standard
   provider evidence retains the existing OpenAI-compatible behavior.
+- The operator `/ops/usage` collection is bounded independently of lifetime
+  member count. It reads at most 26 hosted-member primary keys to admit a
+  25-row page, uses one scalar whole-population aggregate, filters mailbox and
+  immutable-usage groupings to those 25 IDs, and runs the canonical allowance
+  gate sequentially in one short repeatable-read transaction per displayed
+  member. No transaction spans members, no off-page member reaches the gate,
+  and peak added transactional connection ownership is one.
 - An authenticated Settings provider change commits Postgres first and then
   sends the payload-free `runtime_wake_requested` Temporal signal. The per-user
   workflow coalesces duplicate wakes as one boolean and calls the existing
