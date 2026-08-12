@@ -43,6 +43,7 @@ Updated: 2026-08-12
 3. Add the public changelog item after the PR number exists.
 4. Run focused verification, capture desktop/mobile design proof, complete required reviews, and close the plan through the scoped commit path.
 5. Remediate the accepted review finding that the initial shared gate also suppressed existing-account reauthorization across Web, claim-link, internal-link, CLI, and assistant reconnect paths.
+6. Remediate the follow-up authority split so assistant recovery commands execute only from the same live reconnect state they advertise, and a successful Web disconnect immediately consumes the recovery-only target.
 
 ## Decisions
 
@@ -50,10 +51,12 @@ Updated: 2026-08-12
 - Leave `dexcom-g6-and-older` unchanged.
 - Split fresh availability from existing-account recovery eligibility. Modern Dexcom recovery is allowed only after one exact database query proves the member owns an established Junction connection with a live `dexcom_v3` source and a reauthorization, token-refresh, or newer-sync-error state.
 - Keep Strava closed for both fresh offers and recovery. Keep historical `connection_reset` handling unchanged because that state is Garmin-only and cannot apply to Dexcom.
+- Retain assistant recovery, but derive its executable target from the same live reconnect notice used by the status prompt and re-read that state at tool invocation. Do not add persisted state or a second lifecycle owner.
+- Treat local disconnect as the terminal transition for a recovery-only unavailable source: remove its target immediately while retaining ordinary fresh-connect targets for available sources.
 
 ## Verification
 
-- Passed: focused Web Vitest suite (140 tests), device-syncd connect-target tests (7), assistant device-status prompt tests (24), Web/device-syncd/assistant-runtime typechecks, and frontend design-proof unit tests (10).
+- Passed: focused Web connect-page Vitest suite (101 tests), assistant status/phase suites (307 tests), device-syncd connect-target tests (7), Web/device-syncd/assistant-runtime typechecks, and frontend design-proof unit tests (10).
 - Captured and inspected responsive design-catalog proof showing both the fresh `Coming soon` state and existing-account `Reconnect` state at 1440×1200 and 390×844 CSS viewports.
 - Remaining: exact-head CI and final routed ReviewGPT remediation round.
 - Expected outcomes: fresh modern Dexcom starts are impossible, the card visibly says `Coming soon` at desktop/mobile widths, existing-account controls remain, and the legacy route is unaffected.

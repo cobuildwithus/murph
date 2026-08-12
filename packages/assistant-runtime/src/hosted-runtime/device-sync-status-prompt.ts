@@ -70,6 +70,48 @@ export async function buildHostedDeviceSyncStatusPrompt(input: {
   });
 }
 
+export async function resolveHostedDeviceSyncRecoveryConnectTarget(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
+  requestedConnectTarget: string;
+  signal?: AbortSignal | null;
+}): Promise<string | null> {
+  const requestedConnectTarget = normalizeHostedDeviceSyncKey(
+    input.requestedConnectTarget,
+  );
+  if (!requestedConnectTarget) {
+    return null;
+  }
+
+  const reconnectTarget = input.reconnectTargets.find((target) =>
+    target.connectionAvailable !== false
+    && isHostedDeviceSyncReconnectCommandSafe(target)
+    && normalizeHostedDeviceSyncKey(target.connectTarget) === requestedConnectTarget
+  );
+  if (!reconnectTarget) {
+    return null;
+  }
+
+  const snapshot = await fetchHostedDeviceSyncStatusSnapshot({
+    deviceSyncPort: input.deviceSyncPort,
+    reconnectTargets: [reconnectTarget],
+    signal: input.signal ?? null,
+  });
+  if (!snapshot) {
+    return null;
+  }
+
+  const notice = collectHostedDeviceSyncReconnectNotices({
+    reconnectTargets: [reconnectTarget],
+    snapshot,
+  }).find((candidate) =>
+    candidate.commandConnectTargetSafe
+    && normalizeHostedDeviceSyncKey(candidate.commandConnectTarget)
+      === requestedConnectTarget
+  );
+  return notice?.commandConnectTarget ?? null;
+}
+
 async function fetchHostedDeviceSyncStatusSnapshot(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort;
   reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];

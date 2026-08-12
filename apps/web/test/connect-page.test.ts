@@ -2765,6 +2765,32 @@ test("SourceCard shows modern Dexcom as coming soon without hiding existing-acco
   assert.match(recoveryMarkup, /aria-label="Reconnect Dexcom"/u);
   assert.match(recoveryMarkup, /aria-label="Disconnect Dexcom"/u);
   assert.doesNotMatch(recoveryMarkup, />Coming soon<\/button>/u);
+
+  const { markLocallyDisconnectedSources } = await import(
+    "../app/(dashboard)/connect/connect-page-helpers"
+  );
+  const [locallyDisconnectedSource] = markLocallyDisconnectedSources(
+    [{
+      ...source,
+      connectProvider: "junction" as const,
+      connectTarget: "dexcom_v3",
+      disconnectConnectionId: "dsc_dexcom_recovery",
+      disconnectSourceProviderSlug: "dexcom_v3",
+      requiresReconnect: true,
+    }],
+    new Set(["dsc_dexcom_recovery"]),
+  );
+  assert.ok(locallyDisconnectedSource);
+  const disconnectedMarkup = renderToStaticMarkup(
+    createElement(SourceCard, {
+      ...cardProps,
+      authenticated: true,
+      source: locallyDisconnectedSource,
+    }),
+  );
+  assert.match(disconnectedMarkup, />Coming soon<\/button>/u);
+  assert.doesNotMatch(disconnectedMarkup, /aria-label="Connect Dexcom"/u);
+  assert.doesNotMatch(disconnectedMarkup, /aria-label="Reconnect Dexcom"/u);
 });
 
 test("Dexcom disconnect confirmation warns that a voluntary disconnect cannot yet reconnect", async () => {
