@@ -76,8 +76,12 @@ Current providers:
   serially and caps each stream at 100,000 points. The common single-page bound is
   33 logical GETs (one index plus 32 streams); the hard bound is 132 logical GETs
   under the existing 100-page pagination ceiling and 396 network attempts with
-  the existing three-attempt GET retry policy. Neither path retains waveform/stream
-  points, provider envelopes, or evidence whose size scales with sample count.
+  the existing three-attempt GET retry policy for one closed day. The composed
+  logical/network ceilings are 1,848 / 5,544 per attempt and 9,240 / 27,720
+  across five attempts for the 14-day backfill, and 924 / 2,772 per attempt and
+  4,620 / 13,860 across five attempts for the seven-day reconcile.
+  Neither path retains waveform/stream points, provider envelopes, or evidence
+  whose size scales with sample count.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day

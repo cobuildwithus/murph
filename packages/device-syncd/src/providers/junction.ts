@@ -1234,7 +1234,9 @@ export function createJunctionDeviceSyncProvider(
                 && wideChunkTimeseriesResources.length > 0
                 ? "dense"
                 : null,
-              workoutStreamCursor: denseTimeseriesImport.workoutStreamCursor,
+              workoutStreamCursor: denseTimeseriesResources.includes("workout_stream")
+                ? denseTimeseriesImport.workoutStreamCursor
+                : undefined,
             }),
             profileMetadataPatch,
           ),
@@ -2112,7 +2114,9 @@ export function createJunctionDeviceSyncProvider(
                   job,
                   windowEnd: window.windowEnd,
                   windowStart: dailyImport.yieldedAt,
-                  workoutStreamCursor: dailyImport.workoutStreamCursor,
+                  workoutStreamCursor: effectiveResource === "workout_stream"
+                    ? dailyImport.workoutStreamCursor
+                    : undefined,
                 })
               : { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
             skippedOptionalResources,
@@ -3220,23 +3224,9 @@ export function createJunctionDeviceSyncProvider(
       throw new TypeError("Junction workout_stream policy did not define bounded limits.");
     }
 
-    const candidates = await listJunctionWorkoutStreamCandidates(client, {
-      resource: "workout_stream",
-      signal: input.context.signal ?? null,
-      sourceProviderSlug: input.sourceProviderSlug,
-      userId: input.context.account.externalAccountId,
-      windowEnd: input.windowEnd,
-      windowStart: input.windowStart,
-    });
-    const candidateIdentities = new Set(candidates.map((candidate) => candidate.identity));
-    const completedIdentities = new Set(
-      [...input.completedIdentities].filter((identity) => candidateIdentities.has(identity)),
-    );
+    let completedIdentities = new Set(input.completedIdentities);
     const carryTerminalProgressOrThrow = (error: unknown): JunctionDailyTimeseriesImportResult => {
-      if (
-        completedIdentities.size > 0
-        && isJunctionJobSignalAbort(error, input.context.signal)
-      ) {
+      if (isJunctionJobSignalAbort(error, input.context.signal)) {
         return {
           workoutStreamCursor: encodeJunctionWorkoutStreamCompletedIdentities(
             completedIdentities,
@@ -3244,17 +3234,32 @@ export function createJunctionDeviceSyncProvider(
           yieldedAt: input.windowStart,
         };
       }
-      if (completedIdentities.size > 0 && isRetryableDeviceSyncFailure(error)) {
-        const workoutStreamCursor = encodeJunctionWorkoutStreamCompletedIdentities(
-          completedIdentities,
+      if (isRetryableDeviceSyncFailure(error)) {
+        throw new JunctionWorkoutStreamProgressError(
+          error,
+          input.windowStart,
+          encodeJunctionWorkoutStreamCompletedIdentities(completedIdentities),
         );
-        if (!workoutStreamCursor) {
-          throw error;
-        }
-        throw new JunctionWorkoutStreamProgressError(error, workoutStreamCursor);
       }
       throw error;
     };
+    let candidates: Awaited<ReturnType<typeof listJunctionWorkoutStreamCandidates>>;
+    try {
+      candidates = await listJunctionWorkoutStreamCandidates(client, {
+        resource: "workout_stream",
+        signal: input.context.signal ?? null,
+        sourceProviderSlug: input.sourceProviderSlug,
+        userId: input.context.account.externalAccountId,
+        windowEnd: input.windowEnd,
+        windowStart: input.windowStart,
+      });
+    } catch (error) {
+      return carryTerminalProgressOrThrow(error);
+    }
+    const candidateIdentities = new Set(candidates.map((candidate) => candidate.identity));
+    completedIdentities = new Set(
+      [...completedIdentities].filter((identity) => candidateIdentities.has(identity)),
+    );
 
     for (const candidate of candidates) {
       if (completedIdentities.has(candidate.identity)) {
@@ -3484,7 +3489,7 @@ export function createJunctionDeviceSyncProvider(
         ? {
             scheduledJobs: [{
               ...followUp,
-              ...(input.workoutStreamCursor
+              ...(input.workoutStreamCursor !== undefined
                 ? {
                     maxAttempts:
                       input.job.maxAttempts - Math.max(input.job.attempts - 1, 0),

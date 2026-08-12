@@ -1173,7 +1173,14 @@ class DeviceSyncServiceController {
               ...job,
               payload: {
                 ...job.payload,
-                workoutStreamCursor: workoutStreamProgress.workoutStreamCursor,
+                ...(job.kind === "backfill"
+                  ? {
+                      timeseriesCursor: workoutStreamProgress.dailyWindowStart,
+                      timeseriesPhase: "dense",
+                    }
+                  : { windowStart: workoutStreamProgress.dailyWindowStart }),
+                workoutStreamCursor:
+                  workoutStreamProgress.workoutStreamCursor ?? undefined,
               },
             },
             "retry progress",

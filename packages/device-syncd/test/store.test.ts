@@ -3994,10 +3994,13 @@ test("device sync store hydrates new hosted accounts, guards token updates, and 
         "stale worker should not transition expired leases",
         "2026-04-07T01:05:00.000Z",
         true,
+        false,
+        { windowStart: "2026-04-08T00:00:00.000Z" },
       ),
       false,
     );
     assert.equal(store.getJobById(job.id)?.status, "running");
+    assert.deepEqual(store.getJobById(job.id)?.payload, {});
     assert.equal(store.readNextJobWakeAt(), "2026-04-07T01:01:00.000Z");
 
     const reclaimed = store.claimDueJob("worker-b", "2026-04-07T01:01:01.000Z", 60_000);

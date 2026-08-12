@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import {
   importDeviceProviderSnapshot,
@@ -360,6 +360,7 @@ function readJunctionWorkoutProgressIdentities(
 
 function createJunctionWorkoutStreamTestProvider(input: {
   listWorkoutIds(indexRequest: number): readonly string[];
+  listResponse?: (indexRequest: number) => Promise<Response> | Response;
   streamResponse?: (workoutId: string, streamRequest: number) => Promise<Response> | Response;
 }) {
   let indexRequests = 0;
@@ -374,6 +375,9 @@ function createJunctionWorkoutStreamTestProvider(input: {
     }
     if (parsed.pathname === "/v2/summary/workouts/junction-user-1") {
       indexRequests += 1;
+      if (input.listResponse) {
+        return input.listResponse(indexRequests);
+      }
       return createJsonResponse({
         data: input.listWorkoutIds(indexRequests).map((workoutId) =>
           createJunctionWorkoutSummary(workoutId)
@@ -15368,6 +15372,62 @@ test("Junction workout_stream hard call bound is 100 index pages plus 32 serial 
   assert.equal(indexPages + streamCalls, 132);
 });
 
+test("Junction workout_stream composed provider-call bounds match the documented admitted windows", async () => {
+  const maxIndexPagesPerDay = 100;
+  const maxStreamsPerDay = 32;
+  const maxGetAttempts = 3;
+  const maxJobAttempts = 5;
+  const perDayLogicalGets = maxIndexPagesPerDay + maxStreamsPerDay;
+  const perDayNetworkAttempts = perDayLogicalGets * maxGetAttempts;
+  const backfillDays = 14;
+  const reconcileDays = 7;
+  const bounds = {
+    backfill: {
+      logicalPerAttempt: perDayLogicalGets * backfillDays,
+      networkPerAttempt: perDayNetworkAttempts * backfillDays,
+      logicalAcrossJobAttempts: perDayLogicalGets * backfillDays * maxJobAttempts,
+      networkAcrossJobAttempts:
+        perDayNetworkAttempts * backfillDays * maxJobAttempts,
+    },
+    reconcile: {
+      logicalPerAttempt: perDayLogicalGets * reconcileDays,
+      networkPerAttempt: perDayNetworkAttempts * reconcileDays,
+      logicalAcrossJobAttempts: perDayLogicalGets * reconcileDays * maxJobAttempts,
+      networkAcrossJobAttempts:
+        perDayNetworkAttempts * reconcileDays * maxJobAttempts,
+    },
+  };
+
+  assert.deepEqual(bounds, {
+    backfill: {
+      logicalPerAttempt: 1_848,
+      networkPerAttempt: 5_544,
+      logicalAcrossJobAttempts: 9_240,
+      networkAcrossJobAttempts: 27_720,
+    },
+    reconcile: {
+      logicalPerAttempt: 924,
+      networkPerAttempt: 2_772,
+      logicalAcrossJobAttempts: 4_620,
+      networkAcrossJobAttempts: 13_860,
+    },
+  });
+
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const compatibilityMatrix = await readFile(
+    new URL("../../../docs/device-provider-compatibility-matrix.md", import.meta.url),
+    "utf8",
+  );
+  for (const documentation of [readme, compatibilityMatrix]) {
+    assert.match(documentation, /132 logical GETs/u);
+    assert.match(documentation, /396 network attempts/u);
+    assert.match(documentation, /1,848 \/ 5,544/u);
+    assert.match(documentation, /9,240 \/ 27,720/u);
+    assert.match(documentation, /924 \/ 2,772/u);
+    assert.match(documentation, /4,620 \/ 13,860/u);
+  }
+});
+
 test("Junction workout_stream rejects an over-cap index before fetching any stream", async () => {
   let streamCalls = 0;
   const provider = createJunctionProvider(async (input) => {
@@ -15561,6 +15621,7 @@ test("Junction workout_stream exact progress survives comparator-adversarial ins
     (error) => {
       assert.ok(error instanceof JunctionWorkoutStreamProgressError);
       assert.equal(error.failure, failure);
+      assert.equal(error.dailyWindowStart, "2026-04-02T00:00:00.000Z");
       progressCursor = error.workoutStreamCursor;
       return true;
     },
@@ -15593,6 +15654,42 @@ test("Junction workout_stream exact progress survives comparator-adversarial ins
     "workout-3",
   ]);
   assert.equal(second.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
+});
+
+test("Junction workout_stream retryable index failure carries the owning day without a cursor", async () => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => [],
+    listResponse: () => new Response(JSON.stringify({ error: "temporary" }), {
+      status: 503,
+      headers: {
+        "Content-Type": "application/json",
+        "Retry-After": "0",
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      harness.provider,
+      createJunctionJobContext(),
+      createJunctionWorkoutStreamResourceJob(),
+    ),
+    (error) => {
+      assert.ok(error instanceof JunctionWorkoutStreamProgressError);
+      assert.ok(error.failure instanceof DeviceSyncError);
+      assert.equal(error.failure.code, "JUNCTION_API_REQUEST_FAILED");
+      assert.equal(error.failure.retryable, true);
+      assert.equal(error.dailyWindowStart, "2026-04-02T00:00:00.000Z");
+      assert.equal(error.workoutStreamCursor, null);
+      return true;
+    },
+  );
+
+  assert.equal(
+    harness.requestUrls.filter((url) => url.includes("/v2/summary/workouts/")).length,
+    3,
+  );
+  assert.deepEqual(harness.streamRequests, []);
 });
 
 test("Junction workout_stream retires first and middle optional 404/422 candidates only", async () => {
@@ -15652,10 +15749,16 @@ test("Junction workout_stream yields before and after exact candidate progress",
       importSnapshot: importBefore,
       shouldYield: () => true,
     }),
-    createJunctionWorkoutStreamResourceJob(),
+    {
+      ...createJunctionWorkoutStreamResourceJob(),
+      attempts: 2,
+      maxAttempts: 5,
+    },
   );
   const beforeContinuation = readScheduledWorkoutStreamContinuation(beforeYield.scheduledJobs);
   assert.equal(beforeContinuation.payload?.workoutStreamCursor, undefined);
+  assert.equal(beforeContinuation.payload?.windowStart, "2026-04-02T00:00:00.000Z");
+  assert.equal(beforeContinuation.maxAttempts, 4);
   assert.deepEqual(beforeHarness.streamRequests, []);
 
   const beforeCompleted = await executeJunctionJob(
@@ -15700,7 +15803,7 @@ test("Junction workout_stream yields before and after exact candidate progress",
   assert.equal(completed.scheduledJobs?.some((job) => job.kind === "resource") ?? false, false);
 });
 
-test("Junction workout_stream leaves retryable failure before progress on the current service job", async () => {
+test("Junction workout_stream carries the owning day when retryable failure precedes progress", async () => {
   const failure = new DeviceSyncError({
     code: "TEST_RETRYABLE_IMPORT_FAILURE",
     message: "retry the first candidate",
@@ -15720,7 +15823,13 @@ test("Junction workout_stream leaves retryable failure before progress on the cu
       }),
       createJunctionWorkoutStreamResourceJob(),
     ),
-    (error) => error === failure,
+    (error) => {
+      assert.ok(error instanceof JunctionWorkoutStreamProgressError);
+      assert.equal(error.failure, failure);
+      assert.equal(error.dailyWindowStart, "2026-04-02T00:00:00.000Z");
+      assert.equal(error.workoutStreamCursor, null);
+      return true;
+    },
   );
   assert.deepEqual(harness.streamRequests, ["workout-1"]);
 });
