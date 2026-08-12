@@ -1940,6 +1940,10 @@ text(JSON.stringify(result));
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2031-02-15T09:59:59.800Z',
+        latestAt: '2031-02-15T09:59:59.800Z',
+      },
       dynamicTools: [MURPH_AUTOMATION_TOOL],
       hostedToolContext: {
         automationTool: {
@@ -1999,6 +2003,86 @@ text(JSON.stringify(result));
       title: 'Steered one-shot reminder',
     }])
     expect(result.finalMessage).toBe('STEER_REMINDER_OK')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
+  })
+
+  it('fails closed when a live-steered relative reminder spans local midnight', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequest = vi.fn(async () => {
+      throw new Error('The ambiguous reminder must not reach the automation port.')
+    })
+    let steered: Promise<void> | null = null
+    scenario.stub.queue(
+      {
+        delayMs: 2_000,
+        text: 'STEER_MIDNIGHT_FIRST_REPLY',
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tomorrow.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "tomorrow",
+      time: "09:00",
+      timeZone: "America/New_York",
+    },
+  },
+  title: "Midnight-spanning reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'STEER_MIDNIGHT_ASK_EXPLICIT_DATE' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2031-07-15T03:59:59.900Z',
+        latestAt: '2031-07-15T03:59:59.900Z',
+      },
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: { request: automationRequest },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = delay(500).then(() =>
+          turn.steer({
+            prompt: 'Actually, make it 10 AM.',
+            relativeDateReferenceWindow: {
+              earliestAt: '2031-07-15T04:00:00.100Z',
+              latestAt: '2031-07-15T04:00:00.100Z',
+            },
+          }))
+      },
+      prompt: 'Remind me tomorrow at 9 AM New York time.',
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(automationRequest).not.toHaveBeenCalled()
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain(
+      'accepted messages span different calendar dates in that timezone',
+    )
+    expect(result.finalMessage).toBe('STEER_MIDNIGHT_ASK_EXPLICIT_DATE')
     expect(result.responseDeliveryContextOrdinal).toBe(1)
   })
 

@@ -109,10 +109,16 @@ type AutomationLocalAtFailureCode =
 
 class AutomationLocalAtResolutionError extends Error {
   readonly code: AutomationLocalAtFailureCode
+  readonly resolvedLocalDate?: string
 
-  constructor(code: AutomationLocalAtFailureCode, message: string) {
+  constructor(
+    code: AutomationLocalAtFailureCode,
+    message: string,
+    resolvedLocalDate?: string,
+  ) {
     super(message)
     this.code = code
+    this.resolvedLocalDate = resolvedLocalDate
     this.name = 'AutomationLocalAtResolutionError'
   }
 }
@@ -305,7 +311,7 @@ export const MURPH_AUTOMATION_TOOL = {
   name: 'automation',
   deferLoading: true,
   description:
-    'Create, inspect, update, or reconcile durable Murph automations for the current authenticated conversation. Generic save is create-only; use action=inspect and then a versioned patch for every existing automation. Inspect is read-only and returns the authoritative stored version plus scheduler timing projection. For every model-authored one-shot, pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay; raw exact ISO schedule.at is not accepted on generic save or patch. When the request says today, tonight, or tomorrow, preserve that wording as relativeDay (today for tonight) so the host resolves it against the named timezone; never calculate a calendar date from a relative word in the model. Use date only for an explicit calendar date from the request or established context. If localAt is nonexistent because of a daylight-saving gap, ask for another time. If it is ambiguous because of a daylight-saving fold, ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.fold. Recurring cron and dailyLocal values are wall-clock fields: when the user names a timezone, preserve the requested clock time and pass its IANA name in schedule.timeZone; never convert that clock time to UTC inside the cron or localTime field. On save, omit schedule.timeZone only when the recurrence should follow the vault timezone. On patch, inspect the current stored automation first and pass expectedUpdatedAt from that readback; if the automation changed, inspect it again and decide from the new stored state; a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone, so do not ask the user to repeat it or guess it from current conversation context. After save or patch, inspect the stored schedule, status, updatedAt, timingVerified, effectiveTimeZone, and nextOccurrenceAt from this result. For an active deviceActivity schedule, confirm the persisted event trigger directly: a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, verify any user-facing timing confirmation against timingVerified, schedule, effectiveTimeZone, and nextOccurrenceAt from the tool result; a verified null nextOccurrenceAt means no later deliverable occurrence, not a retry or cutoff wake. For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it. For ordinary save or patch, choose assistantTargetOverride deliberately: use Luna for self-contained cues and reminders with all needed context in the instructions and no reads or tools; use Terra for bounded contextual judgment or a few targeted reads; inherit the conversation-selected model for broad conversation history, research, complex or sensitive reasoning, or whenever that model materially matters. On save, omit assistantTargetOverride to inherit. On patch, assistantTargetOverride replaces the whole stored override: omit the field only to preserve it, use null to return to conversation inheritance, or send the complete replacement. Explicit model selections use high reasoning for Luna and low for Terra or Sol at execution unless reasoningEffort is supplied. The override applies only to the automation turn; a later reply returns to the saved conversation model with the automation message retained through compatible provider-thread continuity or committed history replay. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, model-provider ids, or generic commands.',
+    'Create, inspect, update, or reconcile durable Murph automations for the current authenticated conversation. Generic save is create-only; use action=inspect and then a versioned patch for every existing automation. Inspect is read-only and returns the authoritative stored version plus scheduler timing projection. For every model-authored one-shot, pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay; raw exact ISO schedule.at is not accepted on generic save or patch. When the request says today, tonight, or tomorrow, preserve that wording as relativeDay (today for tonight) so the host resolves it against the named timezone; never calculate a calendar date from a relative word in the model. Use date only for an explicit calendar date from the request or established context. If localAt is nonexistent because of a daylight-saving gap, ask for another time, then retry with the explicit host-resolved date returned by the tool instead of relativeDay. If it is ambiguous because of a daylight-saving fold, ask whether the earlier or later occurrence is intended, then retry with the explicit host-resolved date returned by the tool and schedule.localAt.fold instead of relativeDay. Recurring cron and dailyLocal values are wall-clock fields: when the user names a timezone, preserve the requested clock time and pass its IANA name in schedule.timeZone; never convert that clock time to UTC inside the cron or localTime field. On save, omit schedule.timeZone only when the recurrence should follow the vault timezone. On patch, inspect the current stored automation first and pass expectedUpdatedAt from that readback; if the automation changed, inspect it again and decide from the new stored state; a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone, so do not ask the user to repeat it or guess it from current conversation context. After save or patch, inspect the stored schedule, status, updatedAt, timingVerified, effectiveTimeZone, and nextOccurrenceAt from this result. For an active deviceActivity schedule, confirm the persisted event trigger directly: a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, verify any user-facing timing confirmation against timingVerified, schedule, effectiveTimeZone, and nextOccurrenceAt from the tool result; a verified null nextOccurrenceAt means no later deliverable occurrence, not a retry or cutoff wake. For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it. For ordinary save or patch, choose assistantTargetOverride deliberately: use Luna for self-contained cues and reminders with all needed context in the instructions and no reads or tools; use Terra for bounded contextual judgment or a few targeted reads; inherit the conversation-selected model for broad conversation history, research, complex or sensitive reasoning, or whenever that model materially matters. On save, omit assistantTargetOverride to inherit. On patch, assistantTargetOverride replaces the whole stored override: omit the field only to preserve it, use null to return to conversation inheritance, or send the complete replacement. Explicit model selections use high reasoning for Luna and low for Terra or Sol at execution unless reasoningEffort is supplied. The override applies only to the automation turn; a later reply returns to the saved conversation model with the automation message retained through compatible provider-thread continuity or committed history replay. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, model-provider ids, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -317,6 +323,7 @@ export type AutomationDynamicToolRequest =
     }
   | {
       kind: 'invalid-automation-arguments'
+      resolvedLocalDate?: string
       safeFailureCode?: AutomationLocalAtFailureCode
       validationDigest: SafeToolCallValidationDigest
     }
@@ -359,7 +366,12 @@ export function readAutomationDynamicToolRequest(input: {
     return {
       kind: 'invalid-automation-arguments',
       ...(error instanceof AutomationLocalAtResolutionError
-        ? { safeFailureCode: error.code }
+        ? {
+            ...(error.resolvedLocalDate
+              ? { resolvedLocalDate: error.resolvedLocalDate }
+              : {}),
+            safeFailureCode: error.code,
+          }
         : {}),
       validationDigest: buildSafeToolCallValidationDigest({
         error: new z.ZodError([{
@@ -478,6 +490,7 @@ function resolveOneShotLocalAt(
     throw new AutomationLocalAtResolutionError(
       'local_at_gap',
       'schedule.localAt does not exist in that timezone because of a daylight-saving gap.',
+      formatLocalAtDate(date),
     )
   }
   if (uniqueMatches.length > 1) {
@@ -485,6 +498,7 @@ function resolveOneShotLocalAt(
       throw new AutomationLocalAtResolutionError(
         'local_at_fold',
         'schedule.localAt is ambiguous in that timezone because of a daylight-saving fold; choose the earlier or later occurrence.',
+        formatLocalAtDate(date),
       )
     }
     const selected = localAt.fold === 'earlier'
@@ -588,6 +602,18 @@ function parseLocalAtDate(
     throw new Error('schedule.localAt.date must be a valid calendar date.')
   }
   return { day, month, year }
+}
+
+function formatLocalAtDate(input: {
+  day: number
+  month: number
+  year: number
+}): string {
+  return [
+    input.year.toString().padStart(4, '0'),
+    input.month.toString().padStart(2, '0'),
+    input.day.toString().padStart(2, '0'),
+  ].join('-')
 }
 
 function parseLocalAtTime(value: string): { hour: number; minute: number } {

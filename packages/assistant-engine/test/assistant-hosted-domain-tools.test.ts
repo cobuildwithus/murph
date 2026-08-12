@@ -39,6 +39,9 @@ describe('hosted domain dynamic tools', () => {
       'preserve that wording as relativeDay (today for tonight) so the host resolves it against the named timezone',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'retry with the explicit host-resolved date returned by the tool instead of relativeDay',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'raw exact ISO schedule.at is not accepted on generic save or patch',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
@@ -145,6 +148,115 @@ describe('hosted domain dynamic tools', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('returns the host-resolved date for post-midnight gap and fold recovery', async () => {
+    const gapRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Spring reminder',
+    }, referenceWindow('2026-03-08T04:59:00.000Z'))
+    if (gapRequest?.kind !== 'invalid-automation-arguments') {
+      throw new TypeError('Expected a daylight-saving gap failure.')
+    }
+    expect(gapRequest).toMatchObject({
+      resolvedLocalDate: '2026-03-08',
+      safeFailureCode: 'local_at_gap',
+    })
+    const gapResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({}),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: gapRequest,
+    })
+    expect(gapResult.rpcResult.contentItems[0]?.text).toContain(
+      'schedule.localAt.date=2026-03-08 instead of relativeDay',
+    )
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '03:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Spring reminder',
+    }, {
+      earliestAt: '2026-03-08T04:59:00.000Z',
+      latestAt: '2026-03-08T05:01:00.000Z',
+    })).toMatchObject({
+      kind: 'automation',
+      request: {
+        schedule: { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
+      },
+    })
+
+    const foldRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '01:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Fall reminder',
+    }, referenceWindow('2026-11-01T03:59:00.000Z'))
+    if (foldRequest?.kind !== 'invalid-automation-arguments') {
+      throw new TypeError('Expected a daylight-saving fold failure.')
+    }
+    expect(foldRequest).toMatchObject({
+      resolvedLocalDate: '2026-11-01',
+      safeFailureCode: 'local_at_fold',
+    })
+    const foldResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({}),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: foldRequest,
+    })
+    expect(foldResult.rpcResult.contentItems[0]?.text).toContain(
+      'schedule.localAt.date=2026-11-01 and schedule.localAt.fold instead of relativeDay',
+    )
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-11-01',
+          fold: 'later',
+          time: '01:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Fall reminder',
+    }, {
+      earliestAt: '2026-11-01T03:59:00.000Z',
+      latestAt: '2026-11-01T04:01:00.000Z',
+    })).toMatchObject({
+      kind: 'automation',
+      request: {
+        schedule: { at: '2026-11-01T06:30:00.000Z', kind: 'at' },
+      },
+    })
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {
@@ -295,6 +407,7 @@ describe('hosted domain dynamic tools', () => {
       title: 'DST gap reminder',
     })).toMatchObject({
       kind: 'invalid-automation-arguments',
+      resolvedLocalDate: '2026-03-08',
       safeFailureCode: 'local_at_gap',
     })
     expect(readToolRequest('automation', {
@@ -311,6 +424,7 @@ describe('hosted domain dynamic tools', () => {
       title: 'DST fold reminder',
     })).toMatchObject({
       kind: 'invalid-automation-arguments',
+      resolvedLocalDate: '2026-11-01',
       safeFailureCode: 'local_at_fold',
     })
     expect(readToolRequest('automation', {

@@ -5162,9 +5162,10 @@ async function runCodexAppServerTurnOnProcess(
     })
     const deliveryContextOrdinal = automationRelativeDateReferenceWindows.length
     automationRelativeDateReferenceWindows.push(
-      steerInput.relativeDateReferenceWindow
-        ? { ...steerInput.relativeDateReferenceWindow }
-        : null,
+      mergeAutomationRelativeDateReferenceWindows(
+        automationRelativeDateReferenceWindows.at(-1) ?? null,
+        steerInput.relativeDateReferenceWindow ?? null,
+      ),
     )
     try {
       await withCodexRpcTimeout(
@@ -5618,6 +5619,34 @@ async function runCodexAppServerTurnOnProcess(
     stdout: stdout.trim(),
     threadId: codexThreadId,
     turnId,
+  }
+}
+
+function mergeAutomationRelativeDateReferenceWindows(
+  preceding: AssistantAcceptedTurnInputReferenceWindow | null,
+  current: AssistantAcceptedTurnInputReferenceWindow | null,
+): AssistantAcceptedTurnInputReferenceWindow | null {
+  if (current === null) {
+    return null
+  }
+  if (preceding === null) {
+    return { ...current }
+  }
+
+  const earliestAtMs = Math.min(
+    Date.parse(preceding.earliestAt),
+    Date.parse(current.earliestAt),
+  )
+  const latestAtMs = Math.max(
+    Date.parse(preceding.latestAt),
+    Date.parse(current.latestAt),
+  )
+  if (!Number.isFinite(earliestAtMs) || !Number.isFinite(latestAtMs)) {
+    return null
+  }
+  return {
+    earliestAt: new Date(earliestAtMs).toISOString(),
+    latestAt: new Date(latestAtMs).toISOString(),
   }
 }
 
