@@ -111,8 +111,12 @@ export function isGoogleHealthFitbitMigrationLegacyCoverageReady(input: {
       && !producedLegacyResources.includes(resource)
     );
 
+  if (uncoveredLegacyResources.length > 0) {
+    return false;
+  }
+
   return producedLegacyResources.length === 0
-    ? input.legacyAccessTerminal === true && uncoveredLegacyResources.length === 0
+    ? input.legacyAccessTerminal === true
     : producedLegacyResources.every((resource) =>
       isAvailableDeviceSyncSourceResource(
         resource,

@@ -2136,7 +2136,9 @@ describe("hosted device-sync wakes", () => {
     });
 
     expect(revokeSourceAccess).toHaveBeenCalledOnce();
-    expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "fitbit");
+    expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "fitbit", {
+      requiredActiveSourceProviderSlug: "google_health",
+    });
     expect(sources.find((source) => source.sourceProviderSlug === "fitbit")).toMatchObject({
       lastErrorCode: "SOURCE_USER_DISCONNECTED",
       status: "disconnected",
@@ -2476,7 +2478,7 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
-  it("renews and completes an abandoned pre-revoke Fitbit cutover claim", async () => {
+  it("restores retry state when an abandoned Fitbit claim no longer has a durable successor", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:30.000Z"));
     const connection = buildHostedConnection({
@@ -2490,6 +2492,10 @@ describe("hosted device-sync wakes", () => {
       buildHostedConnectionSource(connection.id, "fitbit", {
         lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
         lastSeenAt: "2026-03-26T11:58:00.000Z",
+        resourceAvailabilitySummary: {
+          canonicalCoverageBoundary_sleep: "2026-03-25T08:00:00.000Z",
+          sleep: true,
+        },
       }),
     ]);
     const isSourceAccessActive = vi.fn(async () => true);
@@ -2509,14 +2515,14 @@ describe("hosted device-sync wakes", () => {
         connection.id,
       )).resolves.toEqual({
         connectionId: connection.id,
-        status: "complete",
+        status: "pending",
       });
 
       expect(isSourceAccessActive).toHaveBeenCalledOnce();
-      expect(revokeSourceAccess).toHaveBeenCalledOnce();
+      expect(revokeSourceAccess).not.toHaveBeenCalled();
       expect(state.sources[0]).toMatchObject({
-        lastErrorCode: "SOURCE_USER_DISCONNECTED",
-        status: "disconnected",
+        lastErrorCode: "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED",
+        status: "connected",
       });
     } finally {
       vi.useRealTimers();
@@ -2537,6 +2543,18 @@ describe("hosted device-sync wakes", () => {
       buildHostedConnectionSource(connection.id, "fitbit", {
         lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
         lastSeenAt: "2026-03-26T11:58:00.000Z",
+        resourceAvailabilitySummary: {
+          canonicalCoverageBoundary_sleep: "2026-03-25T08:00:00.000Z",
+          sleep: true,
+        },
+      }),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-03-26T11:00:00.000Z",
+        lastDataAt: "2026-03-26T11:30:00.000Z",
+        resourceAvailabilitySummary: {
+          historicalBackfillCompletedAt: "2026-03-26T11:15:00.000Z",
+          sleep: true,
+        },
       }),
     ]);
     let providerActive = true;
@@ -2578,6 +2596,9 @@ describe("hosted device-sync wakes", () => {
         status: "pending",
       });
       expect(revokeSourceAccess).toHaveBeenCalledOnce();
+      expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "fitbit", {
+        requiredActiveSourceProviderSlug: "google_health",
+      });
       expect(state.sources[0]).toMatchObject({
         lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
         lastSeenAt: "2026-03-26T12:00:00.000Z",
@@ -2612,6 +2633,18 @@ describe("hosted device-sync wakes", () => {
       buildHostedConnectionSource(connection.id, "fitbit", {
         lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
         lastSeenAt: "2026-03-26T11:58:00.000Z",
+        resourceAvailabilitySummary: {
+          canonicalCoverageBoundary_sleep: "2026-03-25T08:00:00.000Z",
+          sleep: true,
+        },
+      }),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-03-26T11:00:00.000Z",
+        lastDataAt: "2026-03-26T11:30:00.000Z",
+        resourceAvailabilitySummary: {
+          historicalBackfillCompletedAt: "2026-03-26T11:15:00.000Z",
+          sleep: true,
+        },
       }),
     ]);
     const isSourceAccessActive = vi.fn()
@@ -2662,6 +2695,18 @@ describe("hosted device-sync wakes", () => {
       buildHostedConnectionSource(connection.id, "fitbit", {
         lastErrorCode: "SOURCE_DISCONNECT_IN_PROGRESS",
         lastSeenAt: "2026-03-26T11:58:00.000Z",
+        resourceAvailabilitySummary: {
+          canonicalCoverageBoundary_sleep: "2026-03-25T08:00:00.000Z",
+          sleep: true,
+        },
+      }),
+      buildHostedConnectionSource(connection.id, "google_health", {
+        firstSeenAt: "2026-03-26T11:00:00.000Z",
+        lastDataAt: "2026-03-26T11:30:00.000Z",
+        resourceAvailabilitySummary: {
+          historicalBackfillCompletedAt: "2026-03-26T11:15:00.000Z",
+          sleep: true,
+        },
       }),
     ]);
     const isSourceAccessActive = vi.fn(async () => true);
@@ -2847,6 +2892,9 @@ describe("hosted device-sync wakes", () => {
       retryable: true,
     });
 
+    expect(revokeSourceAccess).toHaveBeenCalledWith(storedConnection, "fitbit", {
+      requiredActiveSourceProviderSlug: "google_health",
+    });
     expect(sources.find((source) => source.sourceProviderSlug === "fitbit")).toMatchObject({
       lastErrorCode: "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED",
       lastErrorMessage: null,

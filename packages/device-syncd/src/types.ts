@@ -853,7 +853,11 @@ export interface DeviceConnectionHandler {
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
-  revokeSourceAccess?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<void>;
+  revokeSourceAccess?(
+    account: DeviceSyncAccount,
+    sourceProviderSlug: string,
+    options?: { requiredActiveSourceProviderSlug?: string },
+  ): Promise<void>;
   isSourceAccessActive?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<boolean>;
 }
 

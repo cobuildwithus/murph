@@ -98,6 +98,9 @@ const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 const GOOGLE_HEALTH_FITBIT_MIGRATION_NOT_READY_ERROR_CODE =
   "GOOGLE_HEALTH_FITBIT_MIGRATION_NOT_READY";
 const GOOGLE_HEALTH_FITBIT_CUTOVER_CLAIM_LEASE_MS = 60_000;
+const GOOGLE_HEALTH_FITBIT_REVOKE_OPTIONS = {
+  requiredActiveSourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+} as const;
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
@@ -190,7 +193,15 @@ export async function disconnectHostedDeviceSyncConnectionSource(input: {
 
   let completedByConcurrentCleanup = false;
   try {
-    await target.revokeSourceAccess(target.storedAccount, sourceProviderSlug);
+    if (input.requireGoogleHealthFitbitMigrationReady) {
+      await target.revokeSourceAccess(
+        target.storedAccount,
+        sourceProviderSlug,
+        GOOGLE_HEALTH_FITBIT_REVOKE_OPTIONS,
+      );
+    } else {
+      await target.revokeSourceAccess(target.storedAccount, sourceProviderSlug);
+    }
   } catch {
     completedByConcurrentCleanup = await input.store.withConnectionMutationLock(
       input.connectionId,
@@ -319,7 +330,15 @@ export async function disconnectHostedDeviceSyncConnectionSource(input: {
 
     ownedClaimAt = outcome.claimAt;
     try {
-      await target.revokeSourceAccess(target.storedAccount, sourceProviderSlug);
+      if (input.requireGoogleHealthFitbitMigrationReady) {
+        await target.revokeSourceAccess(
+          target.storedAccount,
+          sourceProviderSlug,
+          GOOGLE_HEALTH_FITBIT_REVOKE_OPTIONS,
+        );
+      } else {
+        await target.revokeSourceAccess(target.storedAccount, sourceProviderSlug);
+      }
     } catch {
       throw sourceDisconnectUnavailableError();
     }
@@ -493,9 +512,11 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
         input.connectionId,
         tx,
       );
+      const sources = await input.store.listConnectionSources(input.connectionId, tx);
       const source = await findHostedConnectionSource({
         connectionId: input.connectionId,
         sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+        sources,
         store: input.store,
         tx,
       });
@@ -511,6 +532,22 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
         return null;
       }
 
+      if (!isHostedGoogleHealthFitbitMigrationCutoverReady(sources, {
+        claimAt: target.claimAt,
+        sourceId: target.source.id,
+      })) {
+        await writeHostedConnectionSourceLifecycle({
+          errorCode: DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
+          errorMessage: null,
+          now: nextHostedSourceLifecycleAt(source.lastSeenAt),
+          source,
+          status: target.source.status,
+          store: input.store,
+          tx,
+        });
+        return { state: "not_ready" as const };
+      }
+
       const claimAt = nextHostedSourceLifecycleAt(source.lastSeenAt);
       await writeHostedConnectionSourceLifecycle({
         errorCode: HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
@@ -524,7 +561,7 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
       return { ...target, claimAt, source };
     },
   );
-  if (!renewedTarget) {
+  if (!renewedTarget || renewedTarget.state === "not_ready") {
     return "pending";
   }
 
@@ -532,6 +569,7 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
     await renewedTarget.revokeSourceAccess(
       renewedTarget.storedAccount,
       JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+      GOOGLE_HEALTH_FITBIT_REVOKE_OPTIONS,
     );
   } catch {
     let accessStillActive: boolean;
@@ -1875,6 +1913,7 @@ async function findHostedConnectionSource(input: {
 
 function isHostedGoogleHealthFitbitMigrationCutoverReady(
   sources: readonly HostedDeviceConnectionSource[],
+  allowedClaim?: { claimAt: string; sourceId: string },
 ): boolean {
   const legacy = sources.find((source) =>
     normalizeJunctionProviderSlug(source.sourceProviderSlug)
@@ -1884,6 +1923,12 @@ function isHostedGoogleHealthFitbitMigrationCutoverReady(
     normalizeJunctionProviderSlug(source.sourceProviderSlug)
       === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
   );
+  const ownsAllowedClaim = Boolean(
+    allowedClaim
+    && legacy?.id === allowedClaim.sourceId
+    && legacy.lastErrorCode === HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+    && legacy.lastSeenAt === allowedClaim.claimAt,
+  );
 
   return Boolean(
     legacy
@@ -1891,7 +1936,10 @@ function isHostedGoogleHealthFitbitMigrationCutoverReady(
       isGoogleHealthFitbitMigrationLegacyTerminal(legacy)
       || (
         legacy.status !== "disconnected"
-        && !isHostedSourceDisconnectFenced(legacy)
+        && (
+          !isHostedSourceDisconnectFenced(legacy)
+          || ownsAllowedClaim
+        )
       )
     )
     && successor

@@ -603,10 +603,21 @@ export function createJunctionDeviceSyncProvider(
   async function revokeSourceAccess(
     account: DeviceSyncAccount,
     sourceProviderSlug: string,
+    options?: { requiredActiveSourceProviderSlug?: string },
   ): Promise<void> {
     const userId = normalizeString(account.externalAccountId);
     const targetProviderSlug = normalizeProviderSlug(sourceProviderSlug);
-    if (!userId || !targetProviderSlug) {
+    const requiredActiveProviderSlug = options?.requiredActiveSourceProviderSlug === undefined
+      ? null
+      : normalizeProviderSlug(options.requiredActiveSourceProviderSlug);
+    if (
+      !userId
+      || !targetProviderSlug
+      || (
+        options?.requiredActiveSourceProviderSlug !== undefined
+        && !requiredActiveProviderSlug
+      )
+    ) {
       throw deviceSyncError({
         code: "JUNCTION_SOURCE_DEREGISTER_INPUT_INVALID",
         message: "Junction source cleanup requires a stored user and provider slug.",
@@ -616,15 +627,37 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const providers = await client.listUserProviders(userId);
-    const targetIsRegistered = providers.some((provider) =>
-      mapJunctionSourceStatus(provider.status) !== "disconnected"
-      && (
+    const targetProvider = providers.find((provider) =>
+      (
         normalizeProviderSlug(provider.origin.sourceProviderSlug)
         ?? normalizeProviderSlug(provider.slug)
       ) === targetProviderSlug
     );
-    if (!targetIsRegistered) {
+    const targetStatus = targetProvider
+      ? mapJunctionSourceStatus(targetProvider.status)
+      : "disconnected";
+    if (targetStatus === "disconnected") {
       return;
+    }
+    if (
+      requiredActiveProviderSlug
+      && (
+        targetStatus !== "connected"
+        || !providers.some((provider) =>
+          mapJunctionSourceStatus(provider.status) === "connected"
+          && (
+            normalizeProviderSlug(provider.origin.sourceProviderSlug)
+            ?? normalizeProviderSlug(provider.slug)
+          ) === requiredActiveProviderSlug
+        )
+      )
+    ) {
+      throw deviceSyncError({
+        code: "JUNCTION_REQUIRED_SOURCE_NOT_ACTIVE",
+        message: "Junction source cleanup requires an active successor source.",
+        retryable: true,
+        httpStatus: 409,
+      });
     }
 
     await client.deregisterProvider({
