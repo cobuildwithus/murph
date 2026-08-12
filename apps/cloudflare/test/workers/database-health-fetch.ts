@@ -12,7 +12,10 @@ interface RecordedDatabaseHealthMessageRequest {
 const recordedDatabaseHealthMessageRequests:
   RecordedDatabaseHealthMessageRequest[] = [];
 let databaseHealthClientWaitSeconds = 8;
+let databaseHealthDiscoveryRequestCount = 0;
+let databaseHealthMetricsRequestCount = 0;
 let databaseHealthNowMs = Date.now();
+let databaseHealthZeroEvidenceScrapesRemaining = 0;
 
 export function readDatabaseHealthMessageRequests():
   RecordedDatabaseHealthMessageRequest[] {
@@ -22,10 +25,23 @@ export function readDatabaseHealthMessageRequests():
   }));
 }
 
+export function readDatabaseHealthPlanetScaleRequestCounts(): {
+  discovery: number;
+  metrics: number;
+} {
+  return {
+    discovery: databaseHealthDiscoveryRequestCount,
+    metrics: databaseHealthMetricsRequestCount,
+  };
+}
+
 export function resetDatabaseHealthMessageRequests(): void {
   recordedDatabaseHealthMessageRequests.length = 0;
   databaseHealthClientWaitSeconds = 8;
+  databaseHealthDiscoveryRequestCount = 0;
+  databaseHealthMetricsRequestCount = 0;
   databaseHealthNowMs = Date.now();
+  databaseHealthZeroEvidenceScrapesRemaining = 0;
 }
 
 export function readDatabaseHealthNowMs(): number {
@@ -34,6 +50,12 @@ export function readDatabaseHealthNowMs(): number {
 
 export function setDatabaseHealthClientWaitSeconds(value: number): void {
   databaseHealthClientWaitSeconds = value;
+}
+
+export function setDatabaseHealthZeroEvidenceScrapesRemaining(
+  value: number,
+): void {
+  databaseHealthZeroEvidenceScrapesRemaining = value;
 }
 
 export function setDatabaseHealthNowMs(value: number): void {
@@ -61,6 +83,7 @@ export async function handleDatabaseHealthEgress(
     && headers.get("authorization")
       === "service-token-id:service-token"
   ) {
+    databaseHealthDiscoveryRequestCount += 1;
     return Response.json([
       {
         labels: {
@@ -84,6 +107,11 @@ export async function handleDatabaseHealthEgress(
     && url.searchParams.get("sig") === "signed-scrape-token"
     && headers.get("authorization") === null
   ) {
+    databaseHealthMetricsRequestCount += 1;
+    if (databaseHealthZeroEvidenceScrapesRemaining > 0) {
+      databaseHealthZeroEvidenceScrapesRemaining -= 1;
+      return new Response("", { status: 200 });
+    }
     return new Response(buildMetricsBody({
       branchId: "branch_worker_test",
       clientWaitSeconds: databaseHealthClientWaitSeconds,

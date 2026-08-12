@@ -114,6 +114,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeApplyRequest,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
   HostedExecutionDeviceSyncReconcileResponse,
+  HostedExecutionDeviceSyncRuntimeSnapshotCursor,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
@@ -446,6 +447,7 @@ export interface HostedRuntimeDeviceSyncPort {
   }): Promise<HostedExecutionDeviceSyncReconcileResponse>;
   fetchSnapshot(input?: {
     connectionId?: string | null;
+    cursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;
     includeCredentialMaterial?: boolean | null;
     limit?: number | null;
     provider?: string | null;
@@ -455,9 +457,11 @@ export interface HostedRuntimeDeviceSyncPort {
   fetchDirtyStates(input?: Omit<HostedExecutionDeviceSyncDirtyPendingRequest, "userId"> & {
     signal?: AbortSignal | null;
   }): Promise<HostedExecutionDeviceSyncDirtyPendingResponse>;
-  ackDirtyStateProcessed(input: Omit<HostedExecutionDeviceSyncDirtyAckRequest, "userId">): Promise<
-    HostedExecutionDeviceSyncDirtyAckResponse
-  >;
+  ackDirtyStateProcessed(
+    input: Omit<HostedExecutionDeviceSyncDirtyAckRequest, "userId"> & {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedExecutionDeviceSyncDirtyAckResponse>;
 }
 
 export interface HostedRuntimeClinicalRecordsPort {
@@ -571,7 +575,10 @@ export interface HostedRuntimePhysicalNotePort {
 }
 
 export interface HostedRuntimeMailboxPort {
-  fetch(request: HostedMailboxFetchRequest): Promise<HostedMailboxFetchResponse>;
+  fetch(
+    request: HostedMailboxFetchRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedMailboxFetchResponse>;
   fetchPayload(
     request: HostedMailboxPayloadFetchRequest,
   ): Promise<HostedMailboxPayloadFetchResponse>;

@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import {
   extractIsoDatePrefix,
   ID_PREFIXES,
+  JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+  JUNCTION_WEARABLE_TAG_NOTE_TYPE,
   MEAL_MICRONUTRIENT_KEYS,
   parseCompanionHrvRmssdAdmissionId,
   parseCompanionHrvRmssdObservation,
@@ -48,6 +50,8 @@ import {
   JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS,
   JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
   JUNCTION_SLEEP_HRV_PATHS,
+  JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
+  JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
   JUNCTION_SLEEP_LIGHT_MINUTE_PATHS,
   JUNCTION_SLEEP_LIGHT_SECOND_PATHS,
   JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,
@@ -288,6 +292,27 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
     paths: [],
     value: resolveJunctionDailyActivityMinutes,
   },
+  {
+    metric: "low-activity-minutes",
+    unit: "minutes",
+    title: "Junction low activity minutes",
+    paths: [],
+    value: (entry) => resolveJunctionActivityIntensityMinutes(entry, "low"),
+  },
+  {
+    metric: "medium-activity-minutes",
+    unit: "minutes",
+    title: "Junction medium activity minutes",
+    paths: [],
+    value: (entry) => resolveJunctionActivityIntensityMinutes(entry, "medium"),
+  },
+  {
+    metric: "high-activity-minutes",
+    unit: "minutes",
+    title: "Junction high activity minutes",
+    paths: [],
+    value: (entry) => resolveJunctionActivityIntensityMinutes(entry, "high"),
+  },
   { metric: "daily-steps", unit: "count", title: "Junction activity steps", paths: ["steps", "step_count", "daily_steps"] },
   { metric: "active-calories", unit: "kcal", title: "Junction active calories", paths: ["activeCalories", "active_calories", "calories_active"] },
   { metric: "total-calories", unit: "kcal", title: "Junction total calories", paths: ["calories", "totalCalories", "total_calories", "calories_total"] },
@@ -300,6 +325,9 @@ const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
   { metric: "percent-recorded", unit: "%", title: "Junction activity recording coverage", paths: [], percentRatioPaths: ["percentRecorded", "percent_recorded", "recordingCoverage", "recording_coverage", "recordedRatio", "recorded_ratio", "percentRecordedRatio", "percent_recorded_ratio"] },
   { metric: "workout-strain", unit: "score", title: "Junction workout strain", paths: ["workoutStrain", "workout_strain"] },
   { metric: "day-strain", unit: "score", title: "Junction day strain", paths: ["dayStrain", "day_strain", "strain"] },
+  { metric: "average-heart-rate", unit: "bpm", title: "Junction activity average heart rate", paths: ["heart_rate.avg_bpm"] },
+  { metric: "walking-average-heart-rate", unit: "bpm", title: "Junction activity walking average heart rate", paths: ["heart_rate.avg_walking_bpm"] },
+  { metric: "lowest-heart-rate", unit: "bpm", title: "Junction activity lowest heart rate", paths: ["heart_rate.min_bpm"] },
   { metric: "max-heart-rate", unit: "bpm", title: "Junction activity max heart rate", paths: ["maxHeartRate", "max_heart_rate", "max_hr", "heart_rate.max_bpm"] },
   { metric: "resting-heart-rate", unit: "bpm", title: "Junction activity resting heart rate", paths: ["restingHeartRate", "resting_heart_rate", "resting_hr", "rhr", "heart_rate.resting_bpm"] },
 ];
@@ -356,6 +384,13 @@ const SLEEP_METRICS: readonly MetricDescriptor[] = [
   { metric: "sleep-awake-minutes", unit: "minutes", title: "Junction awake time", paths: JUNCTION_SLEEP_AWAKE_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_AWAKE_SECOND_PATHS },
   { metric: "time-in-bed-minutes", unit: "minutes", title: "Junction time in bed", paths: JUNCTION_SLEEP_TIME_IN_BED_MINUTE_PATHS, secondsPaths: JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS },
   { metric: "sleep-efficiency", unit: "%", title: "Junction sleep efficiency", paths: [], percentRatioPaths: JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS },
+  {
+    metric: "sleep-latency-minutes",
+    unit: "minutes",
+    title: "Junction sleep latency",
+    paths: [],
+    value: resolveJunctionSleepLatencyMinutes,
+  },
   { metric: "sleep-consistency", unit: "%", title: "Junction sleep consistency", paths: JUNCTION_SLEEP_CONSISTENCY_PATHS },
   { metric: "sleep-performance", unit: "%", title: "Junction sleep performance", paths: JUNCTION_SLEEP_PERFORMANCE_PATHS },
   { metric: "hrv", unit: "ms", title: "Junction sleep HRV", paths: JUNCTION_SLEEP_HRV_PATHS },
@@ -1783,7 +1818,14 @@ function pushJunctionNoteTags(
   context: NormalizationContext,
 ): void {
   const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
-  const seenNoteHashes = new Set<string>();
+  type JunctionNoteSpine = {
+    entry: PlainObject;
+    resourceContext: ResourceContext;
+    resourceId: string;
+    tags: Set<string>;
+    timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  };
+  const noteSpines = new Map<string, JunctionNoteSpine>();
 
   for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
     const resourceContext = buildResourceContext({
@@ -1798,6 +1840,10 @@ function pushJunctionNoteTags(
     });
     if (!resourceContext) continue;
 
+    // A missing tag field is still a free-text-only provider note and stays
+    // canonical-no-op. An explicit empty tag set is retained so a later replay
+    // can clear the tag state on an existing neutral note spine.
+    if (!Object.hasOwn(entry, "tags")) continue;
     const tags = normalizeJunctionNoteTags(entry.tags);
     const start = firstStringFromPaths(entry, ["start", "startAt", "start_at"]);
     const baseTimestamp = resolveRecordTimestamp(
@@ -1808,20 +1854,45 @@ function pushJunctionNoteTags(
     const timestamp = withTimestampOverride(baseTimestamp, {
       dayKey: baseTimestamp.dayKey ?? extractIsoDatePrefix(start) ?? undefined,
     });
-    if (!timestamp.occurredAt || !timestamp.dayKey || tags.length === 0) continue;
+    if (!timestamp.occurredAt || !timestamp.dayKey) continue;
 
     const stableId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
-    const noteHash = stableId
-      ? shortHash([resourceContext.externalRefResourceType, stableId])
-      : shortHash([
-          resourceContext.externalRefResourceType,
-          timestamp.observedAtRaw ?? timestamp.occurredAt,
-          ...tags,
-        ]);
-    if (seenNoteHashes.has(noteHash)) continue;
-    seenNoteHashes.add(noteHash);
+    const resourceId = buildJunctionNoteResourceId(resourceContext, stableId, timestamp);
+    const spineKey = `${resourceContext.externalRefResourceType}:${resourceId}`;
+    const existing = noteSpines.get(spineKey);
+    if (existing) {
+      if (stableId) {
+        // Duplicate rows with an explicit provider identity describe one note.
+        // Keep the final row's current tag state rather than unioning revisions.
+        existing.entry = entry;
+        existing.resourceContext = resourceContext;
+        existing.tags = new Set(tags);
+        existing.timestamp = timestamp;
+      } else {
+        // Without an upstream id, source + timestamp is the narrowest stable
+        // spine available. Preserve every same-time tag while allowing a later
+        // replay to revise or clear that timestamp's aggregate tag state.
+        for (const tag of tags) existing.tags.add(tag);
+      }
+      continue;
+    }
 
-    const role = `${baseArtifactRole}:${timestamp.dayKey}:${noteHash}`;
+    noteSpines.set(spineKey, {
+      entry,
+      resourceContext,
+      resourceId,
+      tags: new Set(tags),
+      timestamp,
+    });
+  }
+
+  for (const spine of noteSpines.values()) {
+    const tags = [...spine.tags].sort();
+    const dayKey = spine.timestamp.dayKey;
+    const occurredAt = spine.timestamp.occurredAt;
+    if (!dayKey || !occurredAt) continue;
+
+    const role = `${baseArtifactRole}:${dayKey}:${spine.resourceId}`;
     pushEvidencePart(
       context.evidenceParts,
       withJunctionCompactTimeseriesMetadata(
@@ -1833,12 +1904,12 @@ function pushJunctionNoteTags(
             schema: "junction.note_tags.v1",
             provider: "junction",
             resource,
-            dayKey: timestamp.dayKey,
-            sourceProviderSlug: resourceContext.sourceProviderSlug,
-            sourceType: resourceContext.origin.sourceType,
-            sourceInstanceId: resourceContext.origin.sourceInstanceId,
-            occurredAt: timestamp.occurredAt,
-            recordedAt: timestamp.recordedAt,
+            dayKey,
+            sourceProviderSlug: spine.resourceContext.sourceProviderSlug,
+            sourceType: spine.resourceContext.origin.sourceType,
+            sourceInstanceId: spine.resourceContext.origin.sourceInstanceId,
+            occurredAt,
+            recordedAt: spine.timestamp.recordedAt,
             tags,
           }),
         ),
@@ -1846,31 +1917,54 @@ function pushJunctionNoteTags(
       ),
     );
 
-    for (const tag of tags) {
-      context.events.push(stripUndefined({
-        kind: "intervention_session",
-        occurredAt: timestamp.occurredAt,
-        recordedAt: timestamp.recordedAt,
-        dayKey: timestamp.dayKey,
-        source: "device",
-        title: `Wearable tag: ${tag.replaceAll("-", " ")}`,
-        tags: [tag],
-        evidenceRoles: [role],
-        externalRef: makeProviderExternalRef(
-          "junction",
-          resourceContext.externalRefResourceType,
-          noteHash,
-          undefined,
-          `tag-${tag}`,
-        ),
-        dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
-        fields: {
-          interventionType: tag,
-          sessionStatus: "completed",
-        },
-      }));
-    }
+    context.events.push(stripUndefined({
+      kind: "note",
+      occurredAt,
+      recordedAt: spine.timestamp.recordedAt,
+      dayKey,
+      source: "device",
+      title: "Wearable tags",
+      // The canonical note body is a product-owned marker. Provider free text
+      // never crosses the sanitizer; normalized tag facts live only in `tags`.
+      note: "Wearable tags",
+      tags,
+      evidenceRoles: [role],
+      // This facet is intentionally distinct from the legacy `tag-*`
+      // intervention facets. Core event spines are kind-stable, so any repair
+      // of already-persisted legacy rows must remain explicit.
+      externalRef: makeProviderExternalRef(
+        "junction",
+        spine.resourceContext.externalRefResourceType,
+        spine.resourceId,
+        undefined,
+        JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+      ),
+      dataOrigin: buildDataOrigin(spine.entry, spine.resourceContext, spine.timestamp),
+      fields: {
+        noteType: JUNCTION_WEARABLE_TAG_NOTE_TYPE,
+      },
+    }));
   }
+}
+
+function buildJunctionNoteResourceId(
+  resourceContext: ResourceContext,
+  stableId: string | undefined,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string {
+  if (stableId) {
+    // Junction ids are provider-local, not globally unique across two devices
+    // or accounts of the same provider. Preserve edit/clear stability while
+    // keeping each source instance on its own kind-stable note spine.
+    return shortHash([
+      resourceContext.externalRefResourceType,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      stableId,
+    ]);
+  }
+
+  return buildStableTimeseriesResourceId(resourceContext, timestamp);
 }
 
 function normalizeJunctionNoteTags(value: unknown): string[] {
@@ -5088,6 +5182,21 @@ function resolveMetricDescriptorValue(
   return null;
 }
 
+function resolveJunctionSleepLatencyMinutes(entry: PlainObject): number | undefined {
+  const explicitlyNamedMinutes = firstNumberFromPaths(
+    entry,
+    JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
+  );
+  if (explicitlyNamedMinutes !== undefined) {
+    return explicitlyNamedMinutes;
+  }
+
+  return secondsToMinutes(firstNumberFromPaths(
+    entry,
+    JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
+  ));
+}
+
 function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undefined {
   // Get Summary reports these buckets in minutes and `daily_movement` as
   // deprecated equivalent-walking meters. Sense's `*_second` query columns
@@ -5112,6 +5221,16 @@ function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undef
 
   return totalActivityMinutes <= 24 * 60
     ? totalActivityMinutes
+    : undefined;
+}
+
+function resolveJunctionActivityIntensityMinutes(
+  entry: PlainObject,
+  intensity: "low" | "medium" | "high",
+): number | undefined {
+  const minutes = firstNumberFromPaths(entry, [intensity]);
+  return minutes !== undefined && minutes >= 0 && minutes <= 24 * 60
+    ? minutes
     : undefined;
 }
 

@@ -7,10 +7,10 @@ import { buildActivitySessionMetricCandidate, buildSleepWindowMetricCandidate } 
 import { buildCandidateExactKey } from "./dedupe.ts";
 import {
   ACTIVITY_SESSION_WORKOUT_METRIC_SPECS,
-  ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
+  isActivitySummaryMetricCandidate,
+  isSleepSummaryMetricCandidate,
   RECOVERY_METRIC_KEYS,
-  SLEEP_METRIC_KEYS,
   type WearableActivityDay,
   type WearableActivitySessionAggregate,
   type WearableActivitySessionMetricValues,
@@ -88,6 +88,10 @@ export function buildWearableSourceHealth(input: {
   const selectedMetricsByProvider = countSelectedMetricsByProvider([
     ...input.activityDays.flatMap((day) => [
       day.steps,
+      day.activityMinutes,
+      day.lowActivityMinutes,
+      day.mediumActivityMinutes,
+      day.highActivityMinutes,
       day.activeCalories,
       day.totalCalories,
       day.distanceKm,
@@ -98,6 +102,9 @@ export function buildWearableSourceHealth(input: {
       day.dayStrain,
       day.estimatedVo2Max,
       day.workoutStrain,
+      day.averageHeartRate,
+      day.walkingAverageHeartRate,
+      day.lowestHeartRate,
       day.maxHeartRate,
       day.percentRecorded,
       day.sessionMinutes,
@@ -157,6 +164,10 @@ export function buildWearableSourceHealth(input: {
   const conflictCountsByProvider = countConflictsByProvider([
     ...input.activityDays.flatMap((day) => [
       day.steps,
+      day.activityMinutes,
+      day.lowActivityMinutes,
+      day.mediumActivityMinutes,
+      day.highActivityMinutes,
       day.activeCalories,
       day.totalCalories,
       day.distanceKm,
@@ -167,6 +178,9 @@ export function buildWearableSourceHealth(input: {
       day.dayStrain,
       day.estimatedVo2Max,
       day.workoutStrain,
+      day.averageHeartRate,
+      day.walkingAverageHeartRate,
+      day.lowestHeartRate,
       day.maxHeartRate,
       day.percentRecorded,
       day.sessionMinutes,
@@ -261,10 +275,10 @@ export function buildWearableSourceHealth(input: {
 
       for (const candidate of providerMetricCandidates) {
         const metric = candidate.metric as WearableMetricKey;
-        if (ACTIVITY_METRIC_KEYS.has(metric)) {
+        if (isActivitySummaryMetricCandidate(candidate)) {
           activityMetricDays.add(candidate.date);
         }
-        if (SLEEP_METRIC_KEYS.has(metric)) {
+        if (isSleepSummaryMetricCandidate(candidate)) {
           sleepMetricDays.add(candidate.date);
         }
         if (RECOVERY_METRIC_KEYS.has(metric)) {
@@ -385,7 +399,10 @@ function isUnambiguousSleepFreshnessMetricCandidate(
   candidate: WearableMetricCandidate,
 ): boolean {
   return (
-    metricSetHas(UNAMBIGUOUS_SLEEP_FRESHNESS_METRICS, candidate.metric)
+    (
+      isSleepSummaryMetricCandidate(candidate)
+      && metricSetHas(UNAMBIGUOUS_SLEEP_FRESHNESS_METRICS, candidate.metric)
+    )
     || candidate.sourceKind.toLowerCase().includes("sleep")
     || candidate.externalRef?.resourceType?.toLowerCase().includes("sleep") === true
   );

@@ -153,6 +153,10 @@ const RECOVERY_METRIC_EVIDENCE = [
 
 const ACTIVITY_METRIC_EVIDENCE = [
   { metricKey: "steps", summaryField: "steps", sourceKind: "activity-summary" },
+  { metricKey: "activity-minutes", summaryField: "activityMinutes", sourceKind: "activity-summary" },
+  { metricKey: "low-activity-minutes", summaryField: "lowActivityMinutes", sourceKind: "activity-summary" },
+  { metricKey: "medium-activity-minutes", summaryField: "mediumActivityMinutes", sourceKind: "activity-summary" },
+  { metricKey: "high-activity-minutes", summaryField: "highActivityMinutes", sourceKind: "activity-summary" },
   { metricKey: "workout-minutes", summaryField: "sessionMinutes", sourceKind: "activity-summary" },
   { metricKey: "workout-count", summaryField: "sessionCount", sourceKind: "activity-summary" },
   { metricKey: "active-calories", summaryField: "activeCalories", sourceKind: "activity-summary" },
@@ -162,6 +166,9 @@ const ACTIVITY_METRIC_EVIDENCE = [
   { metricKey: "elevation-gain-meters", summaryField: "totalElevationGainMeters", sourceKind: "activity-summary" },
   { metricKey: "estimated-vo2-max", summaryField: "estimatedVo2Max", sourceKind: "activity-summary" },
   { metricKey: "floors-climbed", summaryField: "floorsClimbed", sourceKind: "activity-summary" },
+  { metricKey: "average-heart-rate", summaryField: "averageHeartRate", sourceKind: "activity-summary" },
+  { metricKey: "walking-average-heart-rate", summaryField: "walkingAverageHeartRate", sourceKind: "activity-summary" },
+  { metricKey: "lowest-heart-rate", summaryField: "lowestHeartRate", sourceKind: "activity-summary" },
   { metricKey: "max-heart-rate", summaryField: "maxHeartRate", sourceKind: "activity-summary" },
   { metricKey: "workout-strain", summaryField: "workoutStrain", sourceKind: "activity-summary" },
 ] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableActivitySummary>>[];

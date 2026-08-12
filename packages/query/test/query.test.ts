@@ -4566,7 +4566,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 21);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 22);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database

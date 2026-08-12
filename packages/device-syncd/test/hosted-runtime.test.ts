@@ -892,6 +892,38 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toThrowError(/runtime apply response updates must include no more than 100 entries/u);
   });
 
+  it("caps each runtime apply update at 64 source projections", () => {
+    const source = (index: number) => ({
+      lastSeenAt: "2026-04-07T02:00:00.000Z",
+      observedLastSeenAt: null,
+      sourceInstanceKey: `source_${index}`,
+      sourceProviderSlug: `provider_${index}`,
+      status: "connected",
+    });
+    const boundedSources = Array.from(
+      {
+        length:
+          hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT,
+      },
+      (_, index) => source(index),
+    );
+
+    expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [{ connectionId: "conn_123", sources: boundedSources }],
+      userId: "user_123",
+    }).updates[0]?.sources).toHaveLength(64);
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+        updates: [{
+          connectionId: "conn_123",
+          sources: [...boundedSources, source(boundedSources.length)],
+        }],
+        userId: "user_123",
+      })
+    ).toThrowError(/updates\[0\]\.sources must include no more than 64 entries/u);
+  });
+
   it("parses staged dirty ack overlays on dirty-pending requests", () => {
     expect(
       parseHostedExecutionDeviceSyncDirtyPendingRequest(
@@ -1019,6 +1051,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
         {
           connectionId: null,
+          cursor: {
+            createdAt: "2026-04-06T23:58:00+00:00",
+            id: "conn_cursor",
+          },
           limit: 4,
           provider: "oura",
         },
@@ -1026,6 +1062,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ),
     ).toEqual({
       connectionId: null,
+      cursor: {
+        createdAt: "2026-04-06T23:58:00.000Z",
+        id: "conn_cursor",
+      },
       includeCredentialMaterial: false,
       limit: 4,
       provider: "oura",
@@ -1086,6 +1126,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           },
         ],
         generatedAt: "2026-04-07T00:00:00.000Z",
+        nextCursor: {
+          createdAt: "2026-04-06T23:59:59+00:00",
+          id: "conn_123",
+        },
         userId: "user_123",
       }),
     ).toEqual({
@@ -1127,6 +1171,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         },
       ],
       generatedAt: "2026-04-07T00:00:00.000Z",
+      nextCursor: {
+        createdAt: "2026-04-06T23:59:59.000Z",
+        id: "conn_123",
+      },
       userId: "user_123",
     });
   });
@@ -1165,6 +1213,25 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toThrowError(
       /Hosted device-sync runtime snapshot request includeCredentialMaterial must be a boolean/u,
     );
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
+        {
+          userId: "other-user",
+        },
+        "trusted-user",
+      ),
+    ).toThrowError(/userId must match the authenticated hosted execution user/u);
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
+        {
+          cursor: {
+            createdAt: "not-a-timestamp",
+            id: "conn_123",
+          },
+        },
+        "trusted-user",
+      ),
+    ).toThrowError(/snapshot request cursor.createdAt must be an ISO timestamp/u);
   });
 
   it("keeps only the supported internal projection paths", () => {
@@ -1173,6 +1240,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     );
     expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH).toBe(
       "/api/internal/device-sync/runtime/apply",
+    );
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT).toBe(32);
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT).toBe(64);
+    expect(hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT).toBe(
+      hostedRuntime.HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
     );
     expect("buildHostedExecutionUserDeviceSyncRuntimePath" in hostedRuntime).toBe(false);
   });
@@ -2866,6 +2938,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           payload: {
             emptyBackfillAttempts: 2,
             historicalBackfill: true,
+            historicalBackfillVersion: 2,
             historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
             historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
@@ -2882,6 +2955,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(hint?.jobs?.[0]?.payload).toEqual({
       emptyBackfillAttempts: 2,
       historicalBackfill: true,
+      historicalBackfillVersion: 2,
       historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,

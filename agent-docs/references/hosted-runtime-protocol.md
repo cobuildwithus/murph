@@ -535,11 +535,15 @@ future deadline. An overdue pending-input pass runs before background input
 selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
 If a `system_mailbox` invocation owns the active fence when foreground/default
-work arrives, the runner uses the same exact-child abort and identity-cleared
-replacement path. It must start a default-mode child rather than coalescing the
-wake because system-mailbox mode imports only system work and returns before
-assistant admission. A system-mailbox request behind an active default runtime
-remains deferred and cannot broaden that child's admission authority.
+work arrives, the runner wakes that exact child and leaves its fence intact.
+System-mailbox mode may import and run one bounded model-free device-sync item;
+it checkpoints any successfully applied unit, observes the wake, and returns
+before assistant admission. The foreground request then retries through the
+ordinary controller path and starts a default-mode child after the system child
+releases its fence. Operator maintenance receipts are not system-mode recovery
+work and remain pending for their existing owner. A system-mailbox request
+behind an active default runtime remains deferred and cannot broaden that
+child's admission authority.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -556,12 +560,14 @@ context. Ambiguous or mismatched foreground ownership is preserved/retried.
 Existing active fences that predate persisted container names resolve through
 the legacy unversioned per-user container name for liveness probes; fresh
 starts still use the current versioned container resolver.
-For foreground/default work behind an `inbox_media_retention` or
-`system_mailbox` fence, the existing workspace-invocation abort seam is the
-sole preemption authority. UserRunner sends that exact abort directly instead
-of spending foreground command budget on a non-authoritative liveness
-preflight. A local exact-pointer abort enters the same inactive-fence
-replacement path. The container registers the
+For foreground/default work behind an `inbox_media_retention` fence, the
+existing workspace-invocation abort seam is the sole preemption authority.
+UserRunner sends that exact abort directly instead of spending foreground
+command budget on a non-authoritative liveness preflight. System-mailbox work
+uses the exact-child wake-and-checkpoint handoff above instead, because aborting
+a bounded unit after canonical web updates but before its checkpoint would
+discard committed progress. A local exact-pointer abort enters the same
+inactive-fence replacement path. The container registers the
 exact attempt, lease generation, user, abort controller, and invocation result
 before lifecycle-lock admission. Queued duplicate invokes therefore coalesce,
 and an exact abort can cancel already-queued successors before runner dispatch.
@@ -1842,9 +1848,12 @@ caller sends its existing ensure-processing HTTP timeout as an internal header.
 An expected managed AI usage denial observed by the workspace read is not a
 transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
-`system_mailbox` path, which imports eligible model-free system work and exits
-before foreground assistant admission. It binds that effective processing mode
-into the same fence so controller priority, preemption, and the container job
+`system_mailbox` path, which imports system work, may run one bounded
+model-free deterministic device-sync item, and exits before foreground
+assistant admission. Operator maintenance receipts retain their existing owner
+and are not consumed by this recovery mode.
+It binds that effective processing mode into the same fence so controller
+priority, preemption, and the container job
 cannot diverge; the fence also rejects all metered provider egress if the runtime
 reaches one unexpectedly. Explicit media
 retention remains model-free, and custom inference keeps its selected route.

@@ -180,6 +180,7 @@ export function ConnectSourcesGrid({
             source.connectionAvailable !== false ||
             Boolean(source.setupGuideId) ||
             Boolean(source.unavailableActionUrl) ||
+            Boolean(source.unavailableMessage) ||
             source.connected === true ||
             source.requiresReconnect === true ||
             Boolean(source.recoveryKind) ||
@@ -207,6 +208,21 @@ export function ConnectSourcesGrid({
       ),
     [displaySources],
   );
+  const disconnectUnavailableSourceNames = useMemo(() => {
+    if (
+      disconnectSource?.disconnectScope !== "junction_account"
+      || !disconnectSource.disconnectConnectionId
+    ) {
+      return [];
+    }
+
+    return displaySources
+      .filter((source) =>
+        source.disconnectConnectionId === disconnectSource.disconnectConnectionId
+        && source.connectionAvailable === false
+      )
+      .map((source) => source.name);
+  }, [disconnectSource, displaySources]);
   const hasInitialCallback = Boolean(initialCallback);
   const activeConnectIntent = initialConnectIntent ?? locationConnectIntent;
   const initialConnectIntentPresentation = useMemo(
@@ -224,8 +240,12 @@ export function ConnectSourcesGrid({
       initialConnectIntentDismissed,
     ],
   );
-  const visibleNotice =
+  const noticeCandidate =
     notice ?? initialConnectIntentPresentation?.notice ?? null;
+  const visibleNotice =
+    !hasVerifyingFitbitMigration && isFitbitMigrationNotice(noticeCandidate)
+      ? null
+      : noticeCandidate;
   const visibleActionError =
     actionError ?? initialConnectIntentPresentation?.actionError ?? null;
   const activeAppleHealthRelaySetupGuide = isAppleHealthRelaySetupGuideId(
@@ -265,7 +285,6 @@ export function ConnectSourcesGrid({
   useEffect(() => {
     if (!hasVerifyingFitbitMigration) {
       fitbitMigrationRefreshAttemptsRef.current = 0;
-      setNotice((current) => isFitbitMigrationNotice(current) ? null : current);
       return;
     }
 
@@ -735,6 +754,7 @@ export function ConnectSourcesGrid({
       />
 
       <ConnectDisconnectDialog
+        affectedUnavailableSourceNames={disconnectUnavailableSourceNames}
         errorMessage={
           disconnectSource && actionError?.sourceId === disconnectSource.id
             ? actionError.message

@@ -7607,6 +7607,40 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const reconcileRequests: Array<Parameters<NonNullable<RuntimeDeviceSyncPort["reconcileAccount"]>>[0]> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const accountSnapshots = Array.from({ length: 33 }, (_, index) => ({
+      connection: {
+        accessTokenExpiresAt: "2026-05-01T00:00:00.000Z",
+        connectedAt: "2026-04-28T00:00:00.000Z",
+        createdAt: new Date(Date.parse("2026-04-28T00:00:00.000Z") - index * 1_000)
+          .toISOString(),
+        displayName: index === 0 ? "Training wearable" : `Training wearable ${index + 1}`,
+        externalAccountId: `external-account-not-for-assistant-${index + 1}`,
+        id: index === 0
+          ? "conn_synthetic_whoop"
+          : `conn_synthetic_whoop_${String(index + 1).padStart(2, "0")}`,
+        metadata: { privateProviderDetail: "not-for-assistant" },
+        provider: "whoop",
+        scopes: ["read:recovery"],
+        status: "active" as const,
+      },
+      credential: {
+        credentialMetadata: { privateCredentialDetail: "not-for-assistant" },
+        kind: "none" as const,
+      },
+      localState: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-04-28T23:59:00.000Z",
+        lastWebhookAt: "2026-04-28T23:58:00.000Z",
+        nextReconcileAt: null,
+      },
+    }));
+    const accountCursor = {
+      createdAt: accountSnapshots[31]!.connection.createdAt,
+      id: accountSnapshots[31]!.connection.id,
+    };
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
@@ -7627,36 +7661,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         };
       },
       async fetchSnapshot(request) {
+        const pageIndex = fetchSnapshotRequests.length;
         fetchSnapshotRequests.push(request);
         return {
-          connections: [{
-            connection: {
-              accessTokenExpiresAt: "2026-05-01T00:00:00.000Z",
-              connectedAt: "2026-04-28T00:00:00.000Z",
-              createdAt: "2026-04-28T00:00:00.000Z",
-              displayName: "Training wearable",
-              externalAccountId: "external-account-not-for-assistant",
-              id: "conn_synthetic_whoop",
-              metadata: { privateProviderDetail: "not-for-assistant" },
-              provider: "whoop",
-              scopes: ["read:recovery"],
-              status: "active" as const,
-            },
-            credential: {
-              credentialMetadata: { privateCredentialDetail: "not-for-assistant" },
-              kind: "none" as const,
-            },
-            localState: {
-              lastErrorCode: null,
-              lastErrorMessage: null,
-              lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
-              lastSyncErrorAt: null,
-              lastSyncStartedAt: "2026-04-28T23:59:00.000Z",
-              lastWebhookAt: "2026-04-28T23:58:00.000Z",
-              nextReconcileAt: null,
-            },
-          }],
+          connections: pageIndex === 0
+            ? accountSnapshots.slice(0, 32)
+            : accountSnapshots.slice(32),
           generatedAt: "2026-04-29T00:00:00.000Z",
+          nextCursor: pageIndex === 0 ? accountCursor : null,
           userId: "member_synthetic_phase",
         };
       },
@@ -7677,7 +7689,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         providerConfigs: {
           junction: {
             environment: "sandbox",
-            providerFilter: ["fitbit"],
+            providerFilter: ["fitbit", "dexcom_v3", "dexcom"],
             region: "us",
           },
           strava: {
@@ -7701,6 +7713,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectProviders: [
           { label: "WHOOP", provider: "whoop" },
           { label: "Fitbit", provider: "fitbit" },
+          { label: "Dexcom (G6 and older)", provider: "dexcom" },
         ],
         deviceTool: expect.objectContaining({ request: expect.any(Function) }),
         memberId: "member_synthetic_phase",
@@ -7716,24 +7729,34 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       provider: " whoop ",
       sourceProvider: " whoop_v2 ",
     }, { signal: abortController.signal })).resolves.toEqual({
-      accounts: [{
-        accountId: "conn_synthetic_whoop",
-        displayName: "Training wearable",
-        lastErrorCode: null,
-        lastSyncCompletedAt: "2026-04-29T00:00:00.000Z",
-        provider: "whoop",
-        status: "active",
-      }],
+      accounts: accountSnapshots.map(({ connection, localState }) => ({
+        accountId: connection.id,
+        displayName: connection.displayName,
+        lastErrorCode: localState.lastErrorCode,
+        lastSyncCompletedAt: localState.lastSyncCompletedAt,
+        provider: connection.provider,
+        status: connection.status,
+      })),
       action: "list_accounts",
       provider: "whoop",
       sourceProvider: "whoop_v2",
     });
-    expect(fetchSnapshotRequests).toEqual([{
-      includeCredentialMaterial: false,
-      provider: "whoop",
-      signal: abortController.signal,
-      sourceProviderSlug: "whoop_v2",
-    }]);
+    expect(fetchSnapshotRequests).toEqual([
+      {
+        includeCredentialMaterial: false,
+        provider: "whoop",
+        signal: abortController.signal,
+        sourceProviderSlug: "whoop_v2",
+      },
+      {
+        cursor: accountCursor,
+        includeCredentialMaterial: false,
+        limit: 32,
+        provider: "whoop",
+        signal: abortController.signal,
+        sourceProviderSlug: "whoop_v2",
+      },
+    ]);
     await expect(
       deviceTool.request({
         action: "connect",
@@ -7773,7 +7796,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       action: "connect",
       provider: "strava",
     })).rejects.toThrow("not available to connect");
-    expect(connectLinkRequests).toHaveLength(1);
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom_v3",
+    })).rejects.toThrow("not available to connect");
+    await expect(deviceTool.request({
+      action: "connect",
+      provider: "dexcom",
+    })).resolves.toEqual({
+      action: "connect",
+      link: expect.objectContaining({ provider: "dexcom" }),
+    });
+    expect(connectLinkRequests).toEqual([
+      { connectTarget: "whoop", messagingReturnTarget: "telegram" },
+      { connectTarget: "dexcom", messagingReturnTarget: "telegram" },
+    ]);
     await Promise.resolve();
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
@@ -7782,8 +7819,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         deviceConnectIssueLinkAvailable: true,
         deviceConnectPortPresent: true,
-        deviceConnectProviderCount: 2,
-        deviceConnectProviders: ["whoop", "fitbit"],
+        deviceConnectProviderCount: 3,
+        deviceConnectProviders: ["whoop", "fitbit", "dexcom"],
         deviceConnectStage: "context",
         deviceConnectStatus: "available",
       }),
@@ -7799,6 +7836,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectReturnTarget: "telegram",
         expiresAtPresent: true,
         provider: "whoop",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "requested",
+        deviceConnectReturnTarget: "telegram",
+        provider: "dexcom",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "issued",
+        deviceConnectReturnTarget: "telegram",
+        expiresAtPresent: true,
+        provider: "dexcom",
       }),
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
@@ -7859,14 +7909,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       async fetchSnapshot(request) {
         fetchSnapshotRequests.push(request);
-        if (request?.sourceProviderSlug !== "whoop_v2") {
-          return {
-            connections: [],
-            generatedAt: "2026-04-29T00:00:00.000Z",
-            userId: "member_synthetic_phase",
-          };
-        }
-
         return {
           connections: [
             {
@@ -7961,23 +8003,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(assistantLaneCall?.executionContext.hosted?.deviceTool).toEqual(
       expect.objectContaining({ request: expect.any(Function) }),
     );
-    expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
-      "google_health",
-      "garmin",
-      "oura",
-      "withings",
-      "whoop_v2",
+    expect(fetchSnapshotRequests).toEqual([
+      {
+        includeCredentialMaterial: false,
+        signal: expect.any(AbortSignal),
+      },
     ]);
-    expect(fetchSnapshotRequests).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          includeCredentialMaterial: false,
-          limit: 4,
-          signal: expect.any(AbortSignal),
-          sourceProviderSlug: "whoop_v2",
-        }),
-      ]),
-    );
+    for (const request of fetchSnapshotRequests) {
+      expect(request).not.toHaveProperty("limit");
+    }
     expect(assistantLaneCall?.signal).toBeUndefined();
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
@@ -8154,7 +8188,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).toContain("generic device-connect command is ambiguous");
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
     expect(prompt).toContain("Strava currently needs reconnect");
-    expect(prompt).toContain("No hosted reconnect target is configured for this wearable/source");
+    expect(prompt).toContain("Reconnect is not currently available for this wearable/source");
+    expect(prompt).toContain("Do not offer or issue a reconnect link");
     expect(prompt).not.toContain("vault-cli device connect strava --format json");
   });
 

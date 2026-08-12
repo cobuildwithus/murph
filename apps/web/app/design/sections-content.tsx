@@ -98,7 +98,7 @@ function StudySection({
 
 function ConnectSourceActionsStudySection() {
   return (
-    <StudySection title="Connect source actions and disconnect lifecycle">
+    <StudySection title="Connect source availability, actions, and disconnect lifecycle">
       <ConnectSourceCardStudy
         androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
       />

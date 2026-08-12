@@ -19,7 +19,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 19: Rebuild test-result identities after expanded lab-only alias curation.
 // 20: Rebuild canonical workout-day rollups and split workout from activity minutes.
 // 21: Rebuild stored body-state summaries after adding composition metric envelopes.
-export const QUERY_PROJECTION_SQLITE_VERSION = 21;
+// 22: Rebuild activity summaries with independent intensity and daily heart-rate facts.
+export const QUERY_PROJECTION_SQLITE_VERSION = 22;
 
 export interface QueryProjectionLocation {
   absolutePath: string;

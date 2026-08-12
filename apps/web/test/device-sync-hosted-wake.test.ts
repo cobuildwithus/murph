@@ -492,6 +492,7 @@ import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-r
 import { getPrisma } from "@/src/lib/prisma";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
+  buildHostedDeviceSyncScheduledReconcileWakeEventId,
   cleanupRejectedHostedDeviceSyncConnectionSource,
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncWebhookAccepted,
@@ -1188,6 +1189,16 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
       mailboxItemId: "mailbox_123",
     });
+  });
+
+  it("versions scheduled wake identity past legacy unhashed envelopes", () => {
+    expect(buildHostedDeviceSyncScheduledReconcileWakeEventId({
+      connectionId: "dsc_123",
+      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
+      nextReconcileAt: "2026-03-26T12:30:00.000Z",
+    })).toBe(
+      "device-sync:scheduled-reconcile:v2:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:30:00.000Z",
+    );
   });
 
   it("does not append scheduled reconcile work after explicit consent withdrawal", async () => {
