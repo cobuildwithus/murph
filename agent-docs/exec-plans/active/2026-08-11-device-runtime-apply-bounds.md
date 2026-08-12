@@ -103,6 +103,47 @@ application authority checks.
   callbacks serially, aggregates ordered responses, and rejects one
   independently oversized update before retry loops. The Web route now imports
   the same protocol limit constant.
+- The next exact-head ReviewGPT round at `e9b5c758729e` returned
+  `RETROSPECTIVE_REQUIRED`, not a code finding. The retrospective decision is
+  to continue with callback-body partitioning at the existing Cloudflare port.
+  That is the smallest complete architecture because the admitted 100-by-64
+  producer shape otherwise fails at the signed Web callback body gate before it
+  can reach the database authority. Moving the bound upstream would either hide
+  a valid producer shape or duplicate transport-envelope knowledge in the
+  assistant runtime; moving it downstream cannot work because the Web route
+  must reject oversized signed bodies before parsing and authority work. The
+  accepted direction keeps exactly one new operational surface: byte-aware
+  chunking inside the existing callback transport owner, using the same compact
+  JSON body it sends. It deliberately does not add a queue, durable state,
+  retry store, service owner, cache, semaphore, compatibility table, or raised
+  body limit.
+- Retrospective validation boundary: the final architecture remains two-phase
+  prepare plus live transactional commit. The Cloudflare port owns body-size
+  chunk construction, sequential callback dispatch, ordered aggregation, later-
+  chunk failure propagation, and single-update oversize rejection. The Web route
+  owns the shared 256 KiB signed-body gate. The Web database authority owns all
+  live connection, token, lease, source, provider, ciphertext, and root fences,
+  with no KMS/provider/rich hydration inside transactions. Future remediation
+  may only shrink or clarify those owners; expanding beyond them requires a new
+  retrospective.
+- The first substantive round-three attempt at `e9b5c758729` required a
+  completed architecture retrospective before further audit. The decision is
+  to retain callback-body partitioning at the existing Cloudflare port. The
+  first-reviewed-to-current direction removes the unused prepared-source owner
+  and duplicate active-root policy while adding 195 lines of review-driven
+  source churn (144 additions / 51 deletions), net 93 lines. The byte-aware
+  chunker, ordered response aggregation, and partial-failure behavior are
+  irreducible because the independently valid 100-update and 64-source bounds
+  do not compose beneath the existing 256 KiB signed-envelope limit. Lowering
+  either semantic bound to avoid envelope measurement would make supported
+  authority unreachable; moving partitioning elsewhere would duplicate the
+  final-envelope owner. The retained smallest architecture is one Cloudflare
+  envelope owner that emits serial bounded callbacks, followed by the existing
+  two-phase Web authority owner with canonical live fences and serial
+  database-only transactions. Superseded preparation and duplicate root-policy
+  paths remain deleted. Further expansion beyond byte partitioning, ordered
+  aggregation, independently oversized-update rejection, and fail-closed
+  later-chunk semantics requires a new retrospective.
 
 ## Verification
 
@@ -173,3 +214,9 @@ application authority checks.
   therefore requires the Cloudflare port partitioner. Affected Cloudflare, Web,
   device-syncd, and assistant-runtime typechecks pass. Diff-check and privacy
   scan are clean.
+- The retrospective-only update changed documentation and PR review context
+  only; no production or test code changed.
+- The first round-three audit returned `RETROSPECTIVE_REQUIRED` rather than a
+  code finding. The required original-versus-current comparison, continuation
+  decision, retained/removed owner inventory, smallest architecture, and
+  no-expansion validation boundary are recorded above and in the PR body.
