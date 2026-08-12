@@ -91,6 +91,7 @@ describe('private completion continuity', () => {
     })
 
     await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
       sessionId: fixture.ordinarySession.sessionId,
       vault: fixture.vaultRoot,
     })
@@ -124,6 +125,7 @@ describe('private completion continuity', () => {
       vault: fixture.vaultRoot,
     })
     await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
       sessionId: fixture.ordinarySession.sessionId,
       vault: fixture.vaultRoot,
     })
@@ -207,6 +209,7 @@ describe('private completion continuity', () => {
         vault: fixture.vaultRoot,
       })
       await reconcileAssistantPrivateCompletionContinuityForSession({
+        allowUnbound: true,
         sessionId: fixture.ordinarySession.sessionId,
         vault: fixture.vaultRoot,
       })
@@ -351,6 +354,103 @@ describe('private completion continuity', () => {
     })
   })
 
+  it('repairs a bound completion before a direct scheduled turn but leaves unbound work attended-only', async () => {
+    const fixture = await createContinuityFixture(
+      'private-continuity-scheduled-repair-',
+    )
+    const bound = await createPrivateCompletionIntent({
+      completionId: 'aask_done_private_continuity_scheduled_bound',
+      continuitySessionId: fixture.ordinarySession.sessionId,
+      deliverySession: fixture.ordinarySession,
+      message: 'Private reply before the scheduled result.',
+      turnId: 'turn_private_continuity_scheduled_bound',
+      vault: fixture.vaultRoot,
+    })
+    const unbound = await createPrivateCompletionIntent({
+      completionId: 'aask_done_private_continuity_scheduled_unbound',
+      continuitySessionId: null,
+      deliverySession: fixture.ordinarySession,
+      message: 'Unbound reply for an attended turn.',
+      turnId: 'turn_private_continuity_scheduled_unbound',
+      vault: fixture.vaultRoot,
+    })
+    for (const [intent, providerMessageId] of [
+      [bound, 'provider_private_continuity_scheduled_bound'],
+      [unbound, 'provider_private_continuity_scheduled_unbound'],
+    ] as const) {
+      const dispatched = await dispatchAssistantOutboxIntent({
+        dependencies: {
+          sendLinq: async () => ({
+            idempotencyKey: intent.deliveryIdempotencyKey,
+            providerMessageId,
+            providerThreadId: locator.threadId,
+            target: locator.bindingDeliveryTarget,
+            targetKind: 'thread',
+          }),
+        },
+        force: true,
+        intentId: intent.intentId,
+        vault: fixture.vaultRoot,
+      })
+      expect(dispatched.intent.status).toBe('sent')
+    }
+
+    await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: false,
+      sessionId: fixture.detachedSession.sessionId,
+      vault: fixture.vaultRoot,
+    })
+    await expect(listAssistantTranscriptEntries(
+      fixture.vaultRoot,
+      fixture.detachedSession.sessionId,
+    )).resolves.toEqual([])
+
+    const scheduled = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: ordinaryTarget,
+      defaults: null,
+      message: {
+        ...locator,
+        executionContext: {
+          hosted: {
+            defaultTarget: ordinaryTarget,
+            memberId: 'member_private_continuity_scheduled_repair',
+            userEnvKeys: [],
+          },
+        },
+        prompt: 'Prepare the scheduled direct update.',
+        sessionId: fixture.ordinarySession.sessionId,
+        turnTrigger: 'automation-cron',
+        vault: fixture.vaultRoot,
+      },
+    })
+
+    expect(scheduled.session).toMatchObject({
+      codexResume: null,
+      resumeState: null,
+      sessionId: fixture.ordinarySession.sessionId,
+      turnCount: 1,
+    })
+    await expect(listAssistantTranscriptEntries(
+      fixture.vaultRoot,
+      fixture.ordinarySession.sessionId,
+    )).resolves.toEqual([
+      expect.objectContaining({
+        sourceOutboxIntentId: bound.intentId,
+        text: bound.message,
+      }),
+    ])
+    await expect(readAssistantOutboxIntent(
+      fixture.vaultRoot,
+      bound.intentId,
+    )).resolves.toMatchObject({
+      privateCompletionContinuity: { status: 'applied' },
+    })
+    await expect(readAssistantOutboxIntent(
+      fixture.vaultRoot,
+      unbound.intentId,
+    )).resolves.not.toHaveProperty('privateCompletionContinuity')
+  })
+
   it('does not infer continuity ownership for a legacy intent without the binding field', async () => {
     const fixture = await createContinuityFixture('private-continuity-legacy-')
     const pending = await createPrivateCompletionIntent({
@@ -381,6 +481,7 @@ describe('private completion continuity', () => {
     })
     expect(dispatched.intent.status).toBe('sent')
     await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
       sessionId: fixture.ordinarySession.sessionId,
       vault: fixture.vaultRoot,
     })
@@ -441,10 +542,12 @@ describe('private completion continuity', () => {
     )
 
     await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
       sessionId: fixture.ordinarySession.sessionId,
       vault: fixture.vaultRoot,
     })
     await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
       sessionId: fixture.ordinarySession.sessionId,
       vault: fixture.vaultRoot,
     })
@@ -496,6 +599,7 @@ describe('private completion continuity', () => {
     })
 
     await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
       sessionId: fixture.ordinarySession.sessionId,
       vault: fixture.vaultRoot,
     })
@@ -791,6 +895,7 @@ describe('private completion continuity', () => {
     })
 
     await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: true,
       sessionId: attended.session.sessionId,
       vault: fixture.vaultRoot,
     })

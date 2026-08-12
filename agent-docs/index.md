@@ -61,7 +61,8 @@ binding, personal direct-route revalidation at every provider attempt, and
 terminal no-fallback failure, plus exact `aask_done_*` pre-checkpoint staging
 without generic-notification admission, canonical-sent exact-session
 continuity, legacy omission fail-closed behavior, and unresolved outbox
-retention are jointly specified by `ARCHITECTURE.md`,
+retention, including bound-only repair before ordinary direct scheduled turns
+while unbound ownership stays attended-only, are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/hosted-runtime-protocol.md` plus

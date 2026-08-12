@@ -74,6 +74,9 @@ inferred as the owner. The import advances that session once and clears its
 stale native provider-resume aliases. The outbox intent journals an interrupted
 import, and nested hosted direct route plus accepted assistant-input authority
 repairs it before provider-resume selection even for text-only payloads.
+An ordinary direct scheduled occurrence also repairs an exact session-bound
+obligation before provider-resume selection, but cannot claim unbound work;
+that remains reserved for the first attended direct turn.
 Rejected completions, system continuations, and every generic detached
 notification remain isolated and cannot claim this continuity behavior.
 An outbox intent written before the explicit continuity binding existed fails

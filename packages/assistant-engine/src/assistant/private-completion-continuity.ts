@@ -34,6 +34,7 @@ import { withAssistantTurnLock } from './turn-lock.js'
  */
 export async function reconcileAssistantPrivateCompletionContinuityForSession(
   input: {
+    allowUnbound: boolean
     sessionId: string
     vault: string
   },
@@ -54,6 +55,7 @@ export async function reconcileAssistantPrivateCompletionContinuityForSession(
       .flatMap((intent) => {
         if (
           !assistantPrivateCompletionCanJoinSession({
+            allowUnbound: input.allowUnbound,
             intent,
             session: initialSession,
           })
@@ -109,6 +111,7 @@ export async function persistAssistantPrivateCompletionContinuityAfterDelivery(
         return
       }
       await reconcileAssistantPrivateCompletionContinuityForSession({
+        allowUnbound: false,
         sessionId,
         vault: input.vault,
       })
@@ -221,6 +224,7 @@ async function writeAssistantPrivateCompletionIntent(input: {
 }
 
 function assistantPrivateCompletionCanJoinSession(input: {
+  allowUnbound: boolean
   intent: AssistantOutboxIntent
   session: AssistantSession
 }): boolean {
@@ -240,6 +244,13 @@ function assistantPrivateCompletionCanJoinSession(input: {
   const boundSessionId = normalizeNullableString(
     input.intent.privateCompletionContinuitySessionId,
   )
+  if (
+    !boundSessionId
+    && continuity?.status !== 'prepared'
+    && !input.allowUnbound
+  ) {
+    return false
+  }
   if (boundSessionId && boundSessionId !== input.session.sessionId) {
     return false
   }

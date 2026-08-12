@@ -516,6 +516,7 @@ describe('assistant session resolution', () => {
       buildResolveAssistantSessionInput(message, defaults, boundaryDefaultTarget),
     )
     expect(sessionResolutionMocks.reconcilePrivateCompletion).toHaveBeenCalledWith({
+      allowUnbound: true,
       sessionId: resolvedSession.session.sessionId,
       vault: message.vault,
     })
@@ -552,6 +553,7 @@ describe('assistant session resolution', () => {
     })
 
     expect(sessionResolutionMocks.reconcilePrivateCompletion).toHaveBeenCalledWith({
+      allowUnbound: true,
       sessionId: resolvedSession.session.sessionId,
       vault: '/tmp/assistant-session-resolution-vault',
     })
@@ -583,6 +585,28 @@ describe('assistant session resolution', () => {
     expect(sessionResolutionMocks.reconcilePrivateCompletion).not.toHaveBeenCalled()
   })
 
+  it('repairs only bound completions before a direct scheduled turn', async () => {
+    const target = createDefaultLocalAssistantModelTarget()
+    const resolvedSession = createResolvedAssistantSessionForTest({ target })
+    sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
+
+    await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: target,
+      defaults: null,
+      message: createMessageInput({
+        sessionId: resolvedSession.session.sessionId,
+        threadIsDirect: true,
+        turnTrigger: 'automation-cron',
+      }),
+    })
+
+    expect(sessionResolutionMocks.reconcilePrivateCompletion).toHaveBeenCalledWith({
+      allowUnbound: false,
+      sessionId: resolvedSession.session.sessionId,
+      vault: '/tmp/assistant-session-resolution-vault',
+    })
+  })
+
   it('repairs manual direct asks regardless of multimodal payload shape', async () => {
     const target = createDefaultLocalAssistantModelTarget()
     const resolvedSession = createResolvedAssistantSessionForTest({ target })
@@ -602,6 +626,11 @@ describe('assistant session resolution', () => {
     })
 
     expect(sessionResolutionMocks.reconcilePrivateCompletion).toHaveBeenCalledOnce()
+    expect(sessionResolutionMocks.reconcilePrivateCompletion).toHaveBeenCalledWith({
+      allowUnbound: true,
+      sessionId: resolvedSession.session.sessionId,
+      vault: '/tmp/assistant-session-resolution-vault',
+    })
   })
 
   it('projects a hosted model change while preserving native thread continuity', async () => {

@@ -298,7 +298,8 @@ immediate rollout makes that one workflow the expected compatibility window.
 Require managed-container smoke to report the new runner fingerprint, monitor
 `outbox.intent.quarantined` and strict outbox parse failures, then verify one
 same-channel private completion is delivered exactly once, never to the group,
-and is visible to the next attended direct turn.
+and is visible before the next ordinary direct turn, whether that consumer is
+an attended member turn or an exact-session scheduled occurrence.
 
 ## Audience-Key Rollout
 

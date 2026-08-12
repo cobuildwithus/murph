@@ -17,11 +17,18 @@ import type { persistAssistantTurnAndSession } from '../src/assistant/turn-final
 import { sendAssistantNotificationLocal } from '../src/assistant/notification-turn.ts'
 import { resolveAssistantSessionForMessage } from '../src/assistant/session-resolution.ts'
 import {
+  createAssistantOutboxIntent,
+  dispatchAssistantOutboxIntent,
+  readAssistantOutboxIntent,
+  saveAssistantOutboxIntent,
+} from '../src/assistant/outbox.ts'
+import {
   listAssistantSessions,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
+import { appendAssistantTranscriptEntries } from '../src/assistant/store.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const boundaries = vi.hoisted(() => ({
@@ -555,6 +562,240 @@ describe('notification audience authority integration', () => {
       }),
     )
   })
+
+  it.each([
+    'after-canonical-sent',
+    'after-prepared-session-write',
+  ] as const)(
+    'imports a bound private completion before scheduled provider planning $stage',
+    async (stage) => {
+      const { parentRoot, vaultRoot } = await createTempVaultContext(
+        'private-continuity-scheduled-provider-',
+      )
+      cleanupPaths.push(parentRoot)
+      const completionEventId =
+        'aask_done_private_continuity_scheduled_provider'
+      const deliveryKey =
+        createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+          completionEventId,
+        )
+      const privateText = 'Private context before scheduled planning.'
+      const scheduledText = 'Scheduled result after private context.'
+      const locator = {
+        actorId: 'h1_121212121212121212121212',
+        channel: 'linq',
+        identityId: 'h1_343434343434343434343434',
+        threadId: 'h1_565656565656565656565656',
+        threadIsDirect: true,
+      } as const
+      const executionContext = {
+        hosted: {
+          defaultTarget: modelTarget,
+          memberId: 'member_private_continuity_scheduled_provider',
+          userEnvKeys: [],
+        },
+      } as const
+      const ordinary = await resolveAssistantSessionForMessage({
+        boundaryDefaultTarget: modelTarget,
+        defaults: null,
+        message: {
+          ...locator,
+          bindingDeliveryTarget: locator.threadId,
+          deliveryKind: 'thread',
+          executionContext,
+          prompt: 'Start the ordinary direct conversation.',
+          vault: vaultRoot,
+        },
+      })
+      const ordinaryRoute = resolveAssistantExecutionPlan({
+        defaults: null,
+        sessionTarget: ordinary.session.target,
+      }).codexRoute
+      const nativeResume: NonNullable<AssistantSession['codexResume']> = {
+        assistantContractFingerprint: 'a'.repeat(64),
+        routeFingerprint: readCodexThreadRouteFingerprint(ordinaryRoute),
+        threadCompatibilityFingerprint:
+          readCodexThreadCompatibilityFingerprint(ordinaryRoute),
+        threadId: 'thread-private-continuity-scheduled-provider',
+      }
+      const ordinaryWithResume = await saveAssistantSession(vaultRoot, {
+        ...ordinary.session,
+        codexResume: nativeResume,
+        resumeState: nativeResume,
+      })
+      const pending = await createAssistantOutboxIntent({
+        ...locator,
+        answeredMailboxItemIds: [completionEventId],
+        bindingDelivery: {
+          kind: 'thread',
+          target: locator.threadId,
+        },
+        deliveryIdempotencyKey: deliveryKey,
+        deliveryTransportIdempotent: true,
+        message: privateText,
+        privateCompletionContinuitySessionId: ordinaryWithResume.sessionId,
+        reviewedAssistantAskCompletionExpiresAt: '2099-01-01T00:00:00.000Z',
+        sessionId: ordinaryWithResume.sessionId,
+        turnId: 'turn_private_continuity_scheduled_provider',
+        vault: vaultRoot,
+      })
+      const delivered = await dispatchAssistantOutboxIntent({
+        dependencies: {
+          sendLinq: async () => ({
+            idempotencyKey: pending.deliveryIdempotencyKey,
+            providerMessageId:
+              'provider_private_continuity_scheduled_provider',
+            providerThreadId: locator.threadId,
+            target: locator.threadId,
+            targetKind: 'thread',
+          }),
+        },
+        force: true,
+        intentId: pending.intentId,
+        vault: vaultRoot,
+      })
+      expect(delivered.intent.status).toBe('sent')
+      if (stage === 'after-prepared-session-write') {
+        const transcriptCreatedAt = delivered.intent.delivery!.sentAt
+        await saveAssistantOutboxIntent(vaultRoot, {
+          ...delivered.intent,
+          privateCompletionContinuity: {
+            baseTurnCount: 0,
+            preparedAt: '2026-08-11T18:00:01.000Z',
+            sessionId: ordinaryWithResume.sessionId,
+            status: 'prepared',
+            transcriptCreatedAt,
+          },
+        })
+        await saveAssistantSession(vaultRoot, {
+          ...ordinaryWithResume,
+          codexResume: null,
+          lastTurnAt: transcriptCreatedAt,
+          resumeState: null,
+          turnCount: 1,
+          updatedAt: '2026-08-11T18:00:02.000Z',
+        })
+      }
+      await expect(listAssistantTranscriptEntries(
+        vaultRoot,
+        ordinaryWithResume.sessionId,
+      )).resolves.toEqual([])
+
+      boundaries.executeProvider.mockImplementationOnce(async (input) => {
+        expect(input.resolvedSession).toMatchObject({
+          codexResume: null,
+          resumeState: null,
+          sessionId: ordinaryWithResume.sessionId,
+          turnCount: 1,
+        })
+        await expect(listAssistantTranscriptEntries(
+          vaultRoot,
+          ordinaryWithResume.sessionId,
+        )).resolves.toEqual([
+          expect.objectContaining({
+            sourceOutboxIntentId: pending.intentId,
+            text: privateText,
+          }),
+        ])
+        return {
+          kind: 'succeeded',
+          providerTurn: {
+            assistantContractFingerprint: 'a'.repeat(64),
+            attemptCount: 1,
+            codexContinuation: { kind: 'explicit-structured-history' },
+            codexThreadId: null,
+            provider: input.route.provider,
+            providerOptions: input.route.providerOptions,
+            rawEvents: [],
+            response: JSON.stringify({
+              kind: 'send_message',
+              privateSummary: 'Scheduled update prepared.',
+              text: scheduledText,
+            }),
+            responseDeliveryContextOrdinal: 0,
+            responseMedia: [],
+            route: input.route,
+            session: input.resolvedSession,
+            stderr: '',
+            stdout: '',
+            transcriptResponse: JSON.stringify({
+              kind: 'send_message',
+              privateSummary: 'Scheduled update prepared.',
+              text: scheduledText,
+            }),
+            usage: null,
+            workingDirectory: input.plan.requestedWorkingDirectory,
+          },
+        }
+      })
+      boundaries.persistTurn.mockImplementationOnce(async (input) => {
+        await appendAssistantTranscriptEntries(vaultRoot, ordinaryWithResume.sessionId, [{
+          createdAt: '2026-08-11T18:01:00.000Z',
+          kind: 'assistant',
+          text: scheduledText,
+        }])
+        return await saveAssistantSession(vaultRoot, {
+          ...input.session,
+          lastTurnAt: '2026-08-11T18:01:00.000Z',
+          turnCount: input.session.turnCount + 1,
+          updatedAt: '2026-08-11T18:01:00.000Z',
+        })
+      })
+
+      await sendAssistantNotificationLocal({
+        ...locator,
+        allowBindingRebind: true,
+        bindingDeliveryTarget: locator.threadId,
+        deliveryIdempotencyKey: 'scheduled-private-continuity-occurrence',
+        deliveryKind: 'thread',
+        deliveryTarget: locator.threadId,
+        executionContext,
+        instructions:
+          'Prepare a scheduled update using the direct conversation.',
+        sessionId: ordinaryWithResume.sessionId,
+        scheduledOccurrenceAt: '2026-08-11T18:01:00.000Z',
+        turnTrigger: 'automation-cron',
+        vault: vaultRoot,
+      })
+
+      const transcript = await listAssistantTranscriptEntries(
+        vaultRoot,
+        ordinaryWithResume.sessionId,
+      )
+      expect(transcript).toEqual([
+        expect.objectContaining({
+          sourceOutboxIntentId: pending.intentId,
+          text: privateText,
+        }),
+        expect.objectContaining({ text: scheduledText }),
+      ])
+      await expect(readAssistantOutboxIntent(
+        vaultRoot,
+        pending.intentId,
+      )).resolves.toMatchObject({
+        privateCompletionContinuity: { status: 'applied' },
+      })
+      await expect(resolveAssistantSessionForMessage({
+        boundaryDefaultTarget: modelTarget,
+        defaults: null,
+        message: {
+          ...locator,
+          executionContext,
+          prompt: 'Continue after the scheduled direct turn.',
+          vault: vaultRoot,
+        },
+      })).resolves.toMatchObject({
+        session: {
+          sessionId: ordinaryWithResume.sessionId,
+          turnCount: 2,
+        },
+      })
+      await expect(listAssistantTranscriptEntries(
+        vaultRoot,
+        ordinaryWithResume.sessionId,
+      )).resolves.toEqual(transcript)
+    },
+  )
 
   it('keeps an exact Telegram welcome on the attended conversation session', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(

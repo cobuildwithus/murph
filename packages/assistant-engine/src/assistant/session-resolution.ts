@@ -226,15 +226,17 @@ export async function resolveAssistantSessionForMessage(input: {
         ...resolved,
         privateCompletionContinuitySessionId,
       }
-  if (
-    sessionInput.threadIsDirect !== true
-    || !assistantMessageIsAttendedDirectTurn(input.message)
-  ) {
+  const privateCompletionAdmission =
+    sessionInput.threadIsDirect === true
+      ? resolveAssistantPrivateCompletionAdmission(input.message)
+      : null
+  if (!privateCompletionAdmission) {
     return effectiveResolved
   }
   const reconciled = {
     ...effectiveResolved,
     session: await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: privateCompletionAdmission === 'allow-unbound',
       sessionId: effectiveResolved.session.sessionId,
       vault: input.message.vault,
     }),
@@ -244,21 +246,26 @@ export async function resolveAssistantSessionForMessage(input: {
     : reconciled
 }
 
-function assistantMessageIsAttendedDirectTurn(
+function resolveAssistantPrivateCompletionAdmission(
   input: AssistantMessageInput,
-): boolean {
+): 'allow-unbound' | 'bound-only' | null {
   if (
     input.turnTrigger === undefined
     || input.turnTrigger === null
     || input.turnTrigger === 'manual-ask'
   ) {
-    return true
+    return 'allow-unbound'
+  }
+  if (input.turnTrigger === 'automation-cron') {
+    return 'bound-only'
   }
   if (input.turnTrigger !== 'automation-auto-reply') {
-    return false
+    return null
   }
   const initialInputs = input.acceptedTurnInput?.initialInputs ?? []
   return initialInputs.some((item) => item.source === 'assistant-input')
+    ? 'allow-unbound'
+    : null
 }
 
 async function resolveAssistantSessionForMessageInput(input: {
