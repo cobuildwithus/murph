@@ -27,8 +27,12 @@ describe('assistant reply bubble prompt guidance', () => {
         "use the current channel's available presentation",
       )
       expect(layers.threadContextPrompt).toContain(
-        'If it fits the complete answer, use it alone; never send that content as long plain text.',
+        'A semantic card that carries the complete answer replaces final text.',
       )
+      expect(layers.threadContextPrompt).toContain(
+        'Response media accompanies concise semantic text; do not recreate its visual content as long prose.',
+      )
+      expect(layers.threadContextPrompt).not.toContain('response media alone')
       expect(layers.threadContextPrompt).toContain(
         'If no owned presentation fits, send concise text.',
       )

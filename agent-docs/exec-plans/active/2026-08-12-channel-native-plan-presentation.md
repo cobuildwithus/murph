@@ -39,7 +39,9 @@ Updated: 2026-08-12
 
 ## Verification log
 
-- Focused Assistant Engine tests pass: six files, 206 tests passed and six credential-gated tests skipped.
+- Focused Assistant Engine tests pass after specialist remediation: seven files, 208 tests passed and six credential-gated tests skipped.
 - Assistant Engine typecheck passes.
 - The prompt-size regression passes without raising its fixed limit.
 - Changelog generation and `git diff --check` pass.
+- Preliminary ReviewGPT found that response media cannot replace routine order, dose, timing, cues, or safety. The corrected contract reserves text replacement for complete cards and keeps concise semantic text with response media.
+- Added opt-in real-model journeys for attended Telegram, scheduled Telegram, and attended Linq routine presentation. Local execution reached the credential gate and stopped because `OPENAI_API_KEY` is unavailable; the exact test remains available to credentialed CI or an operator lane.
