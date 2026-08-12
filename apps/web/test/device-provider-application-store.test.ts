@@ -105,6 +105,7 @@ describe("member-owned device provider application store", () => {
         strava: {
           clientId: "member-client",
           clientSecret: "member-secret",
+          scopes: ["activity:read"],
         },
       },
       revision: 4,

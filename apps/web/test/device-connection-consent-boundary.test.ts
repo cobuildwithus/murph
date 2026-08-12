@@ -105,17 +105,20 @@ test("stale launch-document versions do not stop chat-adjacent companion actions
   );
 });
 
-test("Strava stays disabled as a separate provider product gate", () => {
+test("Strava bypasses ordinary direct connect through the member-owned setup gate", () => {
+  const routeSource = readSource(
+    "../../packages/device-syncd/src/config/connect-routes.ts",
+  );
   const targetSource = readSource(
     "../../packages/device-syncd/src/config/connect-targets.ts",
   );
 
   assert.match(
-    targetSource,
-    /DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set\(\["strava"\]\)/u,
+    routeSource,
+    /directRoute\("strava", \{ applicationOwnership: "member" \}\)/u,
   );
   assert.match(
     targetSource,
-    /!DISABLED_DEVICE_CONNECT_SOURCE_IDS\.has\(normalized\)/u,
+    /return !listMemberOwnedDeviceSyncConnectTargets\(\)\.some\(/u,
   );
 });
