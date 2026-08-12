@@ -161,7 +161,7 @@ describe("findActiveHostedVaultSharePage", () => {
       shares: rows.map((row) => expect.objectContaining({ id: row.id })),
     });
     expect(findMany).toHaveBeenCalledWith({
-      orderBy: { id: "asc" },
+      orderBy: { destinationMemberId: "asc" },
       select: {
         destinationMemberId: true,
         grantorMemberId: true,
@@ -191,7 +191,7 @@ describe("findActiveHostedVaultSharePage", () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
-  it("returns one-over continuation and resumes strictly after completed work", async () => {
+  it("resumes by stable destination when an unprocessed share is regranted", async () => {
     const rows = Array.from(
       { length: HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE + 1 },
       (_, index) => buildShareRow(index + 1),
@@ -201,13 +201,20 @@ describe("findActiveHostedVaultSharePage", () => {
       HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE,
     );
     const lastRow = rows[rows.length - 1];
-    const continuation = firstPageRows[firstPageRows.length - 1]?.id;
+    const continuation = firstPageRows[firstPageRows.length - 1]
+      ?.destinationMemberId;
     if (!lastRow || !continuation) {
       throw new Error("Pagination test fixture did not reach the one-over boundary.");
     }
+    const regrantedLastRow = {
+      ...lastRow,
+      // Regrant replaces the exact generation with a random id that can sort
+      // before the completed page's generation ids.
+      id: "share_000_regranted",
+    };
     const findMany = vi.fn()
       .mockResolvedValueOnce(rows)
-      .mockResolvedValueOnce([lastRow]);
+      .mockResolvedValueOnce([regrantedLastRow]);
     const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
 
     const firstPage = await findActiveHostedVaultSharePage({
@@ -227,14 +234,14 @@ describe("findActiveHostedVaultSharePage", () => {
       projectionScope: SLEEP_SCOPE,
     })).resolves.toMatchObject({
       continuation: null,
-      shares: [expect.objectContaining({ id: lastRow.id })],
+      shares: [expect.objectContaining({ id: regrantedLastRow.id })],
     });
     expect(findMany).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         where: {
+          destinationMemberId: { gt: continuation },
           grantorMemberId: SHARE.grantorMemberId,
-          id: { gt: continuation },
           projectionScopeKey: SLEEP_SCOPE_KEY,
           status: "granted",
         },

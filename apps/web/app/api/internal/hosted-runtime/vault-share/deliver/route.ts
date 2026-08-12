@@ -47,7 +47,7 @@ const DELIVERED_RESPONSE: HostedVaultShareDeliverResponse = {
 /**
  * The single cross-member write seam. The grantor identity comes exclusively from the
  * signed Cloudflare callback. Each callback attempts one hard-bounded page and returns
- * only an opaque share-generation continuation when more configured shares remain. Web
+ * only an opaque stable-destination continuation when more configured shares remain. Web
  * remains the sole authority: each replacement prepares crypto before its transaction,
  * then the transaction validates both members and conditionally updates the exact active
  * HostedVaultShare generation. Status remains a function of share configuration alone;

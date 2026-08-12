@@ -47,9 +47,10 @@ export interface ActiveHostedVaultSharePage {
 }
 
 /**
- * Reads one deterministic, hard-bounded page. The stable share-generation id is an opaque
- * callback cursor, so successful pages need no parallel recovery state and malformed rows
- * still advance the cursor instead of pinning delivery forever.
+ * Reads one deterministic, hard-bounded page. The destination member id is stable across
+ * revoke/regrant generations and serves only as an opaque callback cursor; the mutable row
+ * id remains the exact-generation authority used by encryption and finalization. Malformed
+ * rows still advance the cursor instead of pinning delivery forever.
  */
 export async function findActiveHostedVaultSharePage(input: {
   continuation?: unknown;
@@ -63,7 +64,7 @@ export async function findActiveHostedVaultSharePage(input: {
     input.projectionScope,
   );
   const rows = await prisma.hostedVaultShare.findMany({
-    orderBy: { id: "asc" },
+    orderBy: { destinationMemberId: "asc" },
     select: {
       destinationMemberId: true,
       grantorMemberId: true,
@@ -75,7 +76,9 @@ export async function findActiveHostedVaultSharePage(input: {
     take: HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE + 1,
     where: {
       grantorMemberId: input.grantorMemberId,
-      ...(continuation ? { id: { gt: continuation } } : {}),
+      ...(continuation
+        ? { destinationMemberId: { gt: continuation } }
+        : {}),
       projectionScopeKey,
       status: "granted",
     },
@@ -84,7 +87,7 @@ export async function findActiveHostedVaultSharePage(input: {
 
   return {
     continuation: rows.length > HOSTED_VAULT_SHARE_DELIVER_MAX_SHARES_PER_PAGE
-      ? pageRows[pageRows.length - 1]?.id ?? null
+      ? pageRows[pageRows.length - 1]?.destinationMemberId ?? null
       : null,
     shares: pageRows.flatMap((row) => {
       const projectionScope = parseHostedVaultShareRowProjectionScope(row);

@@ -18,10 +18,10 @@ describe("hosted vault-share delivery page index migration", () => {
     const dropSql = readFileSync(dropMigrationPath, "utf8");
 
     expect(sql).toContain(
-      'CREATE INDEX CONCURRENTLY "hosted_vault_share_active_grantor_scope_id_idx"',
+      'CREATE INDEX CONCURRENTLY "hosted_vault_share_active_grantor_scope_destination_idx"',
     );
     expect(sql).toContain(
-      'ON "hosted_vault_share"("grantor_member_id", "projection_scope_key", "id")',
+      'ON "hosted_vault_share"("grantor_member_id", "projection_scope_key", "destination_member_id")',
     );
     expect(sql).toContain('WHERE "status" = \'granted\'');
     expect(dropSql).toContain(
