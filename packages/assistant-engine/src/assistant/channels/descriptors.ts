@@ -1,7 +1,4 @@
 import {
-  resolveAgentmailApiKey,
-} from '@murphai/operator-config/agentmail-runtime'
-import {
   parseHostedEmailThreadTarget,
 } from '@murphai/runtime-state'
 import {
@@ -42,7 +39,6 @@ import {
 } from './helpers.js'
 import { createAssistantDeliveryConfirmationPendingError } from '../outbox/retry-policy.js'
 import {
-  sendEmailMessage,
   sendLinqMessage,
   setLinqMessageReaction,
   sendLinqVoiceMemoMessage,
@@ -1236,19 +1232,16 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       ? null
       : 'Email auto-reply only runs for direct threads or validated hosted group routes'
   },
-  isReadyForSetup(env) {
-    return resolveAgentmailApiKey(env) !== null
-  },
   supportsIdempotencyKey: false,
   supportedResponseMediaKinds: [],
   targetRequiredMessage:
     'Email delivery requires an explicit recipient or a stored delivery binding.',
   async sendMessage({ candidate, dependencies, idempotencyKey, identityId, message, replyToMessageId, subject }) {
-    const send = dependencies.sendEmail ?? sendEmailMessage
-    if (!identityId && !dependencies.sendEmail) {
+    const send = dependencies.sendEmail
+    if (!send) {
       throw new VaultCliError(
-        'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-        'Email delivery requires a configured email sender identity. Pass --identity or resume a session already bound to email.',
+        'ASSISTANT_EMAIL_DELIVERY_UNAVAILABLE',
+        'Email delivery requires a configured runtime email transport.',
       )
     }
     const targetKind =
@@ -1257,7 +1250,7 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
         : candidate.kind
     const delivered = await send({
       idempotencyKey: idempotencyKey ?? null,
-      identityId: identityId!,
+      identityId,
       target: candidate.target,
       targetKind,
       replyToMessageId: replyToMessageId ?? null,

@@ -30,10 +30,6 @@ import {
 import { configureSetupScheduledUpdates } from './setup-services/scheduled-updates.js'
 import { configureSetupWearables } from './setup-services/wearables.js'
 import {
-  createSetupAgentmailSelectionResolver,
-  type SetupAgentmailSelectionResolver,
-} from './setup-agentmail.js'
-import {
   createDefaultCommandRunner,
   defaultDownloadFile,
   defaultFileExists,
@@ -67,7 +63,6 @@ import {
 } from './setup-services/tool-provisioning.js'
 
 const SETUP_TOOL_PROVISIONING_CREDENTIAL_ENV_KEYS = [
-  'AGENTMAIL_API_KEY',
   'JUNCTION_API_KEY',
   'JUNCTION_CLIENT_USER_ID_SECRET',
   'OURA_CLIENT_ID',
@@ -82,7 +77,6 @@ const SETUP_TOOL_PROVISIONING_CREDENTIAL_ENV_KEYS = [
 interface SetupInput {
   vault: string
   assistant?: SetupConfiguredAssistant | null
-  allowChannelPrompts?: boolean
   channels?: readonly SetupChannel[] | null
   envOverrides?: NodeJS.ProcessEnv
   localEnvOverrides?: NodeJS.ProcessEnv
@@ -114,7 +108,6 @@ interface SetupServicesDependencies {
         'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'
       >
     >
-  resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
   vaultServices?: Pick<VaultServices, 'core'>
 }
 
@@ -146,9 +139,6 @@ export function createSetupServices(
           vault,
         }),
     })
-  const resolveAgentmailInboxSelection =
-    dependencies.resolveAgentmailInboxSelection ??
-    createSetupAgentmailSelectionResolver()
 
   async function setupHost(input: SetupInput): Promise<SetupResult> {
     const platform = getPlatform?.() ?? process.platform
@@ -334,14 +324,12 @@ export function createSetupServices(
       input.channels == null
         ? []
         : await configureSetupChannels({
-            allowPrompt: input.allowChannelPrompts ?? false,
             channels: normalizeSetupChannels(input.channels),
             dryRun,
             env: toolchainEnv,
             inboxServices,
             platform,
             requestId,
-            resolveAgentmailInboxSelection,
             steps,
             vault,
           })

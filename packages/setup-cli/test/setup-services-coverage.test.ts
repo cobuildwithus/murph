@@ -59,7 +59,6 @@ import {
   listAssistantCronPresets,
 } from '@murphai/assistant-engine/assistant-cron'
 import {
-  saveAssistantAutomationState,
   resolveAssistantStatePaths,
 } from '@murphai/assistant-engine/assistant-state'
 import {
@@ -80,9 +79,6 @@ import type {
   SetupConfiguredAssistant,
   SetupStepResult,
 } from '@murphai/operator-config/setup-cli-contracts'
-import {
-  SETUP_RUNTIME_ENV_NOTICE,
-} from '@murphai/operator-config/setup-runtime-env'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   incurErrorBridge,
@@ -312,10 +308,10 @@ test('configureSetupScheduledUpdates describes a single deferred update outside 
   )
 })
 
-test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliation, and automation state updates', async () => {
-  const dryRunSteps: SetupStepResult[] = []
-  const dryRunChannels = await configureSetupChannels({
-    channels: ['telegram', 'email'],
+test('configureSetupChannels describes Telegram-only dry-run readiness', async () => {
+  const missingSteps: SetupStepResult[] = []
+  const missing = await configureSetupChannels({
+    channels: ['telegram'],
     dryRun: true,
     env: {},
     inboxServices: {
@@ -324,21 +320,44 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
       },
     },
     platform: 'linux',
-    requestId: 'req-dry-run',
-    steps: dryRunSteps,
+    requestId: 'req-dry-run-missing',
+    steps: missingSteps,
     vault: '/tmp/vault',
   })
 
-  assert.equal(dryRunChannels[0]?.channel, 'telegram')
-  assert.equal(dryRunChannels[0]?.configured, false)
-  assert.deepEqual(dryRunChannels[0]?.missingEnv, ['TELEGRAM_BOT_TOKEN'])
-  assert.equal(dryRunChannels[0]?.enabled, true)
-  assert.equal(dryRunSteps[0]?.status, 'planned')
-  assert.equal(dryRunChannels[1]?.channel, 'email')
-  assert.deepEqual(dryRunChannels[1]?.missingEnv, ['AGENTMAIL_API_KEY'])
-  assert.equal(dryRunSteps[1]?.status, 'planned')
+  assert.equal(missing[0]?.autoReply, false)
+  assert.equal(missing[0]?.channel, 'telegram')
+  assert.equal(missing[0]?.configured, false)
+  assert.equal(missing[0]?.connectorId, 'telegram:bot')
+  assert.match(missing[0]?.detail ?? '', /TELEGRAM_BOT_TOKEN/u)
+  assert.deepEqual(missing[0]?.missingEnv, ['TELEGRAM_BOT_TOKEN'])
+  assert.equal(missingSteps[0]?.status, 'planned')
 
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-state-'))
+  const readySteps: SetupStepResult[] = []
+  const ready = await configureSetupChannels({
+    channels: ['telegram'],
+    dryRun: true,
+    env: { TELEGRAM_BOT_TOKEN: 'telegram-token' },
+    inboxServices: {
+      async bootstrap() {
+        throw new Error('bootstrap should not run in this test')
+      },
+    },
+    platform: 'linux',
+    requestId: 'req-dry-run-ready',
+    steps: readySteps,
+    vault: '/tmp/vault',
+  })
+
+  assert.equal(ready[0]?.channel, 'telegram')
+  assert.equal(ready[0]?.autoReply, true)
+  assert.equal(ready[0]?.configured, false)
+  assert.deepEqual(ready[0]?.missingEnv, [])
+  assert.equal(readySteps[0]?.status, 'planned')
+})
+
+test('configureSetupChannels reuses and enables the Telegram connector while preserving unmanaged state', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-reuse-'))
   const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
   await mkdir(path.dirname(automationStatePath), { recursive: true })
   await writeFile(
@@ -346,36 +365,34 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
     JSON.stringify({
       version: 1,
       autoReply: [
-        { channel: 'email', enabledAt: '2026-04-08T00:00:00.000Z', eligibleAfter: null },
+        { channel: 'linq', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
       ],
-      updatedAt: '2026-04-08T00:00:00.000Z',
+      updatedAt: TEST_TIMESTAMP,
     }),
     'utf8',
   )
 
-  const setEnabledCalls: Array<{ connectorId: string; enabled: boolean }> = []
-
   try {
+    const setEnabledCalls: Array<{ connectorId: string; enabled: boolean }> = []
+    const steps: SetupStepResult[] = []
     const configured = await configureSetupChannels({
       channels: ['telegram'],
       dryRun: false,
-      env: {
-        TELEGRAM_BOT_TOKEN: 'bot-token',
-      },
+      env: { TELEGRAM_BOT_TOKEN: 'telegram-token' },
       inboxServices: {
         async bootstrap() {
           throw new Error('bootstrap should not run in this test')
         },
-        async doctor(input) {
+        async doctor() {
           return makeInboxDoctorResult(vaultRoot, {
-            target: input?.sourceId ?? null,
-            checks: input?.sourceId === 'telegram:bot'
-              ? [
-                  { name: 'probe', status: 'pass', message: 'Telegram ready' },
-                  { name: 'driver-import', status: 'pass', message: 'Telegram import ready' },
-                ]
-              : [],
+            checks: [
+              { message: 'driver ready', name: 'driver-import', status: 'pass' },
+              { message: 'bot authenticated', name: 'probe', status: 'pass' },
+            ],
           })
+        },
+        async sourceAdd() {
+          throw new Error('sourceAdd should not run when Telegram already exists')
         },
         async sourceList() {
           return makeInboxSourceListResult(vaultRoot, [
@@ -385,18 +402,7 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
               id: 'telegram:bot',
               source: 'telegram',
             }),
-            makeInboxConnector({
-              accountId: 'default',
-              id: 'email:agentmail',
-              options: {
-                emailAddress: 'hello@example.com',
-              },
-              source: 'email',
-            }),
           ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when telegram already exists')
         },
         async sourceSetEnabled(input) {
           setEnabledCalls.push({
@@ -406,20 +412,17 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
           return makeInboxSourceSetEnabledResult(
             vaultRoot,
             makeInboxConnector({
-              accountId: input.connectorId === 'telegram:bot' ? 'bot' : 'default',
+              accountId: 'bot',
               enabled: input.enabled,
               id: input.connectorId,
-              source: input.connectorId.startsWith('telegram')
-                ? 'telegram'
-                : 'email',
+              source: 'telegram',
             }),
-            input.connectorId === 'telegram:bot' ? 3 : 2,
           )
         },
       },
       platform: 'linux',
-      requestId: 'req-live',
-      steps: [],
+      requestId: 'req-reuse',
+      steps,
       vault: vaultRoot,
     })
 
@@ -437,870 +440,99 @@ test('configureSetupChannels covers dry-run, missing-env, readiness, reconciliat
     ])
     assert.deepEqual(setEnabledCalls, [
       { connectorId: 'telegram:bot', enabled: true },
-      { connectorId: 'email:agentmail', enabled: false },
     ])
+    assert.equal(steps[0]?.status, 'reused')
 
-    const savedAutomationState = JSON.parse(
-      await readFile(automationStatePath, 'utf8'),
-    ) as {
-      autoReply: Array<{
-        channel: string
-        enabledAt: string
-        eligibleAfter: {
-          createdAt: string | null
-          inputId: string
-          occurredAt: string
-          sourceKind: string
-        } | null
-      }>
+    const saved = JSON.parse(await readFile(automationStatePath, 'utf8')) as {
+      autoReply: Array<{ channel: string }>
     }
-
-    assert.equal(savedAutomationState.autoReply.length, 1)
-    assert.match(savedAutomationState.autoReply[0]?.enabledAt ?? '', /^\d{4}-\d{2}-\d{2}T/u)
-    assert.deepEqual(savedAutomationState.autoReply, [
-      {
-        channel: 'telegram',
-        enabledAt: savedAutomationState.autoReply[0]?.enabledAt,
-        eligibleAfter: null,
-      },
-    ])
-
-    const missingEnvChannel = await configureSetupChannels({
-      channels: ['email'],
-      dryRun: false,
-      env: {},
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [
-            makeInboxConnector({
-              accountId: 'default',
-              id: 'email:agentmail',
-              options: {
-                emailAddress: 'hello@example.com',
-              },
-              source: 'email',
-            }),
-          ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when env is missing')
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-missing-env',
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    assert.equal(missingEnvChannel[0]?.configured, true)
-    assert.equal(missingEnvChannel[0]?.autoReply, false)
-    assert.deepEqual(missingEnvChannel[0]?.missingEnv, ['AGENTMAIL_API_KEY'])
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test('configureSetupChannels preserves unmanaged auto-reply entries when enabling a managed setup channel', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-preserve-unmanaged-'))
-  const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
-  await mkdir(path.dirname(automationStatePath), { recursive: true })
-  await writeFile(
-    automationStatePath,
-    JSON.stringify({
-      version: 1,
-      autoReply: [{ channel: 'custom', enabledAt: TEST_TIMESTAMP, eligibleAfter: null }],
-      updatedAt: TEST_TIMESTAMP,
-    }),
-    'utf8',
-  )
-
-  try {
-    await configureSetupChannels({
-      channels: ['telegram'],
-      dryRun: false,
-      env: {
-        TELEGRAM_BOT_TOKEN: 'bot-token',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async doctor(input) {
-          return makeInboxDoctorResult(vaultRoot, {
-            checks: [
-              {
-                message: 'Telegram ready',
-                name: 'probe',
-                status: 'pass',
-              },
-            ],
-            target: input.sourceId ?? null,
-          })
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [
-            makeInboxConnector({
-              accountId: 'bot',
-              enabled: true,
-              id: 'telegram:bot',
-              source: 'telegram',
-            }),
-          ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when telegram already exists')
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-preserve-unmanaged',
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    const savedAutomationState = JSON.parse(
-      await readFile(automationStatePath, 'utf8'),
-    ) as {
-      autoReply: Array<{
-        channel: string
-        enabledAt: string
-        eligibleAfter: { inputId: string; createdAt: string | null; occurredAt: string } | null
-      }>
-    }
-
-    assert.deepEqual(savedAutomationState.autoReply, [
-      { channel: 'custom', enabledAt: TEST_TIMESTAMP, eligibleAfter: null },
-      {
-        channel: 'telegram',
-        enabledAt: savedAutomationState.autoReply[1]?.enabledAt,
-        eligibleAfter: null,
-      },
-    ])
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true })
-  }
-})
-
-test('configureSetupChannels covers email inbox reuse and runtime unavailability', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-branches-'))
-
-  try {
-    let inboxSelectionCalls = 0
-    const emailConfigured = await configureSetupChannels({
-      channels: ['email'],
-      dryRun: false,
-      env: {
-        AGENTMAIL_API_KEY: 'agentmail-key',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [])
-        },
-        async sourceAdd(input) {
-          return makeInboxSourceAddResult(
-            vaultRoot,
-            makeInboxConnector({
-              accountId: input.account ?? 'team',
-              id: input.id,
-              options: {
-                emailAddress: input.address ?? 'team@example.com',
-              },
-              source: 'email',
-            }),
-            {
-              reusedMailbox: {
-                clientId: null,
-                displayName: null,
-                emailAddress: input.address ?? 'team@example.com',
-                inboxId: 'inbox-team',
-                provider: 'agentmail',
-              },
-            },
-          )
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-email',
-      resolveAgentmailInboxSelection: async () => {
-        inboxSelectionCalls += 1
-        return {
-          accountId: 'team',
-          emailAddress: 'team@example.com',
-          mode: 'selected',
-        }
-      },
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    assert.equal(inboxSelectionCalls, 1)
-    assert.deepEqual(emailConfigured, [
-      {
-        autoReply: true,
-        channel: 'email',
-        configured: true,
-        connectorId: 'email:agentmail',
-        detail:
-          'Configured the email connector "email:agentmail" at team@example.com and enabled assistant auto-reply for direct email threads.',
-        enabled: true,
-        missingEnv: [],
-      },
-    ])
-
-    await assert.rejects(
-      async () =>
-        configureSetupChannels({
-          channels: ['telegram'],
-          dryRun: false,
-          env: {
-            TELEGRAM_BOT_TOKEN: 'bot-token',
-          },
-          inboxServices: {
-            async bootstrap() {
-              throw new Error('bootstrap should not run in this test')
-            },
-          },
-          platform: 'linux',
-          requestId: 'req-runtime-unavailable',
-          steps: [],
-          vault: vaultRoot,
-        }),
-      (error: unknown) =>
-        error instanceof VaultCliError &&
-        error.code === 'runtime_unavailable' &&
-        error.message.includes('Telegram'),
+    assert.deepEqual(
+      saved.autoReply.map((entry) => entry.channel).sort(),
+      ['linq', 'telegram'],
     )
   } finally {
-    await rm(vaultRoot, { recursive: true, force: true })
-  }
-})
-
-test('configureSetupChannels treats email probe warnings as ready, avoids no-op state writes, and tolerates missing sourceSetEnabled', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-noop-'))
-  const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
-  await mkdir(path.dirname(automationStatePath), { recursive: true })
-  const unchangedState = JSON.stringify({
-    version: 1,
-    autoReply: [
-      {
-        channel: 'email',
-        enabledAt: TEST_TIMESTAMP,
-        eligibleAfter: {
-          createdAt: null,
-          inputId: 'ain_000000000000000000000000000000e0',
-          occurredAt: '2026-04-08T00:00:00.000Z',
-          sourceKind: 'inbox-capture',
-          sourcePosition: null,
-        },
-      },
-    ],
-    updatedAt: TEST_TIMESTAMP,
-  })
-  await writeFile(automationStatePath, unchangedState, 'utf8')
-
-  try {
-    const emailConfigured = await configureSetupChannels({
-      channels: ['email'],
-      dryRun: false,
-      env: {
-        AGENTMAIL_API_KEY: 'agentmail-key',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async doctor(input) {
-          return makeInboxDoctorResult(vaultRoot, {
-            checks: [
-              {
-                message: 'Email probe warning',
-                name: 'probe',
-                status: 'warn',
-              },
-            ],
-            target: input.sourceId ?? null,
-          })
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [
-            makeInboxConnector({
-              accountId: 'default',
-              id: 'email:agentmail',
-              options: {
-                emailAddress: 'hello@example.com',
-              },
-              source: 'email',
-            }),
-          ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when email already exists')
-        },
-        async sourceSetEnabled(input) {
-          return makeInboxSourceSetEnabledResult(
-            vaultRoot,
-            makeInboxConnector({
-              accountId: 'default',
-              enabled: input.enabled,
-              id: input.connectorId,
-              options: {
-                emailAddress: 'hello@example.com',
-              },
-              source: 'email',
-            }),
-          )
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-email-warn',
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    assert.deepEqual(emailConfigured, [
-      {
-        autoReply: true,
-        channel: 'email',
-        configured: true,
-        connectorId: 'email:agentmail',
-        detail:
-          'Reused the email connector "email:agentmail" and enabled assistant auto-reply for direct email threads.',
-        enabled: true,
-        missingEnv: [],
-      },
-    ])
-    const savedEmailState = JSON.parse(
-      await readFile(automationStatePath, 'utf8'),
-    ) as {
-      autoReply: Array<{
-        channel: string
-        enabledAt: string
-        eligibleAfter: {
-          createdAt: string | null
-          inputId: string
-          occurredAt: string
-          sourceKind: string
-          sourcePosition: string | null
-        } | null
-      }>
-    }
-    assert.equal(savedEmailState.autoReply.length, 1)
-    assert.match(savedEmailState.autoReply[0]?.enabledAt ?? '', /^\d{4}-\d{2}-\d{2}T/u)
-    assert.deepEqual(savedEmailState.autoReply, [
-      {
-        channel: 'email',
-        enabledAt: savedEmailState.autoReply[0]?.enabledAt,
-        eligibleAfter: {
-          createdAt: null,
-          inputId: 'ain_000000000000000000000000000000e0',
-          occurredAt: '2026-04-08T00:00:00.000Z',
-          sourceKind: 'inbox-capture',
-          sourcePosition: null,
-        },
-      },
-    ])
-
-    const telegramConfigured = await configureSetupChannels({
-      channels: ['telegram'],
-      dryRun: false,
-      env: {
-        TELEGRAM_BOT_TOKEN: 'telegram-token',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async doctor(input) {
-          return makeInboxDoctorResult(vaultRoot, {
-            checks: [
-              {
-                message: 'Telegram ready',
-                name: 'probe',
-                status: 'pass',
-              },
-            ],
-            target: input.sourceId ?? null,
-          })
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [
-            makeInboxConnector({
-              accountId: 'bot',
-              enabled: false,
-              id: 'telegram:bot',
-              source: 'telegram',
-            }),
-          ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when telegram already exists')
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-telegram-no-enable',
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    assert.equal(telegramConfigured[0]?.autoReply, true)
-    assert.equal(telegramConfigured[0]?.configured, true)
-    assert.equal(telegramConfigured[0]?.connectorId, 'telegram:bot')
-  } finally {
     await rm(vaultRoot, { force: true, recursive: true })
   }
 })
 
-test('configureSetupChannels leaves empty automation state untouched when nothing changes', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-empty-noop-'))
-  const automationStatePath = resolveAssistantStatePaths(vaultRoot).automationStatePath
-  await mkdir(path.dirname(automationStatePath), { recursive: true })
-  const emptyState = `${JSON.stringify(
-    {
-      version: 1,
-      autoReply: [],
-      updatedAt: TEST_TIMESTAMP,
-    },
-    null,
-    2,
-  )}\n`
-  await writeFile(automationStatePath, emptyState, 'utf8')
+test('configureSetupChannels adds Telegram without provider-specific stubs', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-add-'))
 
   try {
-    const configured = await configureSetupChannels({
-      channels: [],
-      dryRun: false,
-      env: {},
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [])
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-empty-noop',
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    assert.deepEqual(configured, [])
-    assert.equal(await readFile(automationStatePath, 'utf8'), emptyState)
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true })
-  }
-})
-
-test('configureSetupChannels covers added Telegram and provisioned email outcomes', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-added-'))
-
-  try {
-    const telegramConfigured = await configureSetupChannels({
-      channels: ['telegram'],
-      dryRun: false,
-      env: {
-        TELEGRAM_BOT_TOKEN: 'telegram-token',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [])
-        },
-        async sourceAdd(input) {
-          return makeInboxSourceAddResult(
-            vaultRoot,
-            makeInboxConnector({
-              accountId: input.account ?? 'bot',
-              id: input.id,
-              source: 'telegram',
-            }),
-          )
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-telegram-add',
-      steps: [],
-      vault: vaultRoot,
-    })
-    assert.deepEqual(telegramConfigured, [
-      {
-        autoReply: true,
-        channel: 'telegram',
-        configured: true,
-        connectorId: 'telegram:bot',
-        detail:
-          'Configured the Telegram connector "telegram:bot" and enabled assistant auto-reply for Telegram direct chats.',
-        enabled: true,
-        missingEnv: [],
-      },
-    ])
-
-    const emailConfigured = await configureSetupChannels({
-      channels: ['email'],
-      dryRun: false,
-      env: {
-        AGENTMAIL_API_KEY: 'agentmail-key',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async doctor(input) {
-          return makeInboxDoctorResult(vaultRoot, {
-            checks: [
-              {
-                message: 'Mailbox not ready yet',
-                name: 'probe',
-                status: 'fail',
-              },
-            ],
-            target: input.sourceId ?? null,
-          })
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [])
-        },
-        async sourceAdd(input) {
-          return makeInboxSourceAddResult(
-            vaultRoot,
-            makeInboxConnector({
-              accountId: input.account ?? 'default',
-              id: input.id,
-              options: {
-                emailAddress: 'new@example.com',
-              },
-              source: 'email',
-            }),
-            {
-              provisionedMailbox: {
-                clientId: null,
-                displayName: 'Murph',
-                emailAddress: 'new@example.com',
-                inboxId: 'inbox-new',
-                provider: 'agentmail',
-              },
-            },
-          )
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-email-provisioned',
-      steps: [],
-      vault: vaultRoot,
-    })
-    assert.deepEqual(emailConfigured, [
-      {
-        autoReply: false,
-        channel: 'email',
-        configured: false,
-        connectorId: 'email:agentmail',
-        detail:
-          'Configured the email connector "email:agentmail" at new@example.com, but skipped assistant auto-reply until AgentMail readiness checks succeed (Mailbox not ready yet).',
-        enabled: true,
-        missingEnv: [],
-      },
-    ])
-
-    const emailConfiguredWithoutMailboxMetadata = await configureSetupChannels({
-      channels: ['email'],
-      dryRun: false,
-      env: {
-        AGENTMAIL_API_KEY: 'agentmail-key',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [])
-        },
-        async sourceAdd(input) {
-          return makeInboxSourceAddResult(
-            vaultRoot,
-            makeInboxConnector({
-              accountId: input.account ?? 'default',
-              id: input.id,
-              options: {},
-              source: 'email',
-            }),
-          )
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-email-default-provisioned',
-      steps: [],
-      vault: vaultRoot,
-    })
-    assert.deepEqual(emailConfiguredWithoutMailboxMetadata, [
-      {
-        autoReply: true,
-        channel: 'email',
-        configured: true,
-        connectorId: 'email:agentmail',
-        detail:
-          'Configured the email connector "email:agentmail" and enabled assistant auto-reply for direct email threads.',
-        enabled: true,
-        missingEnv: [],
-      },
-    ])
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true })
-  }
-})
-
-test('configureSetupChannels preserves matching email backlog timestamps', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-email-backlog-'))
-
-  try {
-    await saveAssistantAutomationState(vaultRoot, {
-      version: 1,
-      autoReply: [{ channel: 'email', enabledAt: TEST_TIMESTAMP, eligibleAfter: null }],
-      updatedAt: TEST_TIMESTAMP,
-    })
-
-    await configureSetupChannels({
-      channels: ['email'],
-      dryRun: false,
-      env: {
-        AGENTMAIL_API_KEY: 'agentmail-key',
-      },
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [
-            makeInboxConnector({
-              accountId: 'default',
-              id: 'email:agentmail',
-              options: {
-                emailAddress: 'hello@example.com',
-              },
-              source: 'email',
-            }),
-          ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when email already exists')
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-email-noop-timestamp',
-      steps: [],
-      vault: vaultRoot,
-    })
-
-    const savedState = JSON.parse(
-      await readFile(resolveAssistantStatePaths(vaultRoot).automationStatePath, 'utf8'),
-    ) as {
-      updatedAt: string
-    }
-    assert.equal(savedState.updatedAt, TEST_TIMESTAMP)
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true })
-  }
-})
-
-test('configureSetupChannels covers missing-env Telegram reuse messaging', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-reuse-'))
-
-  try {
-    const telegramConfigured = await configureSetupChannels({
-      channels: ['telegram'],
-      dryRun: false,
-      env: {},
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [
-            makeInboxConnector({
-              accountId: 'bot',
-              id: 'telegram-existing',
-              source: 'telegram',
-            }),
-          ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when telegram env is missing')
-        },
-      },
-      platform: 'linux',
-      requestId: 'req-telegram-missing-existing',
-      steps: [],
-      vault: vaultRoot,
-    })
-    assert.deepEqual(telegramConfigured, [
-      {
-        autoReply: false,
-        channel: 'telegram',
-        configured: true,
-        connectorId: 'telegram-existing',
-        detail: `Reused the Telegram connector "telegram-existing", but skipped assistant auto-reply until a bot token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`,
-        enabled: true,
-        missingEnv: ['TELEGRAM_BOT_TOKEN'],
-      },
-    ])
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true })
-  }
-})
-
-test('configureSetupChannels skips missing-env channels cleanly when no connector exists yet', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-channel-missing-new-'))
-
-  try {
-    const sourceList = async () => makeInboxSourceListResult(vaultRoot, [])
-    const sourceAdd = async () => {
-      throw new Error('sourceAdd should not run when required channel env is missing')
-    }
-
-    const telegramSteps: SetupStepResult[] = []
-    const telegramConfigured = await configureSetupChannels({
-      channels: ['telegram'],
-      dryRun: false,
-      env: {},
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        sourceAdd,
-        sourceList,
-      },
-      platform: 'linux',
-      requestId: 'req-telegram-missing-new',
-      steps: telegramSteps,
-      vault: vaultRoot,
-    })
-    assert.deepEqual(telegramConfigured, [
-      {
-        autoReply: false,
-        channel: 'telegram',
-        configured: false,
-        connectorId: null,
-        detail: `Telegram needs TELEGRAM_BOT_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
-        enabled: true,
-        missingEnv: ['TELEGRAM_BOT_TOKEN'],
-      },
-    ])
-    assert.equal(telegramSteps[0]?.status, 'skipped')
-
-    const emailSteps: SetupStepResult[] = []
-    const emailConfigured = await configureSetupChannels({
-      channels: ['email'],
-      dryRun: false,
-      env: {},
-      inboxServices: {
-        async bootstrap() {
-          throw new Error('bootstrap should not run in this test')
-        },
-        sourceAdd,
-        sourceList,
-      },
-      platform: 'linux',
-      requestId: 'req-email-missing-new',
-      steps: emailSteps,
-      vault: vaultRoot,
-    })
-    assert.deepEqual(emailConfigured, [
-      {
-        autoReply: false,
-        channel: 'email',
-        configured: false,
-        connectorId: null,
-        detail: `Email needs AGENTMAIL_API_KEY in the current environment before setup can reuse or provision the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
-        enabled: true,
-        missingEnv: ['AGENTMAIL_API_KEY'],
-      },
-    ])
-    assert.equal(emailSteps[0]?.status, 'skipped')
-  } finally {
-    await rm(vaultRoot, { force: true, recursive: true })
-  }
-})
-
-test('configureSetupChannels does not manage unrelated email connectors', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'setup-cli-email-owned-'))
-  const setEnabledCalls: Array<{ connectorId: string; enabled: boolean }> = []
-
-  try {
+    const sourceAdd = vi.fn(async (input: {
+      account?: string | null
+      id: string
+      source: InboxConnectorConfig['source']
+    }) =>
+      makeInboxSourceAddResult(
+        vaultRoot,
+        makeInboxConnector({
+          accountId: input.account ?? null,
+          id: input.id,
+          source: input.source,
+        }),
+      ),
+    )
     const configured = await configureSetupChannels({
       channels: ['telegram'],
       dryRun: false,
-      env: {
-        TELEGRAM_BOT_TOKEN: 'telegram-token',
-      },
+      env: { TELEGRAM_BOT_TOKEN: 'telegram-token' },
       inboxServices: {
         async bootstrap() {
           throw new Error('bootstrap should not run in this test')
         },
         async doctor() {
           return makeInboxDoctorResult(vaultRoot, {
-            checks: [
-              { name: 'probe', status: 'pass', message: 'Telegram ready' },
-              { name: 'driver-import', status: 'pass', message: 'Telegram import ready' },
-            ],
+            checks: [{ message: 'bot authenticated', name: 'probe', status: 'pass' }],
           })
         },
+        sourceAdd,
         async sourceList() {
-          return makeInboxSourceListResult(vaultRoot, [
-            makeInboxConnector({
-              accountId: 'personal',
-              enabled: true,
-              id: 'email:personal',
-              source: 'email',
-            }),
-            makeInboxConnector({
-              accountId: 'bot',
-              enabled: false,
-              id: 'telegram:bot',
-              source: 'telegram',
-            }),
-          ])
-        },
-        async sourceAdd() {
-          throw new Error('sourceAdd should not run when telegram already exists')
-        },
-        async sourceSetEnabled(input) {
-          setEnabledCalls.push({
-            connectorId: input.connectorId,
-            enabled: input.enabled,
-          })
-          return makeInboxSourceSetEnabledResult(
-            vaultRoot,
-            makeInboxConnector({
-              accountId: input.connectorId === 'telegram:bot' ? 'bot' : 'personal',
-              enabled: input.enabled,
-              id: input.connectorId,
-              source: input.connectorId === 'telegram:bot' ? 'telegram' : 'email',
-            }),
-          )
+          return makeInboxSourceListResult(vaultRoot, [])
         },
       },
       platform: 'linux',
-      requestId: 'req-email-owned',
+      requestId: 'req-add',
       steps: [],
       vault: vaultRoot,
     })
 
     assert.equal(configured[0]?.connectorId, 'telegram:bot')
-    assert.deepEqual(setEnabledCalls, [
-      {
-        connectorId: 'telegram:bot',
-        enabled: true,
-      },
-    ])
+    assert.equal(configured[0]?.autoReply, true)
+    assert.deepEqual(sourceAdd.mock.calls[0]?.[0], {
+      account: 'bot',
+      id: 'telegram:bot',
+      requestId: 'req-add',
+      source: 'telegram',
+      vault: vaultRoot,
+    })
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
   }
+})
+
+test('configureSetupChannels fails clearly when Telegram source management is unavailable', async () => {
+  await assert.rejects(
+    () =>
+      configureSetupChannels({
+        channels: ['telegram'],
+        dryRun: false,
+        env: { TELEGRAM_BOT_TOKEN: 'telegram-token' },
+        inboxServices: {
+          async bootstrap() {
+            throw new Error('bootstrap should not run in this test')
+          },
+        },
+        platform: 'linux',
+        requestId: null,
+        steps: [],
+        vault: '/tmp/vault',
+      }),
+    (error: unknown) =>
+      error instanceof VaultCliError &&
+      error.code === 'runtime_unavailable' &&
+      error.message.includes('Telegram'),
+  )
 })
 
 test('process, shell, and toolchain helpers exercise installation and download flows deterministically', async () => {
@@ -2107,9 +1339,11 @@ test('createSetupServices reuses deterministic linux toolchain inputs and writes
       result.steps.find((step) => step.id === 'default-vault')?.status,
       'completed',
     )
-    assert.equal(
-      result.steps.find((step) => step.id === 'channel-email'),
-      undefined,
+    assert.deepEqual(
+      result.steps
+        .filter((step) => step.id.startsWith('channel-'))
+        .map((step) => step.id),
+      [],
     )
     assert.equal(result.scheduledUpdates.length, 2)
 
@@ -2204,7 +1438,6 @@ test('createSetupServices keeps prompted provider credentials out of provisionin
 
   const commandEnvs: NodeJS.ProcessEnv[] = []
   const setupCredentialEnv: NodeJS.ProcessEnv = {
-    AGENTMAIL_API_KEY: 'agentmail_key_SENTINEL',
     JUNCTION_API_KEY: 'junction_key_SENTINEL',
     JUNCTION_CLIENT_USER_ID_SECRET: 'junction_user_secret_SENTINEL',
     OURA_CLIENT_ID: 'oura_client_id_SENTINEL',
@@ -2312,10 +1545,6 @@ test('createSetupServices keeps prompted provider credentials out of provisionin
     assert.match(
       await readFile(path.join(cwd, '.env.local'), 'utf8'),
       /VENICE_API_KEY="venice_secret_SENTINEL"/u,
-    )
-    assert.match(
-      await readFile(path.join(cwd, '.env.local'), 'utf8'),
-      /AGENTMAIL_API_KEY="agentmail_key_SENTINEL"/u,
     )
   } finally {
     await rm(root, { recursive: true, force: true })

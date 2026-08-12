@@ -1,11 +1,5 @@
 import { reconcileManagedAssistantAutoReplyChannelsLocal } from '@murphai/assistant-engine/assistant-state'
-import { resolveAgentmailApiKey } from '@murphai/operator-config/agentmail-runtime'
-import { getAssistantChannelAdapter } from '@murphai/assistant-engine/assistant-runtime'
 import type { InboxServices } from '@murphai/inbox-services'
-import type {
-  SetupAgentmailInboxSelection,
-  SetupAgentmailSelectionResolver,
-} from '../setup-agentmail.js'
 import {
   resolveSetupChannelMissingEnv,
   SETUP_RUNTIME_ENV_NOTICE,
@@ -22,12 +16,7 @@ import { createStep } from './steps.js'
 
 const TELEGRAM_SETUP_CONNECTOR_ID = 'telegram:bot'
 const TELEGRAM_SETUP_ACCOUNT_ID = 'bot'
-const EMAIL_SETUP_CONNECTOR_ID = 'email:agentmail'
-const EMAIL_SETUP_DISPLAY_NAME = 'Murph'
-const SETUP_CHANNEL_ORDER = [
-  'telegram',
-  'email',
-] as const satisfies readonly SetupChannel[]
+const SETUP_CHANNEL_ORDER = ['telegram'] as const satisfies readonly SetupChannel[]
 
 function isSetupChannelSupportedOnPlatform(
   channel: SetupChannel,
@@ -51,12 +40,6 @@ type SetupListedConnector =
 type SetupAddedConnectorResult = Awaited<
   ReturnType<NonNullable<SetupChannelInboxServices['sourceAdd']>>
 >
-type SetupAddedEmailConnectorResult = SetupAddedConnectorResult & {
-  selectedInbox: SetupAgentmailInboxSelection | null
-}
-type SetupChannelAddedResult =
-  | SetupAddedConnectorResult
-  | SetupAddedEmailConnectorResult
 type SetupReadiness = Awaited<ReturnType<typeof probeSetupReadiness>>
 
 type SetupChannelMessages = {
@@ -65,56 +48,27 @@ type SetupChannelMessages = {
 }
 
 type SetupChannelContext = {
-  allowPrompt: boolean
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
   platform: NodeJS.Platform
   requestId: string | null
-  resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
   steps: SetupStepResult[]
   vault: string
 }
 
-type SetupChannelPlan =
-  | {
-      supported: false
-      connectorId: null
-      detail: string
-      missingEnv: string[]
-      stepDetail: string
-    }
-  | {
-      supported: true
-      connectorId: string
-      dryRunDetail: string
-      dryRunStepDetail: string
-      missingEnv: string[]
-      readyForSetup: boolean
-    }
+type SetupChannelPlan = {
+  connectorId: string
+  dryRunDetail: string
+  dryRunStepDetail: string
+  missingEnv: string[]
+  readyForSetup: boolean
+}
 
-type UnsupportedSetupChannelPlan = Extract<SetupChannelPlan, { supported: false }>
-
-type SetupChannelReadinessMode =
-  | {
-      kind: 'always-ready'
-    }
-  | {
-      fallbackReason: string
-      kind: 'doctor-probe'
-      treatProbeWarnAsReady?: boolean
-    }
-
-type SetupChannelOutcome =
-  | 'unsupported'
-  | 'dry-run'
-  | 'missing-env'
-  | 'reused'
-  | 'added'
+type SetupChannelOutcome = 'dry-run' | 'missing-env' | 'reused' | 'added'
 
 type SetupChannelResolution = {
   autoReplyReady: boolean
-  connectorEnabled: boolean
   connectorId: string | null
   connectorPresent: boolean
   detail: string
@@ -129,13 +83,13 @@ type SetupChannelSpec = {
   title: string
   stepId: string
   runtimeUnavailableMessage: string
-  readiness: SetupChannelReadinessMode
+  readinessFallbackReason: string
   plan(context: SetupChannelContext): SetupChannelPlan
   findExistingConnector(connectors: readonly SetupListedConnector[]): SetupListedConnector | null
   addConnector(
     context: SetupChannelContext,
     sourceAdd: NonNullable<SetupChannelInboxServices['sourceAdd']>,
-  ): Promise<SetupChannelAddedResult>
+  ): Promise<SetupAddedConnectorResult>
   describeMissingEnv(input: {
     existingConnector: SetupListedConnector | null
   }): SetupChannelMessages
@@ -144,7 +98,7 @@ type SetupChannelSpec = {
     readiness: SetupReadiness
   }): SetupChannelMessages
   describeAdded(input: {
-    added: SetupChannelAddedResult
+    added: SetupAddedConnectorResult
     readiness: SetupReadiness
   }): SetupChannelMessages
   matchesConfiguredConnector(connector: SetupListedConnector): boolean
@@ -175,238 +129,92 @@ function isTelegramSetupConnector(connector: SetupListedConnector): boolean {
   )
 }
 
-function isEmailSetupConnector(connector: SetupListedConnector): boolean {
-  return connector.id === EMAIL_SETUP_CONNECTOR_ID
-}
+const TELEGRAM_CHANNEL_SPEC = {
+  channel: 'telegram',
+  title: 'Telegram channel',
+  stepId: 'channel-telegram',
+  runtimeUnavailableMessage:
+    'Murph setup cannot configure Telegram because the inbox source management services are unavailable in this build.',
+  readinessFallbackReason: 'Telegram readiness probe failed',
+  plan(context) {
+    const token = resolveTelegramBotToken(context.env)
+    const missingEnv = resolveSetupChannelMissingEnv('telegram', context.env)
 
-function isSetupAddedEmailConnectorResult(
-  value: SetupChannelAddedResult,
-): value is SetupAddedEmailConnectorResult {
-  return 'selectedInbox' in value
-}
-
-function describeConfiguredEmailAction(input: {
-  added: SetupAddedConnectorResult
-  selectedInbox: SetupAgentmailInboxSelection | null
-}): 'Provisioned' | 'Reused' {
-  if (input.added.provisionedMailbox) {
-    return 'Provisioned'
-  }
-
-  if (input.added.reusedMailbox || input.selectedInbox) {
-    return 'Reused'
-  }
-
-  return 'Provisioned'
-}
-
-const CHANNEL_SPECS = {
-  telegram: {
-    channel: 'telegram',
-    title: 'Telegram channel',
-    stepId: 'channel-telegram',
-    runtimeUnavailableMessage:
-      'Murph setup cannot configure Telegram because the inbox source management services are unavailable in this build.',
-    readiness: {
-      fallbackReason: 'Telegram readiness probe failed',
-      kind: 'doctor-probe',
-    },
-    plan(context) {
-      const token = resolveTelegramBotToken(context.env)
-      const readyForSetup =
-        getAssistantChannelAdapter('telegram')?.isReadyForSetup(context.env) ??
-        Boolean(token)
-      const missingEnv = resolveSetupChannelMissingEnv('telegram', context.env)
-
-      return {
-        supported: true,
-        connectorId: TELEGRAM_SETUP_CONNECTOR_ID,
-        dryRunDetail: token
-          ? 'Would configure the Telegram bot connector and enable assistant auto-reply for Telegram direct chats.'
-          : `Telegram needs TELEGRAM_BOT_TOKEN in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
-        dryRunStepDetail: token
-          ? 'Would verify the Telegram bot token, add or reuse the telegram:bot inbox connector, and enable assistant auto-reply for Telegram direct chats.'
-          : 'Would configure Telegram once TELEGRAM_BOT_TOKEN is available in the shell or local `.env`.',
-        missingEnv,
-        readyForSetup,
-      }
-    },
-    findExistingConnector(connectors) {
-      return connectors.find(isTelegramSetupConnector) ?? null
-    },
-    async addConnector(context, sourceAdd) {
-      return sourceAdd({
-        account: TELEGRAM_SETUP_ACCOUNT_ID,
-        id: TELEGRAM_SETUP_CONNECTOR_ID,
-        requestId: context.requestId,
-        source: 'telegram',
-        vault: context.vault,
-      })
-    },
-    describeMissingEnv({ existingConnector }) {
-      return {
-        stepDetail: existingConnector
-          ? `Reused the Telegram inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because TELEGRAM_BOT_TOKEN was not available in the shell or local \`.env\`.`
-          : 'Telegram was selected, but setup did not add the connector because TELEGRAM_BOT_TOKEN was not available in the shell or local `.env`.',
-        detail: existingConnector
-          ? `Reused the Telegram connector "${existingConnector.id}", but skipped assistant auto-reply until a bot token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
-          : `Telegram needs TELEGRAM_BOT_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
-      }
-    },
-    describeReused({ connector, readiness }) {
-      return {
-        stepDetail: readiness.ready
-          ? `Reusing the Telegram inbox connector "${connector.id}" and enabling assistant auto-reply for Telegram direct chats.`
-          : `Reused the Telegram inbox connector "${connector.id}", but did not enable assistant auto-reply because the bot token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-        detail: readiness.ready
-          ? `Reused the Telegram connector "${connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
-          : `Reused the Telegram connector "${connector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      }
-    },
-    describeAdded({ added, readiness }) {
-      return {
-        stepDetail: readiness.ready
-          ? `Added the Telegram inbox connector "${added.connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
-          : `Added the Telegram inbox connector "${added.connector.id}", but did not enable assistant auto-reply because the bot token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-        detail: readiness.ready
-          ? `Configured the Telegram connector "${added.connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
-          : `Configured the Telegram connector "${added.connector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      }
-    },
-    matchesConfiguredConnector: isTelegramSetupConnector,
+    return {
+      connectorId: TELEGRAM_SETUP_CONNECTOR_ID,
+      dryRunDetail: token
+        ? 'Would configure the Telegram bot connector and enable assistant auto-reply for Telegram direct chats.'
+        : `Telegram needs TELEGRAM_BOT_TOKEN in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
+      dryRunStepDetail: token
+        ? 'Would verify the Telegram bot token, add or reuse the telegram:bot inbox connector, and enable assistant auto-reply for Telegram direct chats.'
+        : 'Would configure Telegram once TELEGRAM_BOT_TOKEN is available in the shell or local `.env`.',
+      missingEnv,
+      readyForSetup: Boolean(token),
+    }
   },
-  email: {
-    channel: 'email',
-    title: 'Email channel',
-    stepId: 'channel-email',
-    runtimeUnavailableMessage:
-      'Murph setup cannot configure email because the inbox source management services are unavailable in this build.',
-    readiness: {
-      fallbackReason: 'Email readiness probe failed',
-      kind: 'doctor-probe',
-      treatProbeWarnAsReady: true,
-    },
-    plan(context) {
-      const apiKey = resolveAgentmailApiKey(context.env)
-      const missingEnv = resolveSetupChannelMissingEnv('email', context.env)
-
-      return {
-        supported: true,
-        connectorId: EMAIL_SETUP_CONNECTOR_ID,
-        dryRunDetail: apiKey
-          ? 'Would reuse an existing AgentMail inbox when possible, or provision a new inbox connector and enable assistant auto-reply for direct email threads.'
-          : `Email needs AGENTMAIL_API_KEY in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
-        dryRunStepDetail: apiKey
-          ? 'Would provision or reuse an AgentMail inbox, verify email polling, and enable assistant auto-reply for direct email threads.'
-          : 'Would configure email once AGENTMAIL_API_KEY is available in the shell or local `.env`.',
-        missingEnv,
-        readyForSetup: Boolean(apiKey),
-      }
-    },
-    findExistingConnector(connectors) {
-      return connectors.find(isEmailSetupConnector) ?? null
-    },
-    async addConnector(context, sourceAdd) {
-      const apiKey = resolveAgentmailApiKey(context.env)
-      const selectedInbox =
-        context.resolveAgentmailInboxSelection && apiKey
-          ? await context.resolveAgentmailInboxSelection({
-              allowPrompt: context.allowPrompt,
-              env: context.env,
-            })
-          : null
-
-      const added = await sourceAdd({
-        account: selectedInbox?.accountId,
-        address: selectedInbox?.emailAddress ?? undefined,
-        id: EMAIL_SETUP_CONNECTOR_ID,
-        provision: selectedInbox === null,
-        emailDisplayName: EMAIL_SETUP_DISPLAY_NAME,
-        requestId: context.requestId,
-        source: 'email',
-        vault: context.vault,
-      })
-
-      return { ...added, selectedInbox }
-    },
-    describeMissingEnv({ existingConnector }) {
-      return {
-        stepDetail: existingConnector
-          ? `Reused the email inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because AGENTMAIL_API_KEY was not available in the shell or local \`.env\`.`
-          : 'Email was selected, but setup did not add the connector because AGENTMAIL_API_KEY was not available in the shell or local `.env`.',
-        detail: existingConnector
-          ? `Reused the email connector "${existingConnector.id}", but skipped assistant auto-reply until an AgentMail API key is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
-          : `Email needs AGENTMAIL_API_KEY in the current environment before setup can reuse or provision the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
-      }
-    },
-    describeReused({ connector, readiness }) {
-      return {
-        stepDetail: readiness.ready
-          ? `Reusing the email inbox connector "${connector.id}" and enabling assistant auto-reply for direct email threads.`
-          : `Reused the email inbox connector "${connector.id}", but did not enable assistant auto-reply because AgentMail readiness checks failed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-        detail: readiness.ready
-          ? `Reused the email connector "${connector.id}" and enabled assistant auto-reply for direct email threads.`
-          : `Reused the email connector "${connector.id}", but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      }
-    },
-    describeAdded({ added, readiness }) {
-      const selectedInbox = isSetupAddedEmailConnectorResult(added)
-        ? added.selectedInbox ?? null
-        : null
-      const configuredAddress =
-        added.provisionedMailbox?.emailAddress ??
-        added.reusedMailbox?.emailAddress ??
-        selectedInbox?.emailAddress ??
-        added.connector.options.emailAddress ??
-        null
-      const actionVerb = describeConfiguredEmailAction({
-        added,
-        selectedInbox,
-      })
-
-      return {
-        stepDetail: readiness.ready
-          ? `${actionVerb} the AgentMail inbox connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
-          : `${actionVerb} the AgentMail inbox connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''}, but did not enable assistant auto-reply because AgentMail readiness checks failed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-        detail: readiness.ready
-          ? `Configured the email connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''} and enabled assistant auto-reply for direct email threads.`
-          : `Configured the email connector "${added.connector.id}"${configuredAddress ? ` at ${configuredAddress}` : ''}, but skipped assistant auto-reply until AgentMail readiness checks succeed${readiness.reason ? ` (${readiness.reason})` : ''}.`,
-      }
-    },
-    matchesConfiguredConnector: isEmailSetupConnector,
+  findExistingConnector(connectors) {
+    return connectors.find(isTelegramSetupConnector) ?? null
   },
-} satisfies Record<SetupChannel, SetupChannelSpec>
-
-const CHANNEL_CONFIGURERS = {
-  telegram: configureTelegramChannel,
-  email: configureEmailChannel,
-} satisfies Record<
-  SetupChannel,
-  (context: SetupChannelContext) => Promise<SetupConfiguredChannel>
->
+  async addConnector(context, sourceAdd) {
+    return sourceAdd({
+      account: TELEGRAM_SETUP_ACCOUNT_ID,
+      id: TELEGRAM_SETUP_CONNECTOR_ID,
+      requestId: context.requestId,
+      source: 'telegram',
+      vault: context.vault,
+    })
+  },
+  describeMissingEnv({ existingConnector }) {
+    return {
+      stepDetail: existingConnector
+        ? `Reused the Telegram inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because TELEGRAM_BOT_TOKEN was not available in the shell or local \`.env\`.`
+        : 'Telegram was selected, but setup did not add the connector because TELEGRAM_BOT_TOKEN was not available in the shell or local `.env`.',
+      detail: existingConnector
+        ? `Reused the Telegram connector "${existingConnector.id}", but skipped assistant auto-reply until a bot token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
+        : `Telegram needs TELEGRAM_BOT_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
+    }
+  },
+  describeReused({ connector, readiness }) {
+    return {
+      stepDetail: readiness.ready
+        ? `Reusing the Telegram inbox connector "${connector.id}" and enabling assistant auto-reply for Telegram direct chats.`
+        : `Reused the Telegram inbox connector "${connector.id}", but did not enable assistant auto-reply because the bot token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+      detail: readiness.ready
+        ? `Reused the Telegram connector "${connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
+        : `Reused the Telegram connector "${connector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+    }
+  },
+  describeAdded({ added, readiness }) {
+    return {
+      stepDetail: readiness.ready
+        ? `Added the Telegram inbox connector "${added.connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
+        : `Added the Telegram inbox connector "${added.connector.id}", but did not enable assistant auto-reply because the bot token could not authenticate${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+      detail: readiness.ready
+        ? `Configured the Telegram connector "${added.connector.id}" and enabled assistant auto-reply for Telegram direct chats.`
+        : `Configured the Telegram connector "${added.connector.id}", but skipped assistant auto-reply until the bot token authenticates successfully with Telegram${readiness.reason ? ` (${readiness.reason})` : ''}.`,
+    }
+  },
+  matchesConfiguredConnector: isTelegramSetupConnector,
+} satisfies SetupChannelSpec
 
 export async function configureSetupChannels(input: {
-  allowPrompt?: boolean
   channels: readonly SetupChannel[]
   dryRun: boolean
   env: NodeJS.ProcessEnv
   inboxServices: SetupChannelInboxServices
   platform?: NodeJS.Platform
   requestId: string | null
-  resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
   steps: SetupStepResult[]
   vault: string
 }): Promise<SetupConfiguredChannel[]> {
   const configured: SetupConfiguredChannel[] = []
   const platform = input.platform ?? process.platform
   const context: SetupChannelContext = {
-    allowPrompt: input.allowPrompt ?? false,
     dryRun: input.dryRun,
     env: input.env,
     inboxServices: input.inboxServices,
     platform,
     requestId: input.requestId,
-    resolveAgentmailInboxSelection: input.resolveAgentmailInboxSelection,
     steps: input.steps,
     vault: input.vault,
   }
@@ -417,7 +225,7 @@ export async function configureSetupChannels(input: {
       continue
     }
 
-    configured.push(await CHANNEL_CONFIGURERS[channel](context))
+    configured.push(await configureSetupChannel(TELEGRAM_CHANNEL_SPEC, context))
   }
 
   if (!input.dryRun) {
@@ -440,42 +248,15 @@ export async function configureSetupChannels(input: {
   return configured
 }
 
-async function configureTelegramChannel(
-  context: SetupChannelContext,
-): Promise<SetupConfiguredChannel> {
-  return configureSetupChannel(CHANNEL_SPECS.telegram, context)
-}
-
-async function configureEmailChannel(
-  context: SetupChannelContext,
-): Promise<SetupConfiguredChannel> {
-  return configureSetupChannel(CHANNEL_SPECS.email, context)
-}
-
 async function configureSetupChannel(
   spec: SetupChannelSpec,
   context: SetupChannelContext,
 ): Promise<SetupConfiguredChannel> {
   const plan = spec.plan(context)
 
-  if (isUnsupportedSetupChannelPlan(plan)) {
-    return recordSetupChannelResult(spec, context, {
-      autoReplyReady: false,
-      connectorEnabled: false,
-      connectorId: plan.connectorId,
-      connectorPresent: false,
-      detail: plan.detail,
-      missingEnv: plan.missingEnv,
-      outcome: 'unsupported',
-      stepDetail: plan.stepDetail,
-      stepStatus: 'skipped',
-    })
-  }
-
   if (context.dryRun) {
     return recordSetupChannelResult(spec, context, {
       autoReplyReady: plan.readyForSetup,
-      connectorEnabled: plan.readyForSetup,
       connectorId: plan.connectorId,
       connectorPresent: false,
       detail: plan.dryRunDetail,
@@ -501,17 +282,12 @@ async function configureSetupChannel(
   const existingConnector = spec.findExistingConnector(listed.connectors)
 
   if (!plan.readyForSetup) {
-    const messages = spec.describeMissingEnv({
-      existingConnector,
-    })
-    const connectorPresent = existingConnector !== null
-    const connectorEnabled = existingConnector?.enabled ?? false
+    const messages = spec.describeMissingEnv({ existingConnector })
 
     return recordSetupChannelResult(spec, context, {
       autoReplyReady: false,
-      connectorEnabled,
       connectorId: existingConnector?.id ?? null,
-      connectorPresent,
+      connectorPresent: existingConnector !== null,
       detail: messages.detail,
       missingEnv: plan.missingEnv,
       outcome: 'missing-env',
@@ -521,29 +297,24 @@ async function configureSetupChannel(
   }
 
   if (existingConnector) {
-    const connectorEnabled = await ensureSetupConnectorEnabled({
+    await ensureSetupConnectorEnabled({
       connectorId: existingConnector.id,
       enabled: existingConnector.enabled,
       requestId: context.requestId,
       sourceSetEnabled,
       vault: context.vault,
     })
-    const readiness = await resolveSetupChannelReadiness({
+    const readiness = await probeSetupReadiness({
       connectorId: existingConnector.id,
       doctor,
+      fallbackReason: spec.readinessFallbackReason,
       requestId: context.requestId,
-      readiness: spec.readiness,
       vault: context.vault,
     })
-    const autoReplyReady = readiness.ready
-    const messages = spec.describeReused({
-      connector: existingConnector,
-      readiness,
-    })
+    const messages = spec.describeReused({ connector: existingConnector, readiness })
 
     return recordSetupChannelResult(spec, context, {
-      autoReplyReady,
-      connectorEnabled,
+      autoReplyReady: readiness.ready,
       connectorId: existingConnector.id,
       connectorPresent: true,
       detail: messages.detail,
@@ -555,22 +326,17 @@ async function configureSetupChannel(
   }
 
   const added = await spec.addConnector(context, sourceAdd)
-  const autoReplyReadiness = await resolveSetupChannelReadiness({
+  const readiness = await probeSetupReadiness({
     connectorId: added.connector.id,
     doctor,
+    fallbackReason: spec.readinessFallbackReason,
     requestId: context.requestId,
-    readiness: spec.readiness,
     vault: context.vault,
   })
-  const autoReplyReady = autoReplyReadiness.ready
-  const messages = spec.describeAdded({
-    added,
-    readiness: autoReplyReadiness,
-  })
+  const messages = spec.describeAdded({ added, readiness })
 
   return recordSetupChannelResult(spec, context, {
-    autoReplyReady,
-    connectorEnabled: added.connector.enabled,
+    autoReplyReady: readiness.ready,
     connectorId: added.connector.id,
     connectorPresent: true,
     detail: messages.detail,
@@ -579,12 +345,6 @@ async function configureSetupChannel(
     stepDetail: messages.stepDetail,
     stepStatus: 'completed',
   })
-}
-
-function isUnsupportedSetupChannelPlan(
-  plan: SetupChannelPlan,
-): plan is UnsupportedSetupChannelPlan {
-  return plan.supported === false
 }
 
 function recordSetupChannelResult(
@@ -608,8 +368,6 @@ function recordSetupChannelResult(
     configured: mapConfiguredSetupChannelResolution(resolution),
     connectorId: resolution.connectorId,
     detail: resolution.detail,
-    // Preserve the historical setup result contract at the boundary while the
-    // orchestration tracks connector presence/readiness separately.
     enabled: true,
     missingEnv: resolution.missingEnv,
   }
@@ -624,41 +382,15 @@ function mapConfiguredSetupChannelResolution(
     case 'reused':
     case 'added':
       return resolution.autoReplyReady
-    case 'unsupported':
     case 'dry-run':
       return false
   }
-}
-
-async function resolveSetupChannelReadiness(input: {
-  connectorId: string
-  doctor?: InboxServices['doctor']
-  requestId: string | null
-  readiness: SetupChannelReadinessMode
-  vault: string
-}): Promise<SetupReadiness> {
-  if (input.readiness.kind === 'always-ready') {
-    return {
-      ready: true,
-      reason: null,
-    }
-  }
-
-  return probeSetupReadiness({
-    connectorId: input.connectorId,
-    doctor: input.doctor,
-    fallbackReason: input.readiness.fallbackReason,
-    requestId: input.requestId,
-    treatProbeWarnAsReady: input.readiness.treatProbeWarnAsReady,
-    vault: input.vault,
-  })
 }
 
 async function probeSetupReadiness(input: {
   connectorId: string
   doctor?: InboxServices['doctor']
   requestId: string | null
-  treatProbeWarnAsReady?: boolean
   vault: string
   fallbackReason: string
 }): Promise<{
@@ -681,8 +413,7 @@ async function probeSetupReadiness(input: {
   const driverImportCheck =
     result.checks.find((check) => check.name === 'driver-import') ?? null
   const ready = Boolean(
-    (probeCheck?.status === 'pass' ||
-      (input.treatProbeWarnAsReady === true && probeCheck?.status === 'warn')) &&
+    probeCheck?.status === 'pass' &&
       (driverImportCheck === null || driverImportCheck.status === 'pass'),
   )
 
@@ -780,11 +511,7 @@ async function ensureSetupConnectorEnabled(input: {
 function resolveSetupChannelForConnector(
   connector: SetupListedConnector,
 ): SetupChannel | null {
-  for (const channel of SETUP_CHANNEL_ORDER) {
-    if (CHANNEL_SPECS[channel].matchesConfiguredConnector(connector)) {
-      return channel
-    }
-  }
-
-  return null
+  return TELEGRAM_CHANNEL_SPEC.matchesConfiguredConnector(connector)
+    ? 'telegram'
+    : null
 }

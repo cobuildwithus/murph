@@ -72,6 +72,24 @@ Updated: 2026-08-12
 5. Reproduce and resolve accepted findings, run subsequent final ReviewGPT
    rounds as required, complete the parent final review, and close this plan.
 
+## Progress
+
+- ReviewGPT returned an apply-ready full-repository removal patch against the
+  exact starting head. The patch was inspected, privacy-scanned, checked with
+  `git apply --check`, and deliberately applied.
+- Parent inspection removed residual current configuration and test-fixture
+  references, repaired retained-provider test typing, aligned architecture and
+  legal dates, and updated stale local-email rejection assertions discovered by
+  the full package suites.
+- Active source/config/current-doc scans now find no AgentMail import, export,
+  runtime key, base URL, setup surface, or operational claim outside the
+  explicitly preserved historical records.
+- Affected package typechecks, operator-config, inbox-services, setup-cli,
+  assistant-cli, inboxd, assistant-runtime, Cloudflare env/deploy tests, built
+  runtime preparation, and generated config-schema drift checks pass. Final
+  assistant-engine and CLI reruns, exact-head CI, and ReviewGPT audit rounds are
+  still pending.
+
 ## Verification
 
 - Commands to select after the returned patch establishes the exact touch set:

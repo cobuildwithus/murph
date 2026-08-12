@@ -7,6 +7,13 @@ Last verified: 2026-08-12
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Local setup and assistant delivery no longer own an operational email provider:
+setup manages Telegram, the local inbox runtime retains Telegram and Linq, and
+generic email remains confined to hosted ingress and injected hosted delivery.
+This ownership split is jointly specified by `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, `agent-docs/operations/verification-and-runtime.md`,
+and `agent-docs/references/testing-ci-map.md`.
+
 The lower-level hosted browser assertion first-invalid boundary, single-use
 nonce persisted horizon, mixed-version cleanup safety, and opt-in PostgreSQL
 concurrency proof are jointly specified by `ARCHITECTURE.md`,
