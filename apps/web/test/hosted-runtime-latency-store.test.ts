@@ -1513,6 +1513,39 @@ describe("hosted runtime latency dashboard store", () => {
     );
   });
 
+  it("caps checkpoint-publication collection writes with truncation evidence", async () => {
+    const queryRaw = vi.fn(async (_query: unknown) => [{
+      matchedCount: 250n,
+      truncated: true,
+    }]);
+
+    await expect(recordHostedIngressRuntimeMilestone({
+      at: instant("2026-06-02T19:50:00.000Z"),
+      authenticatedUserId: "member_latency_1",
+      milestone: "checkpoint_publication_expected_by",
+      prisma: { $queryRaw: queryRaw } as never,
+      runtimeAttemptId: "attempt_checkpoint_bounded_1",
+      runtimeLeaseGeneration: "1",
+      source: "linq",
+    })).resolves.toEqual({
+      matchedCount: 250,
+      recorded: true,
+      truncated: true,
+      unmatchedCount: 0,
+    });
+
+    const query = queryRaw.mock.calls[0]?.[0] as unknown as {
+      strings: string[];
+      values: unknown[];
+    };
+    const sql = query.strings.join("");
+    expect(sql).toContain("eligible_candidates AS MATERIALIZED");
+    expect(sql).toContain("ORDER BY trace.accepted_at DESC");
+    expect(sql).toMatch(/LIMIT\s+/u);
+    expect(query.values).toContain(251);
+    expect(query.values).toContain(250);
+  });
+
   it("retains a current attempt reset deadline that arrives before terminal projection", async () => {
     const prisma = createLatencyWritePrisma({
       mailboxAcceptedAtEpochMs: BigInt(Date.parse("2026-06-02T19:12:20.000Z")),

@@ -86,6 +86,7 @@ const HOSTED_INGRESS_LATENCY_IN_FLIGHT_GRACE_MS = 2 * 60_000;
 const HOSTED_INGRESS_LATENCY_READ_ROW_LIMIT = 20_000;
 const HOSTED_INGRESS_LATENCY_TIMING_LOG_READ_LIMIT = 100_000;
 const HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS = 5 * 60_000;
+const HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT = 250;
 const HOSTED_ASSISTANT_TURN_TIMING_SCHEMA = "murph.assistant-turn-timing.v1";
 const HOSTED_ASSISTANT_TURN_TIMING_TYPE = "assistant.turn.timing";
 const HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON = JSON.stringify(
@@ -95,6 +96,8 @@ const HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON = JSON.stringify(
 export interface HostedIngressLatencyWriteResult {
   matchedCount: number;
   recorded: boolean;
+  /** True when a best-effort collection milestone deliberately bounded its write. */
+  truncated?: boolean;
   unmatchedCount: number;
   // Subset of unmatchedCount whose assistant input has no ingress trace row at
   // all. Traces exist only for inbound messaging wakes, so an assistant input
@@ -1065,7 +1068,7 @@ export async function recordHostedIngressRuntimeMilestone(input: {
     };
   }
 
-  const matchedCount = await updateHostedIngressLatencyRuntimeMilestone(prisma, {
+  const update = await updateHostedIngressLatencyRuntimeMilestone(prisma, {
     at,
     milestone: input.milestone,
     runtimeAttemptId,
@@ -1075,8 +1078,9 @@ export async function recordHostedIngressRuntimeMilestone(input: {
   });
 
   return {
-    matchedCount,
-    recorded: matchedCount > 0,
+    matchedCount: update.matchedCount,
+    recorded: update.matchedCount > 0,
+    ...(update.truncated ? { truncated: true } : {}),
     unmatchedCount: 0,
   };
 }
@@ -2032,7 +2036,7 @@ async function updateHostedIngressLatencyRuntimeMilestone(
     source: HostedIngressLatencySource;
     userId: string;
   },
-): Promise<number> {
+): Promise<{ matchedCount: number; truncated: boolean }> {
   if (input.milestone === "checkpoint_publication_expected_by") {
     return updateHostedIngressCheckpointPublicationExpectedBySetBased(prisma, {
       expectedBy: input.at,
@@ -2060,7 +2064,7 @@ async function updateHostedIngressLatencyRuntimeMilestone(
       ],
     },
   });
-  return result.count;
+  return { matchedCount: result.count, truncated: false };
 }
 
 async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
@@ -2072,7 +2076,7 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
     source: HostedIngressLatencySource;
     userId: string;
   },
-): Promise<number> {
+): Promise<{ matchedCount: number; truncated: boolean }> {
   const storedObject = buildHostedIngressLatencyJsonObjectSql(
     Prisma.sql`trace.phase_breakdown_json`,
   );
@@ -2090,7 +2094,10 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
   const nextPhaseBreakdown =
     buildHostedIngressCheckpointPublicationPhaseBreakdownSql();
 
-  const rows = await prisma.$queryRaw<Array<{ matchedCount: bigint }>>(Prisma.sql`
+  const rows = await prisma.$queryRaw<Array<{
+    matchedCount: bigint;
+    truncated: boolean;
+  }>>(Prisma.sql`
     /* hosted_ingress_checkpoint_publication_expected_by_set_based */
     WITH input AS (
       SELECT
@@ -2102,8 +2109,9 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
         1::integer AS phase_schema_version,
         ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
     ),
-    eligible AS MATERIALIZED (
+    eligible_candidates AS MATERIALIZED (
       SELECT
+        trace.accepted_at,
         trace.id,
         trace.phase_breakdown_json,
         trace.runtime_attempt_id,
@@ -2128,8 +2136,15 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
             AND trace.runtime_attempt_id = input.runtime_attempt_id
           )
         )
-      ORDER BY trace.id ASC
+      ORDER BY trace.accepted_at DESC
+      LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT + 1}
       FOR UPDATE OF trace
+    ),
+    eligible AS MATERIALIZED (
+      SELECT *
+      FROM eligible_candidates
+      ORDER BY accepted_at DESC
+      LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
     ),
     next_value AS MATERIALIZED (
       SELECT
@@ -2159,11 +2174,18 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
         )
       RETURNING trace.id
     )
-    SELECT COUNT(*)::bigint AS "matchedCount"
-    FROM eligible
+    SELECT
+      (SELECT COUNT(*)::bigint FROM eligible) AS "matchedCount",
+      (
+        SELECT COUNT(*) > ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
+        FROM eligible_candidates
+      ) AS truncated
   `);
 
-  return Number(rows[0]?.matchedCount ?? 0n);
+  return {
+    matchedCount: Number(rows[0]?.matchedCount ?? 0n),
+    truncated: rows[0]?.truncated === true,
+  };
 }
 
 function readHostedIngressLatencyRuntimeMilestoneField(
