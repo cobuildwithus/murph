@@ -121,7 +121,11 @@ acceptance restores the same row without another send or an unsupported legacy
 charge; a recent or indeterminate replay of that same request stays pending. A
 different current request is first recorded under its own request key as an
 unsent `prior_note_unresolved` failure, then at most one older row is
-reconciled. Proven absence narrows the current row to `unknown`. If that
+reconciled. The member-locked admission re-reads the oldest member-wide guard
+instead of trusting a row selected before the lock, and repeats that guard
+check immediately before ordinary reservation. Resolving one legacy row can
+therefore never hide a second unresolved row or admit another provider effect.
+Proven absence narrows the current row to `unknown`. If that
 older row is proven accepted, the current row is durably narrowed to
 `prior_note_accepted`, so the reply says both that the earlier note is headed to
 print and that the current request was not submitted, without claiming the two
@@ -131,9 +135,12 @@ automatic investigation or follow-up. Recovery also preserves
 request remains suppressed while ordinary accepted notes still allow a later
 paid send. Accepted-row replay is read-only because ordinary paid acceptance
 commits its usage in the same transaction, while restored legacy acceptance
-must never reconstruct erased historical billing evidence. The current reply
-and every replay therefore identify the current row and cannot later turn the
-suppressed request into a new provider effect. The assistant tells the
+must never reconstruct erased historical billing evidence. An accepted replay
+carrying `prior_note_accepted` therefore says only that the earlier submission
+was accepted and the replay sent nothing else; it omits paid, complimentary,
+and cost claims. The current reply and every replay therefore identify the
+current row and cannot later turn the suppressed request into a new provider
+effect. The assistant tells the
 person whether to check the address, regenerate the artwork, or wait for Murph
 to fix its printing setup or request. It never guesses from an unknown reason
 or retries an ambiguous outcome.
@@ -230,5 +237,11 @@ Then deploy Cloudflare and the runner bundle with `container_rollout=immediate`
 and require the managed-container smoke to prove the exact new runner-bundle
 fingerprint. Verify one synthetic rejection category, one HTTP 408 ambiguity,
 one legacy-null resolution, and one accepted test-mode note after both sides
-converge. Roll back Cloudflare before Web so the old 408 classifier never meets
-the new recovery behavior.
+converge. Once current Web can persist categorized failures or the
+`prior_note_accepted` no-send authority, that Web artifact is a hard rollback
+floor. A normal recovery rolls Cloudflare back first and forward-fixes Web;
+never roll Web below the floor while physical-note sending remains enabled.
+If an emergency requires an older Web artifact, first disable
+`HOSTED_PHYSICAL_NOTES_ENABLED`, converge and drain every runner that could call
+the route, and keep the capability off until compatible Web and runner
+artifacts are restored.

@@ -100,8 +100,11 @@ Murph should draft a clear note request. Never ask for a return address.
 
 Treat tool results literally:
 
-- `accepted` means accepted for printing, not delivered; when the result is
-  paid rather than complimentary, state the returned Murph-time cost;
+- `accepted` means accepted for printing, not delivered. When it carries
+  `prior_note_accepted`, say the earlier submission was accepted and this replay
+  sent nothing else; do not call it paid or complimentary or state a cost
+  because historical billing evidence is unavailable. Otherwise, when the
+  result is paid rather than complimentary, state the returned Murph-time cost;
 - `pending` means do not retry or claim mailing success;
 - `insufficient_usage` means explain that the free note was used and more
   Murph time is needed;

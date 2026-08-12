@@ -236,6 +236,116 @@ describe.skipIf(!runPostgresProof)(
         await Promise.allSettled([holderTransaction]);
       }
     });
+
+    it("revalidates every unresolved legacy note after waiting on the member lock", async () => {
+      const lockHolder = requirePrisma(firstClient);
+      const requestingClient = requirePrisma(secondClient);
+      const observer = requirePrisma(observerClient);
+      const beneficiary = requireMemberId(memberId);
+      const firstLegacyId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const secondLegacyId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const createdAt = new Date(Date.now() - 24 * 60 * 60 * 1_000);
+      const { createHostedPhysicalNote } = await import(
+        "@/src/lib/physical-notes/service"
+      );
+      await observer.hostedPhysicalNote.createMany({
+        data: [
+          {
+            complimentaryOfferCode: null,
+            createdAt,
+            failureReason: null,
+            id: firstLegacyId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: "first-legacy-fingerprint",
+            requestKey: `first-legacy-${firstLegacyId}`,
+            status: "failed",
+          },
+          {
+            complimentaryOfferCode: null,
+            createdAt: new Date(createdAt.getTime() + 1),
+            failureReason: null,
+            id: secondLegacyId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: "second-legacy-fingerprint",
+            requestKey: `second-legacy-${secondLegacyId}`,
+            status: "failed",
+          },
+        ],
+      });
+
+      const memberLocked = createDeferred();
+      const resolveFirstLegacy = createDeferred();
+      const holderTransaction = lockHolder.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT 1
+          FROM "hosted_member"
+          WHERE "id" = ${beneficiary}
+          FOR UPDATE
+        `;
+        memberLocked.resolve();
+        await resolveFirstLegacy.promise;
+        await tx.hostedPhysicalNote.update({
+          data: { failureReason: "unknown" },
+          where: { id: firstLegacyId },
+        });
+      });
+      const createProviderLetter = vi.fn(async () => ({
+        kind: "accepted" as const,
+        providerLetterId: "ltr_must_not_send",
+      }));
+      const findProviderLetter = vi.fn(async () => ({
+        kind: "indeterminate" as const,
+      }));
+
+      try {
+        await Promise.race([memberLocked.promise, holderTransaction]);
+        const requestingPid = await readBackendPid(requestingClient);
+        const request = createHostedPhysicalNote({
+          ...buildRequest(5, beneficiary),
+          prisma: requestingClient,
+          runtime: {
+            create: createProviderLetter,
+            findLetterByNoteId: findProviderLetter,
+          },
+        });
+        await waitForBlockedBackend({
+          observer,
+          pid: requestingPid,
+        });
+
+        resolveFirstLegacy.resolve();
+        await holderTransaction;
+        const response = await request;
+
+        expect(response).toMatchObject({
+          failureReason: "prior_note_unresolved",
+          status: "failed",
+        });
+        expect(response.physicalNoteId).not.toBe(firstLegacyId);
+        expect(response.physicalNoteId).not.toBe(secondLegacyId);
+        expect(findProviderLetter).toHaveBeenCalledOnce();
+        expect(findProviderLetter).toHaveBeenCalledWith({
+          noteId: secondLegacyId,
+          signal: undefined,
+        });
+        expect(createProviderLetter).not.toHaveBeenCalled();
+        await expect(observer.hostedPhysicalNote.findUnique({
+          where: { id: secondLegacyId },
+        })).resolves.toMatchObject({
+          failureReason: null,
+          status: "failed",
+        });
+      } finally {
+        resolveFirstLegacy.resolve();
+        await Promise.allSettled([holderTransaction]);
+      }
+    });
   },
 );
 

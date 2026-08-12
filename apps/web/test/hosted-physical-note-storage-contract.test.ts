@@ -77,6 +77,26 @@ describe("HostedPhysicalNote storage contract", () => {
     );
     expect(migration).not.toMatch(/message|address_line|artwork_url/iu);
   });
+
+  it("pins compatible Web as the no-send authority rollback floor", () => {
+    const productContract = readFileSync(
+      new URL(
+        "../../../agent-docs/product-specs/physical-notes.md",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(productContract).toMatch(
+      /Web artifact is a hard rollback\s+floor/iu,
+    );
+    expect(productContract).toMatch(
+      /never roll Web below the floor while physical-note sending remains enabled/iu,
+    );
+    expect(productContract).toMatch(
+      /disable\s+`HOSTED_PHYSICAL_NOTES_ENABLED`[\s\S]*drain every runner[\s\S]*keep the capability off until compatible Web and runner/iu,
+    );
+  });
 });
 
 function readModelScalarFields(schema: string, modelName: string): string[] {

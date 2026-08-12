@@ -63,6 +63,10 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   reconstruct. Always answer with the current row so reply loss and replay
   cannot turn a suppressed request into a provider effect. Do not add another
   enum, queue, state owner, or reconciliation lifecycle.
+- Re-read the member-wide legacy guard after taking the existing member lock
+  and again at final reservation admission. A row selected before the lock is
+  only a hint; resolving it cannot authorize a send while another guard still
+  exists. Keep provider lookup outside the transaction.
 - Cover the member-scoped legacy lookup with an index on member, status, reason,
   and creation time so physical-note history does not create a table-scan hot
   path. The request performs one bounded row lookup and at most one serial
@@ -72,7 +76,10 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   a categorized response and fails closed to pending without retry. Then deploy
   the Cloudflare Worker and runner bundle with `container_rollout=immediate` and
   require managed-container smoke proof of the exact new runner-bundle
-  fingerprint. Roll back Cloudflare before Web.
+  fingerprint. Current Web becomes the hard rollback floor before it can write
+  the new no-send authority; roll Cloudflare back first and forward-fix Web.
+  A below-floor emergency disables and drains the physical-note capability
+  before old Web is restored and keeps it off until compatible artifacts return.
 
 ## Implementation
 
@@ -184,3 +191,16 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   investigation with no owner. State only the earlier outcome and current
   no-send fact, name the absence of automatic follow-up, and let only a later
   explicit request recheck unresolved evidence.
+- Round 10 found that a request could select legacy row A before the member
+  lock, wait while A was resolved, and then fall through to ordinary admission
+  even though legacy row B still remained unresolved. Make the existing
+  member-locked admission re-read the member-wide guard and repeat the same
+  bounded check at final reservation; the real PostgreSQL lock-order proof must
+  show B blocks the provider effect. It also found that the rollout allowed old
+  Web below a new no-send authority it cannot enforce, so pin current Web as the
+  hard rollback floor and require capability disablement plus runner drain for
+  any emergency below-floor rollback. Finally, expose the existing accepted
+  `prior_note_accepted` marker to the assistant and omit paid, complimentary,
+  and cost claims when legacy billing provenance is unavailable. These fixes
+  reuse the existing row, enum, member lock, and response surface without a new
+  state owner or transaction around provider I/O.

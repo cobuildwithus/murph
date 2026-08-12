@@ -333,20 +333,15 @@ describe('assistant physical notes', () => {
     )
   })
 
-  it('keeps a categorized Web rejection pending through the previous strict runner', async () => {
+  it('does not present a recovered legacy acceptance as paid or complimentary', async () => {
     const vaultRoot = await createPhysicalNoteVault()
-    const currentWebResponse = hostedPhysicalNoteSendResponseSchema.parse({
-      complimentary: true,
-      costUsdMicros: '0',
-      failureReason: 'recipient_address',
-      physicalNoteId: 'hpn_failed',
-      status: 'failed',
-    })
-    const send = vi.fn(async () =>
-      PREVIOUS_HOSTED_PHYSICAL_NOTE_SEND_RESPONSE_SCHEMA.parse(
-        currentWebResponse,
-      )
-    )
+    const send = vi.fn(async () => ({
+      complimentary: false,
+      costUsdMicros: '250000',
+      failureReason: 'prior_note_accepted' as const,
+      physicalNoteId: 'hpn_legacy_accepted',
+      status: 'accepted' as const,
+    }))
 
     const result = await executeMurphDynamicToolRequest({
       authorizeAcceptedMessageTarget: authorizeApprovalInput,
@@ -374,21 +369,86 @@ describe('assistant physical notes', () => {
       vaultRoot,
     })
 
-    expect(send).toHaveBeenCalledOnce()
-    expect(result.rpcResult).toMatchObject({ success: false })
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      '"status":"pending"',
-    )
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      'could not confirm whether this physical note was accepted',
-    )
-    expect(result.rpcResult.contentItems[0]?.text).toMatch(
-      /do not .*retry it automatically/iu,
-    )
-    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
-      'new explicit send request',
-    )
+    const toolText = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(toolText).toContain('"status":"accepted"')
+    expect(toolText).toContain('"failureReason":"prior_note_accepted"')
+    expect(toolText).toContain('This replay did not send another note')
+    expect(toolText).toContain('do not describe it as paid or complimentary')
+    expect(toolText).not.toContain('costUsdMicros')
+    expect(toolText).not.toMatch(/"complimentary":/u)
   })
+
+  it.each([
+    ['categorized rejection', {
+      complimentary: true,
+      costUsdMicros: '0',
+      failureReason: 'recipient_address',
+      physicalNoteId: 'hpn_failed',
+      status: 'failed',
+    }],
+    ['recovered legacy acceptance', {
+      complimentary: false,
+      costUsdMicros: '250000',
+      failureReason: 'prior_note_accepted',
+      physicalNoteId: 'hpn_legacy_accepted',
+      status: 'accepted',
+    }],
+  ] as const)(
+    'keeps a %s pending through the previous strict runner',
+    async (_caseName, response) => {
+      const vaultRoot = await createPhysicalNoteVault()
+      const currentWebResponse = hostedPhysicalNoteSendResponseSchema.parse(
+        response,
+      )
+      const send = vi.fn(async () =>
+        PREVIOUS_HOSTED_PHYSICAL_NOTE_SEND_RESPONSE_SCHEMA.parse(
+          currentWebResponse,
+        )
+      )
+
+      const result = await executeMurphDynamicToolRequest({
+        authorizeAcceptedMessageTarget: authorizeApprovalInput,
+        deliveryContextOrdinal: 0,
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createHostedToolContext({
+          physicalNotes: { send },
+          privateImageUrlPublisher: {
+            publishPrivateImageUrl: async () => ({
+              expiresAt: '2027-08-01T00:00:00.000Z',
+              url: 'https://private-media.example.test/note',
+            }),
+          },
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request: {
+          imageRef: IMAGE_REF,
+          imageSha256: IMAGE_SHA256,
+          kind: 'send-physical-note',
+          messageRef: APPROVAL_INPUT_ID,
+          recipient: RECIPIENT,
+        },
+        vaultRoot,
+      })
+
+      expect(send).toHaveBeenCalledOnce()
+      expect(result.rpcResult).toMatchObject({ success: false })
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        '"status":"pending"',
+      )
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        'could not confirm whether this physical note was accepted',
+      )
+      expect(result.rpcResult.contentItems[0]?.text).toMatch(
+        /do not .*retry it automatically/iu,
+      )
+      expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+        'new explicit send request',
+      )
+    },
+  )
 
   it.each([
     ['recipient_address', 'check the street and unit'],

@@ -903,6 +903,7 @@ describe("createHostedPhysicalNote", () => {
 
     expect(response).toMatchObject({
       complimentary: false,
+      failureReason: "prior_note_accepted",
       physicalNoteId: failed.physicalNoteId,
       status: "accepted",
     });
