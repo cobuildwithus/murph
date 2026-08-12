@@ -195,9 +195,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    `heart_rate_recovery_one_minute`, body and basal temperature resources,
    `sleep_breathing_disturbance`, `caffeine`, `water`, and
    `mindfulness_minutes`) use the summary-history window, 180 days by default.
-   A sparse daily pass cannot close coverage when any provider-bearing day
-   produces no canonical observation; the existing anchored retry ladder must
-   rescan that full window before terminal coverage is allowed.
+   Each sparse aggregate request owns one complete provider calendar date, so
+   offset timestamps on opposite sides of UTC midnight reach the importer
+   together. A provider-bearing date that produces no canonical observation
+   retries only that date on the existing bounded ladder before it becomes
+   terminal. Explicit nonterminal historical-pull status holds the first date
+   pending; explicit `not_pulled` remains no obligation. Before coverage closes,
+   a delayed migration appends one segment through the current reconcile-window
+   boundary so the stable dedupe identity cannot freeze a middle gap.
    Blood pressure and notes retain their existing extended policies. An
    explicit timeseries-window override governs both classes.
 

@@ -107,10 +107,12 @@ disturbance, caffeine, water, and mindfulness use the summary-history window,
 day at a time, serialize per account, and record terminal coverage in compact
 connection metadata; they do not add another queue or lifecycle. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
-semantics. A provider-bearing sparse day that produces no canonical observation
-forces the existing anchored retry before coverage can close. An explicit
-timeseries backfill override still governs every
-timeseries resource.
+semantics. Sparse aggregates fetch one complete provider calendar date at a
+time; a provider-bearing date with no canonical observation retries only that
+date on the existing bounded ladder. Explicit nonterminal historical-pull state
+holds the first date pending, and delayed work catches up once to the current
+reconcile boundary before coverage closes. An explicit timeseries backfill
+override still governs every timeseries resource.
 
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero
