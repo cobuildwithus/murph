@@ -1907,7 +1907,7 @@ text(JSON.stringify(result));
   it.each([
     {
       expectedClarification:
-        'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+        'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
       finalMessage:
         '2:30 AM does not exist on 2026-03-08 because of daylight saving time.',
       referenceAt: '2026-03-08T04:59:00.000Z',
@@ -1916,7 +1916,7 @@ text(JSON.stringify(result));
     },
     {
       expectedClarification:
-        'The trusted reminder date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+        'For reminder "Fold reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
       finalMessage:
         '1:30 AM occurs twice on 2026-11-01 because of daylight saving time.',
       referenceAt: '2026-11-01T03:59:00.000Z',
@@ -2001,7 +2001,7 @@ text(JSON.stringify(result));
         timeZone: 'America/New_York',
       },
       staleClarification:
-        'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+        'For reminder "Spring reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
       steerAt: '2026-03-08T05:01:00.000Z',
       steerPrompt: 'Actually, use 3:30 AM.',
       title: 'Spring reminder',
@@ -2020,7 +2020,7 @@ text(JSON.stringify(result));
         timeZone: 'America/New_York',
       },
       staleClarification:
-        'The trusted reminder date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
+        'For reminder "Fall reminder", the trusted date is 2026-11-01. Should I use the earlier or later occurrence on 2026-11-01?',
       steerAt: '2026-11-01T04:01:00.000Z',
       steerPrompt: 'Use the earlier occurrence.',
       title: 'Fall reminder',
@@ -2342,8 +2342,8 @@ text(JSON.stringify(result));
       schedule: { at: expectedAt, kind: 'at' },
     }, expect.anything())
     expect(result.responseCard).toEqual(responseCard)
-    expect(result.finalMessage).not.toContain('The trusted reminder date is')
-    expect(result.transcriptMessage).not.toContain('The trusted reminder date is')
+    expect(result.finalMessage).not.toContain('the trusted date is')
+    expect(result.transcriptMessage).not.toContain('the trusted date is')
   })
 
   it('contains local one-shot slug failures and accepts a corrected retry', {
@@ -2523,7 +2523,7 @@ text(JSON.stringify(result));
     })
 
     const requiredClarification =
-      'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+      'For reminder "Medication reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
     expect(automationRequests).toEqual([{
       action: 'save',
       instructions: 'Send the breakfast reminder tomorrow.',
@@ -2534,6 +2534,334 @@ text(JSON.stringify(result));
       `The breakfast reminder is set for 4 AM on March 8.\n\n${requiredClarification}`,
     )
     expect(result.transcriptMessage).toBe(result.finalMessage)
+  })
+
+  it.each([
+    {
+      date: '2026-03-08',
+      failedTime: '02:30',
+      kind: 'gap',
+      mismatchDate: '2026-03-09',
+      referenceAt: '2026-03-08T04:59:00.000Z',
+      recoveryA: {
+        date: '2026-03-08',
+        time: '03:30',
+        timeZone: 'America/New_York',
+      },
+      recoveryAtA: '2026-03-08T07:30:00.000Z',
+      recoveryAtB: '2026-03-08T08:00:00.000Z',
+      recoveryB: {
+        date: '2026-03-08',
+        time: '04:00',
+        timeZone: 'America/New_York',
+      },
+    },
+    {
+      date: '2026-11-01',
+      failedTime: '01:30',
+      kind: 'fold',
+      mismatchDate: '2026-11-02',
+      referenceAt: '2026-11-01T03:59:00.000Z',
+      recoveryA: {
+        date: '2026-11-01',
+        fold: 'earlier' as const,
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+      recoveryAtA: '2026-11-01T05:30:00.000Z',
+      recoveryAtB: '2026-11-01T06:30:00.000Z',
+      recoveryB: {
+        date: '2026-11-01',
+        fold: 'later' as const,
+        time: '01:30',
+        timeZone: 'America/New_York',
+      },
+    },
+  ])('composes multiple unresolved $kind reminders independently', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    date,
+    failedTime,
+    mismatchDate,
+    referenceAt,
+    recoveryA,
+    recoveryAtA,
+    recoveryAtB,
+    recoveryB,
+  }) => {
+    const failureA = {
+      action: 'save',
+      instructions: 'Send the medication reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Medication reminder',
+    }
+    const failureB = {
+      action: 'save',
+      instructions: 'Send the call reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: failedTime,
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Call reminder',
+    }
+    const successA = {
+      ...failureA,
+      schedule: { kind: 'at', localAt: recoveryA },
+    }
+    const successB = {
+      ...failureB,
+      schedule: { kind: 'at', localAt: recoveryB },
+    }
+    const responseCard = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Reminder results',
+      subtitle: null,
+      rowHeader: 'Reminder',
+      columns: ['Status'],
+      rows: [
+        { label: 'Medication', values: ['Pending'] },
+        { label: 'Call', values: ['Saved'] },
+      ],
+      footer: null,
+      tracking: null,
+    } satisfies AssistantResponseCard
+    const questionA = `For reminder "Medication reminder", the trusted date is ${date}. ${
+      'fold' in recoveryA
+        ? `Should I use the earlier or later occurrence on ${date}?`
+        : `What other local time on ${date} should I use?`
+    }`
+    const questionB = `For reminder "Call reminder", the trusted date is ${date}. ${
+      'fold' in recoveryB
+        ? `Should I use the earlier or later occurrence on ${date}?`
+        : `What other local time on ${date} should I use?`
+    }`
+
+    for (const mode of [
+      'both-pending',
+      'second-resolved',
+      'both-resolved',
+      'unrelated-and-date-mismatch',
+    ] as const) {
+      const scenario = await prepareScriptedTurnScenario()
+      const automationRequests: Array<Extract<
+        AssistantHostedAutomationToolRequest,
+        { action: 'save' }
+      >> = []
+      scenario.stub.queue(
+        {
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(failureA)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        },
+        {
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(failureB)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        },
+      )
+      if (mode === 'second-resolved' || mode === 'both-resolved') {
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(successB)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'both-resolved') {
+        scenario.stub.queue({
+          customToolCall: {
+            input: `
+const result = await tools.murph__automation(${JSON.stringify(successA)});
+text(JSON.stringify(result));
+`,
+            name: 'exec',
+          },
+        })
+      }
+      if (mode === 'unrelated-and-date-mismatch') {
+        const unrelated = {
+          action: 'save',
+          instructions: 'Send an unrelated breakfast reminder.',
+          schedule: {
+            kind: 'at',
+            localAt: {
+              date,
+              time: '05:00',
+              timeZone: 'America/New_York',
+            },
+          },
+          title: 'Breakfast reminder',
+        }
+        const mismatchedA = {
+          ...failureA,
+          schedule: {
+            kind: 'at',
+            localAt: {
+              date: mismatchDate,
+              time: '05:30',
+              timeZone: 'America/New_York',
+            },
+          },
+        }
+        scenario.stub.queue(
+          {
+            customToolCall: {
+              input: `
+const result = await tools.murph__automation(${JSON.stringify(unrelated)});
+text(JSON.stringify(result));
+`,
+              name: 'exec',
+            },
+          },
+          {
+            customToolCall: {
+              input: `
+const result = await tools.murph__automation(${JSON.stringify(mismatchedA)});
+text(JSON.stringify(result));
+`,
+              name: 'exec',
+            },
+          },
+        )
+      }
+      if (mode === 'second-resolved' || mode === 'both-resolved') {
+        scenario.stub.queue({
+          functionCall: {
+            arguments: { card: responseCard },
+            name: 'attach_response_card',
+            namespace: 'murph',
+          },
+        })
+      }
+      if (mode === 'second-resolved') {
+        scenario.stub.queue(
+          {
+            functionCall: {
+              arguments: {},
+              name: 'finish_without_reply',
+              namespace: 'murph',
+            },
+          },
+          { text: '' },
+        )
+      } else {
+        scenario.stub.queue({
+          text: mode === 'both-resolved'
+            ? 'CARD_ATTACHED'
+            : 'I handled the reminder requests I could complete.',
+        })
+      }
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        allowFinishWithoutReply: true,
+        automationRelativeDateReferenceWindow: {
+          earliestAt: referenceAt,
+          latestAt: referenceAt,
+        },
+        dynamicTools: [
+          MURPH_AUTOMATION_TOOL,
+          MURPH_ATTACH_RESPONSE_CARD_TOOL,
+          MURPH_FINISH_WITHOUT_REPLY_TOOL,
+        ],
+        groupConversation: false,
+        hostedToolContext: {
+          automationTool: {
+            request: async (request) => {
+              if (request.action !== 'save') {
+                throw new Error('Expected an automation save request.')
+              }
+              if (request.schedule.kind !== 'at') {
+                throw new Error('Expected an exact one-shot schedule.')
+              }
+              automationRequests.push(request)
+              const lookupId = request.title.toLowerCase().replace(/\s+/gu, '-')
+              return {
+                action: 'save',
+                automationId: `automation-${lookupId}`,
+                created: true,
+                effectiveTimeZone: 'America/New_York',
+                lookupId,
+                nextOccurrenceAt: request.schedule.at,
+                routeBinding: 'current_conversation',
+                schedule: request.schedule,
+                status: 'active',
+                timingVerified: true,
+                updatedAt: '2026-03-08T05:01:00.000Z',
+              }
+            },
+          },
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        prompt: 'Set my medication and call reminders for tomorrow.',
+      })
+
+      if (mode === 'both-resolved') {
+        expect(automationRequests).toHaveLength(2)
+        expect(automationRequests.map((request) => request.schedule)).toEqual([
+          { at: recoveryAtB, kind: 'at' },
+          { at: recoveryAtA, kind: 'at' },
+        ])
+        expect(result.responseCard).toEqual(responseCard)
+        expect(result.finalMessage).not.toContain('the trusted date is')
+        expect(result.transcriptMessage).not.toContain('the trusted date is')
+        continue
+      }
+
+      expect(result.responseCard).toBeNull()
+      expect(result.finalMessage).toContain(questionA)
+      expect(result.transcriptMessage).toContain(questionA)
+      if (mode === 'second-resolved') {
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]?.schedule).toEqual({
+          at: recoveryAtB,
+          kind: 'at',
+        })
+        expect(result.finalAction).toBeNull()
+        expect(result.finalMessage).not.toContain(questionB)
+        expect(result.transcriptMessage).not.toContain(questionB)
+      } else {
+        expect(result.finalMessage).toContain(questionB)
+        expect(result.transcriptMessage).toContain(questionB)
+        expect(result.finalMessage.indexOf(questionA)).toBeLessThan(
+          result.finalMessage.indexOf(questionB),
+        )
+        if (mode === 'both-pending') {
+          expect(automationRequests).toHaveLength(0)
+        } else {
+          expect(automationRequests).toHaveLength(2)
+        }
+      }
+    }
   })
 
   it('suppresses a response card until the trusted DST clarification is delivered', {
@@ -2621,7 +2949,7 @@ text(JSON.stringify(result));
     const publicCardText =
       'Strength session\n\nBench press: Set 1: 185 lb × 8'
     const requiredClarification =
-      'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+      'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
     const expectedDeliveredText = `${publicCardText}\n\n${requiredClarification}`
     expect(result.responseCard).toBeNull()
     expect(result.finalMessage).toBe(expectedDeliveredText)
@@ -2694,7 +3022,7 @@ text(JSON.stringify(result));
     })
 
     const requiredClarification =
-      'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?'
+      'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
     expect(result.finalAction).toBeNull()
     expect(result.finalActionExplicit).toBe(false)
     expect(result.finalMessage).toBe(requiredClarification)

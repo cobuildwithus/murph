@@ -992,7 +992,7 @@ test('sendAssistantMessageLocal delivers an unresolved DST clarification after A
   const session = createAssistantSession()
   const response = [
     'Strength session\n\nBench press: Set 1: 185 lb × 8',
-    'The trusted reminder date is 2026-03-08. What other local time on 2026-03-08 should I use?',
+    'For reminder "Gap reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?',
   ].join('\n\n')
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
     plan: createDirectSharedPlan(),

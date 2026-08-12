@@ -687,30 +687,31 @@ interface RequiredAutomationLocalAtClarification {
   code: 'local_at_fold' | 'local_at_gap'
   resolvedLocalDate: string
   targetKey: string
+  targetLabel: string
 }
 
 function buildRequiredAutomationLocalAtClarification(
   requirement: RequiredAutomationLocalAtClarification,
 ): string {
+  const reminder = `reminder ${JSON.stringify(requirement.targetLabel)}`
   return requirement.code === 'local_at_gap'
-    ? `The trusted reminder date is ${requirement.resolvedLocalDate}. What other local time on ${requirement.resolvedLocalDate} should I use?`
-    : `The trusted reminder date is ${requirement.resolvedLocalDate}. Should I use the earlier or later occurrence on ${requirement.resolvedLocalDate}?`
+    ? `For ${reminder}, the trusted date is ${requirement.resolvedLocalDate}. What other local time on ${requirement.resolvedLocalDate} should I use?`
+    : `For ${reminder}, the trusted date is ${requirement.resolvedLocalDate}. Should I use the earlier or later occurrence on ${requirement.resolvedLocalDate}?`
 }
 
 function appendRequiredAutomationLocalAtClarification(
   message: string | null,
-  requirement: RequiredAutomationLocalAtClarification | null,
+  requirements: readonly RequiredAutomationLocalAtClarification[],
 ): string | null {
-  if (requirement === null) {
+  if (requirements.length === 0) {
     return message
   }
   const normalizedMessage = normalizeNullableString(message)
-  const clarification = buildRequiredAutomationLocalAtClarification(requirement)
-  if (normalizedMessage?.includes(clarification)) {
-    return message
-  }
+  const missingClarifications = requirements
+    .map(buildRequiredAutomationLocalAtClarification)
+    .filter((clarification) => !normalizedMessage?.includes(clarification))
 
-  return [normalizedMessage, clarification]
+  return [normalizedMessage, ...missingClarifications]
     .filter((part): part is string => part !== null)
     .join('\n\n')
 }
@@ -3193,8 +3194,8 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
   const requiredVaultFileApprovalUrls: string[] = []
-  let requiredAutomationLocalAtClarification:
-    RequiredAutomationLocalAtClarification | null = null
+  const requiredAutomationLocalAtClarifications =
+    new Map<string, RequiredAutomationLocalAtClarification>()
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -3304,7 +3305,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
-    requiredAutomationLocalAtClarification !== null ||
+    requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
 
   const settleNoReplyFinalActions = async (): Promise<void> => {
@@ -4227,13 +4228,19 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolRequest.safeFailureCode === 'local_at_fold'
         ) &&
         dynamicToolRequest.resolvedLocalDate &&
-        dynamicToolRequest.localAtTargetKey
+        dynamicToolRequest.localAtTargetKey &&
+        dynamicToolRequest.localAtTargetLabel
       ) {
-        requiredAutomationLocalAtClarification = {
+        const requirement = {
           code: dynamicToolRequest.safeFailureCode,
           resolvedLocalDate: dynamicToolRequest.resolvedLocalDate,
           targetKey: dynamicToolRequest.localAtTargetKey,
+          targetLabel: dynamicToolRequest.localAtTargetLabel,
         }
+        requiredAutomationLocalAtClarifications.set(
+          `${requirement.targetKey}:${requirement.resolvedLocalDate}`,
+          requirement,
+        )
       }
     }
 
@@ -4633,13 +4640,17 @@ async function runCodexAppServerTurnOnProcess(
         dynamicToolRequest.kind === 'automation' &&
         result.rpcResult.success &&
         dynamicToolRequest.localAtRecovery &&
-        requiredAutomationLocalAtClarification?.resolvedLocalDate ===
-          dynamicToolRequest.localAtRecovery.resolvedLocalDate &&
-        result.automationTargetKeys?.includes(
-          requiredAutomationLocalAtClarification.targetKey,
-        ) === true
+        result.automationTargetKeys
       ) {
-        requiredAutomationLocalAtClarification = null
+        for (const [key, requirement] of requiredAutomationLocalAtClarifications) {
+          if (
+            requirement.resolvedLocalDate ===
+              dynamicToolRequest.localAtRecovery.resolvedLocalDate &&
+            result.automationTargetKeys.includes(requirement.targetKey)
+          ) {
+            requiredAutomationLocalAtClarifications.delete(key)
+          }
+        }
       }
       const writeFailure = tryWriteRpcMessage({
         id: requestId,
@@ -5615,23 +5626,27 @@ async function runCodexAppServerTurnOnProcess(
   const semanticFinalMessage = finalResponseCard
     ? renderAssistantResponseCardText(finalResponseCard)
     : modelFinalMessage
+  const requiredAutomationLocalAtClarificationsInOrder =
+    [...requiredAutomationLocalAtClarifications.values()]
   const deliveredFinalResponseCard =
-    requiredAutomationLocalAtClarification === null ? finalResponseCard : null
+    requiredAutomationLocalAtClarificationsInOrder.length === 0
+      ? finalResponseCard
+      : null
   const finalMessage = appendRequiredVaultFileApprovalUrls(
     appendRequiredAutomationLocalAtClarification(
       semanticFinalMessage,
-      requiredAutomationLocalAtClarification,
+      requiredAutomationLocalAtClarificationsInOrder,
     ),
     requiredVaultFileApprovalUrls,
   )
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
     finalResponseCard
-      ? requiredAutomationLocalAtClarification === null
+      ? requiredAutomationLocalAtClarificationsInOrder.length === 0
         ? renderAssistantResponseCardTranscriptText(finalResponseCard)
         : renderAssistantResponseCardText(finalResponseCard)
       : normalizeNullableString(modelFinalMessage) ??
         (finalResponseMedia.length > 0 ? '' : null),
-    requiredAutomationLocalAtClarification,
+    requiredAutomationLocalAtClarificationsInOrder,
   )
   if (
     noReplySelected &&

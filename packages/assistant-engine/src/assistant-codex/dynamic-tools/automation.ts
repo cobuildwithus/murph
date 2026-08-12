@@ -330,6 +330,7 @@ export type AutomationDynamicToolRequest =
     }
   | {
       kind: 'invalid-automation-arguments'
+      localAtTargetLabel?: string
       localAtTargetKey?: string
       resolvedLocalDate?: string
       safeFailureCode?: AutomationLocalAtFailureCode
@@ -386,7 +387,10 @@ export function readAutomationDynamicToolRequest(input: {
       ...(error instanceof AutomationLocalAtResolutionError
         ? {
             ...(localAtAttempt
-              ? { localAtTargetKey: localAtAttempt.targetKey }
+              ? {
+                  localAtTargetKey: localAtAttempt.targetKey,
+                  localAtTargetLabel: localAtAttempt.targetLabel,
+                }
               : {}),
             ...(error.resolvedLocalDate
               ? { resolvedLocalDate: error.resolvedLocalDate }
@@ -418,6 +422,7 @@ function readAutomationLocalAtAttempt(
 ): {
   explicitLocalDate: string | null
   targetKey: string
+  targetLabel: string
 } | null {
   if (args.action !== 'save' && args.action !== 'patch') {
     return null
@@ -436,6 +441,11 @@ function readAutomationLocalAtAttempt(
   return {
     explicitLocalDate: schedule.localAt.date ?? null,
     targetKey: buildAutomationLocalAtTargetKey(args.action, targetIdentity),
+    targetLabel: args.action === 'patch'
+      ? args.lookup
+      : args.slug
+        ? `${args.title} (${args.slug})`
+        : args.title,
   }
 }
 

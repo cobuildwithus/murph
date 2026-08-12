@@ -169,6 +169,7 @@ describe('hosted domain dynamic tools', () => {
       throw new TypeError('Expected a daylight-saving gap failure.')
     }
     expect(gapRequest).toMatchObject({
+      localAtTargetLabel: 'Spring reminder (spring-reminder)',
       resolvedLocalDate: '2026-03-08',
       safeFailureCode: 'local_at_gap',
     })
@@ -229,6 +230,7 @@ describe('hosted domain dynamic tools', () => {
       throw new TypeError('Expected a daylight-saving fold failure.')
     }
     expect(foldRequest).toMatchObject({
+      localAtTargetLabel: 'Fall reminder',
       resolvedLocalDate: '2026-11-01',
       safeFailureCode: 'local_at_fold',
     })
@@ -290,6 +292,7 @@ describe('hosted domain dynamic tools', () => {
     if (failedPatch?.kind !== 'invalid-automation-arguments') {
       throw new TypeError('Expected a daylight-saving gap failure.')
     }
+    expect(failedPatch.localAtTargetLabel).toBe('medication-reminder')
 
     const matchingRecovery = readToolRequest('automation', {
       action: 'patch',
