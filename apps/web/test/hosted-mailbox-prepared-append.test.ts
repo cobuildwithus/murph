@@ -57,7 +57,6 @@ import { hashHostedMailboxStoredPayload } from "../src/lib/hosted-mailbox/finger
 import {
   appendHostedMailboxItem,
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
-  HostedMailboxAppendPreparationMismatchError,
   prepareHostedMailboxItemAppendCrypto,
   type HostedMailboxItemRow,
 } from "../src/lib/hosted-mailbox/store";
@@ -544,7 +543,7 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     await expect(appendHostedMailboxItem({
       ...buildAppendInput(),
       prisma: fixture.prisma as never,
-    })).rejects.toBeInstanceOf(HostedMailboxAppendPreparationMismatchError);
+    })).rejects.toBeInstanceOf(domainRootMocks.PreparationMismatchError);
 
     expect(domainRootMocks.unwrapHostedDomainRootForWeb).toHaveBeenCalledTimes(2);
     expect(fixture.prisma.$transaction).toHaveBeenCalledTimes(2);

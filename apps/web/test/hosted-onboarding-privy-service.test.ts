@@ -497,6 +497,174 @@ describe("completeHostedPrivyVerification", () => {
     expect(prepareHostedDomainRootForWeb).toHaveBeenCalledTimes(2);
   });
 
+  it("retries secondary verified-email root drift once and then fails closed", async () => {
+    const revalidatePreparedRoot = vi
+      .mocked(revalidatePreparedHostedDomainRootForWebTx)
+      .getMockImplementation();
+    if (!revalidatePreparedRoot) {
+      throw new Error("Expected the default prepared-root revalidation mock.");
+    }
+    vi.mocked(revalidatePreparedHostedDomainRootForWebTx)
+      .mockImplementationOnce(revalidatePreparedRoot)
+      .mockRejectedValueOnce(new HostedDomainRootPreparationMismatchError())
+      .mockImplementationOnce(revalidatePreparedRoot)
+      .mockRejectedValueOnce(new HostedDomainRootPreparationMismatchError());
+    const phoneMember = makeMember({
+      id: "member_phone_secondary_email_root_drift",
+    });
+    const activeInvite = makeInvite(phoneMember, {
+      channel: "web",
+      id: "invite_phone_secondary_email_root_drift",
+      inviteCode: "invite-phone-secondary-email-root-drift",
+      memberId: phoneMember.id,
+    });
+    const secondaryEmailUpsert = vi.fn();
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockImplementation(
+          async ({ where }: { where: Record<string, unknown> }) => (
+            where.id === phoneMember.id || where.phoneLookupKey
+              ? phoneMember
+              : null
+          ),
+        ),
+      },
+      hostedMemberEmailAuthorization: {
+        findUnique: vi.fn(),
+        upsert: secondaryEmailUpsert,
+      },
+    });
+
+    await expect(completeHostedPrivyVerification({
+      authMethod: "phone",
+      identity: makeIdentity({
+        email: {
+          address: "secondary-root-drift@example.com",
+          verifiedAt: 1743064200,
+        },
+      }),
+      now: NOW,
+      prisma,
+    })).rejects.toBeInstanceOf(HostedDomainRootPreparationMismatchError);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(4);
+    expect(privyManagementMocks.getUser).toHaveBeenCalledTimes(2);
+    expect(prepareHostedDomainRootForWeb).toHaveBeenCalledTimes(2);
+    expect(revalidatePreparedHostedDomainRootForWebTx).toHaveBeenCalledTimes(4);
+    expect(secondaryEmailUpsert).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
+    expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
+  });
+
+  it("keeps another member's phone binding without decrypting that identity", async () => {
+    const selectedMember = makeMember({
+      id: "member_selected_by_privy_principal",
+      maskedPhoneNumberHint: null,
+      phoneLookupKey: null,
+      privyUserId: baseIdentity().userId,
+    });
+    const phoneOwnerMember = makeMember({
+      id: "member_existing_phone_owner",
+    });
+    const selectedIdentity = await readMemberIdentity(selectedMember);
+    const phoneOwnerIdentity = await readMemberIdentity(phoneOwnerMember);
+    if (!selectedIdentity || !phoneOwnerIdentity) {
+      throw new Error("Expected cross-member phone identity fixtures.");
+    }
+    const activeInvite = makeInvite(selectedMember, {
+      channel: "web",
+      id: "invite_selected_by_privy_principal",
+      inviteCode: "invite-selected-by-privy-principal",
+      memberId: selectedMember.id,
+    });
+    const identityFindMany = vi.fn(async ({
+      include,
+      select,
+      where,
+    }: {
+      include?: { member?: boolean };
+      select?: { memberId?: boolean };
+      where: Record<string, unknown>;
+    }) => {
+      if (where.privyUserLookupKey) {
+        return include?.member
+          ? [{ ...selectedIdentity, member: selectedMember }]
+          : [selectedIdentity];
+      }
+      if (where.phoneLookupKey) {
+        return select?.memberId
+          ? [{ memberId: phoneOwnerMember.id }]
+          : include?.member
+            ? [{ ...phoneOwnerIdentity, member: phoneOwnerMember }]
+            : [phoneOwnerIdentity];
+      }
+      return [];
+    });
+    const identityUpsert = vi.fn(async ({
+      create,
+      update,
+    }: {
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    }) => ({
+      ...selectedIdentity,
+      ...create,
+      ...update,
+    }));
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(activeInvite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+          where.id === selectedMember.id ? selectedMember : null),
+      },
+      hostedMemberIdentity: {
+        findMany: identityFindMany,
+        findUnique: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+          where.memberId === selectedMember.id ? selectedIdentity : null),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(completeHostedPrivyVerification({
+      authMethod: "phone",
+      identity: makeIdentity(),
+      now: NOW,
+      prisma,
+    })).resolves.toMatchObject({
+      inviteCode: "invite-selected-by-privy-principal",
+      memberId: selectedMember.id,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(privyManagementMocks.getUser).toHaveBeenCalledTimes(1);
+    expect(prepareHostedDomainRootForWeb).toHaveBeenCalledTimes(1);
+    expect(revalidatePreparedHostedDomainRootForWebTx).toHaveBeenCalledTimes(1);
+    expect(identityFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: {
+        memberId: true,
+      },
+      where: expect.objectContaining({
+        phoneLookupKey: expect.anything(),
+      }),
+    }));
+    expect(identityUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        phoneLookupKey: null,
+      }),
+    }));
+  });
+
   it("binds a verified email identity onto an invite-bound Linq email contact despite stale client method", async () => {
     const pendingEmailAddress = "linq-handle@example.com";
     const pendingEmailLookupKey = createHostedEmailLookupKey(pendingEmailAddress)!;

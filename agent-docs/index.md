@@ -171,8 +171,10 @@ the rule that alerts never become billing or retry authority are jointly specifi
 Hosted mailbox and Privy identity preparation use one request-local,
 crypto-only exact-root boundary: provider/KMS work settles before `BEGIN`, the
 transaction revalidates the precise root under its canonical lock, and a typed
-winner drift permits one fresh full preparation attempt. The contract is
-specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
+winner drift permits one fresh full preparation attempt. Mailbox callers carry
+that generic capability directly, while Privy phone-conflict suppression reads
+only blind-index ownership and never decrypts an unprepared second member. The
+contract is specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
 
 ## Canonical Docs
 
