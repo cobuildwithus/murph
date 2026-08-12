@@ -1425,11 +1425,12 @@ interface JunctionDailyTimeseriesDescriptor {
 }
 
 interface JunctionSparseBodyTimeseriesDescriptor {
+  timestampShape: "instant" | "interval";
   metric: string;
   normalizeValue: (value: unknown) => number | undefined;
   title: string;
   unit: string;
-  upstreamUnits: ReadonlySet<string>;
+  upstreamUnit: string;
   valuePaths: readonly string[];
 }
 
@@ -1586,43 +1587,48 @@ const JUNCTION_SPARSE_BODY_TIMESERIES_DESCRIPTOR_ENTRIES: readonly (readonly [
   JunctionSparseBodyTimeseriesDescriptor,
 ])[] = [
   ["weight", {
+    timestampShape: "instant",
     metric: "weight",
     normalizeValue: normalizeBodyWeightKilograms,
     title: "Junction body weight",
     unit: "kg",
-    upstreamUnits: new Set(["kg", "kilogram", "kilograms"]),
+    upstreamUnit: "kg",
     valuePaths: ["value", "weight", "bodyWeight", "body_weight"],
   }],
   ["fat", {
+    timestampShape: "instant",
     metric: "body-fat-percentage",
     normalizeValue: normalizeBodyCompositionPercent,
     title: "Junction body fat percentage",
     unit: "%",
-    upstreamUnits: new Set(["%", "percent", "percentage"]),
+    upstreamUnit: "%",
     valuePaths: ["value", "fat", "bodyFat", "body_fat"],
   }],
   ["body_mass_index", {
+    timestampShape: "interval",
     metric: "bmi",
     normalizeValue: normalizeBodyMassIndex,
     title: "Junction BMI",
     unit: "kg_m2",
-    upstreamUnits: new Set(["index", "kg_m2", "kg/m2", "kg/m^2"]),
+    upstreamUnit: "index",
     valuePaths: ["value", "bmi", "bodyMassIndex", "body_mass_index"],
   }],
   ["lean_body_mass", {
+    timestampShape: "interval",
     metric: "lean-body-mass",
     normalizeValue: normalizeLeanBodyMassKilograms,
     title: "Junction lean body mass",
     unit: "kg",
-    upstreamUnits: new Set(["kg", "kilogram", "kilograms"]),
+    upstreamUnit: "kg",
     valuePaths: ["value", "leanBodyMass", "lean_body_mass"],
   }],
   ["waist_circumference", {
+    timestampShape: "interval",
     metric: "waist-circumference",
     normalizeValue: normalizeWaistCircumferenceCentimeters,
     title: "Junction waist circumference",
     unit: "cm",
-    upstreamUnits: new Set(["cm", "centimeter", "centimeters"]),
+    upstreamUnit: "cm",
     valuePaths: ["value", "waistCircumference", "waist_circumference"],
   }],
 ];
@@ -1712,20 +1718,20 @@ function pushJunctionSparseBodyReadings(
     const upstreamUnit = firstStringFromPaths(entry, ["unit"]);
     const timestamp = resolveJunctionSparseBodyReadingTimestamp(
       entry,
-      context,
       resourceContext.sourceProviderSlug,
+      descriptor.timestampShape,
     );
-    const occurredAt = timestamp.observedAtRaw ? timestamp.occurredAt : undefined;
+    const occurredAt = timestamp?.occurredAt;
     const dayKey = resolveJunctionTimeseriesAggregateDayKey(
       entry,
-      timestamp,
+      timestamp ?? {},
       occurredAt,
       context.defaultTimeZone,
     );
     if (
       value === undefined
-      || !upstreamUnit
-      || !descriptor.upstreamUnits.has(upstreamUnit.trim().toLowerCase())
+      || upstreamUnit !== descriptor.upstreamUnit
+      || !timestamp
       || !occurredAt
       || !dayKey
     ) {
@@ -1769,6 +1775,7 @@ function pushJunctionSparseBodyReadings(
             sourceInstanceId: resourceContext.origin.sourceInstanceId,
             occurredAt,
             recordedAt: timestamp.recordedAt,
+            endAt: timestamp.intervalEndAt,
             metric: descriptor.metric,
             value,
             unit: descriptor.unit,
@@ -1823,24 +1830,55 @@ function pushJunctionSparseBodyReadings(
 
 function resolveJunctionSparseBodyReadingTimestamp(
   entry: PlainObject,
-  context: NormalizationContext,
   sourceProviderSlug: string,
-): ReturnType<typeof resolveRecordTimestamp> {
-  const observedAtRaw = firstStringFromPaths(entry, [
-    "timestamp",
-    "time",
-    "start",
-    "startAt",
-    "start_at",
-    "end",
-    "endAt",
-    "end_at",
-  ]);
-  return resolveRecordTimestamp(
-    observedAtRaw ? { ...entry, observedAtRaw } : entry,
-    context,
-    sourceProviderSlug,
+  timestampShape: JunctionSparseBodyTimeseriesDescriptor["timestampShape"],
+): (ReturnType<typeof resolveRecordTimestamp> & { intervalEndAt?: string }) | null {
+  const observedAtRaw = firstStringFromPaths(
+    entry,
+    timestampShape === "instant" ? ["timestamp"] : ["start"],
   );
+  const timestampSemantics = inferTimestampSemantics(observedAtRaw);
+  const occurredAt = resolveSafeTimestamp(observedAtRaw, sourceProviderSlug);
+  if (
+    !observedAtRaw
+    || !occurredAt
+    || (timestampSemantics !== "utc" && timestampSemantics !== "offset")
+  ) {
+    return null;
+  }
+
+  let intervalEndAt: string | undefined;
+  if (timestampShape === "interval") {
+    const endRaw = firstStringFromPaths(entry, ["end"]);
+    const endSemantics = inferTimestampSemantics(endRaw);
+    intervalEndAt = resolveSafeTimestamp(endRaw, sourceProviderSlug);
+    if (
+      !endRaw
+      || !intervalEndAt
+      || (endSemantics !== "utc" && endSemantics !== "offset")
+      || Date.parse(intervalEndAt) <= Date.parse(occurredAt)
+    ) {
+      return null;
+    }
+  }
+
+  const recordedAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, ["recordedAt", "recorded_at", "updatedAt", "updated_at"]),
+    sourceProviderSlug,
+  ) ?? occurredAt;
+  return stripUndefined({
+    occurredAt,
+    recordedAt,
+    dayKey: resolveJunctionLocalDayKey(
+      entry,
+      observedAtRaw,
+      occurredAt,
+      timestampSemantics,
+    ),
+    observedAtRaw,
+    timestampSemantics,
+    intervalEndAt,
+  });
 }
 
 function pushJunctionNoteTags(

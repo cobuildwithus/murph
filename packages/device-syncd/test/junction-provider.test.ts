@@ -9,6 +9,7 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { test } from "vitest";
@@ -490,12 +491,17 @@ test("Junction omitted timeseries config defaults to compact resources only", as
               status: "connected",
               resource_availability: Object.fromEntries([
                 "activity",
-                ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+                ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES.map((resource) =>
+                  resource === "weight"
+                    ? "body_weight"
+                    : resource === "fat"
+                      ? "body_fat"
+                      : resource
+                ),
                 "heartrate",
                 "steps",
                 "distance",
                 "calories_active",
-                "weight",
               ].map((resource) => [resource, true])),
             },
           ],
@@ -508,16 +514,30 @@ test("Junction omitted timeseries config defaults to compact resources only", as
 
       const timeseriesResource = new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
       if (timeseriesResource) {
+        const canonicalResource = timeseriesResource === "body_weight"
+          ? "weight"
+          : timeseriesResource === "body_fat"
+            ? "fat"
+            : timeseriesResource;
         assert.ok(
-          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(canonicalResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
+        const unit = timeseriesResource === "body_fat" || timeseriesResource === "blood_oxygen"
+          ? "%"
+          : timeseriesResource === "body_weight" || timeseriesResource === "lean_body_mass"
+            ? "kg"
+            : timeseriesResource === "body_mass_index"
+              ? "index"
+              : timeseriesResource === "waist_circumference"
+                ? "cm"
+                : "score";
         return createJsonResponse({
           groups: {
             garmin: [{
               data: [{
                 timestamp: "2026-04-02T12:00:00.000Z",
-                unit: timeseriesResource === "blood_oxygen" ? "%" : "score",
+                unit,
                 value: timeseriesResource === "blood_oxygen" ? 97 : 24,
               }],
               source: { provider: "garmin", type: "watch" },
@@ -549,7 +569,12 @@ test("Junction omitted timeseries config defaults to compact resources only", as
 
   const requestedTimeseriesResources = requests
     .map((url) => new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1])
-    .filter((resource): resource is string => Boolean(resource));
+    .filter((resource): resource is string => Boolean(resource))
+    .map((resource) => resource === "body_weight"
+      ? "weight"
+      : resource === "body_fat"
+        ? "fat"
+        : resource);
 
   assert.deepEqual(
     [...new Set(requestedTimeseriesResources)].sort(),
@@ -560,31 +585,29 @@ test("Junction omitted timeseries config defaults to compact resources only", as
       !url.includes("heartrate") &&
       !url.includes("steps") &&
       !url.includes("distance") &&
-      !url.includes("calories_active") &&
-      !url.includes("weight")
+      !url.includes("calories_active")
     ),
     true,
   );
   assert.equal(importedSnapshots.length, 1);
 });
 
-test("Junction explicitly configured sparse body resources fetch only documented endpoints", async () => {
+test("Junction configured sparse body resources fetch only documented endpoints", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
-  const bodyResources = [
-    "weight",
-    "fat",
-    "body_mass_index",
-    "lean_body_mass",
-    "waist_circumference",
-  ];
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
     clientUserIdSecret: "junction-client-user-id-secret",
     environment: "sandbox",
     region: "us",
     summaryResources: ["activity"],
-    timeseriesResources: bodyResources,
+    timeseriesResources: [
+      "weight",
+      "fat",
+      "body_mass_index",
+      "lean_body_mass",
+      "waist_circumference",
+    ],
     fetchImpl: async (input) => {
       const url = readUrl(input);
       requests.push(url);
@@ -699,16 +722,30 @@ test("Junction known dense programmatic timeseries config falls back to compact 
 
       const timeseriesResource = new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
       if (timeseriesResource) {
+        const canonicalResource = timeseriesResource === "body_weight"
+          ? "weight"
+          : timeseriesResource === "body_fat"
+            ? "fat"
+            : timeseriesResource;
         assert.ok(
-          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(canonicalResource),
           `Unexpected default timeseries resource: ${timeseriesResource}`,
         );
+        const unit = timeseriesResource === "body_fat" || timeseriesResource === "blood_oxygen"
+          ? "%"
+          : timeseriesResource === "body_weight" || timeseriesResource === "lean_body_mass"
+            ? "kg"
+            : timeseriesResource === "body_mass_index"
+              ? "index"
+              : timeseriesResource === "waist_circumference"
+                ? "cm"
+                : "count";
         return createJsonResponse({
           groups: {
             garmin: [{
               data: [{
                 timestamp: "2026-04-02T12:00:00.000Z",
-                unit: timeseriesResource === "blood_oxygen" ? "%" : "count",
+                unit,
                 value: timeseriesResource === "blood_oxygen" ? 97 : 24,
               }],
               source: { provider: "garmin", type: "watch" },
@@ -740,7 +777,12 @@ test("Junction known dense programmatic timeseries config falls back to compact 
 
   const requestedTimeseriesResources = requests
     .map((url) => new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1])
-    .filter((resource): resource is string => Boolean(resource));
+    .filter((resource): resource is string => Boolean(resource))
+    .map((resource) => resource === "body_weight"
+      ? "weight"
+      : resource === "body_fat"
+        ? "fat"
+        : resource);
 
   assert.deepEqual(
     [...new Set(requestedTimeseriesResources)].sort(),
@@ -751,8 +793,7 @@ test("Junction known dense programmatic timeseries config falls back to compact 
       !url.includes("heartrate") &&
       !url.includes("steps") &&
       !url.includes("distance") &&
-      !url.includes("calories_active") &&
-      !url.includes("weight")
+      !url.includes("calories_active")
     ),
     true,
   );
@@ -13909,4 +13950,149 @@ test("Junction import accountId is stable across local account row re-registrati
   assert.ok(importedAccountIds.length >= 2, "expected reconcile runs to import snapshots");
   assert.match(importedAccountIds[0] ?? "", /^jxn_acct_[a-f0-9]{32}$/u);
   assert.equal(new Set(importedAccountIds).size, 1);
+});
+
+test("Junction sparse-history scheduling caps global fanout and rotates across every pair", () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      reconcileIntervalMs: 60 * 60_000,
+      timeseriesResources: [...JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES],
+    },
+  );
+  const executor = requireValue(provider.jobExecutor);
+  const availability = Object.fromEntries(
+    JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.map((resource) => [resource, true]),
+  );
+  const sources = JUNCTION_CONNECT_SOURCE_TARGETS.map((target) => ({
+    sourceProviderSlug: target.providerSlug,
+    displayName: null,
+    status: "connected" as const,
+    resourceCount: JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.length,
+    resourceAvailabilitySummary: availability,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    firstSeenAt: "2026-04-03T00:00:00.000Z",
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    lastDataAt: null,
+  }));
+  const account = createStoredAccount({ sources });
+  const observedPairs = new Set<string>();
+  const candidateCount =
+    JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.length * sources.length;
+  const pageCount = Math.ceil(candidateCount / 8);
+  const baseAt = Date.parse("2026-08-11T00:00:00.000Z");
+  const scheduledPageSizes: number[] = [];
+
+  for (let offset = 0; offset < pageCount; offset += 1) {
+    const now = new Date(baseAt + offset * 60 * 60_000).toISOString();
+    const scheduled = executor.createScheduledJobs?.(account, now);
+    const historyJobs = (scheduled?.jobs ?? []).filter((job) =>
+      job.kind === "resource" && job.payload?.historicalBackfill === true
+    );
+    scheduledPageSizes.push(historyJobs.length);
+    assert.ok(historyJobs.length <= 8);
+    for (const job of historyJobs) {
+      observedPairs.add(`${job.payload?.resource}:${job.payload?.sourceProviderSlug}`);
+    }
+  }
+
+  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 33);
+  assert.equal(candidateCount, 495);
+  assert.equal(candidateCount % 8, 7);
+  assert.equal(scheduledPageSizes.filter((size) => size === 8).length, pageCount - 1);
+  assert.equal(scheduledPageSizes.filter((size) => size === 7).length, 1);
+  assert.equal(observedPairs.size, candidateCount);
+});
+
+test("Junction body-history continuation fetches one bounded 30-day window", async () => {
+  const timeseriesRequests: URL[] = [];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: ["weight"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-policy",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { weight: true },
+          }],
+        });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/body_weight/grouped") {
+        timeseriesRequests.push(url);
+        return createJsonResponse({ groups: {} });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    },
+  });
+  const source = {
+    sourceProviderSlug: "garmin",
+    displayName: null,
+    status: "connected" as const,
+    resourceCount: 1,
+    resourceAvailabilitySummary: { weight: true },
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    firstSeenAt: "2026-04-03T00:00:00.000Z",
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    lastDataAt: null,
+  };
+  const storedAccount = createStoredAccount({ sources: [source] });
+  const scheduled = requireValue(provider.jobExecutor).createScheduledJobs?.(
+    storedAccount,
+    "2026-08-11T12:00:00.000Z",
+  );
+  const job = requireValue(
+    scheduled?.jobs.find((candidate) =>
+      candidate.kind === "resource" && candidate.payload?.resource === "weight"
+    ),
+  );
+  const historicalWindowStart = job.payload?.historicalWindowStart;
+  const historicalWindowEnd = job.payload?.windowEnd;
+  if (typeof historicalWindowStart !== "string" || typeof historicalWindowEnd !== "string") {
+    throw new TypeError("Expected a string sparse-history window.");
+  }
+  assert.equal(
+    (Date.parse(historicalWindowEnd) - Date.parse(historicalWindowStart))
+      / (24 * 60 * 60_000),
+    180,
+  );
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: [source] }),
+      now: "2026-08-11T12:00:00.000Z",
+    }),
+    {
+      ...createJob("resource", job.payload ?? {}),
+      dedupeKey: job.dedupeKey ?? null,
+    },
+  );
+
+  assert.equal(timeseriesRequests.length, 1);
+  const request = requireValue(timeseriesRequests[0]);
+  const requestStart = requireValue(request.searchParams.get("start_date"));
+  const requestEnd = requireValue(request.searchParams.get("end_date"));
+  assert.equal(
+    (Date.parse(requestEnd) - Date.parse(requestStart)) / (24 * 60 * 60_000),
+    30,
+  );
+  const continuation = requireValue(
+    result.scheduledJobs?.find((candidate) =>
+      candidate.kind === "resource" && candidate.payload?.resource === "weight"
+    ),
+  );
+  assert.equal(continuation.payload?.windowStart, requestEnd);
+  assert.equal(continuation.payload?.windowEnd, job.payload?.windowEnd);
 });

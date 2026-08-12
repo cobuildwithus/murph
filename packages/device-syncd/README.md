@@ -37,9 +37,18 @@ Current providers:
 - Junction fetches the sparse `note` timeseries by default. Oura note tags become
   completed intervention events for Personal Patterns. Free-text note values are
   dropped before raw snapshot and compact evidence retention.
-- Junction recognizes sparse body weight, fat, BMI, lean-mass, and waist resources
-  for policy-controlled polling. Each reading becomes one compact canonical fact;
-  full provider response arrays are never retained.
+- Junction resource admission derives from the static 57-resource policy in
+  `@murphai/contracts`. Sparse supported VO2 max, temperature, caffeine,
+  one-minute heart-rate recovery, sleep-breathing-disturbance, and AFib-burden
+  resources use the existing per-source history owner for a 180-day initial
+  scan. That scan advances in one bounded 30-day provider window per resource
+  job, schedules at most eight resource/source pairs per reconcile pass, and
+  retains only the existing compact daily facts. It never persists full
+  provider timeseries arrays or emits canonical sample rows.
+- Sparse body weight, fat, BMI, lean-mass, and waist resources are admitted by
+  that policy with the same 180-day, 30-day-chunk history boundary. Each reading
+  becomes one compact canonical fact; full provider response arrays are never
+  retained.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use

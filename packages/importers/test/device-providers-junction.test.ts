@@ -3372,6 +3372,7 @@ test("Junction normalizer lands sparse body readings as compact sample-grain obs
       }],
       body_mass_index: [{
         source: { provider: "withings", type: "scale", id: "scale-primary" },
+        timestamp: "2026-04-22T09:30:00-05:00",
         start: "2026-04-22T08:05:00-05:00",
         end: "2026-04-22T08:06:00-05:00",
         unit: "index",
@@ -3426,6 +3427,10 @@ test("Junction normalizer lands sparse body readings as compact sample-grain obs
     assert.ok(JSON.stringify(artifacts[0]?.content).length < 1024);
     assert.equal(Array.isArray(artifacts[0]?.content), false);
   }
+  assert.match(
+    JSON.stringify(findJunctionBodyReadingArtifacts(payload, "body-mass-index")[0]?.content),
+    /"occurredAt":"2026-04-22T13:05:00.000Z".*"endAt":"2026-04-22T13:06:00.000Z"/u,
+  );
   const evidenceText = JSON.stringify(payload.evidenceParts);
   assert.doesNotMatch(evidenceText, /"data"|"groups"|"samples"/u);
   assert.match(evidenceText, /"schema":"junction\.body_measurement_reading\.v1"/u);
@@ -3470,6 +3475,59 @@ test("Junction sparse body readings keep stable identity across corrected values
   assert.doesNotMatch(JSON.stringify(invalid.evidenceParts), /"value":/u);
 });
 
+test("Junction sparse body readings reject fallback timestamps, invalid intervals, and unit aliases", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-23T12:00:00.000Z",
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+    timeseries: {
+      body_weight: [
+        { sourceProviderSlug: "withings", timestamp: "not-a-timestamp", unit: "kg", value: 81.2 },
+        { sourceProviderSlug: "withings", timestamp: "2026-04-22T08:00:00", unit: "kg", value: 81.2 },
+        { sourceProviderSlug: "withings", time: "2026-04-22T08:00:00Z", unit: "kg", value: 81.2 },
+        { sourceProviderSlug: "withings", timestamp: "2026-04-22T08:00:00Z", unit: "kilograms", value: 81.2 },
+      ],
+      body_fat: [
+        { sourceProviderSlug: "withings", timestamp: "2026-04-22", unit: "%", value: 18.4 },
+        { sourceProviderSlug: "withings", timestamp: "2026-04-22T08:00:00Z", unit: "percent", value: 18.4 },
+      ],
+      body_mass_index: [
+        {
+          sourceProviderSlug: "withings",
+          timestamp: "2026-04-22T08:00:00Z",
+          unit: "index",
+          value: 23.7,
+        },
+        {
+          sourceProviderSlug: "withings",
+          start: "2026-04-22T08:00:00Z",
+          end: "2026-04-22T08:01:00Z",
+          unit: "kg_m2",
+          value: 23.7,
+        },
+      ],
+      lean_body_mass: [{
+        sourceProviderSlug: "withings",
+        start: "2026-04-22T08:00:00Z",
+        end: "2026-04-22T08:00:00Z",
+        unit: "kg",
+        value: 66.3,
+      }],
+      waist_circumference: [{
+        sourceProviderSlug: "withings",
+        start: "2026-04-22T08:00:00Z",
+        end: "2026-04-22T08:01:00Z",
+        unit: "centimeters",
+        value: 84.6,
+      }],
+    },
+  });
+
+  assert.equal(payload.events?.length ?? 0, 0);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /"value":/u);
+});
+
 test("Junction sparse body readings pass the canonical device import contract", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-body-reading-import");
   try {
@@ -3478,7 +3536,7 @@ test("Junction sparse body readings pass the canonical device import contract", 
       createdAt: "2026-04-22T00:00:00.000Z",
       timezone: "UTC",
     });
-    const snapshot = {
+    const snapshot = (value: number) => ({
       importedAt: "2026-04-23T12:00:00.000Z",
       timeseries: {
         body_fat: [{
@@ -3487,16 +3545,25 @@ test("Junction sparse body readings pass the canonical device import contract", 
           sourceInstanceId: "primary",
           timestamp: "2026-04-22T08:05:00Z",
           unit: "%",
-          value: 18.4,
+          value,
         }],
       },
-    };
+    });
 
     const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
-      { provider: "junction", snapshot, vaultRoot },
+      { provider: "junction", snapshot: snapshot(18.4), vaultRoot },
+      { corePort: coreRuntime },
+    );
+    const corrected = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", snapshot: snapshot(18.1), vaultRoot },
+      { corePort: coreRuntime },
+    );
+    const replay = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      { provider: "junction", snapshot: snapshot(18.1), vaultRoot },
       { corePort: coreRuntime },
     );
     const event = result.events.find((candidate) => candidate.kind === "observation");
+    const correctedEvent = corrected.events.find((candidate) => candidate.kind === "observation");
     if (result.ingestId === null) {
       throw new Error("expected a persisted body-composition ingest");
     }
@@ -3511,6 +3578,29 @@ test("Junction sparse body readings pass the canonical device import contract", 
     assert.equal(event.observationGrain, "sample");
     assert.equal(event.unit, "%");
     assert.equal(event.value, 18.4);
+    assert.equal(correctedEvent?.id, event.id);
+    assert.equal(correctedEvent?.kind, "observation");
+    if (correctedEvent?.kind !== "observation") {
+      throw new Error("expected a corrected body-composition observation");
+    }
+    assert.equal(correctedEvent.value, 18.1);
+    assert.equal(eventRevisionFromLifecycle(correctedEvent.lifecycle), 2);
+    assert.equal(replay.applied, false);
+    assert.equal(
+      replay.events.find((candidate) => candidate.kind === "observation")?.id,
+      event.id,
+    );
+    const eventRecords = (
+      await Promise.all(
+        [...new Set([
+          ...result.eventShardPaths,
+          ...corrected.eventShardPaths,
+          ...replay.eventShardPaths,
+        ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+      )
+    ).flat().filter((record) => record.id === event.id);
+    assert.equal(eventRecords.length, 2);
+    assert.equal(storedObservationValue(latestLiveRecords(eventRecords)[0]), 18.1);
     assert.equal(result.samples.length, 0);
     assert.ok(ingest?.record.parts.some((part) =>
       part.role.startsWith("junction-timeseries-reading-fat:")
@@ -4355,6 +4445,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "hrv",
     "respiratory_rate",
     "vo2_max",
+    "weight",
     "body_temperature_delta",
     "body_temperature",
     "basal_body_temperature",
@@ -4367,22 +4458,19 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "glucose",
     "blood_pressure",
     "note",
-  ]);
-  assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
-  assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], [
-    "weight",
-    "fat",
     "body_mass_index",
+    "fat",
     "lean_body_mass",
     "waist_circumference",
   ]);
+  assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
+  assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);
   assert.deepEqual([...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_ALLOWED_SUMMARY_RESOURCES], [
     ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   ]);
   assert.deepEqual([...JUNCTION_ALLOWED_TIMESERIES_RESOURCES], [
     ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-    ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   ]);
 
   const payload = normalizeJunctionSnapshot({
@@ -4405,7 +4493,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
   assert.deepEqual(payload.provenance?.summaryResources, JUNCTION_DEFAULT_SUMMARY_RESOURCES);
   assert.deepEqual(payload.provenance?.timeseriesResources, JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
   assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("heartrate"), false);
-  assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("weight"), false);
+  assert.equal((JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes("weight"), true);
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-profile"));
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-menstrual-cycle"));
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-electrocardiogram"));

@@ -1,98 +1,27 @@
-import { JUNCTION_DEFAULT_TIMESERIES_RESOURCES } from "@murphai/contracts";
+import {
+  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_SUMMARY_RESOURCES,
+  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
+  type JunctionTimeseriesResourceName,
+} from "@murphai/contracts";
 
-export { JUNCTION_DEFAULT_TIMESERIES_RESOURCES };
+export {
+  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
+  JUNCTION_OPT_IN_SUMMARY_RESOURCES,
+  JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
+  JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
+};
 
-// Every default summary resource is sparse event/daily-grain data: profile is
-// a single current snapshot per source, menstrual_cycle is ~13 cycles per
-// member-year with small dated sub-arrays, and electrocardiogram is
-// dozens-to-hundreds of sub-KB recording summaries per member-year (the raw
-// electrocardiogram_voltage waveform stays excluded entirely).
-export const JUNCTION_DEFAULT_SUMMARY_RESOURCES = Object.freeze([
-  "activity",
-  "sleep",
-  "sleep_cycle",
-  "workouts",
-  "body",
-  "meal",
-  "profile",
-  "menstrual_cycle",
-  "electrocardiogram",
-] as const);
-
-export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
-  "steps",
-  "distance",
-  "calories_active",
-  "heartrate",
-  "hrv",
-  "respiratory_rate",
-  "blood_oxygen",
-  "stress_level",
-  "vo2_max",
-  "weight",
-  "fat",
-  "body_mass_index",
-  "lean_body_mass",
-  "waist_circumference",
-  "body_temperature_delta",
-  "body_temperature",
-  "basal_body_temperature",
-  "caffeine",
-  "water",
-  "mindfulness_minutes",
-  "heart_rate_recovery_one_minute",
-  "sleep_breathing_disturbance",
-  "afib_burden",
-  "glucose",
-  "blood_pressure",
-  "note",
-] as const);
-
-export type JunctionTimeseriesResource =
-  (typeof JUNCTION_KNOWN_TIMESERIES_RESOURCES)[number];
-
-// Numeric default timeseries resources normalize through the compact
-// daily-aggregate path: one ~430-byte `junction.timeseries_daily_aggregate.v1` raw
-// artifact per day per resource (measured on a live member's blood_oxygen
-// artifacts), so each default costs roughly 160 KB of raw evidence per
-// member-year regardless of intraday sample density: glucose (CGM, up to
-// 288 samples/day, ~10-15 MB/yr raw) is the canonical example of a stream
-// that must only land through this aggregate seam. `blood_pressure` is the
-// paired-shape exception: readings are sparse (10s-100s/yr), so each reading
-// lands as one `measurement` event plus one compact ~350-byte
-// `junction.blood_pressure_reading.v1` artifact. `note` is another sparse
-// exception: each tag lands as a completed intervention, while free text is
-// dropped. Intraday `heartrate` and
-// `hypnogram` stay deliberately excluded from defaults: their raw sample
-// streams are unbounded (thousands of samples per day) and the vault must
-// not accumulate giant raw timeseries dumps. Sleep-grain heart rate and
-// hypnogram detail already arrive through the `sleep`/`sleep_cycle` summary
-// resources.
-// Sparse body measurements are normalized as one compact canonical fact per
-// reading. The shared Junction resource-policy owner decides when they enter
-// default polling and historical backfill.
-export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
-  "weight",
-  "fat",
-  "body_mass_index",
-  "lean_body_mass",
-  "waist_circumference",
-] as const);
-
-export const JUNCTION_OPT_IN_SUMMARY_RESOURCES = Object.freeze([] as const);
-
-export const JUNCTION_RAW_ONLY_SUMMARY_RESOURCES = Object.freeze([] as const);
-
-export const JUNCTION_ALLOWED_SUMMARY_RESOURCES = Object.freeze([
-  ...JUNCTION_DEFAULT_SUMMARY_RESOURCES,
-  ...JUNCTION_OPT_IN_SUMMARY_RESOURCES,
-  ...JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
-] as const);
-
-export const JUNCTION_ALLOWED_TIMESERIES_RESOURCES = Object.freeze([
-  ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-  ...JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
-] as const);
+export type JunctionTimeseriesResource = JunctionTimeseriesResourceName;
 
 export function normalizeJunctionRawIdentityKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
@@ -508,6 +437,8 @@ export function normalizeJunctionResourceName(value: unknown): string | null {
       return "stress_level";
     case "body_weight":
       return "weight";
+    case "body_fat":
+      return "fat";
     case "body_fat":
       return "fat";
     case "sleep_cycle":
