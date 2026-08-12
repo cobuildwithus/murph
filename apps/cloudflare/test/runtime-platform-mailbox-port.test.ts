@@ -15,6 +15,43 @@ const mailboxRequest = {
 };
 
 describe("createHostedWebMailboxPort", () => {
+  it("forwards an initial mailbox fetch abort and preserves its exact reason", async () => {
+    const fetchController = new AbortController();
+    const wakeReason = new Error("Foreground runtime wake interrupted mailbox fetch.");
+    let markFetchStarted: (() => void) | null = null;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const signal = init?.signal;
+      expect(signal).toBeTruthy();
+      markFetchStarted?.();
+      return await new Promise<Response>((_resolve, reject) => {
+        const abort = () => reject(signal?.reason);
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+    });
+    const mailboxPort = createHostedWebMailboxPort({
+      boundUserId: "member_fetch_abort",
+      fetchImpl: fetchImpl as typeof fetch,
+      timeoutMs: 30_000,
+      transport: { mode: "proxy" },
+    });
+
+    const fetchResult = mailboxPort.fetch(mailboxRequest, {
+      signal: fetchController.signal,
+    });
+    await fetchStarted;
+    fetchController.abort(wakeReason);
+
+    await expect(fetchResult).rejects.toBe(wakeReason);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("turns an explicit AI usage denial into an empty unchanged mailbox prefix", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       error: {

@@ -14,6 +14,10 @@ import {
   checkpointHostedRuntimeBridgeWebWorkspace as checkpointHostedRuntimeBridgeWebWorkspacePublic,
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
+  buildHostedDeviceSyncStatusPrompt as buildHostedDeviceSyncStatusPromptPublic,
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot as fetchCompleteHostedDeviceSyncRuntimeSnapshotPublic,
+} from "@murphai/assistant-runtime/hosted-device-sync-status";
+import {
   createHostedWorkspaceInvocationLease as createHostedWorkspaceInvocationLeasePublic,
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationPublic,
 } from "@murphai/assistant-runtime/hosted-invocation";
@@ -47,6 +51,10 @@ import {
 import {
   checkpointHostedRuntimeBridgeWebWorkspace as checkpointHostedRuntimeBridgeWebWorkspaceDirect,
 } from "../src/hosted-checkpoint-bridge.ts";
+import {
+  buildHostedDeviceSyncStatusPrompt as buildHostedDeviceSyncStatusPromptDirect,
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot as fetchCompleteHostedDeviceSyncRuntimeSnapshotDirect,
+} from "../src/hosted-device-sync-status.ts";
 import {
   checkpointHostedRuntimeBridgeWebWorkspace as checkpointHostedRuntimeBridgeWebWorkspaceSource,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
@@ -87,6 +95,7 @@ const expectedAssistantRuntimePublicExportKeys = [
   ".",
   "./hosted-assistant-bootstrap",
   "./hosted-checkpoint-bridge",
+  "./hosted-device-sync-status",
   "./hosted-email",
   "./hosted-invocation",
   "./hosted-invocation-testkit",
@@ -236,6 +245,17 @@ test("hosted-invocation subpath omits checkpoint bridge helpers", async () => {
   assert.equal("checkpointHostedRuntimeBridgeWebWorkspace" in hostedInvocation, false);
   assert.equal("checkpointHostedRuntimeBridgeWorkspace" in hostedInvocation, false);
   assert.equal("createHostedWorkspaceRuntimeBridgeJobOptions" in hostedInvocation, false);
+});
+
+test("hosted-device-sync-status subpath stays wired to the existing status owners", () => {
+  assert.equal(
+    buildHostedDeviceSyncStatusPromptPublic,
+    buildHostedDeviceSyncStatusPromptDirect,
+  );
+  assert.equal(
+    fetchCompleteHostedDeviceSyncRuntimeSnapshotPublic,
+    fetchCompleteHostedDeviceSyncRuntimeSnapshotDirect,
+  );
 });
 
 test("hosted-invocation-testkit subpath export stays wired to bridge option construction", () => {

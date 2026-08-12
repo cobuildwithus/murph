@@ -30,6 +30,9 @@ import {
 import {
   bindAssistantResumeStateToThreadCompatibility,
 } from './codex-resume-binding.js'
+import {
+  reconcileAssistantPrivateCompletionContinuityForSession,
+} from './private-completion-continuity.js'
 import { normalizeNullableString } from './shared.js'
 
 export function buildResolveAssistantSessionInput(
@@ -197,41 +200,111 @@ export async function resolveAssistantSessionForMessage(input: {
       normalizeAssistantExecutionContext(input.message.executionContext).hosted
         ?.defaultTarget ?? null,
     )
-  const resolved = await resolveAssistantSessionForMessageInput({
+  const sessionResolution = await resolveAssistantSessionForMessageInput({
     hostedDefaultTarget,
     messageOverride,
     sessionInput,
   })
+  const resolved = sessionResolution.resolved
   const effectiveTarget = resolveEffectiveTargetForResolvedSession({
     hostedDefaultTarget,
     messageOverride,
     resolved,
   })
+  const privateCompletionContinuitySessionId =
+    sessionInput.threadIsDirect === true
+      ? sessionResolution.hostedDefaultSessionId
+      : null
+  const effectiveResolved = effectiveTarget
+    ? applyEffectiveTargetToResolvedSession({
+        ...resolved,
+        privateCompletionContinuitySessionId,
+      }, effectiveTarget)
+    : {
+        ...resolved,
+        privateCompletionContinuitySessionId,
+      }
+  const privateCompletionAdmission =
+    sessionInput.threadIsDirect === true
+      ? resolveAssistantPrivateCompletionAdmission(input.message)
+      : null
+  if (!privateCompletionAdmission) {
+    return effectiveResolved
+  }
+  const reconciled = {
+    ...effectiveResolved,
+    session: await reconcileAssistantPrivateCompletionContinuityForSession({
+      allowUnbound: privateCompletionAdmission === 'allow-unbound',
+      sessionId: effectiveResolved.session.sessionId,
+      vault: input.message.vault,
+    }),
+  }
   return effectiveTarget
-    ? applyEffectiveTargetToResolvedSession(resolved, effectiveTarget)
-    : resolved
+    ? applyEffectiveTargetToResolvedSession(reconciled, effectiveTarget)
+    : reconciled
+}
+
+function resolveAssistantPrivateCompletionAdmission(
+  input: AssistantMessageInput,
+): 'allow-unbound' | 'bound-only' | null {
+  if (
+    input.turnTrigger === undefined
+    || input.turnTrigger === null
+    || input.turnTrigger === 'manual-ask'
+  ) {
+    return 'allow-unbound'
+  }
+  if (
+    input.turnTrigger === 'automation-cron'
+    || input.turnTrigger === 'manual-deliver'
+  ) {
+    return 'bound-only'
+  }
+  if (input.turnTrigger !== 'automation-auto-reply') {
+    return null
+  }
+  const initialInputs = input.acceptedTurnInput?.initialInputs ?? []
+  return initialInputs.some((item) => item.source === 'assistant-input')
+    ? 'allow-unbound'
+    : 'bound-only'
 }
 
 async function resolveAssistantSessionForMessageInput(input: {
   hostedDefaultTarget: AssistantModelTarget | null
   messageOverride: AssistantProviderConfigInput | null
   sessionInput: ResolveAssistantSessionInput
-}): Promise<ResolvedAssistantSession> {
+}): Promise<{
+  hostedDefaultSessionId: string | null
+  resolved: ResolvedAssistantSession
+}> {
   if (!input.messageOverride) {
-    return await resolveAssistantSession(input.sessionInput)
+    const resolved = await resolveAssistantSession(input.sessionInput)
+    return {
+      hostedDefaultSessionId: null,
+      resolved,
+    }
   }
 
   try {
-    return await resolveAssistantSession(
+    const resolved = await resolveAssistantSession(
       buildAssistantSessionLookupInputForMessageOverride(input),
     )
+    return {
+      hostedDefaultSessionId: input.hostedDefaultTarget
+        ? resolved.session.sessionId
+        : null,
+      resolved,
+    }
   } catch (error) {
     if (!isAssistantSessionNotFoundError(error)) {
       throw error
     }
   }
 
-  return await resolveAssistantSession(input.sessionInput)
+  return {
+    hostedDefaultSessionId: null,
+    resolved: await resolveAssistantSession(input.sessionInput),
+  }
 }
 
 function buildAssistantSessionLookupInputForMessageOverride(input: {

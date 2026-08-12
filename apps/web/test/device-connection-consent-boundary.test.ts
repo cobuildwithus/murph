@@ -105,14 +105,14 @@ test("stale launch-document versions do not stop chat-adjacent companion actions
   );
 });
 
-test("Strava stays disabled as a separate provider product gate", () => {
+test("Strava and modern Dexcom stay disabled as provider product gates", () => {
   const targetSource = readSource(
     "../../packages/device-syncd/src/config/connect-targets.ts",
   );
 
   assert.match(
     targetSource,
-    /DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set\(\["strava"\]\)/u,
+    /DISABLED_DEVICE_CONNECT_SOURCE_IDS = new Set\(\["strava", "dexcom"\]\)/u,
   );
   assert.match(
     targetSource,

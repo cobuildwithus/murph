@@ -1087,6 +1087,7 @@ model HostedMailboxItem {
   @@index([userId, expiresAt])
   @@index([expiresAt, id])
   @@index([createdAt, id])
+  @@index([consumedAt, id], map: "hosted_mailbox_item_consumed_at_id_idx")
   @@map("hosted_mailbox_item")
 }
 
@@ -1131,6 +1132,7 @@ model HostedIngressLatencyTrace {
 
   @@unique([userId, mailboxItemId])
   @@index([source, acceptedAt])
+  @@index([source, assistantInputStagedAt], map: "hosted_ingress_latency_trace_source_staged_at_idx")
   @@index([source, providerStartAt])
   @@index([userId, acceptedAt])
   @@index([acceptedAt, id])
@@ -2091,6 +2093,7 @@ model HostedLinqDelivery {
   @@index([status, attemptedAt])
   @@index([linqChatLookupKey, attemptedAt])
   @@index([lastReceiptAt])
+  @@index([acceptedAt, id], map: "hosted_linq_delivery_accepted_at_id_idx")
   @@map("hosted_linq_delivery")
 }
 

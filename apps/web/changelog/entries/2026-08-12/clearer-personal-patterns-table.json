@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 100,
+  "item": {
+    "id": "clearer-personal-patterns-table",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer Personal Patterns on phones",
+    "summary": "Personal Patterns now shows distinct illustrations for activities and tags, while phone layouts keep three next-day outcomes visible without sideways scrolling.",
+    "details": "Unrecognized activities and custom tags use neutral illustrations. Pattern calculations and evidence thresholds are unchanged.",
+    "relevanceTags": ["patterns", "wearables", "mobile"],
+    "sourcePullRequests": [1692],
+    "tryIt": {
+      "href": "/patterns",
+      "label": "View your patterns"
+    }
+  }
+}
