@@ -26,7 +26,10 @@ import {
   type HostedCanonicalWritePort,
 } from '@murphai/core'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
-import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
+import type {
+  AssistantResponseCard,
+  CompactTableWorkoutResponseCardV1,
+} from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -170,6 +173,31 @@ const TRACKED_COMPACT_TABLE_RESPONSE_CARD: AssistantResponseCard = {
     kind: 'workout',
     entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
     snapshotAt: '2026-08-04T21:30:00.000Z',
+  },
+}
+const OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD:
+  CompactTableWorkoutResponseCardV1 = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Full workout recovery',
+  subtitle: null,
+  footer: 'Reply with the exercise, set, and result to log or correct it.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: Array.from({ length: 16 }, (_, exerciseIndex) => ({
+      name: `Capacity exercise ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 16 }, (_, setIndex) => ({
+        status: 'pending',
+        target: `Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        actual: null,
+      })),
+    })),
   },
 }
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
@@ -20507,6 +20535,37 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe(
       'Strength session\n\nBench press: Set 1: 185 lb × 8',
     )
+    expect(result.finalMessage).not.toContain('evt_')
+    expect(result.transcriptMessage).toContain(
+      '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
+    )
+  })
+
+  it('renders every semantic workout set from trusted state when the card envelope is too large', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
+        expectedText:
+          'workout card envelope too large; full text recovery selected',
+        id: 871,
+        kind: 'attach-response-card',
+      },
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseCard).toBeNull()
+    expect(result.responseMedia).toEqual([])
+    expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.finalMessage).not.toMatch(/delete|merge|shorten|simplify/iu)
+    for (let exerciseIndex = 0; exerciseIndex < 16; exerciseIndex += 1) {
+      expect(result.finalMessage).toContain(
+        `Capacity exercise ${exerciseIndex + 1}:`,
+      )
+      for (let setIndex = 0; setIndex < 16; setIndex += 1) {
+        expect(result.finalMessage).toContain(
+          `set ${setIndex + 1}: pending; target Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        )
+      }
+    }
     expect(result.finalMessage).not.toContain('evt_')
     expect(result.transcriptMessage).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',

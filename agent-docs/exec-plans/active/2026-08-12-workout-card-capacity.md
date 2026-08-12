@@ -95,6 +95,17 @@ Updated: 2026-08-12
 - Put the no-size-guess rule in the routed tracked-workout skill and response
   card tool description rather than expanding the already budget-capped
   always-on prompt kernel.
+- ReviewGPT round 1 proved that transport-size rejection happened before the
+  trusted renderer could retain semantic workout state. Separate semantic
+  workout validation from measured envelope admission at the existing tool
+  boundary; only a semantically valid oversize workout enters request-local
+  text recovery, while malformed input retains the ordinary validation error.
+- The unchanged V4 discriminator does not remove strict-reader rollout floors.
+  Release the native reader, then Web, then the Worker and runner together; once
+  an expanded V4 card is sent or persisted, recover by forward fix and explicit
+  quarantine restoration rather than rollback below those reader versions.
+- Defer the public changelog fragment until producer enablement, after the iOS
+  reader and all backend reader floors are live and production smoke passes.
 
 ## Verification
 
@@ -104,9 +115,21 @@ Updated: 2026-08-12
 - Expected outcomes: synthetic large workouts encode and render completely
   within the supported bound; over-bound input fails safely to complete text;
   long expanded cards scroll without clipping; all changed-surface checks pass.
-- Completed local proof so far: contract tests (9/9), response-card encoding
-  tests (10/10), assistant prompt/tool tests (94/94), and all three affected
-  package typechecks pass. XcodeGen and SwiftFormat lint pass. Three isolated
-  Xcode attempts stalled before compiling the target while waiting for build
-  workers or package loading; each session-owned command was interrupted, so
-  simulator tests and rendered evidence remain an explicit local blocker.
+- Completed local proof so far: combined contract, tool, assistant app-server,
+  local outbox, hosted side-effect, and Web static-route suite passes (408/408),
+  including literal 16×16 bounds, trusted text recovery for a real oversized
+  semantic workout, and final-exercise retention through every strict backend
+  reader. Typecheck passes for contracts, operator config, assistant engine,
+  hosted execution, and hosted Web. XcodeGen and SwiftFormat lint pass. Direct
+  simulator compilation and render of the exact production iOS view files
+  proves the compact 11×3 transcript state. Repository Xcode attempts still
+  stall before target compilation while waiting for build workers or package
+  loading; each session-owned command was interrupted, so the ordinary Xcode
+  build/test and physical Messages journey remain explicit release blockers.
+- Preliminary ReviewGPT returned findings. Its attached test-only 16×16 boundary
+  patch was inspected, applied, and verified; its semantic-recovery finding was
+  reproduced and fixed. Final ReviewGPT round 1 independently found the same
+  recovery gap plus the undisclosed Web/outbox/hosted rollout floor and premature
+  changelog timing. All three are accepted and addressed on the remediation
+  candidate. iOS ReviewGPT round 1 passed the exact screenshot-bearing head with
+  no source-level finding.

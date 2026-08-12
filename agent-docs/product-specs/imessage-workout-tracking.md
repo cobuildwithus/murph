@@ -110,13 +110,25 @@ Finish branches before the active-only set preflight. The assistant invokes the 
 
 ## Rollout
 
-Deploy the native schema-version-4 reader first, the shared Web image route
-second, and the Worker and runner producer last. Older app versions retain
+For a new V4 workout or an expansion of V4's strict bounds, deploy the native
+reader first, the shared Web image route second, and the Worker and runner
+producer last. Older app versions retain
 truthful captions and the static image but do not provide the drill-down workout
 interface. Keep the Web route available while any sent image URL may still be
 fetched.
 
-The backend also has a persisted-state compatibility floor. Deploy V4-capable Worker and runner bundles before any V4 card can be emitted. The accepted outbox intent and hosted delivery side effect both persist the full response card; after the first V4-bearing record exists, those bundle versions are the rollback floor. A warm older bundle must not process that state because its strict parser rejects the workout branch, and the local runner can quarantine the pending intent out of the retry inventory. Recovery is a coordinated forward fix or explicit restoration of the quarantined intent after the compatible bundle is live, not rollback below the floor. Focused local-outbox and hosted-side-effect round-trip tests pin both persisted owners.
+The backend also has a persisted-state compatibility floor. Deploy a Worker and
+runner bundle that accepts the current V4 bounds before a card using those bounds
+can be emitted. The accepted outbox intent and hosted delivery side effect both
+persist the full response card; after the first V4-bearing record outside the
+prior reader bounds exists, those Web and bundle versions are the rollback
+floor. A warm older bundle must not process that state because its strict parser
+rejects the workout branch, and the local runner can quarantine the pending
+intent out of the retry inventory. Recovery is a coordinated forward fix or
+explicit restoration of the quarantined intent after the compatible bundle is
+live, not rollback below the floor. Focused static-route, local-outbox, and
+hosted-side-effect round-trip tests pin all three strict readers with the same
+expanded fixture shape.
 
 Static rollout also requires physical macOS and no-extension iPhone proof of the
 final balloon, image-failure behavior, accessibility behavior, and App Store

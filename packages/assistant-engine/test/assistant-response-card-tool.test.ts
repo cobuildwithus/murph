@@ -7,7 +7,10 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
-import type { AssistantResponseCard } from '@murphai/operator-config/assistant-response-cards'
+import type {
+  AssistantResponseCard,
+  CompactTableWorkoutResponseCardV1,
+} from '@murphai/operator-config/assistant-response-cards'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 
 import {
@@ -205,6 +208,31 @@ const REALISTIC_LATE_WORKOUT_CARD: AssistantResponseCard = {
           actual: isCompleted ? actual ?? null : null,
         }
       }),
+    })),
+  },
+}
+
+const OVERSIZED_WORKOUT_CARD: CompactTableWorkoutResponseCardV1 = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Full workout recovery',
+  subtitle: null,
+  footer: 'Reply with the exercise, set, and result to log or correct it.',
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: Array.from({ length: 16 }, (_, exerciseIndex) => ({
+      name: `Capacity exercise ${exerciseIndex + 1}`,
+      sets: Array.from({ length: 16 }, (_, setIndex) => ({
+        status: 'pending',
+        target: `Exercise ${exerciseIndex + 1} set ${setIndex + 1} target ${'x'.repeat(12)}`,
+        actual: null,
+      })),
     })),
   },
 }
@@ -890,6 +918,44 @@ describe('murph.attach_response_card', () => {
       },
     })).toMatchObject({
       kind: 'attach-response-card',
+    })
+  })
+
+  it('selects trusted full-text recovery only for a semantic workout that exceeds the envelope', async () => {
+    const request = readCardToolRequest({ card: OVERSIZED_WORKOUT_CARD })
+    expect(request).toEqual({
+      card: OVERSIZED_WORKOUT_CARD,
+      kind: 'response-card-envelope-too-large',
+    })
+    if (request === null) {
+      throw new TypeError('Expected an oversized workout card request.')
+    }
+
+    const result = await executeCardTool({ request })
+    expect(result).toMatchObject({
+      responseCardTextFallbackPatch: { card: OVERSIZED_WORKOUT_CARD },
+      rpcResult: {
+        contentItems: [{
+          text: 'workout card envelope too large; full text recovery selected',
+          type: 'inputText',
+        }],
+        success: true,
+      },
+    })
+    expect(result).not.toHaveProperty('responseCardPatch')
+
+    const invalidWorkout = {
+      ...OVERSIZED_WORKOUT_CARD,
+      workout: {
+        ...OVERSIZED_WORKOUT_CARD.workout,
+        exercises: Array.from({ length: 17 }, (_, exerciseIndex) => ({
+          name: `Invalid exercise ${exerciseIndex + 1}`,
+          sets: [{ status: 'pending', target: null, actual: null }],
+        })),
+      },
+    }
+    expect(readCardToolRequest({ card: invalidWorkout })).toMatchObject({
+      kind: 'invalid-response-card-arguments',
     })
   })
 

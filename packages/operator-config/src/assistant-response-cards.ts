@@ -13,6 +13,7 @@ import {
   challengeStandingsResponseCardV1Schema,
   compactTableCardV1Bounds,
   compactTableResponseCardV1Schema,
+  compactTableWorkoutSemanticResponseCardV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
   exerciseRoutineResponseCardV1Schema,
@@ -27,6 +28,7 @@ import {
   type ChallengeStandingsResponseCardV1,
   type CompactTableGenericResponseCardV1,
   type CompactTableResponseCardV1,
+  type CompactTableWorkoutResponseCardV1,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
@@ -159,6 +161,9 @@ export const assistantResponseCardAuthoringSchema: z.ZodType<
   compactTableResponseCardV1Schema,
 ])
 
+export const assistantWorkoutResponseCardSemanticSchema =
+  compactTableWorkoutSemanticResponseCardV1Schema
+
 export const assistantResponseCardJsonSchema =
   createAssistantResponseCardJsonSchema()
 export const exerciseRoutineResponseCardJsonSchema =
@@ -184,6 +189,24 @@ export function renderAssistantResponseCardText(
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
+}
+
+export function renderAssistantWorkoutResponseCardText(
+  card: CompactTableWorkoutResponseCardV1,
+): string {
+  return renderCompactTableResponseCardText(
+    assistantWorkoutResponseCardSemanticSchema.parse(card),
+    false,
+  )
+}
+
+export function renderAssistantWorkoutResponseCardTranscriptText(
+  card: CompactTableWorkoutResponseCardV1,
+): string {
+  return renderCompactTableResponseCardText(
+    assistantWorkoutResponseCardSemanticSchema.parse(card),
+    true,
+  )
 }
 
 /**
