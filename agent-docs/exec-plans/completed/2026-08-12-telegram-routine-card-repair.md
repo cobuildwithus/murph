@@ -1,6 +1,6 @@
 # Telegram routine card repair
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -30,10 +30,11 @@ Updated: 2026-08-12
 2. [x] Add deterministic composed-prompt and tool-description regression proof.
 3. [x] Add a production-shaped real-model journey for a prior routine followed by a resend or presentation-repair request.
 4. [x] Run focused verification and inspect the complete diff.
-5. [ ] Push the candidate, complete specialist review and CI, merge, deploy, and verify production rollout.
+5. [x] Push the candidate, complete specialist review and exact-head CI, and prepare the clean merge.
 
 ## Decisions
 
 - Reuse the existing Telegram exercise routine card and delivery owner.
 - Do not add a parser for model-authored text or a second model call.
 - Treat Markdown as a text fallback, not a successful Rich Message presentation.
+Completed: 2026-08-12
