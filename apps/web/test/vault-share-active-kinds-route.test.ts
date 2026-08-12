@@ -39,6 +39,8 @@ import {
 	buildHostedVaultShareProjectionScopeKey,
 	HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
 	HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+	HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+	HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
 	hostedVaultShareProjectionKindToScope,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -74,7 +76,6 @@ function projectionWork(
 	return {
 		generations: projectionScopes.map((projectionScope, index) => ({
 			generationToken: generationToken(index),
-			hasUnmaterializedShare: false,
 			projectionScope,
 		})),
 		hasDeferredProjectionWork: false,
@@ -100,6 +101,15 @@ function withDeferredWorkCapability(search = ""): string {
 	params.set(
 		HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
 		HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+	);
+	return `?${params.toString()}`;
+}
+
+function withFirstMaterializationMode(search = ""): string {
+	const params = new URLSearchParams(withDeferredWorkCapability(search).slice(1));
+	params.set(
+		HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
+		HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
 	);
 	return `?${params.toString()}`;
 }
@@ -144,10 +154,10 @@ describe("vault-share active-kinds route", () => {
 		expect(mocks.requireHostedRuntimeActiveAccess).toHaveBeenCalledWith("member_grantor", {
 			prisma: { kind: "prisma" },
 		});
-		expect(mocks.readDeliverableHostedVaultShareProjectionScopeGenerations).toHaveBeenCalledWith({
+		expect(mocks.readDeliverableHostedVaultShareProjectionScopeGenerations).toHaveBeenCalledWith(expect.objectContaining({
 			grantorMemberId: "member_grantor",
 			prisma: { kind: "prisma" },
-		});
+		}));
 	});
 
 	it("filters new selector scopes from old runners that do not declare support", async () => {
@@ -334,7 +344,7 @@ describe("vault-share active-kinds route", () => {
 		});
 
 		const response = await activeKindsRoute.GET(buildRequest(
-			withDeferredWorkCapability(),
+			withFirstMaterializationMode(),
 		));
 
 		expect(response.status).toBe(200);
@@ -342,22 +352,25 @@ describe("vault-share active-kinds route", () => {
 			generationTokensByProjectionScopeKey: {},
 			hasDeferredProjectionWork: true,
 			projectionKinds: [],
+			projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
 			projectionScopes: [],
 		});
+		expect(
+			mocks.readDeliverableHostedVaultShareProjectionScopeGenerations,
+		).toHaveBeenCalledWith(expect.objectContaining({
+			projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+			supportedProjectionScopeKeys: expect.any(Set),
+		}));
 	});
 
 	it("defers a null-snapshot scope that the current runner cannot project", async () => {
 		mocks.readDeliverableHostedVaultShareProjectionScopeGenerations.mockResolvedValue({
-			generations: [{
-				generationToken: generationToken(0),
-				hasUnmaterializedShare: true,
-				projectionScope: ACTIVITY_SCOPE,
-			}],
-			hasDeferredProjectionWork: false,
+			generations: [],
+			hasDeferredProjectionWork: true,
 		});
 
 		const response = await activeKindsRoute.GET(buildRequest(
-			withDeferredWorkCapability(
+			withFirstMaterializationMode(
 				"?supportedProjectionScope=future-kind.v1.activityKind.running",
 			),
 		));
@@ -367,6 +380,7 @@ describe("vault-share active-kinds route", () => {
 			generationTokensByProjectionScopeKey: {},
 			hasDeferredProjectionWork: true,
 			projectionKinds: [],
+			projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
 			projectionScopes: [],
 		});
 	});

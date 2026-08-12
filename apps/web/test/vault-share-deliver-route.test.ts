@@ -26,6 +26,7 @@ import {
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
   HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -337,6 +338,26 @@ describe("vault-share deliver route", () => {
 			records: VALID_BODY.records,
 			share: SECOND_SHARE,
 		});
+  });
+
+  it("limits first-materialization delivery to exact null-snapshot shares", async () => {
+    const response = await deliverRoute.POST(buildRequest({
+      ...VALID_BODY,
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
+      grantorMemberId: "member_grantor",
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScope: SLEEP_SCOPE,
+    });
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      records: VALID_BODY.records,
+      share: ACTIVE_SHARE,
+    });
   });
 
   it("preserves activity semantics through the deliver route into snapshot storage", async () => {

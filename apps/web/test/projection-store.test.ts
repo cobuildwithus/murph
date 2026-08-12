@@ -2,7 +2,11 @@ import type { PrismaClient } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX,
+  HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   hostedVaultShareProjectionKindToScope,
+  isHostedVaultShareRuntimeProjectedKind,
 } from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
@@ -174,6 +178,26 @@ describe("replaceHostedVaultShareProjectionSnapshot", () => {
     expect(records).toEqual([]);
   });
 
+  it("replaces only an exact null snapshot during first materialization", async () => {
+    createSnapshotTestCodec();
+    const { prisma, updateMany } = createPrisma();
+
+    await replaceHostedVaultShareProjectionSnapshot({
+      prisma,
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      records: [RECORD],
+      share: SHARE,
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: SHARE.id,
+        projectionSnapshotCiphertext: null,
+        status: "granted",
+      }),
+    }));
+  });
+
   it("uses the exact active row as the stale-writer compare-and-set boundary", async () => {
     createSnapshotTestCodec();
     const { prisma, updateMany } = createPrisma();
@@ -314,12 +338,10 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
             "share_sleep_2",
             "share_sleep_1",
           ]),
-          hasUnmaterializedShare: true,
           projectionScope: SLEEP_SCOPE,
         },
         {
           generationToken: buildHostedVaultShareGenerationToken(["share_profile"]),
-          hasUnmaterializedShare: false,
           projectionScope: profileScope,
         },
       ],
@@ -345,6 +367,113 @@ describe("readDeliverableHostedVaultShareProjectionScopeGenerations", () => {
         status: "granted",
       },
     }));
+  });
+
+  it("ignores the maximum materialized fanout and selects only a reactivated null row", async () => {
+    const runtimeScopes = HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.filter((scope) =>
+      isHostedVaultShareRuntimeProjectedKind(scope.projectionKind)
+    );
+    const firstRuntimeScope = runtimeScopes[0];
+    if (!firstRuntimeScope) {
+      throw new Error("Expected at least one runtime-projected share scope.");
+    }
+    const inactiveId = "member_destination_0_0";
+    const rows = runtimeScopes.flatMap((projectionScope, scopeIndex) =>
+      Array.from(
+        { length: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX },
+        (_, destinationIndex) => ({
+          destinationMemberId: `member_destination_${scopeIndex}_${destinationIndex}`,
+          id: `share_${scopeIndex}_${destinationIndex}`,
+          projectionKind: projectionScope.projectionKind,
+          projectionSnapshotCiphertext:
+            scopeIndex === 0 && destinationIndex === 0 ? null : "sealed:materialized",
+          projectionScopeJson: projectionScope,
+          projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope),
+        }),
+      )
+    );
+    expect(rows).toHaveLength(2_450);
+    expect(rows.filter((row) => row.projectionSnapshotCiphertext !== null))
+      .toHaveLength(2_449);
+    const findMany = vi.fn().mockResolvedValue(rows);
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+    const supportedProjectionScopeKeys = new Set(
+      runtimeScopes.map(buildHostedVaultShareProjectionScopeKey),
+    );
+    mocks.readActiveHostedMemberAccessIds.mockResolvedValueOnce(new Set(
+      rows.map((row) => row.destinationMemberId).filter((id) => id !== inactiveId),
+    ));
+
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      supportedProjectionScopeKeys,
+    })).resolves.toEqual({
+      generations: [],
+      hasDeferredProjectionWork: true,
+    });
+
+    mocks.readActiveHostedMemberAccessIds.mockResolvedValueOnce(new Set(
+      rows.map((row) => row.destinationMemberId),
+    ));
+    await expect(readDeliverableHostedVaultShareProjectionScopeGenerations({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      supportedProjectionScopeKeys,
+    })).resolves.toEqual({
+      generations: [{
+        generationToken: buildHostedVaultShareGenerationToken(["share_0_0"]),
+        projectionScope: firstRuntimeScope,
+      }],
+      hasDeferredProjectionWork: false,
+    });
+  });
+
+  it("selects complete exact-scope generations within one 25-row page", async () => {
+    const trailingScope = hostedVaultShareProjectionKindToScope("time-zone.v0");
+    const rows = [
+      ...Array.from(
+        { length: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX },
+        (_, index) => ({
+          destinationMemberId: `member_sleep_${index}`,
+          id: `share_sleep_${index}`,
+          projectionKind: SLEEP_SCOPE.projectionKind,
+          projectionSnapshotCiphertext: null,
+          projectionScopeJson: SLEEP_SCOPE,
+          projectionScopeKey: SLEEP_SCOPE_KEY,
+        }),
+      ),
+      {
+        destinationMemberId: "member_trailing",
+        id: "share_trailing_pending",
+        projectionKind: trailingScope.projectionKind,
+        projectionSnapshotCiphertext: null,
+        projectionScopeJson: trailingScope,
+        projectionScopeKey: buildHostedVaultShareProjectionScopeKey(trailingScope),
+      },
+    ];
+    const findMany = vi.fn().mockResolvedValue(rows);
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+
+    const result = await readDeliverableHostedVaultShareProjectionScopeGenerations({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    });
+
+    expect(result.generations).toHaveLength(1);
+    expect(result.generations[0]).toEqual({
+      generationToken: buildHostedVaultShareGenerationToken(
+        Array.from(
+          { length: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX },
+          (_, index) => `share_sleep_${index}`,
+        ),
+      ),
+      projectionScope: SLEEP_SCOPE,
+    });
+    expect(result.hasDeferredProjectionWork).toBe(true);
   });
 });
 
@@ -415,6 +544,27 @@ describe("findActiveHostedVaultShares", () => {
     });
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
       take: 26,
+    }));
+  });
+
+  it("discovers only null snapshots during first-materialization delivery", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const prisma = createPrismaClientTestDouble({ hostedVaultShare: { findMany } });
+
+    await findActiveHostedVaultShares({
+      grantorMemberId: SHARE.grantorMemberId,
+      prisma,
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScope: SLEEP_SCOPE,
+    });
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        grantorMemberId: SHARE.grantorMemberId,
+        projectionScopeKey: SLEEP_SCOPE_KEY,
+        projectionSnapshotCiphertext: null,
+        status: "granted",
+      }),
     }));
   });
 });

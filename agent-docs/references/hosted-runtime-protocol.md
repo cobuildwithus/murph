@@ -484,12 +484,34 @@ The runtime does not mark that maintenance row handled when it first imports
 the control wake. It retains a `vault-share.projection` post-checkpoint record,
 runs the existing projection offer only after the source checkpoint, and removes
 the mailbox obligation only when every current granted runtime-projectable
-generation is materialized or revoked. Web returns a single fixed-width
+generation is materialized or revoked. This durable first pass uses the
+`first-materialization` projection mode. Web must acknowledge that exact mode;
+an old Web response that omits the acknowledgment fails before any private vault
+read. Discovery ignores already-materialized rows and chooses a deterministic
+page of complete exact-scope generations containing at most 25 active null
+snapshots total. One pass therefore performs at most 25 private scope reads, 25
+delivery requests, and 25 destination replacement transactions even at the
+admitted maximum of 25 destinations across every known scope. The bounded
+all-scope control read still admits at most 25 rows per finite known projection
+scope, then resolves destination access with one set-based member query and at
+most one bounded current-participant query.
+
+First-materialization delivery reselects only active null rows and conditionally
+replaces only an exact row whose snapshot remains null. Materialized rows cannot
+enter its generation digest or be rewritten by a racing or redundant maintenance
+pass. If a page made progress while more eligible page work remains, the existing
+recording item continues after one second; if no page is deliverable because
+remaining null work is inactive or unsupported, it uses the five-minute deferred
+retry. Either future retry time lets foreground and independent system controls
+proceed between pages. The ordinary abortable idle projection refresh omits this
+mode and retains its existing all-active-scope behavior.
+
+Web returns a single fixed-width
 `hasDeferredProjectionWork` bit when any approved null-snapshot generation is
 temporarily omitted by destination access or runner capability; it exposes no
 destination identity, count, or fan-out cardinality. The runtime may deliver
-currently active scopes in the same offer, but a true deferred bit retains the
-recording item on a five-minute retry. Missing ports, delivery races, and
+currently active scopes in the same offer, but retry timing follows whether that
+bounded pass made progress. Missing ports, delivery races, and
 projection errors retain that item on the existing one-minute retry. Projection
 work has its own serialization key:
 its FIFO and watermark remain ordered, while a not-yet-due projection retry
@@ -521,12 +543,14 @@ retryable before resolving or replacing a share. The active-scope request also
 declares exact deferred-work capability; while an older runner is draining, Web
 turns deferred discovery into the same generic retryable failure instead of
 letting that runner consume the row. The converged token- and deferred-capable
-runner bundle is therefore the hard rollback floor before Web promotion.
+runner bundle, including first-materialization mode acknowledgment, is therefore
+the hard rollback floor before Web promotion.
 
 The rollout is consumer-first and reader-before-backfill. First deploy the
-runtime/Worker parser, bounded projection owner, retry consumer, and generation
-token client, then prove immediate fleet convergence. Next deploy the complete
-Web release, including the pending-aware reader, opaque generation fence,
+runtime/Worker parser, bounded first-materialization owner, retry consumer,
+generation-token client, and mode acknowledgment check, then prove immediate
+fleet convergence. Next deploy the complete Web release, including the
+pending-aware reader, opaque generation fence, null-only bounded page selector,
 consent copy, atomic admission, and reaffirmation writer. Capture one stable
 cutoff only after both releases are live, then run the bounded recent-date
 generation backfill under the production Web environment until its count-only

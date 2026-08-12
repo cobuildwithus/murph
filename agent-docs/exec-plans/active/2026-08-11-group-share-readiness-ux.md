@@ -234,3 +234,34 @@ Updated: 2026-08-12
   seven-round cap is reached; repository policy requires an explicit
   continuation decision before a round-8 ReviewGPT audit. Exact-head CI and
   current-base mergeability also remain unresolved.
+- The user explicitly authorized ReviewGPT round 8. That full-patch audit found
+  that a targetless maintenance retry still discovered and rewrote every active
+  materialized destination, so one durable effect could perform 98 private reads,
+  98 delivery requests, and 2,450 sequential replacement transactions before
+  foreground work regained control at the admitted registry and destination
+  bounds. The finding was accepted.
+- The remediation adds no durable owner or cursor. The existing null snapshot is
+  the progress cursor: maintenance requests an acknowledged
+  `first-materialization` mode, Web ignores materialized rows, and one
+  deterministic page contains complete exact-scope generations totaling at most
+  25 null destinations. Delivery reselects and conditionally replaces only exact
+  null rows. A page with progress and more work continues after one second; only
+  inaccessible or unsupported null work uses the existing five-minute retry.
+  Generic abortable idle refresh remains unchanged.
+- Round-8 remediation proof passes 451 focused tests across Hosted Execution,
+  Assistant Runtime, Web, and Cloudflare, plus all four package typechecks. It
+  covers maximum materialized fan-out exclusion, inactive-destination
+  reactivation, complete-scope page bounds, redundant-maintenance exclusion,
+  mode acknowledgment, prompt continuation versus deferred retry, and foreground
+  admission between pages. Final ReviewGPT must rerun on the remediated exact
+  head; exact-head CI and current-base mergeability remain unresolved.
+- Corrected-head product-purpose revalidation: the irreducible purpose remains
+  truthful, recoverable preparation immediately after exact consent. The bounded
+  page is the smallest complete experience because it changes no user action,
+  screen, consent, or visible copy; it prevents background maintenance from
+  monopolizing the runtime, admits foreground work between pages, promptly
+  continues after progress, and preserves the existing delayed retry only when
+  remaining work cannot currently run. `pending` stays the honest visible state
+  and the next authorized group read remains the existing completion surface.
+  No evidence-backed product-experience finding or new rendered-evidence gap
+  remains; exact-head CI and the final cross-cutting audit are still pending.

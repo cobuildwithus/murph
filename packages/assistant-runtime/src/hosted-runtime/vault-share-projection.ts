@@ -42,6 +42,7 @@ import {
   type HostedVaultShareDailyMetricProjectionSpec,
   type HostedVaultShareActiveProjectionKindsResponse,
   type HostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionMode,
   type HostedVaultShareProjectionScope,
   type HostedVaultShareSleepMetricSource,
   type HostedVaultShareWorkout,
@@ -170,6 +171,7 @@ type ProjectableMemoryProfileNameRead =
 
 export interface HostedVaultShareProjectionOfferResult {
   outcome:
+    | "continued"
     | "deferred"
     | "delivered"
     | "error"
@@ -189,6 +191,7 @@ export interface HostedVaultShareProjectionOfferResult {
  * that disappeared from the member vault cannot remain visible as current data.
  */
 export async function offerHostedVaultShareProjectionBestEffort(input: {
+  projectionMode?: HostedVaultShareProjectionMode;
   vaultRoot: string;
   vaultSharePort: HostedRuntimeVaultSharePort | null | undefined;
 }): Promise<HostedVaultShareProjectionOfferResult> {
@@ -200,7 +203,15 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
 
   let activeProjections: HostedVaultShareActiveProjectionKindsResponse;
   try {
-    activeProjections = await port.listActiveProjectionScopes();
+    activeProjections = await port.listActiveProjectionScopes({
+      projectionMode: input.projectionMode,
+    });
+    if (
+      input.projectionMode
+      && activeProjections.projectionMode !== input.projectionMode
+    ) {
+      return { outcome: "error" };
+    }
     activeProjections = {
       ...activeProjections,
       projectionScopes: uniqueHostedVaultShareProjectionScopes(
@@ -241,6 +252,7 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
       projectionScope,
       generationToken,
       readRecords,
+      projectionMode: input.projectionMode,
       vaultRoot: input.vaultRoot,
     }));
   }
@@ -248,14 +260,16 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
   const outcome = combineHostedVaultShareOfferOutcomes(outcomes);
   return {
     outcome: outcome !== "error" && activeProjections.hasDeferredProjectionWork === true
-      ? "deferred"
+      ? projectionScopes.length > 0 && input.projectionMode
+        ? "continued"
+        : "deferred"
       : outcome,
   };
 }
 
 type HostedVaultShareOfferOutcome = Exclude<
   HostedVaultShareProjectionOfferResult["outcome"],
-  "deferred"
+  "continued" | "deferred"
 >;
 
 export interface HostedVaultShareProjectionReadContext {
@@ -275,6 +289,7 @@ async function offerHostedVaultShareScopeBestEffort(input: {
   context: HostedVaultShareProjectionReadContext;
   generationToken: string;
   port: HostedRuntimeVaultSharePort;
+  projectionMode?: HostedVaultShareProjectionMode;
   projectionScope: HostedVaultShareProjectionScope;
   readRecords: ProjectableRecordReader;
   vaultRoot: string;
@@ -287,6 +302,7 @@ async function offerHostedVaultShareScopeBestEffort(input: {
 
     const response = await input.port.deliver({
       expectedGenerationToken: input.generationToken,
+      ...(input.projectionMode ? { projectionMode: input.projectionMode } : {}),
       projectionKind: input.projectionScope.projectionKind,
       projectionScope: input.projectionScope,
       records,

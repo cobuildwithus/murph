@@ -1,5 +1,6 @@
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   type HostedVaultShareActiveProjectionKindsResponse,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -19,6 +20,7 @@ import {
 } from "@/src/lib/hosted-onboarding/errors";
 import {
   filterHostedVaultShareProjectionScopesBySupportedKeys,
+  readHostedVaultShareProjectionModeFromRequest,
   readHostedVaultShareSupportedProjectionScopeKeysFromRequest,
   supportsHostedVaultShareDeferredProjectionWork,
 } from "@/src/lib/hosted-vault-share/supported-projection-scopes";
@@ -31,6 +33,7 @@ export const GET = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_VAULT_SHARE_ACTIVE_KINDS_BODY_LIMIT_BYTES,
   });
   const prisma = getPrisma();
+  const projectionMode = readHostedVaultShareProjectionModeFromRequest(request);
 
   try {
     await requireHostedRuntimeActiveAccess(grantorMemberId, { prisma });
@@ -38,6 +41,7 @@ export const GET = withJsonError(async (request: Request) => {
     if (isHostedRuntimeInactiveAccessError(error)) {
       return jsonOk({
         hasDeferredProjectionWork: false,
+        ...(projectionMode ? { projectionMode } : {}),
         projectionKinds: [],
         projectionScopes: [],
       } satisfies HostedVaultShareActiveProjectionKindsResponse);
@@ -50,6 +54,8 @@ export const GET = withJsonError(async (request: Request) => {
   const projectionWork = await readDeliverableHostedVaultShareProjectionScopeGenerations({
     grantorMemberId,
     prisma,
+    projectionMode,
+    supportedProjectionScopeKeys,
   });
   const generations = projectionWork.generations;
   const projectionScopes = filterHostedVaultShareProjectionScopesBySupportedKeys(
@@ -59,13 +65,7 @@ export const GET = withJsonError(async (request: Request) => {
   const supportedScopeKeys = new Set(
     projectionScopes.map(buildHostedVaultShareProjectionScopeKey),
   );
-  const hasDeferredProjectionWork = projectionWork.hasDeferredProjectionWork
-    || generations.some((generation) =>
-      generation.hasUnmaterializedShare
-      && !supportedScopeKeys.has(
-        buildHostedVaultShareProjectionScopeKey(generation.projectionScope),
-      )
-    );
+  const hasDeferredProjectionWork = projectionWork.hasDeferredProjectionWork;
   if (
     hasDeferredProjectionWork
     && !supportsHostedVaultShareDeferredProjectionWork(request)
@@ -80,6 +80,9 @@ export const GET = withJsonError(async (request: Request) => {
 
   return jsonOk({
     hasDeferredProjectionWork,
+    ...(projectionMode === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+      ? { projectionMode }
+      : {}),
     projectionKinds: [...new Set(projectionScopes.map((scope) => scope.projectionKind))],
     projectionScopes: projectionScopes.sort((left, right) =>
       buildHostedVaultShareProjectionScopeKey(left)

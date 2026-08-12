@@ -2,9 +2,12 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
   HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
   parseHostedVaultShareProjectionScopeKey,
   type HostedVaultShareFixedProjectionKind,
   type HostedVaultShareProjectionScope,
+  type HostedVaultShareProjectionMode,
 } from "@murphai/hosted-execution/vault-share";
 
 const SUPPORTED_PROJECTION_SCOPE_PARAM = "supportedProjectionScope";
@@ -16,6 +19,16 @@ export function supportsHostedVaultShareDeferredProjectionWork(
   return new URL(request.url).searchParams.get(
     HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM,
   ) === HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION;
+}
+
+export function readHostedVaultShareProjectionModeFromRequest(
+  request: Request,
+): HostedVaultShareProjectionMode | undefined {
+  return new URL(request.url).searchParams.get(
+      HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM,
+    ) === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+    ? HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+    : undefined;
 }
 
 // Temporary omitted-capability fallback for runner bundles that predate exact

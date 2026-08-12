@@ -5,10 +5,13 @@ import { createHash } from "node:crypto";
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   isHostedVaultShareRuntimeProjectedKind,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionMode,
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -41,6 +44,7 @@ export interface ActiveHostedVaultShare {
 export async function findActiveHostedVaultShares(input: {
   grantorMemberId: string;
   prisma?: PrismaClient;
+  projectionMode?: HostedVaultShareProjectionMode;
   projectionScope: HostedVaultShareProjectionScope;
 }): Promise<ActiveHostedVaultShare[]> {
   const prisma = input.prisma ?? getPrisma();
@@ -61,6 +65,9 @@ export async function findActiveHostedVaultShares(input: {
     where: {
       grantorMemberId: input.grantorMemberId,
       projectionScopeKey,
+      ...(input.projectionMode === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+        ? { projectionSnapshotCiphertext: null }
+        : {}),
       status: "granted",
     },
   });
@@ -98,7 +105,6 @@ export async function findActiveHostedVaultShares(input: {
 export interface DeliverableHostedVaultShareProjectionScopeGenerations {
   generations: Array<{
     generationToken: string;
-    hasUnmaterializedShare: boolean;
     projectionScope: HostedVaultShareProjectionScope;
   }>;
   hasDeferredProjectionWork: boolean;
@@ -107,6 +113,8 @@ export interface DeliverableHostedVaultShareProjectionScopeGenerations {
 export async function readDeliverableHostedVaultShareProjectionScopeGenerations(input: {
   grantorMemberId: string;
   prisma?: PrismaClient;
+  projectionMode?: HostedVaultShareProjectionMode;
+  supportedProjectionScopeKeys?: ReadonlySet<string>;
 }): Promise<DeliverableHostedVaultShareProjectionScopeGenerations> {
   const prisma = input.prisma ?? getPrisma();
   const shares = await prisma.hostedVaultShare.findMany({
@@ -134,11 +142,18 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
     prisma,
   });
   const generations = new Map<string, {
-    hasUnmaterializedShare: boolean;
     projectionScope: HostedVaultShareProjectionScope;
     shareIds: string[];
   }>();
   let hasDeferredProjectionWork = false;
+  const firstMaterializationOnly = input.projectionMode
+    === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
+  const supportedProjectionScopeKeys = input.supportedProjectionScopeKeys
+    ?? new Set(
+      HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.map(
+        buildHostedVaultShareProjectionScopeKey,
+      ),
+    );
   for (const share of shares) {
     const projectionScope = parseHostedVaultShareRowProjectionScope(share);
     if (
@@ -148,27 +163,45 @@ export async function readDeliverableHostedVaultShareProjectionScopeGenerations(
       continue;
     }
     const hasUnmaterializedShare = share.projectionSnapshotCiphertext === null;
+    if (firstMaterializationOnly && !hasUnmaterializedShare) {
+      continue;
+    }
+    const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
     if (!activeDestinationMemberIds.has(share.destinationMemberId)) {
       hasDeferredProjectionWork ||= hasUnmaterializedShare;
       continue;
     }
-    const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+    if (!supportedProjectionScopeKeys.has(projectionScopeKey)) {
+      hasDeferredProjectionWork ||= hasUnmaterializedShare;
+      continue;
+    }
     const current = generations.get(projectionScopeKey);
     if (current) {
       current.shareIds.push(share.id);
-      current.hasUnmaterializedShare ||= hasUnmaterializedShare;
     } else {
       generations.set(projectionScopeKey, {
-        hasUnmaterializedShare,
         projectionScope,
         shareIds: [share.id],
       });
     }
   }
+  const selectedGenerations: typeof generations = new Map();
+  let selectedShareCount = 0;
+  for (const [projectionScopeKey, generation] of generations) {
+    if (
+      firstMaterializationOnly
+      && selectedShareCount + generation.shareIds.length
+        > HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX
+    ) {
+      hasDeferredProjectionWork = true;
+      continue;
+    }
+    selectedGenerations.set(projectionScopeKey, generation);
+    selectedShareCount += generation.shareIds.length;
+  }
   return {
-    generations: [...generations.values()].map((generation) => ({
+    generations: [...selectedGenerations.values()].map((generation) => ({
       generationToken: buildHostedVaultShareGenerationToken(generation.shareIds),
-      hasUnmaterializedShare: generation.hasUnmaterializedShare,
       projectionScope: generation.projectionScope,
     })),
     hasDeferredProjectionWork,
@@ -219,6 +252,7 @@ function assertHostedVaultShareCandidateBound(
  */
 export async function replaceHostedVaultShareProjectionSnapshot(input: {
   prisma?: PrismaClient;
+  projectionMode?: HostedVaultShareProjectionMode;
   records: readonly HostedVaultShareDeliveryRecord[];
   share: ActiveHostedVaultShare;
 }): Promise<"replaced" | "no-active-share"> {
@@ -253,6 +287,9 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
         id: input.share.id,
         projectionKind: input.share.projectionKind,
         projectionScopeKey: input.share.projectionScopeKey,
+        ...(input.projectionMode === HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
+          ? { projectionSnapshotCiphertext: null }
+          : {}),
         status: "granted",
       },
     });

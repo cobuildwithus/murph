@@ -68,6 +68,12 @@ const HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_PARAM =
   "deferredProjectionWork";
 export const HOSTED_VAULT_SHARE_DEFERRED_WORK_CAPABILITY_VERSION = "v1";
+export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE =
+  "first-materialization";
+export const HOSTED_VAULT_SHARE_PROJECTION_MODE_PARAM = "projectionMode";
+
+export type HostedVaultShareProjectionMode =
+  typeof HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
 
 export type HostedVaultShareDailyMetricProjectionKind =
   (typeof HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS)[number];
@@ -355,6 +361,8 @@ export type HostedVaultShareProjectionKind =
 
 /** Maximum active destinations one grantor may authorize for one exact scope. */
 export const HOSTED_VAULT_SHARE_ACTIVE_DESTINATIONS_PER_SCOPE_MAX = 25;
+/** Maximum snapshot replacements one durable first-materialization pass may attempt. */
+export const HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_PAGE_MAX = 25;
 
 export interface HostedVaultShareFixedProjectionScope {
   projectionKind: HostedVaultShareFixedProjectionKind;
@@ -649,6 +657,7 @@ export interface HostedVaultShareDeliverRequest {
    * digest still matches, so a rotated consent cannot receive stale records.
    */
   expectedGenerationToken: string;
+  projectionMode?: HostedVaultShareProjectionMode;
   projectionKind: HostedVaultShareProjectionKind;
   projectionScope: HostedVaultShareProjectionScope;
   records: HostedVaultShareDeliveryRecord[];
@@ -670,6 +679,7 @@ export interface HostedVaultShareActiveProjectionKindsResponse {
    * deployments omit the field, which runners interpret as false.
    */
   hasDeferredProjectionWork?: boolean;
+  projectionMode?: HostedVaultShareProjectionMode;
   projectionKinds: HostedVaultShareProjectionKind[];
   projectionScopes: HostedVaultShareProjectionScope[];
   generationTokensByProjectionScopeKey?: Record<string, string>;
@@ -2107,6 +2117,10 @@ export function parseHostedVaultShareDeliverRequest(
     request.expectedGenerationToken,
     "Vault share deliver request expectedGenerationToken",
   );
+  const projectionMode = parseHostedVaultShareProjectionMode(
+    request.projectionMode,
+    "Vault share deliver request projectionMode",
+  );
   if (!HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN.test(expectedGenerationToken)) {
     throw new TypeError(
       "Vault share deliver request expectedGenerationToken must be a SHA-256 base64url digest.",
@@ -2142,6 +2156,7 @@ export function parseHostedVaultShareDeliverRequest(
 
   return {
     expectedGenerationToken,
+    ...(projectionMode ? { projectionMode } : {}),
     projectionKind,
     projectionScope,
     records: parsedRecords,
@@ -2173,6 +2188,10 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
         record.hasDeferredProjectionWork,
         "Vault share active projection kinds response hasDeferredProjectionWork",
       );
+  const projectionMode = parseHostedVaultShareProjectionMode(
+    record.projectionMode,
+    "Vault share active projection kinds response projectionMode",
+  );
   const projectionKinds = record.projectionKinds === undefined
     ? []
     : requireArray(
@@ -2227,12 +2246,27 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
 
   return {
     hasDeferredProjectionWork,
+    ...(projectionMode ? { projectionMode } : {}),
     projectionKinds: uniqueProjectionKinds,
     projectionScopes: uniqueProjectionScopes,
     ...(generationTokensByProjectionScopeKey
       ? { generationTokensByProjectionScopeKey }
       : {}),
   };
+}
+
+function parseHostedVaultShareProjectionMode(
+  value: unknown,
+  label: string,
+): HostedVaultShareProjectionMode | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const mode = requireString(value, label);
+  if (mode !== HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE) {
+    throw new TypeError(`${label} must be ${HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE}.`);
+  }
+  return mode;
 }
 
 function parseHostedVaultShareGenerationTokensByProjectionScopeKey(

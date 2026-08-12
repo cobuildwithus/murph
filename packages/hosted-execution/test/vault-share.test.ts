@@ -17,6 +17,7 @@ import {
   HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -639,6 +640,23 @@ describe("vault-share contracts", () => {
     ).toThrow(/delivered or no-active-share/u);
   });
 
+  it("parses only the exact first-materialization delivery mode", () => {
+    expect(parseHostedVaultShareDeliverRequestContract({
+      expectedGenerationToken: "a".repeat(43),
+      projectionKind: "sleep-times.v0",
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      records: [VALID_RECORD],
+    })).toEqual(expect.objectContaining({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    }));
+    expect(() => parseHostedVaultShareDeliverRequestContract({
+      expectedGenerationToken: "a".repeat(43),
+      projectionKind: "sleep-times.v0",
+      projectionMode: "refresh-all",
+      records: [VALID_RECORD],
+    })).toThrow(/first-materialization/u);
+  });
+
   it("deduplicates supported active projection-kind responses and rejects unknown values", () => {
     const runningScope = {
       projectionKind: "activity-minutes-days.v1",
@@ -720,6 +738,25 @@ describe("vault-share contracts", () => {
       projectionKinds: [],
       projectionScopes: [],
     })).toThrow(/boolean/u);
+  });
+
+  it("requires exact first-materialization acknowledgment", () => {
+    expect(parseHostedVaultShareActiveProjectionKindsResponse({
+      hasDeferredProjectionWork: false,
+      projectionKinds: [],
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScopes: [],
+    })).toEqual({
+      hasDeferredProjectionWork: false,
+      projectionKinds: [],
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      projectionScopes: [],
+    });
+    expect(() => parseHostedVaultShareActiveProjectionKindsResponse({
+      projectionKinds: [],
+      projectionMode: "first-materialization-v2",
+      projectionScopes: [],
+    })).toThrow(/first-materialization/u);
   });
 
   it("parses exact projection scope keys for capability negotiation", () => {

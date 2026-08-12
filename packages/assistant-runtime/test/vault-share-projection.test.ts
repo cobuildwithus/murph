@@ -14,6 +14,7 @@ import {
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
@@ -550,15 +551,17 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
         listActiveProjectionScopes: async () => ({
           ...activeProjectionResponse(),
           hasDeferredProjectionWork: true,
+          projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
         }),
       },
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
     });
 
     expect(result.outcome).toBe("deferred");
     expect(deliver).not.toHaveBeenCalled();
   });
 
-  it("delivers active scopes but retains the obligation for deferred work", async () => {
+  it("continues after a bounded first-materialization page with more work", async () => {
     const vaultRoot = await createMemoryDisplayNameVault("Theo");
     const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
     const result = await offerHostedVaultShareProjectionBestEffort({
@@ -568,12 +571,32 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
         listActiveProjectionScopes: async () => ({
           ...activeProjectionResponse(PROFILE_SCOPE),
           hasDeferredProjectionWork: true,
+          projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
         }),
       },
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
     });
 
-    expect(result.outcome).toBe("deferred");
+    expect(result.outcome).toBe("continued");
     expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledWith(expect.objectContaining({
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    }));
+  });
+
+  it("does not read or deliver when Web cannot acknowledge the requested projection mode", async () => {
+    const deliver = vi.fn();
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      vaultRoot: "/must-not-read",
+      vaultSharePort: {
+        deliver,
+        listActiveProjectionScopes: async () => activeProjectionResponse(PROFILE_SCOPE),
+      },
+      projectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+    });
+
+    expect(result.outcome).toBe("error");
+    expect(deliver).not.toHaveBeenCalled();
   });
 
   it("does not read or deliver when old Web omits active-generation proof", async () => {

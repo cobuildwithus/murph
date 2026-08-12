@@ -67,6 +67,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   const shares = await findActiveHostedVaultShares({
     grantorMemberId,
+    ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
     projectionScope: body.projectionScope,
   });
   if (shares.length === 0) {
@@ -102,6 +103,7 @@ export const POST = withJsonError(async (request: Request) => {
   for (const share of shares) {
     try {
       const outcome = await replaceHostedVaultShareProjectionSnapshot({
+        ...(body.projectionMode ? { projectionMode: body.projectionMode } : {}),
         records,
         share,
       });
