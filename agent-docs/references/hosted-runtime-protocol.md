@@ -668,14 +668,16 @@ conversation input continues to preempt this pass.
 
 An authenticated current-sender private exact completion does not mutate the
 member's ordinary conversation when the notification is queued. After the
-hosted provider accepts the live-authorized same-channel delivery, the durable
-outbox intent becomes the recovery journal. If queue-time resolution found an
+live-authorized same-channel delivery reaches the durable outbox's canonical
+`sent` state, its intent becomes the recovery journal. Partial or ambiguous
+provider receipts remain retryable or abandoned and never participate, even
+when they retain message metadata. If queue-time resolution found an
 existing ordinary direct session, the intent binds that exact session ID before
 the notification target is projected read-only; otherwise the target stays
 unbound until the first attended direct turn. An omitted binding identifies a
 pre-rollout intent and fails closed; only an explicit current-writer null may
 wait for that first session. No route-sibling heuristic may choose the owner.
-A delivered field-present obligation is exempt from ordinary terminal outbox
+A canonically sent field-present obligation is exempt from ordinary terminal outbox
 pruning until its journal reaches `applied`, after which ordinary retention
 resumes. The import appends the exact reviewed assistant text once,
 advances the session once, and clears both stale native provider-resume aliases.

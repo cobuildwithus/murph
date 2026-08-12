@@ -341,7 +341,8 @@ function isPruneProtectedAssistantOutboxIntent(
   protectedGroupEmailOccurrencePrefixes: readonly string[],
 ): boolean {
   if (
-    intent.privateCompletionContinuitySessionId !== undefined
+    intent.status === 'sent'
+    && intent.privateCompletionContinuitySessionId !== undefined
     && intent.delivery !== null
     && intent.privateCompletionContinuity?.status !== 'applied'
   ) {

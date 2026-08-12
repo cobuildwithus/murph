@@ -27,7 +27,7 @@ import {
 import { withAssistantTurnLock } from './turn-lock.js'
 
 /**
- * Imports a provider-accepted private completion into its ordinary direct
+ * Imports a canonically sent private completion into its ordinary direct
  * conversation. The outbox intent is the recovery journal: `prepared` records
  * the pre-import turn count before either coupled session/transcript write,
  * while transcript provenance makes the append replay-safe.
@@ -67,7 +67,7 @@ export async function reconcileAssistantPrivateCompletionContinuityForSession(
 }
 
 /**
- * Runs from the hosted outbox's post-provider-acceptance hook. If exactly one
+ * Runs from the hosted outbox's post-sent hook. If exactly one
  * pre-existing ordinary direct session matches the authenticated delivery
  * route, join immediately. Otherwise the next direct session resolution owns
  * the same replay-safe reconciliation before provider resume selection.
@@ -245,6 +245,7 @@ function isDeliveredPrivateAssistantAskCompletion(
   )
   return (
     completionId !== null
+    && intent.status === 'sent'
     && intent.answeredMailboxItemIds[0] === completionId
     && [...completionId].length <= 256
     && deliveryKey !== null

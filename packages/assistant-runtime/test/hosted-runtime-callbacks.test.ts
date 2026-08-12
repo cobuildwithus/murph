@@ -8950,6 +8950,9 @@ describe("hosted runtime callbacks", () => {
           intent: {
             ...storedIntent,
             delivery: persistedDelivery,
+            deliveryConfirmationPending: false,
+            sentAt: persistedDelivery.sentAt,
+            status: "sent",
           },
           vault: HOSTED_WAKE.vaultRoot,
         });
@@ -9018,6 +9021,7 @@ describe("hosted runtime callbacks", () => {
           providerMessageId: "provider_private_telegram_123",
         }),
         intentId: storedIntent.intentId,
+        status: "sent",
       }),
       vault: HOSTED_WAKE.vaultRoot,
     });

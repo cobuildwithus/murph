@@ -869,7 +869,7 @@ describe('assistant outbox thresholds', () => {
     })
   })
 
-  it('reuses the already-sent intent when the persist hook races the final send mark', async () => {
+  it('runs the persist hook only after the canonical sent mark', async () => {
     const delivery = createDelivery({
       providerMessageId: 'provider-raced-send',
       sentAt: '2026-04-08T13:01:00.000Z',
@@ -885,26 +885,22 @@ describe('assistant outbox thresholds', () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-thresholds-race-')
     const seeded = await createIntent(outbox, vaultRoot, {
       createdAt: '2026-04-08T13:00:00.000Z',
-      message: 'persist hook races the sent mark',
+      message: 'persist hook observes the sent mark',
       sessionId: 'session-race',
       turnId: 'turn-race',
+    })
+    const persistDeliveredIntent = vi.fn(async ({ intent }) => {
+      expect(intent).toMatchObject({
+        delivery,
+        sentAt: '2026-04-08T13:01:00.000Z',
+        status: 'sent',
+        updatedAt: '2026-04-08T13:01:00.000Z',
+      })
     })
 
     const dispatched = await outbox.dispatchAssistantOutboxIntent({
       dispatchHooks: {
-        persistDeliveredIntent: async ({ intent, vault }) => {
-          await outbox.saveAssistantOutboxIntent(vault, {
-            ...intent,
-            delivery,
-            deliveryConfirmationPending: false,
-            deliveryIdempotencyKey: delivery.idempotencyKey,
-            lastError: null,
-            nextAttemptAt: null,
-            sentAt: delivery.sentAt,
-            status: 'sent',
-            updatedAt: '2026-04-08T13:02:00.000Z',
-          })
-        },
+        persistDeliveredIntent,
       },
       force: true,
       intentId: seeded.intentId,
@@ -916,8 +912,9 @@ describe('assistant outbox thresholds', () => {
       intentId: seeded.intentId,
       sentAt: '2026-04-08T13:01:00.000Z',
       status: 'sent',
-      updatedAt: '2026-04-08T13:02:00.000Z',
+      updatedAt: '2026-04-08T13:01:00.000Z',
     })
+    expect(persistDeliveredIntent).toHaveBeenCalledOnce()
   })
 
   it('surfaces non-missing quarantine rename failures', async () => {

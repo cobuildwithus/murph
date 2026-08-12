@@ -94,6 +94,7 @@ import {
 } from './outbox/dispatch-state.js'
 import {
   normalizeNullableString,
+  warnAssistantBestEffortFailure,
   writeJsonFileAtomic,
 } from './shared.js'
 import { sanitizeAssistantOutboxIntentForPersistence } from './redaction.js'
@@ -196,6 +197,7 @@ export interface AssistantOutboxDispatchHooks {
     intent: AssistantOutboxIntent
     vault: string
   }) => Promise<void>
+  /** Best-effort local persistence after the delivery is canonically `sent`. */
   persistDeliveredIntent?: (input: {
     delivery: AssistantChannelDelivery
     intent: AssistantOutboxIntent
@@ -1080,12 +1082,6 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       await saveAssistantSession(input.vault, delivered.session)
     }
 
-    await input.dispatchHooks?.persistDeliveredIntent?.({
-      delivery,
-      intent: durableDeliveredIntent,
-      vault: input.vault,
-    })
-    preparedDispatchReserved = false
     const sentIntent = await markAssistantOutboxIntentSent({
       delivery,
       intent: deliveredOwnerIntent,
@@ -1098,6 +1094,21 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
         deliveryError: sentIntent.lastError,
         session: null,
       }
+    }
+    preparedDispatchReserved = false
+    try {
+      await input.dispatchHooks?.persistDeliveredIntent?.({
+        delivery,
+        intent: sentIntent,
+        vault: input.vault,
+      })
+    } catch (error) {
+      // Provider delivery is already durably sent. The existing foreground
+      // reconciliation owner repairs optional local post-send persistence.
+      warnAssistantBestEffortFailure({
+        error,
+        operation: 'outbox post-send persistence',
+      })
     }
 
     return {
