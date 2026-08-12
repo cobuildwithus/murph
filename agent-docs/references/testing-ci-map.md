@@ -564,7 +564,8 @@ supported provider credential.
   required series, continued evaluation of available signals, positive
   direct-port counter deltas with reset/new-series suppression across complete
   and partial samples, one bounded confirmation for a safe direct-counter-only
-  omission, immediate unsafe-signal paging before that confirmation, unsafe
+  omission, multi-family confirmation rejection, cross-scrape evidence
+  composition, immediate unsafe-signal paging before that confirmation, unsafe
   confirmation-signal paging, failed-confirmation retention, positive
   recovered-counter deltas, persistent-gap telemetry paging, and the scheduled
   Durable Object boundary for that retry,

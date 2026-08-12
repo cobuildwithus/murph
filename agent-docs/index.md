@@ -73,8 +73,9 @@ provider-no-replay recovery, are jointly specified by
 
 Independent partial PlanetScale metric normalization, explicit unknown-family
 evidence, continued evaluation of available database signals, bounded safe
-direct-counter-only confirmation without suppressing unsafe observations, and
-one-shot telemetry-only operator paging with unresolved-window coalescing, current-pressure
+direct-counter-only confirmation with cross-scrape evidence composition and
+without suppressing unsafe observations, and one-shot telemetry-only operator
+paging with unresolved-window coalescing, current-pressure
 priority including direct errors in one combined pre-first-page incident,
 post-ack recurrence suppression, durable owed-page preservation inside
 non-replayable direct-error admission, truthful direct-error and mixed telemetry

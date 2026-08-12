@@ -1087,6 +1087,72 @@ describe("database health monitor", () => {
     expect(harness.primaryLinqRequests).toEqual([]);
   });
 
+  it("keeps multi-family omissions single-pass when the direct-error counter is also missing", async () => {
+    const partialMetricsBody = buildMetricsBody({
+      branchId: BRANCH_ID,
+    }).replace(
+      /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
+      "",
+    ).replace(
+      /^planetscale_postgres_settings_max_connections.*$/mu,
+      "",
+    );
+    const harness = createMonitorHarness({ metricsBody: partialMetricsBody });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "failed",
+    });
+
+    expect(harness.planetScaleRequests).toHaveLength(2);
+    expect(harness.retryWaits).toEqual([]);
+    expect(harness.monitor.readRecentSamples()).toEqual([
+      expect.objectContaining({
+        failureCode: "required_metrics_missing",
+        scrapeStatus: "failed",
+      }),
+    ]);
+  });
+
+  it("joins a recovered direct-error counter to first-scrape gauges when confirmation loses another family", async () => {
+    const completeMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
+    const missingDirectErrorMetricsBody = completeMetricsBody.replace(
+      /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
+      "",
+    );
+    const missingMaxConnectionsMetricsBody = completeMetricsBody.replace(
+      /^planetscale_postgres_settings_max_connections.*$/mu,
+      "",
+    );
+    let scrapeAttempt = 0;
+    const harness = createMonitorHarness({
+      readMetricsBody() {
+        scrapeAttempt += 1;
+        return scrapeAttempt === 1
+          ? missingDirectErrorMetricsBody
+          : missingMaxConnectionsMetricsBody;
+      },
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
+      conditions: [],
+      outcome: "healthy",
+      sampleStatus: "ok",
+    });
+
+    expect(harness.planetScaleRequests).toHaveLength(4);
+    expect(harness.retryWaits).toEqual([1_000]);
+    expect(harness.monitor.readRecentSamples()).toEqual([
+      expect.objectContaining({
+        directConnectionErrorDelta: 0,
+        failureCode: null,
+        postgresMaxConnections: 50,
+        scrapeStatus: "ok",
+      }),
+    ]);
+  });
+
   it("retains the original incomplete observation when direct-error confirmation fails", async () => {
     const partialMetricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
