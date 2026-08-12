@@ -1,5 +1,7 @@
 import {
   isValidIanaTimeZone,
+  JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET,
+  JUNCTION_WEARABLE_TAG_NOTE_TYPE,
   normalizeActivityKindToken,
 } from "@murphai/contracts";
 
@@ -29,6 +31,10 @@ const MAX_FACTORS = 6;
 const MIN_MATCHED_DAYS = 5;
 const MIN_WINDOW_DAYS = 21;
 const COMPARISON_SEARCH_DAYS = 35;
+// Product-owned and intentionally fail-closed. A new provider tag requires
+// explicit product evidence before it can acquire action semantics here.
+const PERSONAL_PATTERN_OURA_ACTION_TAG = "sauna";
+const JUNCTION_NOTE_RESOURCE_TYPE_PATTERN = /^junction-[a-z0-9]+(?:-[a-z0-9]+)*-note$/u;
 const OUTCOME_LIKE_FACTOR_TOKENS = new Set([
   "heart-rate-variability",
   "hrv",
@@ -298,6 +304,11 @@ function readFactorCandidate(
   }
 
   if (event.kind === "intervention_session") {
+    // PR #1673 emitted every Junction note tag as a completed intervention.
+    // Those legacy rows have incorrect canonical meaning and must not remain
+    // action factors while any explicit storage repair is evaluated separately.
+    if (isLegacyJunctionNoteTagIntervention(event)) return null;
+
     const status = readString(event.attributes.sessionStatus);
     if (status === "missed" || status === "skipped") return null;
     const token = canonicalFactorToken(
@@ -308,7 +319,38 @@ function readFactorCandidate(
       : null;
   }
 
-  return null;
+  if (
+    !isEligibleJunctionOuraWearableTagNote(event)
+    || !event.tags.includes(PERSONAL_PATTERN_OURA_ACTION_TAG)
+  ) {
+    return null;
+  }
+
+  return { kind: "intervention", token: PERSONAL_PATTERN_OURA_ACTION_TAG };
+}
+
+function isEligibleJunctionOuraWearableTagNote(event: CanonicalEntity): boolean {
+  if (event.kind !== "note") return false;
+  if (readString(event.attributes.noteType) !== JUNCTION_WEARABLE_TAG_NOTE_TYPE) return false;
+
+  const externalRef = readRecord(event.attributes.externalRef);
+  const dataOrigin = readRecord(event.attributes.dataOrigin);
+  return readString(event.attributes.source) === "device"
+    && readString(externalRef?.system) === "junction"
+    && readString(externalRef?.resourceType) === "junction-oura-note"
+    && readString(externalRef?.facet) === JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET
+    && readString(dataOrigin?.sourceProviderSlug) === "oura";
+}
+
+function isLegacyJunctionNoteTagIntervention(event: CanonicalEntity): boolean {
+  const externalRef = readRecord(event.attributes.externalRef);
+  const resourceType = readString(externalRef?.resourceType);
+  const facet = readString(externalRef?.facet);
+  return readString(event.attributes.source) === "device"
+    && readString(externalRef?.system) === "junction"
+    && resourceType !== null
+    && JUNCTION_NOTE_RESOURCE_TYPE_PATTERN.test(resourceType)
+    && facet?.startsWith("tag-") === true;
 }
 
 function collectOutcomeSeries(
@@ -563,6 +605,12 @@ function mean(values: readonly number[]): number {
 
 function round(value: number): number {
   return Number(value.toFixed(2));
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function readString(value: unknown): string | null {

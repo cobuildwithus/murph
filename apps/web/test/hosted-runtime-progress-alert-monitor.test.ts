@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { sendHostedResendPlainTextEmail } from "@/src/lib/hosted-onboarding/resend-plain-text-email";
 import {
   HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
+  readHostedRuntimeProgressHealth,
   runHostedRuntimeProgressAlertMonitor,
   summarizeHostedRuntimeProgressRows,
   type HostedRuntimeProgressHealthRow,
@@ -124,13 +125,67 @@ describe("hosted runtime progress alert monitor", () => {
     ) {
       throw new TypeError("Expected a Prisma SQL query.");
     }
-    const sql = query.strings.join(" ");
+    const sql = query.strings.join(" ").replace(/\s+/gu, " ");
     expect(sql).toContain(
       "mailbox_item.lane_seq > lane_boundary.effective_consumed_seq",
     );
     expect(sql).toContain(
       "pending_head.created_at AS head_created_at",
     );
+    expect(sql).toContain(
+      "lane_boundary.lane <> 'conversation' OR mailbox_item.consumed_at IS NULL",
+    );
+    expect(sql).toContain("COUNT(*) OVER () AS pending_count");
+    expect(sql).toContain("trace.assistant_input_staged_at");
+    expect(sql).toContain("trace.provider_start_at");
+    expect(sql).toContain("delivery.accepted_at");
+    expect(sql).not.toContain("head_consumed_at");
+  });
+
+  it("bounds the raw candidate scan before inactive-lane exclusions", async () => {
+    let emitted = 0;
+    const queryRaw = vi.fn(async () => {
+      if (emitted >= 20_001) {
+        return [];
+      }
+      const pageSize = emitted < 20_000 ? 500 : 1;
+      const rows = Array.from({ length: pageSize }, (_, index) => {
+        const ordinal = emitted + index;
+        return progressRow({
+          progressOriginAt: "2026-08-10T15:00:00.000Z",
+          lane: "system",
+          runtimeKey: `runtime_inactive_${ordinal}`,
+        });
+      });
+      emitted += pageSize;
+      return rows;
+    });
+    const hostedMemberFindMany = vi.fn(async () => []);
+    const hostedThreadContainerParticipantFindMany = vi.fn(async () => []);
+
+    const health = await readHostedRuntimeProgressHealth({
+      now,
+      prisma: {
+        $queryRaw: queryRaw,
+        hostedMember: {
+          findMany: hostedMemberFindMany,
+        },
+        hostedThreadContainerParticipant: {
+          findMany: hostedThreadContainerParticipantFindMany,
+        },
+      } as never,
+    });
+
+    expect(queryRaw).toHaveBeenCalledTimes(41);
+    expect(hostedMemberFindMany).toHaveBeenCalledTimes(40);
+    expect(health).toMatchObject({
+      anomalous: true,
+      excludedInactiveLaneCount: 20_000,
+      pendingItemCount: 0,
+      scanTruncated: true,
+      stalledLaneCount: 0,
+      stalledRuntimeCount: 0,
+    });
   });
 
   it("opens one aggregate Resend incident and coalesces repeated stalled scans", async () => {

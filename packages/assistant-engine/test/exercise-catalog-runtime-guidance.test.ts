@@ -17,7 +17,7 @@ describe('exercise catalog runtime guidance', () => {
     const compact = raw.replace(/\s+/gu, ' ')
 
     expect(compact).toContain(
-      'Count useful frames per unfamiliar movement, not only across the whole response.',
+      'Count useful frames per unfamiliar movement, not only across the whole response, while keeping the complete response at eight images or fewer.',
     )
     expect(compact).toContain(
       'attach the available frames in exercise order so each illustrated movement shows its setup, important transitions or side changes, and endpoint across the full range of motion.',
@@ -27,6 +27,9 @@ describe('exercise catalog runtime guidance', () => {
     )
     expect(compact).toContain(
       'Do not satisfy this rule with one static frame for each of several unfamiliar movements.',
+    )
+    expect(compact).toContain(
+      'Never split an oversized image set across consecutive unsolicited messages.',
     )
     expect(compact).toContain(
       'teach fewer movements at a time rather than sacrificing sequence clarity.',

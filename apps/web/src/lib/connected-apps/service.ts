@@ -261,6 +261,7 @@ async function runHostedConnectedAppsRequest(input: {
               ...writePolicy.forcedArguments,
             },
             toolSlug,
+            userId: input.memberId,
             version: writePolicy.version,
           }).catch((error: unknown) => {
             if (error instanceof ComposioConnectedAppsRequestError) {
