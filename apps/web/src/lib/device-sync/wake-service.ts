@@ -93,6 +93,7 @@ const HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA = "v1";
 const COMPANION_HEALTH_MAX_PENDING_PAYLOADS = 16;
 const GOOGLE_HEALTH_FITBIT_MIGRATION_NOT_READY_ERROR_CODE =
   "GOOGLE_HEALTH_FITBIT_MIGRATION_NOT_READY";
+const GOOGLE_HEALTH_FITBIT_CUTOVER_CLAIM_LEASE_MS = 60_000;
 
 const HISTORICAL_RESET_REVOKE_WARNING_MESSAGE =
   "Provider revoke did not complete while a historical data reset is pending. "
@@ -357,10 +358,10 @@ export async function completeHostedGoogleHealthFitbitMigration(input: {
 }
 
 /**
- * Recovers the narrow crash window after Junction accepted Fitbit revocation
- * but before Murph finalized the fenced source row. Provider state is probed
- * outside the database lock and the exact captured claim is revalidated before
- * the local lifecycle transition.
+ * Recovers abandoned Fitbit cutover claims on either side of provider revoke.
+ * A fresh claim remains with its current owner; a stale claim is renewed under
+ * the exact source epoch before any provider mutation. Provider I/O stays
+ * outside the database lock and every local transition revalidates the claim.
  */
 async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
   connectionId: string;
@@ -407,7 +408,9 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
       );
       const isSourceAccessActive = input.registry.get("junction")
         ?.connectionHandler?.isSourceAccessActive;
-      if (!storedAccount || !isSourceAccessActive) {
+      const revokeSourceAccess = input.registry.get("junction")
+        ?.connectionHandler?.revokeSourceAccess;
+      if (!storedAccount || !isSourceAccessActive || !revokeSourceAccess) {
         return { state: "pending" as const };
       }
 
@@ -415,6 +418,7 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
         claimAt: source.lastSeenAt,
         connection,
         isSourceAccessActive,
+        revokeSourceAccess,
         source,
         state: "probe" as const,
         storedAccount,
@@ -435,10 +439,146 @@ async function recoverHostedGoogleHealthFitbitMigrationCutover(input: {
   } catch {
     return "pending";
   }
-  if (sourceAccessActive) {
+  if (!sourceAccessActive) {
+    return finalizeRecoveredHostedGoogleHealthFitbitCutover(input, target);
+  }
+
+  if (isHostedGoogleHealthFitbitCutoverClaimFresh(target.claimAt)) {
     return "pending";
   }
 
+  const renewedTarget = await input.store.withConnectionMutationLock(
+    input.connectionId,
+    async (tx) => {
+      const connection = await input.store.getConnectionForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      const storedAccount = await input.store.getStoredConnectionAccountForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      const source = await findHostedConnectionSource({
+        connectionId: input.connectionId,
+        sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+        store: input.store,
+        tx,
+      });
+      if (
+        !connection
+        || !publicAccountMatchesDisconnectTarget(target.connection, connection)
+        || !storedAccountMatchesDisconnectTarget(target.storedAccount, storedAccount)
+        || !source
+        || source.id !== target.source.id
+        || source.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+        || source.lastSeenAt !== target.claimAt
+      ) {
+        return null;
+      }
+
+      const claimAt = nextHostedSourceLifecycleAt(source.lastSeenAt);
+      await writeHostedConnectionSourceLifecycle({
+        errorCode: HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+        errorMessage: null,
+        now: claimAt,
+        source,
+        status: source.status,
+        store: input.store,
+        tx,
+      });
+      return { ...target, claimAt, source };
+    },
+  );
+  if (!renewedTarget) {
+    return "pending";
+  }
+
+  try {
+    await renewedTarget.revokeSourceAccess(
+      renewedTarget.storedAccount,
+      JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+    );
+  } catch {
+    let accessStillActive: boolean;
+    try {
+      accessStillActive = await renewedTarget.isSourceAccessActive(
+        renewedTarget.storedAccount,
+        JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+      );
+    } catch {
+      return "pending";
+    }
+    if (!accessStillActive) {
+      return finalizeRecoveredHostedGoogleHealthFitbitCutover(input, renewedTarget);
+    }
+
+    await input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
+      const connection = await input.store.getConnectionForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      const storedAccount = await input.store.getStoredConnectionAccountForUser(
+        input.userId,
+        input.connectionId,
+        tx,
+      );
+      const current = await findHostedConnectionSource({
+        connectionId: input.connectionId,
+        sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+        store: input.store,
+        tx,
+      });
+      if (
+        !connection
+        || !publicAccountMatchesDisconnectTarget(renewedTarget.connection, connection)
+        || !storedAccountMatchesDisconnectTarget(renewedTarget.storedAccount, storedAccount)
+        || !current
+        || current.id !== renewedTarget.source.id
+        || current.lastErrorCode !== HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE
+        || current.lastSeenAt !== renewedTarget.claimAt
+      ) {
+        return;
+      }
+      await writeHostedConnectionSourceLifecycle({
+        errorCode: DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
+        errorMessage: null,
+        now: nextHostedSourceLifecycleAt(current.lastSeenAt),
+        source: current,
+        status: renewedTarget.source.status,
+        store: input.store,
+        tx,
+      });
+    });
+    return "pending";
+  }
+
+  return finalizeRecoveredHostedGoogleHealthFitbitCutover(input, renewedTarget);
+}
+
+function isHostedGoogleHealthFitbitCutoverClaimFresh(claimAt: string): boolean {
+  const claimAtMs = Date.parse(claimAt);
+  return Number.isFinite(claimAtMs)
+    && Date.now() - claimAtMs < GOOGLE_HEALTH_FITBIT_CUTOVER_CLAIM_LEASE_MS;
+}
+
+async function finalizeRecoveredHostedGoogleHealthFitbitCutover(
+  input: {
+    connectionId: string;
+    store: PrismaDeviceSyncControlPlaneStore;
+    userId: string;
+  },
+  target: {
+    claimAt: string;
+    connection: PublicDeviceSyncAccount;
+    source: HostedDeviceConnectionSource;
+    storedAccount: NonNullable<Awaited<ReturnType<
+      PrismaDeviceSyncControlPlaneStore["getStoredConnectionAccountForUser"]
+    >>>;
+  },
+): Promise<"complete" | "pending"> {
   return input.store.withConnectionMutationLock(input.connectionId, async (tx) => {
     const connection = await input.store.getConnectionForUser(
       input.userId,

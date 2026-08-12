@@ -111,9 +111,14 @@ Updated: 2026-08-12
     4. It accepted four findings: importer-owned canonical local-day coverage,
     strict availability semantics with sparse-resource obligations, recovery of
     the post-revoke/pre-finalize crash window, and stale retry UI state.
-12. In progress: push the round-four remediation, rerun final ReviewGPT against
-    the exact head with all rendered evidence attached, and inspect current-base
-    mergeability without spending a second base-update attempt.
+12. Completed: pushed the round-four remediation and ran final ReviewGPT round
+    5 with all eight rendered captures. It required a second retrospective:
+    successor admission still compared raw UTC-shaped records after legacy
+    coverage moved to canonical local-day boundaries, while crash recovery
+    could leave an active-provider pre-revoke claim pending forever.
+13. In progress: push the requirement-level round-five remediation, rerun final
+    ReviewGPT against the exact head with all rendered evidence attached, and
+    inspect current-base mergeability without spending a second base update.
 
 ## Decisions
 
@@ -127,6 +132,17 @@ Updated: 2026-08-12
   and targeted legacy cutover instead of requiring a second confirmation click.
 - Treat the broader refactor request as permission to simplify adjacent code in
   the exact migration call path, not to widen into unrelated device providers.
+- Carry the existing durable per-resource Fitbit boundary into the Junction
+  importer and apply it only after canonical normalization, before the writer.
+  Daily facts use the same vault-local day-end resolver that produced the
+  boundary; interval facts use the canonical accepted interval end. Do not add
+  another coverage store or raw-record timestamp interpretation.
+- Treat `SOURCE_DISCONNECT_IN_PROGRESS` plus the source row's `lastSeenAt` as a
+  bounded 60-second cutover claim. A fresh active-provider claim remains with
+  its owner; a stale claim is renewed under the exact source epoch before the
+  existing list-before-revoke operation resumes. Provider absence finalizes the
+  fence, active failure restores the existing retry marker, and an unprobeable
+  outcome retains the renewed bounded claim. Do not add a lease table or worker.
 
 ## Verification
 
@@ -172,11 +188,17 @@ Updated: 2026-08-12
   uses the vault-resolved local-day boundary; availability accepts only explicit
   supported values; an absent Fitbit registration recovers the exact fenced
   cutover without a second revoke; and successful retry removes its stale error.
+- Final round-five retrospective proof: 154 focused importer tests, 224 focused
+  Junction provider tests, and 136 hosted Web cutover tests pass. The importer,
+  device-sync, and Web typechecks plus focused Web lint pass. Coverage includes
+  positive-offset and DST local-day boundaries, interval-ended sleep, the real
+  vault-writer boundary, stale pre-revoke recovery, concurrent retries with one
+  provider mutation, and both absent and still-active ambiguous revoke results.
 
 ## Remaining handoff
 
 - Keep the pull request draft.
-- Push the round-four remediation and rerun final ReviewGPT against its exact
+- Push the round-five retrospective remediation and rerun final ReviewGPT against its exact
   head with the eight authorization, verification, cutover, and retry captures
   packaged as rendered evidence; resolve every accepted finding before
   archiving this plan.

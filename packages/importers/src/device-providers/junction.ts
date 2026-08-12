@@ -129,6 +129,12 @@ export interface JunctionSnapshotInput {
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
   companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry;
+  canonicalCoverageFence?: JunctionCanonicalCoverageFence;
+}
+
+export interface JunctionCanonicalCoverageFence {
+  readonly coverageThroughByResource: Readonly<Record<string, string | null>>;
+  readonly sourceProviderSlug: string;
 }
 
 export type JunctionSummaryResource =
@@ -157,11 +163,13 @@ export interface JunctionCanonicalCoverageEvidence {
 
 export interface JunctionCanonicalCoverageEvent {
   readonly dataOrigin?: { readonly sourceProviderSlug?: string };
-  readonly dayKey: string;
+  readonly dayKey?: string;
   readonly endAt?: string;
   readonly externalRef?: { readonly resourceType: string };
+  readonly fields?: Readonly<Record<string, unknown>>;
   readonly kind: string;
   readonly occurredAt: string;
+  readonly sample?: { readonly endAt?: string };
   readonly timeZone?: string;
   readonly workout?: { readonly endedAt?: string };
 }
@@ -225,6 +233,10 @@ const junctionSnapshotSchema = z.object({
   summaries: z.record(z.string(), z.unknown()).optional(),
   timeseries: z.record(z.string(), z.unknown()).optional(),
   companionHrvRmssd: z.unknown().optional(),
+  canonicalCoverageFence: z.object({
+    coverageThroughByResource: z.record(z.string(), z.string().nullable()),
+    sourceProviderSlug: z.string(),
+  }).strict().optional(),
 }).catchall(z.unknown());
 
 const junctionCompanionHrvRmssdSnapshotEntrySchema = z.object({
@@ -974,6 +986,10 @@ export function normalizeJunctionSnapshot(
   normalizeSummaries(snapshot.summaries, context);
   normalizeTimeseries(snapshot.timeseries, context);
   normalizeCompanionHrvRmssd(companionHrvRmssd, context);
+  applyJunctionCanonicalCoverageFence(
+    context,
+    snapshot.canonicalCoverageFence,
+  );
 
   return makeNormalizedDeviceBatch({
     provider: "junction",
@@ -1002,44 +1018,26 @@ export function normalizeJunctionSnapshot(
  */
 export function deriveJunctionCanonicalCoverageEvidence(
   events: readonly JunctionCanonicalCoverageEvent[],
+  defaultTimeZone?: string,
 ): readonly JunctionCanonicalCoverageEvidence[] {
   const coverageBySourceAndResource = new Map<string, JunctionCanonicalCoverageEvidence>();
 
   for (const event of events) {
-    const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
-      event.dataOrigin?.sourceProviderSlug,
+    const evidence = resolveJunctionCanonicalCoverageEvidence(
+      event,
+      defaultTimeZone,
     );
-    const externalRefResourceType = event.externalRef?.resourceType;
-    if (!sourceProviderSlug || !externalRefResourceType) {
+    if (!evidence) {
       continue;
     }
 
-    const resource = JUNCTION_CANONICAL_COVERAGE_RESOURCES.find((candidate) =>
-      externalRefResourceType
-        === `junction-${slugify(sourceProviderSlug, "source")}-${slugify(candidate, "resource")}`
-    );
-    if (!resource) {
-      continue;
-    }
-
-    const coverageThrough = JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES.has(resource)
-      ? resolveCanonicalLocalDayEnd(event.dayKey, event.timeZone)
-      : resolveCanonicalEventIntervalEnd(event);
-    if (!coverageThrough) {
-      continue;
-    }
-
-    const key = `${sourceProviderSlug}\u0000${resource}`;
+    const key = `${evidence.sourceProviderSlug}\u0000${evidence.resource}`;
     const existing = coverageBySourceAndResource.get(key);
     if (
       !existing
-      || Date.parse(coverageThrough) > Date.parse(existing.coverageThrough)
+      || Date.parse(evidence.coverageThrough) > Date.parse(existing.coverageThrough)
     ) {
-      coverageBySourceAndResource.set(key, {
-        coverageThrough,
-        resource,
-        sourceProviderSlug,
-      });
+      coverageBySourceAndResource.set(key, evidence);
     }
   }
 
@@ -1049,16 +1047,101 @@ export function deriveJunctionCanonicalCoverageEvidence(
   );
 }
 
+function applyJunctionCanonicalCoverageFence(
+  context: NormalizationContext,
+  fence: JunctionCanonicalCoverageFence | undefined,
+): void {
+  const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
+    fence?.sourceProviderSlug,
+  );
+  if (!fence || !sourceProviderSlug) {
+    return;
+  }
+
+  const admittedEvents = context.events.filter((event) => {
+    if (
+      normalizeJunctionSourceProviderSlug(event.dataOrigin?.sourceProviderSlug)
+        !== sourceProviderSlug
+    ) {
+      return true;
+    }
+    const evidence = resolveJunctionCanonicalCoverageEvidence(
+      event,
+      context.defaultTimeZone,
+    );
+    if (!evidence) {
+      return event.externalRef?.resourceType
+        === `junction-${slugify(sourceProviderSlug, "source")}-profile`;
+    }
+    if (!(evidence.resource in fence.coverageThroughByResource)) {
+      return true;
+    }
+    const legacyCoverageThrough = fence.coverageThroughByResource[evidence.resource];
+    return typeof legacyCoverageThrough === "string"
+      && Date.parse(evidence.coverageThrough) > Date.parse(legacyCoverageThrough);
+  });
+  context.events.splice(0, context.events.length, ...admittedEvents);
+}
+
+function resolveJunctionCanonicalCoverageEvidence(
+  event: JunctionCanonicalCoverageEvent,
+  defaultTimeZone?: string,
+): JunctionCanonicalCoverageEvidence | null {
+  const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
+    event.dataOrigin?.sourceProviderSlug,
+  );
+  const externalRefResourceType = event.externalRef?.resourceType;
+  if (!sourceProviderSlug || !externalRefResourceType) {
+    return null;
+  }
+
+  const resource = JUNCTION_CANONICAL_COVERAGE_RESOURCES.find((candidate) =>
+    externalRefResourceType
+      === `junction-${slugify(sourceProviderSlug, "source")}-${slugify(candidate, "resource")}`
+  );
+  if (!resource) {
+    return null;
+  }
+
+  const coverageThrough = JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES.has(resource)
+    ? resolveCanonicalLocalDayEnd(
+        event.dayKey ?? resolveCanonicalLocalDayKey(event.occurredAt, event.timeZone ?? defaultTimeZone),
+        event.timeZone ?? defaultTimeZone,
+      )
+    : resolveCanonicalEventIntervalEnd(event);
+  return coverageThrough
+    ? { coverageThrough, resource, sourceProviderSlug }
+    : null;
+}
+
+function resolveCanonicalLocalDayKey(
+  occurredAt: string,
+  timeZone: string | undefined,
+): string {
+  if (!timeZone) {
+    return "";
+  }
+  try {
+    return formatTimeZoneDateTimeParts(occurredAt, timeZone).dayKey;
+  } catch {
+    return "";
+  }
+}
+
 function resolveCanonicalEventIntervalEnd(
   event: JunctionCanonicalCoverageEvent,
 ): string | null {
   if (event.kind === "sleep_session") {
-    return normalizeTimestamp(event.endAt) ?? null;
+    return normalizeTimestamp(event.endAt ?? event.fields?.endAt) ?? null;
   }
   if (event.kind === "activity_session") {
-    return normalizeTimestamp(event.workout?.endedAt)
+    const fieldsWorkout = asPlainObject(event.fields?.workout);
+    return normalizeTimestamp(event.workout?.endedAt ?? fieldsWorkout?.endedAt)
       ?? normalizeTimestamp(event.occurredAt)
       ?? null;
+  }
+  if (event.sample?.endAt) {
+    return normalizeTimestamp(event.sample.endAt) ?? null;
   }
   return normalizeTimestamp(event.occurredAt) ?? null;
 }
@@ -1073,6 +1156,9 @@ function resolveCanonicalLocalDayEnd(
 
   let targetDayKey: string;
   try {
+    if (!dayKey) {
+      return null;
+    }
     targetDayKey = addDaysToIsoDate(dayKey, 1);
   } catch {
     return null;
@@ -2445,8 +2531,11 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
     return {};
   }
 
+  const { canonicalCoverageFence: _canonicalCoverageFence, ...sanitizedSnapshot } = sanitized;
+  void _canonicalCoverageFence;
+
   return stripUndefined({
-    ...sanitized,
+    ...sanitizedSnapshot,
     connections: sanitizeJunctionRawConnections(snapshot.connections),
     summaries,
     timeseries,

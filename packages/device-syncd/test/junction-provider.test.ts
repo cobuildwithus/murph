@@ -279,9 +279,10 @@ function executeJunctionJob(
 function createCanonicalImportReceipt(
   snapshot: unknown,
   durableDeliveryAccepted = true,
+  defaultTimeZone?: string,
 ) {
   assertJunctionSnapshotInput(snapshot);
-  const events = normalizeJunctionSnapshot(snapshot).events ?? [];
+  const events = normalizeJunctionSnapshot(snapshot, { defaultTimeZone }).events ?? [];
   return {
     canonicalEventCount: events.length,
     canonicalEventExternalRefResourceIds: events.flatMap((event) =>
@@ -11565,6 +11566,7 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
     timeseriesResources: [],
   });
   const cutoverAt = "2026-08-11T12:00:00.000Z";
+  const cutoverDayCoverageThrough = "2026-08-12T00:00:00.000Z";
   const legacyFitbit = createConnectionSource({
     id: "src-fitbit-legacy",
     lastSeenAt: cutoverAt,
@@ -11575,7 +11577,7 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
     sourceProviderSlug: "fitbit",
     resourceAvailabilitySummary: {
       activity: true,
-      canonicalCoverageThrough_activity: cutoverAt,
+      canonicalCoverageThrough_activity: cutoverDayCoverageThrough,
     },
   });
   const googleHealth = createConnectionSource({
@@ -11612,6 +11614,7 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
     sources: DeviceConnectionSourceRecord[],
     observedAt = "2026-08-11T12:05:00.000Z",
     recordOverrides: Record<string, unknown> = {},
+    defaultTimeZone = "UTC",
   ) => {
     const sourceSummaries = sources.map(summarizeConnectionSource);
     return executeJunctionJob(
@@ -11619,8 +11622,15 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
       createJunctionJobContext({
         account: createAccount({ sources: sourceSummaries }),
         importSnapshot: async (snapshot) => {
-          importedSnapshots.push(snapshot);
-          return { imported: true };
+          const receipt = createCanonicalImportReceipt(
+            snapshot,
+            true,
+            defaultTimeZone,
+          );
+          if (receipt.canonicalEventCount > 0) {
+            importedSnapshots.push(snapshot);
+          }
+          return receipt;
         },
         listConnectionSources: async () => sourceSummaries,
       }),
@@ -11676,11 +11686,9 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
   assert.equal(fetchCalls, 0);
 
   await executeWithSources(cutoverSources, "2026-08-11T12:05:00.000Z");
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 0);
   assert.equal(fetchCalls, 0);
-  assert.match(JSON.stringify(importedSnapshots[0]), /google_health/u);
 
-  importedSnapshots.length = 0;
   await executeWithSources(
     cutoverSources,
     "2026-08-11T11:00:00.000Z",
@@ -11689,15 +11697,22 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
       start_time: "2026-08-11T11:00:00.000Z",
     },
   );
-  assert.equal(importedSnapshots.length, 1);
+  assert.equal(importedSnapshots.length, 0);
 
-  importedSnapshots.length = 0;
   await executeWithSources(
     cutoverSources,
     "2026-08-11T11:00:00.000Z",
     { date: "2026-08-11" },
   );
+  assert.equal(importedSnapshots.length, 0);
+
+  await executeWithSources(
+    cutoverSources,
+    "2026-08-12T12:05:00.000Z",
+    { date: "2026-08-12" },
+  );
   assert.equal(importedSnapshots.length, 1);
+  assert.match(JSON.stringify(importedSnapshots[0]), /google_health/u);
 
   importedSnapshots.length = 0;
   const localDayBoundary = "2026-08-12T04:00:00.000Z";
@@ -11717,6 +11732,7 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
     localDayCutoverSources,
     "2026-08-12T03:00:00.000Z",
     { date: "2026-08-11" },
+    "America/New_York",
   );
   assert.equal(importedSnapshots.length, 0);
 
@@ -11724,6 +11740,7 @@ test("Junction fences Google Health imports and legacy-era backfill until an exp
     localDayCutoverSources,
     "2026-08-12T05:00:00.000Z",
     { date: "2026-08-12" },
+    "America/New_York",
   );
   assert.equal(importedSnapshots.length, 1);
 });

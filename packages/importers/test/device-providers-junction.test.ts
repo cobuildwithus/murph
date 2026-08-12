@@ -24,6 +24,7 @@ import {
   JUNCTION_OPT_IN_TIMESERIES_RESOURCES,
   JUNCTION_RAW_ONLY_SUMMARY_RESOURCES,
   classifyJunctionSummaryNormalizationEvidence,
+  deriveJunctionCanonicalCoverageEvidence,
   identifyJunctionBloodPressureProviderRecords,
   importDeviceProviderSnapshot,
   normalizeJunctionSnapshot,
@@ -3140,6 +3141,161 @@ test("Junction importer reports committed Fitbit daily coverage at the vault-loc
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
+});
+
+test("Junction canonical fence suppresses same-day Google Health facts east of UTC", () => {
+  const payload = normalizeJunctionSnapshot({
+    canonicalCoverageFence: {
+      coverageThroughByResource: {
+        hrv: "2026-08-11T15:00:00.000Z",
+      },
+      sourceProviderSlug: "google_health",
+    },
+    importedAt: "2026-08-12T12:00:00.000Z",
+    timeseries: {
+      hrv: {
+        groups: {
+          google_health: [{
+            data: [
+              { timestamp: "2026-08-11T02:00:00.000Z", value: 60 },
+              { timestamp: "2026-08-11T16:00:00.000Z", value: 70 },
+            ],
+            source: { provider: "google_health", type: "wearable" },
+          }],
+        },
+      },
+    },
+  }, { defaultTimeZone: "Asia/Tokyo" });
+
+  const hrvEvents = payload.events?.filter((event) => event.fields?.metric === "hrv") ?? [];
+  assert.deepEqual(hrvEvents.map((event) => event.dayKey), ["2026-08-12"]);
+  assert.deepEqual(
+    deriveJunctionCanonicalCoverageEvidence(
+      hrvEvents,
+      "Asia/Tokyo",
+    ),
+    [{
+      coverageThrough: "2026-08-12T15:00:00.000Z",
+      resource: "hrv",
+      sourceProviderSlug: "google-health",
+    }],
+  );
+});
+
+test("Junction importer applies the canonical fence before the vault writer", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-google-health-canonical-fence");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-08-12T00:00:00.000Z",
+      timezone: "Asia/Tokyo",
+    });
+    type JunctionImportResult = Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>> & {
+      junctionCanonicalCoverage: readonly JunctionCanonicalCoverageEvidence[];
+    };
+
+    const result = await importDeviceProviderSnapshot<JunctionImportResult>({
+      provider: "junction",
+      vaultRoot,
+      snapshot: {
+        accountId: "junction-account-hash-google-health-fence",
+        canonicalCoverageFence: {
+          coverageThroughByResource: {
+            hrv: "2026-08-11T15:00:00.000Z",
+          },
+          sourceProviderSlug: "google_health",
+        },
+        importedAt: "2026-08-12T12:00:00.000Z",
+        timeseries: {
+          hrv: {
+            groups: {
+              google_health: [{
+                data: [
+                  { timestamp: "2026-08-11T02:00:00.000Z", value: 60 },
+                  { timestamp: "2026-08-11T16:00:00.000Z", value: 70 },
+                ],
+                source: { provider: "google_health", type: "wearable" },
+              }],
+            },
+          },
+        },
+      },
+    }, { corePort: coreRuntime });
+
+    assert.deepEqual(result.events.map((event) => event.dayKey), ["2026-08-12"]);
+    assert.deepEqual(result.junctionCanonicalCoverage, [{
+      coverageThrough: "2026-08-12T15:00:00.000Z",
+      resource: "hrv",
+      sourceProviderSlug: "google-health",
+    }]);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("Junction canonical fence handles a negative-offset DST boundary", () => {
+  const payload = normalizeJunctionSnapshot({
+    canonicalCoverageFence: {
+      coverageThroughByResource: {
+        hrv: "2026-11-02T05:00:00.000Z",
+      },
+      sourceProviderSlug: "google_health",
+    },
+    importedAt: "2026-11-03T12:00:00.000Z",
+    timeseries: {
+      hrv: {
+        groups: {
+          google_health: [{
+            data: [
+              { timestamp: "2026-11-01T18:00:00.000Z", value: 60 },
+              { timestamp: "2026-11-02T18:00:00.000Z", value: 70 },
+            ],
+            source: { provider: "google_health", type: "wearable" },
+          }],
+        },
+      },
+    },
+  }, { defaultTimeZone: "America/New_York" });
+
+  const hrvEvents = payload.events?.filter((event) => event.fields?.metric === "hrv") ?? [];
+  assert.deepEqual(hrvEvents.map((event) => event.dayKey), ["2026-11-02"]);
+});
+
+test("Junction canonical fence compares sleep sessions by accepted interval end", () => {
+  const payload = normalizeJunctionSnapshot({
+    canonicalCoverageFence: {
+      coverageThroughByResource: {
+        sleep: "2026-08-12T10:00:00.000Z",
+      },
+      sourceProviderSlug: "google_health",
+    },
+    importedAt: "2026-08-13T12:00:00.000Z",
+    summaries: {
+      sleep: [
+        {
+          bedtime_start: "2026-08-12T02:00:00.000Z",
+          bedtime_stop: "2026-08-12T10:00:00.000Z",
+          duration: 28_800,
+          id: "google-health-same-session",
+          sourceProviderSlug: "google_health",
+          total: 25_200,
+        },
+        {
+          bedtime_start: "2026-08-13T02:00:00.000Z",
+          bedtime_stop: "2026-08-13T10:00:00.000Z",
+          duration: 28_800,
+          id: "google-health-next-session",
+          sourceProviderSlug: "google_health",
+          total: 25_200,
+        },
+      ],
+    },
+  }, { defaultTimeZone: "America/New_York" });
+
+  const sessions = payload.events?.filter((event) => event.kind === "sleep_session") ?? [];
+  assert.deepEqual(sessions.map((event) => event.fields?.endAt), [
+    "2026-08-13T10:00:00.000Z",
+  ]);
 });
 
 test("Junction normalizer compacts VO2 max interval timeseries into daily facts", () => {

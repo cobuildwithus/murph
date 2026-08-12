@@ -35,6 +35,7 @@ export {
   normalizeJunctionSnapshot,
   type JunctionSnapshotInput,
   type JunctionBloodPressureProviderRecordIdentityEvidence,
+  type JunctionCanonicalCoverageFence,
   type JunctionCanonicalCoverageEvidence,
   type JunctionCanonicalCoverageEvent,
   type JunctionSummaryNormalizationEvidence,

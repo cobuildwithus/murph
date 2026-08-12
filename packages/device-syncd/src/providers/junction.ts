@@ -212,6 +212,7 @@ interface JunctionHistoricalUnresolvedProviderRecords {
 }
 
 interface PreparedJunctionImportSnapshot {
+  canonicalCoverageFence?: JunctionSnapshotInput["canonicalCoverageFence"];
   connections: Array<Record<string, unknown>>;
   sourceProviders: readonly JunctionProviderConnection[];
   snapshots: Record<string, unknown[]>;
@@ -1115,6 +1116,7 @@ export function createJunctionDeviceSyncProvider(
         windowStart: summaryWindow.windowStart,
         windowEnd: summaryWindow.windowEnd,
         connections: importConnections,
+        canonicalCoverageFence: preparedSummaryImport.canonicalCoverageFence,
         summaries: importSummaries,
         timeseries: {},
       };
@@ -2167,6 +2169,7 @@ export function createJunctionDeviceSyncProvider(
       windowStart: window.windowStart,
       windowEnd: window.windowEnd,
       connections: preparedImport.connections,
+      canonicalCoverageFence: preparedImport.canonicalCoverageFence,
       summaries: preparedImport.snapshots,
       timeseries: {},
     };
@@ -2871,6 +2874,7 @@ export function createJunctionDeviceSyncProvider(
             windowStart: executionWindowStart,
             windowEnd: executionWindowEnd,
             connections: preparedImport.connections,
+            canonicalCoverageFence: preparedImport.canonicalCoverageFence,
             summaries: {},
             timeseries: preparedImport.snapshots,
           };
@@ -2988,6 +2992,7 @@ export function createJunctionDeviceSyncProvider(
           windowStart: window.windowStart,
           windowEnd: window.windowEnd,
           connections: preparedImport.connections,
+          canonicalCoverageFence: preparedImport.canonicalCoverageFence,
           summaries: {},
           timeseries: preparedImport.snapshots,
         };
@@ -3046,6 +3051,7 @@ export function createJunctionDeviceSyncProvider(
       windowStart,
       windowEnd,
       connections,
+      canonicalCoverageFence: preparedImport.canonicalCoverageFence,
       summaries,
       timeseries: {},
     };
@@ -4784,6 +4790,7 @@ function prepareJunctionImportSnapshotForSources(
   );
 
   return {
+    canonicalCoverageFence: buildJunctionGoogleHealthCanonicalCoverageFence(currentSources),
     connections: sanitizeJunctionImportConnections(sourceProviders),
     sourceProviders,
     snapshots: sanitizeJunctionImportSnapshots(
@@ -4820,7 +4827,6 @@ function filterJunctionImportSnapshots(
       records.filter((record) =>
         isJunctionImportRecordAdmitted(
           record,
-          resource,
           sourceReferences,
           sources,
           hasPendingSourceAdmission,
@@ -4937,7 +4943,6 @@ async function recordAcceptedJunctionFitbitCoverage(
 
 function isJunctionImportRecordAdmitted(
   value: unknown,
-  resource: string,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
   sources: readonly JunctionImportAdmissionSource[],
   hasPendingSourceAdmission: boolean,
@@ -4963,18 +4968,7 @@ function isJunctionImportRecordAdmitted(
       return false;
     }
 
-    const googleHealthLegacyCoverageThrough =
-      sourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-      ? resolveJunctionGoogleHealthLegacyCoverageThrough(sources, resource)
-      : undefined;
-    return googleHealthLegacyCoverageThrough === undefined
-      || (
-        typeof googleHealthLegacyCoverageThrough === "string"
-        && isJunctionGoogleHealthRecordBeyondLegacyCoverage(
-          record,
-          googleHealthLegacyCoverageThrough,
-        )
-      );
+    return true;
   }
 
   return !hasPendingSourceAdmission || !hasJunctionSourceReferenceIdentity(record);
@@ -7500,139 +7494,59 @@ async function projectJunctionSources(
   }
 }
 
-function resolveJunctionGoogleHealthLegacyCoverageThrough(
+function buildJunctionGoogleHealthCanonicalCoverageFence(
   sources: readonly JunctionImportAdmissionSource[],
-  resource: string,
-): string | null | undefined {
+): JunctionSnapshotInput["canonicalCoverageFence"] {
   const legacySources = sources.filter((source) =>
     normalizeProviderSlug(source.sourceProviderSlug) === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
   );
-  if (legacySources.length === 0) {
+  if (
+    legacySources.length === 0
+    || legacySources.some((source) =>
+      source.status !== "disconnected"
+      || source.lastErrorCode !== DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE
+    )
+  ) {
     return undefined;
   }
 
-  let latestCoverageMs = Number.NEGATIVE_INFINITY;
-  for (const source of legacySources) {
-    if (
-      source.status !== "disconnected"
-      || source.lastErrorCode !== DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE
-    ) {
-      return null;
-    }
-
+  const coverageThroughByResource: Record<string, string | null> = {};
+  for (const resource of [
+    ...JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+    ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  ]) {
     const coverageKey = buildDeviceSyncSourceCanonicalCoverageThroughKey(resource);
-    const summary = source.resourceAvailabilitySummary;
-    if (!coverageKey || !summary || !(coverageKey in summary)) {
+    if (!coverageKey) {
       continue;
     }
-    const coverageThrough = readDeviceSyncSourceCanonicalCoverageThrough(
-      summary,
-      resource,
+    const summariesWithCoverage = legacySources.flatMap((source) => {
+      const summary = source.resourceAvailabilitySummary;
+      return summary && coverageKey in summary ? [summary] : [];
+    });
+    if (summariesWithCoverage.length === 0) {
+      continue;
+    }
+    const coverageValues = summariesWithCoverage.map((summary) =>
+      readDeviceSyncSourceCanonicalCoverageThrough(summary, resource)
     );
-    const coverageThroughMs = coverageThrough
-      ? Date.parse(coverageThrough)
-      : Number.NaN;
-    if (!Number.isFinite(coverageThroughMs)) {
-      return null;
-    }
-    latestCoverageMs = Math.max(latestCoverageMs, coverageThroughMs);
-  }
-
-  return latestCoverageMs === Number.NEGATIVE_INFINITY
-    ? undefined
-    : new Date(latestCoverageMs).toISOString();
-}
-
-function isJunctionGoogleHealthRecordBeyondLegacyCoverage(
-  record: Record<string, unknown>,
-  legacyCoverageThrough: string,
-): boolean {
-  const recordCoverageThrough = resolveJunctionRecordCoverageThrough(record);
-  if (!recordCoverageThrough) {
-    return false;
-  }
-
-  const recordCoverageThroughMs = Date.parse(recordCoverageThrough);
-  const legacyCoverageThroughMs = Date.parse(legacyCoverageThrough);
-  return Number.isFinite(recordCoverageThroughMs)
-    && Number.isFinite(legacyCoverageThroughMs)
-    && recordCoverageThroughMs > legacyCoverageThroughMs;
-}
-
-function resolveJunctionRecordCoverageThrough(
-  record: Record<string, unknown>,
-): string | null {
-  for (const key of [
-    "end",
-    "endAt",
-    "end_at",
-    "endTime",
-    "end_time",
-    "endTimestamp",
-    "end_timestamp",
-    "timeEnd",
-    "time_end",
-    "bedtimeStop",
-    "bedtime_stop",
-  ]) {
-    const value = normalizeString(record[key]);
-    if (!value) {
+    if (coverageValues.some((coverage) => coverage === null)) {
+      coverageThroughByResource[resource] = null;
       continue;
     }
-    const timestamp = toIsoTimestampIfValid(value);
-    if (timestamp) {
-      return timestamp;
-    }
+    const validCoverage = coverageValues.filter(
+      (coverage): coverage is string => coverage !== null,
+    );
+    coverageThroughByResource[resource] = validCoverage.reduce((latest, coverage) =>
+      Date.parse(coverage) > Date.parse(latest) ? coverage : latest
+    );
   }
 
-  for (const key of [
-    "date",
-    "day",
-    "calendarDate",
-    "calendar_date",
-    "localDate",
-    "local_date",
-  ]) {
-    const value = normalizeString(record[key]);
-    if (!value || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
-      continue;
-    }
-    const dayStartMs = Date.parse(`${value}T00:00:00.000Z`);
-    if (Number.isFinite(dayStartMs)) {
-      return new Date(dayStartMs + 24 * 60 * 60_000).toISOString();
-    }
-  }
-
-  for (const key of [
-    "observedAtRaw",
-    "observed_at_raw",
-    "observedAt",
-    "observed_at",
-    "timestamp",
-    "time",
-    "start",
-    "startAt",
-    "start_at",
-    "startTime",
-    "start_time",
-    "startTimestamp",
-    "start_timestamp",
-    "timeStart",
-    "time_start",
-    "bedtimeStart",
-    "bedtime_start",
-  ]) {
-    const value = normalizeString(record[key]);
-    if (!value) {
-      continue;
-    }
-    const timestamp = toIsoTimestampIfValid(value);
-    if (timestamp) {
-      return timestamp;
-    }
-  }
-
-  return null;
+  return Object.keys(coverageThroughByResource).length > 0
+    ? {
+        coverageThroughByResource,
+        sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+      }
+    : undefined;
 }
 
 function isJunctionSourceAdmittedForImport(
