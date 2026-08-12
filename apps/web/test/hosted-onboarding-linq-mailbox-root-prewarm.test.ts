@@ -18,6 +18,9 @@ import {
   encryptHostedWebNullableString,
 } from "@/src/lib/hosted-web/encryption";
 import {
+  buildHostedMemberRoutingPrivateColumns,
+} from "@/src/lib/hosted-onboarding/member-private-codecs";
+import {
   handleHostedOnboardingLinqWebhook,
   runHostedOnboardingWebhookTransaction,
   warmHostedLinqMailboxPayloadRoot,
@@ -701,7 +704,18 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         reason: "historical-root-prepared",
       });
 
-      expect(unwrapExactRoots).toHaveBeenCalledExactlyOnceWith({
+      expect(unwrapExactRoots).toHaveBeenCalledTimes(2);
+      expect(unwrapExactRoots).toHaveBeenNthCalledWith(1, {
+        prisma,
+        references: [{
+          domain: "control",
+          rootKeyId: historicalRootKeyId,
+          userId: memberId,
+        }],
+        retainFailureInScopedCache: true,
+        signal: undefined,
+      });
+      expect(unwrapExactRoots).toHaveBeenNthCalledWith(2, {
         prisma,
         references: [{
           domain: "control",
@@ -719,6 +733,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         "unwrap-active-ingress",
         "unwrap-active-control",
         "unwrap-exact-roots",
+        "unwrap-exact-roots",
         "begin",
         "plan",
         "commit",
@@ -727,6 +742,269 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       installLocalHostedSecureBoxTestCodec();
       unwrapActiveRoot.mockReset();
       unwrapActiveRoot.mockImplementation(defaultUnwrapActiveRoot);
+      readRoute.mockReset();
+      readRoute.mockImplementation(defaultReadRoute);
+      resolver.mockReset();
+      resolver.mockImplementation(defaultResolver);
+      planner.mockReset();
+      planner.mockImplementation(defaultPlanner);
+    }
+  });
+
+  it("bounds six distinct historical routing roots to two concurrent KMS operations", async () => {
+    const {
+      unwrapHostedDomainRootForWeb,
+      unwrapHostedDomainRootsForWebByRootKeyIds,
+    } = await import("@/src/lib/hosted-crypto/domain-root-store");
+    const {
+      planHostedOnboardingLinqWebhook,
+      resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+    } = await import("@/src/lib/hosted-onboarding/webhook-provider-linq");
+    const { readHostedThreadRouteByThreadIdentity } = await import(
+      "@/src/lib/hosted-routing/thread-route-store"
+    );
+    const unwrapActiveRoot = vi.mocked(unwrapHostedDomainRootForWeb);
+    const unwrapExactRoots = vi.mocked(
+      unwrapHostedDomainRootsForWebByRootKeyIds,
+    );
+    const readRoute = vi.mocked(readHostedThreadRouteByThreadIdentity);
+    const resolver = vi.mocked(
+      resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+    );
+    const planner = vi.mocked(planHostedOnboardingLinqWebhook);
+    const defaultUnwrapActiveRoot = unwrapActiveRoot.getMockImplementation();
+    const defaultUnwrapExactRoots = unwrapExactRoots.getMockImplementation();
+    const defaultReadRoute = readRoute.getMockImplementation();
+    const defaultResolver = resolver.getMockImplementation();
+    const defaultPlanner = planner.getMockImplementation();
+    if (
+      !defaultUnwrapActiveRoot
+      || !defaultUnwrapExactRoots
+      || !defaultReadRoute
+      || !defaultResolver
+      || !defaultPlanner
+    ) {
+      throw new Error("Expected the default direct routing preparation mocks.");
+    }
+
+    const memberId = "member_direct_six_historical_roots";
+    const historicalRootKeyIds = [
+      "root_control_historical_1",
+      "root_control_historical_2",
+      "root_control_historical_3",
+      "root_control_historical_4",
+      "root_control_historical_5",
+      "root_control_historical_6",
+    ] as const;
+    const expectedHistoricalProviderOrder = [
+      historicalRootKeyIds[0],
+      historicalRootKeyIds[1],
+      historicalRootKeyIds[2],
+      historicalRootKeyIds[4],
+      historicalRootKeyIds[3],
+      historicalRootKeyIds[5],
+    ];
+    let releaseIngress: (() => void) | undefined;
+    setHostedSecureBoxStringTestCodecForTests(null);
+    try {
+      let encryptionRootIndex = 0;
+      unwrapActiveRoot.mockImplementation(async (input) => {
+        const rootKeyId = historicalRootKeyIds[encryptionRootIndex];
+        encryptionRootIndex += 1;
+        if (!rootKeyId) {
+          throw new Error("Unexpected historical routing fixture encryption.");
+        }
+        const root = buildTestUnwrappedHostedDomainRoot({
+          domain: input.domain,
+          rootKey: new Uint8Array(32),
+          rootKeyId,
+          userId: input.userId,
+        });
+        return {
+          envelope: root.envelope,
+          rootKey: Uint8Array.from(root.rootKey),
+        };
+      });
+      const privateColumns = await buildHostedMemberRoutingPrivateColumns({
+        linqChatId: "chat_six_roots",
+        linqRecipientPhone: "+15550000000",
+        memberId,
+        pendingLinqChatId: "chat_pending_six_roots",
+        pendingLinqParticipantContact: "+15555550123",
+        pendingLinqRecipientPhone: "+15550000001",
+        telegramThreadId: "telegram_thread_six_roots",
+        telegramUserId: "telegram_user_six_roots",
+      });
+      expect(encryptionRootIndex).toBe(6);
+
+      let providerInFlight = 0;
+      let providerPeak = 0;
+      let providerTotal = 0;
+      const historicalProviderOrder: string[] = [];
+      const ingressGate = new Promise<void>((resolve) => {
+        releaseIngress = resolve;
+      });
+      const beginProviderOperation = () => {
+        providerInFlight += 1;
+        providerTotal += 1;
+        providerPeak = Math.max(providerPeak, providerInFlight);
+      };
+      const finishProviderOperation = () => {
+        providerInFlight -= 1;
+      };
+      const cacheRoot = (input: {
+        domain: HostedCryptoDomain;
+        rootKeyId: string;
+        userId: string;
+      }) => {
+        const master = buildTestUnwrappedHostedDomainRoot({
+          ...input,
+          rootKey: new Uint8Array(32),
+        });
+        getHostedDomainRootUnwrapCache()?.set(
+          `${input.userId}|${input.domain}|${input.rootKeyId}`,
+          Promise.resolve(master),
+        );
+        return master;
+      };
+
+      calls.length = 0;
+      unwrapActiveRoot.mockImplementation(async (input) => {
+        beginProviderOperation();
+        try {
+          if (input.domain === "ingress") {
+            calls.push("provider-ingress");
+            await ingressGate;
+          } else {
+            calls.push("provider-control-active");
+            await Promise.resolve();
+          }
+          const rootKeyId = input.domain === "ingress"
+            ? "root_ingress_active"
+            : "root_control_active";
+          const master = cacheRoot({
+            domain: input.domain,
+            rootKeyId,
+            userId: input.userId,
+          });
+          getHostedDomainRootUnwrapCache()?.set(
+            `${input.userId}|${input.domain}|@active`,
+            Promise.resolve(master),
+          );
+          return {
+            envelope: master.envelope,
+            rootKey: Uint8Array.from(master.rootKey),
+          };
+        } finally {
+          finishProviderOperation();
+        }
+      });
+      unwrapExactRoots.mockImplementation(async (input) => {
+        const results = [];
+        for (const reference of input.references) {
+          const cacheKey =
+            `${reference.userId}|${reference.domain}|${reference.rootKeyId}`;
+          const cached = getHostedDomainRootUnwrapCache()?.get(cacheKey);
+          let master: UnwrappedHostedDomainRoot;
+          if (cached) {
+            master = await cached;
+          } else {
+            beginProviderOperation();
+            historicalProviderOrder.push(reference.rootKeyId);
+            calls.push(`provider-historical-${reference.rootKeyId}`);
+            if (historicalProviderOrder.length === 1) {
+              releaseIngress?.();
+            }
+            await Promise.resolve();
+            master = cacheRoot(reference);
+            finishProviderOperation();
+          }
+          results.push({
+            ...reference,
+            envelope: master.envelope,
+            rootKey: Uint8Array.from(master.rootKey),
+          });
+        }
+        return results;
+      });
+      readRoute.mockImplementation(async () => {
+        calls.push("read-route");
+        return null;
+      });
+      resolver.mockResolvedValue(memberId);
+      planner.mockImplementationOnce(async (input) => {
+        calls.push("plan");
+        expect(input.preparedDirectMailboxPayloadRoot).toMatchObject({
+          activeControlRootKeyId: "root_control_active",
+          memberId,
+          rootKeyId: "root_ingress_active",
+          routingState: {
+            linqChatId: "chat_six_roots",
+            memberId,
+            pendingLinqChatId: "chat_pending_six_roots",
+            telegramThreadId: "telegram_thread_six_roots",
+            telegramUserId: "telegram_user_six_roots",
+          },
+        });
+        return {
+          desiredSideEffects: [],
+          response: {
+            ok: true as const,
+            reason: "six-historical-roots-prepared",
+          },
+        };
+      });
+      const prisma = buildPrewarmPrisma();
+      prisma.hostedMemberRouting.findUnique.mockResolvedValue({
+        ...privateColumns,
+        linqChatLookupKey: null,
+        linqHomeLineAssignedAt: null,
+        linqParticipantContactKind: null,
+        linqParticipantContactLookupKey: null,
+        linqRecipientPhoneLookupKey: null,
+        memberId,
+        pendingLinqChatLookupKey: null,
+        pendingLinqParticipantContactKind: null,
+        pendingLinqParticipantContactLookupKey: null,
+        pendingLinqParticipantContactObservedAt: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+        replyAliasLookupKey: null,
+        telegramUserLookupKey: null,
+      });
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma: prisma as never,
+        rawBody: buildLinqMessageWebhookBody({ chatIsGroup: false }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ok: true,
+        reason: "six-historical-roots-prepared",
+      });
+
+      expect(providerTotal).toBe(8);
+      expect(providerPeak).toBe(2);
+      expect(providerInFlight).toBe(0);
+      expect(historicalProviderOrder).toEqual(
+        expectedHistoricalProviderOrder,
+      );
+      expect(unwrapExactRoots).toHaveBeenCalledTimes(7);
+      const lastProviderCallIndex = calls.reduce(
+        (lastIndex, call, index) => call.startsWith("provider-")
+          ? index
+          : lastIndex,
+        -1,
+      );
+      expect(calls.indexOf("begin")).toBeGreaterThan(
+        lastProviderCallIndex,
+      );
+    } finally {
+      releaseIngress?.();
+      installLocalHostedSecureBoxTestCodec();
+      unwrapActiveRoot.mockReset();
+      unwrapActiveRoot.mockImplementation(defaultUnwrapActiveRoot);
+      unwrapExactRoots.mockReset();
+      unwrapExactRoots.mockImplementation(defaultUnwrapExactRoots);
       readRoute.mockReset();
       readRoute.mockImplementation(defaultReadRoute);
       resolver.mockReset();
@@ -1027,7 +1305,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       }
     });
 
-    it("preserves the first direct root failure, drains its sibling, and opens zero transactions", async () => {
+    it("preserves the first direct root failure, drains its sibling, and limits the transaction to recovery planning", async () => {
       const { unwrapHostedDomainRootForWeb } = await import(
         "@/src/lib/hosted-crypto/domain-root-store"
       );
@@ -1046,8 +1324,9 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       const unwrapRoot = vi.mocked(unwrapHostedDomainRootForWeb);
       const defaultReadRoute = readRoute.getMockImplementation();
       const defaultResolver = resolver.getMockImplementation();
+      const defaultPlanner = planner.getMockImplementation();
       const defaultUnwrap = unwrapRoot.getMockImplementation();
-      if (!defaultReadRoute || !defaultResolver || !defaultUnwrap) {
+      if (!defaultReadRoute || !defaultResolver || !defaultPlanner || !defaultUnwrap) {
         throw new Error("Expected the default direct preparation mocks.");
       }
       const ingressError = new Error("direct ingress KMS unavailable");
@@ -1065,6 +1344,11 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           return null;
         });
         resolver.mockResolvedValue("member_direct_prewarm");
+        planner.mockImplementationOnce(async (input) => {
+          calls.push("plan-recovery-only");
+          expect(input.directMailboxPreparationFailure).toBe(ingressError);
+          throw input.directMailboxPreparationFailure;
+        });
         unwrapRoot.mockImplementation(async (input) => {
           if (input.domain === "ingress") {
             calls.push("ingress-failed");
@@ -1101,19 +1385,23 @@ describe("hosted Linq mailbox payload root prewarm", () => {
           value: null,
         });
 
-        expect(prisma.$transaction).not.toHaveBeenCalled();
-        expect(planner).not.toHaveBeenCalled();
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(planner).toHaveBeenCalledTimes(1);
         expect(calls).toEqual([
           "read-route",
           "ingress-failed",
           "control-started",
           "control-failed",
+          "begin",
+          "plan-recovery-only",
         ]);
       } finally {
         readRoute.mockReset();
         readRoute.mockImplementation(defaultReadRoute);
         resolver.mockReset();
         resolver.mockImplementation(defaultResolver);
+        planner.mockReset();
+        planner.mockImplementation(defaultPlanner);
         unwrapRoot.mockReset();
         unwrapRoot.mockImplementation(defaultUnwrap);
       }

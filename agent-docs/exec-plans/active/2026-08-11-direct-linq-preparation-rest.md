@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-11
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 ## Goal
 
@@ -17,8 +17,13 @@ Updated: 2026-08-11
 - Preparation binds the resolved direct member and mailbox ingress root.
 - Member, owner, or root drift rolls back and receives at most one fresh
   prepare-before-transaction attempt; repeated drift fails closed.
-- Preparation failure opens no transaction, and transaction-time crypto is a
-  request-cache hit.
+- Preparation failure may open one transaction only to recover an exact
+  durable duplicate and its missing wake; every nonduplicate rethrows the
+  original failure without route mutation, append work, or KMS under locks.
+- Prepared direct ingress takes control-root authority before a nonblocking
+  member-row lock, then home-route and chat-route authority.
+- Direct root preparation performs at most two concurrent KMS operations even
+  when all six encrypted routing fields reference distinct historical roots.
 - Focused hosted Web tests, Web typecheck, scoped lint, privacy/no-JS guards,
   exact-head CI, and required ReviewGPT gates pass.
 
@@ -50,6 +55,14 @@ Updated: 2026-08-11
 3. Risk: the core-candidate change overwrites newer Family changes.
    Mitigation: integrate against current main, inspect the base-to-head diff,
    and retain focused Family tests in the verification slice.
+4. Risk: direct ingress and member-first lifecycle owners deadlock on reciprocal
+   control-root/member acquisition.
+   Mitigation: retain root-first direct ingress, make the following member-row
+   acquisition nonblocking, and replay once after releasing root authority.
+5. Risk: mandatory direct preparation prevents an exact duplicate from
+   repairing a post-commit wake during a KMS outage.
+   Mitigation: carry the original preparation failure into a narrow duplicate
+   recovery branch and rethrow it for every nonduplicate outcome.
 
 ## Tasks
 
@@ -66,12 +79,18 @@ Updated: 2026-08-11
 - Keep the direct-Linq core and mailbox-root binding in one PR because the
   narrow candidate is the preparation input the binding must authenticate.
 - Do not duplicate the independently landed fail-fast drain change.
+- Preserve the exact duplicate read/wake path during direct KMS failure while
+  keeping all mutation and encryption paths fail closed.
+- Warm historical control roots sequentially within one control-lane owner;
+  ingress remains the only concurrent lane, so peak KMS concurrency is two.
 
 ## Verification
 
 - Commands to run: focused hosted Web Vitest files selected from the final
-  diff; `pnpm --dir apps/web typecheck`; scoped ESLint; `pnpm no-js`; privacy
-  and architecture/diff guards; exact-head GitHub checks and ReviewGPT gates.
+  diff; opt-in real-PostgreSQL activation concurrency; Web typecheck; scoped
+  ESLint; `pnpm test:diff`; privacy and architecture/diff guards; exact-head
+  GitHub checks and ReviewGPT gates.
 - Expected outcomes: the direct route is unchanged for a stable identity/root;
-  drift gets one fresh pre-transaction preparation; preparation/KMS failure
-  starts zero transactions; no new persisted state or privacy expansion.
+  drift or member contention gets one fresh pre-transaction preparation;
+  preparation/KMS failure recovers only an exact duplicate; no new persisted
+  state or privacy expansion.

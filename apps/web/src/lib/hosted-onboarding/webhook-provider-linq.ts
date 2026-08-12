@@ -664,9 +664,7 @@ interface PreparedHostedLinqDirectMailboxPayloadRoot {
   rootKeyId: string;
 }
 
-async function revalidatePreparedHostedLinqDirectMailboxTx(input: {
-  chatId: string;
-  contact: HostedLinqParticipantContact;
+async function revalidatePreparedHostedLinqDirectMailboxControlRootTx(input: {
   memberId: string;
   prepared: PreparedHostedLinqDirectMailboxPayloadRoot | null;
   prisma: Prisma.TransactionClient;
@@ -675,9 +673,9 @@ async function revalidatePreparedHostedLinqDirectMailboxTx(input: {
     throw hostedLinqDirectMailboxPreparationRequired("member");
   }
 
-  // Domain-root lifecycle code takes this authority lock before member rows.
-  // Hold it through any route rewrite so the prepared active control root
-  // remains the encrypt authority for the whole transaction.
+  // Root lifecycle owners take this authority lock before member rows. Direct
+  // ingress follows that order, then uses a nonblocking member-row attempt so
+  // a member-first activation transaction can finish instead of deadlocking.
   const activeControlRootKeyId =
     await lockAndReadActiveHostedDomainRootKeyIdTx({
       domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
@@ -694,9 +692,35 @@ async function revalidatePreparedHostedLinqDirectMailboxTx(input: {
     memberId: input.memberId,
     reason: "control-root",
   });
+  return input.prepared;
+}
 
-  // Match the durable route-binding lock order so the exact direct identity and
-  // chat winner cannot change between the re-read and mailbox encryption.
+async function tryLockPreparedHostedLinqDirectMemberRowTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const lockedRows = await input.prisma.$queryRaw<Array<{ id: string }>>`
+    select "id"
+    from "hosted_member"
+    where "id" = ${input.memberId}
+    for update skip locked
+  `;
+  return lockedRows.length === 1;
+}
+
+async function revalidatePreparedHostedLinqDirectMailboxTx(input: {
+  chatId: string;
+  contact: HostedLinqParticipantContact;
+  memberId: string;
+  prepared: PreparedHostedLinqDirectMailboxPayloadRoot | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<PreparedHostedLinqDirectMailboxPayloadRoot> {
+  if (!input.prepared || input.prepared.memberId !== input.memberId) {
+    throw hostedLinqDirectMailboxPreparationRequired("member");
+  }
+
+  // The caller already owns the control-root authority and member row. Match
+  // the durable route-binding order for the remaining home/chat authorities.
   await acquireHostedMemberHomeLinqRouteLockTx({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -834,7 +858,7 @@ function hasSameHostedMemberRoutingRecord(
   });
 }
 
-function readHostedMemberRoutingControlRootKeyIds(
+export function readHostedMemberRoutingControlRootKeyIds(
   routing: HostedMemberRoutingRecord | null,
 ): string[] {
   if (!routing) {
@@ -1282,6 +1306,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   instantStartAllowed?: boolean;
   pendingGroupParticipantMemberIds?: readonly string[] | null;
   pendingGroupRosterUnavailable?: boolean;
+  directMailboxPreparationFailure?: unknown;
   preparedDirectMailboxPayloadRoot?: PreparedHostedLinqDirectMailboxPayloadRoot | null;
   preparedPendingGroupSetupClaim?: PreparedHostedPendingGroupSetupClaim;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
@@ -1315,6 +1340,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
     input,
     "preparedDirectMailboxPayloadRoot",
   );
+  const directMailboxPreparationFailureProvided =
+    Object.prototype.hasOwnProperty.call(
+      input,
+      "directMailboxPreparationFailure",
+    );
 
   const accountLookupKey = createHostedPhoneLookupKey(recipientPhoneNumber);
   const threadRouteAccountLookupKeys = createHostedPhoneLookupKeyReadCandidates(
@@ -1326,6 +1356,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
     threadId: summary.chatId,
   });
   if (explicitThreadRoute) {
+    if (directMailboxPreparationFailureProvided) {
+      throw input.directMailboxPreparationFailure;
+    }
     return planHostedLinqExistingThreadRouteWebhook({
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       accountLookupKey,
@@ -1442,6 +1475,39 @@ export async function planHostedOnboardingLinqWebhook(input: {
     existingPendingLinqContactLookupPresent: Boolean(existingPendingLinqContactLookup),
     participantContactKind: participantContact.kind,
   });
+  const buildExistingMemberDuplicatePlan = (duplicateInput: {
+    existingMemberActive: boolean;
+    mailboxItemId: string;
+    memberId: string;
+  }): HostedOnboardingLinqDirectPlan =>
+    logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildActiveMemberDirectPlan({
+        desiredSideEffects: [],
+        postCommitGroupJoinConfirmationMemberIds: [duplicateInput.memberId],
+        response: {
+          duplicate: true,
+          ignored: true,
+          ok: true,
+          reason: "duplicate-webhook-event",
+        },
+        // No checkpoint on the duplicate read: this transaction did not run
+        // the append-path workspace upsert, so the retry keeps the legacy
+        // signal path that repairs a missing workspace row.
+        wakeHandoffs: [{
+          eventId: input.event.event_id,
+          mailboxItemId: duplicateInput.mailboxItemId,
+          source: "linq",
+          userId: duplicateInput.memberId,
+        }],
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        duplicate: true,
+        existingMemberActive: duplicateInput.existingMemberActive,
+        existingMemberMatch,
+        reason: "duplicate-webhook-event",
+        routeStage: "active-member-duplicate",
+      }),
+    );
   const memberRouteBindingAuthority = resolveHostedLinqHomeLineRouteBindingAuthority({
     existingMemberMatch,
     participantContact,
@@ -1454,6 +1520,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
     && incomingHomeLinqChatOwnerLookup
     && incomingHomeLinqChatOwnerLookup.memberId !== existingMember.id
   ) {
+    if (directMailboxPreparationFailureProvided) {
+      throw input.directMailboxPreparationFailure;
+    }
     if (directMailboxPreparationProvided) {
       throw hostedLinqDirectMailboxPreparationRequired("home-chat-owner");
     }
@@ -1467,6 +1536,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }),
     );
   }
+  if (!existingMember && directMailboxPreparationFailureProvided) {
+    throw input.directMailboxPreparationFailure;
+  }
   const existingMemberSuspended = existingMember
     ? isHostedMemberSuspended(existingMember.suspendedAt)
     : false;
@@ -1479,6 +1551,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
   let instantStartOwner: HostedLinqInstantStartOwner | null = null;
 
   if (summary.isFromMe) {
+    if (directMailboxPreparationFailureProvided) {
+      throw input.directMailboxPreparationFailure;
+    }
     if (existingMember) {
       await incrementHostedLinqOutboundDailyState({
         memberId: existingMember.id,
@@ -1499,6 +1574,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (existingMember && existingMemberSuspended) {
+    if (directMailboxPreparationFailureProvided) {
+      throw input.directMailboxPreparationFailure;
+    }
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("suspended-member"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -1510,8 +1588,29 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  let preparedDirectMailboxControlAuthority:
+    | PreparedHostedLinqDirectMailboxPayloadRoot
+    | null = null;
   if (existingMember) {
-    await lockHostedMemberRow(input.prisma, existingMember.id);
+    if (
+      directMailboxPreparationProvided
+      && input.preparedDirectMailboxPayloadRoot
+    ) {
+      preparedDirectMailboxControlAuthority =
+        await revalidatePreparedHostedLinqDirectMailboxControlRootTx({
+          memberId: existingMember.id,
+          prepared: input.preparedDirectMailboxPayloadRoot,
+          prisma: input.prisma,
+        });
+      if (!await tryLockPreparedHostedLinqDirectMemberRowTx({
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      })) {
+        throw hostedLinqDirectMailboxPreparationRequired("member");
+      }
+    } else {
+      await lockHostedMemberRow(input.prisma, existingMember.id);
+    }
     const exactMemberAccess = await readHostedRuntimeAiAccessDecision({
       memberId: existingMember.id,
       noticeSeed: input.event.event_id,
@@ -1522,6 +1621,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       !exactMemberAccess.allowed
       && exactMemberAccess.reason === "health_data_consent_withdrawn"
     ) {
+      if (directMailboxPreparationFailureProvided) {
+        throw input.directMailboxPreparationFailure;
+      }
       if (
         !isHostedLinqDirectChatAttested(messageEvent)
         || !exactMemberAccess.userNotice
@@ -1558,6 +1660,39 @@ export async function planHostedOnboardingLinqWebhook(input: {
           routeStage: "health-data-consent-withdrawn",
         }),
       );
+    }
+
+    if (directMailboxPreparationFailureProvided) {
+      if (!exactMemberAccess.allowed) {
+        throw input.directMailboxPreparationFailure;
+      }
+      const recoveryGroupJoinContext = participantPhoneNumber
+        ? await readHostedGroupJoinOutreachReplyContextTx({
+            linqChatId: summary.chatId,
+            participantMemberId: existingMember.id,
+            participantPhoneNumber,
+            recipientPhoneNumber,
+            replyToMessageId:
+              messageEvent.data.message.reply_to?.message_id ?? null,
+            sourceEventId: input.event.event_id,
+            tx: input.prisma,
+          })
+        : null;
+      if (!recoveryGroupJoinContext) {
+        const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
+          dedupeKey: input.event.event_id,
+          prisma: input.prisma,
+          userId: existingMember.id,
+        });
+        if (existingMailboxItem) {
+          return buildExistingMemberDuplicatePlan({
+            existingMemberActive: true,
+            mailboxItemId: existingMailboxItem.id,
+            memberId: existingMember.id,
+          });
+        }
+      }
+      throw input.directMailboxPreparationFailure;
     }
   }
 
@@ -1997,29 +2132,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
       });
 
       if (existingMailboxItem) {
-        return logHostedLinqWebhookPlannerDecisionAndReturn(
-          buildActiveMemberDirectPlan({
-            desiredSideEffects: [],
-            postCommitGroupJoinConfirmationMemberIds: [existingMember.id],
-            response: {
-              duplicate: true,
-              ignored: true,
-              ok: true,
-              reason: "duplicate-webhook-event",
-            },
-            // No checkpoint on the duplicate read: this transaction did not run
-            // the append-path workspace upsert, so the retry keeps the legacy
-            // signal path that repairs a missing workspace row.
-            wakeHandoffs: [{ eventId: input.event.event_id, mailboxItemId: existingMailboxItem.id, source: "linq", userId: existingMember.id }],
-          }),
-          buildHostedLinqWebhookPlannerDetails(input.event, context, {
-            duplicate: true,
-            existingMemberActive: existingMemberEffectiveActive,
-            existingMemberMatch,
-            reason: "duplicate-webhook-event",
-            routeStage: "active-member-duplicate",
-          }),
-        );
+        return buildExistingMemberDuplicatePlan({
+          existingMemberActive: existingMemberEffectiveActive,
+          mailboxItemId: existingMailboxItem.id,
+          memberId: existingMember.id,
+        });
       }
     }
 
@@ -2028,7 +2145,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         chatId: summary.chatId,
         contact: participantContact,
         memberId: existingMember.id,
-        prepared: input.preparedDirectMailboxPayloadRoot ?? null,
+        prepared: preparedDirectMailboxControlAuthority,
         prisma: input.prisma,
       })
       : null;

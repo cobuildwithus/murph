@@ -662,7 +662,18 @@ function createUsageResetPrismaFixture(input: {
 
   const prisma: UsageResetPrismaFixture = {
     $executeRaw: vi.fn(async () => 0),
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async (
+      query: readonly string[] | { strings?: readonly string[] },
+      ...values: unknown[]
+    ) => {
+      const taggedTemplate = Array.isArray(query);
+      const strings = taggedTemplate
+        ? query as readonly string[]
+        : (query as { strings?: readonly string[] }).strings ?? [];
+      return strings.join(" ").toLowerCase().includes("for update skip locked")
+        ? [{ id: values[0] }]
+        : [];
+    }),
     $transaction: vi.fn(async (run: (tx: UsageResetPrismaFixture) => Promise<unknown>) => run(prisma)),
     hostedAiUsage: {
       aggregate: vi.fn(async (aggregateInput: {

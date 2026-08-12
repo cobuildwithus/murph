@@ -38,6 +38,7 @@ import {
 import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
+  readHostedMemberRoutingControlRootKeyIds,
   resolveHostedLinqThreadContainerCryptoPreparationTarget,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
@@ -70,7 +71,10 @@ import {
 import {
   runWithHostedDomainRootUnwrapCache,
 } from "../hosted-crypto/domain-root-unwrap-cache";
-import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
+import {
+  unwrapHostedDomainRootForWeb,
+  unwrapHostedDomainRootsForWebByRootKeyIds,
+} from "../hosted-crypto/domain-root-store";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
   runWithPrismaOperationTimings,
@@ -562,6 +566,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 ? {
                     failedPendingGroupSetupPreparationClaim:
                       preparation.failedPendingGroupSetupPreparationClaim,
+                  }
+                : {}),
+              ...("directMailboxPreparationFailure" in preparation
+                ? {
+                    directMailboxPreparationFailure:
+                      preparation.directMailboxPreparationFailure,
                   }
                 : {}),
               ...("preparedDirectMailboxPayloadRoot" in preparation
@@ -1934,6 +1944,7 @@ async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
 }
 
 interface HostedThreadRoutingCryptoPreparation {
+  directMailboxPreparationFailure?: unknown;
   failedPendingGroupSetupPreparationClaim?: PreparedHostedPendingGroupSetupClaim;
   pendingGroupSetupPreparationFailure?: unknown;
   preparedDirectMailboxPayloadRoot?: {
@@ -1948,16 +1959,6 @@ interface HostedThreadRoutingCryptoPreparation {
   preparedSenderMemberId?: string;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
-}
-
-class RequiredHostedWebhookPreparationError extends Error {
-  readonly preparationError: unknown;
-
-  constructor(preparationError: unknown) {
-    super("Required hosted webhook preparation failed.");
-    this.name = "RequiredHostedWebhookPreparationError";
-    this.preparationError = preparationError;
-  }
 }
 
 async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
@@ -2118,10 +2119,10 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
         }),
     };
   } catch (error) {
-    // A direct append cannot safely enter the transaction after its exact
-    // member/root package failed to prepare: doing so would either repeat KMS
-    // under locks or encrypt against an unbound winner.
-    throw new RequiredHostedWebhookPreparationError(error);
+    // The planner may use this failure only to repair the wake for an exact
+    // durable duplicate. Every nonduplicate path rethrows the original error
+    // without route mutation, append work, or KMS under transaction locks.
+    return { directMailboxPreparationFailure: error };
   }
 }
 
@@ -2367,10 +2368,11 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
 
   // The direct planner encrypts the mailbox payload under ingress and may
   // rewrite the member's private Linq routing under control. Project the exact
-  // persisted routing row here as well: this warms every historical control
-  // root it references and keeps the decrypt itself outside the transaction.
-  // Warm the active control root before projecting historical ciphertext so a
-  // route already on the active generation cannot race a duplicate unwrap.
+  // persisted routing row here as well. The ingress lane runs beside one
+  // explicit control-lane owner: it warms the active control root, then each
+  // distinct historical root sequentially, and only then projects plaintext
+  // from cache. External KMS concurrency is therefore bounded at two even when
+  // all six encrypted routing fields use different historical generations.
   let firstPreparationError: unknown;
   let hasPreparationError = false;
   const preserveFirstPreparationError = async <T>(
@@ -2397,6 +2399,11 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
         domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
         memberId,
         prisma: input.prisma,
+      });
+      await warmHostedLinqRoutingControlRoots({
+        memberId,
+        prisma: input.prisma,
+        routingRecord,
       });
       return {
         activeControlRootKeyId,
@@ -2426,6 +2433,27 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
     routingState: controlRoutingResult.value.routingState,
     rootKeyId: ingressRootResult.value,
   };
+}
+
+async function warmHostedLinqRoutingControlRoots(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  routingRecord: HostedMemberRoutingRecord | null;
+}): Promise<void> {
+  const domain = getHostedCryptoDomainForLane("hosted-member-private-field");
+  for (const rootKeyId of readHostedMemberRoutingControlRootKeyIds(
+    input.routingRecord,
+  )) {
+    const roots = await unwrapHostedDomainRootsForWebByRootKeyIds({
+      prisma: input.prisma,
+      references: [{ domain, rootKeyId, userId: input.memberId }],
+      retainFailureInScopedCache: true,
+      signal: undefined,
+    });
+    for (const root of roots) {
+      root.rootKey.fill(0);
+    }
+  }
 }
 
 async function warmHostedDomainRootForWeb(input: {
@@ -2469,9 +2497,6 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
           try {
             await warmUnwrapCache();
           } catch (error) {
-            if (error instanceof RequiredHostedWebhookPreparationError) {
-              throw error.preparationError;
-            }
             // A failed preflight must not suppress branches that never need
             // this root. If the planner does request it, the scoped cache
             // returns the retained rejection instead of repeating KMS while a

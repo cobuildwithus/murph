@@ -125,7 +125,9 @@ const mocks = vi.hoisted(() => {
       step,
     })),
     readHostedLinqDailyState: vi.fn<() => Promise<HostedLinqDailyState | null>>(async () => null),
-    readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
+    readHostedMailboxItemByDedupeKey: vi.fn(
+      async (): Promise<{ id: string } | null> => null,
+    ),
     readHostedMailboxItemOwnerById: vi.fn(async (input: { mailboxItemId: string }) => ({
       id: input.mailboxItemId,
       userId: "member_123",
@@ -4012,11 +4014,24 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
       "member_123",
     );
-    mocks.lockAndReadActiveHostedDomainRootKeyIdTx
-      .mockResolvedValueOnce("root-control-active")
-      .mockResolvedValueOnce("root-ingress-stale")
-      .mockResolvedValueOnce("root-control-active")
-      .mockResolvedValueOnce("root-control-active");
+    const lockOrder: string[] = [];
+    const rootKeyIds = [
+      "root-control-active",
+      "root-ingress-stale",
+      "root-control-active",
+      "root-control-active",
+    ];
+    mocks.lockAndReadActiveHostedDomainRootKeyIdTx.mockImplementation(
+      async (...args: unknown[]) => {
+        const input = args[0] as { domain: "control" | "ingress" };
+        lockOrder.push(`${input.domain}-root`);
+        const rootKeyId = rootKeyIds.shift();
+        if (!rootKeyId) {
+          throw new Error("Unexpected direct root authority lock.");
+        }
+        return rootKeyId;
+      },
+    );
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-routing.home-linq-chat-id",
@@ -4053,6 +4068,36 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMemberRouting,
       hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
     });
+    const queryRawImplementation = prisma.$queryRaw.getMockImplementation() as
+      | ((...args: unknown[]) => unknown)
+      | undefined;
+    const executeRawImplementation = prisma.$executeRaw.getMockImplementation() as
+      | ((...args: unknown[]) => unknown)
+      | undefined;
+    if (!queryRawImplementation || !executeRawImplementation) {
+      throw new Error("Expected the direct lock-order Prisma mocks.");
+    }
+    prisma.$queryRaw.mockImplementation(async (
+      query: readonly string[],
+      ...values: unknown[]
+    ) => {
+      const sql = query.join(" ").toLowerCase();
+      if (sql.includes("for update skip locked")) {
+        lockOrder.push("member-row");
+      } else if (sql.includes("for no key update")) {
+        lockOrder.push("home-route");
+      }
+      return queryRawImplementation(query, ...values);
+    });
+    prisma.$executeRaw.mockImplementation(async (
+      query: readonly string[],
+      ...values: unknown[]
+    ) => {
+      if (values.includes("hosted-linq-routing:chat")) {
+        lockOrder.push("chat-route");
+      }
+      return executeRawImplementation(query, ...values);
+    });
     prisma.$transaction = vi.fn(async (
       callback: (transaction: typeof prisma) => Promise<unknown>,
     ) => callback(prisma));
@@ -4075,6 +4120,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       .toHaveBeenCalledTimes(2);
     expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
       .toHaveBeenCalledTimes(4);
+    expect(lockOrder.slice(0, 10)).toEqual([
+      "control-root",
+      "member-row",
+      "home-route",
+      "chat-route",
+      "ingress-root",
+      "control-root",
+      "member-row",
+      "home-route",
+      "chat-route",
+      "ingress-root",
+    ]);
     expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
       isFullHostedMemberRoutingRecordQuery(query)
     )).toHaveLength(4);
@@ -4192,6 +4249,116 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       .toHaveBeenCalledTimes(expectedRootLockCount);
     expect(mocks.appendHostedMailboxEnvelopeTx)
       .toHaveBeenCalledTimes(expectedAppendCount);
+  });
+
+  it.each([
+    {
+      label: "retries direct member contention once and appends after release",
+      lockedRows: [[], [{ id: "member_123" }]],
+      succeeds: true,
+    },
+    {
+      label: "fails closed after repeated direct member contention",
+      lockedRows: [[], []],
+      succeeds: false,
+    },
+  ])("$label", async ({ lockedRows, succeeds }) => {
+    mocks.enforceDirectMailboxPreparation = true;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey(
+        "+15551234567",
+      ),
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-03-26T00:00:00.000Z"),
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+          updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    const queryRawImplementation = prisma.$queryRaw.getMockImplementation() as
+      | ((...args: unknown[]) => unknown)
+      | undefined;
+    if (!queryRawImplementation) {
+      throw new Error("Expected the direct member lock mock.");
+    }
+    let memberLockAttempt = 0;
+    prisma.$queryRaw.mockImplementation(async (
+      query: readonly string[],
+      ...values: unknown[]
+    ) => {
+      const sql = query.join(" ").toLowerCase();
+      if (sql.includes("for update skip locked")) {
+        const rows = lockedRows[memberLockAttempt];
+        memberLockAttempt += 1;
+        return rows ?? [];
+      }
+      return queryRawImplementation(query, ...values);
+    });
+    prisma.$transaction = vi.fn(async (
+      callback: (transaction: typeof prisma) => Promise<unknown>,
+    ) => callback(prisma));
+
+    const outcome = handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: succeeds
+          ? "evt_direct_member_retry"
+          : "evt_direct_member_contention",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+    if (succeeds) {
+      await expect(outcome).resolves.toMatchObject({
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+    } else {
+      await expect(outcome).rejects.toMatchObject({
+        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+        details: {
+          preparationTarget: "direct_linq_mailbox",
+          reason: "member",
+        },
+        retryable: true,
+      });
+    }
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(memberLockAttempt).toBe(2);
+    expect(mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId)
+      .toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelopeTx)
+      .toHaveBeenCalledTimes(succeeds ? 1 : 0);
   });
 
   it("re-prepares once when the direct routing ciphertext changes under its lock", async () => {
@@ -4353,6 +4520,172 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("repairs an exact duplicate wake when direct root preparation fails", async () => {
+    mocks.enforceDirectMailboxPreparation = true;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    const preparationError = new Error("direct ingress root unavailable");
+    const unwrapRoot = vi.mocked(unwrapHostedDomainRootForWeb);
+    const defaultUnwrapRoot = unwrapRoot.getMockImplementation();
+    if (!defaultUnwrapRoot) {
+      throw new Error("Expected the default hosted root unwrap mock.");
+    }
+    unwrapRoot.mockRejectedValueOnce(preparationError);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: "mailbox_existing_direct",
+    });
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey(
+        "+15551234567",
+      ),
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-03-26T00:00:00.000Z"),
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+          updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    prisma.$transaction = vi.fn(async (
+      callback: (transaction: typeof prisma) => Promise<unknown>,
+    ) => callback(prisma));
+
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          eventId: "evt_direct_duplicate_root_failure",
+        }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        duplicate: true,
+        ignored: true,
+        ok: true,
+        reason: "duplicate-webhook-event",
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(1);
+      expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledExactlyOnceWith({
+        abortSignal: expect.any(AbortSignal),
+        expectedUserId: "member_123",
+        mailboxItemId: "mailbox_existing_direct",
+      });
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx)
+        .not.toHaveBeenCalled();
+      expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+      expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+      expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+    } finally {
+      unwrapRoot.mockReset();
+      unwrapRoot.mockImplementation(defaultUnwrapRoot);
+    }
+  });
+
+  it("rethrows a failed direct root preparation when no duplicate exists", async () => {
+    mocks.enforceDirectMailboxPreparation = true;
+    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValue(
+      "member_123",
+    );
+    const preparationError = new Error("direct ingress root unavailable");
+    const unwrapRoot = vi.mocked(unwrapHostedDomainRootForWeb);
+    const defaultUnwrapRoot = unwrapRoot.getMockImplementation();
+    if (!defaultUnwrapRoot) {
+      throw new Error("Expected the default hosted root unwrap mock.");
+    }
+    unwrapRoot.mockRejectedValueOnce(preparationError);
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: createHostedPhoneLookupKey(
+        "+15551234567",
+      ),
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-03-26T00:00:00.000Z"),
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+          updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+    });
+    prisma.$transaction = vi.fn(async (
+      callback: (transaction: typeof prisma) => Promise<unknown>,
+    ) => callback(prisma));
+
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          eventId: "evt_direct_nondedupe_root_failure",
+        }),
+        signature: null,
+        timestamp: null,
+      })).rejects.toBe(preparationError);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledTimes(1);
+      expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeWithSourceMessageTx)
+        .not.toHaveBeenCalled();
+      expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+      expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+      expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
+    } finally {
+      unwrapRoot.mockReset();
+      unwrapRoot.mockImplementation(defaultUnwrapRoot);
+    }
   });
 
   it("binds an active member's bare home-line recipient even when the line left the assignable pool", async () => {
@@ -13340,7 +13673,25 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   const hostedMemberEmailAuthorization = prisma.hostedMemberEmailAuthorization;
 
   prisma.$executeRaw ??= vi.fn(async () => 0);
-  prisma.$queryRaw ??= vi.fn(async () => []);
+  prisma.$queryRaw ??= vi.fn(async (
+    query: readonly string[] | {
+      strings?: readonly string[];
+      values?: readonly unknown[];
+    },
+    ...taggedValues: unknown[]
+  ) => {
+    const taggedTemplate = Array.isArray(query);
+    const strings = taggedTemplate
+      ? query as readonly string[]
+      : (query as { strings?: readonly string[] }).strings ?? [];
+    const values = taggedTemplate
+      ? taggedValues
+      : (query as { values?: readonly unknown[] }).values ?? [];
+    const sql = strings.join(" ").toLowerCase();
+    return sql.includes("for update skip locked")
+      ? [{ id: values[0] }]
+      : [];
+  });
 
   // Inbound planning consults pending pre-member group-join outreach to recover
   // the originating group. These fixtures have no outreach rows.
