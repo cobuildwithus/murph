@@ -131,6 +131,7 @@ export function VitalConnectionDialog({
 }
 
 export function ConnectDisconnectDialog({
+  affectedUnavailableSourceNames = [],
   errorMessage,
   inert = false,
   pending,
@@ -138,6 +139,7 @@ export function ConnectDisconnectDialog({
   onConfirm,
   onOpenChange,
 }: {
+  affectedUnavailableSourceNames?: readonly string[];
   errorMessage: string | null;
   inert?: boolean;
   pending: boolean;
@@ -156,7 +158,10 @@ export function ConnectDisconnectDialog({
             {resolveDisconnectDialogTitle(source)}
           </DialogTitle>
           <DialogDescription>
-            {resolveDisconnectDialogDescription(source)}
+            {resolveDisconnectDialogDescription(
+              source,
+              affectedUnavailableSourceNames,
+            )}
           </DialogDescription>
         </DialogHeader>
         {errorMessage ? (
@@ -204,13 +209,17 @@ function resolveDisconnectDialogTitle(source: ConnectSource | null): string {
 
 function resolveDisconnectDialogDescription(
   source: ConnectSource | null,
+  affectedUnavailableSourceNames: readonly string[],
 ): string {
   const reconnectUnavailable = source?.connectionAvailable === false;
 
   if (source?.disconnectScope === "junction_account") {
-    const consequence = reconnectUnavailable
-      ? ` You won't be able to reconnect ${source.name} yet.`
-      : "";
+    const unavailableNames = [...new Set(affectedUnavailableSourceNames)];
+    const consequence = unavailableNames.length === 0
+      ? ""
+      : unavailableNames.length === 1 && unavailableNames[0] === source.name
+        ? ` You won't be able to reconnect ${source.name} yet.`
+        : ` This also disconnects ${formatSourceNames(unavailableNames)}, which cannot be reconnected yet.`;
     return `Murph will stop syncing new data from every source in this connection. Your history is kept.${consequence}`;
   }
 
@@ -219,6 +228,16 @@ function resolveDisconnectDialogDescription(
     ? ` You won't be able to reconnect ${sourceName} yet.`
     : "";
   return `Murph will stop syncing new data from ${sourceName}. Your history is kept.${consequence}`;
+}
+
+function formatSourceNames(sourceNames: readonly string[]): string {
+  if (sourceNames.length < 2) {
+    return sourceNames[0] ?? "an unavailable source";
+  }
+  if (sourceNames.length === 2) {
+    return `${sourceNames[0]} and ${sourceNames[1]}`;
+  }
+  return `${sourceNames.slice(0, -1).join(", ")}, and ${sourceNames.at(-1)}`;
 }
 
 export function ConnectRedirectDialog({

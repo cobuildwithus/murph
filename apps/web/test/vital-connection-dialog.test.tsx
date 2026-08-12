@@ -201,6 +201,7 @@ test("Dexcom disconnect warns that reconnect is not available", async () => {
   );
   const markup = renderToStaticMarkup(
     createElement(ConnectDisconnectDialog, {
+      affectedUnavailableSourceNames: ["Dexcom"],
       errorMessage: null,
       onConfirm: vi.fn(),
       onOpenChange: vi.fn(),

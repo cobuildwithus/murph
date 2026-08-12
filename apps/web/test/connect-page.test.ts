@@ -4627,7 +4627,7 @@ test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconne
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid warns before disconnecting unavailable Dexcom and stays fail-closed afterward", async () => {
+test("ConnectSourcesGrid warns when a Garmin account reset also disconnects unavailable Dexcom", async () => {
   const fetch = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input;
@@ -4644,10 +4644,27 @@ test("ConnectSourcesGrid warns before disconnecting unavailable Dexcom and stays
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          connectionAvailable: true,
+          connectTarget: "garmin",
+          connected: true,
+          description: "Workouts, sleep, stress, heart rate, and body battery.",
+          disconnectConnectionId: "dsc_shared_garmin_dexcom",
+          disconnectScope: "junction_account",
+          id: "garmin",
+          logo: {
+            className: "size-11 object-contain",
+            height: 44,
+            src: "/brand-logos/connect/garmin.png",
+            width: 44,
+          },
+          name: "Garmin",
+          recoveryKind: "connection_reset",
+        },
+        {
           connectionAvailable: false,
           connected: true,
           description: "CGM glucose readings and trends.",
-          disconnectConnectionId: "dsc_dexcom_existing",
+          disconnectConnectionId: "dsc_shared_garmin_dexcom",
           disconnectScope: "junction_account",
           id: "dexcom",
           logo: {
@@ -4664,9 +4681,12 @@ test("ConnectSourcesGrid warns before disconnecting unavailable Dexcom and stays
     }),
   );
 
-  const disconnectButton = rendered.container.querySelector(
+  const garminHeading = [...rendered.container.querySelectorAll("h2")]
+    .find((heading) => heading.textContent === "Garmin");
+  const garminCard = garminHeading?.closest("div.relative");
+  const disconnectButton = garminCard?.querySelector(
     "button[aria-label='Disconnect account']",
-  );
+  ) ?? null;
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
   await act(async () => {
@@ -4677,7 +4697,7 @@ test("ConnectSourcesGrid warns before disconnecting unavailable Dexcom and stays
 
   assert.match(
     rendered.container.textContent ?? "",
-    /You won't be able to reconnect Dexcom yet\./u,
+    /This also disconnects Dexcom, which cannot be reconnected yet\./u,
   );
   const cancelButton = [...rendered.container.querySelectorAll("button")]
     .find((button) => button.textContent === "Cancel");
@@ -4689,6 +4709,7 @@ test("ConnectSourcesGrid warns before disconnecting unavailable Dexcom and stays
     );
   });
 
+  assert.match(rendered.container.textContent ?? "", /Garmin needs a fresh connection/u);
   assert.match(rendered.container.textContent ?? "", /Dexcom connected/u);
   assert.equal(fetch.mock.calls.length, 0);
 
@@ -4709,12 +4730,16 @@ test("ConnectSourcesGrid warns before disconnecting unavailable Dexcom and stays
   });
 
   await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Garmin not connected/u);
     assert.match(rendered.container.textContent ?? "", /Dexcom not connected/u);
     assert.match(rendered.container.textContent ?? "", /Dexcom connections are coming soon\./u);
   });
   assert.equal(
     fetch.mock.calls[0]?.[0],
-    "/api/settings/device-sync/connections/dsc_dexcom_existing/disconnect",
+    "/api/settings/device-sync/connections/dsc_shared_garmin_dexcom/disconnect",
+  );
+  assert.ok(
+    rendered.container.querySelector("button[aria-label='Connect Garmin']"),
   );
   assert.ok(
     rendered.container.querySelector("button[aria-label='Dexcom web setup is not available yet']"),

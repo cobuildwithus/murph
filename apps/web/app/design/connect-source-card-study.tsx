@@ -190,7 +190,7 @@ const DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES: ConnectSourceCardStudyCase[] = [
       connectTarget: "garmin",
       description: "Workouts, sleep, stress, heart rate, and body battery.",
       disconnectConnectionId: "design-shared-junction",
-      disconnectSourceProviderSlug: "garmin",
+      disconnectScope: "junction_account",
       id: "garmin-disconnect-journey",
       logo: {
         className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
@@ -199,7 +199,28 @@ const DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES: ConnectSourceCardStudyCase[] = [
         width: 128,
       },
       name: "Garmin",
-      requiresReconnect: true,
+      recoveryKind: "connection_reset",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      connectionAvailable: false,
+      connected: true,
+      description: "CGM glucose readings and trends.",
+      disconnectConnectionId: "design-shared-junction",
+      disconnectScope: "junction_account",
+      id: "dexcom-shared-disconnect-journey",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/dexcom.png",
+        width: 128,
+      },
+      name: "Dexcom",
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage: "Dexcom connections are coming soon.",
     },
   },
   {
@@ -242,8 +263,8 @@ const DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES: ConnectSourceCardStudyCase[] = [
 
 const DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES = markLocallyDisconnectedSources(
   DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.map(({ source }) => source),
+  new Set(["design-shared-junction"]),
   new Set(),
-  new Set(["garmin-disconnect-journey"]),
 );
 
 export function ConnectSourceCardStudy({
@@ -259,7 +280,22 @@ export function ConnectSourceCardStudy({
       ? DESIGN_CONNECT_SOURCE_CASES.find(({ source }) =>
           source.id === "dexcom-recovery"
         )?.source ?? null
+      : studyState === "shared-dexcom-disconnect"
+        ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES.find(({ source }) =>
+            source.id === "garmin-disconnect-journey"
+          )?.source ?? null
       : null;
+  const disconnectUnavailableSourceNames = disconnectDialogSource
+    ? [
+        ...DESIGN_CONNECT_SOURCE_CASES,
+        ...DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES,
+      ]
+        .filter(({ source }) =>
+          source.disconnectConnectionId === disconnectDialogSource.disconnectConnectionId
+          && source.connectionAvailable === false
+        )
+        .map(({ source }) => source.name)
+    : [];
   const defaultStudyCases = androidAppAvailable
     ? DESIGN_CONNECT_SOURCE_CASES
     : DESIGN_CONNECT_SOURCE_CASES.filter(
@@ -300,6 +336,7 @@ export function ConnectSourceCardStudy({
       </div>
 
       <ConnectDisconnectDialog
+        affectedUnavailableSourceNames={disconnectUnavailableSourceNames}
         errorMessage={null}
         inert
         pending={false}
