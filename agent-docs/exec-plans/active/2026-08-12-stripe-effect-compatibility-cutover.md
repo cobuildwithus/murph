@@ -94,3 +94,7 @@ is the hard rollback floor and incident recovery below it is prohibited.
   both targeted pre-merge head `80e8555638` while the PR was already
   non-mergeable, then terminated during response capture. They establish no
   review baseline. Fresh reviews will target the clean merged head.
+- After the one-time base merge, a fresh loopback database applied all 180 Web
+  migrations. The 30-case PostgreSQL barrier suite passed after its test-only
+  crypto provider double was brought up to the current signing contract; no
+  production owner or provider request changed.
