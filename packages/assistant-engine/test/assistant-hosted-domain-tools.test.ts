@@ -39,7 +39,7 @@ describe('hosted domain dynamic tools', () => {
       'preserve that wording as relativeDay (today for tonight) so the host resolves it against the named timezone',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'retry with the explicit host-resolved date returned by the tool instead of relativeDay',
+      'state the explicit host-resolved date returned by the tool while asking for another time',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'raw exact ISO schedule.at is not accepted on generic save or patch',

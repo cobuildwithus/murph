@@ -15300,6 +15300,19 @@ describe('assistant codex runtime', () => {
         updatedAt: '2026-08-10T00:00:00.000Z',
       })),
     }
+    const invalidGapAutomationArguments = {
+      action: 'save',
+      instructions: 'Send the reminder tomorrow.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          relativeDay: 'tomorrow',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    }
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -15361,10 +15374,10 @@ describe('assistant codex runtime', () => {
             id: 1000,
             method: 'item/tool/call',
             params: {
-              arguments: { action: 'list' },
+              arguments: invalidGapAutomationArguments,
               namespace: 'murph',
               threadId: 'thread-root-tool-scope',
-              tool: 'pending_vault_files',
+              tool: 'automation',
               turnId: 'turn-stale-root-tool-scope',
             },
           }))
@@ -15440,11 +15453,7 @@ describe('assistant codex runtime', () => {
             id: 103,
             method: 'item/tool/call',
             params: {
-              arguments: {
-                action: 'patch',
-                lookup: 'hidden',
-                status: 'paused',
-              },
+              arguments: invalidGapAutomationArguments,
               namespace: 'murph',
               threadId: 'thread-root-tool-scope',
               tool: 'automation',
@@ -15596,6 +15605,18 @@ describe('assistant codex runtime', () => {
           })
 
           child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-root-tool-scope-final',
+                type: 'agentMessage',
+                phase: 'final_answer',
+                text: 'Root tool scope verified.',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
               turn: {
@@ -15611,6 +15632,10 @@ describe('assistant codex runtime', () => {
     })
 
     await expect(executeCodexAppServerTurn({
+      automationRelativeDateReferenceWindow: {
+        earliestAt: '2026-03-08T04:59:00.000Z',
+        latestAt: '2026-03-08T04:59:00.000Z',
+      },
       authorizeAcceptedMessageTarget,
       hostedToolContext: {
         ...createHostedToolContext(),
@@ -15625,6 +15650,7 @@ describe('assistant codex runtime', () => {
       prompt: 'inspect connected devices',
       workingDirectory,
     })).resolves.toMatchObject({
+      finalMessage: 'Root tool scope verified.',
       sessionId: 'thread-root-tool-scope',
       turnId: 'turn-root-tool-scope',
     })

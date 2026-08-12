@@ -674,13 +674,36 @@ export function buildCodexAppServerSteerRequest(
 }
 
 function appendRequiredVaultFileApprovalUrls(
-  message: string,
+  message: string | null,
   approvalUrls: readonly string[],
 ): string {
   return [
     normalizeNullableString(message),
     ...approvalUrls,
   ].filter((part): part is string => part !== null).join('\n\n')
+}
+
+function appendRequiredAutomationLocalAtClarification(
+  message: string | null,
+  requirement: {
+    code: 'local_at_fold' | 'local_at_gap'
+    resolvedLocalDate: string
+  } | null,
+): string | null {
+  if (requirement === null) {
+    return message
+  }
+  const normalizedMessage = normalizeNullableString(message)
+  if (normalizedMessage?.includes(requirement.resolvedLocalDate)) {
+    return message
+  }
+
+  const clarification = requirement.code === 'local_at_gap'
+    ? `The trusted reminder date is ${requirement.resolvedLocalDate}. What other local time on ${requirement.resolvedLocalDate} should I use?`
+    : `The trusted reminder date is ${requirement.resolvedLocalDate}. Should I use the earlier or later occurrence on ${requirement.resolvedLocalDate}?`
+  return [normalizedMessage, clarification]
+    .filter((part): part is string => part !== null)
+    .join('\n\n')
 }
 
 export async function executeCodexAppServerTurn(
@@ -3161,6 +3184,10 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
   const requiredVaultFileApprovalUrls: string[] = []
+  let requiredAutomationLocalAtClarification: {
+    code: 'local_at_fold' | 'local_at_gap'
+    resolvedLocalDate: string
+  } | null = null
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -3269,7 +3296,9 @@ async function runCodexAppServerTurnOnProcess(
     )].sort((left, right) => left - right)
 
   const hasRequiredUserVisibleOutput = (): boolean =>
-    computerToolsLockedAfterUserPause || requiredVaultFileApprovalUrls.length > 0
+    computerToolsLockedAfterUserPause ||
+    requiredAutomationLocalAtClarification !== null ||
+    requiredVaultFileApprovalUrls.length > 0
 
   const settleNoReplyFinalActions = async (): Promise<void> => {
     if (hasRequiredUserVisibleOutput() || noReplySettlementStarted) {
@@ -4184,6 +4213,19 @@ async function runCodexAppServerTurnOnProcess(
         request: dynamicToolRequest,
         reason: 'invalid_arguments',
       }))
+      if (
+        dynamicToolRequest.kind === 'invalid-automation-arguments' &&
+        (
+          dynamicToolRequest.safeFailureCode === 'local_at_gap' ||
+          dynamicToolRequest.safeFailureCode === 'local_at_fold'
+        ) &&
+        dynamicToolRequest.resolvedLocalDate
+      ) {
+        requiredAutomationLocalAtClarification = {
+          code: dynamicToolRequest.safeFailureCode,
+          resolvedLocalDate: dynamicToolRequest.resolvedLocalDate,
+        }
+      }
     }
 
     if (
@@ -5553,8 +5595,18 @@ async function runCodexAppServerTurnOnProcess(
     ? renderAssistantResponseCardText(finalResponseCard)
     : modelFinalMessage
   const finalMessage = appendRequiredVaultFileApprovalUrls(
-    semanticFinalMessage,
+    appendRequiredAutomationLocalAtClarification(
+      semanticFinalMessage,
+      requiredAutomationLocalAtClarification,
+    ),
     requiredVaultFileApprovalUrls,
+  )
+  const transcriptMessage = appendRequiredAutomationLocalAtClarification(
+    finalResponseCard
+      ? renderAssistantResponseCardTranscriptText(finalResponseCard)
+      : normalizeNullableString(modelFinalMessage) ??
+        (finalResponseMedia.length > 0 ? '' : null),
+    requiredAutomationLocalAtClarification,
   )
   if (
     noReplySelected &&
@@ -5583,11 +5635,7 @@ async function runCodexAppServerTurnOnProcess(
       finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput,
     finalMessage,
     providerAuthoredFinalMessage: modelFinalMessage,
-    transcriptMessage:
-      finalResponseCard
-        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
-        : normalizeNullableString(modelFinalMessage) ??
-          (finalResponseMedia.length > 0 ? '' : null),
+    transcriptMessage,
     reactions: reactionPatches.map((entry) => ({
       deliveryContextOrdinal: entry.deliveryContextOrdinal,
       reaction: entry.patch.reaction,

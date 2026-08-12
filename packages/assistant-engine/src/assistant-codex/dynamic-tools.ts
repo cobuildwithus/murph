@@ -1853,14 +1853,14 @@ export async function executeMurphDynamicToolRequest(input: {
           return toolTextResult(
             false,
             input.request.resolvedLocalDate
-              ? `that local reminder time does not exist because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; ask for another local time, then retry with schedule.localAt.date=${input.request.resolvedLocalDate} instead of relativeDay`
+              ? `that local reminder time does not exist because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date, ask for another local time, then retry with schedule.localAt.date=${input.request.resolvedLocalDate} instead of relativeDay`
               : 'that local reminder time does not exist because of a daylight-saving change; ask for another local time',
           )
         case 'local_at_fold':
           return toolTextResult(
             false,
             input.request.resolvedLocalDate
-              ? `that local reminder time occurs twice because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.date=${input.request.resolvedLocalDate} and schedule.localAt.fold instead of relativeDay`
+              ? `that local reminder time occurs twice because of a daylight-saving change; the trusted host resolved the requested calendar date as ${input.request.resolvedLocalDate}; tell the user that exact date, ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.date=${input.request.resolvedLocalDate} and schedule.localAt.fold instead of relativeDay`
               : 'that local reminder time occurs twice because of a daylight-saving change; ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.fold',
           )
         case 'local_at_invalid_timezone':

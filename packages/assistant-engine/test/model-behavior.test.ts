@@ -3192,6 +3192,12 @@ describe('assistant conversation scope', () => {
       'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
     )
     expect(prompt).toContain(
+      'state the explicit host-resolved date returned by the tool while asking for another time',
+    )
+    expect(prompt).toContain(
+      'state the explicit host-resolved date returned by the tool while asking whether the earlier or later occurrence is intended',
+    )
+    expect(prompt).toContain(
       'Before making any relative-date claim about an existing automation, call `action: inspect` and answer from its authoritative schedule and verified next occurrence without mutating it',
     )
     expect(prompt).toContain(
@@ -3263,6 +3269,9 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain(
       'When the request says today, tonight, or tomorrow, preserve it as `relativeDay` (`today` for tonight) so the host resolves the calendar date in the named timezone; never calculate that date in the model.',
+    )
+    expect(prompt).toContain(
+      'state the explicit host-resolved date returned by the tool while asking for another time',
     )
     expect(prompt).toContain(
       'Before making any relative-date claim about an existing automation, call `action: inspect` and answer from its authoritative schedule and verified next occurrence without mutating it',
