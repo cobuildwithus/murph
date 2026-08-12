@@ -379,6 +379,49 @@ describe('assistant physical notes', () => {
     expect(toolText).not.toMatch(/"complimentary":/u)
   })
 
+  it('preserves the cost fields for an ordinary paid acceptance', async () => {
+    const vaultRoot = await createPhysicalNoteVault()
+    const send = vi.fn(async () => ({
+      complimentary: false,
+      costUsdMicros: '250000',
+      physicalNoteId: 'hpn_paid_accepted',
+      status: 'accepted' as const,
+    }))
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        physicalNotes: { send },
+        privateImageUrlPublisher: {
+          publishPrivateImageUrl: async () => ({
+            expiresAt: '2027-08-01T00:00:00.000Z',
+            url: 'https://private-media.example.test/note',
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        imageRef: IMAGE_REF,
+        imageSha256: IMAGE_SHA256,
+        kind: 'send-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
+        recipient: RECIPIENT,
+      },
+      vaultRoot,
+    })
+
+    const toolText = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(toolText).toContain('"status":"accepted"')
+    expect(toolText).toContain('"complimentary":false')
+    expect(toolText).toContain('"costUsdMicros":"250000"')
+    expect(toolText).not.toContain('prior_note_accepted')
+  })
+
   it.each([
     ['categorized rejection', {
       complimentary: true,

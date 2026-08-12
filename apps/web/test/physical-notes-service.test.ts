@@ -256,68 +256,6 @@ describe("createHostedPhysicalNote", () => {
     });
   });
 
-  it("reserves known in-flight paid costs before another provider send", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const store = createPhysicalNoteStore();
-    await createHostedPhysicalNote({
-      ...buildRequest(10),
-      prisma: store.prisma,
-      runtime: createPhysicalNoteRuntime([
-        { kind: "accepted", providerLetterId: "ltr_free" },
-      ]).runtime,
-    });
-    mocks.readUsageGate.mockResolvedValue({
-      allowed: true,
-      periodEnd: DEFAULT_PERIOD_END,
-      periodStart: DEFAULT_PERIOD_START,
-      remainingUsdMicros: COST_USD_MICROS,
-    });
-    const firstPaidResult = createDeferred<LobPhysicalNoteCreateResult>();
-    const firstPaidCreate = vi.fn<
-      LobPhysicalNoteRuntime["create"]
-    >(() => firstPaidResult.promise);
-    const firstPaidLookup = vi.fn<
-      LobPhysicalNoteRuntime["findLetterByNoteId"]
-    >();
-    const firstPaidPromise = createHostedPhysicalNote({
-      ...buildRequest(11),
-      prisma: store.prisma,
-      runtime: {
-        create: firstPaidCreate,
-        findLetterByNoteId: firstPaidLookup,
-      },
-    });
-    await vi.waitFor(() => {
-      expect(firstPaidCreate).toHaveBeenCalledOnce();
-    });
-
-    const blockedProvider = createPhysicalNoteRuntime([
-      { kind: "accepted", providerLetterId: "ltr_should_not_send" },
-    ]);
-    const blocked = await createHostedPhysicalNote({
-      ...buildRequest(12),
-      prisma: store.prisma,
-      runtime: blockedProvider.runtime,
-    });
-
-    expect(blocked).toEqual({
-      complimentary: false,
-      costUsdMicros: COST_USD_MICROS.toString(),
-      physicalNoteId: null,
-      status: "insufficient_usage",
-    });
-    expect(blockedProvider.create).not.toHaveBeenCalled();
-
-    firstPaidResult.resolve({
-      kind: "accepted",
-      providerLetterId: "ltr_first_paid",
-    });
-    await expect(firstPaidPromise).resolves.toMatchObject({
-      complimentary: false,
-      status: "accepted",
-    });
-  });
-
   it("replays an accepted request without another provider send", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
@@ -960,7 +898,7 @@ describe("createHostedPhysicalNote", () => {
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
-  it("keeps an HTTP 408 reservation and offer after one provider request", async () => {
+  it("never resends an HTTP 408 reservation and suppresses accepted reconciliation", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
@@ -976,8 +914,18 @@ describe("createHostedPhysicalNote", () => {
       fromAddressId: "adr_from",
     });
 
+    const request = buildRequest(70);
     const response = await createHostedPhysicalNote({
-      ...buildRequest(70),
+      ...request,
+      prisma: store.prisma,
+      runtime,
+    });
+    const replay = await createHostedPhysicalNote({
+      ...request,
+      artwork: {
+        ...request.artwork,
+        url: "https://assets.example.test/refreshed-capability.png",
+      },
       prisma: store.prisma,
       runtime,
     });
@@ -986,6 +934,7 @@ describe("createHostedPhysicalNote", () => {
       complimentary: true,
       status: "pending",
     });
+    expect(replay).toEqual(response);
     expect(store.allRows()).toEqual([
       expect.objectContaining({
         complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
@@ -995,66 +944,50 @@ describe("createHostedPhysicalNote", () => {
       }),
     ]);
     expect(fetchImpl).toHaveBeenCalledOnce();
-    expect(mocks.recordUsage).not.toHaveBeenCalled();
-  });
-
-  it("finalizes a stale Lob acceptance while the current request proceeds", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const store = createPhysicalNoteStore();
-    const provider = createPhysicalNoteRuntime(
-      [
-        { kind: "ambiguous_failure" },
-        { kind: "accepted", providerLetterId: "ltr_current_paid" },
-      ],
-      [{ kind: "accepted", providerLetterId: "ltr_stale_free" }],
-    );
-
-    const stale = await createHostedPhysicalNote({
-      ...buildRequest(50),
-      prisma: store.prisma,
-      runtime: provider.runtime,
-    });
     store.setCreatedAt(
-      stale.physicalNoteId!,
+      response.physicalNoteId!,
       new Date(Date.now() - REPLAY_WINDOW_MS - 1),
     );
-    provider.create.mockClear();
-    const current = await createHostedPhysicalNote({
-      ...buildRequest(51),
+    const provider = createPhysicalNoteRuntime(
+      [],
+      [{ kind: "accepted", providerLetterId: "ltr_stale_free" }],
+    );
+    const blocked = await createHostedPhysicalNote({
+      ...buildRequest(71),
       prisma: store.prisma,
       runtime: provider.runtime,
     });
 
+    expect(blocked).toMatchObject({
+      failureReason: "prior_note_accepted",
+      status: "failed",
+    });
+    expect(blocked.physicalNoteId).not.toBe(response.physicalNoteId);
     expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
     expect(provider.findLetterByNoteId).toHaveBeenCalledWith({
-      noteId: stale.physicalNoteId,
+      noteId: response.physicalNoteId,
       signal: undefined,
     });
-    expect(current).toEqual({
-      complimentary: false,
-      costUsdMicros: COST_USD_MICROS.toString(),
-      physicalNoteId: expect.stringMatching(/^hpn_[a-f0-9]{32}$/u),
-      status: "accepted",
-    });
-    expect(store.allRows().find((row) => row.id === stale.physicalNoteId))
+    expect(store.allRows().find((row) => row.id === response.physicalNoteId))
       .toMatchObject({
         complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
         providerLetterId: "ltr_stale_free",
         status: "accepted",
       });
-    expect(store.allRows().find((row) => row.id === current.physicalNoteId))
+    expect(store.allRows().find((row) => row.id === blocked.physicalNoteId))
       .toMatchObject({
         complimentaryOfferCode: null,
-        providerLetterId: "ltr_current_paid",
-        status: "accepted",
+        failureReason: "prior_note_accepted",
+        providerLetterId: null,
+        status: "failed",
       });
     expect(store.allRows()).toHaveLength(2);
-    expect(provider.create).toHaveBeenCalledOnce();
-    expect(mocks.readUsageGate).toHaveBeenCalledOnce();
-    expect(mocks.recordUsage).toHaveBeenCalledOnce();
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(mocks.readUsageGate).not.toHaveBeenCalled();
+    expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
-  it("releases a stale complimentary claim when Lob confirms no letter exists", async () => {
+  it("keeps the request that proves stale absence unsent", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
@@ -1074,34 +1007,45 @@ describe("createHostedPhysicalNote", () => {
       stale.physicalNoteId!,
       new Date(Date.now() - REPLAY_WINDOW_MS - 1),
     );
-    const current = await createHostedPhysicalNote({
+    provider.create.mockClear();
+    const blocked = await createHostedPhysicalNote({
       ...buildRequest(53),
       prisma: store.prisma,
       runtime: provider.runtime,
     });
 
-    expect(current).toMatchObject({
-      complimentary: true,
-      status: "accepted",
+    expect(blocked).toMatchObject({
+      failureReason: "unknown",
+      status: "failed",
     });
+    expect(provider.create).not.toHaveBeenCalled();
     expect(store.allRows().find((row) => row.id === stale.physicalNoteId))
       .toMatchObject({
         complimentaryOfferCode: null,
+        failureReason: "unknown",
         providerLetterId: null,
         status: "failed",
       });
+    const later = await createHostedPhysicalNote({
+      ...buildRequest(57),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(later).toMatchObject({
+      complimentary: true,
+      status: "accepted",
+    });
+    expect(provider.create).toHaveBeenCalledOnce();
     expect(mocks.readUsageGate).not.toHaveBeenCalled();
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
-  it("leaves an indeterminate claim pending while the current request proceeds", async () => {
+  it("blocks recent and indeterminate requests behind ambiguous authority", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
-      [
-        { kind: "ambiguous_failure" },
-        { kind: "accepted", providerLetterId: "ltr_after_indeterminate" },
-      ],
+      [{ kind: "ambiguous_failure" }],
       [{ kind: "indeterminate" }],
     );
 
@@ -1110,19 +1054,32 @@ describe("createHostedPhysicalNote", () => {
       prisma: store.prisma,
       runtime: provider.runtime,
     });
-    store.setCreatedAt(
-      stale.physicalNoteId!,
-      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
-    );
-    const current = await createHostedPhysicalNote({
+    provider.create.mockClear();
+    const recent = await createHostedPhysicalNote({
       ...buildRequest(55),
       prisma: store.prisma,
       runtime: provider.runtime,
     });
+    expect(recent).toMatchObject({
+      failureReason: "prior_note_unresolved",
+      status: "failed",
+    });
+    expect(provider.findLetterByNoteId).not.toHaveBeenCalled();
+    expect(provider.create).not.toHaveBeenCalled();
 
-    expect(current).toMatchObject({
-      complimentary: false,
-      status: "accepted",
+    store.setCreatedAt(
+      stale.physicalNoteId!,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    const indeterminate = await createHostedPhysicalNote({
+      ...buildRequest(58),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+
+    expect(indeterminate).toMatchObject({
+      failureReason: "prior_note_unresolved",
+      status: "failed",
     });
     expect(store.allRows().find((row) => row.id === stale.physicalNoteId))
       .toMatchObject({
@@ -1132,16 +1089,15 @@ describe("createHostedPhysicalNote", () => {
       });
 
     expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
-    expect(provider.create).toHaveBeenCalledTimes(2);
-    expect(mocks.recordUsage).toHaveBeenCalledOnce();
+    expect(provider.create).not.toHaveBeenCalled();
+    expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
-  it("uses ordinary same-request replay inside the window without a Lob lookup", async () => {
+  it("keeps same-request replay pending when its private URL changes", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "ambiguous_failure" },
-      { kind: "accepted", providerLetterId: "ltr_replayed_in_window" },
     ]);
     const request = buildRequest(56);
 
@@ -1152,58 +1108,20 @@ describe("createHostedPhysicalNote", () => {
     })).resolves.toMatchObject({ status: "pending" });
     await expect(createHostedPhysicalNote({
       ...request,
+      artwork: {
+        ...request.artwork,
+        url: "https://assets.example.test/refreshed-replay-capability.png",
+      },
       prisma: store.prisma,
       runtime: provider.runtime,
     })).resolves.toMatchObject({
       complimentary: true,
-      status: "accepted",
+      status: "pending",
     });
 
     expect(provider.findLetterByNoteId).not.toHaveBeenCalled();
-    expect(provider.create).toHaveBeenCalledTimes(2);
+    expect(provider.create).toHaveBeenCalledOnce();
     expect(store.allRows()).toHaveLength(1);
-  });
-
-  it("reserves paid notes only against the current allowance period", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const store = createPhysicalNoteStore();
-    const provider = createPhysicalNoteRuntime([
-      { kind: "accepted", providerLetterId: "ltr_period_free" },
-      { kind: "ambiguous_failure" },
-      { kind: "accepted", providerLetterId: "ltr_period_paid" },
-    ]);
-    mocks.readUsageGate.mockResolvedValue({
-      allowed: true,
-      periodEnd: DEFAULT_PERIOD_END,
-      periodStart: DEFAULT_PERIOD_START,
-      remainingUsdMicros: COST_USD_MICROS,
-    });
-
-    await createHostedPhysicalNote({
-      ...buildRequest(40),
-      prisma: store.prisma,
-      runtime: provider.runtime,
-    });
-    const oldPending = await createHostedPhysicalNote({
-      ...buildRequest(41),
-      prisma: store.prisma,
-      runtime: provider.runtime,
-    });
-    expect(oldPending.status).toBe("pending");
-    store.setCreatedAt(
-      oldPending.physicalNoteId!,
-      new Date(DEFAULT_PERIOD_START.getTime() - 1),
-    );
-
-    await expect(createHostedPhysicalNote({
-      ...buildRequest(42),
-      prisma: store.prisma,
-      runtime: provider.runtime,
-    })).resolves.toMatchObject({
-      complimentary: false,
-      status: "accepted",
-    });
-    expect(provider.create).toHaveBeenCalledTimes(3);
   });
 
   it("does not reserve or send a paid note when remaining usage is insufficient", async () => {
@@ -1301,25 +1219,6 @@ function createPhysicalNoteRuntime(
   return { create, findLetterByNoteId, runtime };
 }
 
-function createDeferred<T>(): {
-  promise: Promise<T>;
-  resolve(value: T): void;
-} {
-  let resolvePromise: ((value: T) => void) | null = null;
-  const promise = new Promise<T>((resolve) => {
-    resolvePromise = resolve;
-  });
-  return {
-    promise,
-    resolve(value) {
-      if (!resolvePromise) {
-        throw new Error("deferred promise is not initialized");
-      }
-      resolvePromise(value);
-    },
-  };
-}
-
 function createPhysicalNoteStore(
   initialRows: readonly HostedPhysicalNote[] = [],
 ): PhysicalNoteStore {
@@ -1328,35 +1227,6 @@ function createPhysicalNoteStore(
   );
 
   const hostedPhysicalNote = {
-    async aggregate(input: {
-      where: {
-        createdAt?: { gte: Date; lt: Date };
-      };
-    }): Promise<{
-      _sum: { providerCostUsdMicros: bigint | null };
-    }> {
-      const providerCostUsdMicros = [...rows.values()]
-        .filter((row) =>
-          row.memberId === MEMBER_ID
-          && row.complimentaryOfferCode === null
-          && row.status === "starting"
-          && (
-            !input.where.createdAt
-            || (
-              row.createdAt >= input.where.createdAt.gte
-              && row.createdAt < input.where.createdAt.lt
-            )
-          )
-        )
-        .reduce((sum, row) => sum + row.providerCostUsdMicros, 0n);
-      return {
-        _sum: {
-          providerCostUsdMicros:
-            providerCostUsdMicros === 0n ? null : providerCostUsdMicros,
-        },
-      };
-    },
-
     async create(input: {
       data: PhysicalNoteCreateData;
     }): Promise<HostedPhysicalNote> {

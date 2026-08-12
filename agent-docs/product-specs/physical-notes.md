@@ -95,12 +95,18 @@ remain in the separate request fingerprint, so reusing one approval with changed
 content is a collision rather than a second effect. Accepted replays resolve
 from the durable row even after the temporary artwork capability expires; an
 existing uncertain send remains pending rather than being rewritten. After that
-replay check, Web constructs the provider runtime and a later request may repair
-one stale complimentary claim against Lob. Confirmed acceptance finalizes the
-stale row, confirmed absence releases its claim, and an indeterminate lookup
-changes nothing. The current request then validates the artwork lifetime,
-reasserts final group authority, observes caller cancellation, and follows its
-ordinary member-locked admission, provider effect, replay, and response path.
+replay check, Web treats every `starting` row as a member-wide unresolved-effect
+guard. Replaying that same request key always returns pending without another
+Lob create call, even if the temporary artwork URL changed. A distinct request
+is first persisted as an unsent `prior_note_unresolved` row. Only that distinct
+explicit request may, after the 23-hour provider window, reconcile the guarded
+row through Lob's exact-metadata lookup. Recent or indeterminate evidence keeps
+both rows blocked. Confirmed acceptance finalizes the guarded row, including
+the original paid usage when applicable, narrows the current blocker to
+`prior_note_accepted`, and creates no new provider effect. Confirmed absence
+marks the guarded row and current blocker `unknown` and releases any
+complimentary claim; the blocked request remains unsent, so only a later new
+explicit request may enter ordinary admission.
 
 `memberId + complimentaryOfferCode` atomically admits one complimentary note per
 direct member or synthetic group member. A definite provider rejection releases
@@ -114,19 +120,18 @@ to the bounded failure reason and persists it before responding. Lob's
 human-readable message is untrusted, may contain address details, and never
 enters durable state or assistant context. Replays return the same safe reason.
 A pre-migration failed row without one remains ambiguous because old Web also
-terminalized HTTP 408. Before replaying it or admitting another note for that
-member, Web waits through the existing 23-hour provider window and uses the
-existing exact-metadata lookup. Proven absence persists `unknown`; proven
-acceptance restores the same row without another send or an unsupported legacy
-charge; a recent or indeterminate replay of that same request stays pending. A
-different current request is first recorded under its own request key as an
-unsent `prior_note_unresolved` failure, then at most one older row is
-reconciled. The member-locked admission re-reads the oldest member-wide guard
-instead of trusting a row selected before the lock, and repeats that guard
-check immediately before ordinary reservation. Resolving one legacy row can
-therefore never hide a second unresolved row or admit another provider effect.
-Proven absence narrows the current row to `unknown`. If that
-older row is proven accepted, the current row is durably narrowed to
+terminalized HTTP 408. It joins current `starting` rows and restored legacy
+acceptance markers in the same oldest-first, member-wide unresolved-effect
+guard. The member-locked admission re-reads that guard instead of trusting a
+row selected before the lock and repeats the same bounded check immediately
+before ordinary reservation. Resolving one row can therefore never hide a
+second unresolved row or admit another provider effect. A recent or
+indeterminate same-key legacy replay stays pending. A different current request
+is first recorded under its own request key as an unsent
+`prior_note_unresolved` failure, then at most one older row is reconciled.
+Proven absence narrows the current row to `unknown`. If an older legacy row is
+proven accepted, Web restores it without another send or an unsupported
+historical charge, and the current row is durably narrowed to
 `prior_note_accepted`, so the reply says both that the earlier note is headed to
 print and that the current request was not submitted, without claiming the two
 requests share a recipient; it does not invite another send or promise an
@@ -145,11 +150,12 @@ person whether to check the address, regenerate the artwork, or wait for Murph
 to fix its printing setup or request. It never guesses from an unknown reason
 or retries an ambiguous outcome.
 
-For paid notes, `starting` rows from the current allowance period reserve their
-already-frozen provider cost under the same member lock used by allowance
-admission. Older ambiguous rows remain auditable but do not reduce a new
-period's capacity. Concurrent sends therefore cannot each spend the same
-remaining capacity, and no second balance owner is needed.
+For paid notes, the same member lock and unresolved-effect guard admit at most
+one `starting` physical note at a time. Distinct concurrent requests are
+persisted as unsent blockers instead of reaching allowance admission. The
+allowance gate can therefore compare the frozen provider cost directly with
+the existing remaining balance; it needs no pending-cost aggregate or second
+balance owner.
 
 ## Provider boundary
 

@@ -31,9 +31,13 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - The assistant gives reason-specific next steps, states that nothing was sent,
   and never invites an automatic retry after an ambiguous outcome.
 - HTTP outcomes that may be ambiguous do not release the one-effect reservation.
-- Pre-migration failed rows without a reason remain pending until the existing
-  Lob metadata lookup proves acceptance or absence, and block a later provider
-  effect while indeterminate.
+- A current `starting` row remains pending on every same-key replay without
+  another Lob create call, even when a refreshed private-media URL changes the
+  request body.
+- Pre-migration failed rows without a reason and current `starting` rows form
+  one member-wide unresolved-effect guard. A distinct request is persisted as
+  unsent before an age-gated lookup can resolve the older row, and never sends
+  as part of that reconciliation.
 - Existing accepted, pending, permission, unavailable, and usage behavior stays
   unchanged.
 
@@ -47,30 +51,30 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Add one nullable column to `hosted_physical_note` so a definite rejection has
   the same answer on the original call and every replay. Null on an existing
   failed row is the legacy-ambiguity marker, not an unknown definite rejection.
-- Before replay or a later send for the same member, resolve at most one legacy
-  row through the existing Lob lookup after 23 hours. Proven absence persists
-  `unknown`, proven acceptance restores the same row without an unsupported
-  historical charge, and indeterminate evidence stays pending for the same
-  request. Before reconciling an older row for a distinct request, persist that
-  current request as an unsent `prior_note_unresolved` failure under its own
-  request key, so a concurrent replay cannot invite another send. Proven
-  absence narrows that current reason to `unknown`.
-  If the older row is proven accepted, narrow the current row to the existing
-  bounded reason vocabulary's `prior_note_accepted` state and tell the member
-  both that the older note was accepted and the current request was not sent.
-  Accepted replay is read-only; ordinary paid acceptance already commits usage
-  atomically, while restored legacy acceptance has no billing provenance to
-  reconstruct. Always answer with the current row so reply loss and replay
-  cannot turn a suppressed request into a provider effect. Do not add another
-  enum, queue, state owner, or reconciliation lifecycle.
-- Re-read the member-wide legacy guard after taking the existing member lock
-  and again at final reservation admission. A row selected before the lock is
-  only a hint; resolving it cannot authorize a send while another guard still
-  exists. Keep provider lookup outside the transaction.
-- Cover the member-scoped legacy lookup with an index on member, status, reason,
-  and creation time so physical-note history does not create a table-scan hot
-  path. The request performs one bounded row lookup and at most one serial
-  provider lookup; it never fans out by history cardinality.
+- Treat every current `starting` row, every pre-migration failed row without a
+  reason, and every restored legacy acceptance marker as one member-wide
+  unresolved-effect guard. Same-key `starting` replay stays pending and never
+  calls Lob create. Before reconciling an older row for a distinct request,
+  persist that current request as an unsent `prior_note_unresolved` failure
+  under its own request key, so a concurrent replay cannot invite another send.
+  After 23 hours, use the existing Lob lookup outside the transaction. Recent
+  or indeterminate evidence keeps the blocker unresolved. Proven absence marks
+  both the guarded row and blocker `unknown`; the blocked request stays unsent,
+  and only a later explicit request may send. Proven acceptance finalizes a
+  current `starting` row and its original paid usage when applicable, or
+  restores a legacy row without reconstructing erased billing evidence, then
+  narrows the blocker to `prior_note_accepted`. Always answer with the current
+  row so reply loss and replay cannot turn a suppressed request into a provider
+  effect. Do not add another enum, queue, state owner, or reconciliation
+  lifecycle.
+- Re-read the member-wide unresolved-effect guard after taking the existing
+  member lock and again at final reservation admission. A row selected before
+  the lock is only a hint; resolving it cannot authorize a send while another
+  guard still exists. Keep provider lookup outside the transaction.
+- Cover the member-scoped unresolved-effect lookup with an index on member,
+  status, reason, and creation time so physical-note history does not create a
+  table-scan hot path. The request performs one bounded row lookup and at most
+  one serial provider lookup; it never fans out by history cardinality.
 - Deploy the additive migration and current Web producer first so the HTTP 408
   ambiguity fix precedes the new recovery behavior. An old strict runner rejects
   a categorized response and fails closed to pending without retry. Then deploy
@@ -104,6 +108,10 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   usage even when another note already owns the complimentary claim.
 - Assistant tool tests prove each member-facing recovery path and preserve the
   pending no-retry instruction.
+- Round 11 focused proof passes 20 Web owner tests, 3 real-PostgreSQL
+  concurrency tests, and 20 Assistant physical-note tests. The changed Web
+  files pass focused ESLint, Web and Assistant typechecks pass, and agent-docs
+  drift verification passes.
 - Focused Hosted Execution, Web, Assistant Engine, and Cloudflare tests pass:
   6, 87, 15, and 5 tests respectively. Prisma validation and generation pass,
   as do all four affected package/app typechecks. The opt-in real-model journey
@@ -204,3 +212,16 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   and cost claims when legacy billing provenance is unavailable. These fixes
   reuse the existing row, enum, member lock, and response surface without a new
   state owner or transaction around provider I/O.
+- Round 11 found that current `starting` rows—including a newly ambiguous HTTP
+  408 outcome—were outside the member-wide guard. Same-key replay could call
+  Lob create again with a refreshed private-media URL, and a distinct request
+  could reconcile the first effect as accepted before sending and charging a
+  second. Fold every `starting` row into the existing unresolved-effect guard,
+  make same-key replay unconditionally pending, and persist distinct requests
+  as unsent blockers before any age-gated lookup. Accepted evidence now
+  finalizes only the original reservation and its original usage; absence marks
+  both rows unknown but never sends the blocked request. Delete the separate
+  stale-complimentary repair path and the now-redundant pending-cost aggregate.
+  Real PostgreSQL concurrency plus changed-artwork-URL replay prove one Lob
+  create and no second provider effect. The correction shrinks production code
+  and keeps the existing row, lock, lookup, allowance owner, and reason enum.
