@@ -1757,6 +1757,310 @@ test("Junction empty sparse history exhausts real delayed scans once and records
   }
 });
 
+test("Junction moving sparse-history rescans repair a post-anchor gap while daily sync is blocked", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-moving-history-repair");
+  const databasePath = path.join(vaultRoot, ".runtime", "device-syncd.sqlite");
+  let now = new Date("2040-08-01T12:00:00.000Z");
+  let dailyBlockerFails = false;
+  let dailyCaffeineRequestCount = 0;
+  let historicalRequestCount = 0;
+  let importedPostAnchorFactCount = 0;
+  const historicalWindows: Array<{ end: string; start: string }> = [];
+  const dailyCaffeineWindows: Array<{ end: string; start: string }> = [];
+  const postAnchorFactAt = "2040-08-03T08:00:00.000Z";
+  await initializeVault({ vaultRoot });
+  const canonicalImporter = createImporters();
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    reconcileDays: 7,
+    reconcileIntervalMs: 60 * 60_000,
+    summaryBackfillDays: 1,
+    summaryResources: [],
+    timeseriesResources: ["blood_oxygen", "caffeine"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-moving-history-repair") {
+        return createJsonResponse({ providers: [{
+          id: "provider-garmin-moving-history-repair",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { blood_oxygen: true, caffeine: true },
+        }] });
+      }
+      if (
+        url.pathname.startsWith("/v2/summary/")
+        && url.pathname.endsWith("/junction-user-moving-history-repair")
+      ) {
+        return createJsonResponse({ data: [] });
+      }
+      if (
+        url.pathname
+          === "/v2/timeseries/junction-user-moving-history-repair/blood_oxygen/grouped"
+      ) {
+        if (dailyBlockerFails) {
+          return new Response(JSON.stringify({ code: "temporary_failure" }), {
+            headers: {
+              "content-type": "application/json",
+              "retry-after": "0",
+            },
+            status: 503,
+          });
+        }
+        return createJsonResponse({ groups: {} });
+      }
+      if (
+        url.pathname
+          === "/v2/timeseries/junction-user-moving-history-repair/caffeine/grouped"
+      ) {
+        const start = url.searchParams.get("start_date");
+        const end = url.searchParams.get("end_date");
+        assert.ok(start);
+        assert.ok(end);
+        if (url.searchParams.get("provider") === "garmin") {
+          historicalRequestCount += 1;
+          historicalWindows.push({ end, start });
+        } else {
+          dailyCaffeineRequestCount += 1;
+          dailyCaffeineWindows.push({ end, start });
+        }
+        const containsPostAnchorFact =
+          Date.parse(start) <= Date.parse(postAnchorFactAt)
+          && Date.parse(end) > Date.parse(postAnchorFactAt);
+        return createJsonResponse({
+          groups: containsPostAnchorFact
+            ? { garmin: [{
+                data: [{ start: postAnchorFactAt, value: 0.095 }],
+                source: { provider: "garmin", type: "watch" },
+              }] }
+            : {},
+        });
+      }
+      throw new Error(`Unexpected Junction moving-history request: ${url.pathname}`);
+    },
+  });
+  const createRuntime = () => createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      log: {
+        error() {},
+        warn() {},
+      },
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: databasePath,
+    },
+    importer: {
+      async importDeviceProviderSnapshot(snapshot) {
+        if (JSON.stringify(snapshot).includes(postAnchorFactAt)) {
+          importedPostAnchorFactCount += 1;
+        }
+        return canonicalImporter.importDeviceProviderSnapshot(snapshot);
+      },
+    },
+    providers: [provider],
+  });
+  let runtime = createRuntime();
+  let closed = false;
+
+  try {
+    const account = runtime.store.upsertAccount({
+      connectedAt: "2040-04-03T12:00:00.000Z",
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      displayName: "Junction",
+      externalAccountId: "junction-user-moving-history-repair",
+      metadata: {
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillWindowEnd: "2040-04-03T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2040-04-02T00:00:00.000Z",
+      },
+      nextReconcileAt: now.toISOString(),
+      provider: "junction",
+      scopes: [],
+      status: "active",
+    });
+    runtime.store.upsertConnectionSource({
+      connectionId: account.id,
+      lastSeenAt: now.toISOString(),
+      lifecycleEpoch: 1,
+      resourceAvailabilitySummary: { blood_oxygen: true, caffeine: true },
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    });
+    const pendingJobs = () => readJobsForAccountForTesting(runtime.store, account.id)
+      .flatMap((row) => {
+        const job = runtime.store.getJobById(row.id);
+        return job && (job.status === "queued" || job.status === "running")
+          ? [job]
+          : [];
+      });
+    const activeHistoryJobs = () => pendingJobs().filter((job) =>
+      job.kind === "resource"
+      && job.payload.historicalBackfill === true
+      && job.payload.resource === "caffeine"
+    );
+    const advanceTrace: Array<{ availableAt: string; kind: string; resource: unknown }> = [];
+    const advanceToNextJob = () => {
+      const nextJob = pendingJobs()
+        .filter((job) => Date.parse(job.availableAt) > now.getTime())
+        .sort((left, right) => Date.parse(left.availableAt) - Date.parse(right.availableAt))[0];
+      const nextAvailableAt = nextJob ? Date.parse(nextJob.availableAt) : Number.NaN;
+      assert.ok(
+        Number.isFinite(nextAvailableAt),
+        JSON.stringify({
+          advanceTrace,
+          historicalRequestCount,
+          now: now.toISOString(),
+          pendingJobs: pendingJobs().map((job) => ({
+            availableAt: job.availableAt,
+            attempts: job.attempts,
+            emptyBackfillAttempts: job.payload.emptyBackfillAttempts,
+            historicalNoProgressRescan: job.payload.historicalNoProgressRescan,
+            kind: job.kind,
+            resource: job.payload.resource,
+            status: job.status,
+          })),
+        }),
+      );
+      assert.ok(nextJob);
+      advanceTrace.push({
+        availableAt: nextJob.availableAt,
+        kind: nextJob.kind,
+        resource: nextJob.payload.resource,
+      });
+      now = new Date(nextAvailableAt);
+    };
+
+    await runtime.service.runSchedulerOnce();
+    const initialHistoryJob = activeHistoryJobs()[0];
+    assert.ok(initialHistoryJob);
+    assert.equal(initialHistoryJob.payload.windowEnd, "2040-08-01T00:00:00.000Z");
+    const stableDedupeKey = initialHistoryJob.dedupeKey;
+    const observedRetryAttempts = new Set<number>();
+    const observedRetryDelays: number[] = [];
+    let workerRuns = 0;
+    while (historicalRequestCount < 24) {
+      const processed = await runtime.service.runWorkerOnce();
+      workerRuns += 1;
+      assert.ok(workerRuns < 100);
+      if (!processed) {
+        advanceToNextJob();
+        continue;
+      }
+      const activeHistoryJob = activeHistoryJobs()[0];
+      if (!activeHistoryJob) {
+        continue;
+      }
+      assert.equal(activeHistoryJob.dedupeKey, stableDedupeKey);
+      const emptyAttempts = typeof activeHistoryJob.payload.emptyBackfillAttempts === "number"
+        ? activeHistoryJob.payload.emptyBackfillAttempts
+        : 0;
+      if (emptyAttempts > 0 && !observedRetryAttempts.has(emptyAttempts)) {
+        observedRetryAttempts.add(emptyAttempts);
+        observedRetryDelays.push(Date.parse(activeHistoryJob.availableAt) - now.getTime());
+      }
+    }
+    assert.deepEqual(observedRetryDelays, [
+      15 * 60_000,
+      60 * 60_000,
+      6 * 60 * 60_000,
+      24 * 60 * 60_000,
+    ]);
+    assert.equal(historicalWindows.every((window) =>
+      Date.parse(window.end) <= Date.parse("2040-08-01T00:00:00.000Z")
+    ), true);
+    const queuedTerminalScan = activeHistoryJobs()[0];
+    assert.ok(queuedTerminalScan);
+    assert.equal(queuedTerminalScan.dedupeKey, stableDedupeKey);
+    assert.equal(queuedTerminalScan.payload.emptyBackfillAttempts, 4);
+    assert.equal(queuedTerminalScan.payload.historicalNoProgressRescan, true);
+    const queuedTerminalScanId = queuedTerminalScan.id;
+    const queuedTerminalScanAvailableAt = queuedTerminalScan.availableAt;
+    const dailyCaffeineRequestCountBeforeBlockedRestart = dailyCaffeineRequestCount;
+    assert.ok(dailyCaffeineRequestCountBeforeBlockedRestart > 0);
+
+    runtime.close();
+    closed = true;
+    now = new Date("2040-08-12T12:00:00.000Z");
+    dailyBlockerFails = true;
+    runtime = createRuntime();
+    closed = false;
+    const reloadedTerminalScan = runtime.store.getJobById(queuedTerminalScanId);
+    assert.ok(reloadedTerminalScan);
+    assert.equal(reloadedTerminalScan.availableAt, queuedTerminalScanAvailableAt);
+    assert.equal(reloadedTerminalScan.dedupeKey, stableDedupeKey);
+    assert.equal(reloadedTerminalScan.payload.historicalNoProgressRescan, true);
+
+    runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await runtime.service.runSchedulerOnce();
+    workerRuns = 0;
+    while (historicalRequestCount < 30) {
+      const processed = await runtime.service.runWorkerOnce();
+      workerRuns += 1;
+      assert.ok(workerRuns < 40);
+      if (!processed) {
+        advanceToNextJob();
+      }
+    }
+
+    assert.equal(historicalRequestCount, 30);
+    assert.equal(dailyCaffeineRequestCount, dailyCaffeineRequestCountBeforeBlockedRestart);
+    assert.ok(
+      historicalWindows.slice(24).some((window) =>
+        Date.parse(window.start) <= Date.parse(postAnchorFactAt)
+        && Date.parse(window.end) > Date.parse(postAnchorFactAt)
+      ),
+    );
+    assert.equal(importedPostAnchorFactCount, 1);
+    const persisted = runtime.store.getAccountById(account.id);
+    assert.ok(persisted);
+    assert.equal(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+      persisted.metadata,
+      "garmin",
+      "caffeine",
+      JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_POLICY_VERSION,
+    ), true);
+    assert.equal(activeHistoryJobs().length, 0);
+
+    dailyBlockerFails = false;
+    now = new Date("2040-08-20T12:00:00.000Z");
+    runtime.store.patchAccount(account.id, { nextReconcileAt: now.toISOString() });
+    await runtime.service.runSchedulerOnce();
+    for (
+      let pass = 0;
+      pass < 20 && dailyCaffeineRequestCount === dailyCaffeineRequestCountBeforeBlockedRestart;
+      pass += 1
+    ) {
+      const processed = await runtime.service.runWorkerOnce();
+      if (!processed && pendingJobs().length > 0) {
+        advanceToNextJob();
+      }
+    }
+    assert.ok(dailyCaffeineRequestCount > dailyCaffeineRequestCountBeforeBlockedRestart);
+    assert.equal(dailyCaffeineWindows.some((window) =>
+      Date.parse(window.start) <= Date.parse(postAnchorFactAt)
+      && Date.parse(window.end) > Date.parse(postAnchorFactAt)
+    ), false, "the recovered rolling daily window must no longer include the post-anchor fact");
+    assert.equal(importedPostAnchorFactCount, 1);
+    assert.equal(activeHistoryJobs().length, 0);
+  } finally {
+    if (!closed) {
+      runtime.close();
+    }
+  }
+});
+
 test("Junction schedule-time history keeps one durable retry chain across UTC days", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-schedule-history-retry");
   let now = new Date("2026-08-11T12:00:00.000Z");

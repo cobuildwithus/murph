@@ -741,6 +741,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   eventType: "string",
   historicalBackfill: "boolean",
   historicalBackfillVersion: "number",
+  historicalNoProgressRescan: "boolean",
   historicalProviderRecordsSeen: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",

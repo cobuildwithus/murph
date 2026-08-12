@@ -213,11 +213,6 @@ interface JunctionHistoricalUnresolvedProviderRecords {
   withoutStableIdentity: boolean;
 }
 
-type JunctionExtendedTimeseriesBackfillCompletionReason =
-  | "fetch_complete_no_progress_exhausted"
-  | "note_semantic_noop"
-  | "record_bearing";
-
 interface PreparedJunctionImportSnapshot {
   connections: Array<Record<string, unknown>>;
   sourceProviders: readonly JunctionProviderConnection[];
@@ -2002,8 +1997,17 @@ export function createJunctionDeviceSyncProvider(
         const extendedHistoryPolicy = extendedHistoricalBackfill
           ? resolveJunctionExtendedTimeseriesBackfillPolicy(effectiveResource)
           : null;
+        const extendedHistoryExecution = selectJunctionExtendedHistoryExecution({
+          job,
+          now: context.now,
+          policy: extendedHistoryPolicy,
+          resource: effectiveResource,
+          window,
+        });
+        const executionJob = extendedHistoryExecution.job;
+        const executionWindow = extendedHistoryExecution.window;
         const sourceLifecycleEpoch = extendedHistoryPolicy?.historyAnchor === "schedule_time"
-          ? readJunctionSourceLifecycleEpoch(job.payload)
+          ? readJunctionSourceLifecycleEpoch(executionJob.payload)
           : null;
         if (
           extendedHistoryPolicy?.historyAnchor === "schedule_time"
@@ -2029,8 +2033,8 @@ export function createJunctionDeviceSyncProvider(
           if (
             extendedHistoricalBackfill
             && (
-              job.payload.historicalProviderRecordsSeen === true
-              || job.payload.historicalRecordsSeen === true
+              executionJob.payload.historicalProviderRecordsSeen === true
+              || executionJob.payload.historicalRecordsSeen === true
             )
             && isRetryableDeviceSyncFailure(error)
           ) {
@@ -2046,12 +2050,12 @@ export function createJunctionDeviceSyncProvider(
                 unresolvedProviderRecordsWithoutStableIdentity: false,
                 yieldedAt: null,
               },
-              job,
+              job: executionJob,
               resource: effectiveResource,
               result: {
                 nextReconcileAt: clampWebhookJobNextReconcileAt(context),
               },
-              window,
+              window: executionWindow,
             });
           }
           throw error;
@@ -2078,8 +2082,8 @@ export function createJunctionDeviceSyncProvider(
             nextReconcileAt: clampWebhookJobNextReconcileAt(context),
           };
           if (
-            job.payload.historicalProviderRecordsSeen !== true
-            && job.payload.historicalRecordsSeen !== true
+            executionJob.payload.historicalProviderRecordsSeen !== true
+            && executionJob.payload.historicalRecordsSeen !== true
           ) {
             return result;
           }
@@ -2095,23 +2099,23 @@ export function createJunctionDeviceSyncProvider(
               unresolvedProviderRecordsWithoutStableIdentity: false,
               yieldedAt: null,
             },
-            job,
+            job: executionJob,
             resource: effectiveResource,
             result,
-            window,
+            window: executionWindow,
           });
         }
         const timeseriesImport = await importTimeseriesPreciseSnapshots(
           context,
           sourceProviders,
-          window.windowStart,
-          window.windowEnd,
+          executionWindow.windowStart,
+          executionWindow.windowEnd,
           skippedOptionalResources,
           [effectiveResource],
           sourceProviderSlug,
           {
             historicalProviderRecordsSeen:
-              job.payload.historicalProviderRecordsSeen === true,
+              executionJob.payload.historicalProviderRecordsSeen === true,
             historyChunkDays: extendedHistoricalBackfill
               ? resolveJunctionExtendedTimeseriesBackfillPolicy(effectiveResource)
                 ?.historyChunkDays
@@ -2140,8 +2144,8 @@ export function createJunctionDeviceSyncProvider(
         if (
           extendedHistoricalBackfill
           && timeseriesImport.postFetchSourceAdmission === "pending"
-          && job.payload.historicalProviderRecordsSeen !== true
-          && job.payload.historicalRecordsSeen !== true
+          && executionJob.payload.historicalProviderRecordsSeen !== true
+          && executionJob.payload.historicalRecordsSeen !== true
           && timeseriesImport.providerRecordCount === 0
         ) {
           return withJunctionSkippedResourceMetadata(
@@ -2153,12 +2157,12 @@ export function createJunctionDeviceSyncProvider(
           );
         }
         const historicalRecordsSeen = extendedHistoricalBackfill
-          ? job.payload.historicalRecordsSeen === true
+          ? executionJob.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
           : undefined;
         const historicalUnresolvedProviderRecords = extendedHistoricalBackfill
           ? resolveJunctionHistoricalUnresolvedProviderRecords(
-              job,
+              executionJob,
               timeseriesImport,
             )
           : undefined;
@@ -2187,8 +2191,8 @@ export function createJunctionDeviceSyncProvider(
               historicalRecordsSeen,
               historicalUnresolvedProviderRecordIdentitiesJson,
               historicalUnresolvedProviderRecordCount,
-              job,
-              windowEnd: window.windowEnd,
+              job: executionJob,
+              windowEnd: executionWindow.windowEnd,
               windowStart: timeseriesImport.yieldedAt,
             }),
             skippedOptionalResources,
@@ -2204,15 +2208,15 @@ export function createJunctionDeviceSyncProvider(
         );
         return withJunctionHistoricalCoverageVerification(
           context,
-          job,
-          window,
+          executionJob,
+          executionWindow,
           withJunctionExtendedTimeseriesBackfillFollowUp({
             context,
             importResult: timeseriesImport,
-            job,
+            job: executionJob,
             resource: effectiveResource,
             result,
-            window,
+            window: executionWindow,
           }),
         );
       }
@@ -2319,6 +2323,54 @@ export function createJunctionDeviceSyncProvider(
       : latestAt;
   }
 
+  function selectJunctionExtendedHistoryExecution(input: {
+    job: DeviceSyncJobRecord;
+    now: string;
+    policy: {
+      historyAnchor: "schedule_time" | "source_first_seen";
+      historyChunkDays: number;
+      initialHistoryDays: number;
+      version: number;
+    } | null;
+    resource: string;
+    window: { windowEnd: string; windowStart: string };
+  }): {
+    job: DeviceSyncJobRecord;
+    window: { windowEnd: string; windowStart: string };
+  } {
+    const historicalWindowStart = toIsoTimestampIfValid(
+      normalizeString(input.job.payload.historicalWindowStart),
+    );
+    if (
+      input.policy?.historyAnchor !== "schedule_time"
+      || input.job.payload.historicalNoProgressRescan !== true
+      || historicalWindowStart !== input.window.windowStart
+    ) {
+      return { job: input.job, window: input.window };
+    }
+
+    const selectedWindow = buildExtendedTimeseriesBackfillWindow(
+      input.resource,
+      input.now,
+    );
+    if (Date.parse(selectedWindow.windowEnd) < Date.parse(input.window.windowEnd)) {
+      return { job: input.job, window: input.window };
+    }
+
+    return {
+      job: {
+        ...input.job,
+        payload: {
+          ...input.job.payload,
+          historicalWindowStart: selectedWindow.windowStart,
+          windowEnd: selectedWindow.windowEnd,
+          windowStart: selectedWindow.windowStart,
+        },
+      },
+      window: selectedWindow,
+    };
+  }
+
   function withJunctionExtendedTimeseriesBackfillFollowUp(input: {
     context: ProviderJobContext;
     importResult: JunctionPreciseTimeseriesImportResult;
@@ -2360,7 +2412,6 @@ export function createJunctionDeviceSyncProvider(
           input.job,
           input.resource,
           sourceProviderSlug,
-          "note_semantic_noop",
         ),
       );
     }
@@ -2377,7 +2428,6 @@ export function createJunctionDeviceSyncProvider(
           input.job,
           input.resource,
           sourceProviderSlug,
-          "record_bearing",
         ),
       );
     }
@@ -2409,7 +2459,6 @@ export function createJunctionDeviceSyncProvider(
           input.job,
           input.resource,
           sourceProviderSlug,
-          "fetch_complete_no_progress_exhausted",
         ),
       );
     }
@@ -2430,6 +2479,10 @@ export function createJunctionDeviceSyncProvider(
           availableAt: addMilliseconds(input.context.now, retryDelayMs),
           dedupeKey: input.job.dedupeKey,
           emptyBackfillAttempts,
+          historicalNoProgressRescan:
+            input.importResult.fetchComplete
+            && !recordsSeen
+            && unresolvedProviderRecordCount === 0,
           ...(input.resource === "note"
             ? {
                 historicalBackfillVersion:
@@ -2471,7 +2524,6 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     resource: string,
     sourceProviderSlug: string | null,
-    completionReason: JunctionExtendedTimeseriesBackfillCompletionReason,
   ): Record<string, unknown> {
     if (!sourceProviderSlug) {
       return {};
@@ -2493,18 +2545,19 @@ export function createJunctionDeviceSyncProvider(
 
     if (
       policy.historyAnchor === "schedule_time"
-      && completionReason !== "fetch_complete_no_progress_exhausted"
+      && job.payload.historicalNoProgressRescan !== true
       && !doesJunctionScheduleTimeHistoryWindowReachDailyCoverage({
         currentClosedDayTarget: floorUtcDayTimestamp(context.now),
         fixedWindowEnd: normalizeString(job.payload.windowEnd),
       })
     ) {
-      // The stable logical chain deliberately keeps its original fixed
-      // window while an optional endpoint is unavailable. If that window no
-      // longer touches the ordinary rolling reconcile interval, completing
-      // it cannot certify the intervening gap. Finish this row without the
-      // matrix bit; the existing scheduler can then enqueue one replacement
-      // under the same logical identity, anchored to the current closed day.
+      // Incomplete or unavailable work deliberately keeps its prior window.
+      // If that window no longer reaches the current closed-day target, it
+      // cannot certify the intervening gap. Finish this row without the bit;
+      // the scheduler can offer one current replacement. A fetch-complete
+      // no-progress rescan instead selects its current target before its first
+      // chunk, so its bit certifies the same interval as every other terminal
+      // path rather than bypassing freshness for the original fixed window.
       return {};
     }
 
@@ -6446,6 +6499,7 @@ function buildExtendedTimeseriesBackfillJob(input: {
   emptyBackfillAttempts?: number;
   historicalProviderRecordsSeen?: boolean;
   historicalBackfillVersion?: number;
+  historicalNoProgressRescan?: boolean;
   historicalRecordsSeen?: boolean;
   historicalUnresolvedProviderRecordIdentitiesJson?: string;
   historicalUnresolvedProviderRecordCount?: number;
@@ -6464,6 +6518,9 @@ function buildExtendedTimeseriesBackfillJob(input: {
     ...(input.historicalBackfillVersion === undefined
       ? {}
       : { historicalBackfillVersion: input.historicalBackfillVersion }),
+    ...(input.historicalNoProgressRescan
+      ? { historicalNoProgressRescan: true }
+      : {}),
     ...(input.historicalProviderRecordsSeen
       ? { historicalProviderRecordsSeen: true }
       : {}),

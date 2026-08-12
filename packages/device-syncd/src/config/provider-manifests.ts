@@ -204,6 +204,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       eventType: stringJobField({ includeInHostedHint: true }),
       historicalBackfill: booleanJobField({ includeInHostedHint: true }),
       historicalBackfillVersion: numberJobField({ includeInHostedHint: true }),
+      historicalNoProgressRescan: booleanJobField({ includeInHostedHint: true }),
       historicalProviderRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       sourceLifecycleEpoch: numberJobField({ includeInHostedHint: true }),
