@@ -108,14 +108,13 @@ import {
   HOSTED_GROUP_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
   assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx,
   createHostedGroupCurrentSenderAssistantAskRequestId,
-  createHostedGroupCurrentSenderPrivateAssistantAskRequestId,
   requestHostedGroupCurrentSenderAssistantAsk,
-  requestHostedGroupCurrentSenderPrivateAssistantAsk,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
 
 const GROUP_RUNTIME_MEMBER_ID = "member_group_runtime";
 const SENDER_MEMBER_ID = "member_sender";
 const ORIGIN_ASSISTANT_INPUT_ID = `ain_${"a".repeat(32)}`;
+const OLDER_PRIVATE_ASSISTANT_INPUT_ID = `ain_${"b".repeat(32)}`;
 const NOW = new Date("2026-07-27T20:00:00.000Z");
 const ROUTE_AUTHORITY = {
   accountLookupKey: "hplk_line",
@@ -224,11 +223,13 @@ async function createCurrentSenderRequestFixture(
         : null,
   );
   const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+    responseDestination: "group",
     groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
     now: NOW,
     origin: CURRENT_SENDER_ORIGIN,
   });
   const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+    responseDestination: "group",
     groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
     originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
   });
@@ -298,12 +299,14 @@ describe("hosted current-sender Assistant Ask authority", () => {
       sessionId: "session_group",
     };
     const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin,
     });
 
     const requestId = createHostedGroupCurrentSenderAssistantAskRequestId({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     });
@@ -371,12 +374,14 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin,
     })).resolves.toEqual(admission);
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: { ...origin, sessionId: "different_session" },
@@ -466,6 +471,63 @@ describe("hosted current-sender Assistant Ask authority", () => {
     })).resolves.toBeUndefined();
   });
 
+  it(
+    "ignores an older private request when the selected fresh input targets the group",
+    async () => {
+      const olderPrivateWake = createSourceWake({
+        text: "Murph, continue this older synthetic request privately.",
+      });
+      const freshGroupWake = createSourceWake({
+        text: "Murph, answer this fresh synthetic request in the group.",
+      });
+      mocks.readHostedMailboxConversationWakeByAssistantInputId.mockImplementation(
+        async ({ assistantInputId, memberId }: {
+          assistantInputId: string;
+          memberId: string;
+        }) => {
+          if (memberId !== GROUP_RUNTIME_MEMBER_ID) {
+            return null;
+          }
+          if (assistantInputId === ORIGIN_ASSISTANT_INPUT_ID) {
+            return freshGroupWake;
+          }
+          return assistantInputId === OLDER_PRIVATE_ASSISTANT_INPUT_ID
+            ? olderPrivateWake
+            : null;
+        },
+      );
+
+      await expect(requestHostedGroupCurrentSenderAssistantAsk({
+        responseDestination: "group",
+        groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+        now: NOW,
+        origin: CURRENT_SENDER_ORIGIN,
+      })).resolves.toMatchObject({
+        mailboxWake: { expectedUserId: SENDER_MEMBER_ID },
+        result: { status: "accepted" },
+      });
+
+      expect(
+        mocks.readHostedMailboxConversationWakeByAssistantInputId,
+      ).toHaveBeenCalledExactlyOnceWith({
+        assistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+        availableAt: NOW,
+        memberId: GROUP_RUNTIME_MEMBER_ID,
+        prisma: fakeTx,
+      });
+      expect(
+        mocks.appendHostedMailboxEnvelopeWithIdentityTx.mock.calls[0]?.[0]
+          .envelope,
+      ).toMatchObject({
+        ask: {
+          origin: CURRENT_SENDER_ORIGIN,
+          question: "Murph, answer this fresh synthetic request in the group.",
+          target: { kind: "group_sender" },
+        },
+      });
+    },
+  );
+
   it("queues and replays one private current-sender completion on the sender personal runtime", async () => {
     const question = "Murph text me privately about my sleep";
     const answer = "Your recent sleep has been inconsistent.";
@@ -473,17 +535,20 @@ describe("hosted current-sender Assistant Ask authority", () => {
       createSourceWake({ text: question }),
     );
 
-    const admission = await requestHostedGroupCurrentSenderPrivateAssistantAsk({
+    const admission = await requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "current_sender",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
     });
     const requestId =
-      createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
+      createHostedGroupCurrentSenderAssistantAskRequestId({
+        responseDestination: "current_sender",
         groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
         originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
       });
     expect(requestId).not.toBe(createHostedGroupCurrentSenderAssistantAskRequestId({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
     }));
@@ -532,7 +597,8 @@ describe("hosted current-sender Assistant Ask authority", () => {
         mailboxItemId === requestId ? requestWake : null,
     );
 
-    await expect(requestHostedGroupCurrentSenderPrivateAssistantAsk({
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "current_sender",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
@@ -544,7 +610,8 @@ describe("hosted current-sender Assistant Ask authority", () => {
       externalThreadRouteAuthority: null,
       route: LINQ_PARTICIPANT_ROUTE,
     });
-    await expect(requestHostedGroupCurrentSenderPrivateAssistantAsk({
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "current_sender",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
@@ -767,7 +834,8 @@ describe("hosted current-sender Assistant Ask authority", () => {
       route: LINQ_PARTICIPANT_ROUTE,
     });
 
-    await expect(requestHostedGroupCurrentSenderPrivateAssistantAsk({
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "current_sender",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
@@ -795,7 +863,8 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
     mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(null);
 
-    await expect(requestHostedGroupCurrentSenderPrivateAssistantAsk({
+    await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "current_sender",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: CURRENT_SENDER_ORIGIN,
@@ -831,6 +900,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     mocks.lookupHostedGroupParticipantMemberByHandle.mockClear();
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: new Date(requested.requestWake.ask.expiresAt),
       origin: CURRENT_SENDER_ORIGIN,
@@ -1000,6 +1070,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
   it("fails closed when the provider sender cannot be resolved or text is absent", async () => {
     mocks.lookupHostedGroupParticipantMemberByHandle.mockResolvedValueOnce(null);
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: {
@@ -1019,6 +1090,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
       createSourceWake({ text: "   " }),
     );
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: {
@@ -1042,6 +1114,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
       createTelegramSourceWake(),
     );
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: {
@@ -1079,6 +1152,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: {
@@ -1113,6 +1187,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
         wake,
       );
       await expect(requestHostedGroupCurrentSenderAssistantAsk({
+        responseDestination: "group",
         groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
         now: NOW,
         origin,
@@ -1126,6 +1201,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
       memberId: GROUP_RUNTIME_MEMBER_ID,
     });
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin,
@@ -1144,6 +1220,7 @@ describe("hosted current-sender Assistant Ask authority", () => {
     );
 
     await expect(requestHostedGroupCurrentSenderAssistantAsk({
+      responseDestination: "group",
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
       origin: {

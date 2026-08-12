@@ -26,6 +26,7 @@ import type {
 } from "./assistant-model.ts";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
+  HostedExecutionAssistantAskGroupSenderResponseDestination,
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
   HostedBrowserVaultReplicaCursorRef,
@@ -1454,13 +1455,7 @@ export type HostedRuntimeGroupToolRequest =
         HostedExecutionAssistantAskOrigin,
         { kind: "accepted_input" }
       >;
-    }
-  | {
-      action: "message_current_sender";
-      origin: Extract<
-        HostedExecutionAssistantAskOrigin,
-        { kind: "accepted_input" }
-      >;
+      responseDestination: HostedExecutionAssistantAskGroupSenderResponseDestination;
     }
   | {
       action: "ask_member";
@@ -1588,7 +1583,7 @@ export type HostedRuntimeGroupMemberAskResult =
   | ({ status: "completed" } & HostedExecutionAssistantAskResult)
   | Extract<HostedRuntimeGroupAskResult, { status: "unavailable" }>;
 
-export type HostedRuntimeGroupCurrentSenderMessageResult =
+export type HostedRuntimeGroupCurrentSenderDirectResult =
   | { status: "accepted" }
   | { status: "unavailable"; unavailableReason: string };
 
@@ -1597,10 +1592,15 @@ export type HostedRuntimeGroupToolResponse =
       action: "ask";
       result: HostedRuntimeGroupAskResult;
     }
-  | { action: "ask_current_sender"; result: HostedRuntimeGroupMemberAskResult }
   | {
-      action: "message_current_sender";
-      result: HostedRuntimeGroupCurrentSenderMessageResult;
+      action: "ask_current_sender";
+      responseDestination: "group";
+      result: HostedRuntimeGroupMemberAskResult;
+    }
+  | {
+      action: "ask_current_sender";
+      responseDestination: "current_sender";
+      result: HostedRuntimeGroupCurrentSenderDirectResult;
     }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
   | {

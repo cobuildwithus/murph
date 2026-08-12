@@ -18,6 +18,7 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   isHostedExecutionAssistantAskCompletedWake,
   isHostedExecutionAssistantAskRequestedWake,
+  readHostedExecutionAssistantAskGroupSenderResponseDestination,
   type HostedExecutionAssistantAskCompletedPayload,
   type HostedExecutionAssistantAskCompletedWake,
   type HostedExecutionAssistantAskOrigin,
@@ -55,9 +56,7 @@ import {
 import {
   appendHostedGroupCurrentSenderPrivateCompletionTx,
   createHostedGroupCurrentSenderAssistantAskRequestId,
-  createHostedGroupCurrentSenderPrivateAssistantAskRequestId,
   readHostedGroupCurrentSenderAssistantAskAuthorityTx,
-  readHostedGroupCurrentSenderPrivateAssistantAskAuthorityTx,
   readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx,
   type HostedGroupCurrentSenderPrivateCompletionAuthority,
 } from "./group-current-sender-assistant-ask";
@@ -1072,54 +1071,17 @@ async function readHostedAssistantAskAuthorityTx(input: {
     };
   }
 
-  if (wake.ask.target.kind === "group_sender_private") {
+  if (
+    wake.ask.target.kind === "group_sender"
+    || wake.ask.target.kind === "group_sender_private"
+  ) {
     if (wake.ask.origin.kind !== "accepted_input") {
       return { authority: null, terminalReason: "unavailable" };
     }
-    const currentSenderAuthority =
-      await readHostedGroupCurrentSenderPrivateAssistantAskAuthorityTx({
-        expectedGroupRuntimeMemberId:
-          wake.ask.target.groupRuntimeMemberId,
-        expectedTargetMemberId: item.userId,
-        now: input.now,
-        origin: wake.ask.origin,
-        tx: input.tx,
-      });
-    if (
-      !currentSenderAuthority
-      || currentSenderAuthority.question !== wake.ask.question
-      || currentSenderAuthority.permissionDigest
-        !== wake.ask.target.permissionDigest
-      || createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
-        groupRuntimeMemberId: currentSenderAuthority.groupRuntimeMemberId,
-        originAssistantInputId: wake.ask.origin.assistantInputId,
-      }) !== input.requestId
-    ) {
-      return { authority: null, terminalReason: "unavailable" };
-    }
-    const privateCurrentSender = {
-      ...currentSenderAuthority,
-      expiresAt: wake.ask.expiresAt,
-      origin: wake.ask.origin,
-    } satisfies HostedGroupCurrentSenderPrivateCompletionAuthority;
-    return {
-      authority: {
-        expiresAt: wake.ask.expiresAt,
-        origin: wake.ask.origin,
-        originMemberId: currentSenderAuthority.groupRuntimeMemberId,
-        permissionText: currentSenderAuthority.permissionText,
-        privateCurrentSender,
-        question: currentSenderAuthority.question,
-        targetLabel: null,
-      },
-      terminalReason: null,
-    };
-  }
-
-  if (wake.ask.target.kind === "group_sender") {
-    if (wake.ask.origin.kind !== "accepted_input") {
-      return { authority: null, terminalReason: "unavailable" };
-    }
+    const responseDestination =
+      readHostedExecutionAssistantAskGroupSenderResponseDestination(
+        wake.ask.target,
+      );
     const currentSenderAuthority =
       await readHostedGroupCurrentSenderAssistantAskAuthorityTx({
         expectedGroupRuntimeMemberId:
@@ -1127,6 +1089,7 @@ async function readHostedAssistantAskAuthorityTx(input: {
         expectedTargetMemberId: item.userId,
         now: input.now,
         origin: wake.ask.origin,
+        responseDestination,
         tx: input.tx,
       });
     if (
@@ -1137,9 +1100,30 @@ async function readHostedAssistantAskAuthorityTx(input: {
       || createHostedGroupCurrentSenderAssistantAskRequestId({
         groupRuntimeMemberId: currentSenderAuthority.groupRuntimeMemberId,
         originAssistantInputId: wake.ask.origin.assistantInputId,
+        responseDestination,
       }) !== input.requestId
     ) {
       return { authority: null, terminalReason: "unavailable" };
+    }
+    if (responseDestination === "current_sender") {
+      const privateCurrentSender = {
+        ...currentSenderAuthority,
+        expiresAt: wake.ask.expiresAt,
+        origin: wake.ask.origin,
+        responseDestination: "current_sender",
+      } satisfies HostedGroupCurrentSenderPrivateCompletionAuthority;
+      return {
+        authority: {
+          expiresAt: wake.ask.expiresAt,
+          origin: wake.ask.origin,
+          originMemberId: currentSenderAuthority.groupRuntimeMemberId,
+          permissionText: currentSenderAuthority.permissionText,
+          privateCurrentSender,
+          question: currentSenderAuthority.question,
+          targetLabel: null,
+        },
+        terminalReason: null,
+      };
     }
     return {
       authority: {

@@ -28,9 +28,11 @@ import {
   parseAssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 import {
+  HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS,
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   type HostedExecutionAcceptedGroupMessageParticipant,
+  type HostedExecutionAssistantAskGroupSenderResponseDestination,
 } from "../contracts.ts";
 import {
   parseHostedRuntimePendingGroupSetupInput,
@@ -175,7 +177,7 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupMembershipSummary,
   type HostedRuntimeGroupParticipantDisplayNameSource,
-  type HostedRuntimeGroupCurrentSenderMessageResult,
+  type HostedRuntimeGroupCurrentSenderDirectResult,
   type HostedRuntimeGroupMemberAskResult,
   type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupSharedMember,
@@ -1127,11 +1129,36 @@ export function parseHostedRuntimeGroupToolRequest(
       ...parseHostedRuntimeGroupAssistantAskFields(record, label),
     };
   }
-  if (
-    action === "ask_current_sender"
-    || action === "message_current_sender"
-  ) {
-    const label = `Hosted runtime group tool ${action} request`;
+  if (action === "ask_current_sender") {
+    const label = "Hosted runtime group tool ask_current_sender request";
+    const hasResponseDestination = Object.hasOwn(record, "responseDestination");
+    assertAllowedObjectKeys(
+      record,
+      hasResponseDestination
+        ? new Set(["action", "origin", "responseDestination"])
+        : new Set(["action", "origin"]),
+      label,
+    );
+    const origin = parseHostedExecutionAssistantAskOrigin(
+      record.origin,
+      `${label} origin`,
+    );
+    if (origin.kind !== "accepted_input") {
+      throw new TypeError(`${label} origin must be an accepted input.`);
+    }
+    return {
+      action,
+      origin,
+      responseDestination: hasResponseDestination
+        ? parseHostedRuntimeGroupCurrentSenderResponseDestination(
+            record.responseDestination,
+            `${label} responseDestination`,
+          )
+        : "group",
+    };
+  }
+  if (action === "message_current_sender") {
+    const label = "Hosted runtime group tool legacy message_current_sender request";
     assertAllowedObjectKeys(record, new Set(["action", "origin"]), label);
     const origin = parseHostedExecutionAssistantAskOrigin(
       record.origin,
@@ -1140,7 +1167,11 @@ export function parseHostedRuntimeGroupToolRequest(
     if (origin.kind !== "accepted_input") {
       throw new TypeError(`${label} origin must be an accepted input.`);
     }
-    return { action, origin };
+    return {
+      action: "ask_current_sender",
+      origin,
+      responseDestination: "current_sender",
+    };
   }
   if (action === "ask_member") {
     const label = "Hosted runtime group tool ask_member request";
@@ -2509,11 +2540,27 @@ function parseHostedRuntimeGroupCanonicalTimestamp(
   return timestamp;
 }
 
-function parseHostedRuntimeGroupCurrentSenderMessageResult(
+function parseHostedRuntimeGroupCurrentSenderResponseDestination(
   value: unknown,
-): HostedRuntimeGroupCurrentSenderMessageResult {
+  label: string,
+): HostedExecutionAssistantAskGroupSenderResponseDestination {
+  const responseDestination = requireString(value, label);
+  for (
+    const candidate
+    of HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS
+  ) {
+    if (responseDestination === candidate) {
+      return candidate;
+    }
+  }
+  throw new TypeError(`${label} is invalid.`);
+}
+
+function parseHostedRuntimeGroupCurrentSenderDirectResult(
+  value: unknown,
+): HostedRuntimeGroupCurrentSenderDirectResult {
   const label =
-    "Hosted runtime group tool message_current_sender response result";
+    "Hosted runtime group tool direct current-sender response result";
   const result = requireObject(value, label);
   const status = requireString(result.status, `${label} status`);
   if (status === "accepted") {
@@ -2584,15 +2631,55 @@ export function parseHostedRuntimeGroupToolResponse(
 ): HostedRuntimeGroupToolResponse {
   const record = requireObject(value, "Hosted runtime group tool response");
   const action = requireString(record.action, "Hosted runtime group tool response action");
-  assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
 
-  if (action === "message_current_sender") {
+  if (action === "ask_current_sender") {
+    const label = "Hosted runtime group tool ask_current_sender response";
+    const hasResponseDestination = Object.hasOwn(record, "responseDestination");
+    assertAllowedObjectKeys(
+      record,
+      hasResponseDestination
+        ? new Set(["action", "responseDestination", "result"])
+        : new Set(["action", "result"]),
+      label,
+    );
+    const responseDestination = hasResponseDestination
+      ? parseHostedRuntimeGroupCurrentSenderResponseDestination(
+          record.responseDestination,
+          `${label} responseDestination`,
+        )
+      : "group";
+    if (responseDestination === "group") {
+      return {
+        action,
+        responseDestination,
+        result: parseHostedRuntimeGroupMemberAskResult(record.result, action),
+      };
+    }
     return {
       action,
-      result: parseHostedRuntimeGroupCurrentSenderMessageResult(record.result),
+      responseDestination,
+      result: parseHostedRuntimeGroupCurrentSenderDirectResult(record.result),
     };
   }
-  if (action === "ask_current_sender" || action === "ask_member") {
+  if (action === "message_current_sender") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "result"]),
+      "Hosted runtime group tool legacy message_current_sender response",
+    );
+    return {
+      action: "ask_current_sender",
+      responseDestination: "current_sender",
+      result: parseHostedRuntimeGroupCurrentSenderDirectResult(record.result),
+    };
+  }
+
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "result"]),
+    "Hosted runtime group tool response",
+  );
+  if (action === "ask_member") {
     return {
       action,
       result: parseHostedRuntimeGroupMemberAskResult(record.result, action),

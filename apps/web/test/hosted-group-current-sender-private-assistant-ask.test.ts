@@ -34,7 +34,7 @@ vi.mock("@/src/lib/prisma", () => ({
 import {
   appendHostedGroupCurrentSenderPrivateCompletionTx,
   buildHostedGroupCurrentSenderPrivateResponseText,
-  createHostedGroupCurrentSenderPrivateAssistantAskRequestId,
+  createHostedGroupCurrentSenderAssistantAskRequestId,
   readHostedGroupCurrentSenderPrivateCompletionMailboxWakeTx,
   type HostedGroupCurrentSenderPrivateCompletionAuthority,
 } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
@@ -65,6 +65,7 @@ const AUTHORITY: HostedGroupCurrentSenderPrivateCompletionAuthority = {
   permissionDigest: "d".repeat(64),
   permissionText: "One private owner-only answer.",
   question: "Murph text me individually about today's workout",
+  responseDestination: "current_sender",
   sourceChannel: "linq",
   targetMemberId: "member_sender",
 };
@@ -85,15 +86,16 @@ describe("hosted private current-sender Assistant Ask completion", () => {
     );
   });
 
-  it("uses a distinct stable request identity", () => {
+  it("uses the direct destination's stable request identity", () => {
     const input = {
       groupRuntimeMemberId: AUTHORITY.groupRuntimeMemberId,
       originAssistantInputId: INPUT_ID,
+      responseDestination: "current_sender" as const,
     };
     const requestId =
-      createHostedGroupCurrentSenderPrivateAssistantAskRequestId(input);
+      createHostedGroupCurrentSenderAssistantAskRequestId(input);
     expect(requestId).toBe(
-      createHostedGroupCurrentSenderPrivateAssistantAskRequestId(input),
+      createHostedGroupCurrentSenderAssistantAskRequestId(input),
     );
     expect(requestId).toMatch(/^aask_req_[a-f0-9]{64}$/u);
   });
@@ -134,9 +136,10 @@ describe("hosted private current-sender Assistant Ask completion", () => {
           privateAssistantAskCompletion: {
             expiresAt: AUTHORITY.expiresAt,
             requestId:
-              createHostedGroupCurrentSenderPrivateAssistantAskRequestId({
+              createHostedGroupCurrentSenderAssistantAskRequestId({
                 groupRuntimeMemberId: AUTHORITY.groupRuntimeMemberId,
                 originAssistantInputId: INPUT_ID,
+                responseDestination: "current_sender",
               }),
           },
           responsePolicy: {

@@ -32,6 +32,8 @@ export interface HostedCurrentSenderAssistantAskFixture {
   groupRuntimeMemberId: string;
   origin: HostedExecutionAssistantAskAcceptedInputOrigin;
   ownerMemberId: string;
+  priorAssistantInputId: string | null;
+  priorQuestion: string | null;
   question: string;
   routeAuthority: HostedExecutionExternalThreadRouteAuthority;
   senderMemberId: string;
@@ -44,6 +46,7 @@ export interface HostedCurrentSenderAssistantAskFixture {
 export async function seedHostedCurrentSenderAssistantAskFixture(input: {
   now: Date;
   prisma: PrismaClient;
+  priorQuestion?: string;
   question?: string;
 }): Promise<HostedCurrentSenderAssistantAskFixture> {
   const suffix = randomUUID().replaceAll("-", "");
@@ -54,8 +57,14 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
   const threadId = `telegram_group_current_sender_${suffix}`;
   const sourceEventId = `telegram.message.received:current-sender:${suffix}`;
   const sourceMessageId = `telegram_message_current_sender_${suffix}`;
+  const priorSourceEventId = input.priorQuestion === undefined
+    ? null
+    : `telegram.message.received:current-sender-prior:${suffix}`;
+  const priorSourceMessageId = input.priorQuestion === undefined
+    ? null
+    : `telegram_message_current_sender_prior_${suffix}`;
   const question = input.question
-    ?? "Murph, use my private sleep history to answer this exact question.";
+    ?? "Murph, answer this synthetic request for the group.";
   const routeAuthority = {
     channel: "telegram" as const,
     containerMemberId: groupRuntimeMemberId,
@@ -117,7 +126,7 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
     });
   });
 
-  const wake = buildHostedExecutionTelegramConversationMessageWake({
+  const currentWake = buildHostedExecutionTelegramConversationMessageWake({
     eventId: sourceEventId,
     occurredAt: input.now.toISOString(),
     routeAuthority,
@@ -131,19 +140,42 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
     },
     userId: groupRuntimeMemberId,
   });
+  const priorWake = priorSourceEventId && priorSourceMessageId
+    ? buildHostedExecutionTelegramConversationMessageWake({
+        eventId: priorSourceEventId,
+        occurredAt: new Date(input.now.getTime() - 1_000).toISOString(),
+        routeAuthority,
+        telegramMessage: {
+          from: telegramUserId,
+          messageId: priorSourceMessageId,
+          schema: "murph.hosted-telegram-message.v1",
+          text: input.priorQuestion ?? "",
+          threadId,
+          threadIsDirect: false,
+        },
+        userId: groupRuntimeMemberId,
+      })
+    : null;
   await input.prisma.$transaction(async (tx) => {
-    const append = await appendHostedMailboxEnvelopeWithIdentityTx({
-      envelope: wake,
-      expiresAt: new Date(input.now.getTime() + 60 * 60 * 1_000),
-      itemId: sourceEventId,
-      tx,
-    });
-    if (
-      !append.inserted
-      || append.dedupeConflict
-      || append.item.id !== sourceEventId
-    ) {
-      throw new Error("Could not append the current-sender source wake.");
+    for (const [itemId, wake] of [
+      ...(priorWake && priorSourceEventId
+        ? [[priorSourceEventId, priorWake] as const]
+        : []),
+      [sourceEventId, currentWake] as const,
+    ]) {
+      const append = await appendHostedMailboxEnvelopeWithIdentityTx({
+        envelope: wake,
+        expiresAt: new Date(input.now.getTime() + 60 * 60 * 1_000),
+        itemId,
+        tx,
+      });
+      if (
+        !append.inserted
+        || append.dedupeConflict
+        || append.item.id !== itemId
+      ) {
+        throw new Error("Could not append the current-sender source wake.");
+      }
     }
   });
 
@@ -154,6 +186,15 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
     secret: threadId,
     userId: groupRuntimeMemberId,
   });
+  const priorAssistantInputId = priorSourceEventId
+    ? createHostedMailboxAssistantInputId({
+        dedupeKey: priorSourceEventId,
+        eventId: priorSourceEventId,
+        lane: "conversation",
+        secret: threadId,
+        userId: groupRuntimeMemberId,
+      })
+    : null;
   return {
     assistantInputId,
     groupRuntimeMemberId,
@@ -163,6 +204,8 @@ export async function seedHostedCurrentSenderAssistantAskFixture(input: {
       sessionId: `session_current_sender_${suffix}`,
     },
     ownerMemberId,
+    priorAssistantInputId,
+    priorQuestion: input.priorQuestion ?? null,
     question,
     routeAuthority,
     senderMemberId,

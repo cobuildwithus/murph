@@ -1083,11 +1083,15 @@ Last verified: 2026-08-11
   row, or delivery ledger.
 - Cloudflare may exact-replay one Assistant Ask control request within the
   original request deadline after a replay-safe transport ambiguity or HTTP
-  `5xx`. This applies only to group `ask`, `ask_member`, `ask_current_sender`,
-  `message_current_sender`, and the dedicated `prepare` / `complete` control
-  requests, whose stable identities make identical replay idempotent. Caller
-  cancellation, exhausted deadlines, authority failures, and other `4xx`
-  responses do not replay.
+  `5xx`. This applies only to group `ask`, `ask_member`, the single canonical
+  destination-bearing `ask_current_sender`, and the dedicated `prepare` /
+  `complete` control requests, whose stable identities make identical replay
+  idempotent. During rolling deployment, Cloudflare encodes the two current-
+  sender destinations into the former wire shapes and Web canonicalizes both
+  before admission; response parsing restores the canonical destination. This
+  compatibility seam is transport-only and does not restore a second model
+  action. Caller cancellation, exhausted deadlines, authority failures, and
+  other `4xx` responses do not replay.
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct
@@ -1103,11 +1107,11 @@ Last verified: 2026-08-11
   runtime and preview buckets to be ENAM Standard. Runtime code has no fallback
   bucket, migration phase, or storage-specific admission gate; ordinary retry
   and mailbox durability remain the failure boundary.
-- One-time current-sender Assistant Ask has two target-bound completion adapters
-  over the same mailbox lifecycle, deterministic request identity, ten-minute
-  expiry, isolated reviewed personal read, and completion identity.
-  `ask_current_sender` retains exact-origin group delivery.
-  `message_current_sender` creates one deterministic
+- One-time current-sender Assistant Ask has one destination-bearing request,
+  one Web admission owner, one mailbox lifecycle, deterministic destination-
+  preserving request identity, ten-minute expiry, isolated reviewed personal
+  read, and completion identity. The `group` destination retains exact-origin
+  caller delivery. The `current_sender` destination creates one deterministic
   `assistant.notification.requested` for the same personal member: queue-only,
   exact-text, idempotent, same source channel, current `direct-member` route
   only, and no external group-route authority. The personal runtime's existing
@@ -1117,10 +1121,21 @@ Last verified: 2026-08-11
   personal member, and the current same-channel `direct-member` route. Expired,
   revoked, text-mismatched, or route-drifted proof is terminal with no group or
   alternate-route fallback. Exact replay reopens and revalidates the stored
-  group input; changed identity, question, permission, target, route, or expiry
-  becomes unavailable, and route drift cannot redirect existing work. Neither
-  path adds a scheduler, callback wait, status or grant row, retry owner,
-  delivery ledger, or second generation.
+  group input; changed identity, question, destination, permission, target,
+  route, or expiry becomes unavailable, and route drift cannot redirect
+  existing work. Neither destination adds a scheduler, callback wait, status or
+  grant row, retry owner, delivery ledger, or second generation.
+- Mixed Web, Cloudflare, and warm-runtime deployment keeps the established
+  `group_sender` and `group_sender_private` mailbox target discriminants and the
+  former request-id namespaces so already-admitted work retains identity and
+  old runtimes can finish it. New canonical in-process contracts always carry
+  `responseDestination`; parsers accept the old destination-less group request
+  and private transport action only at the wire boundary, and Web returns the
+  corresponding legacy response shape to legacy callers. Remove that seam only
+  after the minimum runtime bundle is verified converged and all pre-convergence
+  mailbox work has expired or drained. Rollback before then remains safe because
+  new admission still writes target kinds and identities understood by the old
+  runtime.
 - The same dirty-runtime prefix admits only three server-identified,
   replay-safe external-completion notification families:
   `assistant.notification.requested:phone-call-result:*` and

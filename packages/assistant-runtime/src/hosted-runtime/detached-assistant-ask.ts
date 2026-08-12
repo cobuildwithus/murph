@@ -18,8 +18,9 @@ import {
 import type {
   AssistantHostedGroupSharedReader,
 } from "@murphai/assistant-engine";
-import type {
-  HostedExecutionAssistantAskResult,
+import {
+  readHostedExecutionAssistantAskGroupSenderResponseDestination,
+  type HostedExecutionAssistantAskResult,
 } from "@murphai/hosted-execution/contracts";
 
 import type {
@@ -324,9 +325,16 @@ async function runOneHostedDetachedAssistantAsk(input: {
           "Reviewed personal ask prepare omitted its disclosure context.",
         );
       }
+      const currentSenderResponseDestination =
+        claimed.wake.ask.target.kind === "group_sender"
+        || claimed.wake.ask.target.kind === "group_sender_private"
+          ? readHostedExecutionAssistantAskGroupSenderResponseDestination(
+              claimed.wake.ask.target,
+            )
+          : null;
       answer = await input.executeConsentedAsk({
         ...executionInput,
-        answerMode: claimed.wake.ask.target.kind === "group_sender_private"
+        answerMode: currentSenderResponseDestination === "current_sender"
           ? "direct_recipient"
           : "caller_handoff",
         permissionText: prepared.disclosure.permissionText,

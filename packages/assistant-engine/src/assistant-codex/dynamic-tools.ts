@@ -5,8 +5,10 @@ import {
   type HostedRuntimeAssistantPersonalizationToolAuthority,
 } from '@murphai/hosted-execution/assistant-personalization'
 import {
+  HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS,
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  type HostedExecutionAssistantAskGroupSenderResponseDestination,
 } from '@murphai/hosted-execution/contracts'
 import {
   hostedRuntimePendingGroupSetupInputSchema,
@@ -420,13 +422,8 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       message_ref: z.string().regex(
         new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
       ),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal('message_current_sender'),
-      message_ref: z.string().regex(
-        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      response_destination: z.enum(
+        HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS,
       ),
     })
     .strict(),
@@ -989,7 +986,6 @@ type MurphGroupToolRequest =
         action:
           | 'ask'
           | 'ask_current_sender'
-          | 'message_current_sender'
           | 'ask_member'
           | 'create_join_link'
           | 'create_signup_referral_link'
@@ -1019,10 +1015,8 @@ type MurphGroupToolRequest =
   | {
       action: 'ask_current_sender'
       messageRef: string
-    }
-  | {
-      action: 'message_current_sender'
-      messageRef: string
+      responseDestination:
+        HostedExecutionAssistantAskGroupSenderResponseDestination
     }
   | {
       action: 'ask_member'
@@ -3901,7 +3895,8 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
   if (
-    response.action === 'message_current_sender'
+    response.action === 'ask_current_sender'
+    && response.responseDestination === 'current_sender'
     && response.result.status === 'unavailable'
     && response.result.unavailableReason
       === 'same_channel_direct_route_unavailable'
@@ -4372,10 +4367,7 @@ async function executeGroupTool(input: {
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
     }
-  } else if (
-    input.request.action === 'ask_current_sender'
-    || input.request.action === 'message_current_sender'
-  ) {
+  } else if (input.request.action === 'ask_current_sender') {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
     if (
@@ -4384,16 +4376,17 @@ async function executeGroupTool(input: {
     ) {
       return toolTextResult(
         false,
-        'current-sender actions require the selected accepted message in this group turn',
+        'current-sender request requires the selected accepted message in this group turn',
       )
     }
     request = {
-      action: input.request.action,
+      action: 'ask_current_sender',
       origin: {
         assistantInputId: input.request.messageRef,
         kind: 'accepted_input',
         sessionId: userActionScope.originSessionId,
       },
+      responseDestination: input.request.responseDestination,
     }
   } else if (input.request.action === 'ask_member') {
     if (!invocationScope) {
@@ -6281,7 +6274,7 @@ function parseGroupArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.group.input',
-        schemaRootKeys: ['action', 'message_ref'],
+        schemaRootKeys: ['action', 'message_ref', 'response_destination'],
         toolName: 'murph.group',
       }),
     }
@@ -6296,15 +6289,13 @@ function parseGroupArguments(
   ) {
     return { ok: true, request: parsed.data }
   }
-  if (
-    parsed.data.action === 'ask_current_sender'
-    || parsed.data.action === 'message_current_sender'
-  ) {
+  if (parsed.data.action === 'ask_current_sender') {
     return {
       ok: true,
       request: {
-        action: parsed.data.action,
+        action: 'ask_current_sender',
         messageRef: parsed.data.message_ref,
+        responseDestination: parsed.data.response_destination,
       },
     }
   }

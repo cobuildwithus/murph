@@ -158,7 +158,7 @@ describe("hosted group tool route", () => {
   it.each([
     ["P2010", "P2010"],
     ["PRIVATE_CODE", null],
-  ])(
+  ] as const)(
     "returns bounded Assistant Ask diagnostics for unexpected admission code %s",
     async (errorCode, expectedDiagnosticCode) => {
       const originAssistantInputId = `ain_${"a".repeat(32)}`;
@@ -292,6 +292,158 @@ describe("hosted group tool route", () => {
 
   it.each([
     {
+      label: "canonical group destination",
+      requestBody: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"c".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        responseDestination: "group",
+      },
+      expectedRequest: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"c".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        responseDestination: "group",
+      },
+      toolResponse: {
+        action: "ask_current_sender",
+        responseDestination: "group",
+        result: { status: "accepted" },
+      },
+      expectedResponse: {
+        action: "ask_current_sender",
+        responseDestination: "group",
+        result: { status: "accepted" },
+      },
+    },
+    {
+      label: "canonical direct destination",
+      requestBody: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"d".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        responseDestination: "current_sender",
+      },
+      expectedRequest: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"d".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        responseDestination: "current_sender",
+      },
+      toolResponse: {
+        action: "ask_current_sender",
+        responseDestination: "current_sender",
+        result: { status: "accepted" },
+      },
+      expectedResponse: {
+        action: "ask_current_sender",
+        responseDestination: "current_sender",
+        result: { status: "accepted" },
+      },
+    },
+    {
+      label: "legacy group transport",
+      requestBody: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"e".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      expectedRequest: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"e".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        responseDestination: "group",
+      },
+      toolResponse: {
+        action: "ask_current_sender",
+        responseDestination: "group",
+        result: { status: "accepted" },
+      },
+      expectedResponse: {
+        action: "ask_current_sender",
+        result: { status: "accepted" },
+      },
+    },
+    {
+      label: "legacy direct transport",
+      requestBody: {
+        action: "message_current_sender",
+        origin: {
+          assistantInputId: `ain_${"f".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+      },
+      expectedRequest: {
+        action: "ask_current_sender",
+        origin: {
+          assistantInputId: `ain_${"f".repeat(32)}`,
+          kind: "accepted_input",
+          sessionId: "session_group",
+        },
+        responseDestination: "current_sender",
+      },
+      toolResponse: {
+        action: "ask_current_sender",
+        responseDestination: "current_sender",
+        result: { status: "accepted" },
+      },
+      expectedResponse: {
+        action: "message_current_sender",
+        result: { status: "accepted" },
+      },
+    },
+  ])(
+    "keeps $label compatible while canonicalizing Web admission",
+    async ({
+      expectedRequest,
+      expectedResponse,
+      requestBody,
+      toolResponse,
+    }) => {
+      mocks.handleTool.mockResolvedValueOnce(toolResponse);
+      const request = new Request(
+        `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+        {
+          body: JSON.stringify(requestBody),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      );
+
+      const response = await route.POST(request);
+
+      expect(response.status).toBe(200);
+      expect(mocks.handleTool).toHaveBeenCalledWith({
+        memberId: "member_group_runtime",
+        request: expectedRequest,
+        requestStartedAtMs: expect.any(Number),
+        scheduleMailboxWake: expect.any(Function),
+      });
+      await expect(response.json()).resolves.toEqual(expectedResponse);
+    },
+  );
+
+  it.each([
+    {
       body: {
         action: "ask_member",
         grantId: "grant_sleep",
@@ -304,7 +456,10 @@ describe("hosted group tool route", () => {
       },
       expectedUserId: "member-grantor",
       mailboxItemId: "aask_req_disclosure_one",
-      responseAction: "ask_member",
+      toolResponse: {
+        action: "ask_member",
+        result: { status: "accepted" },
+      },
     },
     {
       body: {
@@ -314,36 +469,48 @@ describe("hosted group tool route", () => {
           kind: "accepted_input",
           sessionId: "session_group",
         },
+        responseDestination: "group",
       },
       expectedUserId: "member-sender",
       mailboxItemId: "aask_req_current_sender",
-      responseAction: "ask_current_sender",
+      toolResponse: {
+        action: "ask_current_sender",
+        responseDestination: "group",
+        result: { status: "accepted" },
+      },
     },
     {
       body: {
-        action: "message_current_sender",
+        action: "ask_current_sender",
         origin: {
           assistantInputId: `ain_${"d".repeat(32)}`,
           kind: "accepted_input",
           sessionId: "session_group",
         },
+        responseDestination: "current_sender",
       },
       expectedUserId: "member-sender",
       mailboxItemId: "aask_req_private_sender",
-      responseAction: "message_current_sender",
+      toolResponse: {
+        action: "ask_current_sender",
+        responseDestination: "current_sender",
+        result: { status: "accepted" },
+      },
     },
-  ])(
-    "does not acknowledge an accepted $responseAction when its durable handoff rejects",
-    async ({ body, expectedUserId, mailboxItemId, responseAction }) => {
+  ] as const)(
+    "does not acknowledge an accepted $toolResponse.action when its durable handoff rejects",
+    async ({
+      body,
+      expectedUserId,
+      mailboxItemId,
+      toolResponse,
+    }) => {
       mocks.handoffHostedMailboxWake.mockRejectedValueOnce(
         new Error("Temporal unavailable"),
       );
       mocks.handleTool.mockImplementationOnce(async (input) => {
         await input.scheduleMailboxWake({ expectedUserId, mailboxItemId });
-        return {
-          action: responseAction,
-          result: { status: "accepted" },
-        };
+        return toolResponse;
       });
       const request = new Request(
         `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,

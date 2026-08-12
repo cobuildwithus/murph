@@ -24,6 +24,8 @@ const replaySafeRequests = [
       action: "ask",
       result: { status: "accepted", targetLabel: "100 Club" },
     },
+    wireRequest: undefined,
+    wireResponse: undefined,
   },
   {
     action: "ask_member",
@@ -41,9 +43,11 @@ const replaySafeRequests = [
       action: "ask_member",
       result: { status: "accepted" },
     },
+    wireRequest: undefined,
+    wireResponse: undefined,
   },
   {
-    action: "ask_current_sender",
+    action: "ask_current_sender:group",
     request: {
       action: "ask_current_sender",
       origin: {
@@ -51,15 +55,43 @@ const replaySafeRequests = [
         kind: "accepted_input",
         sessionId: "session_group",
       },
+      responseDestination: "group",
     },
     response: {
+      action: "ask_current_sender",
+      responseDestination: "group",
+      result: { status: "accepted" },
+    },
+    wireRequest: {
+      action: "ask_current_sender",
+      origin: {
+        assistantInputId: `ain_${"c".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    },
+    wireResponse: {
       action: "ask_current_sender",
       result: { status: "accepted" },
     },
   },
   {
-    action: "message_current_sender",
+    action: "ask_current_sender:current_sender",
     request: {
+      action: "ask_current_sender",
+      origin: {
+        assistantInputId: `ain_${"d".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+      responseDestination: "current_sender",
+    },
+    response: {
+      action: "ask_current_sender",
+      responseDestination: "current_sender",
+      result: { status: "accepted" },
+    },
+    wireRequest: {
       action: "message_current_sender",
       origin: {
         assistantInputId: `ain_${"d".repeat(32)}`,
@@ -67,7 +99,7 @@ const replaySafeRequests = [
         sessionId: "session_group",
       },
     },
-    response: {
+    wireResponse: {
       action: "message_current_sender",
       result: { status: "accepted" },
     },
@@ -76,12 +108,19 @@ const replaySafeRequests = [
   action: string;
   request: HostedRuntimeGroupToolRequest;
   response: HostedRuntimeGroupToolResponse;
+  wireRequest?: unknown;
+  wireResponse?: unknown;
 }[];
 
 describe("hosted group tool exact replay", () => {
   it.each(replaySafeRequests)(
     "exact-replays the same $action request when a successful response body is lost",
-    async ({ request, response }) => {
+    async ({
+      request,
+      response,
+      wireRequest,
+      wireResponse,
+    }: (typeof replaySafeRequests)[number]) => {
       const requestBodies: BodyInit[] = [];
       const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
         if (init?.body) {
@@ -89,7 +128,7 @@ describe("hosted group tool exact replay", () => {
         }
         return requestBodies.length === 1
           ? createLostBodyResponse(200)
-          : createJsonResponse(response);
+          : createJsonResponse(wireResponse ?? response);
       });
       const port = createHostedRuntimeGroupToolPort({
         boundUserId: "member-bound",
@@ -101,17 +140,17 @@ describe("hosted group tool exact replay", () => {
       await expect(port.request(request)).resolves.toEqual(response);
       expect(fetchImpl).toHaveBeenCalledTimes(2);
       expect(requestBodies).toEqual([
-        JSON.stringify(request),
-        JSON.stringify(request),
+        JSON.stringify(wireRequest ?? request),
+        JSON.stringify(wireRequest ?? request),
       ]);
     },
   );
 
   it("exact-replays the same Ask after consuming a complete 5xx response", async () => {
-    const { request, response } = replaySafeRequests[0];
+    const { request, response, wireRequest, wireResponse } = replaySafeRequests[0];
     const responses = [
       createJsonResponse({ error: "temporarily unavailable" }, 503),
-      createJsonResponse(response),
+      createJsonResponse(wireResponse ?? response),
     ];
     const requestBodies: BodyInit[] = [];
     const fetchImpl = vi.fn<typeof fetch>(async (_request, init) => {
@@ -129,8 +168,8 @@ describe("hosted group tool exact replay", () => {
 
     await expect(port.request(request)).resolves.toEqual(response);
     expect(requestBodies).toEqual([
-      JSON.stringify(request),
-      JSON.stringify(request),
+      JSON.stringify(wireRequest ?? request),
+      JSON.stringify(wireRequest ?? request),
     ]);
   });
 

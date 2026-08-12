@@ -50,13 +50,17 @@ describe.skipIf(!runPostgresProof)(
       try {
         fixture = await seedHostedCurrentSenderAssistantAskFixture({
           now,
+          priorQuestion:
+            "Murph, continue this older synthetic request privately.",
           prisma,
+          question: "Murph, answer this fresh synthetic request in the group.",
         });
         await expect(countSenderDisclosureGrants({ fixture, prisma }))
           .resolves.toBe(0);
 
         const requestId =
           createHostedGroupCurrentSenderAssistantAskRequestId({
+            responseDestination: "group",
             groupRuntimeMemberId: fixture.groupRuntimeMemberId,
             originAssistantInputId: fixture.assistantInputId,
           });
@@ -68,6 +72,7 @@ describe.skipIf(!runPostgresProof)(
           result: { status: "accepted" as const },
         };
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          responseDestination: "group",
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
           now,
           origin: fixture.origin,
@@ -82,6 +87,10 @@ describe.skipIf(!runPostgresProof)(
         if (!requestWake || !isHostedExecutionAssistantAskRequestedWake(requestWake)) {
           throw new Error("Expected the persisted current-sender request wake.");
         }
+        expect(fixture.priorAssistantInputId).not.toBeNull();
+        expect(fixture.priorAssistantInputId).not.toBe(
+          fixture.assistantInputId,
+        );
         expect(requestWake).toMatchObject({
           ask: {
             origin: fixture.origin,
@@ -100,12 +109,14 @@ describe.skipIf(!runPostgresProof)(
         expect(requestWake.ask.target.permissionDigest).toMatch(/^[a-f0-9]{64}$/u);
 
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          responseDestination: "group",
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
           now,
           origin: fixture.origin,
           prisma,
         })).resolves.toEqual(expectedAdmission);
         await expect(requestHostedGroupCurrentSenderAssistantAsk({
+          responseDestination: "group",
           groupRuntimeMemberId: fixture.groupRuntimeMemberId,
           now,
           origin: {

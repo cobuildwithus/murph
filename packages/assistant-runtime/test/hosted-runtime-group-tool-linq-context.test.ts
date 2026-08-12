@@ -49,14 +49,12 @@ function buildEmailDeliveryContext(
 }
 
 describe("createHostedGroupToolWithCurrentTurnContext", () => {
-  it.each([
-    "ask_current_sender",
-    "message_current_sender",
-  ] as const)(
-    "forwards current-turn cancellation through %s requests",
-    async (action) => {
+  it.each(["group", "current_sender"] as const)(
+    "forwards current-turn cancellation through the %s destination",
+    async (responseDestination: "current_sender" | "group") => {
       const request = vi.fn().mockResolvedValue({
-        action,
+        action: "ask_current_sender",
+        responseDestination,
         result: { status: "accepted" },
       });
       const groupTool = createHostedGroupToolWithCurrentTurnContext({
@@ -65,18 +63,20 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       });
       const signal = new AbortController().signal;
       const currentSenderRequest = {
-        action,
+        action: "ask_current_sender" as const,
         origin: {
           assistantInputId: `ain_${"a".repeat(32)}`,
           kind: "accepted_input" as const,
           sessionId: "session_group",
         },
+        responseDestination,
       };
 
       await expect(
         groupTool.request(currentSenderRequest, { signal }),
       ).resolves.toEqual({
-        action,
+        action: "ask_current_sender",
+        responseDestination,
         result: { status: "accepted" },
       });
       expect(request).toHaveBeenCalledExactlyOnceWith(
@@ -239,14 +239,16 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
       },
     });
     await expect(groupTool.request({
-      action: "message_current_sender",
+      action: "ask_current_sender",
       origin: {
         assistantInputId: `ain_${"a".repeat(32)}`,
         kind: "accepted_input",
         sessionId: "session_group",
       },
+      responseDestination: "current_sender",
     })).resolves.toEqual({
-      action: "message_current_sender",
+      action: "ask_current_sender",
+      responseDestination: "current_sender",
       result: {
         status: "unavailable",
         unavailableReason: "authenticated_sender_required",
@@ -1202,6 +1204,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
           kind: "accepted_input" as const,
           sessionId: "session_group",
         },
+        responseDestination: "group" as const,
       },
       {
         action: "ask_member" as const,

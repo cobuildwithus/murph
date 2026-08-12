@@ -5,7 +5,6 @@ import {
   type HostedExecutionAssistantAskCompletedPayload,
   type HostedExecutionAssistantAskConsentedMemberTarget,
   type HostedExecutionAssistantAskGroupSenderTarget,
-  type HostedExecutionAssistantAskPrivateGroupSenderTarget,
   type HostedExecutionAssistantAskJoinedGroupTarget,
   type HostedExecutionAssistantAskOrigin,
   type HostedExecutionAssistantAskRequestedPayload,
@@ -70,18 +69,13 @@ export function parseHostedExecutionAssistantAskRequestedPayload(
     record.origin,
     `${label}.origin`,
   );
-  if (target.kind === "group_sender") {
+  if (
+    target.kind === "group_sender"
+    || target.kind === "group_sender_private"
+  ) {
     if (origin.kind !== "accepted_input") {
       throw new TypeError(
-        `${label}.origin must be an accepted input for group_sender.`,
-      );
-    }
-    return { expiresAt, origin, question, target };
-  }
-  if (target.kind === "group_sender_private") {
-    if (origin.kind !== "accepted_input") {
-      throw new TypeError(
-        `${label}.origin must be an accepted input for group_sender_private.`,
+        `${label}.origin must be an accepted input for the group sender.`,
       );
     }
     return { expiresAt, origin, question, target };
@@ -287,8 +281,7 @@ function parseHostedExecutionAssistantAskTarget(
   label: string,
 ): HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
-  | HostedExecutionAssistantAskGroupSenderTarget
-  | HostedExecutionAssistantAskPrivateGroupSenderTarget {
+  | HostedExecutionAssistantAskGroupSenderTarget {
   const target = requireObject(value, label);
   const kind = requireString(target.kind, `${label}.kind`);
   if (kind === "joined_group") {
@@ -334,25 +327,7 @@ function parseHostedExecutionAssistantAskTarget(
       ),
     };
   }
-  if (kind === "group_sender") {
-    assertExactHostedExecutionAssistantAskKeys(
-      target,
-      ["groupRuntimeMemberId", "kind", "permissionDigest"],
-      label,
-    );
-    return {
-      groupRuntimeMemberId: parseHostedExecutionAssistantAskOpaqueId(
-        target.groupRuntimeMemberId,
-        `${label}.groupRuntimeMemberId`,
-      ),
-      kind,
-      permissionDigest: parseHostedExecutionAssistantAskOpaqueId(
-        target.permissionDigest,
-        `${label}.permissionDigest`,
-      ),
-    };
-  }
-  if (kind === "group_sender_private") {
+  if (kind === "group_sender" || kind === "group_sender_private") {
     assertExactHostedExecutionAssistantAskKeys(
       target,
       ["groupRuntimeMemberId", "kind", "permissionDigest"],

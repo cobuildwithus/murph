@@ -305,23 +305,37 @@ export interface HostedExecutionAssistantAskConsentedMemberTarget {
   permissionDigest: string;
 }
 
-export interface HostedExecutionAssistantAskGroupSenderTarget {
-  groupRuntimeMemberId: string;
-  kind: "group_sender";
-  permissionDigest: string;
-}
+export const HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS = [
+  "group",
+  "current_sender",
+] as const;
 
-export interface HostedExecutionAssistantAskPrivateGroupSenderTarget {
+export type HostedExecutionAssistantAskGroupSenderResponseDestination =
+  (typeof HOSTED_EXECUTION_ASSISTANT_ASK_GROUP_SENDER_RESPONSE_DESTINATIONS)[number];
+
+/**
+ * One logical current-sender target. The two stable kind values remain the
+ * mailbox wire discriminator so old warm runtimes can finish already-admitted
+ * work during a rolling deploy.
+ */
+export type HostedExecutionAssistantAskGroupSenderTarget = {
   groupRuntimeMemberId: string;
-  kind: "group_sender_private";
   permissionDigest: string;
+} & (
+  | { kind: "group_sender" }
+  | { kind: "group_sender_private" }
+);
+
+export function readHostedExecutionAssistantAskGroupSenderResponseDestination(
+  target: Pick<HostedExecutionAssistantAskGroupSenderTarget, "kind">,
+): HostedExecutionAssistantAskGroupSenderResponseDestination {
+  return target.kind === "group_sender_private" ? "current_sender" : "group";
 }
 
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
-  | HostedExecutionAssistantAskGroupSenderTarget
-  | HostedExecutionAssistantAskPrivateGroupSenderTarget;
+  | HostedExecutionAssistantAskGroupSenderTarget;
 
 export interface HostedExecutionAssistantAskAcceptedInputOrigin {
   assistantInputId: string;
@@ -371,18 +385,10 @@ export interface HostedExecutionAssistantAskGroupSenderRequestedPayload {
   target: HostedExecutionAssistantAskGroupSenderTarget;
 }
 
-export interface HostedExecutionAssistantAskPrivateGroupSenderRequestedPayload {
-  expiresAt: string;
-  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
-  question: string;
-  target: HostedExecutionAssistantAskPrivateGroupSenderTarget;
-}
-
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
   | HostedExecutionAssistantAskConsentedMemberRequestedPayload
-  | HostedExecutionAssistantAskGroupSenderRequestedPayload
-  | HostedExecutionAssistantAskPrivateGroupSenderRequestedPayload;
+  | HostedExecutionAssistantAskGroupSenderRequestedPayload;
 
 export interface HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   expiresAt: string;

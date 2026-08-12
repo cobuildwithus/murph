@@ -56,7 +56,7 @@ export function createHostedRuntimeGroupToolPort(input: {
           : timeoutSignal;
       }
       const payload = await fetchHostedWebControlPlaneJson({
-        body: request,
+        body: encodeHostedRuntimeGroupToolWireRequest(request),
         boundUserId: input.boundUserId,
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
@@ -91,8 +91,31 @@ function isHostedReplaySafeGroupToolRequest(
 ): boolean {
   return request.action === "ask"
     || request.action === "ask_current_sender"
-    || request.action === "message_current_sender"
     || request.action === "ask_member";
+}
+
+/**
+ * Preserve rollback compatibility while old Web deploys and warm hosted
+ * runtimes may still speak the former two-action wire contract. Canonical
+ * callers above this seam always use one destination-bearing request.
+ */
+function encodeHostedRuntimeGroupToolWireRequest(
+  request: Parameters<
+    NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
+  >[0],
+): unknown {
+  if (request.action !== "ask_current_sender") {
+    return request;
+  }
+  return request.responseDestination === "group"
+    ? {
+        action: "ask_current_sender",
+        origin: request.origin,
+      }
+    : {
+        action: "message_current_sender",
+        origin: request.origin,
+      };
 }
 
 function buildHostedRuntimeGroupToolPath(): string {

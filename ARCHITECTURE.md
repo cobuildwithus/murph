@@ -352,42 +352,52 @@ Candidate and reviewer provider usage flows through the existing
 hosted usage ledger with deterministic request, attempt, stage, and provider
 ordinal identity; usage recording is best-effort and never controls disclosure.
 
-The `group_sender` adapter is a one-time first-party disclosure path, not a
-grant shortcut. The group model supplies only one opaque Message ref from the
-accepted inputs in the current group turn. Web reopens the exact encrypted
-conversation wake under the synthetic group runtime, revalidates its live
-non-direct route, resolves its author through the channel's canonical identity
-index, and derives the exact authored text plus a fixed self-only permission.
-The transport's optional `senderMemberId` remains attribution metadata and is
-never runtime authority. The target must be an active personal runtime rather
-than another thread container. A deterministic request id binds the group
-runtime, accepted input, and fixed permission; admission, personal-read
-preparation, completion, and final group egress all re-open the same authority.
-Linq and Telegram repeat that disclosure check at their existing provider-entry
-authority boundary; if it has become stale, the outbox durably supersedes the
-reviewed answer with the fixed non-disclosing fallback before any provider call.
+The current-sender Assistant Ask adapter is a single first-party, one-time
+personal-runtime request path, not a grant shortcut. The group model exposes only
+`ask_current_sender`, with one opaque Message ref from the accepted inputs in the
+current group turn and one required `response_destination`. `group` returns the
+reviewed read-only answer to the group caller. `current_sender` is valid only
+when that exact fresh accepted input explicitly requests a direct private answer;
+older transcript context is never destination authority. Web reopens the exact
+encrypted conversation wake under the synthetic group runtime, revalidates its
+live non-direct route, resolves its author through the channel's canonical
+identity index, and derives the exact authored text plus the destination-specific
+fixed permission. The transport's optional `senderMemberId` remains attribution
+metadata and is never runtime authority. The target must be an active personal
+runtime rather than another thread container.
+
+One Web admission owner derives the target, permission, request identity, and
+mailbox wake for both destinations. The deterministic request id binds the group
+runtime, accepted input, fixed permission, and destination; admission,
+personal-read preparation, completion, and terminal routing all re-open that
+same authority. The stable `group_sender` and `group_sender_private` mailbox
+kinds remain transport discriminants so already-running hosted runtimes can drain
+across a rolling deploy; they are not separate model actions or admission APIs.
+Legacy `message_current_sender` and destination-less `ask_current_sender` shapes
+exist only at the Web/Cloudflare parser and encoder seam until old runtimes have
+drained. Canonical in-process contracts always carry `responseDestination`.
 Textless, oversized, direct, email, stale-route, unresolved-sender,
 cross-runtime, scheduled, or replay-conflicting requests fail closed. This path
 creates no group, membership, permission, grant, queue, workflow, or table and
 grants no future disclosure authority.
 
-The sibling `group_sender_private` adapter powers `message_current_sender` only
-for the exact accepted group input whose author explicitly requested a private
-continuation. Web derives the canonical sender and targets only that sender's
-active personal runtime; thread-container, direct, unknown-audience, scheduled,
-stale-route, and unresolved-sender contexts fail closed. A reviewed completion
-never returns to the group. Web appends one deterministic, queue-only
-`assistant.notification.requested` for the same member's current same-channel
-`direct-member` route, with `threadIsDirect: true`, no external group-thread
-authority, and the exact reviewed text. The personal runtime consumes that
-notification through the existing delivery primitive while retaining the
-original completion expiry and proof anchor. Immediately before provider entry,
-Web reopens that proof and revalidates the unexpired private Assistant Ask, the
-exact reviewed-text digest, the same personal member, and the current
+For `response_destination="group"`, Linq and Telegram repeat the disclosure check
+at their existing provider-entry authority boundary; if it has become stale, the
+outbox durably supersedes the reviewed answer with the fixed non-disclosing
+fallback before any provider call. For `response_destination="current_sender"`,
+a reviewed completion never returns to the group. Web appends one deterministic,
+queue-only `assistant.notification.requested` for the exact sender's current
+same-channel `direct-member` route, with `threadIsDirect: true`, no external
+group-thread authority, and the exact reviewed text. The personal runtime
+consumes that notification through the existing delivery primitive while
+retaining the original completion expiry and proof anchor. Immediately before
+provider entry, Web reopens that proof and revalidates the unexpired Assistant
+Ask, the exact reviewed-text digest, the same personal member, and the current
 same-channel `direct-member` route. Expired, revoked, text-mismatched, or
-route-drifted proof fails terminally with no group fallback. Replay cannot
-redirect the completion after member or route drift. This adds no second model
-turn, group wake, group outbox intent, route selector, queue, or table.
+route-drifted proof fails terminally with no group or alternate-route fallback.
+Replay cannot redirect the completion after member or route drift. This adds no
+second model turn, group wake, group outbox intent, route selector, queue, or
+table.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
@@ -409,17 +419,17 @@ owned child before releasing the workspace. Further asks remain pending in the
 same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
 
-For a consented member, one-time current-sender disclosure, or private
-current-sender continuation, the private read-only child receives the exact
-permission context and produces a candidate from the member workspace. One
-separate fresh-context outgoing reviewer receives only that immutable
-permission, the question, and the candidate; it has no member workspace,
-history, application tools, network, or delivery authority and returns only
-`allow` or `deny`. There is no incoming reviewer or rewrite loop. An allowed
-answer enters only its target-bound completion adapter. `consented_member` and
-`group_sender` retain the caller group's isolated output-only continuation and
-provider-entry authority recheck. `group_sender_private` instead seals the exact
-reviewed text into the personal queue-only notification above; no group
+For a consented member or either current-sender response destination, the
+private read-only child receives the exact permission context and produces a
+candidate from the member workspace. One separate fresh-context outgoing
+reviewer receives only that immutable permission, the question, and the
+candidate; it has no member workspace, history, application tools, network, or
+delivery authority and returns only `allow` or `deny`. There is no incoming
+reviewer or rewrite loop. An allowed answer enters only its target-bound
+completion adapter. `consented_member` and current-sender `group` requests retain
+the caller group's isolated output-only continuation and provider-entry
+authority recheck. Current-sender `current_sender` requests instead seal the
+exact reviewed text into the personal queue-only notification above; no group
 continuation or second generation runs. Denial or a candidate-declared
 cannot-answer uses fixed non-disclosing copy. Invalid review output, provider
 failure, or stale authority discloses nothing and follows the existing retry,

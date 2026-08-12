@@ -655,13 +655,23 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
     case "ask":
-    case "ask_current_sender":
-    case "message_current_sender":
     case "ask_member":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
       };
+    case "ask_current_sender":
+      return request.responseDestination === "group"
+        ? {
+            action: "ask_current_sender",
+            responseDestination: "group",
+            result: { status: "unavailable", unavailableReason },
+          }
+        : {
+            action: "ask_current_sender",
+            responseDestination: "current_sender",
+            result: { status: "unavailable", unavailableReason },
+          };
     case "list_memberships":
       return {
         action: request.action,

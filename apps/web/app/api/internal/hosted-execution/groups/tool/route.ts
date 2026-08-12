@@ -6,6 +6,9 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   isHostedRuntimeAssistantAskDiagnosticCode,
+  type HostedRuntimeGroupCurrentSenderDirectResult,
+  type HostedRuntimeGroupMemberAskResult,
+  type HostedRuntimeGroupToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   handleHostedRuntimeGroupTool,
@@ -43,6 +46,8 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
+  const currentSenderLegacyWireAction =
+    readHostedCurrentSenderLegacyWireAction(payload);
   const body = parseHostedRuntimeGroupToolRequest(payload, {
     privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
   });
@@ -64,7 +69,10 @@ export const POST = withJsonError(async (request: Request) => {
   );
 
   if (body.action !== "ask") {
-    return jsonOk(await executeTool());
+    return jsonOk(encodeHostedCurrentSenderLegacyWireResponse(
+      await executeTool(),
+      currentSenderLegacyWireAction,
+    ));
   }
 
   const responseHeaders = {
@@ -99,4 +107,69 @@ function readHostedAssistantAskDiagnosticCode(error: unknown): string | undefine
   } catch {
     return undefined;
   }
+}
+
+// Temporary transport-only compatibility for old Cloudflare/runtime bundles.
+// Web admission and every in-process owner use the canonical destination field.
+type HostedCurrentSenderLegacyWireAction =
+  | "ask_current_sender"
+  | "message_current_sender";
+
+type HostedCurrentSenderLegacyWireResponse =
+  | {
+      action: "ask_current_sender";
+      result: HostedRuntimeGroupMemberAskResult;
+    }
+  | {
+      action: "message_current_sender";
+      result: HostedRuntimeGroupCurrentSenderDirectResult;
+    };
+
+function readHostedCurrentSenderLegacyWireAction(
+  payload: unknown,
+): HostedCurrentSenderLegacyWireAction | null {
+  if (
+    (typeof payload !== "object" && typeof payload !== "function")
+    || payload === null
+  ) {
+    return null;
+  }
+  try {
+    const action = Reflect.get(payload, "action");
+    if (action === "message_current_sender") {
+      return action;
+    }
+    if (
+      action === "ask_current_sender"
+      && !Object.hasOwn(payload, "responseDestination")
+    ) {
+      return action;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function encodeHostedCurrentSenderLegacyWireResponse(
+  response: HostedRuntimeGroupToolResponse,
+  legacyAction: HostedCurrentSenderLegacyWireAction | null,
+): HostedRuntimeGroupToolResponse | HostedCurrentSenderLegacyWireResponse {
+  if (response.action !== "ask_current_sender" || legacyAction === null) {
+    return response;
+  }
+  if (legacyAction === "message_current_sender") {
+    if (response.responseDestination !== "current_sender") {
+      throw new TypeError(
+        "Hosted current-sender legacy response destination mismatched.",
+      );
+    }
+    return { action: legacyAction, result: response.result };
+  }
+  if (response.responseDestination !== "group") {
+    throw new TypeError(
+      "Hosted current-sender legacy response destination mismatched.",
+    );
+  }
+  return { action: legacyAction, result: response.result };
 }

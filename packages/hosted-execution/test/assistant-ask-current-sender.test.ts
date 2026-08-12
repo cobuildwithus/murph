@@ -6,6 +6,7 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+  readHostedExecutionAssistantAskGroupSenderResponseDestination,
   readHostedExecutionConversationMessageText,
 } from "../src/contracts.ts";
 import {
@@ -28,7 +29,7 @@ const CURRENT_SENDER_ASK = {
     kind: "accepted_input" as const,
     sessionId: "session_group",
   },
-  question: "Murph tell them about my sleep",
+  question: "Murph tell this synthetic room about my sleep",
   target: {
     groupRuntimeMemberId: "member_group_runtime",
     kind: "group_sender" as const,
@@ -37,21 +38,33 @@ const CURRENT_SENDER_ASK = {
 };
 
 describe("hosted current-sender Assistant Ask contracts", () => {
-  it("round-trips the accepted-input-only group_sender request", () => {
-    expect(parseHostedExecutionAssistantAskRequestedPayload(
-      CURRENT_SENDER_ASK,
-    )).toEqual(CURRENT_SENDER_ASK);
+  it("round-trips one accepted-input target type for both destinations", () => {
+    for (const [kind, responseDestination] of [
+      ["group_sender", "group"],
+      ["group_sender_private", "current_sender"],
+    ] as const) {
+      const ask = {
+        ...CURRENT_SENDER_ASK,
+        target: { ...CURRENT_SENDER_ASK.target, kind },
+      };
+      expect(parseHostedExecutionAssistantAskRequestedPayload(ask)).toEqual(ask);
+      expect(
+        readHostedExecutionAssistantAskGroupSenderResponseDestination(
+          ask.target,
+        ),
+      ).toBe(responseDestination);
 
-    const wake = buildHostedExecutionAssistantAskRequestedWake({
-      ask: CURRENT_SENDER_ASK,
-      eventId: `aask_req_${"b".repeat(64)}`,
-      memberId: "member_personal_runtime",
-      occurredAt: REQUESTED_AT,
-    });
-    expect(parseHostedExecutionWake(wake)).toEqual(wake);
+      const wake = buildHostedExecutionAssistantAskRequestedWake({
+        ask,
+        eventId: `aask_req_${(kind === "group_sender" ? "b" : "c").repeat(64)}`,
+        memberId: "member_personal_runtime",
+        occurredAt: REQUESTED_AT,
+      });
+      expect(parseHostedExecutionWake(wake)).toEqual(wake);
+    }
   });
 
-  it("rejects scheduled or model-selected authority on group_sender", () => {
+  it("rejects scheduled or model-selected current-sender authority", () => {
     expect(() => parseHostedExecutionAssistantAskRequestedPayload({
       ...CURRENT_SENDER_ASK,
       origin: {
@@ -70,107 +83,114 @@ describe("hosted current-sender Assistant Ask contracts", () => {
     })).toThrow(/unsupported field/u);
   });
 
-  it("round-trips the accepted-input-only private group-sender request", () => {
-    const privateAsk = {
-      ...CURRENT_SENDER_ASK,
-      target: {
-        ...CURRENT_SENDER_ASK.target,
-        kind: "group_sender_private" as const,
-      },
-    };
-    expect(parseHostedExecutionAssistantAskRequestedPayload(
-      privateAsk,
-    )).toEqual(privateAsk);
-    expect(() => parseHostedExecutionAssistantAskRequestedPayload({
-      ...privateAsk,
-      origin: {
-        automationId: "automation_1",
-        kind: "automation_occurrence",
-        occurrenceAt: REQUESTED_AT,
-      },
-    })).toThrow(/accepted input/u);
-  });
+  it("parses the canonical destination-bearing request", () => {
+    for (const responseDestination of ["group", "current_sender"] as const) {
+      const request = {
+        action: "ask_current_sender",
+        origin: CURRENT_SENDER_ASK.origin,
+        responseDestination,
+      } as const;
+      expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request);
+    }
 
-  it("parses the narrow group-tool request and shared member-ask results", () => {
-    const request = {
+    expect(() => parseHostedRuntimeGroupToolRequest({
       action: "ask_current_sender",
       origin: CURRENT_SENDER_ASK.origin,
-    } as const;
-    expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request);
-    expect(() => parseHostedRuntimeGroupToolRequest({
-      ...request,
       question: "model paraphrase",
+      responseDestination: "group",
     })).toThrow(/not allowed/u);
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "ask_current_sender",
+      origin: CURRENT_SENDER_ASK.origin,
+      responseDestination: "other",
+    })).toThrow(/invalid/u);
+  });
 
+  it("canonicalizes only the legacy transport request aliases", () => {
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "ask_current_sender",
+      origin: CURRENT_SENDER_ASK.origin,
+    })).toEqual({
+      action: "ask_current_sender",
+      origin: CURRENT_SENDER_ASK.origin,
+      responseDestination: "group",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "message_current_sender",
+      origin: CURRENT_SENDER_ASK.origin,
+    })).toEqual({
+      action: "ask_current_sender",
+      origin: CURRENT_SENDER_ASK.origin,
+      responseDestination: "current_sender",
+    });
+  });
+
+  it("parses group and direct terminal results under one action", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask_current_sender",
+      responseDestination: "group",
       result: { status: "accepted" },
     })).toEqual({
       action: "ask_current_sender",
+      responseDestination: "group",
       result: { status: "accepted" },
     });
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask_current_sender",
+      responseDestination: "group",
       result: {
-        answer: "Your sleep has been rough this week.",
+        answer: "Synthetic reviewed group answer.",
         outcome: "answered",
         status: "completed",
       },
     })).toMatchObject({
       action: "ask_current_sender",
+      responseDestination: "group",
       result: { outcome: "answered", status: "completed" },
     });
     expect(parseHostedRuntimeGroupToolResponse({
       action: "ask_current_sender",
+      responseDestination: "current_sender",
       result: {
         status: "unavailable",
-        unavailableReason: "current_sender_unavailable",
+        unavailableReason: "same_channel_direct_route_unavailable",
       },
-    })).toMatchObject({
+    })).toEqual({
       action: "ask_current_sender",
-      result: { status: "unavailable" },
-    });
-  });
-
-  it("parses the current sender's private-continuation action", () => {
-    const request = {
-      action: "message_current_sender",
-      origin: CURRENT_SENDER_ASK.origin,
-    } as const;
-    expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request);
-    expect(() => parseHostedRuntimeGroupToolRequest({
-      ...request,
-      text: "model-authored private message",
-    })).toThrow(/not allowed/u);
-
-    expect(parseHostedRuntimeGroupToolResponse({
-      action: "message_current_sender",
-      result: { status: "accepted" },
-    })).toEqual({
-      action: "message_current_sender",
-      result: { status: "accepted" },
-    });
-    expect(parseHostedRuntimeGroupToolResponse({
-      action: "message_current_sender",
+      responseDestination: "current_sender",
       result: {
         status: "unavailable",
-        unavailableReason: "private_route_unavailable",
-      },
-    })).toEqual({
-      action: "message_current_sender",
-      result: {
-        status: "unavailable",
-        unavailableReason: "private_route_unavailable",
+        unavailableReason: "same_channel_direct_route_unavailable",
       },
     });
     expect(() => parseHostedRuntimeGroupToolResponse({
-      action: "message_current_sender",
+      action: "ask_current_sender",
+      responseDestination: "current_sender",
       result: {
-        answer: "not a private delivery result",
+        answer: "not a direct-delivery admission result",
         outcome: "answered",
         status: "completed",
       },
     })).toThrow(/status is invalid/u);
+  });
+
+  it("canonicalizes legacy transport responses for rolling deploys", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "ask_current_sender",
+      result: { status: "accepted" },
+    })).toEqual({
+      action: "ask_current_sender",
+      responseDestination: "group",
+      result: { status: "accepted" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "message_current_sender",
+      result: { status: "accepted" },
+    })).toEqual({
+      action: "ask_current_sender",
+      responseDestination: "current_sender",
+      result: { status: "accepted" },
+    });
   });
 
   it("reads exactly the authored Linq or Telegram text and never email text", () => {
