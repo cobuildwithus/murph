@@ -9,6 +9,7 @@ import {
   COMPANION_HRV_RMSSD_METHOD_VERSION,
   COMPANION_HRV_RMSSD_RESOURCE,
   COMPANION_HRV_RMSSD_SCHEMA,
+  JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { test } from "vitest";
@@ -14016,4 +14017,149 @@ test("Junction rejects a shallow workout stream webhook without workout_id befor
       && error.retryable === false,
   );
   assert.equal(fetched, false);
+});
+
+test("Junction sparse-history scheduling caps global fanout and rotates across every pair", () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      reconcileIntervalMs: 60 * 60_000,
+      timeseriesResources: [...JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES],
+    },
+  );
+  const executor = requireValue(provider.jobExecutor);
+  const availability = Object.fromEntries(
+    JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.map((resource) => [resource, true]),
+  );
+  const sources = JUNCTION_CONNECT_SOURCE_TARGETS.map((target) => ({
+    sourceProviderSlug: target.providerSlug,
+    displayName: null,
+    status: "connected" as const,
+    resourceCount: JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.length,
+    resourceAvailabilitySummary: availability,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    firstSeenAt: "2026-04-03T00:00:00.000Z",
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    lastDataAt: null,
+  }));
+  const account = createStoredAccount({ sources });
+  const observedPairs = new Set<string>();
+  const candidateCount =
+    JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCES.length * sources.length;
+  const pageCount = Math.ceil(candidateCount / 8);
+  const baseAt = Date.parse("2026-08-11T00:00:00.000Z");
+  const scheduledPageSizes: number[] = [];
+
+  for (let offset = 0; offset < pageCount; offset += 1) {
+    const now = new Date(baseAt + offset * 60 * 60_000).toISOString();
+    const scheduled = executor.createScheduledJobs?.(account, now);
+    const historyJobs = (scheduled?.jobs ?? []).filter((job) =>
+      job.kind === "resource" && job.payload?.historicalBackfill === true
+    );
+    scheduledPageSizes.push(historyJobs.length);
+    assert.ok(historyJobs.length <= 8);
+    for (const job of historyJobs) {
+      observedPairs.add(`${job.payload?.resource}:${job.payload?.sourceProviderSlug}`);
+    }
+  }
+
+  assert.equal(JUNCTION_CONNECT_SOURCE_TARGETS.length, 33);
+  assert.equal(candidateCount, 363);
+  assert.equal(candidateCount % 8, 3);
+  assert.equal(scheduledPageSizes.filter((size) => size === 8).length, pageCount - 1);
+  assert.equal(scheduledPageSizes.filter((size) => size === 3).length, 1);
+  assert.equal(observedPairs.size, candidateCount);
+});
+
+test("Junction sparse-history continuation fetches one bounded 30-day window", async () => {
+  const timeseriesRequests: URL[] = [];
+  const provider = createJunctionDeviceSyncProvider({
+    apiKey: "sk_us_test_123",
+    clientUserIdSecret: "junction-client-user-id-secret",
+    environment: "sandbox",
+    region: "us",
+    summaryResources: ["activity"],
+    timeseriesResources: ["vo2_max"],
+    fetchImpl: async (input) => {
+      const url = new URL(readUrl(input));
+      if (url.pathname === "/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [{
+            id: "provider-garmin-policy",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: { vo2_max: true },
+          }],
+        });
+      }
+      if (url.pathname === "/v2/timeseries/junction-user-1/vo2_max/grouped") {
+        timeseriesRequests.push(url);
+        return createJsonResponse({ groups: {} });
+      }
+      throw new Error(`Unexpected request: ${url.toString()}`);
+    },
+  });
+  const source = {
+    sourceProviderSlug: "garmin",
+    displayName: null,
+    status: "connected" as const,
+    resourceCount: 1,
+    resourceAvailabilitySummary: { vo2_max: true },
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    firstSeenAt: "2026-04-03T00:00:00.000Z",
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    lastDataAt: null,
+  };
+  const storedAccount = createStoredAccount({ sources: [source] });
+  const scheduled = requireValue(provider.jobExecutor).createScheduledJobs?.(
+    storedAccount,
+    "2026-08-11T12:00:00.000Z",
+  );
+  const job = requireValue(
+    scheduled?.jobs.find((candidate) =>
+      candidate.kind === "resource" && candidate.payload?.resource === "vo2_max"
+    ),
+  );
+  const historicalWindowStart = job.payload?.historicalWindowStart;
+  const historicalWindowEnd = job.payload?.windowEnd;
+  if (typeof historicalWindowStart !== "string" || typeof historicalWindowEnd !== "string") {
+    throw new TypeError("Expected a string sparse-history window.");
+  }
+  assert.equal(
+    (Date.parse(historicalWindowEnd) - Date.parse(historicalWindowStart))
+      / (24 * 60 * 60_000),
+    180,
+  );
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: [source] }),
+      now: "2026-08-11T12:00:00.000Z",
+    }),
+    {
+      ...createJob("resource", job.payload ?? {}),
+      dedupeKey: job.dedupeKey ?? null,
+    },
+  );
+
+  assert.equal(timeseriesRequests.length, 1);
+  const request = requireValue(timeseriesRequests[0]);
+  const requestStart = requireValue(request.searchParams.get("start_date"));
+  const requestEnd = requireValue(request.searchParams.get("end_date"));
+  assert.equal(
+    (Date.parse(requestEnd) - Date.parse(requestStart)) / (24 * 60 * 60_000),
+    30,
+  );
+  const continuation = requireValue(
+    result.scheduledJobs?.find((candidate) =>
+      candidate.kind === "resource" && candidate.payload?.resource === "vo2_max"
+    ),
+  );
+  assert.equal(continuation.payload?.windowStart, requestEnd);
+  assert.equal(continuation.payload?.windowEnd, job.payload?.windowEnd);
 });

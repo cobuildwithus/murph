@@ -4195,8 +4195,8 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "glucose",
     "blood_pressure",
     "note",
-    "workout_duration",
     "workout_distance",
+    "workout_duration",
     "workout_swimming_stroke",
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
