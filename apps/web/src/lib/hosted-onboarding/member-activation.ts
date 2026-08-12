@@ -200,6 +200,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
       return {
         activated: false,
         hostedExecutionEventId: existingWake.dedupeKey,
+        hostedExecutionMailboxItemId: existingWake.id,
         memberId: currentMember.core.id,
       };
     }
@@ -227,6 +228,9 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
       return {
         activated: false,
         hostedExecutionEventId: existingWake?.dedupeKey ?? null,
+        ...(existingWake
+          ? { hostedExecutionMailboxItemId: existingWake.id }
+          : {}),
         memberId: currentMember.core.id,
       };
     }

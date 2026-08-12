@@ -15,23 +15,24 @@ export async function assertHostedWhoopConnectCapacityAvailable(input: {
     return;
   }
 
-  const existingMemberConnection = await input.prisma.deviceConnection.findFirst({
-    where: {
-      userId: input.memberId,
-      status: { not: "disconnected" },
-      OR: [
-        { provider: "whoop" },
-        {
-          provider: "junction",
-          sources: {
-            some: {
-              sourceProviderSlug: "whoop_v2",
-              status: { not: "disconnected" },
-            },
+  const existingMemberWhere = {
+    userId: input.memberId,
+    status: { not: "disconnected" },
+    OR: [
+      { provider: "whoop" },
+      {
+        provider: "junction",
+        sources: {
+          some: {
+            sourceProviderSlug: "whoop_v2",
+            status: { not: "disconnected" },
           },
         },
-      ],
-    },
+      },
+    ],
+  } satisfies Prisma.DeviceConnectionWhereInput;
+  const existingMemberConnection = await input.prisma.deviceConnection.findFirst({
+    where: existingMemberWhere,
     select: { id: true },
   });
   if (existingMemberConnection) {
@@ -71,7 +72,22 @@ export async function assertHostedWhoopConnectCapacityAvailable(input: {
     LIMIT ${WHOOP_DIRECT_CONNECT_MEMBER_LIMIT}
   `);
 
-  if (currentMembers.length < WHOOP_DIRECT_CONNECT_MEMBER_LIMIT) {
+  if (
+    currentMembers.length < WHOOP_DIRECT_CONNECT_MEMBER_LIMIT
+    || currentMembers.some((member) => member.userId === input.memberId)
+  ) {
+    return;
+  }
+
+  // The exact fast-path and bounded graph read are intentionally separate so
+  // existing members avoid the shared graph. Recheck only on the rejecting
+  // path so a connection committed between those reads remains idempotent.
+  const concurrentExistingMemberConnection =
+    await input.prisma.deviceConnection.findFirst({
+      where: existingMemberWhere,
+      select: { id: true },
+    });
+  if (concurrentExistingMemberConnection) {
     return;
   }
 

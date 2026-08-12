@@ -512,6 +512,44 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
+  it("returns the exact existing Family activation pointer on replay", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+      dedupeKey:
+        "member.activated:hosted.family.sponsorship:member_123:family-subscription:sub_family_replay",
+      id: "mailbox_family_activation_existing",
+    });
+
+    await expect(activateHostedMemberForFamilySponsorshipTx({
+      memberId: member.core.id,
+      occurredAt: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: makeTransactionHarness({
+        accountGroupMemberships: [{
+          group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+          status: "active",
+        }],
+        billingStatus: HostedBillingStatus.canceled,
+        suspendedAt: null,
+        threadContainer: null,
+      }) as never,
+      sourceEventId: "family-subscription:sub_family_replay",
+    })).resolves.toEqual({
+      activated: false,
+      hostedExecutionEventId:
+        "member.activated:hosted.family.sponsorship:member_123:family-subscription:sub_family_replay",
+      hostedExecutionMailboxItemId: "mailbox_family_activation_existing",
+      memberId: "member_123",
+    });
+
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("activates verified-email-only family members without assigning a Linq home line", async () => {
     const member = makeMemberSnapshot({
       core: {
@@ -1186,6 +1224,7 @@ describe("hosted onboarding member activation", () => {
     setActivationMemberSnapshot(member);
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
       dedupeKey: "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
+      id: "mailbox_activation_existing",
     });
 
     await expect(
@@ -1203,6 +1242,7 @@ describe("hosted onboarding member activation", () => {
     ).resolves.toEqual({
       activated: false,
       hostedExecutionEventId: "member.activated:stripe.customer.subscription.updated:member_123:evt_123",
+      hostedExecutionMailboxItemId: "mailbox_activation_existing",
       memberId: "member_123",
     });
 

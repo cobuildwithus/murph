@@ -6,12 +6,21 @@ import {
 
 function buildPrisma(input: {
   existing?: boolean;
+  existingResults?: boolean[];
   members?: Array<{ userId: string }>;
 }) {
+  const existingResults = input.existingResults ?? [input.existing ?? false];
+  let existingReadIndex = 0;
   return {
     $queryRaw: vi.fn(async () => input.members ?? []),
     deviceConnection: {
-      findFirst: vi.fn(async () => input.existing ? { id: "connection_existing" } : null),
+      findFirst: vi.fn(async (_args?: { where?: unknown }) => {
+        const existing = existingResults[
+          Math.min(existingReadIndex, existingResults.length - 1)
+        ];
+        existingReadIndex += 1;
+        return existing ? { id: "connection_existing" } : null;
+      }),
     },
   };
 }
@@ -66,6 +75,39 @@ describe("WHOOP connect capacity", () => {
     })).rejects.toMatchObject({
       code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
     });
+
+    expect(prisma.deviceConnection.findFirst).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows a member returned by the bounded direct-and-Junction graph", async () => {
+    const prisma = buildPrisma({
+      members: [{ userId: "member_existing" }, { userId: "member_other" }],
+    });
+
+    await expect(assertHostedWhoopConnectCapacityAvailable({
+      memberId: "member_existing",
+      prisma: prisma as never,
+      target: { provider: "junction", sourceProviderSlug: "whoop_v2" } as never,
+    })).resolves.toBeUndefined();
+
+    expect(prisma.deviceConnection.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows a member whose connection appears between the exact and bounded reads", async () => {
+    const prisma = buildPrisma({
+      existingResults: [false, true],
+      members: [{ userId: "member_one" }, { userId: "member_two" }],
+    });
+
+    await expect(assertHostedWhoopConnectCapacityAvailable({
+      memberId: "member_racing",
+      prisma: prisma as never,
+      target: { provider: "whoop" } as never,
+    })).resolves.toBeUndefined();
+
+    expect(prisma.deviceConnection.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.deviceConnection.findFirst.mock.calls[0]?.[0]?.where)
+      .toEqual(prisma.deviceConnection.findFirst.mock.calls[1]?.[0]?.where);
   });
 
   it("does not query capacity for another provider", async () => {

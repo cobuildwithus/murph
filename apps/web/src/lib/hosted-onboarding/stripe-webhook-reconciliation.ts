@@ -120,6 +120,7 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
 
     if (refreshedEvent.status === HostedStripeEventStatus.completed) {
       return await resolveCompletedHostedStripeWebhookActivationResult({
+        activationResultJson: refreshedEvent.activationResultJson ?? null,
         eventId: input.eventId,
         eventType: refreshedEvent.type,
         prisma,
@@ -366,13 +367,13 @@ function buildHostedStripeWebhookInlineRetryReset(
 }
 
 async function resolveCompletedHostedStripeWebhookActivationResult(input: {
+  activationResultJson: Prisma.JsonValue | null;
   eventId: string;
   eventType: string;
   prisma: PrismaClient;
 }): Promise<HostedStripeWebhookReconciliationResult> {
-  const receipt = await readHostedStripeWebhookEventReceipt(input.eventId, input.prisma);
   const storedActivationPointers = parseHostedStripeActivationResultJson(
-    receipt?.activationResultJson ?? null,
+    input.activationResultJson,
   );
   const activations = storedActivationPointers
     ? await readStoredHostedStripeActivationMailboxItems({

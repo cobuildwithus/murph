@@ -1221,14 +1221,16 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.applyStripeInvoicePaid
       .mockResolvedValueOnce({
-        activatedMemberId: null,
-        hostedExecutionEventId: null,
+        activatedMemberId: "member_123",
+        hostedExecutionEventId: "dispatch_retry",
+        hostedExecutionMailboxItemId: "mailbox_dispatch_retry",
         runtimeRecheckMemberIds: ["member_123"],
         welcomeEmailMemberId: null,
       })
       .mockResolvedValueOnce({
-        activatedMemberId: null,
-        hostedExecutionEventId: null,
+        activatedMemberId: "member_123",
+        hostedExecutionEventId: "dispatch_retry",
+        hostedExecutionMailboxItemId: "mailbox_dispatch_retry",
         runtimeRecheckMemberIds: [],
         welcomeEmailMemberId: null,
       });
@@ -1262,6 +1264,10 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(2);
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
+      activationResultJson: {
+        activationMailboxItemIds: ["mailbox_dispatch_retry"],
+        schema: "hosted.stripe.activation-result.v1",
+      },
       attemptCount: 7,
       processedAt: expect.any(Date),
       status: HostedStripeEventStatus.completed,

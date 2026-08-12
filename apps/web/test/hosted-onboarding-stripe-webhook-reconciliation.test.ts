@@ -249,6 +249,7 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
         kind: "member.activated",
       },
     });
+    expect(prisma.hostedStripeEvent.findUnique).toHaveBeenCalledTimes(2);
     expect(mocks.stripeEventsRetrieve).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
       .toHaveBeenCalledWith(expect.objectContaining({
@@ -257,6 +258,44 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
         mailboxItemId: "mailbox_item_activation_123",
         memberId: "member_123",
       }));
+  });
+
+  it("preserves completed receipt convergence when account deletion removed a pointed mailbox row", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const prisma = createPrisma({
+      hostedMailboxItem: { findMany },
+      hostedStripeEvent: {
+        findUnique: vi.fn().mockResolvedValue({
+          activationResultJson: {
+            activationMailboxItemIds: ["mailbox_item_deleted_member"],
+            schema: "hosted.stripe.activation-result.v1",
+          },
+          claimExpiresAt: null,
+          nextAttemptAt: new Date("2026-04-23T00:00:00.000Z"),
+          status: HostedStripeEventStatus.completed,
+          type: "invoice.paid",
+          updatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        }),
+      },
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValue(null);
+
+    await expect(processRecordedHostedStripeWebhookEvent({
+      eventId: "evt_123",
+      prisma: prisma as never,
+    })).resolves.toEqual({ accepted: true, required: false });
+
+    expect(findMany).toHaveBeenCalledWith({
+      select: { dedupeKey: true, id: true, userId: true },
+      where: {
+        id: { in: ["mailbox_item_deleted_member"] },
+        kind: "member.activated",
+      },
+    });
+    expect(prisma.hostedStripeEvent.findUnique).toHaveBeenCalledTimes(2);
+    expect(mocks.stripeEventsRetrieve).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .not.toHaveBeenCalled();
   });
 
   it.each([
@@ -269,6 +308,14 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
         { length: 7 },
         (_, index) => `mailbox_${index}`,
       ),
+      schema: "hosted.stripe.activation-result.v1",
+    },
+    {
+      activationMailboxItemIds: [],
+      schema: "hosted.stripe.activation-result.v2",
+    },
+    {
+      activationMailboxItemIds: [""],
       schema: "hosted.stripe.activation-result.v1",
     },
   ])("fails closed on malformed completed activation pointers", async (

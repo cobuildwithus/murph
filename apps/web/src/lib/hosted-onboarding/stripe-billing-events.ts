@@ -858,7 +858,9 @@ async function convertHostedLegacyPulseTrialToStarterTx(input: {
   });
 
   return {
-    activatedMemberId: activation.activated ? input.member.id : null,
+    activatedMemberId: activation.hostedExecutionEventId
+      ? input.member.id
+      : null,
     cleanupPulseTrialStripeSubscriptionId,
     hostedExecutionEventId: activation.hostedExecutionEventId,
     hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
@@ -1453,7 +1455,9 @@ export async function applyStripeInvoicePaid(
   });
 
   return {
-    activatedMemberId: activation.activated ? updatedMember.core.id : null,
+    activatedMemberId: activation.hostedExecutionEventId
+      ? updatedMember.core.id
+      : null,
     hostedExecutionEventId: activation.hostedExecutionEventId,
     hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
     runtimeRecheckMemberIds: runtimeRecheckMemberId
@@ -1541,7 +1545,10 @@ function buildHostedStripeActivationOutcomeFromFamilySubscription(
   familySubscription: HostedFamilyStripeSubscriptionResult,
 ): HostedStripeActivationOutcome {
   const activatedMembers = familySubscription.activations
-    .filter((activation) => activation.activated && activation.hostedExecutionEventId)
+    .filter((activation) =>
+      activation.hostedExecutionEventId
+      && (activation.activated || activation.hostedExecutionMailboxItemId)
+    )
     .map((activation) => ({
       activatedMemberId: activation.memberId,
       hostedExecutionEventId: activation.hostedExecutionEventId,
