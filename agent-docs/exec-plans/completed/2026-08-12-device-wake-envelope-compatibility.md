@@ -1,6 +1,6 @@
 # device-wake-envelope-compatibility
 
-Status: active
+Status: completed
 Created: 2026-08-12
 Updated: 2026-08-12
 
@@ -46,14 +46,15 @@ Updated: 2026-08-12
 
 ## Tasks
 
-1. Add the scheduled-only event revision and direct regression coverage.
-2. Document the compatibility boundary and update existing changelog
+1. [x] Add the scheduled-only event revision and direct regression coverage.
+2. [x] Document the compatibility boundary and update existing changelog
    provenance after the PR number is allocated.
-3. Run focused tests, Web typecheck, and secret-safe diff inspection.
-4. Push the exact candidate, start CI and both ReviewGPT stages concurrently,
+3. [x] Run focused tests, Web typecheck, and secret-safe diff inspection.
+4. [x] Push the exact candidate, start CI and both ReviewGPT stages concurrently,
    and resolve any accepted findings.
-5. Merge, deploy the exact revision, resume the periodic recovery schedule,
-   and verify successful bounded recovery.
+5. Merge and deploy the exact revision, then resume the periodic recovery
+   schedule and verify successful bounded recovery as the rollout step after
+   this implementation plan closes.
 
 ## Decisions
 
@@ -69,3 +70,18 @@ Updated: 2026-08-12
 - Web TypeScript check.
 - Repository diff/identifier checks and required exact-head GitHub checks.
 - Post-deploy exact-revision proof plus bounded recovery-sweep logs.
+
+Results before merge:
+
+- Scheduled-wake and due-reconcile focused suite: 130 tests passed.
+- Changelog registry and fragment suite: 45 tests passed.
+- Web typecheck passed.
+- Every required exact-head GitHub check passed on the test-remediation head.
+- Preliminary product/coverage review found one stale changelog provenance
+  assertion. The exact test-only patch was already present on the latest head,
+  was inspected without duplicate application, and passed focused plus full CI.
+- Final ReviewGPT round 1 passed with no findings against the immutable
+  production-code head. The later head changes only that isolated assertion.
+- Parent final review found no remaining correctness, privacy, architecture,
+  or proof gap; current-main merge-tree proof is clean.
+Completed: 2026-08-12
