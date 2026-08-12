@@ -66,8 +66,11 @@ is the hard rollback floor and incident recovery below it is prohibited.
 - [x] Add the read-only expand and compatibility implementation.
 - [x] Prove unit, migration, and real-PostgreSQL mixed-version barriers.
 - [x] Run focused/type/lint/guard/docs/privacy/diff gates.
-- [ ] Publish a draft PR and complete exact-head CI plus zero-actionable
-  specialist and final ReviewGPT rounds.
+- [x] Publish draft PR #1750.
+- [x] Merge current `origin/main` exactly once after prevalidating the only two
+  conflicts as mechanical documentation-index and migration-inventory unions.
+- [ ] Complete exact-head CI plus zero-actionable specialist and final
+  ReviewGPT rounds.
 
 ## Verification evidence
 
@@ -87,3 +90,7 @@ is the hard rollback floor and incident recovery below it is prohibited.
   9,693 tests passed and 402 were skipped. After fixture-only corrections, the
   exact files passed 53 tests, the broader Family/Telegram slice passed 289
   tests, focused lint passed, and Web typecheck passed.
+- The first specialist and final ReviewGPT submissions were diagnostic-only:
+  both targeted pre-merge head `80e8555638` while the PR was already
+  non-mergeable, then terminated during response capture. They establish no
+  review baseline. Fresh reviews will target the clean merged head.
