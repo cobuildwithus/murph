@@ -5,10 +5,10 @@
     "id": "junction-menstrual-and-profile-fidelity",
     "kind": "improvement",
     "priority": 2,
-    "title": "Keep more Junction health context structured",
-    "summary": "Junction syncs now preserve more dated menstrual observations and the profile gender field as structured personal context.",
+    "title": "Keep more personal health context structured",
+    "summary": "Connected health syncs now preserve more dated menstrual observations and the profile gender field as structured personal context.",
     "details": "Murph keeps provider predictions excluded, records categorical observations without treating them as diagnoses, and keeps gender separate from biological sex.",
-    "relevanceTags": ["junction", "wearables", "menstrual-health", "profile"],
+    "relevanceTags": ["wearables", "menstrual-health", "profile"],
     "sourcePullRequests": [1694]
   }
 }
