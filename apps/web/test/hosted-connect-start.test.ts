@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   assertHostedWhoopConnectCapacityAvailable: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   getPrisma: vi.fn(),
-  isHostedDeviceSyncExistingConnectionRecoveryAuthorized: vi.fn(),
   isDeviceConnectSourceAvailableForConnection: vi.fn(),
   prepareConnectionStart: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
@@ -25,11 +24,6 @@ vi.mock("@murphai/device-syncd/connect-config", () => ({
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
   createHostedDeviceSyncPublicIngressService:
     mocks.createHostedDeviceSyncPublicIngressService,
-}));
-
-vi.mock("@/src/lib/device-sync/recovery-authorization", () => ({
-  isHostedDeviceSyncExistingConnectionRecoveryAuthorized:
-    mocks.isHostedDeviceSyncExistingConnectionRecoveryAuthorized,
 }));
 
 vi.mock("@/src/lib/device-sync/whoop-connect-capacity", () => ({
@@ -62,14 +56,6 @@ const OURA_TARGET = {
   provider: "oura",
 } as const;
 
-const DEXCOM_TARGET = {
-  connectSourceId: "dexcom",
-  connectTarget: "dexcom_v3",
-  label: "Dexcom",
-  provider: "junction",
-  sourceProviderSlug: "dexcom_v3",
-} as const;
-
 const REQUEST = new Request(
   "https://app.example.test/api/connect-sources/oura/start",
   { method: "POST" },
@@ -85,7 +71,6 @@ beforeEach(() => {
   vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "");
 
   mocks.isDeviceConnectSourceAvailableForConnection.mockReturnValue(true);
-  mocks.isHostedDeviceSyncExistingConnectionRecoveryAuthorized.mockResolvedValue(false);
   mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
     member: { id: "member_a" },
     sessionId: "session_a",
@@ -161,55 +146,5 @@ describe("startHostedDeviceSyncConnection", () => {
     expect(mocks.assertHostedWhoopConnectCapacityAvailable).not.toHaveBeenCalled();
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
     expect(mocks.startConnection).not.toHaveBeenCalled();
-  });
-
-  it("keeps a fresh modern Dexcom start closed after member authentication", async () => {
-    mocks.isDeviceConnectSourceAvailableForConnection.mockReturnValue(false);
-
-    await expect(startHostedDeviceSyncConnection({
-      defaultReturnTo: "/device-sync/connect/complete?source=connect",
-      request: REQUEST,
-      target: DEXCOM_TARGET,
-    })).rejects.toMatchObject({
-      code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
-      httpStatus: 404,
-    });
-
-    expect(
-      mocks.isHostedDeviceSyncExistingConnectionRecoveryAuthorized,
-    ).toHaveBeenCalledWith({
-      memberId: "member_a",
-      target: DEXCOM_TARGET,
-    });
-    expect(mocks.prepareConnectionStart).not.toHaveBeenCalled();
-    expect(mocks.startConnection).not.toHaveBeenCalled();
-  });
-
-  it("starts modern Dexcom only for a revalidated existing recovery", async () => {
-    mocks.isDeviceConnectSourceAvailableForConnection.mockReturnValue(false);
-    mocks.isHostedDeviceSyncExistingConnectionRecoveryAuthorized.mockResolvedValue(true);
-
-    await expect(startHostedDeviceSyncConnection({
-      defaultReturnTo: "/device-sync/connect/complete?source=connect",
-      request: REQUEST,
-      target: DEXCOM_TARGET,
-    })).resolves.toMatchObject({
-      authorizationUrl: "https://provider.example.test/oauth/start",
-    });
-
-    expect(mocks.prepareConnectionStart).toHaveBeenCalledWith(
-      "member_a",
-      DEXCOM_TARGET,
-    );
-    expect(mocks.startConnection).toHaveBeenCalledWith(
-      "member_a",
-      "junction",
-      "/device-sync/connect/complete?source=connect",
-      {
-        connectSourceId: "dexcom",
-        connectTarget: "dexcom_v3",
-        sourceProviderSlug: "dexcom_v3",
-      },
-    );
   });
 });

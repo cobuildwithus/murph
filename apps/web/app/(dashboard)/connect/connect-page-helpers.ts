@@ -96,7 +96,6 @@ export function markLocallyDisconnectedSources(
     const {
       connected,
       connectProvider,
-      connectTarget,
       disconnectConnectionId,
       disconnectScope,
       disconnectSourceProviderSlug,
@@ -114,9 +113,6 @@ export function markLocallyDisconnectedSources(
 
     return {
       ...locallyDisconnectedSource,
-      ...(source.connectionAvailable !== false && connectTarget
-        ? { connectTarget }
-        : {}),
     };
   });
 }

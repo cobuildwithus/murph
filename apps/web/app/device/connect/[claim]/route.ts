@@ -1,6 +1,6 @@
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
-  isDeviceConnectSourceAvailableForExistingConnectionRecovery,
+  isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncReconnectTargets,
   readConfiguredDeviceSyncConnectTargetConfigs,
 } from "@murphai/device-syncd/connect-config";
@@ -130,9 +130,7 @@ function resolveHostedDeviceConnectIntentTarget(intent: HostedDeviceConnectInten
   return listConfiguredDeviceSyncReconnectTargets(
     readConfiguredDeviceSyncConnectTargetConfigs(process.env),
   ).find((target) =>
-    isDeviceConnectSourceAvailableForExistingConnectionRecovery(
-      target.connectSourceId,
-    )
+    isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
     && target.provider === intent.provider
     && target.connectSourceId === intent.connectSourceId
     && target.connectTarget === intent.connectTarget

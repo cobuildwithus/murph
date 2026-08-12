@@ -28,47 +28,6 @@ const ZEPP_CONNECT_SOURCE: ConnectSource = {
 
 const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
-    authenticated: false,
-    errorMessage: null,
-    source: {
-      connectionAvailable: false,
-      description: "CGM glucose readings and trends.",
-      id: "dexcom",
-      logo: {
-        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-        height: 36,
-        src: "/brand-logos/connect/dexcom.png",
-        width: 128,
-      },
-      name: "Dexcom",
-      unavailableActionLabel: "Coming soon",
-      unavailableMessage: "Dexcom connections are coming soon.",
-    },
-  },
-  {
-    authenticated: true,
-    errorMessage: null,
-    source: {
-      connectionAvailable: false,
-      connectProvider: "junction",
-      connectTarget: "dexcom_v3",
-      description: "CGM glucose readings and trends.",
-      disconnectConnectionId: "design-dexcom-recovery",
-      disconnectSourceProviderSlug: "dexcom_v3",
-      id: "dexcom-recovery",
-      logo: {
-        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-        height: 36,
-        src: "/brand-logos/connect/dexcom.png",
-        width: 128,
-      },
-      name: "Dexcom",
-      requiresReconnect: true,
-      unavailableActionLabel: "Coming soon",
-      unavailableMessage: "Dexcom connections are coming soon.",
-    },
-  },
-  {
     authenticated: true,
     errorMessage: null,
     source: ZEPP_CONNECT_SOURCE,
@@ -143,6 +102,24 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
         width: 128,
       },
       name: "Oura",
+    },
+  },
+  {
+    authenticated: false,
+    errorMessage: null,
+    source: {
+      connectionAvailable: false,
+      description: "CGM glucose readings and trends.",
+      id: "dexcom",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/dexcom.png",
+        width: 128,
+      },
+      name: "Dexcom",
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage: "Dexcom connections are coming soon.",
     },
   },
   {

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
-  resolveDeviceSyncExistingConnectionRecoveryReason,
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   isDeviceSyncConnectionSetupConfirmed,
   isDeviceSyncConnectionSetupPending,
@@ -112,56 +111,4 @@ test("historical connection reset recovery is limited to Garmin error sources", 
     sourceProviderSlug: "garmin",
     status: "connected",
   }), false);
-});
-
-test("existing connection recovery uses one exact state vocabulary", () => {
-  const source = { lastErrorCode: null, status: "connected" };
-  const connection = {
-    lastErrorCode: null,
-    lastSyncCompletedAt: "2026-04-28T00:00:00.000Z",
-    lastSyncErrorAt: null,
-    setupPhase: "source_confirmed",
-    status: "active",
-  };
-
-  assert.equal(resolveDeviceSyncExistingConnectionRecoveryReason({
-    connection,
-    source,
-  }), null);
-  assert.equal(resolveDeviceSyncExistingConnectionRecoveryReason({
-    connection: { ...connection, lastSyncErrorAt: "2026-04-29T00:00:00.000Z" },
-    source,
-  }), "newer_sync_error");
-  assert.equal(resolveDeviceSyncExistingConnectionRecoveryReason({
-    connection: { ...connection, lastSyncCompletedAt: null, lastSyncErrorAt: "2026-04-29T00:00:00.000Z" },
-    source,
-  }), "newer_sync_error");
-  assert.equal(resolveDeviceSyncExistingConnectionRecoveryReason({
-    connection,
-    source: { lastErrorCode: "TOKEN_REFRESH_FAILED", status: "error" },
-  }), "source_token_refresh_failed");
-  assert.equal(resolveDeviceSyncExistingConnectionRecoveryReason({
-    connection,
-    source: { lastErrorCode: "INVALID_GRANT", status: "error" },
-  }), null);
-  assert.equal(resolveDeviceSyncExistingConnectionRecoveryReason({
-    connection: { ...connection, status: "reauthorization_required" },
-    source,
-  }), "account_reauthorization");
-  assert.equal(resolveDeviceSyncExistingConnectionRecoveryReason({
-    connection: {
-      ...connection,
-      lastErrorCode: "DISCONNECT_IN_PROGRESS",
-      status: "reauthorization_required",
-    },
-    source,
-  }), null);
-  assert.equal(resolveDeviceSyncExistingConnectionRecoveryReason({
-    connection,
-    source: { ...source, status: "disconnected" },
-  }), null);
-  assert.equal(resolveDeviceSyncExistingConnectionRecoveryReason({
-    connection: { ...connection, setupPhase: "pending_link" },
-    source,
-  }), null);
 });

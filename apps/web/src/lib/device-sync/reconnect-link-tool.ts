@@ -1,6 +1,5 @@
 import {
   isDeviceConnectSourceAvailableForConnection,
-  isDeviceConnectSourceAvailableForExistingConnectionRecovery,
   listConfiguredDeviceSyncReconnectTargets,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
@@ -12,7 +11,6 @@ import {
   HOSTED_DEVICE_RECONNECT_NOTICE_INTENT_TTL_MS,
   createHostedDeviceConnectIntentTx,
 } from "./connect-intent-core";
-import { isHostedDeviceSyncExistingConnectionRecoveryAuthorized } from "./recovery-authorization";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 
@@ -114,9 +112,7 @@ export function resolveHostedDeviceReconnectLinkTarget(
   const matches = listConfiguredDeviceSyncReconnectTargets(
     readConfiguredDeviceSyncConnectTargetConfigs(env),
   ).filter((target) =>
-    isDeviceConnectSourceAvailableForExistingConnectionRecovery(
-      target.connectSourceId,
-    )
+    isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
     && (!connectSourceId || target.connectSourceId === connectSourceId)
     && (!connectTarget || target.connectTarget === connectTarget)
     && (!sourceProviderSlug || (target.sourceProviderSlug ?? null) === sourceProviderSlug)
@@ -161,20 +157,6 @@ export async function createHostedDeviceReconnectLink(input: {
   if (targetResult.status === "ambiguous") {
     throw new Error(
       `Reconnect target is ambiguous (${targetResult.matches.length} matches). Pass --source-provider-slug to choose the Junction source.`,
-    );
-  }
-
-  if (
-    !isDeviceConnectSourceAvailableForConnection(
-      targetResult.target.connectSourceId,
-    )
-    && !await isHostedDeviceSyncExistingConnectionRecoveryAuthorized({
-      memberId,
-      target: targetResult.target,
-    })
-  ) {
-    throw new Error(
-      "The selected source has no current member-owned recovery state.",
     );
   }
 

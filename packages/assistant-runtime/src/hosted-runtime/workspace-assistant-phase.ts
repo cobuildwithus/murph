@@ -85,7 +85,6 @@ import {
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import {
   isDeviceConnectSourceAvailableForConnection,
-  isDeviceConnectSourceAvailableForExistingConnectionRecovery,
   listConfiguredDeviceSyncConnectTargets,
   listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/connect-config";
@@ -133,7 +132,6 @@ import {
 } from "./device-sync-maintenance-import.ts";
 import {
   buildHostedDeviceSyncStatusPrompt,
-  resolveHostedDeviceSyncRecoveryConnectTarget,
   type HostedDeviceSyncStatusPromptReconnectTarget,
 } from "./device-sync-status-prompt.ts";
 import {
@@ -175,7 +173,6 @@ import type {
   HostedAssistantEmailDeliveryContext,
 } from "./email-delivery-context.ts";
 import type {
-  HostedRuntimeDeviceSyncPort,
   HostedRuntimePlatform,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
 } from "./platform.ts";
@@ -1806,10 +1803,8 @@ export async function runHostedWorkspaceAssistantPhase(
     }
   }
   const deviceConnectProviders = resolveHostedWorkspaceDeviceConnectProviders(input.runtime);
-  const deviceReconnectTargets = resolveHostedWorkspaceDeviceReconnectTargets(input.runtime);
   const deviceTool = resolveHostedWorkspaceDeviceTool({
     deviceConnectProviders,
-    deviceReconnectTargets,
     input,
   });
   const clinicalRecordsConnectLinkTool =
@@ -2201,7 +2196,7 @@ export async function runHostedWorkspaceAssistantPhase(
       try {
         const deviceSyncStatusPrompt = await buildHostedDeviceSyncStatusPrompt({
           deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
-          reconnectTargets: deviceReconnectTargets,
+          reconnectTargets: resolveHostedWorkspaceDeviceReconnectTargets(input.runtime),
           signal: cancellation.signal,
         });
         if (
@@ -8273,9 +8268,7 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
   const publicTargetsByConnectTarget = new Map(
     listConfiguredDeviceSyncConnectTargets(providerConfigs)
       .filter((target) =>
-        isDeviceConnectSourceAvailableForExistingConnectionRecovery(
-          target.connectSourceId,
-        )
+        isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
       )
       .map((target) => [
         target.connectTarget,
@@ -8291,7 +8284,7 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
   }
 
   return targets.map((target) => ({
-    connectionAvailable: isDeviceConnectSourceAvailableForExistingConnectionRecovery(
+    connectionAvailable: isDeviceConnectSourceAvailableForConnection(
       target.connectSourceId,
     ),
     connectTarget: target.connectTarget,
@@ -8299,9 +8292,6 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
     connectTargetCommandSafe: sameHostedDeviceSyncConnectTarget(
       target,
       publicTargetsByConnectTarget.get(target.connectTarget) ?? null,
-    ),
-    freshConnectionAvailable: isDeviceConnectSourceAvailableForConnection(
-      target.connectSourceId,
     ),
     label: target.label,
     provider: target.provider,
@@ -8368,7 +8358,6 @@ type HostedAssistantDeviceTool = NonNullable<
 
 function resolveHostedWorkspaceDeviceTool(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
-  deviceReconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): HostedAssistantDeviceTool | undefined {
   const deviceSyncPort = input.input.runtime.platform.deviceSyncPort ?? null;
@@ -8422,12 +8411,9 @@ function resolveHostedWorkspaceDeviceTool(input: {
         };
       }
 
-      const provider = await resolveHostedDeviceToolConnectProvider({
+      const provider = resolveHostedDeviceToolConnectProvider({
         configuredProviders: input.deviceConnectProviders,
-        deviceSyncPort,
-        reconnectTargets: input.deviceReconnectTargets,
         requestedProvider: request.provider,
-        signal: context?.signal ?? null,
       });
       const messagingReturnTarget = input.input.deviceSyncMessagingReturnTarget ?? null;
       await writeHostedDeviceConnectRuntimeLog({
@@ -8476,13 +8462,10 @@ function resolveHostedWorkspaceDeviceTool(input: {
   };
 }
 
-async function resolveHostedDeviceToolConnectProvider(input: {
+function resolveHostedDeviceToolConnectProvider(input: {
   configuredProviders: readonly { provider: string }[];
-  deviceSyncPort: HostedRuntimeDeviceSyncPort;
-  reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
   requestedProvider: string;
-  signal: AbortSignal | null;
-}): Promise<string> {
+}): string {
   const requestedKey = normalizeHostedDeviceSyncConnectTargetKey(
     input.requestedProvider,
   );
@@ -8490,24 +8473,13 @@ async function resolveHostedDeviceToolConnectProvider(input: {
     ({ provider }) =>
       normalizeHostedDeviceSyncConnectTargetKey(provider) === requestedKey,
   );
-  if (target) {
-    return target.provider;
+  if (!target) {
+    throw new VaultCliError(
+      "device_connect_provider_unavailable",
+      "That device provider is not available to connect.",
+    );
   }
-
-  const recoveryTarget = await resolveHostedDeviceSyncRecoveryConnectTarget({
-    deviceSyncPort: input.deviceSyncPort,
-    reconnectTargets: input.reconnectTargets,
-    requestedConnectTarget: input.requestedProvider,
-    signal: input.signal,
-  });
-  if (recoveryTarget) {
-    return recoveryTarget;
-  }
-
-  throw new VaultCliError(
-    "device_connect_provider_unavailable",
-    "That device provider is not available to connect.",
-  );
+  return target.provider;
 }
 
 function resolveHostedClinicalRecordsConnectLinkTool(

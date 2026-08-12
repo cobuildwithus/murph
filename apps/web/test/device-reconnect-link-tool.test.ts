@@ -2,18 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceConnectIntentTx: vi.fn(),
-  isHostedDeviceSyncExistingConnectionRecoveryAuthorized: vi.fn(),
   tx: {},
 }));
 
 vi.mock("@/src/lib/device-sync/connect-intent-core", () => ({
   createHostedDeviceConnectIntentTx: mocks.createHostedDeviceConnectIntentTx,
   HOSTED_DEVICE_RECONNECT_NOTICE_INTENT_TTL_MS: 72 * 60 * 60 * 1000,
-}));
-
-vi.mock("@/src/lib/device-sync/recovery-authorization", () => ({
-  isHostedDeviceSyncExistingConnectionRecoveryAuthorized:
-    mocks.isHostedDeviceSyncExistingConnectionRecoveryAuthorized,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -36,7 +30,6 @@ const configuredWhoopEnv = {
 describe("hosted device reconnect link tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.isHostedDeviceSyncExistingConnectionRecoveryAuthorized.mockResolvedValue(false);
   });
 
   it("uses the Junction source slug to avoid choosing direct WHOOP", async () => {
@@ -92,38 +85,6 @@ describe("hosted device reconnect link tool", () => {
       connectTarget: null,
       sourceProviderSlug: null,
     })).toEqual({ status: "missing" });
-  });
-
-  it("resolves modern Dexcom for recovery but refuses intent creation without member-owned state", async () => {
-    const env = {
-      ...configuredWhoopEnv,
-      JUNCTION_PROVIDER_FILTER: "dexcom_v3",
-      WHOOP_CLIENT_ID: "",
-      WHOOP_CLIENT_SECRET: "",
-    };
-    const { createHostedDeviceReconnectLink, resolveHostedDeviceReconnectLinkTarget } =
-      await import("@/src/lib/device-sync/reconnect-link-tool");
-    const args = {
-      baseUrl: null,
-      connectSourceId: "dexcom",
-      connectTarget: "dexcom_v3",
-      help: false,
-      memberId: "member_existing",
-      sourceProviderSlug: "dexcom_v3",
-    };
-
-    expect(resolveHostedDeviceReconnectLinkTarget(env, args)).toMatchObject({
-      status: "found",
-      target: {
-        connectSourceId: "dexcom",
-        connectTarget: "dexcom_v3",
-        sourceProviderSlug: "dexcom_v3",
-      },
-    });
-    await expect(createHostedDeviceReconnectLink({ args, env })).rejects.toThrow(
-      "no current member-owned recovery state",
-    );
-    expect(mocks.createHostedDeviceConnectIntentTx).not.toHaveBeenCalled();
   });
 
   it("creates a long-lived source-specific connect intent for the selected target", async () => {

@@ -2,7 +2,6 @@ import {
   DEVICE_SYNC_HISTORICAL_DATA_RECONNECT_REQUIRED_ERROR_CODE,
   isDeviceSyncConnectionSetupConfirmed,
   isEstablishedDeviceSyncConnection,
-  resolveDeviceSyncExistingConnectionRecoveryReason,
   requiresHistoricalResetDeviceSyncSource,
 } from "@murphai/device-syncd/public-account";
 
@@ -24,7 +23,6 @@ export interface HostedDeviceSyncStatusPromptReconnectTarget {
   connectTarget: string;
   connectTargetAmbiguous?: boolean | null;
   connectTargetCommandSafe?: boolean | null;
-  freshConnectionAvailable?: boolean | null;
   label: string;
   provider: string;
   sourceProviderSlug?: string | null;
@@ -70,48 +68,6 @@ export async function buildHostedDeviceSyncStatusPrompt(input: {
     reconnectTargets: input.reconnectTargets,
     snapshot,
   });
-}
-
-export async function resolveHostedDeviceSyncRecoveryConnectTarget(input: {
-  deviceSyncPort: HostedRuntimeDeviceSyncPort;
-  reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
-  requestedConnectTarget: string;
-  signal?: AbortSignal | null;
-}): Promise<string | null> {
-  const requestedConnectTarget = normalizeHostedDeviceSyncKey(
-    input.requestedConnectTarget,
-  );
-  if (!requestedConnectTarget) {
-    return null;
-  }
-
-  const reconnectTarget = input.reconnectTargets.find((target) =>
-    target.connectionAvailable !== false
-    && isHostedDeviceSyncReconnectCommandSafe(target)
-    && normalizeHostedDeviceSyncKey(target.connectTarget) === requestedConnectTarget
-  );
-  if (!reconnectTarget) {
-    return null;
-  }
-
-  const snapshot = await fetchHostedDeviceSyncStatusSnapshot({
-    deviceSyncPort: input.deviceSyncPort,
-    reconnectTargets: [reconnectTarget],
-    signal: input.signal ?? null,
-  });
-  if (!snapshot) {
-    return null;
-  }
-
-  const notice = collectHostedDeviceSyncReconnectNotices({
-    reconnectTargets: [reconnectTarget],
-    snapshot,
-  }).find((candidate) =>
-    candidate.commandConnectTargetSafe
-    && normalizeHostedDeviceSyncKey(candidate.commandConnectTarget)
-      === requestedConnectTarget
-  );
-  return notice?.commandConnectTarget ?? null;
 }
 
 async function fetchHostedDeviceSyncStatusSnapshot(input: {
@@ -332,16 +288,6 @@ function collectHostedDeviceSyncReconnectNotices(input: {
       continue;
     }
 
-    for (const reconnectTarget of input.reconnectTargets) {
-      const disabledSourceNotice = buildHostedDisabledSourceRecoveryNotice({
-        connection: entry,
-        reconnectTarget,
-      });
-      if (disabledSourceNotice) {
-        addHostedDeviceSyncReconnectNotice(notices, seen, disabledSourceNotice);
-      }
-    }
-
     for (const source of entry.sources ?? []) {
       const sourceNotice = buildHostedDeviceSyncSourceReconnectNotice({
         reconnectTargets: input.reconnectTargets,
@@ -362,59 +308,6 @@ function collectHostedDeviceSyncReconnectNotices(input: {
   }
 
   return notices;
-}
-
-function buildHostedDisabledSourceRecoveryNotice(input: {
-  connection: HostedDeviceSyncRuntimeConnectionSnapshot;
-  reconnectTarget: HostedDeviceSyncStatusPromptReconnectTarget;
-}): HostedDeviceSyncReconnectNotice | null {
-  if (
-    input.reconnectTarget.freshConnectionAvailable !== false
-    || input.reconnectTarget.connectionAvailable !== true
-  ) {
-    return null;
-  }
-
-  const sourceProviderSlug = normalizeHostedDeviceSyncKey(
-    input.reconnectTarget.sourceProviderSlug,
-  );
-  if (!sourceProviderSlug) {
-    return null;
-  }
-
-  const source = (input.connection.sources ?? []).find((candidate) =>
-    normalizeHostedDeviceSyncKey(candidate.sourceProviderSlug) === sourceProviderSlug
-  ) ?? null;
-  const recoveryReason = resolveDeviceSyncExistingConnectionRecoveryReason({
-    connection: {
-      ...input.connection.connection,
-      lastErrorCode: input.connection.localState.lastErrorCode,
-      lastSyncCompletedAt: input.connection.localState.lastSyncCompletedAt,
-      lastSyncErrorAt: input.connection.localState.lastSyncErrorAt,
-    },
-    source,
-  });
-  if (!recoveryReason) {
-    return null;
-  }
-
-  const errorCode = recoveryReason === "source_token_refresh_failed"
-    ? normalizeHostedDeviceSyncErrorCode(source?.lastErrorCode)
-        ?? "TOKEN_REFRESH_FAILED"
-    : recoveryReason === "account_reauthorization"
-      ? normalizeHostedDeviceSyncErrorCode(input.connection.localState.lastErrorCode)
-          ?? "REAUTHORIZATION_REQUIRED"
-      : "SYNC_ERROR_NEWER_THAN_COMPLETION";
-
-  return {
-    commandConnectTarget: input.reconnectTarget.connectTarget,
-    commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(
-      input.reconnectTarget,
-    ),
-    errorCode,
-    label: input.reconnectTarget.label,
-    sourceProviderSlug,
-  };
 }
 
 function buildHostedDeviceSyncSourceReconnectNotice(input: {
@@ -443,12 +336,6 @@ function buildHostedDeviceSyncSourceReconnectNotice(input: {
     reconnectTargets: input.reconnectTargets,
     sourceProviderSlug: input.source.sourceProviderSlug,
   });
-  if (
-    reconnectTarget?.freshConnectionAvailable === false
-    && reconnectTarget.connectionAvailable === true
-  ) {
-    return null;
-  }
   const sourceProviderSlug = normalizeHostedDeviceSyncKey(input.source.sourceProviderSlug);
 
   return {
@@ -483,12 +370,6 @@ function buildHostedDeviceSyncAccountReconnectNotice(input: {
     provider,
     reconnectTargets: input.reconnectTargets,
   });
-  if (
-    reconnectTarget?.freshConnectionAvailable === false
-    && reconnectTarget.connectionAvailable === true
-  ) {
-    return null;
-  }
   const errorCode = normalizeHostedDeviceSyncErrorCode(
     input.connection.localState.lastErrorCode,
   ) ?? "REAUTHORIZATION_REQUIRED";

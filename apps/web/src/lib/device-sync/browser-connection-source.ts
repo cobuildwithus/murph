@@ -1,7 +1,4 @@
-import {
-  DEVICE_SYNC_EXISTING_CONNECTION_RECOVERY_SOURCE_ERROR_CODES,
-  requiresHistoricalResetDeviceSyncSource,
-} from "@murphai/device-syncd/public-account";
+import { requiresHistoricalResetDeviceSyncSource } from "@murphai/device-syncd/public-account";
 
 import type { HostedDeviceConnectionSource } from "./prisma-store/sources";
 
@@ -29,9 +26,7 @@ export function toHostedBrowserDeviceSyncConnectionSource(
     firstSeenAt: source.firstSeenAt,
     lastSeenAt: source.lastSeenAt,
     ...(recoveryKind ? { recoveryKind } : {}),
-    ...(requiresHostedDeviceConnectionSourceReconnect(source)
-      ? { requiresReconnect: true }
-      : {}),
+    ...(requiresConnectionSourceReconnect(source) ? { requiresReconnect: true } : {}),
     resourceCount: countSourceResources(source.resourceAvailabilitySummary),
     sourceProviderSlug: source.sourceProviderSlug,
     status: source.status,
@@ -41,12 +36,7 @@ export function toHostedBrowserDeviceSyncConnectionSource(
 const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
   "sourceInstanceKeyFallback",
 ]);
-export const HOSTED_DEVICE_CONNECTION_SOURCE_RECONNECT_ERROR_CODES = [
-  ...DEVICE_SYNC_EXISTING_CONNECTION_RECOVERY_SOURCE_ERROR_CODES,
-] as const;
-const CONNECTION_SOURCE_RECONNECT_ERROR_CODES = new Set<string>(
-  HOSTED_DEVICE_CONNECTION_SOURCE_RECONNECT_ERROR_CODES,
-);
+const CONNECTION_SOURCE_RECONNECT_ERROR_CODES = new Set(["TOKEN_REFRESH_FAILED"]);
 
 /**
  * True when a `resourceAvailabilitySummary` entry names an available resource
@@ -74,14 +64,9 @@ function countSourceResources(
   ).length;
 }
 
-export function requiresHostedDeviceConnectionSourceReconnect(
-  source: {
-    lastErrorCode?: string | null;
-    status?: string | null;
-  },
-): boolean {
+function requiresConnectionSourceReconnect(source: HostedDeviceConnectionSource): boolean {
   return source.status === "error"
-    && typeof source.lastErrorCode === "string"
+    && source.lastErrorCode !== null
     && CONNECTION_SOURCE_RECONNECT_ERROR_CODES.has(source.lastErrorCode);
 }
 

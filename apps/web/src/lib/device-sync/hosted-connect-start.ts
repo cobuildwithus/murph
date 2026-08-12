@@ -9,7 +9,6 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { assertHostedDeviceSyncBrowserCallbackHostname } from "./public-base-url";
 import { createHostedDeviceSyncPublicIngressService } from "./public-ingress-service";
 import { buildHostedDeviceSyncCallbackProof } from "./browser-callback-proof";
-import { isHostedDeviceSyncExistingConnectionRecoveryAuthorized } from "./recovery-authorization";
 import { assertHostedWhoopConnectCapacityAvailable } from "./whoop-connect-capacity";
 import { requireActiveHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
@@ -27,24 +26,7 @@ export async function startHostedDeviceSyncConnection(input: {
   request: Request;
   target: DeviceSyncConnectTarget;
 }): Promise<HostedDeviceSyncConnectResponse> {
-  assertHostedOnboardingMutationOrigin(input.request);
-  const auth = await requireActiveHostedAppSessionFromRequest(input.request);
-  assertHostedDeviceSyncBrowserCallbackHostname({
-    appSessionUrl: input.request.url,
-    callbackBaseUrl: readHostedDeviceSyncPublicBaseUrl(),
-  });
-  const prisma = getPrisma();
-  const freshConnectionAvailable = isDeviceConnectSourceAvailableForConnection(
-    input.target.connectSourceId,
-  );
-  const existingRecoveryAuthorized = freshConnectionAvailable
-    ? false
-    : await isHostedDeviceSyncExistingConnectionRecoveryAuthorized({
-        memberId: auth.member.id,
-        target: input.target,
-      });
-
-  if (!freshConnectionAvailable && !existingRecoveryAuthorized) {
+  if (!isDeviceConnectSourceAvailableForConnection(input.target.connectSourceId)) {
     throw deviceSyncError({
       code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
       httpStatus: 404,
@@ -52,6 +34,14 @@ export async function startHostedDeviceSyncConnection(input: {
       retryable: false,
     });
   }
+
+  assertHostedOnboardingMutationOrigin(input.request);
+  const auth = await requireActiveHostedAppSessionFromRequest(input.request);
+  assertHostedDeviceSyncBrowserCallbackHostname({
+    appSessionUrl: input.request.url,
+    callbackBaseUrl: readHostedDeviceSyncPublicBaseUrl(),
+  });
+  const prisma = getPrisma();
   await assertHostedHistoricalLaunchConsentGranted({
     memberId: auth.member.id,
     prisma,

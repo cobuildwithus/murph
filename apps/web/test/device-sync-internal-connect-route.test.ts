@@ -4,18 +4,12 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceConnectIntent: vi.fn(),
-  isHostedDeviceSyncExistingConnectionRecoveryAuthorized: vi.fn(),
   isHostedThreadContainerMember: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/connect-intents", () => ({
   createHostedDeviceConnectIntent: mocks.createHostedDeviceConnectIntent,
-}));
-
-vi.mock("@/src/lib/device-sync/recovery-authorization", () => ({
-  isHostedDeviceSyncExistingConnectionRecoveryAuthorized:
-    mocks.isHostedDeviceSyncExistingConnectionRecoveryAuthorized,
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -53,7 +47,6 @@ describe("device sync internal connect-link route", () => {
     vi.stubEnv("STRAVA_CLIENT_SECRET", "");
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.isHostedThreadContainerMember.mockResolvedValue(false);
-    mocks.isHostedDeviceSyncExistingConnectionRecoveryAuthorized.mockResolvedValue(false);
     mocks.createHostedDeviceConnectIntent.mockResolvedValue({
       claim: "dc_opaque",
       connectUrl: "https://join.example.test/connect#deviceConnectIntent=dc_opaque&connectSource=whoop",
@@ -140,53 +133,6 @@ describe("device sync internal connect-link route", () => {
         code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
         retryable: false,
       },
-    });
-  });
-
-  it("issues modern Dexcom links only for a revalidated existing recovery", async () => {
-    vi.stubEnv("WHOOP_CLIENT_ID", "");
-    vi.stubEnv("WHOOP_CLIENT_SECRET", "");
-    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
-    vi.stubEnv("JUNCTION_ENV", "sandbox");
-    vi.stubEnv("JUNCTION_PROVIDER_FILTER", "dexcom_v3");
-    vi.stubEnv("JUNCTION_REGION", "us");
-
-    const request = () => new Request(
-      "https://join.example.test/api/internal/device-sync/connect-targets/dexcom_v3/connect-link",
-      { method: "POST" },
-    );
-    const context = {
-      params: Promise.resolve({ connectTarget: "dexcom_v3" }),
-    };
-
-    const denied = await internalDeviceSyncConnectLinkRoute.POST(
-      request(),
-      context,
-    );
-    expect(denied.status).toBe(404);
-    expect(mocks.createHostedDeviceConnectIntent).not.toHaveBeenCalled();
-
-    mocks.isHostedDeviceSyncExistingConnectionRecoveryAuthorized.mockResolvedValue(true);
-    mocks.createHostedDeviceConnectIntent.mockResolvedValueOnce({
-      claim: "dc_dexcom_recovery",
-      connectUrl:
-        "https://join.example.test/connect#deviceConnectIntent=dc_dexcom_recovery&connectSource=dexcom",
-      expiresAt: "2026-08-12T12:00:00.000Z",
-    });
-    const allowed = await internalDeviceSyncConnectLinkRoute.POST(
-      request(),
-      context,
-    );
-
-    expect(allowed.status).toBe(200);
-    expect(mocks.createHostedDeviceConnectIntent).toHaveBeenCalledWith({
-      connectSourceId: "dexcom",
-      connectTarget: "dexcom_v3",
-      memberId: "member_123",
-      provider: "junction",
-      request: expect.any(Request),
-      sourceProviderSlug: "dexcom_v3",
     });
   });
 
