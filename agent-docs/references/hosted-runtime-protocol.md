@@ -360,6 +360,12 @@ encryption before taking a short `hosted_workspace` row lock, then replaces the
 exact active share generation only when the locked version still matches. The
 workspace lock serializes the final replacement with checkpoint CAS: an older
 request either commits before the newer checkpoint or becomes a no-op after it.
+The runtime also creates one absolute effect deadline for each delivery and
+forwards it unchanged through the proxy to Web. Web stops admitting destination
+replacements at that deadline. Transport receives only a fixed settlement
+margin, and the proxy marks a response as authoritative only after receiving the
+actual Web response; an unmarked proxy-local response or transport loss retains
+invocation ownership until the absolute settlement boundary.
 No projection watermark is stored on the share, and the group runtime is not
 woken; its next ordinary read continues to query the current Web-owned
 replacement snapshot.
@@ -505,16 +511,18 @@ This protocol is a consumer-first hard cut:
    legacy local projections. No mailbox drain or local cleanup proof can lower
    this floor.
 
-The later source-workspace-version fence is a producer-first hard cut. Deploy its
-additive Cloudflare/runner request field with immediate container rollout and
-prove fleet convergence before Web requires that field and conditionally
+The later vault-share delivery contract is a producer-first hard cut. Deploy its
+additive Cloudflare/runner source-workspace-version field, absolute effect
+deadline, and authoritative-response marker with immediate container rollout;
+prove fleet convergence before Web requires the fields and conditionally
 replaces a share snapshot under the source workspace row lock. Old Web ignores
-the additive field; new Web rejects an older runner's unversioned delivery and
-leaves the existing device-sync continuation pending. After Web deploys, the
-version-capable runner is the rollback floor. Keep the runner-first/Web-second
-window short because stale-writer rejection becomes authoritative only in the
-Web phase; do not preserve a second wire version, retry owner, or projection
-watermark for rollout convenience.
+the additive request fields; new Web rejects an older runner's incomplete
+delivery and leaves the existing device-sync continuation pending. After Web
+deploys, the compatible runner is the rollback floor. Keep the
+runner-first/Web-second window short because stale-writer rejection and the
+shared effect deadline become authoritative only in the Web phase; do not
+preserve a second wire version, retry owner, or projection watermark for rollout
+convenience.
 
 ## Current Protocol
 

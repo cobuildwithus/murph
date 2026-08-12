@@ -651,11 +651,14 @@ Last verified: 2026-08-12
   runner ownership until the real proxy-to-Web response is terminal. Web owns a
   finite effect deadline for each delivery, stops admitting destination
   replacements on deadline or request cancellation, and gives the final
-  database transaction only the remaining deadline. Runtime-to-proxy and
-  proxy-to-Web transport timeouts exceed that effect deadline by a fixed margin.
-  A response-less transport failure remains ambiguous, so invocation ownership
-  stays occupied until the absolute effect-deadline-plus-margin boundary; an
-  authoritative HTTP response settles immediately. Abort, shutdown, and normal
+  database transaction only the remaining deadline. The runtime creates one
+  absolute effect deadline and forwards it unchanged to the proxy and Web;
+  neither hop restarts the budget. Runtime-to-proxy and proxy-to-Web transport
+  timeouts add a fixed settlement margin. The proxy marks a response only after
+  receiving the actual Web response. A transport failure or unmarked
+  proxy-local response remains ambiguous, so invocation ownership stays
+  occupied until the absolute effect-deadline-plus-margin boundary; a marked
+  Web response settles immediately. Abort, shutdown, and normal
   finalization join that same owner before a successor invocation or the
   existing continuation may retry. No projection stage continues detached.
   Every delivery carries the committed source

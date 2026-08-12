@@ -7,6 +7,11 @@ Last verified: 2026-08-12
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Personal-to-group projection convergence, including its single forwarded
+deadline and authoritative Web-response ownership boundary, is specified by
+`ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
+`agent-docs/references/hosted-runtime-protocol.md`.
+
 The lower-level hosted browser assertion first-invalid boundary, single-use
 nonce persisted horizon, mixed-version cleanup safety, and opt-in PostgreSQL
 concurrency proof are jointly specified by `ARCHITECTURE.md`,

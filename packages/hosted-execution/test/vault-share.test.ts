@@ -27,6 +27,7 @@ import {
   parseHostedVaultShareDeliveryRecord,
   parseHostedVaultShareDeliverRequest as parseHostedVaultShareDeliverRequestContract,
   parseHostedVaultShareDeliverResponse,
+  parseHostedVaultShareEffectDeadlineAtEpochMs,
   parseHostedVaultShareProjectionScopeKey,
 } from "../src/vault-share.ts";
 
@@ -241,6 +242,18 @@ const VALID_REVOKE = {
 };
 
 describe("vault-share contracts", () => {
+  it("parses only an exact millisecond effect deadline header", () => {
+    expect(parseHostedVaultShareEffectDeadlineAtEpochMs("1786543200000")).toBe(
+      1_786_543_200_000,
+    );
+    expect(() => parseHostedVaultShareEffectDeadlineAtEpochMs(null)).toThrow(
+      "effect deadline header is invalid",
+    );
+    expect(() => parseHostedVaultShareEffectDeadlineAtEpochMs("178654320000")).toThrow(
+      "effect deadline header is invalid",
+    );
+  });
+
   it("requires one canonical source workspace version per replacement", () => {
     expect(parseHostedVaultShareDeliverRequestContract({
       projectionKind: "sleep-times.v0",

@@ -15,8 +15,9 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
+  HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+  parseHostedVaultShareEffectDeadlineAtEpochMs,
 } from "@murphai/hosted-execution/vault-share";
 import {
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
@@ -56,6 +57,7 @@ import {
 import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
   HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
+  HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
 } from "./headers.ts";
 
 const HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES = 256 * 1024;
@@ -133,6 +135,11 @@ export async function handleRunnerWebControlRequest(input: {
   const isVaultShareDeliveryRequest =
     policy.operation === "vault_share_deliver"
     && input.request.method === "POST";
+  const vaultShareEffectDeadlineAtEpochMs = isVaultShareDeliveryRequest
+    ? parseHostedVaultShareEffectDeadlineAtEpochMs(
+      input.request.headers.get(HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER),
+    )
+    : null;
   const isClinicalRecordsRequest = (
     policy.operation === "clinical_records_connect_link"
     || policy.operation === "clinical_records_fetch_page"
@@ -211,6 +218,16 @@ export async function handleRunnerWebControlRequest(input: {
     message: "Hosted runner web-control request forwarding.",
     phase: "wake.running",
   });
+  const forwardHeaders = createRunnerRuntimeWriteFenceForwardHeaders(
+    writeAuthority,
+    checkpointRequest?.expectedWorkspaceVersion ?? writeAuthority.workspaceVersion,
+  );
+  if (vaultShareEffectDeadlineAtEpochMs !== null) {
+    forwardHeaders.set(
+      HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+      String(vaultShareEffectDeadlineAtEpochMs),
+    );
+  }
   const response = await fetchHostedExecutionWebControlPlaneResponse({
     ...(input.environment.hostedWebAllowHttpHosts
       ? { allowHttpHosts: input.environment.hostedWebAllowHttpHosts }
@@ -222,10 +239,7 @@ export async function handleRunnerWebControlRequest(input: {
     method: input.request.method,
     path: input.url.pathname,
     search: input.url.search || null,
-    headers: createRunnerRuntimeWriteFenceForwardHeaders(
-      writeAuthority,
-      checkpointRequest?.expectedWorkspaceVersion ?? writeAuthority.workspaceVersion,
-    ),
+    headers: forwardHeaders,
     timeoutMs: policy.operation === "physical_note_send"
       ? Math.max(
         input.environment.webControlTimeoutMs,
@@ -233,9 +247,10 @@ export async function handleRunnerWebControlRequest(input: {
       )
       : isVaultShareDeliveryRequest
       ? Math.max(
-        input.environment.webControlTimeoutMs,
-        HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS
-          + HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
+        1,
+        requireHostedVaultShareSettlementDeadlineAtEpochMs(
+          vaultShareEffectDeadlineAtEpochMs,
+        ) - Date.now(),
       )
       : input.environment.webControlTimeoutMs,
   });
@@ -266,7 +281,26 @@ export async function handleRunnerWebControlRequest(input: {
     }
   }
 
-  return response;
+  if (!isVaultShareDeliveryRequest) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set(HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER, "1");
+  return new Response(response.body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
+function requireHostedVaultShareSettlementDeadlineAtEpochMs(
+  effectDeadlineAtEpochMs: number | null,
+): number {
+  if (effectDeadlineAtEpochMs === null) {
+    throw new TypeError("Hosted vault-share effect deadline is missing.");
+  }
+  return effectDeadlineAtEpochMs
+    + HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS;
 }
 
 function createRunnerRuntimeWriteFenceForwardHeaders(

@@ -62,9 +62,12 @@ finishes its current scope. The wake prevents admission of every later captured
 scope, leaving the existing dirty or recording obligation to retry them. Web
 owns a finite effect deadline for that current scope, stops admitting destination
 replacements on deadline or request cancellation, and bounds the final database
-transaction by the remaining deadline. Runtime and proxy transport deadlines
-include a fixed settlement margin; an ambiguous transport failure retains the
-invocation owner until that absolute boundary. Finalization drains that owner
+transaction by the remaining deadline. Runtime creates that one absolute
+effect deadline and carries it unchanged through the proxy to Web. Transport
+timeouts add a fixed settlement margin. Only a proxy response marked after an
+actual Web response can prove terminal settlement; an unmarked proxy response
+or transport failure retains the invocation owner until the absolute settlement
+boundary. Finalization drains that owner
 before release or retry, so projection work never overlaps a successor
 invocation. Local capture is bounded and likewise drains before its result is
 either delivered or discarded. Every captured offer names

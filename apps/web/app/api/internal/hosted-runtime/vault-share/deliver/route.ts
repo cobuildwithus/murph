@@ -1,7 +1,9 @@
 import {
   isHostedVaultShareCurrentStateProjectionKind,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
   parseHostedVaultShareDeliverRequest,
+  parseHostedVaultShareEffectDeadlineAtEpochMs,
   type HostedVaultShareDeliverResponse,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionScope,
@@ -49,15 +51,19 @@ const DELIVERED_RESPONSE: HostedVaultShareDeliverResponse = {
  * `delivered`, so the grantor runtime learns nothing beyond "an active share exists".
  */
 export const POST = withJsonError(async (request: Request) => {
-  const effectDeadlineAtEpochMs = Date.now()
-    + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS;
-  const effectTimeoutSignal = AbortSignal.timeout(
-    HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
-  );
-  const effectSignal = AbortSignal.any([request.signal, effectTimeoutSignal]);
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
   });
+  const effectDeadlineAtEpochMs = Math.min(
+    parseHostedVaultShareEffectDeadlineAtEpochMs(
+      request.headers.get(HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER),
+    ),
+    Date.now() + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  );
+  const effectTimeoutSignal = AbortSignal.timeout(
+    Math.max(0, effectDeadlineAtEpochMs - Date.now()),
+  );
+  const effectSignal = AbortSignal.any([request.signal, effectTimeoutSignal]);
   const body = parseHostedVaultShareDeliverRequest(await readOptionalJsonObject(request));
 
   const shares = await findActiveHostedVaultShares({

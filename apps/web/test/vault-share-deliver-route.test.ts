@@ -21,6 +21,8 @@ import {
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+  HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
   HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
   HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
@@ -140,7 +142,12 @@ function buildRequest(body: unknown, signal?: AbortSignal): Request {
     : body;
   return new Request("https://web.test/api/internal/hosted-runtime/vault-share/deliver", {
     body: JSON.stringify(versionedBody),
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      [HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER]: String(
+        Date.now() + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
+      ),
+    },
     method: "POST",
     ...(signal ? { signal } : {}),
   });
@@ -437,6 +444,24 @@ describe("vault-share deliver route", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "delivered" });
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("admits no destination after the shared effect deadline has elapsed", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const request = buildRequest(VALID_BODY);
+    request.headers.set(
+      HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
+      String(Date.now() - 1),
+    );
+
+    try {
+      const response = await deliverRoute.POST(request);
+
+      expect(response.status).toBe(503);
+      expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("awaits the active replacement but admits no later share after cancellation", async () => {

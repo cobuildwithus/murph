@@ -28,17 +28,19 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
-## Vault-Share Source-Version Fence Rollout
+## Vault-Share Delivery Contract Rollout
 
 Deploy the Cloudflare Worker and runner bundle first with
 `container_rollout=immediate`, and require managed-container smoke to report the
 exact new bundle fingerprint before deploying Web's required
-`sourceWorkspaceVersion` parser and conditional replacement writer. Old Web
-ignores the additive runner field, so the first phase keeps projection working;
-the source-version fence becomes authoritative only after Web deploys. Do not
-deploy Web first: an older runner omits the required version and its projection
-delivery fails closed, retaining the existing device-sync continuation until a
-compatible runner handles it.
+`sourceWorkspaceVersion` parser, absolute effect-deadline parser, and conditional
+replacement writer. The runner also marks only actual Web responses so a
+proxy-local response cannot release publication ownership early. Old Web
+ignores the additive runner request fields, so the first phase keeps projection
+working; the source-version fence and shared deadline become authoritative only
+after Web deploys. Do not deploy Web first: an older runner omits required
+delivery fields and its projection fails closed, retaining the existing
+device-sync continuation until a compatible runner handles it.
 
 After both deploys, checkpoint one device-sync update with an active share,
 confirm the replacement is readable through the ordinary group shared-data

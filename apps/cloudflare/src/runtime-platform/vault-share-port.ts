@@ -3,6 +3,7 @@ import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
+  HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
   HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverResponse,
@@ -53,9 +54,13 @@ export function createHostedWebVaultSharePort(input: {
         NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]
       >[0],
     ) {
-      const ambiguousSettlementDeadlineAtEpochMs = Date.now()
-        + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS
+      const effectDeadlineAtEpochMs = Date.now()
+        + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS;
+      const settlementDeadlineAtEpochMs = effectDeadlineAtEpochMs
         + HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS;
+      const headers = new Headers({
+        [HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER]: String(effectDeadlineAtEpochMs),
+      });
       let payload: unknown;
       try {
         payload = await fetchHostedWebControlPlaneJson({
@@ -63,18 +68,21 @@ export function createHostedWebVaultSharePort(input: {
           boundUserId: input.boundUserId,
           description: "Hosted vault share delivery",
           fetchImpl: input.fetchImpl,
+          headers,
           path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
-          timeoutMs: Math.max(
-            input.timeoutMs,
-            HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS
-              + HOSTED_VAULT_SHARE_DELIVERY_TRANSPORT_MARGIN_MS,
-          ),
+          timeoutMs: Math.max(1, settlementDeadlineAtEpochMs - Date.now()),
           transport: input.transport,
         });
       } catch (error) {
-        if (!(error instanceof HostedWebControlPlaneResponseError)) {
+        if (
+          !(error instanceof HostedWebControlPlaneResponseError)
+          || (
+            input.transport.mode === "proxy"
+            && !error.forwardedFromWeb
+          )
+        ) {
           await waitForHostedVaultShareAmbiguousDeliverySettlement(
-            ambiguousSettlementDeadlineAtEpochMs,
+            settlementDeadlineAtEpochMs,
           );
         }
         throw error;

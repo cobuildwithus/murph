@@ -67,7 +67,9 @@ Updated: 2026-08-12
    restored vault, keep delivery owned until the real Web response is terminal,
    admit foreground conversation without starting a second projection, stop
    before the next captured scope, bound the current Web effect and its
-   transport-settlement margin, join the request before retry,
+   transport-settlement margin, carry the same absolute deadline across every
+   hop, distinguish actual Web responses from proxy-local responses, join the
+   request before retry,
    carry the committed source workspace version bound to those bytes, and
    serialize the final Web replacement against that existing row; stale work
    becomes a no-op.
@@ -152,6 +154,16 @@ Updated: 2026-08-12
   cancellation after one destination begins, deadline-bounded transaction
   admission, three-scope ordinary preemption with a second conversation, and
   system-mailbox dirty-owner retry of undispatched scopes.
-- Remaining proof: corrected exact-head preliminary specialists, ReviewGPT
-  round 6 PASS, required GitHub Actions, and current-base merge-tree
+- ReviewGPT round 6 challenged whether a proxy-local HTTP response could be
+  mistaken for terminal Web settlement and whether relative hop deadlines could
+  outlive the intended effect boundary. Production-shaped proof showed the
+  actual second-hop rejection is rethrown rather than converted to HTTP 500, but
+  the correction still closes the broader classification gap: only a response
+  marked after the actual Web hop settles immediately, while unmarked responses
+  retain ownership. One runtime-created absolute effect deadline now crosses
+  both hops unchanged, and focused proof covers actual Web 503, propagated
+  second-hop loss, proxy-local 500, unchanged deadline forwarding, and expired
+  Web admission.
+- Remaining proof: ReviewGPT round 7 PASS, required GitHub Actions, and
+  current-base merge-tree
   verification.
