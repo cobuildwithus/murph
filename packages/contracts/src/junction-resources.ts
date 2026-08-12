@@ -5,8 +5,8 @@ export const JUNCTION_WEARABLE_TAG_EXTERNAL_REF_FACET = "wearable-tags" as const
 // device-syncd and the Junction importer. Keep the list in the lower contracts
 // package so boot-time config readers do not import the turn-scoped importer
 // graph just to merge required defaults.
-// Keep the established default order stable. Opt-ins stay explicit so adding
-// an importer path never widens existing members' collection implicitly.
+// Keep the established default order stable. Every supported canonical
+// timeseries resource is enabled when runtime configuration omits the list.
 export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "blood_oxygen",
   "stress_level",
@@ -25,15 +25,16 @@ export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "glucose",
   "blood_pressure",
   "note",
-] as const);
-
-export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([
   "steps",
   "distance",
   "calories_active",
   "heartrate",
   "weight",
 ] as const);
+
+// Retain the public export for consumers that distinguish defaults from
+// opt-ins. There are currently no supported opt-in-only resources.
+export const JUNCTION_OPT_IN_TIMESERIES_RESOURCES = Object.freeze([] as const);
 
 export const JUNCTION_KNOWN_TIMESERIES_RESOURCES = Object.freeze([
   ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,

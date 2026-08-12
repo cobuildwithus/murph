@@ -1541,13 +1541,13 @@ interface JunctionFeatureTimeseriesDescriptor {
   valuePaths: readonly string[];
 }
 
-// Every daily-aggregate timeseries resource must appear here. Defaults keep
-// their established bounded mapping; opt-in `steps` and `distance` use the
-// scheduler's complete UTC-day owner. Paired/sparse and feature-shaped
-// resources use dedicated handlers below. Raw evidence stays one compact
-// ~430 B `junction.timeseries_daily_aggregate.v1` artifact per day per
-// resource (~160 KB/member-year/resource) no matter how dense the provider
-// stream is: glucose CGM streams (288 samples/day, ~10-15 MB/yr raw) reduce
+// Every daily-aggregate timeseries resource must appear here. `steps` and
+// `distance` use the scheduler's complete UTC-day owner; the other daily
+// resources keep their established bounded mapping. Paired/sparse and
+// feature-shaped resources use dedicated handlers below. Raw evidence stays
+// one compact ~430 B `junction.timeseries_daily_aggregate.v1` artifact per
+// day per resource (~160 KB/member-year/resource) no matter how dense the
+// provider stream is: glucose CGM streams (288 samples/day, ~10-15 MB/yr raw) reduce
 // to the same one artifact per day. Resource classifications and payload
 // field names are verified against docs.junction.com
 // (wearables/providers/resources; api-reference/data/timeseries/*): hrv,
@@ -2328,7 +2328,7 @@ function legacyJunctionDailyTimeseriesAggregateExternalRefs(
   );
 }
 
-// Dense opt-in streams never retain provider rows. They collapse into one
+// Dense timeseries streams never retain provider rows. They collapse into one
 // provider-partitioned feature artifact per UTC hour. The import owner commits
 // closed UTC-day snapshots, so an hour is the broadest feature bucket whose
 // completeness is provable without persisted cross-window aggregation state.
@@ -2761,7 +2761,7 @@ function pushJunctionBloodPressureReadings(
   }
 }
 
-// Sparse opt-in weight readings use the same canonical measurement path as
+// Sparse weight readings use the same canonical measurement path as
 // other queryable body measurements. Each accepted reading retains only one
 // compact evidence record and a replay-stable external reference.
 function pushJunctionWeightReadings(

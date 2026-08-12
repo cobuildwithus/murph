@@ -4,6 +4,7 @@ import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from
 import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  normalizeJunctionResourceName,
 } from "@murphai/importers/device-providers/junction-resources";
 import {
   normalizeJunctionSnapshot,
@@ -471,9 +472,11 @@ test("Junction provider defaults fetch every default summary resource", async ()
   assert.equal(importedSnapshots.length, 1);
 });
 
-test("Junction omitted timeseries config defaults to compact resources only", async () => {
+test("Junction omitted timeseries config has a sequential 14-day maximum fanout", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
+  let activeProviderCalls = 0;
+  let maxActiveProviderCalls = 0;
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",
     clientUserIdSecret: "junction-client-user-id-secret",
@@ -481,98 +484,137 @@ test("Junction omitted timeseries config defaults to compact resources only", as
     region: "us",
     summaryResources: ["activity"],
     fetchImpl: async (input) => {
-      const url = readUrl(input);
-      requests.push(url);
+      activeProviderCalls += 1;
+      maxActiveProviderCalls = Math.max(maxActiveProviderCalls, activeProviderCalls);
+      try {
+        // A microtask boundary makes accidental parallel fetches observable:
+        // every concurrently started request increments before any completes.
+        await Promise.resolve();
+        const url = readUrl(input);
+        requests.push(url);
 
-      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
-        return createJsonResponse({
-          providers: [
-            {
-              id: "provider-garmin-1",
-              slug: "garmin",
-              name: "Garmin",
-              status: "connected",
-              resource_availability: Object.fromEntries([
-                "activity",
-                ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-                "heartrate",
-                "steps",
-                "distance",
-                "calories_active",
-                "weight",
-              ].map((resource) => [resource, true])),
-            },
-          ],
-        });
+        if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+          return createJsonResponse({
+            providers: [
+              {
+                id: "provider-garmin-1",
+                slug: "garmin",
+                name: "Garmin",
+                status: "connected",
+                resource_availability: Object.fromEntries([
+                  "activity",
+                  ...JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+                ].map((resource) => [resource, true])),
+              },
+            ],
+          });
+        }
+
+        if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+          return createJsonResponse({ data: [] });
+        }
+
+        const timeseriesUrl = new URL(url);
+        const timeseriesApiResource = timeseriesUrl.pathname.match(
+          /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+        )?.[1];
+        const timeseriesResource = normalizeJunctionResourceName(timeseriesApiResource);
+        if (timeseriesResource) {
+          assert.ok(
+            (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
+            `Unexpected default timeseries resource: ${timeseriesResource}`,
+          );
+          const hasRepresentativeRecord = timeseriesResource === "blood_oxygen"
+            && timeseriesUrl.searchParams.get("start_date") === "2026-04-02";
+          return createJsonResponse({
+            groups: hasRepresentativeRecord
+              ? {
+                  garmin: [{
+                    data: [{
+                      timestamp: "2026-04-02T12:00:00.000Z",
+                      unit: "%",
+                      value: 97,
+                    }],
+                    source: { provider: "garmin", type: "watch" },
+                  }],
+                }
+              : {},
+          });
+        }
+
+        throw new Error(`Unexpected request: ${url}`);
+      } finally {
+        activeProviderCalls -= 1;
       }
-
-      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
-        return createJsonResponse({ data: [] });
-      }
-
-      const timeseriesResource = new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1];
-      if (timeseriesResource) {
-        assert.ok(
-          (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(timeseriesResource),
-          `Unexpected default timeseries resource: ${timeseriesResource}`,
-        );
-        return createJsonResponse({
-          groups: {
-            garmin: [{
-              data: [{
-                timestamp: "2026-04-02T12:00:00.000Z",
-                unit: timeseriesResource === "blood_oxygen" ? "%" : "score",
-                value: timeseriesResource === "blood_oxygen" ? 97 : 24,
-              }],
-              source: { provider: "garmin", type: "watch" },
-            }],
-          },
-        });
-      }
-
-      throw new Error(`Unexpected request: ${url}`);
     },
   });
 
   await executeJunctionJob(
     provider,
     createJunctionJobContext({
-      account: createAccount({
-        lastSyncCompletedAt: "2026-04-03T12:00:00.000Z",
-      }),
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot);
         return { imported: true };
       },
     }),
     createJob("backfill", {
-      windowStart: "2026-04-02T00:00:00.000Z",
+      // The summary backfill is longer, but dense timeseries stay capped at
+      // the provider's owning 14 closed UTC days.
+      windowStart: "2026-03-01T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
-  const requestedTimeseriesResources = requests
-    .map((url) => new URL(url).pathname.match(/^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u)?.[1])
-    .filter((resource): resource is string => Boolean(resource));
+  const requestedTimeseries = requests.flatMap((url) => {
+    const parsedUrl = new URL(url);
+    const apiResource = parsedUrl.pathname.match(
+      /^\/v2\/timeseries\/junction-user-1\/([^/]+)\/grouped$/u,
+    )?.[1];
+    const resource = normalizeJunctionResourceName(apiResource);
+    return resource
+      ? [{
+          endDate: parsedUrl.searchParams.get("end_date"),
+          resource,
+          startDate: parsedUrl.searchParams.get("start_date"),
+        }]
+      : [];
+  });
+  const requestedTimeseriesResources = requestedTimeseries.map(({ resource }) => resource);
 
+  const requestsPerResource = new Map<string, number>();
+  for (const resource of requestedTimeseriesResources) {
+    requestsPerResource.set(resource, (requestsPerResource.get(resource) ?? 0) + 1);
+  }
+
+  assert.equal(JUNCTION_DEFAULT_TIMESERIES_RESOURCES.length, 22);
+  assert.equal(requestedTimeseriesResources.length, 308);
+  assert.equal(
+    new Set(requestedTimeseries.map(({ resource, startDate }) => `${resource}:${startDate}`)).size,
+    308,
+  );
   assert.deepEqual(
-    [...new Set(requestedTimeseriesResources)].sort(),
-    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
+    [...new Set(requestedTimeseries.map(({ startDate }) => startDate))].sort(),
+    Array.from({ length: 14 }, (_, index) => {
+      const day = new Date(Date.UTC(2026, 2, 20 + index));
+      return day.toISOString().slice(0, 10);
+    }),
   );
   assert.equal(
-    requests.every((url) =>
-      !url.includes("heartrate") &&
-      !url.includes("steps") &&
-      !url.includes("distance") &&
-      !url.includes("calories_active") &&
-      !url.includes("weight")
-    ),
+    requestedTimeseries.every(({ endDate, startDate }) => endDate === startDate),
     true,
   );
+  assert.deepEqual(
+    [...requestsPerResource.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]
+      .map((resource) => [resource, 14] as const)
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+  assert.equal(requests.length, 310);
+  assert.equal(maxActiveProviderCalls, 1);
   assert.equal(importedSnapshots.length, 1);
 });
 
-test("Junction programmatic timeseries opt-ins fetch exactly the requested resources", async () => {
+test("Junction programmatic timeseries overrides fetch exactly the requested resources", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -652,16 +694,11 @@ test("Junction programmatic timeseries opt-ins fetch exactly the requested resou
     .filter((resource): resource is string => Boolean(resource));
 
   assert.deepEqual([...new Set(requestedTimeseriesResources)].sort(), ["heartrate", "steps"]);
-  assert.equal(
-    requestedTimeseriesResources.some((resource) =>
-      (JUNCTION_DEFAULT_TIMESERIES_RESOURCES as readonly string[]).includes(resource)
-    ),
-    false,
-  );
+  assert.equal(requestedTimeseriesResources.length, 2);
   assert.equal(importedSnapshots.length, 1);
 });
 
-test("Junction dense opt-in resource jobs import only complete closed UTC days", async () => {
+test("Junction dense timeseries resource jobs import only complete closed UTC days", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionDeviceSyncProvider({
@@ -738,7 +775,7 @@ test("Junction dense opt-in resource jobs import only complete closed UTC days",
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
 });
 
-test("Junction daily opt-ins preserve floating days through fetch and import off UTC", async () => {
+test("Junction daily aggregate resources preserve floating days through fetch and import off UTC", async () => {
   const originalTimeZone = process.env.TZ;
   process.env.TZ = "America/Los_Angeles";
 
@@ -7636,7 +7673,7 @@ test("Junction skips same closed-day timeseries after a completed reconcile", as
   assert.equal(requests.some((url) => url.includes("/v2/timeseries/")), false);
 });
 
-test("Junction code-owned compact defaults admit direct timeseries resource jobs", async () => {
+test("Junction code-owned defaults admit direct timeseries resource jobs", async () => {
   const requests: string[] = [];
   const provider = createJunctionDeviceSyncProvider({
     apiKey: "sk_us_test_123",

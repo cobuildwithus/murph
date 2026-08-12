@@ -971,7 +971,7 @@ test("local Junction workers exclude a disconnected source from production-norma
   }
 });
 
-test("Junction resource success preserves the full-reconcile watermark and closed-day opt-ins", async () => {
+test("Junction resource success preserves the full-reconcile watermark and closed-day timeseries", async () => {
   const now = new Date("2026-04-23T00:05:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-resource-watermark");
   const requests: string[] = [];
@@ -1208,7 +1208,7 @@ test("Junction yielded full-sync continuations advance the watermark only at ter
   }
 });
 
-test("Junction stale metadata backfill cannot suppress the current closed-day opt-ins", async () => {
+test("Junction stale metadata backfill cannot suppress the current closed-day timeseries", async () => {
   const now = new Date("2026-04-04T00:15:00.000Z");
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-stale-backfill-watermark");
   const requests: string[] = [];
