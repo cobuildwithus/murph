@@ -906,7 +906,7 @@ export function registerWorkoutCommands(
         .min(1)
         .max(80)
         .optional()
-        .describe('Optional source hint such as strong or hevy.'),
+        .describe('Strong or Hevy dialect; required when the headers are shared by both apps.'),
       delimiter: z
         .string()
         .min(1)
@@ -946,7 +946,7 @@ export function registerWorkoutCommands(
         .min(1)
         .max(80)
         .optional()
-        .describe('Optional source hint such as strong or hevy.'),
+        .describe('Strong or Hevy dialect; required when the headers are shared by both apps.'),
       delimiter: z
         .string()
         .min(1)

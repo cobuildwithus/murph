@@ -123,6 +123,10 @@ export, including bodyweight, assistance, and added weight. Never infer units
 from locale, exercise names, or value size. Rerun inspection with the confirmed
 `--weight-unit lb|kg` and/or `--distance-unit m|km|mi` options.
 
+If inspection returns `detectedSource: null` for headers shared by Strong and
+Hevy, ask which app produced the export and rerun with the matching
+`--source strong|hevy`. Never guess Strong from shared workout headers.
+
 Do not run the structured write while any unit requirement or unsafe skipped
 row remains. Claim completion only from the durable import result and its
 aggregate counts. `lookupIds` and `ledgerFiles` are intentionally capped, so use
@@ -132,7 +136,8 @@ duplicate raw copy. These are historical snapshots, not continuous syncs.
 If the member says a previously confirmed unit was wrong, rerun the exact
 original CSV with the corrected unit option and `--correct-units`. Use that
 flag only after explicit confirmation; it supersedes the same imported workout
-identities and requires the exact prior raw evidence.
+identities, requires the exact prior raw evidence, and preserves the original
+workout timezone and other non-unit fields.
 
 ## Strong
 

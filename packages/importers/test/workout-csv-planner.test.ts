@@ -29,6 +29,7 @@ describe("planWorkoutCsvImport", () => {
         "2026-03-12 07:00:00,Upper,1h 15m,Row,F,70,0,0,0,,Session note,10",
       ].join("\n"),
       timeZone: "America/Los_Angeles",
+      source: "strong",
       weightUnit: "lb",
     });
 
@@ -71,6 +72,26 @@ describe("planWorkoutCsvImport", () => {
     assert.deepEqual(
       strong.sessions[0]?.workout.exercises[0]?.sets.map((set) => [set.order, set.type]),
       [[1, "normal"], [2, "normal"]],
+    );
+  });
+
+  test("requires a source choice for headers shared by Strong and Hevy", () => {
+    const text = [
+      "Workout Name,Date,Start Time,Exercise Name,Set Order,Set Type,Exercise Notes,Reps",
+      "Upper,2026-04-08,10:00:00,Press,2,warmup,Controlled,8",
+    ].join("\n");
+
+    const plan = planWorkoutCsvImport({ text, timeZone: "UTC" });
+
+    assert.equal(plan.detectedSource, null);
+    assert.equal(plan.importable, false);
+    assert.equal(plan.skippedRowCount, 0);
+    assert.equal(plan.sessions.length, 1);
+    assert.equal(
+      plan.warnings.includes(
+        "The CSV headers are shared by Strong and Hevy; pass --source strong or --source hevy before importing.",
+      ),
+      true,
     );
   });
 
@@ -237,6 +258,7 @@ describe("planWorkoutCsvImport", () => {
         "Morning,2026-03-12,07:00:00,08:00:00,60,Press,2,40,kg,10,Controlled,Session context,A",
       ].join("\n"),
       timeZone: "America/Los_Angeles",
+      source: "strong",
     });
 
     assert.equal(plan.sessions[0]?.durationMinutes, 60);
@@ -257,6 +279,7 @@ describe("planWorkoutCsvImport", () => {
           `Morning,2026-03-12,07:00:00,30,Run,1,${fixture.value},600`,
         ].join("\n"),
         timeZone: "UTC",
+        source: "strong",
       });
 
       assert.equal(plan.importable, true);

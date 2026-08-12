@@ -530,6 +530,8 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
         csvPath,
         '--vault',
         vaultRoot,
+        '--source',
+        'strong',
       ])
     ).envelope,
   )
@@ -555,6 +557,8 @@ test('workout import inspect and raw-only csv import expose the raw batch surfac
         csvPath,
         '--vault',
         vaultRoot,
+        '--source',
+        'strong',
         '--store-raw-only',
       ])
     ).envelope,

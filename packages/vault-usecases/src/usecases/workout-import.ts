@@ -13,6 +13,7 @@ import {
   type EventRecord,
   type JsonObject,
   type RawImportManifest,
+  type WorkoutSession,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
@@ -118,6 +119,14 @@ interface ExactRawWorkoutFile {
   rawFile: string
   weightUnit?: WorkoutCsvWeightUnit | null
   distanceUnit?: WorkoutCsvDistanceUnit | null
+  timeZone?: string
+}
+
+interface WorkoutExternalIdentity {
+  system: string
+  resourceType: string
+  resourceId: string
+  facet?: string
 }
 
 async function loadWorkoutImportCoreRuntime(): Promise<WorkoutImportCoreRuntime> {
@@ -152,10 +161,11 @@ function sanitizeFileName(fileName: string): string {
 function buildWorkoutEventDecisions(
   plan: WorkoutCsvImportPlan,
   rawFile: string,
-  externalResourceIds?: readonly string[],
+  existingExternalRefs?: readonly WorkoutExternalIdentity[],
   mappingRevision = WORKOUT_CSV_MAPPING_REVISION,
 ): JsonObject[] {
   return plan.sessions.map((session, index) => {
+    const existingExternalRef = existingExternalRefs?.[index]
     const draft = buildStructuredWorkoutActivitySessionDraft({
       payload: compactObject({
         title: session.title,
@@ -168,10 +178,11 @@ function buildWorkoutEventDecisions(
         note: session.note,
         rawRefs: [rawFile],
         externalRef: {
-          system: sanitizePathSegment(plan.source, DEFAULT_SOURCE),
-          resourceType: 'workout-session',
-          resourceId: externalResourceIds?.[index] ?? session.sourceWorkoutId,
+          system: existingExternalRef?.system ?? sanitizePathSegment(plan.source, DEFAULT_SOURCE),
+          resourceType: existingExternalRef?.resourceType ?? 'workout-session',
+          resourceId: existingExternalRef?.resourceId ?? session.sourceWorkoutId,
           version: mappingRevision,
+          ...(existingExternalRef?.facet ? { facet: existingExternalRef.facet } : {}),
         },
         workout: session.workout,
       }) as JsonObject,
@@ -291,7 +302,12 @@ async function loadWorkoutCsvPlan(input: {
   delimiter?: string
   weightUnit?: WorkoutCsvWeightUnit
   distanceUnit?: WorkoutCsvDistanceUnit
-}): Promise<{ text: string, plan: WorkoutCsvImportPlan, core: WorkoutImportCoreRuntime }> {
+}): Promise<{
+  text: string
+  plan: WorkoutCsvImportPlan
+  core: WorkoutImportCoreRuntime
+  importers: WorkoutImportersRuntime
+}> {
   const [text, core, importers] = await Promise.all([
     readFile(input.file, 'utf8'),
     loadWorkoutImportCoreRuntime(),
@@ -306,7 +322,7 @@ async function loadWorkoutCsvPlan(input: {
     weightUnit: input.weightUnit,
     distanceUnit: input.distanceUnit,
   })
-  return { text, plan, core }
+  return { text, plan, core, importers }
 }
 
 function assertStructuredPlanImportable(plan: WorkoutCsvImportPlan): void {
@@ -347,11 +363,9 @@ async function findExactRawWorkoutFiles(input: {
   core: WorkoutImportCoreRuntime
   vault: string
   text: string
-  source: string
 }): Promise<ExactRawWorkoutFile[]> {
   const expectedBytes = new TextEncoder().encode(input.text).byteLength
   const expectedHash = createHash('sha256').update(input.text).digest('hex')
-  const safeSource = sanitizePathSegment(input.source, DEFAULT_SOURCE)
   const manifestFiles = (await input.core.walkVaultFiles(
     input.vault,
     'raw/workouts',
@@ -364,10 +378,7 @@ async function findExactRawWorkoutFiles(input: {
     const manifest = input.core.parseRawImportManifest(
       JSON.parse(await readFile(manifestPath, 'utf8')),
     )
-    if (
-      manifest.importKind !== 'workout_batch'
-      || sanitizePathSegment(manifest.source ?? '', DEFAULT_SOURCE) !== safeSource
-    ) {
+    if (manifest.importKind !== 'workout_batch') {
       continue
     }
     const artifacts = manifest.artifacts.filter((artifact) =>
@@ -402,6 +413,7 @@ async function findExactRawWorkoutFiles(input: {
       if (matches) {
         const weightUnit = manifest.provenance.weightUnit
         const distanceUnit = manifest.provenance.distanceUnit
+        const timeZone = manifest.provenance.timeZone
         candidates.set(artifact.relativePath, {
           rawFile: artifact.relativePath,
           ...(weightUnit === null || weightUnit === 'lb' || weightUnit === 'kg'
@@ -410,6 +422,7 @@ async function findExactRawWorkoutFiles(input: {
           ...(distanceUnit === null || distanceUnit === 'm' || distanceUnit === 'km' || distanceUnit === 'mi'
             ? { distanceUnit }
             : {}),
+          ...(typeof timeZone === 'string' ? { timeZone } : {}),
         })
       }
     }
@@ -417,11 +430,13 @@ async function findExactRawWorkoutFiles(input: {
   return [...candidates.values()].sort((left, right) => left.rawFile.localeCompare(right.rawFile))
 }
 
-function resourceIdsFromAttachedEvents(
+function mappingFromAttachedEvents(
   plan: WorkoutCsvImportPlan,
   records: readonly EventRecord[],
 ): {
-  resourceIds: string[]
+  externalRefs: WorkoutExternalIdentity[]
+  records: EventRecord[]
+  canonicalSourceMatches: boolean
   currentMappingReplay: boolean
   latestSourceRevision?: string
 } | undefined {
@@ -442,7 +457,7 @@ function resourceIdsFromAttachedEvents(
     titleRecords.push(record)
     recordsByTitle.set(record.title, titleRecords)
   }
-  const resourceIds = new Array<string>(plan.sessions.length)
+  const alignedRecords = new Array<EventRecord>(plan.sessions.length)
   const sessionIndexesByTitle = new Map<string, number[]>()
   plan.sessions.forEach((session, index) => {
     const indexes = sessionIndexesByTitle.get(session.title) ?? []
@@ -459,19 +474,33 @@ function resourceIdsFromAttachedEvents(
     titleRecords.sort((left, right) =>
       left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id))
     sessionIndexes.forEach((sessionIndex, titleIndex) => {
-      resourceIds[sessionIndex] = titleRecords[titleIndex]!.externalRef!.resourceId
+      alignedRecords[sessionIndex] = titleRecords[titleIndex]!
     })
   }
-  if (new Set(resourceIds).size !== resourceIds.length) {
+  if (new Set(alignedRecords.map((record) => record.id)).size !== alignedRecords.length) {
     return undefined
   }
-  const revisions = records
+  const externalRefs = alignedRecords.map((record): WorkoutExternalIdentity => {
+    const externalRef = record.externalRef!
+    return {
+      system: externalRef.system,
+      resourceType: externalRef.resourceType,
+      resourceId: externalRef.resourceId,
+      ...(externalRef.facet ? { facet: externalRef.facet } : {}),
+    }
+  })
+  const revisions = alignedRecords
     .map((record) => record.externalRef?.version)
     .filter((revision): revision is string => typeof revision === 'string')
     .sort()
   return {
-    resourceIds,
-    currentMappingReplay: records.every(
+    externalRefs,
+    records: alignedRecords,
+    canonicalSourceMatches: alignedRecords.every(
+      (record) => record.kind === 'activity_session'
+        && record.workout?.sourceApp === plan.source,
+    ),
+    currentMappingReplay: alignedRecords.every(
       (record) => record.externalRef?.version === WORKOUT_CSV_MAPPING_REVISION,
     ),
     ...(revisions.at(-1) ? { latestSourceRevision: revisions.at(-1) } : {}),
@@ -485,29 +514,40 @@ async function resolveExistingWorkoutEvidence(input: {
   plan: WorkoutCsvImportPlan
 }): Promise<{
   rawFile?: string
-  resourceIds: string[]
+  externalRefs?: WorkoutExternalIdentity[]
+  records?: EventRecord[]
+  canonicalSourceMatches?: boolean
   currentMappingReplay?: boolean
   currentUnitsMatch?: boolean
   latestSourceRevision?: string
+  originalTimeZone?: string
 }> {
   const exactRawFiles = await findExactRawWorkoutFiles({
     core: input.core,
     vault: input.vault,
     text: input.text,
-    source: input.plan.source,
   })
   if (exactRawFiles.length === 0) {
-    return { resourceIds: input.plan.sessions.map((session) => session.sourceWorkoutId) }
+    return {}
   }
 
   const eventsByRawFile = await input.core.findEventsByRawRefs({
     vaultRoot: input.vault,
     rawRefs: exactRawFiles.map((candidate) => candidate.rawFile),
-    system: sanitizePathSegment(input.plan.source, DEFAULT_SOURCE),
     resourceType: 'workout-session',
   })
   let rawOnlyFile: string | undefined
   let foundAmbiguousCanonicalEvidence = false
+  let selectedEvidence: {
+    rawFile: string
+    externalRefs: WorkoutExternalIdentity[]
+    records: EventRecord[]
+    canonicalSourceMatches: boolean
+    currentMappingReplay: boolean
+    currentUnitsMatch: boolean
+    latestSourceRevision?: string
+    originalTimeZone?: string
+  } | undefined
   for (const [index, candidate] of exactRawFiles.entries()) {
     const rawFile = candidate.rawFile
     const records = eventsByRawFile[index] ?? []
@@ -515,9 +555,14 @@ async function resolveExistingWorkoutEvidence(input: {
       rawOnlyFile = rawOnlyFile ?? rawFile
       continue
     }
-    const mapping = resourceIdsFromAttachedEvents(input.plan, records)
+    const mapping = mappingFromAttachedEvents(input.plan, records)
     if (mapping) {
-      return {
+      const recordTimeZones = new Set(mapping.records
+        .map((record) => record.timeZone)
+        .filter((timeZone): timeZone is string => typeof timeZone === 'string'))
+      const recordTimeZone = recordTimeZones.size === 1 ? [...recordTimeZones][0] : undefined
+      const originalTimeZone = recordTimeZone ?? candidate.timeZone
+      const evidence = {
         rawFile,
         ...mapping,
         currentUnitsMatch:
@@ -526,7 +571,18 @@ async function resolveExistingWorkoutEvidence(input: {
             candidate.weightUnit === (input.plan.weightUnit ?? null)
             && candidate.distanceUnit === (input.plan.distanceUnit ?? null)
           ),
+        ...(originalTimeZone ? { originalTimeZone } : {}),
       }
+      if (
+        selectedEvidence
+        && selectedEvidence.records.map((record) => record.id).join('\0')
+          !== evidence.records.map((record) => record.id).join('\0')
+      ) {
+        foundAmbiguousCanonicalEvidence = true
+      } else {
+        selectedEvidence = selectedEvidence ?? evidence
+      }
+      continue
     }
     foundAmbiguousCanonicalEvidence = true
   }
@@ -537,9 +593,55 @@ async function resolveExistingWorkoutEvidence(input: {
       'Exact prior workout evidence has an ambiguous canonical event mapping; nothing was imported.',
     )
   }
+  if (selectedEvidence) {
+    return selectedEvidence
+  }
   return {
     ...(rawOnlyFile ? { rawFile: rawOnlyFile } : {}),
-    resourceIds: input.plan.sessions.map((session) => session.sourceWorkoutId),
+  }
+}
+
+function assertUnitCorrectionPreservesNonUnitFields(
+  plan: WorkoutCsvImportPlan,
+  records: readonly EventRecord[],
+): void {
+  const nonUnitExerciseFields = (workout: WorkoutSession | undefined) =>
+    workout?.exercises.map((exercise) => ({
+      name: exercise.name,
+      sourceExerciseId: exercise.sourceExerciseId,
+      order: exercise.order,
+      groupId: exercise.groupId,
+      mode: exercise.mode,
+      note: exercise.note,
+      sets: exercise.sets.map((set) => ({
+        order: set.order,
+        type: set.type,
+        note: set.note,
+        reps: set.reps,
+        durationSeconds: set.durationSeconds,
+        rpe: set.rpe,
+      })),
+    }))
+  const mismatch = plan.sessions.some((session, index) => {
+    const record = records[index]
+    if (!record || record.kind !== 'activity_session') return true
+    return record.occurredAt !== session.occurredAt
+      || record.timeZone !== plan.timeZone
+      || record.title !== session.title
+      || record.note !== session.note
+      || record.durationMinutes !== session.durationMinutes
+      || record.workout?.startedAt !== session.workout.startedAt
+      || record.workout?.endedAt !== session.workout.endedAt
+      || record.workout?.routineName !== session.workout.routineName
+      || record.workout?.sessionNote !== session.workout.sessionNote
+      || JSON.stringify(nonUnitExerciseFields(record.workout))
+        !== JSON.stringify(nonUnitExerciseFields(session.workout))
+  })
+  if (mismatch) {
+    throw new VaultCliError(
+      'conflict',
+      'Exact prior workout evidence cannot preserve non-unit workout fields during correction; nothing was imported.',
+    )
   }
 }
 
@@ -594,7 +696,9 @@ export async function importWorkoutCsv(input: {
   storeRawOnly?: boolean
   correctUnits?: boolean
 }) {
-  const { text, plan, core } = await loadWorkoutCsvPlan(input)
+  const loaded = await loadWorkoutCsvPlan(input)
+  const { text, core, importers } = loaded
+  let { plan } = loaded
   if (input.correctUnits && input.storeRawOnly) {
     throw new VaultCliError(
       'invalid_option',
@@ -660,6 +764,8 @@ export async function importWorkoutCsv(input: {
     text,
     plan,
   })
+  const sourceDialectCorrection = existingEvidence.records !== undefined
+    && existingEvidence.canonicalSourceMatches === false
   if (
     existingEvidence.currentMappingReplay
     && !existingEvidence.currentUnitsMatch
@@ -670,7 +776,11 @@ export async function importWorkoutCsv(input: {
       'This exact workout CSV was imported with different unit choices. Confirm the correction and rerun with --correct-units.',
     )
   }
-  if (existingEvidence.currentMappingReplay && !input.correctUnits) {
+  if (
+    existingEvidence.currentMappingReplay
+    && !input.correctUnits
+    && !sourceDialectCorrection
+  ) {
     return {
       vault: input.vault,
       sourceFile: input.file,
@@ -698,16 +808,50 @@ export async function importWorkoutCsv(input: {
       warnings: plan.warnings,
     }
   }
-  if (input.correctUnits && !existingEvidence.rawFile) {
+  const requiresEvidenceCorrection = input.correctUnits || sourceDialectCorrection
+  if (requiresEvidenceCorrection && !existingEvidence.rawFile) {
     throw new VaultCliError(
       'invalid_option',
-      'Unit correction requires an exact previously imported workout CSV; nothing was imported.',
+      'Workout correction requires an exact previously imported workout CSV; nothing was imported.',
     )
+  }
+  let existingExternalRefs = existingEvidence.externalRefs
+  if (requiresEvidenceCorrection) {
+    if (!existingEvidence.originalTimeZone || !existingEvidence.records) {
+      throw new VaultCliError(
+        'conflict',
+        'Exact prior workout evidence does not prove its original timezone; nothing was imported.',
+      )
+    }
+    const correctionPlan = importers.planWorkoutCsvImport({
+      text,
+      timeZone: existingEvidence.originalTimeZone,
+      source: input.source,
+      delimiter: input.delimiter,
+      weightUnit: input.weightUnit,
+      distanceUnit: input.distanceUnit,
+    })
+    assertStructuredPlanImportable(correctionPlan)
+    const correctedMapping = mappingFromAttachedEvents(
+      correctionPlan,
+      existingEvidence.records,
+    )
+    if (!correctedMapping) {
+      throw new VaultCliError(
+        'conflict',
+        'Exact prior workout evidence has an ambiguous correction mapping; nothing was imported.',
+      )
+    }
+    if (input.correctUnits) {
+      assertUnitCorrectionPreservesNonUnitFields(correctionPlan, correctedMapping.records)
+    }
+    plan = correctionPlan
+    existingExternalRefs = correctedMapping.externalRefs
   }
   const priorRevisionTimestamp = existingEvidence.latestSourceRevision
     ? Date.parse(existingEvidence.latestSourceRevision)
     : Number.NaN
-  const mappingRevision = input.correctUnits
+  const mappingRevision = requiresEvidenceCorrection
     ? new Date(Math.max(
         Date.now(),
         Date.parse(WORKOUT_CSV_MAPPING_REVISION) + 1,
@@ -727,7 +871,7 @@ export async function importWorkoutCsv(input: {
   const decisions = buildWorkoutEventDecisions(
     plan,
     rawFile,
-    existingEvidence.resourceIds,
+    existingExternalRefs,
     mappingRevision,
   )
   let preview: WorkoutImportBatchResult

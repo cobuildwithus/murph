@@ -175,6 +175,15 @@ describe('assistant manual provider export guidance', () => {
     expect(normalizedReference).toContain(
       'the corrected unit option and `--correct-units`',
     )
+    expect(normalizedReference).toContain(
+      'If inspection returns `detectedSource: null` for headers shared by Strong and Hevy',
+    )
+    expect(normalizedReference).toContain(
+      'Never guess Strong from shared workout headers',
+    )
+    expect(normalizedReference).toContain(
+      'preserves the original workout timezone and other non-unit fields',
+    )
 
     expect(reference).toContain('`Export Workouts`')
     expect(reference).toContain('`Export Measurements`')

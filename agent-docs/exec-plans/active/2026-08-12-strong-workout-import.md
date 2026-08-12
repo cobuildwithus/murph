@@ -133,6 +133,14 @@ Updated: 2026-08-12
   Strong and Hevy now share one inspect-first workflow, the ambiguous repair is
   exercised fail-closed, and the scenario docs identify focused tests as the
   executable proof owner.
+- Final ReviewGPT round 3 found that unit correction reparsed timestamps using
+  the current vault preference. Correction now uses the exact evidence's
+  original timezone and compares every non-unit session, exercise, and set field
+  with the attached live records before allowing a supersession.
+- Final ReviewGPT round 3 also found that source-omitted shared headers still
+  guessed Strong. Shared Strong/Hevy shapes now require an explicit provider,
+  while an exact prior batch mislabeled Strong can adopt explicit Hevy semantics
+  in place through its existing raw attachment and authoritative event IDs.
 
 ## Verification
 
@@ -143,8 +151,9 @@ Updated: 2026-08-12
   export without row contents entering output; import blocks only on the
   explicit weight and distance unit choices; synthetic end-to-end import and
   replay are atomic and bounded; all required gates pass.
-- Latest focused remediation proof: importer planner 23 tests, core event-batch
-  33 tests, vault workout import 12 tests, CLI workout command coverage 8 tests,
+- Latest focused remediation proof: importer planner 24 tests and vault workout
+  import 14 tests pass after round 3 remediation. Core event-batch 33 tests, CLI
+  workout command coverage 8 tests,
   assistant guidance 3 tests, changelog 57 tests, scenario integrity (206
   scenarios / 12 sample inputs / 29 golden directories), all affected package
   typechecks, and affected package builds pass. The supplied export still plans

@@ -137,27 +137,14 @@ function detectSource(headers: readonly string[]): string | null {
     return "hevy";
   }
 
-  if (
-    normalizedHeaders.has("workoutname")
-    && normalizedHeaders.has("exercisename")
-    && normalizedHeaders.has("setorder")
-  ) {
-    return "strong";
-  }
-
-  return null;
+  return hasCurrentStrongHeaders(headers) ? "strong" : null;
 }
 
-function detectUnambiguousSource(headers: readonly string[]): "strong" | "hevy" | null {
+function hasSharedWorkoutHeaders(headers: readonly string[]): boolean {
   const normalizedHeaders = new Set(headers.map(normalizeHeaderName));
-  if (
-    normalizedHeaders.has("exerciseimage")
-    || normalizedHeaders.has("primarymuscles")
-    || normalizedHeaders.has("secondarymuscles")
-  ) {
-    return "hevy";
-  }
-  return hasCurrentStrongHeaders(headers) ? "strong" : null;
+  return normalizedHeaders.has("workoutname")
+    && normalizedHeaders.has("exercisename")
+    && normalizedHeaders.has("setorder");
 }
 
 function findHeaderIndex(headers: readonly string[], aliases: readonly string[]): number | undefined {
@@ -514,6 +501,7 @@ function resolveExerciseMode(exercise: WorkoutCsvSessionExercise): WorkoutSessio
 
 function toWarnings(input: {
   detectedSource: string | null;
+  requiresSourceSelection: boolean;
   repairedRowCount: number;
   ignoredRowCount: number;
   skippedRowCount: number;
@@ -523,7 +511,9 @@ function toWarnings(input: {
   hasExerciseColumn: boolean;
 }): string[] {
   const warnings: string[] = [];
-  if (!input.detectedSource) {
+  if (input.requiresSourceSelection) {
+    warnings.push("The CSV headers are shared by Strong and Hevy; pass --source strong or --source hevy before importing.");
+  } else if (!input.detectedSource) {
     warnings.push("The CSV header does not match a supported workout export.");
   }
   if (!input.hasExerciseColumn) {
@@ -932,7 +922,7 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
   const explicitDialect = explicitSource === "strong" || explicitSource === "hevy"
     ? explicitSource
     : undefined;
-  const unambiguousSource = detectUnambiguousSource(headers);
+  const unambiguousSource = inferredSource;
   if (explicitDialect && unambiguousSource && explicitDialect !== unambiguousSource) {
     throw new TypeError(
       `Workout CSV source ${explicitDialect} conflicts with unambiguous ${unambiguousSource} headers.`,
@@ -962,6 +952,10 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
 
   const warnings = toWarnings({
     detectedSource,
+    requiresSourceSelection:
+      explicitDialect === undefined
+      && detectedSource === null
+      && hasSharedWorkoutHeaders(headers),
     repairedRowCount: normalized.repairedRowCount,
     ignoredRowCount: built.ignoredRowCount,
     skippedRowCount,
